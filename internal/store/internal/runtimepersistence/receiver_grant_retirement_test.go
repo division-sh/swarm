@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -64,10 +66,78 @@ func TestReceiverSelectedGrantRetirementFencesClaimBothStores(t *testing.T) {
 	proveReceiverGrantRetirementFencesClaimBothStores(t, true)
 }
 
+func TestReceiverEntityBearingActorRefusesEntitylessTargetBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newReceiverConfigActivationFixtureWithOptions(t, backend, true, false)
+			f.constructKeylessRoot(t)
+			req := f.request("business-key", "entity-owner", "original")
+			plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
+			if err != nil || len(plan.Readiness.Agents) != 1 {
+				t.Fatalf("prepare real entity-bearing actor: %+v %v", plan, err)
+			}
+			committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, plan)
+			if err != nil || !committed.Acknowledged {
+				t.Fatalf("commit actor construction: %+v %v", committed, err)
+			}
+			if err := f.manager.FinalizeCommittedFlowInstanceActivation(f.ctx, committed); err != nil {
+				t.Fatal(err)
+			}
+			expected := plan.Readiness.Agents[0]
+			if expected.EntityID == "" || expected.EntityID != plan.Identity.EntityID {
+				t.Fatal("fixture did not retain the actual configured template entity")
+			}
+			evidence, err := f.grant.Evidence()
+			if err != nil {
+				t.Fatal(err)
+			}
+			authority, err := deliverylifecycle.NewNormalExecutionAuthority(mustStoreTestSourceArtifactFact(evidence.BundleHash), evidence.GrantID, evidence.RuntimeGeneration)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := f.store.(interface {
+				deliverylifecycle.Store
+				ActivateDeliveryAuthority(context.Context, deliverylifecycle.ExecutionAuthority) error
+			})
+			for _, hostile := range []bool{false, true} {
+				target := events.RouteIdentity{FlowID: plan.Identity.TemplateID, FlowInstance: plan.Identity.InstancePath, EntityID: expected.EntityID}
+				dependency, err := events.AdmitStoredFlowReceiverInitialization(expected.Identity.RunID, plan.CreatingInput.EventID, events.MustExistingEntityTarget(target), expected.Identity.Route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(expected.Identity.AgentID()), AgentIdentity: expected.Identity, Target: events.MustExistingEntityTarget(target), Initialization: dependency}
+				if hostile {
+					target.EntityID = ""
+					route.Target = events.MustEntitylessReceiverTarget(target)
+				}
+				event := eventtest.ExistingRunRootIngress(uuid.NewString(), req.TriggerEvent.Type(), "constructor-fixture", "", req.TriggerEvent.Payload(), 0, expected.Identity.RunID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, route.Target.Route()), req.OccurredAt)
+				if err := commitSemanticEventFixtureWithRoutes(f.ctx, f.store, event, []events.DeliveryRoute{route}); err != nil {
+					t.Fatal(err)
+				}
+				if err := store.ActivateDeliveryAuthority(f.ctx, authority); err != nil {
+					t.Fatal(err)
+				}
+				before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
+				claim, err := store.ClaimDelivery(f.ctx, authority, event, route)
+				want := deliverylifecycle.ClaimDeferred
+				if hostile {
+					want = deliverylifecycle.ClaimInvariantInvalid
+				}
+				if err != nil || claim.Disposition != want || hostile && (claim.Invariant == nil || !strings.Contains(claim.Invariant.Error(), "receiver lifecycle entity contradicts")) {
+					t.Fatalf("entity-bearing actor hostile=%t disposition=%s invariant=%v err=%v", hostile, claim.Disposition, claim.Invariant, err)
+				}
+				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
+					t.Fatal("registered receiver claim changed execution evidence")
+				}
+			}
+		})
+	}
+}
+
 func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFork bool) {
 	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, ordering := range []string{"claim_wins", "retirement_wins", "claim_rollback"} {
+		for _, ordering := range []string{"claim_wins", "retirement_wins", "claim_rollback", "actor_entity_mismatch"} {
 			t.Run(backend+"/"+ordering, func(t *testing.T) {
 				base, selected := newAgentFixtureAuthorityStore(t, backend)
 				ctx, cancel := context.WithTimeout(base, 20*time.Second)
@@ -130,9 +200,6 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 					Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "global", FlowInstance: identity.FlowInstance(), EntityID: entityID}),
 				}
 				event := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.grant_receiver", "operator", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
-				if selectedFork {
-					event = eventtest.TargetRouted(event, route.Target.Route())
-				}
 				req.TriggerEvent, req.OccurredAt = event, event.CreatedAt()
 				if !selectedFork {
 					requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
@@ -140,16 +207,35 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 						Artifact: bundle.SourceArtifact, BundleHash: bundle.SourceArtifact.BundleHash(),
 					})
 				}
-				constructed := constructHistoricalSourceFixture(t, ctx, selected, req)
+				rootRequest := sqliteFlowActivationRequest(bundle, ".", runID, "", runID)
+				rootRequest.Instance, rootRequest.TriggerEvent, rootRequest.OccurredAt = rootIdentity, event, event.CreatedAt()
+				rootPlan := constructHistoricalSourceFixture(t, ctx, selected, rootRequest)
+				var constructed pipeline.FlowInstanceActivationPlan
+				for _, child := range rootPlan.ConstructionPlans() {
+					if child.Identity == req.Instance {
+						constructed = child
+					}
+				}
 				if constructed.Identity != req.Instance || constructed.CreatingInput.EventID != event.ID() {
 					t.Fatal("grant fixture lost exact receiver construction and creating occurrence")
 				}
 				// This grant-boundary fixture starts after initialization. Preserve
 				// the future-target path using the real constructor's exact receipt;
 				// attachment admission has its own both-store journey.
-				route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target)
+				dependency := events.MustExistingEntityTarget(route.Target.Route())
+				route.Initialization, err = events.AdmitStoredFlowReceiverInitialization(runID, constructed.CreatingInput.EventID, dependency, identity.Route)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if ordering == "actor_entity_mismatch" {
+					route.Target = dependency
+				} else {
+					actor := route.Target.Route()
+					actor.EntityID = ""
+					route.Target = events.MustEntitylessReceiverTarget(actor)
+				}
+				if selectedFork {
+					event = eventtest.TargetRouted(event, route.Target.Route())
 				}
 				authority, err := deliverylifecycle.NewNormalExecutionAuthority(mustStoreTestSourceArtifactFact(evidence.BundleHash), evidence.GrantID, evidence.RuntimeGeneration)
 				if selectedFork {
@@ -171,6 +257,17 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 				before := loadDeliverySnapshotFixture(t, ctx, selected, event.ID(), route)
 				if before.Status != deliverylifecycle.StatusPending || before.ClaimVersion != 0 || !before.Authority.Equal(authority) {
 					t.Fatalf("initial exact pending obligation: %+v", before)
+				}
+				if ordering == "actor_entity_mismatch" {
+					result, err := selected.ClaimDelivery(ctx, authority, event, route)
+					if err != nil || result.Disposition != deliverylifecycle.ClaimInvariantInvalid || result.Invariant == nil || !strings.Contains(result.Invariant.Error(), "receiver lifecycle entity contradicts") {
+						t.Fatalf("entityless actor target refusal: disposition=%s invariant=%v err=%v", result.Disposition, result.Invariant, err)
+					}
+					after := loadDeliverySnapshotFixture(t, ctx, selected, event.ID(), route)
+					if after.ClaimVersion != before.ClaimVersion || after.Status != before.Status {
+						t.Fatal("actor ownership refusal mutated the pending delivery")
+					}
+					return
 				}
 				if ordering == "retirement_wins" {
 					if err := grant.Retire(ctx); err != nil {

@@ -125,6 +125,14 @@ func (tx *operatorSnapshotTx) Rollback() error {
 func operatorSnapshotQueryKind(query string) string {
 	q := strings.Join(strings.Fields(strings.ToLower(query)), " ")
 	switch {
+	case strings.HasPrefix(q, "select run_id from runs where bundle_hash="):
+		return "readiness-runs"
+	case strings.HasPrefix(q, "select fi.entity_id,"), strings.HasPrefix(q, "select fi.entity_id::text,"):
+		return "readiness-headers"
+	case strings.HasPrefix(q, "select projection from workflow_instance_initial_materializations"):
+		return "readiness-construction"
+	case strings.HasPrefix(q, "select readiness.plan, readiness.plan_hash,"):
+		return "readiness-attachment"
 	case strings.HasPrefix(q, "select e.event_id::text, e.created_at from events e"), strings.HasPrefix(q, "select e.event_id, e.created_at from events e"):
 		return "candidate"
 	case strings.HasPrefix(q, "select e.event_class,"):

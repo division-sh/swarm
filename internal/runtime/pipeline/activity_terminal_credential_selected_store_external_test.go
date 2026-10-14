@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -27,8 +26,6 @@ func TestActivityCredentialTerminalTimestampReplayBothStores(t *testing.T) {
 				ctx := testAuthorActivityContext(t, context.Background())
 				selected, closeStore, reopen := openActivityReplayStore(t, backend)
 				intent := runtimepipeline.NonIdempotentActivityIntentForTest(uuid.NewString(), uuid.NewString(), uuid.NewString())
-				requireActivityReplayRun(t, ctx, selected, intent.SourceRunID)
-				seedSelectedActivitySource(t, ctx, selected, intent)
 				var calls atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					calls.Add(1)
@@ -60,9 +57,11 @@ func TestActivityCredentialTerminalTimestampReplayBothStores(t *testing.T) {
 					intent.Input = runtimepipeline.ActivityInputForTest(map[string]any{"chat_id": "42", "text": "hello"})
 					tool = runtimepipeline.TelegramConnectorToolForTest(server.URL)
 				}
-				source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{intent.Tool: tool}})
+				source := activityJournalProofSource(t, map[string]runtimecontracts.ToolSchemaEntry{intent.Tool: tool})
+				ctx = requireActivityReplayRun(t, selected, source, intent.SourceRunID)
 				bus := newActivityJournalProofBus(t, selected, source)
 				pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}, Credentials: credentialStore})
+				intent = seedSelectedActivitySource(t, ctx, selected, pc, intent)
 				if err := runtimepipeline.ExecuteActivityIntentForTest(ctx, pc, nil, intent); err != nil {
 					t.Fatal(err)
 				}

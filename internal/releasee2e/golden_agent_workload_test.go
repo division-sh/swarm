@@ -1885,7 +1885,7 @@ func assertGoldenRoutePayloads(t *testing.T, events []goldenEvent, entities gold
 
 	scoutWork := goldenSingleNamedEvent(t, events, "scout/scout.work.requested")
 	assertGoldenExactPayload(t, scoutWork, map[string]any{"query": "golden workload", "candidate_ids": payloadCandidateIDs})
-	assertGoldenSingleTargetlessAgentDelivery(t, scoutWork, "scout-worker", entities.scout)
+	assertGoldenSingleEntitylessAgentDelivery(t, scoutWork, "scout-worker", "scout", entities.scout)
 
 	scoutCompleted := goldenSingleNamedEvent(t, events, "scout/scout.completed")
 	assertGoldenExactPayload(t, scoutCompleted, map[string]any{
@@ -2052,14 +2052,15 @@ func assertGoldenSingleDelivery(t *testing.T, event goldenEvent, subscriberType,
 	assertGoldenDeliveryToEntity(t, event, subscriberType, subscriberID, kind, flowID, entity)
 }
 
-func assertGoldenSingleTargetlessAgentDelivery(t *testing.T, event goldenEvent, subscriberID string, entity goldenEntitySummary) {
+func assertGoldenSingleEntitylessAgentDelivery(t *testing.T, event goldenEvent, subscriberID, flowID string, entity goldenEntitySummary) {
 	t.Helper()
-	if len(event.Deliveries) != 1 || event.EntityID != entity.EntityID {
-		t.Errorf("event %s = %#v, want one agent delivery in exact entity context %s", event.EventName, event, entity.EntityID)
+	if len(event.Deliveries) != 1 || event.EntityID != "" {
+		t.Errorf("event %s = %#v, want one exactly entityless agent delivery", event.EventName, event)
 	}
 	delivery := goldenDeliveryFor(t, event, "agent", subscriberID)
-	if delivery.Target != (goldenDeliveryTarget{}) {
-		t.Errorf("event %s static agent delivery target = %#v, want explicit targetless agent route", event.EventName, delivery.Target)
+	want := goldenDeliveryTarget{Kind: "entityless_receiver", FlowID: flowID, FlowInstance: entity.FlowInstance}
+	if delivery.Target != want {
+		t.Errorf("event %s static agent delivery target = %#v, want exact entityless actor target %#v", event.EventName, delivery.Target, want)
 	}
 }
 

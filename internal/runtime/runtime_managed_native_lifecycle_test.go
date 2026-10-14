@@ -2,9 +2,11 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -34,6 +36,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -125,6 +128,83 @@ func TestRuntimeRecoveryPreflightCollaboratorRefusesPersistentClaims(t *testing.
 
 type managedNativeDurableRoles struct {
 	runtimerunlifecycle.OperationOwner
+	session *runtimeTestRetainedSession
+}
+
+func (r managedNativeDurableRoles) RequireActiveRun(ctx context.Context, runID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if r.session == nil {
+		return &runtimerunlifecycle.RunNotFoundError{RunID: runID}
+	}
+	r.session.mu.Lock()
+	source, found := r.session.runs[runID]
+	r.session.mu.Unlock()
+	if !found {
+		return &runtimerunlifecycle.RunNotFoundError{RunID: runID}
+	}
+	selected, present := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !present || !selected.Matches(source) {
+		return fmt.Errorf("managed-native fixture run requires its exact admitted source")
+	}
+	return nil
+}
+
+func (managedNativeDurableRoles) LookupFlowInstance(context.Context, runtimepipeline.FlowInstanceLookupRequest) (runtimepipeline.FlowInstanceObservation, bool, error) {
+	return runtimepipeline.FlowInstanceObservation{}, false, fmt.Errorf("unexpected component fixture instance lookup")
+}
+
+func (managedNativeDurableRoles) ListFlowInstances(context.Context, runtimepipeline.FlowInstanceLookupScope) ([]runtimepipeline.FlowInstanceObservation, error) {
+	return nil, fmt.Errorf("unexpected component fixture instance inventory")
+}
+
+func TestRuntimeSyntheticInstanceIndexFailsClosed(t *testing.T) {
+	roles := runtimeTestSyntheticDurableDependencies(nil).Instances
+	if roles == nil {
+		t.Fatal("component fixture omitted its unavailable instance-index role")
+	}
+	if observation, found, err := roles.LookupFlowInstance(context.Background(), runtimepipeline.FlowInstanceLookupRequest{}); err == nil || found || !reflect.DeepEqual(observation, runtimepipeline.FlowInstanceObservation{}) {
+		t.Fatalf("component fixture fabricated instance evidence: %+v, %t, %v", observation, found, err)
+	}
+	if observations, err := roles.ListFlowInstances(context.Background(), runtimepipeline.FlowInstanceLookupScope{}); err == nil || len(observations) != 0 {
+		t.Fatalf("component fixture fabricated an instance inventory: %+v, %v", observations, err)
+	}
+}
+
+func TestManagedNativeLifecycleRunRequiresAdmittedSource(t *testing.T) {
+	store := newManagedNativeLifecycleStore(t)
+	source := testSourceArtifactFact(t, runtimeTestBundleHash)
+	ctx := runtimecorrelation.WithSourceArtifactFact(t.Context(), source)
+	owner := managedNativeDurableRoles{session: store.runtimeTestRetainedSession}
+	var missing *runtimerunlifecycle.RunNotFoundError
+	if err := owner.RequireActiveRun(ctx, runtimeTestManagedLifecycleRunID); !errors.As(err, &missing) {
+		t.Fatalf("fixture accepted unadmitted run: %v", err)
+	}
+	store.admitRun(t, runtimeTestManagedLifecycleRunID, source)
+	if err := owner.RequireActiveRun(ctx, runtimeTestManagedLifecycleRunID); err != nil {
+		t.Fatal(err)
+	}
+	for _, absent := range []string{"", uuid.NewString()} {
+		if err := owner.RequireActiveRun(ctx, absent); !errors.As(err, &missing) || missing.RunID != absent {
+			t.Fatalf("fixture borrowed another run: run=%q err=%v", absent, err)
+		}
+	}
+	if err := owner.RequireActiveRun(t.Context(), runtimeTestManagedLifecycleRunID); err == nil {
+		t.Fatal("fixture accepted run without its source")
+	}
+	foreign := sourceartifactfixture.FactFor(sourceartifactfixture.New("schema.yaml", []byte("name: foreign-lifecycle-source\n")))
+	if err := owner.RequireActiveRun(runtimecorrelation.WithSourceArtifactFact(t.Context(), foreign), runtimeTestManagedLifecycleRunID); err == nil {
+		t.Fatal("fixture accepted run with a different source")
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := owner.RequireActiveRun(canceled, runtimeTestManagedLifecycleRunID); !errors.Is(err, context.Canceled) {
+		t.Fatalf("fixture lost cancellation: %v", err)
+	}
+	if err := (managedNativeDurableRoles{}).RequireActiveRun(ctx, runtimeTestManagedLifecycleRunID); !errors.As(err, &missing) {
+		t.Fatalf("unbound component owner accepted run: %v", err)
+	}
 }
 
 func (managedNativeDurableRoles) LoadFlowConstructionPublication(context.Context, runtimeflowidentity.RunScopedFlowInstance, string) (runtimepipeline.FlowConstructionPublicationEvidence, error) {
@@ -143,34 +223,7 @@ func (managedNativeDurableRoles) TransitionActiveRun(context.Context, runtimerun
 func (managedNativeDurableRoles) MarkTerminalRun(context.Context, runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf("unexpected managed-native terminal run transition")
 }
-func (managedNativeDurableRoles) UpsertFlowInstanceRoute(context.Context, runtimebus.FlowInstanceRouteRecord) error {
-	return nil
-}
-func (managedNativeDurableRoles) DeleteFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
-	return nil
-}
-func (managedNativeDurableRoles) ListFlowInstanceRoutes(context.Context) ([]runtimeflowidentity.RunScopedFlowInstance, error) {
-	return nil, nil
-}
-func (managedNativeDurableRoles) ReplaceFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance, []runtimebus.FlowInstanceRouteRecord) error {
-	return nil
-}
-func (managedNativeDurableRoles) ReplaceFlowInstanceRouteTopology(context.Context, []runtimebus.FlowInstanceRouteRecordSet) (runtimebus.FlowInstanceRouteTopologyResult, error) {
-	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
-}
-func (managedNativeDurableRoles) ListFlowInstanceRouteRecords(context.Context, runtimeflowidentity.RunScopedFlowInstance) ([]runtimebus.FlowInstanceRouteRecord, error) {
-	return nil, nil
-}
-func (managedNativeDurableRoles) RollbackFlowInstanceRoute(context.Context, runtimeflowidentity.RunScopedFlowInstance) error {
-	return nil
-}
 func (managedNativeDurableRoles) ListActiveAgentDescriptors(context.Context, string) ([]runtimebus.ActiveAgentDescriptor, error) {
-	return nil, nil
-}
-func (managedNativeDurableRoles) ListActiveFlowInstanceDescriptors(context.Context, string) ([]runtimebus.ActiveFlowInstanceDescriptor, error) {
-	return nil, nil
-}
-func (managedNativeDurableRoles) ListSelectedRunTargetOwners(context.Context, string) ([]runtimebus.ActiveTargetDescriptor, error) {
 	return nil, nil
 }
 func (managedNativeDurableRoles) LoadWorkflowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance) (runtimepipeline.WorkflowInstance, bool, error) {
@@ -205,10 +258,10 @@ func runtimeTestSyntheticDurableDependencies(delivery runtimedelivery.Store) run
 	roles := managedNativeDurableRoles{}
 	return runtimebus.DurableDependencies{
 		RunLifecycle: roles, DeliveryLifecycle: delivery,
-		FlowRoutes: roles, FlowRouteRecords: roles, FlowRouteSets: roles,
-		FlowRouteTopology: roles, FlowRouteRollback: roles, ActiveAgents: roles, ActiveFlows: roles, TargetOwners: roles,
+
+		ActiveAgents:          roles,
 		PreparedEvents:        roles,
-		TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles,
+		TargetFailureRecorder: roles, RunOrigins: roles, StandingRestarts: roles, ConstructionPublications: roles, Instances: roles,
 	}
 }
 
@@ -266,7 +319,6 @@ func (s *managedNativeRecoveryDeliveryStore) ScanDeliveryContinuations(
 
 func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmission(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runtimeTestManagedLifecycleRunID)
 	module := managedNativeLifecycleModule(t, "recovered-native-agent")
 	managerStore := newManagedNativeLifecycleStore(t, managedNativeLifecycleAgent(t, module.SemanticSource()))
 	delivery := &managedNativeRecoveryDeliveryStore{}
@@ -278,6 +330,7 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 	)
 	deps.Config = cfg
 	deps.Options = managedNativeLifecycleOptions(t, "recovered-native-agent", probeRuntime, module)
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), deps.Options.SourceArtifactFact.BundleHash()), runtimeTestManagedLifecycleRunID)
 	gatewayBinding, installGateway := startManagedNativeLifecycleGateway(t)
 	deps.Options.ToolGatewayBinding = gatewayBinding
 	rt, err := newScopedTestRuntime(t, ctx, deps)
@@ -344,7 +397,6 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 
 func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission(t *testing.T) {
 	t.Setenv("SWARM_CLAUDE_USE_MCP", "1")
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runtimeTestManagedLifecycleRunID)
 	predecessorStore := newManagedNativeLifecycleStore(t)
 	delivery := &managedNativeRecoveryDeliveryStore{}
 	predecessorDeps := managedNativeLifecycleDeps(
@@ -358,6 +410,12 @@ func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission
 		LLMRuntime:                       llm.NewNoopRuntime(llm.AnthropicAPIProviderContract()),
 		DisablePersistentStartupRecovery: true,
 	}
+	predecessorBundle, found := semanticview.Bundle(predecessorDeps.Options.WorkflowModule.SemanticSource())
+	if !found || predecessorBundle.SourceArtifact == nil {
+		t.Fatal("managed-native predecessor requires its actual source artifact")
+	}
+	predecessorDeps.Options.SourceArtifactFact = testSourceArtifactFact(t, predecessorBundle.SourceArtifact.BundleHash())
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), predecessorDeps.Options.SourceArtifactFact.BundleHash()), runtimeTestManagedLifecycleRunID)
 	predecessor, err := newScopedTestRuntime(t, ctx, predecessorDeps)
 	if err != nil {
 		t.Fatalf("NewRuntime(predecessor): %v", err)
@@ -381,9 +439,10 @@ func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission
 	)
 	candidateDeps.Config = managedNativeLifecycleConfig(true)
 	candidateDeps.Options = managedNativeLifecycleOptions(t, "replacement-native-agent", probeRuntime, module)
+	candidateCtx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), candidateDeps.Options.SourceArtifactFact.BundleHash()), runtimeTestManagedLifecycleRunID)
 	gatewayBinding, installGateway := startManagedNativeLifecycleGateway(t)
 	candidateDeps.Options.ToolGatewayBinding = gatewayBinding
-	candidate, err := newScopedTestRuntime(t, ctx, candidateDeps)
+	candidate, err := newScopedTestRuntime(t, candidateCtx, candidateDeps)
 	if err != nil {
 		t.Fatalf("NewRuntime(candidate): %v", err)
 	}
@@ -393,7 +452,7 @@ func TestRuntimeStart_SuccessorGrantSettlesManagedNativePreflightBeforeAdmission
 		t.Fatalf("PrepareAuthorActivityCatalog(candidate): %v", err)
 	}
 	installGateway(candidate.ToolGateway.Handler())
-	if err := candidate.Start(ctx); err != nil {
+	if err := candidate.Start(candidateCtx); err != nil {
 		t.Fatalf("Start(candidate): %v", err)
 	}
 
@@ -434,10 +493,15 @@ func managedNativeLifecycleConfig(recovery bool) *config.Config {
 
 func managedNativeLifecycleOptions(t *testing.T, agentID string, modelRuntime llm.Runtime, module runtimepipeline.WorkflowModule) RuntimeOptions {
 	t.Helper()
+	bundle, found := semanticview.Bundle(module.SemanticSource())
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("managed-native lifecycle requires its actual source artifact")
+	}
 	return RuntimeOptions{
-		SelfCheck:      false,
-		WorkflowModule: module,
-		LLMRuntime:     modelRuntime,
+		SelfCheck:          false,
+		WorkflowModule:     module,
+		LLMRuntime:         modelRuntime,
+		SourceArtifactFact: testSourceArtifactFact(t, bundle.SourceArtifact.BundleHash()),
 		WorkspaceLifecycle: managedNativeLifecycleWorkspace{
 			claudeStartupWorkspaceStub: claudeStartupWorkspaceStub{
 				target: &workspace.Target{Container: "swarm-agent-" + agentID, Workdir: "/workspace"},
@@ -502,9 +566,11 @@ func managedNativeLifecycleDeps(
 	delivery runtimedelivery.Store,
 ) RuntimeDeps {
 	eventStore := startupRecoveryMinimalEventStore{}
+	durable := runtimeTestSyntheticDurableDependencies(delivery)
+	durable.RunLifecycle = managedNativeDurableRoles{session: managerStore.runtimeTestRetainedSession}
 	return RuntimeDeps{
 		EventStore:               eventStore,
-		EventBusDurable:          runtimeTestSyntheticDurableDependencies(delivery),
+		EventBusDurable:          durable,
 		PipelineObligations:      eventStore.PipelineObligations(),
 		DeliveryStore:            delivery,
 		ManagerStore:             managerStore,

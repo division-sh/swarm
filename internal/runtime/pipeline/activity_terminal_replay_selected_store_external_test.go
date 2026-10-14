@@ -17,13 +17,22 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 type activityResultPublicationCut struct {
@@ -65,9 +74,7 @@ func TestActivityTerminalResultUsesDurableTimestampBothStores(t *testing.T) {
 			for _, cut := range []string{"result_persisted", "journal_committed_result_absent"} {
 				t.Run(backend+"/"+status+"/"+cut, func(t *testing.T) {
 					selected, closeStore, reopen := openActivityReplayStore(t, backend)
-					ctx := testAuthorActivityContext(t, context.Background())
 					runID := uuid.NewString()
-					requireActivityReplayRun(t, ctx, selected, runID)
 					var calls atomic.Int32
 					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 						calls.Add(1)
@@ -92,7 +99,8 @@ func TestActivityTerminalResultUsesDurableTimestampBothStores(t *testing.T) {
 						runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
 						runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}),
 					)
-					source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": tool}})
+					source := activityJournalProofSource(t, map[string]runtimecontracts.ToolSchemaEntry{"provider_write": tool})
+					ctx := requireActivityReplayRun(t, selected, source, runID)
 					bus := newActivityJournalProofBus(t, selected, source)
 					publication := &activityResultPublicationCut{activityJournalProofBus: bus}
 					fault := errors.New("process stopped after terminal journal commit before result publication")
@@ -101,7 +109,7 @@ func TestActivityTerminalResultUsesDurableTimestampBothStores(t *testing.T) {
 					}
 					pc := newGateRecoveryCoordinator(publication, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
 					intent := runtimepipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString())
-					seedSelectedActivitySource(t, ctx, selected, intent)
+					intent = seedSelectedActivitySource(t, ctx, selected, pc, intent)
 					beforeExecution := time.Now().UTC().Truncate(time.Microsecond)
 					err := runtimepipeline.ExecuteActivityIntentForTest(ctx, pc, nil, intent)
 					afterExecution := time.Now().UTC().Truncate(time.Microsecond)
@@ -216,11 +224,13 @@ func TestActivityTerminalInvalidTimestampCannotPublishBothStores(t *testing.T) {
 	for _, tc := range activityTerminalReplayStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			selected := tc.open(t)
-			ctx := testAuthorActivityContext(t, context.Background())
 			runID := uuid.NewString()
-			requireActivityReplayRun(t, ctx, selected, runID)
+			source := activityJournalProofSource(t, nil)
+			ctx := requireActivityReplayRun(t, selected, source, runID)
+			bus := newActivityJournalProofBus(t, selected, source)
+			pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
 			intent := runtimepipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString())
-			seedSelectedActivitySource(t, ctx, selected, intent)
+			intent = seedSelectedActivitySource(t, ctx, selected, pc, intent)
 			started, inserted, err := activityReplayJournal(selected).StartActivityAttempt(ctx, runtimepipeline.ActivityAttemptStartForTest(intent))
 			if err != nil || !inserted {
 				t.Fatalf("claim real journal: inserted=%t err=%v", inserted, err)
@@ -239,9 +249,6 @@ func TestActivityTerminalInvalidTimestampCannotPublishBothStores(t *testing.T) {
 			if err != nil || !committed || receipt.CompletedAt == nil || receipt.CompletedAt.IsZero() {
 				t.Fatalf("real terminal commit: committed=%t receipt=%+v err=%v", committed, receipt, err)
 			}
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
-			bus := newActivityJournalProofBus(t, selected, source)
-			pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
 			before := storetest.ObserveActivityResultPublicationStorage(t, ctx, selected.events)
 			zero := time.Time{}
 			for _, invalid := range []*time.Time{nil, &zero} {
@@ -269,15 +276,14 @@ func TestActivityRejectedChannelTargetReplaysDurableResultBothStores(t *testing.
 	for _, tc := range activityTerminalReplayStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			selected := tc.open(t)
-			ctx := testAuthorActivityContext(t, context.Background())
 			runID := uuid.NewString()
-			requireActivityReplayRun(t, ctx, selected, runID)
-			intent := runtimepipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString())
-			intent.Tool = runtimecontracts.PrivateChannelActivityPrefix + "missing"
-			seedSelectedActivitySource(t, ctx, selected, intent)
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+			source := activityJournalProofSource(t, nil)
+			ctx := requireActivityReplayRun(t, selected, source, runID)
 			bus := newActivityJournalProofBus(t, selected, source)
 			pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
+			intent := runtimepipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString())
+			intent.Tool = runtimecontracts.PrivateChannelActivityPrefix + "missing"
+			intent = seedSelectedActivitySource(t, ctx, selected, pc, intent)
 			var calls atomic.Int32
 			client := &http.Client{Transport: activityTerminalRoundTripFunc(func(*http.Request) (*http.Response, error) {
 				calls.Add(1)
@@ -318,13 +324,64 @@ func activityReplayJournal(selected gateRecoveryStoreCase) runtimepipeline.Activ
 	return selected.events.(runtimepipeline.ActivityAttemptJournal)
 }
 
-func requireActivityReplayRun(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, runID string) {
+func activityJournalProofSource(t *testing.T, tools map[string]runtimecontracts.ToolSchemaEntry) semanticview.Source {
 	t.Helper()
-	owner := selected.events.(interface {
-		runtimerunlifecycle.OperationOwner
-		runtimerunlifecycle.CandidateStore
+	files := map[string]string{
+		"schema.yaml":            "name: activity-journal-proof\nstages: []\npins:\n  inputs: [activity.source]\nconnect:\n  - event: activity.source\n    from: .\n    to: research\n    resolution: create\n",
+		"events.yaml":            "activity.source:\n  marker: text\n",
+		"research/schema.yaml":   "name: research\ninstance: marker\nstages: []\npins:\n  inputs: [activity.source]\n",
+		"research/entities.yaml": "activity_entity:\n  marker: text\n",
+		"research/nodes.yaml":    "scanner:\n  execution_type: system_node\n  subscribes_to: [activity.source]\n  event_handlers:\n    activity.source: {}\n",
+	}
+	if len(tools) != 0 {
+		raw, err := yaml.Marshal(tools)
+		if err != nil {
+			t.Fatalf("serialize actual activity tool declarations: %v", err)
+		}
+		files["tools.yaml"] = string(raw)
+	}
+	bundle := loadPipelineLifecycleFixtureBundle(t, files)
+	for name, expected := range tools {
+		actual, found := bundle.Tools[name]
+		if !found {
+			t.Fatalf("compiled source omitted activity tool %s", name)
+		}
+		// Compiled channel result projections are runtime binding facts, not YAML.
+		if projection, present := expected.CompiledResult(); present {
+			var err error
+			actual, err = actual.WithCompiledResult(projection)
+			if err != nil {
+				t.Fatalf("compose admitted channel projection: %v", err)
+			}
+			bundle.Tools[name] = actual
+			bundle.FlowTree.Root.Tools[name] = actual
+		}
+		wantHash, wantErr := expected.CanonicalHash()
+		gotHash, gotErr := actual.CanonicalHash()
+		if wantErr != nil || gotErr != nil || wantHash != gotHash {
+			t.Fatalf("actual activity tool %s drifted through compilation: expected=%s actual=%s errors=%v/%v", name, wantHash, gotHash, wantErr, gotErr)
+		}
+		resolved, present := bundle.ToolEntryForFlow("research", name)
+		resolvedHash, resolvedErr := resolved.CanonicalHash()
+		if !present || resolvedErr != nil || resolvedHash != wantHash {
+			t.Fatalf("activity node resolves a different tool %s: found=%v hash=%s err=%v", name, present, resolvedHash, resolvedErr)
+		}
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func requireActivityReplayRun(t *testing.T, selected gateRecoveryStoreCase, source semanticview.Source, runID string) context.Context {
+	t.Helper()
+	bundle, found := semanticview.Bundle(source)
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("activity journal fixture requires its actual compiled artifact")
+	}
+	fact := sourceartifactfixture.RequireArtifact(t, context.Background(), selected.events.(sourceartifactfixture.Writer), bundle.SourceArtifact)
+	ctx := withLiveGateExecution(testAuthorActivityContextForSource(t, correlation.WithRunID(context.Background(), runID), fact))
+	storetest.RequireRun(t, ctx, selected.events.(storetest.RunFixtureStore), storetest.RunFixture{
+		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: time.Now().UTC(),
 	})
-	storetest.RequireRunningRun(t, ctx, owner, runID, time.Now().UTC())
+	return ctx
 }
 
 func loadActivityResultForProof(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, eventID string) runtimebus.PreparedPublishEvent {
@@ -372,7 +429,13 @@ func (b *activityJournalProofBus) Publish(ctx context.Context, event events.Even
 
 func newActivityJournalProofBus(t *testing.T, selected gateRecoveryStoreCase, source semanticview.Source) *activityJournalProofBus {
 	t.Helper()
-	bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source},
+	bundle, found := semanticview.Bundle(source)
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("activity publication bus requires its exact compiled artifact")
+	}
+	bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
+		ContractBundle: source, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact),
+	},
 		"research/entity-1/research.scanner_provider_write.succeeded", "research/entity-1/research.scanner_provider_write.failed",
 		"research/entity-1/channel.deliver.succeeded", "research/entity-1/channel.deliver.failed",
 		"research/entity-1/telegram.send_message.succeeded", "research/entity-1/telegram.send_message.failed")
@@ -382,8 +445,84 @@ func newActivityJournalProofBus(t *testing.T, selected gateRecoveryStoreCase, so
 	return &activityJournalProofBus{EventBus: bus}
 }
 
-func seedSelectedActivitySource(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, intent runtimeengine.ActivityIntent) {
+func seedSelectedActivitySource(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, pc *runtimepipeline.PipelineCoordinator, intent runtimeengine.ActivityIntent) runtimeengine.ActivityIntent {
 	t.Helper()
-	source := eventtest.ExistingRunRootIngressWithRoutingSource(intent.SourceEventID, "activity.source", "activity-proof", intent.SourceTaskID, []byte(`{}`), 0, intent.SourceRunID, events.EventEnvelope{}, intent.RoutingSource, time.Now().UTC())
-	storetest.CommitSemanticEvent(t, ctx, selected.events, source)
+	source := pc.SemanticSource()
+	fact, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found || correlation.RunIDFromContext(ctx) != intent.SourceRunID {
+		t.Fatal("activity construction requires its exact source and run context")
+	}
+	ctx = effects.WithExecutionMode(ctx, intent.ExecutionMode)
+	root := flowidentity.Stored(source, semanticview.RootExecutionFlowID(source), intent.SourceRunID, intent.SourceRunID, intent.SourceRunID, "")
+	planner := manager.NewAgentManagerWithOptions(nil, nil, manager.AgentManagerOptions{
+		BaseContext: ctx, SemanticSource: source, SourceArtifactFact: fact, WorkflowInstances: pc,
+		ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(),
+	})
+	at := time.Now().UTC().Truncate(time.Microsecond)
+	rootPlan, err := planner.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source, Instance: root, OccurredAt: at,
+	})
+	if err != nil {
+		t.Fatalf("prepare activity structural root: %v", err)
+	}
+	owner := selected.events.(runtimebus.FlowInstanceActivationCommitOwner)
+	rootCommit, err := owner.CommitFlowInstanceActivation(ctx, runtimebus.FlowInstanceActivationCommand{Plan: rootPlan})
+	if err != nil || !rootCommit.Acknowledged || !rootCommit.Created {
+		t.Fatalf("construct activity structural root: result=%+v err=%v", rootCommit, err)
+	}
+	_, key, present := strings.Cut(intent.FlowInstance, "research/")
+	if !present || key == "" {
+		t.Fatal("activity source requires its exact research key")
+	}
+	child, err := flowidentity.KeyedChild(source, root, "research", key)
+	if err != nil || child.InstancePath != intent.FlowInstance {
+		t.Fatalf("derive actual activity instance: identity=%+v err=%v", child, err)
+	}
+	payload, err := json.Marshal(map[string]string{"marker": key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	creating := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(intent.SourceEventID, "activity.source", "activity-proof", intent.SourceTaskID, payload, intent.ChainDepth, intent.SourceRunID, events.EventEnvelope{}, eventtest.RootRoutingSource(intent.SourceRunID), at, intent.ExecutionMode)
+	storetest.CommitSemanticEvent(t, ctx, selected.events, creating)
+	plan, err := planner.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source, Instance: child, ConstructorInput: "activity.source", ResolvedKey: key,
+		TriggerEvent: creating, OccurredAt: at,
+	})
+	if err != nil {
+		t.Fatalf("prepare actual activity instance: %v", err)
+	}
+	committed, err := owner.CommitFlowInstanceActivation(ctx, runtimebus.FlowInstanceActivationCommand{Plan: plan})
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("construct actual activity instance: result=%+v err=%v", committed, err)
+	}
+	receiver := flowidentity.RunScopedFlowInstance{RunID: intent.SourceRunID, Route: child.Route()}
+	lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, fact, receiver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, found, err := selected.events.(runtimepipeline.FlowInstanceIndexReader).LookupFlowInstance(ctx, lookup)
+	if err != nil || !found {
+		t.Fatalf("read actual activity construction: found=%t err=%v", found, err)
+	}
+	if err := observed.ValidateSelection(lookup); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := storetest.ReadReceiverConstructionPublication(ctx, selected.events, receiver, child.EntityID)
+	if err != nil || receipt.Identity != child || receipt.BundleHash != fact.BundleHash() ||
+		receipt.WorkflowVersion != source.WorkflowVersion() || receipt.CreatingInput != plan.CreatingInput {
+		t.Fatalf("activity construction receipt: evidence=%+v err=%v", receipt, err)
+	}
+	intent.EntityID = identity.NormalizeEntityID(child.EntityID)
+	actor := activityidentity.MustNodeOwner(externalPipelineSourceNode(t, source, child.TemplateID, "scanner"))
+	if actor.Key() != intent.Owner.Key() {
+		t.Fatal("compiled activity owner changed its original node identity")
+	}
+	intent.Owner = actor
+	intent.RoutingSource, err = events.NewConcreteTemplateInstanceRoutingSource(events.RouteIdentity{
+		FlowID: child.TemplateID, FlowInstance: child.InstancePath, EntityID: child.EntityID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return intent.Normalized()
 }

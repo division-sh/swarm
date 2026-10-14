@@ -38,6 +38,23 @@ func materializedWorkflowInstanceForSource(t testing.TB, source semanticview.Sou
 	t.Helper()
 	instance = materializedWorkflowInstanceForTest(instance)
 	runID := correlation.RunIDFromContext(ctx)
+	schema, found := source.FlowSchemaByID(instance.WorkflowName)
+	if !found {
+		t.Fatal("component fixture requires its exact declared flow")
+	}
+	instance.Mode = schema.EffectiveMode()
+	graph, compiled := semanticview.WorkflowStageTopology(source, instance.WorkflowName)
+	if !compiled {
+		t.Fatal("component fixture requires its compiled stage topology")
+	}
+	instance.StageDefined = graph.StageCount() != 0
+	if !schema.Instance.Empty() {
+		key, err := AdmitFlowInstanceKey(source, instance.WorkflowName, instance.Fields[schema.Instance.Path()])
+		if err != nil {
+			t.Fatalf("admit component fixture key: %v", err)
+		}
+		instance.InstanceKey = key
+	}
 	if instance.WorkflowName == semanticview.RootExecutionFlowID(source) {
 		if instance.StorageRef != runID || instance.EntityID != flowidentity.EntityID(runID) {
 			t.Fatal("root component fixture requires its exact run coordinate")

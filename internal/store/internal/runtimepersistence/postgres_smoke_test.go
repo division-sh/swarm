@@ -63,7 +63,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		t.Fatalf("load agents err=%v len=%d", err, len(agentsOut))
 	}
 
-	// Seed an operating agent id so routing_rules FK constraints are satisfied.
+	// Seed the operating agent used by the event and delivery controls.
 	ceoID := "operator-" + entityID
 	ceoIdentity := mustTestAgentIdentityForRun(runID, ceoID, "")
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
@@ -82,24 +82,6 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 		StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("upsert ceo agent: %v", err)
-	}
-
-	// Routing rules.
-	rule := runtimemanager.PersistedRoutingRule{
-		EntityID:         entityID,
-		EventPattern:     "review.*",
-		SubscriberID:     ceoID,
-		InstalledBy:      "control-plane",
-		Reason:           "tests",
-		Status:           "active",
-		Source:           "bootstrap",
-		BootstrapVersion: 1,
-	}
-	if err := pg.UpsertRoutingRule(ctx, rule); err != nil {
-		t.Fatalf("upsert routing rule: %v", err)
-	}
-	if rules, err := pg.LoadRoutingRules(ctx); err != nil || len(rules) == 0 {
-		t.Fatalf("load routing rules err=%v len=%d", err, len(rules))
 	}
 
 	// Events + deliveries + receipts.

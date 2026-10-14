@@ -1,24 +1,38 @@
-//go:build issue2413
-
 package serveapp
 
 import (
 	"reflect"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
 
-// Deferred R7 acceptance: https://github.com/division-sh/swarm/pull/2515#issuecomment-5938269535.
-// #2413 must remove this tag and restore required coverage when full ancestry is implemented.
-// Run with: go test -tags=issue2413 ./internal/serveapp -run '^TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores$' -race -count=3.
+// Required R7 ancestry proof: equal leaf keys must retain their structural parent.
 func TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.FanInBarrier)
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyExample(t, canonicalrouting.FanInBarrier))
+			t.Cleanup(func() {
+				if t.Failed() {
+					stack := make([]byte, 1<<20)
+					n := runtime.Stack(stack, true)
+					t.Logf("M34 failed before runtime cleanup at %s:\n%s", time.Now().UTC().Format(time.RFC3339Nano), stack[:n])
+				}
+			})
+			publish := func(params map[string]any) servedEventPublishRPCResult {
+				t.Helper()
+				started := time.Now()
+				t.Logf("M34 publication started: event=%v key=%v at=%s", params["event_name"], params["idempotency_key"], started.UTC().Format(time.RFC3339Nano))
+				defer func() {
+					t.Logf("M34 publication returned: event=%v key=%v elapsed=%s failed=%t", params["event_name"], params["idempotency_key"], time.Since(started), t.Failed())
+				}()
+				return requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+			}
 			const periodKey = "same-period"
 			portfolios := []string{"portfolio-left", "portfolio-right"}
 			parents := make([]operatorread.OperatorEntityFull, 2)
@@ -32,7 +46,7 @@ func TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores(t *testing.T) {
 				} else {
 					params["run_id"] = runID
 				}
-				setup := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
+				setup := publish(params)
 				if runID != "" && setup.RunID != runID {
 					t.Fatalf("sibling portfolio setup changed run: %+v", setup)
 				}
@@ -62,7 +76,7 @@ func TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores(t *testing.T) {
 			}{{0, "op-b", 22}, {1, "op-a", 111}, {0, "op-a", 11}, {1, "op-b", 222}} {
 				index, portfolio := arrival.owner, portfolios[arrival.owner]
 				otherBefore := requireA2PortfolioEntity(t, rt, runID, periods[1-index].Entity.FlowInstance)
-				trigger := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+				trigger := publish(map[string]any{
 					"run_id": runID, "event_name": "operating.report.triggered", "idempotency_key": "a2-nested-" + portfolio + "-" + arrival.member,
 					"payload": map[string]any{"portfolio_id": portfolio, "period_id": periodKey, "operating_id": arrival.member, "revenue": arrival.revenue},
 				})

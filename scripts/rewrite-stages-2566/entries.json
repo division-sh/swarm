@@ -5245,7 +5245,12 @@
     ],
     "finals": [],
     "function": "TestFlowAttachmentCleanupRetainsExactPredecessorBothStores",
-    "literal": 18
+    "literal": 18,
+    "current_selector": {
+      "file": "internal/store/internal/runtimepersistence/flow_attachment_cleanup_failure_test.go",
+      "function": "TestFlowAttachmentCleanupRetainsExactPredecessorBothStores",
+      "literal": 19
+    }
   },
   {
     "file": "internal/store/internal/runtimepersistence/flow_attachment_commit_boundary_test.go",

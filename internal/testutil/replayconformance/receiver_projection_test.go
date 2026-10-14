@@ -81,7 +81,11 @@ func receiverProjectionFixture(t *testing.T, eventName string, flow bool, nodeNa
 	target := events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: entity})
 	owner := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: target}
 	var err error
-	owner.Initialization, err = events.AdmitFlowReceiverInitialization(event, target)
+	receiver, err := agentidentity.PresentRoute("consumer", "consumer", "consumer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.Initialization, err = events.AdmitFlowReceiverInitialization(event, target, receiver)
 	if err != nil {
 		t.Fatal(err)
 	}

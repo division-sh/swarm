@@ -54,7 +54,7 @@ func TestManagerRetainsAdmissionBeforeBeginAndResolvesLostResponse(t *testing.T)
 	for _, cut := range []string{"committed", "rolled_back", "unresolved"} {
 		t.Run(cut, func(t *testing.T) {
 			instances := &flowAdmissionResolutionProbe{flowActivationTestInstanceStore: &flowActivationTestInstanceStore{}, lost: true, rollback: cut == "rolled_back", unresolved: cut == "unresolved"}
-			bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+			bus := &flowActivationTestBus{}
 			am := newFlowActivationManager(t, bus, instances)
 			instances.manager = am
 			ctx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 5*time.Second)
@@ -73,7 +73,7 @@ func TestManagerRetainsAdmissionBeforeBeginAndResolvesLostResponse(t *testing.T)
 				if active == nil || active.pending == nil || active.receipt.Validate() == nil {
 					t.Fatalf("lost unresolved ownership: %+v", active)
 				}
-				if len(bus.addedPaths) != 0 || len(instances.armedEntries) != 0 {
+				if len(am.lifecycle.executionIdentities()) != 0 || len(instances.armedEntries) != 0 {
 					t.Fatal("unresolved admission executed topology")
 				}
 				instances.unresolved = false
@@ -87,7 +87,7 @@ func TestManagerRetainsAdmissionBeforeBeginAndResolvesLostResponse(t *testing.T)
 					t.Fatal("joined retirement retained a resolved request")
 				}
 			} else if cut == "rolled_back" {
-				if active != nil || len(bus.addedPaths) != 0 {
+				if active != nil || len(am.lifecycle.executionIdentities()) != 0 {
 					t.Fatal("unadmitted request retained execution or cleanup authority")
 				}
 			} else {
@@ -112,7 +112,7 @@ func TestManagerRetainsAdmissionBeforeBeginAndResolvesLostResponse(t *testing.T)
 
 func TestManagerCancelledAdmissionRetainsResolutionUntilRetirement(t *testing.T) {
 	instances := &flowAdmissionResolutionProbe{flowActivationTestInstanceStore: &flowActivationTestInstanceStore{}, lost: true}
-	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	bus := &flowActivationTestBus{}
 	am := newFlowActivationManager(t, bus, instances)
 	instances.manager = am
 	ctx, cancel := context.WithCancel(testAuthorActivityContext(context.Background()))
@@ -136,7 +136,7 @@ func TestManagerCancelledAdmissionRetainsResolutionUntilRetirement(t *testing.T)
 	am.dynamicFlowReadinessMu.Lock()
 	pending := am.dynamicFlowActiveAttempts[key]
 	am.dynamicFlowReadinessMu.Unlock()
-	if pending == nil || pending.pending == nil || len(bus.addedPaths) != 0 || len(instances.armedEntries) != 0 {
+	if pending == nil || pending.pending == nil || len(am.lifecycle.executionIdentities()) != 0 || len(instances.armedEntries) != 0 {
 		t.Fatal("cancelled admission lost non-executable responsibility")
 	}
 	if err := am.retireDynamicFlowAttemptsAfterJoin(context.WithoutCancel(ctx)); err != nil {

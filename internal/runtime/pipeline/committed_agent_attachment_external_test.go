@@ -351,7 +351,7 @@ func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gat
 		WorkflowInstances: pc, LifecycleStore: grant, DeliveryStore: selected.events,
 		WorkOwner: pipelineExternalTestWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution(), ExecutionPosture: executionposture.Live,
 		PersistenceRoles: manager.PersistenceRoles{
-			FlowActivation: bus, AgentRoutes: bus, RouteInstaller: bus, RouteVerifier: bus, RouteRestorer: bus, CreationPublisher: bus, DeliveryRuntime: bus,
+			FlowActivation: bus, AgentRoutes: bus, CreationPublisher: bus, DeliveryRuntime: bus,
 			LifecycleState: selected.events.(manager.AgentLifecycleStateReader), LifecycleOutcome: selected.events.(manager.AgentLifecycleOutcomeReader),
 		},
 	}, selected.events.(manager.ManagerPersistence))

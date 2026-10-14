@@ -46,7 +46,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/division-sh/swarm/internal/testutil/flowroutefixture"
 	"github.com/google/uuid"
 )
 
@@ -1176,11 +1175,13 @@ func TestOperatorEventPublishPrivateTargetCannotAuthorizePublication(t *testing.
 	`, runID, targetEntityID); err != nil {
 		t.Fatalf("seed hostile entity value-map identity lookalikes: %v", err)
 	}
-	if err := flowroutefixture.StageAndPublish(runtimecorrelation.WithRunID(ctx, runID), bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
-		RunID: runID,
-		Route: runtimeflowidentity.DeriveRoute("operating", targetKey),
-	}, Instance: construction.Identity}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, mustAPITestSourceArtifactFact(bundleHash), targetOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, found, err := pg.LookupFlowInstance(testAuthorActivityContextForSource(ctx, mustAPITestSourceArtifactFact(bundleHash)), lookup)
+	if err != nil || !found || observed.Identity() != construction.Identity {
+		t.Fatalf("target index must retain exact construction despite field lookalikes: found=%t err=%v identity=%+v", found, err, observed.Identity())
 	}
 
 	targeted := rpcCall(t, handler, eventPublishBodyWithTarget(runID, "", bundleHash, "operating/opco.product_initialization_requested", `{"topic":"targeted"}`, "operator-test", "idem-target-route-positive", targetFlowInstance, targetEntityID))
@@ -1222,6 +1223,27 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDD
 
 	flowInstance := "operating/inst-1"
 	entityID := seedEventPublishConstructedFlow(t, pg, bus, source, runID, flowInstance, stringValue(t, asMap(t, initial.Result)["event_id"], "event_id"))
+	rootFlowID := semanticview.RootExecutionFlowID(source)
+	rootOwner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.StoredRoute(runtimeflowidentity.ScopeKey(source, rootFlowID), runID, runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootFact := mustAPITestSourceArtifactFact(bundleHash)
+	rootCtx := testAuthorActivityContextForSource(ctx, rootFact)
+	rootLookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, rootFact, rootOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, found, err := pg.LookupFlowInstance(rootCtx, rootLookup)
+	if err != nil || !found {
+		t.Fatalf("root construction lookup: found=%t err=%v", found, err)
+	}
+	rootConstruction, err := pg.LoadFlowConstructionPublication(rootCtx, rootOwner, root.Identity().EntityID)
+	if err != nil || rootConstruction.Identity != root.Identity() ||
+		rootConstruction.CreatingInput.EventID != stringValue(t, asMap(t, initial.Result)["event_id"], "event_id") ||
+		rootConstruction.CreatingInput.Input != "" {
+		t.Fatalf("root construction: evidence=%+v err=%v", rootConstruction, err)
+	}
 
 	followUp := rpcCall(t, handler, eventPublishBody(runID, bundleHash, "review.requested", fmt.Sprintf(`{"entity_id":%q,"topic":"root-follow-up"}`, entityID), "operator-test", "idem-root-template-collision-follow-up"))
 	if followUp.Error != nil {
@@ -1242,7 +1264,23 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDD
 	if gotEventName != "review.requested" || gotEntityID != "" || gotFlowInstance != "" {
 		t.Fatalf("event row = name:%q entity:%q flow:%q, want mixed root-receiver projection despite payload entity_id %s/%s", gotEventName, gotEntityID, gotFlowInstance, entityID, flowInstance)
 	}
-	assertStoredEventUntargeted(t, gotTargetRoute, gotTargetSet)
+	wantRootTarget := events.RouteIdentity{FlowID: root.Identity().TemplateID, FlowInstance: root.Identity().InstancePath}
+	deliveryTargets := postgresEventDeliveryTargetRoutes(t, db, eventID)
+	rootTargets, targetlessTargets := 0, 0
+	for _, target := range deliveryTargets {
+		switch target {
+		case wantRootTarget:
+			rootTargets++
+		case events.RouteIdentity{}:
+			targetlessTargets++
+		default:
+			t.Fatalf("root publication target = %+v, want original root %+v or independently targetless observer, not payload child %s/%s", target, wantRootTarget, entityID, flowInstance)
+		}
+	}
+	if rootTargets != 1 || targetlessTargets != 1 {
+		t.Fatalf("root publication targets = %+v, want one declared entityless root and one independently targetless observer", deliveryTargets)
+	}
+	assertStoredEventProjectionMatchesDeliveries(t, gotEntityID, gotFlowInstance, gotTargetRoute, gotTargetSet, runID, deliveryTargets)
 	var decoded map[string]any
 	if err := json.Unmarshal(gotPayload, &decoded); err != nil {
 		t.Fatalf("decode root/template collision payload: %v", err)
@@ -1411,11 +1449,13 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := flowroutefixture.StageAndPublish(runtimecorrelation.WithRunID(ctx, runID), bus, runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.RunScopedFlowInstance{
-		RunID: runID,
-		Route: runtimeflowidentity.DeriveRoute("operating", targetKey),
-	}, Instance: construction.Identity}); err != nil {
-		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, mustAPITestSourceArtifactFact(bundleHash), targetOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, found, err := pg.LookupFlowInstance(testAuthorActivityContextForSource(ctx, mustAPITestSourceArtifactFact(bundleHash)), lookup)
+	if err != nil || !found || observed.Identity() != construction.Identity {
+		t.Fatalf("target index = %+v, found=%t err=%v, want %+v", observed.Identity(), found, err, construction.Identity)
 	}
 	mismatchEntityID := seedEventPublishConstructedFlow(t, pg, bus, source, runID, "operating/"+uuid.NewString(), stringValue(t, asMap(t, initial.Result)["event_id"], "event_id"))
 	unroutableEntityID := uuid.NewString()
@@ -2977,24 +3017,6 @@ func containsStoredRoute(routes []events.RouteIdentity, want events.RouteIdentit
 		}
 	}
 	return false
-}
-
-func assertStoredEventUntargeted(t *testing.T, targetRouteRaw, targetSetRaw string) {
-	t.Helper()
-	var target events.RouteIdentity
-	if err := json.Unmarshal([]byte(targetRouteRaw), &target); err != nil {
-		t.Fatalf("decode event target_route: %v", err)
-	}
-	if !target.Empty() {
-		t.Fatalf("event target_route = %#v, want untargeted root publication", target)
-	}
-	var targetSet []events.RouteIdentity
-	if err := json.Unmarshal([]byte(targetSetRaw), &targetSet); err != nil {
-		t.Fatalf("decode event target_set: %v", err)
-	}
-	if len(targetSet) != 0 {
-		t.Fatalf("event target_set = %#v, want untargeted root publication", targetSet)
-	}
 }
 
 func assertOperatorEventReference(t *testing.T, db *sql.DB, eventID, wantReferenceEventID string) {

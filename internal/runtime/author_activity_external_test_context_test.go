@@ -379,7 +379,11 @@ func installExternalManagerTestGeneration(
 
 func admitExternalManagerTestGeneration(t testing.TB, ctx context.Context, selected agentfixture.Store, manager *runtimemanager.AgentManager, source semanticview.Source) {
 	t.Helper()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: authorActivityTestSourceArtifactFact.BundleHash()}
+	fact, present := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !present || fact.Validate() != nil {
+		t.Fatal("external manager fixture requires its admitted source context")
+	}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)
 	if err != nil {
 		t.Fatal(err)
@@ -402,20 +406,14 @@ func admitExternalManagerTestGeneration(t testing.TB, ctx context.Context, selec
 }
 
 type externalRuntimeTestDurableEventStore interface {
+	runtimepipeline.FlowInstanceIndexReader
 	runtimepipeline.FlowConstructionPublicationReader
 	runtimebus.EventStore
 	runtimepipeline.WorkflowEmitFeedbackOwner
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
-	runtimebus.FlowInstanceRoutePersistence
-	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteSetPersistence
-	runtimebus.FlowInstanceRouteTopologyPersistence
-	runtimebus.FlowInstanceRouteRollbackPersistence
 	runtimebus.ActiveAgentDescriptorLister
-	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
@@ -425,20 +423,21 @@ type externalRuntimeTestDurableEventStore interface {
 
 func externalRuntimeTestDurableDependencies(durable externalRuntimeTestDurableEventStore) runtimebus.DurableDependencies {
 	return runtimebus.DurableDependencies{
+		Instances:                durable,
 		ConstructionPublications: durable,
 		EmitFeedback:             durable,
 		ReplyContext:             durable, RunLifecycle: durable,
-		DeliveryLifecycle: durable, FlowRoutes: durable, FlowRouteRecords: durable,
-		FlowRouteSets: durable, FlowRouteTopology: durable, FlowRouteRollback: durable, ActiveAgents: durable,
-		ActiveFlows: durable, TargetOwners: durable, PreparedEvents: durable,
+		DeliveryLifecycle:     durable,
+		ActiveAgents:          durable,
+		PreparedEvents:        durable,
 		TargetFailureRecorder: durable, RunOrigins: durable, StandingRestarts: durable,
 	}
 }
 
 func externalRuntimeTestManagerBusRoles(bus *runtimebus.EventBus) runtimemanager.PersistenceRoles {
 	return runtimemanager.PersistenceRoles{
-		AgentRoutes: bus, RouteInstaller: bus, RouteVerifier: bus,
-		RouteRestorer: bus, FlowActivation: bus, CreationPublisher: bus, DeliveryRuntime: bus,
+		AgentRoutes:    bus,
+		FlowActivation: bus, CreationPublisher: bus, DeliveryRuntime: bus,
 	}
 }
 
@@ -463,7 +462,6 @@ func externalRuntimeTestSelectedManagerRoles(selected any) runtimemanager.Persis
 	roles.EventExistence, _ = selected.(runtimemanager.EventExistenceReader)
 	roles.DirectiveOperations, _ = selected.(runtimeagentcontrol.DirectiveOperationStore)
 	roles.DirectiveTargets, _ = selected.(runtimemanager.AgentDirectiveRunTargetResolver)
-	roles.FlowRoutes, _ = selected.(runtimebus.FlowInstanceRoutePersistence)
 	roles.StandingRestarts, _ = selected.(runtimerunlifecycle.StandingRestartDispositionReader)
 	return roles
 }
@@ -582,7 +580,7 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 		}
 	}
 	if opts.PipelineObligations != nil {
-		if opts.Durable.FlowRouteTopology == nil {
+		if opts.Durable.Instances == nil {
 			durable, ok := store.(externalRuntimeTestDurableEventStore)
 			if !ok {
 				return nil, fmt.Errorf("external runtime durable event-store fixture %T lacks exact durable roles", store)

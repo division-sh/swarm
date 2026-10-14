@@ -36,8 +36,8 @@ func TestRecoverRejectsMalformedCanonicalRecipientEvidence(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), tc.want) {
 					t.Fatalf("restore error = %v, want %q after valid record fingerprint", err, tc.want)
 				}
-				if len(am.SelectedContractRouteRecoverySnapshot()) != 0 || len(bus.restored) != 0 {
-					t.Fatal("invalid evidence installed recovery truth or live routes")
+				if len(am.SelectedContractRouteRecoverySnapshot()) != 0 || len(am.dynamicFlowActiveAttempts) != 0 {
+					t.Fatal("invalid evidence installed recovery truth or current attachment authority")
 				}
 			})
 		}
@@ -71,8 +71,8 @@ func TestRecoverCanonicalRecipientReadbackPreservesSelectedEvidence(t *testing.T
 				got.HandlerEvent() != "work.changed" || got.AgentPlan.Name.Owner != "test://recovery/other-owner" {
 				t.Fatalf("recovery reduced selected evidence: %#v", got)
 			}
-			if len(bus.restored) != 0 {
-				t.Fatal("evidence readback installed live routes")
+			if len(am.dynamicFlowActiveAttempts) != 0 {
+				t.Fatal("evidence readback installed current attachment authority")
 			}
 		})
 	}

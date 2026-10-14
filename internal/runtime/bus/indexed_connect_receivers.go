@@ -1,0 +1,247 @@
+package bus
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+)
+
+// Existence and publication authority precede executable receiver selection.
+// A terminal receiver can produce a diagnostic, never a construction proposal.
+func (r connectRoutePlanResolver) explicitReceiverTerminated(ctx context.Context, event events.Event) (bool, error) {
+	target := explicitRootPublicationTarget(event)
+	if target.Empty() || r.source == nil || target.FlowID == semanticview.RootExecutionFlowID(r.source) {
+		return false, nil
+	}
+	fact, present := correlation.SourceArtifactFactFromContext(ctx)
+	if !present || r.lifecycle.index == nil {
+		return false, fmt.Errorf("explicit receiver requires its admitted source and native index")
+	}
+	owner, err := flowidentity.NewRunScopedFlowInstance(event.RunID(), flowidentity.StoredRoute(flowidentity.ScopeKey(r.source, target.FlowID), "", target.FlowInstance))
+	if err != nil {
+		return false, err
+	}
+	request, err := pipeline.NewExactFlowInstanceLookup(r.source, fact, owner)
+	if err != nil {
+		return false, err
+	}
+	instance, found, err := r.indexedReceiverWorkflowInstance(ctx, request)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return false, fmt.Errorf("explicit receiver is not constructed in the selected run")
+	}
+	if target.EntityID != "" && target.EntityID != instance.EntityID {
+		return false, fmt.Errorf("explicit receiver contradicts its stored entity identity")
+	}
+	if instance.Status == "terminated" || !instance.TerminatedAt.IsZero() {
+		return pipeline.StandingConstructionIsKeyless(r.source, instance.WorkflowName)
+	}
+	stage := ""
+	if instance.StageDefined {
+		stage = instance.CurrentState
+	}
+	err = pipeline.NewDeliveryTargetAvailability(stage, instance.Status, false).Validate(r.source, instance.WorkflowName)
+	var terminal *pipeline.TerminalReceiverError
+	if errors.As(err, &terminal) {
+		return pipeline.StandingConstructionIsKeyless(r.source, instance.WorkflowName)
+	}
+	return false, err
+}
+
+func (r connectRoutePlanResolver) replyOriginAvailable(ctx context.Context, runID string, plan pinrouting.ConnectRoutePlan, target events.RouteIdentity) (bool, error) {
+	if plan.ReplyRole() != pinrouting.ConnectReplyRoleResponse {
+		return true, nil
+	}
+	fact, present := correlation.SourceArtifactFactFromContext(ctx)
+	if !present || r.lifecycle.index == nil {
+		return false, fmt.Errorf("reply origin requires its admitted source and native index")
+	}
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flowidentity.ScopeKey(r.source, target.FlowID), "", target.FlowInstance))
+	if err != nil {
+		return false, err
+	}
+	request, err := pipeline.NewExactFlowInstanceLookup(r.source, fact, owner)
+	if err != nil {
+		return false, err
+	}
+	instance, found, err := r.indexedReceiverWorkflowInstance(ctx, request)
+	if err != nil || !found {
+		return false, err
+	}
+	if target.EntityID != "" && instance.EntityID != target.EntityID {
+		return false, fmt.Errorf("reply origin crosses its target entity")
+	}
+	if instance.Status == "terminated" {
+		return false, nil
+	}
+	stage := ""
+	if instance.StageDefined {
+		stage = instance.CurrentState
+	}
+	err = pipeline.NewDeliveryTargetAvailability(stage, instance.Status, !instance.TerminatedAt.IsZero()).Validate(r.source, instance.WorkflowName)
+	var terminal *pipeline.TerminalReceiverError
+	if errors.As(err, &terminal) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (r connectRoutePlanResolver) indexedReceiverWorkflowInstance(ctx context.Context, request pipeline.FlowInstanceLookupRequest) (pipeline.WorkflowInstance, bool, error) {
+	if _, err := r.prospectiveConnectInstances(ctx, request.RunID(), request.SourceFact()); err != nil {
+		return pipeline.WorkflowInstance{}, false, err
+	}
+	for _, tree := range preparedConnectPlans(ctx) {
+		for _, plan := range tree.ConstructionPlans() {
+			if plan.Identity.InstancePath == request.ExactPath() && plan.Identity.TemplateID == request.FlowID() {
+				return plan.Instance, true, nil
+			}
+		}
+	}
+	observed, found, err := r.lifecycle.index.LookupFlowInstance(ctx, request)
+	if err != nil || !found {
+		return pipeline.WorkflowInstance{}, false, err
+	}
+	if err := observed.ValidateSelection(request); err != nil {
+		return pipeline.WorkflowInstance{}, false, err
+	}
+	instance, err := observed.WorkflowInstance()
+	return instance, err == nil, err
+}
+
+func (r connectRoutePlanResolver) lookupTargetScope(ctx context.Context, runID string, flows map[string]struct{}, owners []flowidentity.RunScopedFlowInstance) (selectedTargetOwnerLookupScope, error) {
+	fact, present := correlation.SourceArtifactFactFromContext(ctx)
+	if !present || r.lifecycle.index == nil {
+		return selectedTargetOwnerLookupScope{}, fmt.Errorf("connect lookup scope requires its admitted source and index owner")
+	}
+	flowIDs := make([]string, 0, len(flows))
+	for flowID := range flows {
+		flowIDs = append(flowIDs, flowID)
+	}
+	scope, err := pipeline.NewFlowInstanceLookupScope(r.source, fact, runID, flowIDs, owners)
+	if err != nil {
+		return selectedTargetOwnerLookupScope{}, err
+	}
+	var observations []pipeline.FlowInstanceObservation
+	if r.lifecycle.runProposal.Present() {
+		if err := r.lifecycle.runProposal.Validate(runID, fact); err != nil {
+			return selectedTargetOwnerLookupScope{}, err
+		}
+	} else {
+		observations, err = r.indexedObservations(ctx, scope)
+		if err != nil {
+			return selectedTargetOwnerLookupScope{}, err
+		}
+	}
+	if _, err := r.prospectiveConnectInstances(ctx, runID, fact); err != nil {
+		return selectedTargetOwnerLookupScope{}, err
+	}
+	return selectedTargetOwnerLookupScope{lookup: scope, observations: observations}, nil
+}
+
+func preparedConnectPlans(ctx context.Context) []pipeline.FlowInstanceActivationPlan {
+	preview, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes)
+	if preview == nil {
+		return nil
+	}
+	return preview.plans
+}
+
+func (r connectRoutePlanResolver) prospectiveConnectInstances(ctx context.Context, runID string, fact correlation.SourceArtifactFact) ([]flowidentity.Instance, error) {
+	var instances []flowidentity.Instance
+	for _, tree := range preparedConnectPlans(ctx) {
+		for _, plan := range tree.ConstructionPlans() {
+			if err := plan.Validate(); err != nil {
+				return nil, err
+			}
+			if plan.Readiness.RunID != runID || plan.Readiness.BundleHash != fact.BundleHash() || plan.Readiness.WorkflowVersion != r.source.WorkflowVersion() {
+				return nil, fmt.Errorf("prospective receiver crosses its selected source or run")
+			}
+			instances = append(instances, plan.Identity)
+		}
+	}
+	return instances, nil
+}
+
+func (r connectRoutePlanResolver) indexedConnectIdentity(ctx context.Context, runID string, target events.RouteIdentity) (flowidentity.Instance, error) {
+	fact, present := correlation.SourceArtifactFactFromContext(ctx)
+	if !present || r.lifecycle.index == nil {
+		return flowidentity.Instance{}, fmt.Errorf("connect receiver requires its admitted source and index owner")
+	}
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(flowidentity.ScopeKey(r.source, target.FlowID), "", target.FlowInstance))
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	request, err := pipeline.NewExactFlowInstanceLookup(r.source, fact, owner)
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	proposals, err := r.prospectiveConnectInstances(ctx, runID, fact)
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	for _, instance := range proposals {
+		if instance.Route() == owner.Route {
+			if target.EntityID != "" && instance.EntityID != target.EntityID {
+				return flowidentity.Instance{}, fmt.Errorf("prospective receiver crosses its target entity")
+			}
+			return instance, nil
+		}
+	}
+	observed, found, err := r.lifecycle.index.LookupFlowInstance(ctx, request)
+	if err != nil {
+		return flowidentity.Instance{}, err
+	}
+	if !found {
+		return flowidentity.Instance{}, &pipeline.WorkflowInstanceLookupMiss{RequestedKey: target.FlowInstance}
+	}
+	if err := observed.ValidateSelection(request); err != nil {
+		return flowidentity.Instance{}, err
+	}
+	instance := observed.Identity()
+	if target.EntityID != "" && instance.EntityID != target.EntityID {
+		return flowidentity.Instance{}, fmt.Errorf("native receiver crosses its target entity")
+	}
+	return instance, nil
+}
+
+func (r connectRoutePlanResolver) materializeKeylessConnect(ctx context.Context, event events.Event, plan pinrouting.ConnectRoutePlan) (pinrouting.ConnectRoutePlanMaterialization, connectInstanceSelection, error) {
+	flowID := plan.ReceiverEndpoint().Readback().FlowID
+	if plan.ReceiverEndpoint().IsRoot() {
+		instance, err := r.indexedConnectIdentity(ctx, event.RunID(), events.RouteIdentity{FlowID: flowID, FlowInstance: event.RunID()})
+		if err != nil {
+			return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, err
+		}
+		return pinrouting.ConnectRoutePlanMaterialization{Target: plan.ReceiverRoute(instance.InstancePath, instance.EntityID)}, connectInstanceSelection{}, nil
+	}
+	parent, err := r.lifecycle.constructionParent(ctx, event, plan)
+	if err != nil {
+		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, err
+	}
+	fact, present := correlation.SourceArtifactFactFromContext(ctx)
+	if !present {
+		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, fmt.Errorf("keyless receiver requires its admitted source")
+	}
+	request, err := pipeline.NewDeclaredFlowInstanceLookup(r.source, fact, event.RunID(), flowID, parent, nil)
+	if err != nil {
+		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, err
+	}
+	selection, err := pipeline.PrepareFlowInstanceSelection(ctx, r.lifecycle.index, nil, pipeline.FlowInstanceSelectionRequest{Lookup: request, Mode: contracts.FlowInputResolutionModeSelect, Prepared: preparedConnectPlans(ctx), RunProposal: r.lifecycle.runProposal})
+	if err != nil {
+		if _, unavailable := selection.UnavailableReceiver(); unavailable {
+			return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureLifecycleUnavailable}, connectInstanceSelection{}, nil
+		}
+		return pinrouting.ConnectRoutePlanMaterialization{}, connectInstanceSelection{}, err
+	}
+	instance := selection.Identity()
+	return pinrouting.ConnectRoutePlanMaterialization{Target: plan.ReceiverRoute(instance.InstancePath, instance.EntityID)}, connectInstanceSelection{FlowInstanceSelection: selection, receiver: plan.ReceiverEndpoint(), identity: instance}, nil
+}

@@ -6,7 +6,9 @@ import (
 	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -88,6 +90,54 @@ func TestRunControlFixtureUsesOriginalSelectedLifecycleOwnerBothStores(t *testin
 			}
 			if probe.Snapshot().Active != 0 {
 				t.Fatal("run-control setup/readback retained selected work")
+			}
+		})
+	}
+}
+
+func TestRunControlPublicationFixtureUsesExactSourceAndNativeIndexBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var selected interface {
+				storetest.RunFixtureStore
+				componentFlowConstructionStore
+				runtimepipeline.FlowInstanceIndexReader
+				runtimebus.RunLifecycleReadPersistence
+			}
+			if backend == "sqlite" {
+				selected = storetest.StartSQLiteRuntimeStore(t)
+			} else {
+				selected = storetest.StartPostgresRuntimeStore(t)
+			}
+			source := runControlPublicationSource(t)
+			ctx := testAuthorActivityContextForSource(context.Background(), source)
+			bus, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			runID := uuid.NewString()
+			probe := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
+			seedRunControlPublicationRoot(t, ctx, selected, bus, source, runID)
+			fact := testSourceArtifactFact(source)
+			storedFact, err := selected.RequireActiveRunSource(ctx, runID)
+			if err != nil || storedFact != fact {
+				t.Fatalf("run-control source: stored=%+v want=%+v err=%v", storedFact, fact, err)
+			}
+			identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runID)
+			request, err := runtimepipeline.NewExactFlowInstanceLookup(source, fact, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: identity.Route()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			observation, found, err := selected.LookupFlowInstance(ctx, request)
+			if err != nil || !found || observation.Identity() != identity || observation.SourceFact() != fact {
+				t.Fatalf("run-control native index: found=%t observation=%+v err=%v", found, observation, err)
+			}
+			receipt, native, err := observation.NativeConstruction()
+			if err != nil || !native || receipt.Identity != identity || receipt.CreatingInput.EventID != "" || receipt.CreatingInput.Input != "" {
+				t.Fatalf("run-control construction: receipt=%+v native=%t err=%v", receipt, native, err)
+			}
+			if counts := probe.Snapshot(); counts.Total.WriteCommits == 0 || counts.Active != 0 {
+				t.Fatalf("run-control setup lost native ownership or retained work: %+v", counts)
 			}
 		})
 	}

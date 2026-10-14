@@ -170,7 +170,8 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	entityContracts := mustYAMLPath(t, root, "entity_contracts")
 	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "indexed: true")
 	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "not composition-routing selectors")
-	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "scalar instance field")
+	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "native immutable instance key")
+	assertScalarContains(t, mustYAMLPath(t, entityContracts, "routing_indexes", "rule"), "exact declaration/run/structural parent")
 
 	slice1479 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1479")
 	assertScalarValue(t, mustMappingValue(t, slice1479, "status"), "retired_by_2087")

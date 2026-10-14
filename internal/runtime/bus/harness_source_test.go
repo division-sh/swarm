@@ -1,7 +1,6 @@
 package bus
 
 import (
-	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -11,16 +10,13 @@ import (
 
 func TestNamesOnlyPrivateInputDoesNotInventExternalProducer(t *testing.T) {
 	source := loadNamesOnlyRouteSource(t, canonicalrouting.WritePublicTemplateInputRoute(t))
-	if routeFlowInputHasExternalProducer(source, "operating", "opco.product_initialization_requested") {
+	routes := derivedRouteTableFixture(t, source)
+	if routeFlowInputProducerIsExternal(routes.inputProducers.Resolve("operating", "opco.product_initialization_requested")) {
 		t.Fatal("unconnected private input acquired external producer authority")
 	}
 
-	routes, err := DeriveRouteTable(source)
-	if err != nil {
-		t.Fatalf("DeriveRouteTable: %v", err)
-	}
 	for _, eventType := range []string{"opco.product_initialization_requested", "operating/opco.product_initialization_requested"} {
-		for _, subscriber := range routes.ResolveForRun(busInternalTestRunID, eventType) {
+		for _, subscriber := range routes.PubsubDeclarationDefinitionsFixture(t, "operating", eventType) {
 			if subscriber.RouteSourceCode() != "subscription" {
 				t.Fatalf("unconnected input invented route authority: %#v", subscriber)
 			}
@@ -30,23 +26,18 @@ func TestNamesOnlyPrivateInputDoesNotInventExternalProducer(t *testing.T) {
 
 func TestRouteResolveSubscriberPatterns_PrivatePinKeepsOrdinarySubscription(t *testing.T) {
 	source := loadNamesOnlyRouteSource(t, canonicalrouting.WritePublicTemplateInputRoute(t))
-	scope, ok := source.FlowScopeByID("operating")
-	if !ok {
+	routes := derivedRouteTableFixture(t, source)
+	scope, found := source.FlowScopeByID("operating")
+	if !found {
 		t.Fatal("worker flow scope missing")
 	}
-	patterns, err := routeResolveSubscriberPatterns(
-		source,
-		subscriberNode,
-		scope.ID,
-		scope.InputEvents,
-		scope.Path,
-		scope.Path,
-		routeFlowLocalEventSet(source, scope),
-		"opco.product_initialization_requested",
-	)
-	if err != nil {
-		t.Fatalf("resolve subscriber patterns: %v", err)
+	admission := routeClassifyAuthoredSubscription(source, subscriberNode, scope.ID, scope.InputEvents, scope.Path,
+		routeFlowLocalEventSetWithInputProducers(scope, routes.inputProducers), "opco.product_initialization_requested")
+	if !admission.Admitted() {
+		t.Fatal(admission.Message())
 	}
+	inputEvent := !admission.Pattern() && source.FlowHasInputEvent(scope.ID, admission.LocalEvent())
+	patterns := routeProjectAdmittedSubscriberPatterns(admission, scope.ID, scope.Path, inputEvent, routes.inputProducers)
 	if len(patterns) == 0 {
 		t.Fatal("ordinary authored subscription did not resolve")
 	}
@@ -69,12 +60,4 @@ func loadNamesOnlyRouteSource(t *testing.T, root string) semanticview.Source {
 		t.Fatalf("load names-only interface artifact: %v", err)
 	}
 	return semanticview.Wrap(bundle)
-}
-
-func subscriberSignature(subscribers []Subscriber) string {
-	parts := make([]string, 0, len(subscribers))
-	for _, subscriber := range subscribers {
-		parts = append(parts, strings.Join([]string{subscriber.Recipient.LocalID(), subscriber.Recipient.Code(), subscriber.Path, subscriber.MatchPattern, subscriber.RouteSourceCode(), subscriber.LocalizedEvent}, "|"))
-	}
-	return strings.Join(parts, "\n")
 }

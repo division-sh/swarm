@@ -195,7 +195,7 @@ func TestStandingPipelineRecoveryWaitsForOwnerInstallationOnSQLiteAndPostgres(t 
 			if err != nil {
 				t.Fatal(err)
 			}
-			fixture := newCompleteEventDispatchFixtureWithOrigin(t, backend, false, origin)
+			fixture := newCompleteEventDispatchFixtureWithOrigin(t, backend, false, origin, nil)
 			deliveries := fixture.subscribe(t, fixture.event.Type())
 			defer runtimebustest.UnsubscribeIdentity(fixture.bus, fixture.identity)
 
@@ -328,7 +328,7 @@ func TestPostgresRetryReleaseClaimSpansBoundedSweepWindow(t *testing.T) {
 		release:      releaseLater,
 	})
 
-	competingBus, err := newScopedTestEventBus(fixture.store)
+	competingBus, err := newScopedTestEventBus(fixture.store, runtimebus.EventBusOptions{ContractBundle: fixture.source})
 	if err != nil {
 		t.Fatalf("create competing event bus: %v", err)
 	}
@@ -980,14 +980,10 @@ func TestPipelineScanRunLocalBlockDoesNotStarveLaterRunOnSQLiteAndPostgres(t *te
 }
 
 func newRetryReleaseTestEvent(fixture completeEventDispatchFixture, createdAt time.Time) events.Event {
-	sourceRoute := events.RouteIdentity{
-		FlowID:       "retry-source",
-		FlowInstance: "retry-source/one",
-		EntityID:     uuid.NewString(),
-	}
+	sourceRoute := fixture.event.RoutingSource().Route()
 	return eventtest.InExecutionMode(eventtest.PersistedChildForProducer(
 		uuid.NewString(),
-		events.EventType("custom.replay.checked"),
+		fixture.event.Type(),
 		eventtest.Producer(events.EventProducerNode, "retry-release-node"),
 		"retry-release-task",
 		[]byte(`{"text":"retry release"}`),

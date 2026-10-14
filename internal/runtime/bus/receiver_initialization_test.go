@@ -10,22 +10,32 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
+func flowReceiverRouteFixture(t testing.TB, route flowidentity.Route) agentidentity.Route {
+	t.Helper()
+	receiver, err := route.AgentIdentityRoute()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return receiver
+}
+
 func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 	for _, tc := range []struct {
-		name, payload              string
-		reuse, descriptor, invalid bool
+		name, payload           string
+		reuse, indexed, invalid bool
 	}{
 		{"typed zero false", `{"account_id":"acct-1","count":0,"ratio":2.0,"active":false,"label":"kept","attributes":{"nested":[1,2.0]}}`, false, false, false},
 		{"optional state omitted", `{"account_id":"acct-1","active":true,"label":"kept","attributes":[]}`, false, false, false},
 		{"missing required message field", `{"account_id":"acct-1","active":true,"attributes":{}}`, false, false, true},
 		{"null required message field", `{"account_id":"acct-1","active":true,"label":null,"attributes":{}}`, false, false, true},
 		{"wrong integer", `{"account_id":"acct-1","count":"3","active":true,"label":"kept","attributes":{}}`, false, false, true},
-		{"descriptor reuse missing initialization", `{"account_id":"acct-1"}`, true, true, false},
+		{"indexed reuse missing initialization", `{"account_id":"acct-1"}`, true, true, false},
 		{"route without matching key cannot reuse", `{"account_id":"acct-1"}`, true, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,35 +54,34 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 			keys := []runtimecontracts.TemplateInstanceKeyValue{{Field: mustBusTemplateInstanceField(t, "account_id"), Value: "acct-1"}}
 			root := ConstructedFlowInstanceIdentityFixture(source, ".", busInternalTestRunID, busInternalTestRunID)
 			producer := ConstructedFlowInstanceIdentityFixture(source, "producer", "", busInternalTestRunID)
-			instance, err := flowidentity.KeyedChild(source, root, "account", templateInstanceLifecycleInstanceID(plan, keys))
+			instance, err := flowidentity.KeyedChild(source, root, "account", connectMissingInstanceID(plan, keys))
 			if err != nil {
 				t.Fatal(err)
 			}
-			store := &connectRoutePlanLifecycleStore{connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}}
-			if tc.descriptor {
-				store.flowInstances = []ActiveFlowInstanceDescriptor{{InstanceID: instance.InstanceID, EntityID: instance.EntityID, FlowInstance: instance.InstancePath, FlowTemplate: "account", AddressFields: map[string]string{"entity.account_id": "acct-1"}}}
-			}
+			store := &connectRoutePlanLifecycleStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
 			owner := newTestFlowInstanceActivationOwner(store.Activate)
-			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TemplateInstancePlanner: owner})
+			bus, err := newScopedTestEventBus(store, EventBusOptions{
+				ContractBundle: source, TemplateInstancePlanner: owner,
+				Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			store.bus = bus
 			for _, construction := range []flowidentity.Instance{root, producer} {
-				if err := bus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(construction.Route()), Instance: construction}); err != nil {
-					t.Fatal(err)
-				}
+				store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, construction, ""))
+				store.installConstructionReceipt(testRunScopedFlowRoute(construction.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: construction})
 			}
 			if tc.reuse {
+				if tc.indexed {
+					store.installIndexObservation(constructionIndexObservation(t, source, busInternalTestRunID, instance, "acct-1"))
+				}
 				store.setTargetOwnerRoutes(plan.ReceiverRoute(instance.InstancePath, instance.EntityID))
 				store.workflowInstances = []runtimepipeline.WorkflowInstance{{
 					EntityID: instance.EntityID, WorkflowName: "account", InstanceID: instance.InstanceID,
 					StorageRef: instance.InstancePath, EntityType: "account_state", CurrentState: "active", Status: "active",
 					Fields: map[string]any{"account_id": "acct-1"},
 				}}
-				if err := bus.AddFlowInstanceRouteFixture(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(instance.Route()), Instance: instance}); err != nil {
-					t.Fatal(err)
-				}
+				store.installConstructionReceipt(testRunScopedFlowRoute(instance.Route()), runtimepipeline.FlowConstructionPublicationEvidence{Identity: instance})
 			}
 			eventID := eventtest.UUID("initialize-" + tc.name)
 			event := connectRoutePlanStaticProducerEvent(eventID, events.EventType("producer/account.ready"), "", "", json.RawMessage(tc.payload), 0, busInternalTestRunID, "", events.EventEnvelope{Source: events.RouteIdentity{FlowID: producer.TemplateID, FlowInstance: producer.InstancePath, EntityID: producer.EntityID}}, time.Now().UTC())
@@ -138,7 +147,7 @@ func TestReceiverInitializationEventBusAdmissionAndReuse(t *testing.T) {
 }
 
 func TestReceiverInitializationPreviewUsesOnlyPreparedActivationVariables(t *testing.T) {
-	decision := TemplateInstanceLifecycleDecision{InstanceID: "must-not-derive", EntityID: "must-not-derive"}
+	decision := connectInstanceSelection{identity: flowidentity.Instance{InstanceID: "must-not-derive", EntityID: "must-not-derive"}}
 	if got := decision.ActivationVariables(); got != nil {
 		t.Fatalf("unprepared decision synthesized activation variables: %#v", got)
 	}

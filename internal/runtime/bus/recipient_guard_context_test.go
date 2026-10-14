@@ -30,12 +30,23 @@ func TestRecipientGuardObservesEffectiveDeliveryContext(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newTargetRouteMemoryStore()
-			store.setTargetOwnerRoutes(events.RouteIdentity{FlowID: "review", FlowInstance: "review/inst-1", EntityID: eventtest.UUID("review-entity")})
 			node := testFlowNode(t, "review", "target-node")
+			source := semanticview.Wrap(materializedTargetBundle(t, "review", "target-node", "task.started"))
+			wantRoutes := []events.DeliveryRoute{{
+				Recipient: events.MustNodeDeliveryRecipient(node), Context: tc.want,
+				Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: "review/inst-1", EntityID: eventtest.UUID("review-entity")}),
+			}}
+			if tc.routeContext.Reply != nil {
+				// The materializer adds its explicit route alongside the compiled
+				// subscription's independently inherited context.
+				ordinary := wantRoutes[0]
+				ordinary.Context = inherited
+				wantRoutes = append([]events.DeliveryRoute{ordinary}, wantRoutes...)
+			}
 			refusal := errors.New("effective reply context refused")
 			calls := 0
 			eb, err := newScopedTestEventBus(store, EventBusOptions{
-				ContractBundle: semanticview.Wrap(materializedTargetBundle(t, "review", "target-node", "task.started")),
+				ContractBundle: source,
 				RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 					return []DeliveryRouteBlueprint{{
 						Recipient: events.MustNodeDeliveryRecipient(node),
@@ -47,11 +58,15 @@ func TestRecipientGuardObservesEffectiveDeliveryContext(t *testing.T) {
 				RecipientPlanGuard: func(_ context.Context, _ events.Event, plan PublishRecipientPlan) error {
 					calls++
 					actuals, err := plan.RecipientActuals()
-					if err != nil || len(actuals) != 1 || !reflect.DeepEqual(actuals[0].Route().Context, tc.want) {
-						t.Fatalf("canonical guard actuals = %#v, error %v, want effective context %#v", actuals, err, tc.want)
+					var actualRoutes []events.DeliveryRoute
+					for _, actual := range actuals {
+						actualRoutes = append(actualRoutes, actual.Route())
 					}
-					if len(plan.DeliveryRoutes) != 1 || !reflect.DeepEqual(plan.DeliveryRoutes[0].Context, tc.want) {
-						t.Fatalf("guard routes = %#v, want one route with effective context %#v", plan.DeliveryRoutes, tc.want)
+					if err != nil || !reflect.DeepEqual(actualRoutes, wantRoutes) {
+						t.Fatalf("canonical guard actuals = %#v, error %v, want exact routes %#v", actuals, err, wantRoutes)
+					}
+					if !reflect.DeepEqual(plan.DeliveryRoutes, wantRoutes) {
+						t.Fatalf("guard routes = %#v, want exact routes %#v", plan.DeliveryRoutes, wantRoutes)
 					}
 					if tc.reject {
 						return refusal
@@ -65,6 +80,8 @@ func TestRecipientGuardObservesEffectiveDeliveryContext(t *testing.T) {
 			evt := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "review/inst-1/task.started", eventtest.Producer(events.EventProducerNode, node.Key()), "", nil, 0,
 				events.EventLineage{RunID: uuid.NewString(), ParentEventID: uuid.NewString(), ExecutionMode: executionmode.Live}, events.EventEnvelope{},
 				eventtest.ConcreteTemplateRoutingSource("review", "review/inst-1", eventtest.UUID("review-entity")), time.Now().UTC())
+			instance := StoredFlowInstanceIdentityFixture(source, "review", "inst-1", evt.RunID(), eventtest.UUID("review-entity"))
+			store.installIndexObservation(constructionIndexObservation(t, source, evt.RunID(), instance, "inst-1"))
 			plan, err := eb.planSubscribedPublish(events.WithDeliveryContext(context.Background(), inherited), evt)
 			if calls != 1 {
 				t.Fatalf("guard calls = %d, want 1; planning error: %v", calls, err)
@@ -82,7 +99,7 @@ func TestRecipientGuardObservesEffectiveDeliveryContext(t *testing.T) {
 				t.Fatal(err)
 			}
 			routes := plan.DeliveryRoutes()
-			if len(routes) != 1 || !reflect.DeepEqual(routes[0].Context, tc.want) {
+			if !reflect.DeepEqual(routes, wantRoutes) {
 				t.Fatalf("returned routes differ from authorized effective context: %#v", routes)
 			}
 		})

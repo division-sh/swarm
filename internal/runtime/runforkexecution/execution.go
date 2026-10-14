@@ -367,7 +367,6 @@ func selectedContractPipelineCoordinatorOptions(
 		DecisionCardDraftExpiry:   ports.decisionCardDraftExpiry,
 		HumanTaskExpiry:           ports.humanTaskExpiry,
 		DeliveryRuntime:           bus,
-		FlowRoutes:                bus,
 		RunLifecycle:              ports.busDurable.RunLifecycle,
 		Credentials:               agentRuntime.Credentials,
 		ManagedCredentials:        agentRuntime.ManagedCredentials,

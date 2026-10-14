@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -690,6 +691,46 @@ func logScatterGatherProgress(t testing.TB, h *runtimeHarness, eventID string) {
 		t.Logf("fan-out persisted settlement inputs: events=%d distinct=%d bytes=%d", facts.Events, facts.DistinctLedgers, facts.Bytes)
 	}
 	logScatterGatherDeliveryProgress(t, ctx, h, eventID)
+	logScatterGatherContinuationOwners(t, ctx, h)
+}
+
+func logScatterGatherContinuationOwners(t testing.TB, ctx context.Context, h *runtimeHarness) {
+	t.Helper()
+	started := time.Now()
+	authority, err := h.rt.Bus.DeliveryAuthority()
+	if err != nil {
+		t.Logf("failed exact continuation authority observation: %v", err)
+		return
+	}
+	var selected deliverylifecycle.Store = h.pg
+	if h.sqlite != nil {
+		selected = h.sqlite
+	}
+	page, err := selected.ScanDeliveryContinuations(ctx, authority, deliverylifecycle.ContinuationCursor{}, 64)
+	if err != nil {
+		t.Logf("failed exact continuation observation after %s: %v", time.Since(started), err)
+		return
+	}
+	t.Logf("continuation owner observation at=%s elapsed=%s authority=%+v exhausted=%t", started.Format(time.RFC3339Nano), time.Since(started), authority, page.Exhausted)
+	for _, item := range page.Items {
+		if item.Snapshot.RunID != catalogRuntimeRunID || item.Snapshot.Terminal() {
+			continue
+		}
+		snapshot := item.Snapshot
+		target := snapshot.Route.Target.Route()
+		t.Logf("unfinished continuation delivery=%s event=%s type=%s source=%s payload=%s target=%+v creating=%s disposition=%s invariant=%v status=%s handoff=%s started=%s eligible=%s claim_version=%d claim_expiry=%s retries=%d authority=%+v",
+			item.DeliveryID, item.Event.ID(), item.Event.Type(), item.Event.ParentEventID(), item.Event.Payload(), target,
+			snapshot.Route.Initialization.CreatingEventID(), item.Disposition, item.Invariant, snapshot.Status,
+			snapshot.ContinuationHandoffAt, snapshot.StartedAt, snapshot.NextEligibleAt, snapshot.ClaimVersion, snapshot.ClaimExpiresAt, snapshot.RetryCount, snapshot.Authority)
+		owner, err := flowidentity.NewRunScopedFlowInstance(catalogRuntimeRunID, flowidentity.StoredRoute(target.FlowID, target.EntityID, target.FlowInstance))
+		if err != nil {
+			t.Logf("unfinished continuation target observation: %v", err)
+			continue
+		}
+		instance, found, err := h.workflow.Load(ctx, owner)
+		t.Logf("unfinished continuation header: found=%t err=%v entity=%s parent=%s key=%s stage=%s status=%s version=%d fields=%v", found, err,
+			instance.EntityID, instance.ParentFlowInstance, instance.InstanceKey, instance.CurrentState, instance.Status, instance.Revision, instance.Fields)
+	}
 }
 
 func logScatterGatherDeliveryProgress(t testing.TB, ctx context.Context, h *runtimeHarness, eventID string) {

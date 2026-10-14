@@ -30762,16 +30762,6 @@
       }
     },
     {
-      "path": "platform.platform_tables.destructive_reset_cleanup_policy.classifications.delete_mixed_row_policy[10]",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "platform.platform_tables.destructive_reset_cleanup_policy.classifications.delete_mixed_row_policy[1]",
       "provenance": {
         "origin": "authored",
@@ -32403,6 +32393,66 @@
     },
     {
       "path": "platform.platform_tables.notes.product_tables",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.retired_instance_routing",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "mapping"
+      }
+    },
+    {
+      "path": "platform.platform_tables.retired_instance_routing.reply_origin_availability",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.retired_instance_routing.retired_api",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.retired_instance_routing.retired_observer_registry",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.retired_instance_routing.selected_store_policy",
+      "provenance": {
+        "origin": "authored",
+        "source_file": "embedded://swarm/platform-spec.yaml",
+        "source_line": 1,
+        "source_column": 1,
+        "source_presence": "scalar"
+      }
+    },
+    {
+      "path": "platform.platform_tables.retired_instance_routing.status",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",
@@ -34863,86 +34913,6 @@
     },
     {
       "path": "platform.platform_tables.tables.resource_versions.description",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.routing_rules",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "mapping"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.routing_rules.ddl",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.routing_rules.description",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.routing_rules.lifecycle",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "mapping"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.routing_rules.lifecycle.boot",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.routing_rules.lifecycle.event_dispatch",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.routing_rules.lifecycle.receiver_creation",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "embedded://swarm/platform-spec.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "platform.platform_tables.tables.routing_rules.lifecycle.terminate_flow_instance",
       "provenance": {
         "origin": "authored",
         "source_file": "embedded://swarm/platform-spec.yaml",

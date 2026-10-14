@@ -103,8 +103,9 @@ func TestRootExecutionIdentityConsumersStayCanonical(t *testing.T) {
 		{file: "workflow_timer_owner.go", required: []string{"OwningFlowID"}},
 		{file: filepath.Join("..", "bus", "delivery_planner.go"), required: []string{"AdmitRootExecutionCoordinate"}},
 		{file: filepath.Join("..", "bus", "eventbus_publish.go"), required: []string{"validateEventRootTargetCoordinates"}},
-		{file: filepath.Join("..", "bus", "connect_"+"route_plan_dispatch.go"), required: []string{"AdmitRootExecutionCoordinate"}},
-		{file: filepath.Join("..", "bus", "target_owner_projection.go"), required: []string{"AdmitRootExecutionCoordinate"}},
+		{file: filepath.Join("..", "bus", "connect_"+"route_plan_dispatch.go"), required: []string{"rootExecutionCoordinate", "root.Matches(target.FlowID, target.FlowInstance)"}},
+		{file: filepath.Join("..", "bus", "target_owner_projection.go"), required: []string{"admitAgentTarget"}},
+		{file: filepath.Join("..", "bus", "agent_target_admission.go"), required: []string{"AdmitRootExecutionCoordinate", "root.Matches(route.FlowID, route.FlowInstance)"}},
 	}
 	for _, check := range checks {
 		t.Run(filepath.Base(check.file), func(t *testing.T) {

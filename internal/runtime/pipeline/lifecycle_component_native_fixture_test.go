@@ -104,7 +104,7 @@ func nativeLifecycleComponentForTest(t *testing.T, backend string, bundle *contr
 		}
 	})
 	run := correlation.RunIDFromContext(ctx)
-	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: run, StorageRef: run, EntityID: run, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: initial, EnteredStageAt: time.Now().UTC(), Fields: map[string]any{}, EntityType: "test_entity"})); err != nil {
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{InstanceID: run, StorageRef: run, EntityID: run, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(), CurrentState: initial, EnteredStageAt: time.Now().UTC(), Fields: map[string]any{}, EntityType: "test_entity"})); err != nil {
 		t.Fatal(err)
 	}
 	return fixture, pc, ctx, mutations

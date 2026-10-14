@@ -16,11 +16,10 @@ import (
 // topology. Their caller joins timer/publication work before retiring this owner.
 func newTimerReplayAttachmentOwner(t *testing.T, ctx context.Context, selected any) (func(pipeline.DynamicFlowRuntimeReadinessPlan) pipeline.DynamicFlowRuntimeActivationAttempt, func()) {
 	t.Helper()
-	return newTimerReplayAttachmentOwnerForSource(t, ctx, selected, authorActivityTestSourceArtifactFact)
-}
-
-func newTimerReplayAttachmentOwnerForSource(t *testing.T, ctx context.Context, selected any, fact correlation.SourceArtifactFact) (func(pipeline.DynamicFlowRuntimeReadinessPlan) pipeline.DynamicFlowRuntimeActivationAttempt, func()) {
-	t.Helper()
+	fact, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found || fact.Validate() != nil {
+		t.Fatal("native timer attachment requires its admitted source")
+	}
 	workflows := selected.(pipeline.DynamicFlowRuntimeReadinessPersistence)
 	process, err := selected.(startupownership.Store).AcquireProcessCapability(ctx, startupownership.AcquireRequest{
 		OwnerID: "timer-replay-proof", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,

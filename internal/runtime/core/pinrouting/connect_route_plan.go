@@ -375,8 +375,6 @@ func (k ConnectRoutePlanResolutionKind) Code() string {
 	}
 }
 
-func (k ConnectRoutePlanResolutionKind) empty() bool { return k == 0 }
-
 type ConnectRoutePlanFailure uint8
 
 const (
@@ -640,6 +638,37 @@ func (r ConnectRecipient) HandlerEvent() events.EventType  { return r.handlerEve
 type ConnectRecipientRegistration struct {
 	receiverPin ConnectReceiverPinIdentity
 	recipient   ConnectRecipient
+}
+
+// BindReceiverInstance projects an already compiled receiver declaration onto
+// selected construction data. It grants neither construction nor execution.
+func (g CompiledConnectGraph) BindReceiverInstance(registration ConnectRecipientRegistration, instance runtimeflowidentity.Instance) (ConnectRecipientRegistration, error) {
+	if registration.receiverPin.Empty() || instance.InstancePath == "" || instance.EntityID == "" {
+		return ConnectRecipientRegistration{}, fmt.Errorf("receiver binding requires compiled permission and exact construction data")
+	}
+	declared := false
+	for _, plan := range append(append([]ConnectRoutePlan(nil), g.plans...), g.receiverPlans...) {
+		if plan.ReceiverPinIdentity().Equal(registration.receiverPin) && plan.receiver.flowID.value == instance.TemplateID {
+			declared = true
+			break
+		}
+	}
+	if !declared {
+		return ConnectRecipientRegistration{}, fmt.Errorf("receiver binding crosses its compiled declaration")
+	}
+	registration.recipient.path = instance.InstancePath
+	if registration.recipient.kind == ConnectRecipientAgent {
+		route, err := instance.Route().AgentIdentityRoute()
+		if err != nil {
+			return ConnectRecipientRegistration{}, err
+		}
+		plan, err := agentidentity.NewPlan(registration.recipient.agentPlan.Name, route)
+		if err != nil {
+			return ConnectRecipientRegistration{}, err
+		}
+		registration.recipient.agentPlan = plan
+	}
+	return registration, nil
 }
 
 // ConnectRecipientAssociation retains the compiled plan and receiver pin that
@@ -1298,11 +1327,6 @@ func admitConnectRoutePlanIssueEndpoints(source semanticview.Source, connect run
 	return issue
 }
 
-type ConnectRoutePlanMaterializationInput struct {
-	MatchValues ConnectRouteMatchValues
-	Descriptors []Descriptor
-}
-
 // ConnectRouteMatchValues is the admitted schema-value snapshot consumed by a
 // compiled plan. Callers cannot mutate or reinterpret its keys after admission.
 type ConnectRouteMatchValues struct {
@@ -1381,83 +1405,6 @@ type CompiledConnectGraph struct {
 	receiverPlans         []ConnectRoutePlan
 	issues                []ConnectRoutePlanIssue
 	receiverPinCollisions []ConnectReceiverPinCollision
-}
-
-// RouteOwnerDependency is a compiled relationship between a producer scope
-// and a scope whose route records observe that producer. It carries no run
-// instance identity; that is selected from the current durable snapshot.
-type RouteOwnerDependency struct {
-	SourceFlowPath   string
-	ReceiverFlowPath string
-}
-
-// RouteDependencySelection separates the descriptors needed to derive a new
-// route from existing owners whose records may change because of that route.
-type RouteDependencySelection struct {
-	ContextFlowPaths  []string
-	AffectedFlowPaths []string
-}
-
-// SelectRouteDependencies is the compiled graph's owner of activation
-// dependency scope. RouteTable supplies already-admitted pub/sub observer
-// relationships; neither storage nor callers reinterpret their event names.
-func (g CompiledConnectGraph) SelectRouteDependencies(changedFlowPaths []string, observers []RouteOwnerDependency) RouteDependencySelection {
-	changed := make(map[string]struct{}, len(changedFlowPaths))
-	for _, flowPath := range changedFlowPaths {
-		flowPath = strings.Trim(strings.TrimSpace(flowPath), "/")
-		if flowPath != "" {
-			changed[flowPath] = struct{}{}
-		}
-	}
-	context := make(map[string]struct{})
-	affected := make(map[string]struct{})
-	dependencies := append([]RouteOwnerDependency(nil), observers...)
-	for _, plan := range g.plans {
-		if plan.source.IsRoot() || plan.receiver.IsRoot() {
-			continue
-		}
-		dependencies = append(dependencies, RouteOwnerDependency{
-			SourceFlowPath: plan.source.flowPath.value, ReceiverFlowPath: plan.receiver.flowPath.value,
-		})
-	}
-	for _, dependency := range dependencies {
-		source := strings.Trim(strings.TrimSpace(dependency.SourceFlowPath), "/")
-		receiver := strings.Trim(strings.TrimSpace(dependency.ReceiverFlowPath), "/")
-		if source == "" || receiver == "" {
-			continue
-		}
-		if _, newSource := changed[source]; newSource {
-			context[receiver] = struct{}{}
-			affected[receiver] = struct{}{}
-		}
-		if _, newReceiver := changed[receiver]; newReceiver {
-			context[source] = struct{}{}
-		}
-	}
-	// An affected owner is replaced with its complete derived route set. Load
-	// every producer it observes, not only the producer in this activation.
-	for _, dependency := range dependencies {
-		source := strings.Trim(strings.TrimSpace(dependency.SourceFlowPath), "/")
-		receiver := strings.Trim(strings.TrimSpace(dependency.ReceiverFlowPath), "/")
-		if source == "" || receiver == "" {
-			continue
-		}
-		if _, ownsReplacement := affected[receiver]; ownsReplacement {
-			context[source] = struct{}{}
-		}
-	}
-	selection := RouteDependencySelection{
-		ContextFlowPaths: make([]string, 0, len(context)), AffectedFlowPaths: make([]string, 0, len(affected)),
-	}
-	for flowPath := range context {
-		selection.ContextFlowPaths = append(selection.ContextFlowPaths, flowPath)
-	}
-	for flowPath := range affected {
-		selection.AffectedFlowPaths = append(selection.AffectedFlowPaths, flowPath)
-	}
-	sort.Strings(selection.ContextFlowPaths)
-	sort.Strings(selection.AffectedFlowPaths)
-	return selection
 }
 
 const ConnectReceiverPinCollisionFailure = "connect_receiver_pin_delivery_collision"
@@ -2761,9 +2708,12 @@ func localConnectReceiverHasConsumer(source semanticview.Source, to compositionC
 	return len(census.ResolveTypedPubSubConsumerMatches(endpoint)) > 0
 }
 
-func MaterializeConnectRoutePlan(plan ConnectRoutePlan, input ConnectRoutePlanMaterializationInput) ConnectRoutePlanMaterialization {
+func MaterializeConnectRoutePlan(plan ConnectRoutePlan) ConnectRoutePlanMaterialization {
 	if plan.receiver.IsRoot() {
 		return ConnectRoutePlanMaterialization{}
+	}
+	if plan.RequiresRuntimeResolution() {
+		return ConnectRoutePlanMaterialization{Failure: ConnectFailureReceiverResolutionMissing}
 	}
 	if !plan.target.Empty() {
 		return ConnectRoutePlanMaterialization{Target: plan.target}
@@ -2771,44 +2721,7 @@ func MaterializeConnectRoutePlan(plan ConnectRoutePlan, input ConnectRoutePlanMa
 	if len(plan.targetSet) > 0 {
 		return ConnectRoutePlanMaterialization{TargetSet: append([]events.RouteIdentity{}, plan.targetSet...)}
 	}
-	switch connectRoutePlanResolutionKind(plan) {
-	case ConnectResolutionInstanceKey:
-		return materializeInstanceKeyConnectRoutePlan(plan, input)
-	default:
-		return ConnectRoutePlanMaterialization{Failure: ConnectFailureReceiverResolutionMissing}
-	}
-}
-
-func materializeInstanceKeyConnectRoutePlan(plan ConnectRoutePlan, input ConnectRoutePlanMaterializationInput) ConnectRoutePlanMaterialization {
-	keyMaterial, failure := InstanceKeyMaterialForConnectRoutePlan(plan, input.MatchValues)
-	if !failure.Empty() {
-		return ConnectRoutePlanMaterialization{Failure: failure}
-	}
-	routes := make([]events.RouteIdentity, 0, len(input.Descriptors))
-	for _, descriptor := range input.Descriptors {
-		route := descriptorRouteForReceiver(plan, descriptor)
-		if route.Empty() {
-			continue
-		}
-		if ConnectInstanceKeyDescriptorMatches(keyMaterial.Keys, descriptor) {
-			routes = append(routes, route)
-		}
-	}
-	routes = uniqueRoutes(routes)
-	if len(routes) == 0 {
-		return ConnectRoutePlanMaterialization{Failure: ConnectFailureTargetUnresolved}
-	}
-	switch plan.targetKind {
-	case ConnectTargetKindTarget:
-		if len(routes) > 1 {
-			return ConnectRoutePlanMaterialization{Failure: ConnectFailureTargetAmbiguous}
-		}
-		return ConnectRoutePlanMaterialization{Target: routes[0]}
-	case ConnectTargetKindTargetSet:
-		return ConnectRoutePlanMaterialization{TargetSet: routes}
-	default:
-		return ConnectRoutePlanMaterialization{Failure: ConnectFailureDeliveryTopologyInvalid}
-	}
+	return ConnectRoutePlanMaterialization{Failure: ConnectFailureReceiverResolutionMissing}
 }
 
 func InstanceKeyMaterialForConnectRoutePlan(plan ConnectRoutePlan, matchValues ConnectRouteMatchValues) (ConnectRoutePlanInstanceKeyMaterial, ConnectRoutePlanFailure) {
@@ -2890,23 +2803,6 @@ func deterministicResolutionUUID(plan ConnectRoutePlan, eventID string) string {
 	b[8] = (b[8] & 0x3f) | 0x80
 	encoded := hex.EncodeToString(b)
 	return fmt.Sprintf("%s-%s-%s-%s-%s", encoded[0:8], encoded[8:12], encoded[12:16], encoded[16:20], encoded[20:32])
-}
-
-func InstanceKeyDescriptorRoutesForConnectRoutePlan(plan ConnectRoutePlan, keyMaterial []runtimecontracts.TemplateInstanceKeyValue, descriptors []Descriptor) []events.RouteIdentity {
-	if len(keyMaterial) == 0 {
-		return nil
-	}
-	routes := make([]events.RouteIdentity, 0, len(descriptors))
-	for _, descriptor := range descriptors {
-		route := descriptorRouteForReceiver(plan, descriptor)
-		if route.Empty() {
-			continue
-		}
-		if ConnectInstanceKeyDescriptorMatches(keyMaterial, descriptor) {
-			routes = append(routes, route)
-		}
-	}
-	return uniqueRoutes(routes)
 }
 
 func connectInstanceKey(source semanticview.Source, connect runtimecontracts.FlowConnect, inputPin runtimecontracts.CompiledFlowInputPin, receiverFlowID string) (*ConnectRoutePlanInstanceKey, ConnectRoutePlanIssue) {
@@ -3067,19 +2963,6 @@ func connectResolutionKind(scope semanticview.FlowScope, instanceKey *ConnectRou
 	return 0
 }
 
-func connectRoutePlanResolutionKind(plan ConnectRoutePlan) ConnectRoutePlanResolutionKind {
-	if !plan.resolutionKind.empty() {
-		return plan.resolutionKind
-	}
-	if !plan.target.Empty() || len(plan.targetSet) > 0 {
-		return ConnectResolutionStatic
-	}
-	if plan.instanceKey != nil {
-		return ConnectResolutionInstanceKey
-	}
-	return 0
-}
-
 func receiverRequiresRuntimeResolution(scope semanticview.FlowScope) bool {
 	switch strings.TrimSpace(scope.Mode) {
 	case runtimecontracts.FlowModeTemplate:
@@ -3098,44 +2981,4 @@ func staticConnectRoute(source semanticview.Source, flowID string) events.RouteI
 		FlowID:       strings.TrimSpace(flowID),
 		FlowInstance: flowInstance,
 	}.Normalized()
-}
-
-func ConnectInstanceKeyDescriptorMatches(keyMaterial []runtimecontracts.TemplateInstanceKeyValue, descriptor Descriptor) bool {
-	if len(keyMaterial) == 0 {
-		return false
-	}
-	for _, key := range keyMaterial {
-		field := key.Field.Path()
-		value := strings.Trim(strings.TrimSpace(key.Value), "/")
-		if field == "" || value == "" {
-			return false
-		}
-		actual, ok := descriptor.AddressFields["entity."+field]
-		if !ok {
-			actual, ok = descriptor.AddressFields[field]
-		}
-		if !ok || strings.Trim(strings.TrimSpace(actual), "/") != value {
-			return false
-		}
-	}
-	return true
-}
-
-func descriptorRouteForReceiver(plan ConnectRoutePlan, descriptor Descriptor) events.RouteIdentity {
-	if !descriptorBelongsToReceiver(plan, descriptor) {
-		return events.RouteIdentity{}
-	}
-	return descriptorRoute(plan.receiver.flowID.value, descriptor)
-}
-
-func descriptorBelongsToReceiver(plan ConnectRoutePlan, descriptor Descriptor) bool {
-	flowInstance := strings.Trim(strings.TrimSpace(descriptor.FlowInstance), "/")
-	if flowInstance == "" {
-		return false
-	}
-	receiverPath := plan.receiver.flowPath.value
-	if receiverPath == "" {
-		receiverPath = plan.receiver.flowID.value
-	}
-	return receiverPath != "" && (flowInstance == receiverPath || runtimeflowidentity.SemanticScopeFromInstancePath(flowInstance) == receiverPath)
 }
