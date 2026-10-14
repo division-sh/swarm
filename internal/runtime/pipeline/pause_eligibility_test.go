@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -30,23 +29,22 @@ func TestPausedHandedNodeParksUntilContinueBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			s := backend.open(t)
 			runID := uuid.NewString()
-			insertGateRecoveryRun(t, s.events, runID)
-			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			repo := canonicalrouting.RepoRoot(t)
 			bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopySelectionRetry(t), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 			if err != nil {
 				t.Fatal(err)
 			}
 			source := semanticview.Wrap(bundle)
+			ctx, fact := workflowLifecycleSourceContext(t, s, bundle, runID)
 			var nodes []pipeline.WorkflowNode
 			for _, row := range []struct{ id, event string }{{"seed", "seed"}, {"select", "select"}, {"final", "selected"}} {
 				nodes = append(nodes, pipeline.WorkflowNode{Node: externalPipelineSourceNode(t, source, ".", row.id), Subscriptions: []events.EventType{events.EventType(row.event)}, ExecutionType: contracts.SystemNodeExecutionType})
 			}
-			bus, err := newScopedTestEventBus(t, s.events, runtimebus.EventBusOptions{ContractBundle: source})
+			bus, err := newScopedTestEventBus(t, s.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact})
 			if err != nil {
 				t.Fatal(err)
 			}
-			coordinator := newGateRecoveryCoordinator(bus, s, pipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}})
+			coordinator := newGateRecoveryCoordinator(bus, s, pipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}, SourceArtifactFact: fact})
 			commitKeylessConstructorComponent(t, ctx, s, coordinator, source)
 			bus.SetInterceptors(coordinator)
 			publish := func(name string) events.Event {
