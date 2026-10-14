@@ -657,7 +657,8 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 			t.Error(err)
 		}
 	})
-	route := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()}.Normalized()
+	constructedProducer := fanOutConstructedProducerForTest(t, ctx, workflow, source, f.seed.runID)
+	route := events.RouteIdentity{FlowID: constructedProducer.TemplateID, FlowInstance: constructedProducer.InstancePath, EntityID: constructedProducer.EntityID}.Normalized()
 	routingSource, err := events.NewStaticFlowRoutingSource(route)
 	if err != nil {
 		t.Fatal(err)
@@ -675,7 +676,7 @@ func newMixedExecutionFixtureWithManager(t *testing.T, backend string, handlers 
 		t.Fatal(err)
 	}
 	capsule.NodeKey, capsule.ExecutionFlowID, capsule.EntityID = producer.Key(), "producer", route.EntityID
-	capsule.Route, capsule.ProducerSource = flowidentity.StoredRoute("producer", "producer", "producer"), routingSource
+	capsule.Route, capsule.ProducerSource = constructedProducer.Route(), routingSource
 	raw, err = json.Marshal(capsule)
 	if err != nil {
 		t.Fatal(err)
