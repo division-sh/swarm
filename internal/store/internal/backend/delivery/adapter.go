@@ -566,7 +566,7 @@ func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *m
 	}
 	var renewal ClaimCommit
 	if renew {
-		updated, err := a.renewAcquiredClaim(ctx, tx, attempt, claimed, leaseTTL)
+		updated, err := a.renewAcquiredClaim(ctx, tx, claimed, leaseTTL)
 		if err != nil {
 			return ClaimResult{}, err
 		}
@@ -1173,11 +1173,11 @@ func (a *Adapter) bindAgentSessionTx(ctx context.Context, tx *sql.Tx, claim Clai
 
 func (a *Adapter) RenewClaim(ctx context.Context, attempt *mutationprotocol.Attempt, claim Claim, leaseTTL time.Duration) (Snapshot, error) {
 	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (Snapshot, error) {
-		return a.renewClaimTx(ctx, tx, attempt, claim, leaseTTL)
+		return a.renewClaimTx(ctx, tx, claim, leaseTTL)
 	})
 }
 
-func (a *Adapter) renewClaimTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, leaseTTL time.Duration) (Snapshot, error) {
+func (a *Adapter) renewClaimTx(ctx context.Context, tx *sql.Tx, claim Claim, leaseTTL time.Duration) (Snapshot, error) {
 	if tx == nil || claim.Validate() != nil {
 		return Snapshot{}, fmt.Errorf("delivery claim renewal requires a current claim")
 	}
@@ -1194,7 +1194,7 @@ func (a *Adapter) renewClaimTx(ctx context.Context, tx *sql.Tx, attempt *mutatio
 
 // The acquired row and its authority were just checked under this transaction's
 // locks. Only the exact conditional lease update remains necessary here.
-func (a *Adapter) renewAcquiredClaim(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claimed ClaimedObligation, leaseTTL time.Duration) (Snapshot, error) {
+func (a *Adapter) renewAcquiredClaim(ctx context.Context, tx *sql.Tx, claimed ClaimedObligation, leaseTTL time.Duration) (Snapshot, error) {
 	claim := claimed.Claim
 	snapshot := claimed.Snapshot
 	if claim.Validate() != nil || snapshot.Status != StatusInProgress || snapshot.DeliveryID != claim.DeliveryID() ||

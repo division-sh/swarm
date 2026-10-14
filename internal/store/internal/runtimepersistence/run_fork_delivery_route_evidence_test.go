@@ -220,7 +220,7 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					if got := routeEvidenceHead(t, ctx, fixture.db, runID); got != revision {
 						t.Fatalf("exact duplicate emitted revision %d, want unchanged %d", got, revision)
 					}
-					proveRouteEvidenceRollback(t, ctx, fixture, event, route)
+					beforeClaimRevision := proveRouteEvidenceRollback(t, ctx, fixture, event, route)
 
 					if route.Recipient.IsAgent() {
 						if err := fixture.store.(interface {
@@ -240,24 +240,30 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					if err := claimed.Claim.Validate(); err != nil {
 						t.Fatalf("real claim must carry live authority: %v", err)
 					}
+					if claimed.Snapshot.Status != runtimedelivery.StatusInProgress || claimed.Snapshot.ClaimVersion != claimed.Claim.Version() || claimed.Snapshot.ClaimExpiresAt.IsZero() {
+						t.Fatalf("real claim lost its current lifecycle and lease: %#v", claimed.Snapshot)
+					}
 					claimRevision := routeEvidenceHead(t, ctx, fixture.db, runID)
+					if claimRevision != beforeClaimRevision {
+						t.Fatalf("physical claim advanced fork history: got revision %d, want %d", claimRevision, beforeClaimRevision)
+					}
 					claimHistory := routeEvidenceSnapshot(t, ctx, fixture.db, runID, live.DeliveryID, claimRevision)
 					assertRouteEvidenceEqual(t, claimHistory.Route, route)
-					if claimHistory.Status != runtimedelivery.StatusInProgress || claimHistory.ClaimVersion != claimed.Claim.Version() || claimHistory.ClaimExpiresAt.IsZero() {
-						t.Fatalf("real claim lost historical lifecycle evidence: %#v", claimHistory)
+					if claimHistory.Status != runtimedelivery.StatusPending || claimHistory.ClaimVersion != 0 || !claimHistory.ClaimExpiresAt.IsZero() {
+						t.Fatalf("physical claim rewrote the retained pending delivery: %#v", claimHistory)
 					}
 					if claimHistory.Authority.Validate() == nil {
 						t.Fatal("historical readback of a live claim grants execution authority")
 					}
 					var claimFact []byte
-					if err := fixture.db.QueryRowContext(ctx, `SELECT fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='event_deliveries' AND fact_key=$2 AND revision=$3`, runID, live.DeliveryID, claimRevision).Scan(&claimFact); err != nil {
+					if err := fixture.db.QueryRowContext(ctx, `SELECT fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='event_deliveries' AND fact_key=$2 AND revision<=$3 ORDER BY revision DESC LIMIT 1`, runID, live.DeliveryID, claimRevision).Scan(&claimFact); err != nil {
 						t.Fatal(err)
 					}
 					var claimFields map[string]json.RawMessage
 					if err := json.Unmarshal(claimFact, &claimFields); err != nil {
 						t.Fatal(err)
 					}
-					for _, forbidden := range []string{"claim_token", "lease_token", "execution_authority"} {
+					for _, forbidden := range []string{"claim_token", "lease_token", "execution_authority", "claim_expires_at", "continuation_handoff_at"} {
 						if _, exists := claimFields[forbidden]; exists {
 							t.Fatalf("real claimed delivery revision contains %s", forbidden)
 						}
@@ -391,7 +397,7 @@ func assertRouteEvidenceStampedConsumers(t testing.TB, source semanticview.Sourc
 	}
 }
 
-func proveRouteEvidenceRollback(t testing.TB, ctx context.Context, fixture authorActivityReceiptFixture, event events.Event, route events.DeliveryRoute) {
+func proveRouteEvidenceRollback(t testing.TB, ctx context.Context, fixture authorActivityReceiptFixture, event events.Event, route events.DeliveryRoute) int64 {
 	t.Helper()
 	before := routeEvidenceHead(t, ctx, fixture.db, event.RunID())
 	rollbackEvent := eventtest.PersistedProjection(uuid.NewString(), "route.rollback", "route-proof", "", []byte(`{}`), 0, event.RunID(), "", events.EventEnvelope{}, event.CreatedAt())
@@ -457,4 +463,5 @@ func proveRouteEvidenceRollback(t testing.TB, ctx context.Context, fixture autho
 			t.Fatalf("partial rollback history in %s: count=%d err=%v", table, count, err)
 		}
 	}
+	return baseline
 }
