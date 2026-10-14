@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -30,25 +31,74 @@ func constructFanOutCompletionReceiver(t *testing.T, ctx context.Context, f rece
 	t.Helper()
 	req := sqliteFlowActivationRequest(f.bundle, flow, flow, "", flow)
 	runID := correlation.RunIDFromContext(ctx)
-	rootIdentity := flowidentity.Stored(semanticview.Wrap(f.bundle), ".", runID, runID, runID, "")
-	childIdentity, err := flowidentity.KeylessChild(semanticview.Wrap(f.bundle), rootIdentity, flow)
+	source := semanticview.Wrap(f.bundle)
+	rootIdentity := flowidentity.Stored(source, ".", runID, runID, runID, "")
+	fact, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("completion construction requires its exact source fact")
+	}
+	reader := f.store.(pipeline.FlowInstanceIndexReader)
+	rootOwner, err := flowidentity.NewRunScopedFlowInstance(runID, rootIdentity.Route())
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootLookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, rootOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, found, err := reader.LookupFlowInstance(ctx, rootLookup)
+	if err != nil {
+		t.Fatalf("observe exact completion parent: %v", err)
+	}
+	if !found {
+		rootRequest := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
+		rootRequest.Instance, rootRequest.OccurredAt = rootIdentity, at
+		rootPlan, err := f.manager.PrepareFlowInstanceActivation(ctx, rootRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(ctx, rootPlan)
+		if err != nil || !committed.Acknowledged || !committed.Created {
+			t.Fatalf("construct complete completion parent tree: result=%+v err=%v", committed, err)
+		}
+		root, found, err = reader.LookupFlowInstance(ctx, rootLookup)
+		if err != nil || !found {
+			t.Fatalf("read acknowledged completion parent: found=%t err=%v", found, err)
+		}
+	}
+	childIdentity, err := flowidentity.KeylessChild(source, root.Identity(), flow)
 	if err != nil {
 		t.Fatal(err)
 	}
 	req.Instance = childIdentity
 	req.OccurredAt = at
-	plan, err := f.manager.PrepareFlowInstanceActivation(ctx, req)
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, childIdentity.Route())
 	if err != nil {
 		t.Fatal(err)
 	}
-	committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(ctx, plan)
-	if err != nil || !committed.Acknowledged || !committed.Created {
-		t.Fatalf("construct completion receiver: result=%+v err=%v", committed, err)
-	}
-	owner, err := flowidentity.NewRunScopedFlowInstance(correlation.RunIDFromContext(ctx), req.Instance.Route())
+	lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, owner)
 	if err != nil {
 		t.Fatal(err)
 	}
+	child, found, err := reader.LookupFlowInstance(ctx, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		plan, err := f.manager.PrepareFlowInstanceActivation(ctx, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(ctx, plan)
+		if err != nil || !committed.Acknowledged || !committed.Created {
+			t.Fatalf("construct completion receiver: result=%+v err=%v", committed, err)
+		}
+		child, found, err = reader.LookupFlowInstance(ctx, lookup)
+		if err != nil || !found {
+			t.Fatalf("read acknowledged completion receiver: found=%t err=%v", found, err)
+		}
+	}
+	owner.Route = child.Identity().Route()
 	instance, found, err := f.workflows.Load(ctx, owner)
 	if err != nil || !found || instance.EntityID != req.Instance.EntityID || instance.Revision != 1 {
 		t.Fatalf("constructed completion readback: instance=%+v found=%t err=%v", instance, found, err)
@@ -60,10 +110,19 @@ func constructFanOutCompletionReceiver(t *testing.T, ctx context.Context, f rece
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{
 		FlowID: flow, FlowInstance: owner.Route.InstancePath, EntityID: instance.EntityID,
 	})}
+	header, err := pipeline.WorkflowInstanceHeaderPayloadForIdentity(child.Identity(), instance.WorkflowVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config, err := json.Marshal(header)
+	if err != nil {
+		t.Fatal(err)
+	}
 	state := pipeline.WorkflowEngineStateRecord{
 		Identity: owner, EntityID: instance.EntityID, WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion,
-		Mode: instance.Mode, Status: instance.Status, CurrentState: instance.CurrentState, StageDefined: instance.StageDefined,
-		Fields: []byte(`{}`), Bookkeeping: []byte(`{}`), Gates: []byte(`{}`), Accumulator: []byte(`{}`), Config: []byte(`{}`), InitialFields: []byte(`{}`),
+		ParentInstance: child.Identity().ParentRoute.FlowInstance,
+		Mode:           instance.Mode, Status: instance.Status, CurrentState: instance.CurrentState, StageDefined: instance.StageDefined,
+		Fields: []byte(`{}`), Bookkeeping: []byte(`{}`), Gates: []byte(`{}`), Accumulator: []byte(`{}`), Config: config, InitialFields: []byte(`{}`),
 		EnteredStageAt: instance.EnteredStageAt, CreatedAt: instance.CreatedAt, UpdatedAt: at.Add(time.Second),
 		ExpectedState: instance.CurrentState, ExpectedRevision: instance.Revision, Transition: pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion,
 	}
