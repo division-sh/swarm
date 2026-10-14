@@ -19,6 +19,8 @@ import (
 // three admitted-source gate repairs append to their prior Mode receipts.
 // reviewer-c6164473807 retains the two exact recovery-port successors; its
 // separate dead-letter timing RED remains unqualified.
+// reviewer-c6169605343 and6170114891 append only the CAS and sibling-source
+// setup successors, retaining their original owner/negative proofs.
 //
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
@@ -44,14 +46,14 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "7164139f6a316f47c0f2bb6752a015417796a9740e1f650437b9ccea1236bb2c" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "d825558d3e7f5ccb1432a865a5049e2f5da3984c5bb66255628ea6fa1adf3879" {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 27 {
+	if len(pins) != 29 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
@@ -158,7 +160,7 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "7164139f6a316f47c0f2bb6752a015417796a9740e1f650437b9ccea1236bb2c" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "d825558d3e7f5ccb1432a865a5049e2f5da3984c5bb66255628ea6fa1adf3879" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -169,7 +171,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 27 {
+	if len(pins) != 29 {
 		t.Fatal("fixture successor row count changed")
 	}
 	for index, pin := range pins {
