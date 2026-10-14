@@ -95,8 +95,5 @@ func SourceKeyRules() map[string]SourceKeyRule {
 		"paths.swarm_dir":                         {},
 		"paths.platform_spec_path":                {},
 		"paths.monitor_dir":                       {},
-		"paths.agent_config_map_file":             {},
-		"paths.verification_gates_file":           {},
-		"paths.tooling_lock_file":                 {},
 	}
 }

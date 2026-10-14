@@ -55,12 +55,9 @@
 #     rotate_after_turns: 40 # Rotate an LLM session after this many turns.
 #     rotate_on_parse_failures: 3 # Rotate an LLM session after repeated parse failures.
 # paths:
-#   agent_config_map_file: ./agent-config-map.yaml # Agent config map file.
 #   monitor_dir: .swarm/monitor # Runtime monitor artifact directory.
 #   platform_spec_path: platform-spec.yaml # Platform spec path override.
 #   swarm_dir: .swarm # Swarm state directory.
-#   tooling_lock_file: ./tooling.lock # Tooling lock file.
-#   verification_gates_file: ./verification-gates.yaml # Verification gates file.
 # platform:
 #   packs:
 #     platform_dirs: ["/path/to/complete/dev-pack/provider.telegram.trigger", "/path/to/complete/dev-pack/provider.telegram.connector", "/path/to/complete/dev-pack/provider.telegram.channel"] # Complete replacement for the embedded platform pack inventory during platform development.
