@@ -3,6 +3,7 @@ package serveapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -107,43 +108,51 @@ func (p *completion2270InvocationProof) read(ctx context.Context) ([]completion2
 	if contexts == nil {
 		return nil, fmt.Errorf("CLI invocation proof has no published runtime context owner")
 	}
-	return readCompletion2270ContextInvocations(ctx, contexts.LoadedContexts())
-}
-
-func readCompletion2270ContextInvocations(ctx context.Context, contexts []runtimepkg.BundleContext) ([]completion2270Invocation, error) {
-	if len(contexts) == 0 {
+	loaded := contexts.LoadedContexts()
+	if len(loaded) == 0 {
 		return nil, fmt.Errorf("CLI invocation proof has no loaded runtime context")
 	}
 	seen := map[string]bool{}
 	var evidence []completion2270Invocation
-	for _, contextDef := range contexts {
-		if contextDef.Runtime == nil {
-			return nil, fmt.Errorf("CLI invocation proof has no published runtime")
+	for _, contextDef := range loaded {
+		use, lookup, err := contexts.AcquireBundleHash(ctx, contextDef.BundleHash())
+		if err != nil || use == nil || !lookup.Loaded() || use.Runtime() == nil || use.Context.PublicationGeneration != contextDef.PublicationGeneration {
+			return nil, fmt.Errorf("acquire published CLI workspace owner: %w", errors.Join(err, use.Done(), errors.New("runtime unavailable or replaced")))
 		}
-		manager, ok := contextDef.Runtime.Workspace.(*workspace.DockerManager)
-		if !ok || manager == nil {
-			return nil, fmt.Errorf("CLI invocation proof requires the published Docker workspace owner")
+		rows, readErr := readCompletion2270WorkspaceInvocations(ctx, use.Runtime().Workspace, seen)
+		if err := errors.Join(readErr, use.Done()); err != nil {
+			return nil, err
 		}
-		containers, err := manager.RuntimeWorkspaceContainers(ctx)
+		evidence = append(evidence, rows...)
+	}
+	return evidence, nil
+}
+
+func readCompletion2270WorkspaceInvocations(ctx context.Context, lifecycle workspace.Lifecycle, seen map[string]bool) ([]completion2270Invocation, error) {
+	manager, ok := lifecycle.(*workspace.DockerManager)
+	if !ok || manager == nil {
+		return nil, fmt.Errorf("CLI invocation proof requires the acquired Docker workspace owner")
+	}
+	containers, err := manager.RuntimeWorkspaceContainers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var evidence []completion2270Invocation
+	for _, container := range containers {
+		if seen[container] {
+			continue
+		}
+		seen[container] = true
+		file := filepath.Join("/tmp", completion2270InvocationFile)
+		output, err := manager.RunDocker(ctx, "exec", container, "sh", "-c", `if [ -f "$1" ]; then cat "$1"; fi`, "completion-proof-read", file)
+		if err != nil {
+			return nil, fmt.Errorf("read original CLI invocation evidence: %w", err)
+		}
+		rows, err := decodeCompletion2270Invocations(string(output))
 		if err != nil {
 			return nil, err
 		}
-		for _, container := range containers {
-			if seen[container] {
-				continue
-			}
-			seen[container] = true
-			file := filepath.Join("/tmp", completion2270InvocationFile)
-			output, err := manager.RunDocker(ctx, "exec", container, "sh", "-c", `if [ -f "$1" ]; then cat "$1"; fi`, "completion-proof-read", file)
-			if err != nil {
-				return nil, fmt.Errorf("read original CLI invocation evidence: %w", err)
-			}
-			rows, err := decodeCompletion2270Invocations(string(output))
-			if err != nil {
-				return nil, err
-			}
-			evidence = append(evidence, rows...)
-		}
+		evidence = append(evidence, rows...)
 	}
 	return evidence, nil
 }
