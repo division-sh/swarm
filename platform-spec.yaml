@@ -1669,6 +1669,11 @@ contract_formats:
             parent. The event, exact lineage row, and declared initial
             delivery/replay facts MUST commit in one named operation before
             selected-contract activation, handler dispatch, or provider use.
+            Historical agent replay projects actor identity separately from captured flow construction: an entityless
+            actor stays exactly entityless and carries the original fixed-cut construction dependency. Because replay
+            lineage references the initial delivery, that first write may consume the exact prepared publication
+            appended by the canonical event owner in the same mutation. This does not authorize an arbitrary admitted
+            event or incomplete durable lineage; claim, recovery and fresh readback require all committed facts.
         runtime_control:
           rule: Platform control events that enter generic runtime dispatch use
             runtime-control constructors so control traffic is not confused with
