@@ -17,6 +17,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/receiverreadback"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 )
 
 //go:embed family145-receiver-public-readback-preimages.json
@@ -72,7 +73,11 @@ func TestFamily145ReceiverPublicReadbackWholeRulePreservesExistingNativeOwnerAnd
 		if err != nil {
 			t.Fatal(err)
 		}
-		if current := family145PublicA2CurrentDeclaration(t, source, pin.Function); current != pin.After {
+		current := sourceBlobPreviousDeclaration(t, pin.File, pin.Function, family145PublicA2CurrentDeclaration(t, source, pin.Function))
+		current = runphysical.Previous(runPhysicalPins(t), pin.File, pin.Function, current)
+		current = family145PublicJoinCallerInverse(pin.Function, current)
+		current = family145PublicA2EndpointCallerInverse(pin.Function, current)
+		if current != pin.After {
 			t.Fatal("current receiver caller differs from the complete transform:", key)
 		}
 		if pin.Function == "requireReceiverPublicReadback" {

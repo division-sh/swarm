@@ -72,7 +72,7 @@ func TestFamily145RequestKeyWholeChainRetainsPredicatesAssertionsAndCuts(t *test
 			t.Fatal("request-key source is not its signed predecessor:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || family145RequestKeyCurrentPrevious(pin.File, pin.Function, servedSetupEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))) != pin.After {
+		if err != nil || family145RequestKeyCurrentPrevious(pin.File, pin.Function, sourceBlobPreviousDeclaration(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))) != pin.After {
 			t.Fatal("request-key current source escaped its whole rule:", key, err)
 		}
 		after, count, err := requestkey.Transform(pin.Before)
@@ -185,7 +185,7 @@ func requestKeyOwnedFile(t *testing.T, pins []requestkey.Pin, helpers map[string
 			if ok && helpers[id.Name] {
 				calls++
 				allowed[id.Pos()] = true
-				current := family145RequestKeyCurrentPrevious(path, fn.Name.Name, servedSetupEarlierSource(t, path, fn.Name.Name, requestkey.Node(fn)))
+				current := family145RequestKeyCurrentPrevious(path, fn.Name.Name, sourceBlobPreviousDeclaration(t, path, fn.Name.Name, requestkey.Node(fn)))
 				if requestkey.Previous(pins, path, fn.Name.Name, current) == current {
 					t.Error("request-key caller escaped complete source-pinned owner chain:", path, fn.Name.Name)
 				}

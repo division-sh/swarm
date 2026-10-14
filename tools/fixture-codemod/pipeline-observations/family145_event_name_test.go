@@ -124,7 +124,7 @@ func eventNameCurrentDeclaration(t *testing.T, path, function string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return servedSetupEarlierSource(t, path, function, requestKeyDeclaration(t, raw, function))
+	return sourceBlobPreviousDeclaration(t, path, function, requestKeyDeclaration(t, raw, function))
 }
 
 func TestFamily145EventNameTransformRefusesForeignCarriersAndShadowedCalls(t *testing.T) {
@@ -154,7 +154,7 @@ func TestFamily145EventNameWholeChainPreservesEveryPollAndRefusalCut(t *testing.
 			t.Fatal("event name source is not its signed predecessor:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || servedSetupEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
+		if err != nil || sourceBlobPreviousDeclaration(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("event name current source escaped its whole rule:", key, err)
 		}
 		after, count, err := eventname.Transform(pin.Before)
@@ -234,7 +234,7 @@ func eventNameOwnedFile(t *testing.T, path string, file *ast.File) (int, int) {
 			if ok && eventname.Helpers[id.Name] {
 				calls++
 				allowed[id.Pos()] = true
-				current := servedSetupEarlierSource(t, path, fn.Name.Name, requestkey.Node(fn))
+				current := sourceBlobPreviousDeclaration(t, path, fn.Name.Name, requestkey.Node(fn))
 				if eventname.Previous(eventNamePins(t), path, fn.Name.Name, current) == current {
 					t.Error("event name caller escaped exact chain:", path, fn.Name.Name)
 				}

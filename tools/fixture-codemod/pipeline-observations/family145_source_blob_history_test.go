@@ -112,8 +112,9 @@ func family145CheckSourceBlobWholeRule(t *testing.T, file, function, current str
 func sourceBlobPreviousDeclaration(t *testing.T, file, function, current string) string {
 	t.Helper()
 	current = servedObservationEarlierSource(t, file, function, current)
-	for _, pin := range sourceBlobLivePins(t) {
+	for _, pin := range sourceBlobInventoryPins {
 		if pin.File == file && pin.Function == function {
+			sourceBlobLivePins(t)
 			if current != pin.After {
 				t.Fatal("source blob exact current declaration changed:", function)
 			}
