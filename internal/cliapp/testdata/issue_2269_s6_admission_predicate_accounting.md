@@ -42,3 +42,56 @@ artifact delta: only this one body hash may change, with its owner, caller
 family, labels and all other entries retained. Generation gives no execution
 credit; exact receipts belong in the S6 checkpoint audit. Connected dispatcher,
 occupancy, selected-preparation and runtime recovery joins remain gated.
+
+## Selected Preparation Read Projection (A22/A24, P20/P21)
+
+P18/P19 bounded gate #2269/6161191417 permits an immutable selected actor
+projection, not connected occupancy or a second claim-profile ledger.
+`loadSelectedRecoveryRecordTx` remains the latest-execution reader for the
+unchanged mutation and verification callers: `recoverSelectedForkTx` and
+`inspectSelectedRecoveryTx`. It delegates to `loadSelectedRecoveryExecutionTx`
+with no execution selector, preserving the original latest-generation query,
+fixed-cut origin/binding, preparation/declaration fingerprints and failure
+validation. Only the original mutation caller may request a row lock.
+`selectedRecoveryExecutionQuery` owns only the closed latest/exact selector and
+the original dialect/lock suffix; it has no decoder, transaction or authority.
+Separating that query construction preserves the complexity ratchet without a
+policy/baseline exception.
+
+The two native `ReadSelectedAgentPreparation` methods compose the exact claimed
+agent delivery, run snapshot, fixed binding and that same retained decoder in
+one read transaction, supplying the delivery's exact execution ID. An absent
+or foreign execution never falls back to the latest execution. The projection
+requires the original generation, source, fork, actor identity and declaration
+configuration revision. It does not consult today's agent cache, acquire a
+process, reinterpret startup receipts, mutate a row or authorize a launch.
+Immutable historical evidence may be read after quiescence; the unchanged
+selected delivery claim/read fences continue to govern live work.
+
+Execution witnesses are
+`TestSelectedRecoveryUsesNativeAdmittedPreparationWithoutProcessJournalBothStores`
+(the existing boot/inspection owner and hostile provenance),
+`TestSelectedPreparationExecutionBindingBothStores` (the original preparation
+and execution admission checks),
+`TestSelectedContinuationReadFenceBothStores` (live vs terminal/fenced
+observation), and
+`TestSelectedAgentClaimReadsOriginalPreparationWithoutOrdinaryCaptureBothStores`
+(native first claim, physical NULL ordinary profile, exact caller negatives,
+quiesced historical readback and full-table conservation), and
+`TestSelectedAgentPreparationCoherentMembershipRefusalBothStores` (actual native
+issuance/claim with coherent preparation fingerprints, then exact actor or
+declaration-config membership refusal, with no post-commit fault). The original
+ordinary first-claim/reclaim/reopen families also exercise the shared exact
+claimed-delivery reader. Named receipts belong in the checkpoint, not in the
+generated census. The selected preparation fault owner follows reviewer-b
+#2542/6180524710 and reviewer-g/6180527018: one-column exact native CAS,
+owner-captured restoration receipt, canceled/foreign/stale/changed-replacement
+refusals and full conservation. Its foreign-actor variant retains the original
+fingerprint and proves integrity refusal only, not downstream membership.
+
+Regeneration must change only the decoder's wrapper/body entries and add its
+new shared decoder/query helper entries under the inherited A22/A24, P20/P21
+labels. The
+recovery/process, declaration, readiness, startup sequencing and every other
+owner/caller stay unchanged. These witnesses are not S6 qualification or
+permission to connect the dispatcher, occupancy or runtime recovery.
