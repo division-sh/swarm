@@ -43,7 +43,6 @@ select:
           emit: {event: selected, fields: {marker: "first"}}
         - when: entity.marker == 'second'
           emit: {event: selected, fields: {marker: "second"}}
-        - else: true
       data_accumulation:
         writes: [{target_field: marker, value: entity.marker}]
 final:

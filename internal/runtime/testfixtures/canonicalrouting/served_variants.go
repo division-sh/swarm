@@ -37,7 +37,6 @@ stages:
             event: item.processed
             fields:
               item_id: payload.item_id
-        - else: true
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), `item-observer:
   execution_type: system_node
@@ -53,7 +52,6 @@ stages:
       rules:
         - when: has(payload.item_id) && payload.item_id == 'review'
           advances_to: done
-        - else: true
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.received\n", "    - item.received\n    - item.processed\n")
 	return root

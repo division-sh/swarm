@@ -27,8 +27,8 @@ func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBo
 		semanticPath string
 		label        string
 	}{
-		{event: "rules.selected", context: handlerselection.ContextRules, disposition: handlerselection.DispositionSelected, semanticPath: `nodes["selection-node"].handlers["rules.selected"].rules[0]`, label: "rules[0]: else"},
-		{event: "rules.fallback", context: handlerselection.ContextRules, disposition: handlerselection.DispositionSelected, semanticPath: `nodes["selection-node"].handlers["rules.fallback"].rules[1]`, label: "rules[1]: else"},
+		{event: "rules.selected", context: handlerselection.ContextRules, disposition: handlerselection.DispositionSelected, semanticPath: `nodes["selection-node"].handlers["rules.selected"].rules[0]`, label: "rules[0]: when true"},
+		{event: "rules.fallback", context: handlerselection.ContextRules, disposition: handlerselection.DispositionSelected, semanticPath: `nodes["selection-node"].handlers["rules.fallback"].rules[1]`, label: "rules[1]: when true"},
 		{event: "rules.evaluation_failed", context: handlerselection.ContextRules, disposition: handlerselection.DispositionEvaluationFailed, semanticPath: `nodes["selection-node"].handlers["rules.evaluation_failed"].rules[0]`, label: "rules[0]: when payload.proof > 0"},
 		{event: "complete.selected", context: handlerselection.ContextOnComplete, disposition: handlerselection.DispositionSelected, semanticPath: `nodes["selection-node"].handlers["complete.selected"].on_complete[0]`, label: "on_complete[0]: condition true"},
 		{event: "complete.no_match", context: handlerselection.ContextOnComplete, disposition: handlerselection.DispositionNoMatch},

@@ -72,8 +72,7 @@ repo_scaffold.repo_commit_failed:
             fields:
               request_id: payload.request_id
               result_kind: "ready"
-        - else: true
-          emit:
+        - emit:
             event: repo_scaffold.repo_commit_failed
             fields:
               request_id: payload.request_id
