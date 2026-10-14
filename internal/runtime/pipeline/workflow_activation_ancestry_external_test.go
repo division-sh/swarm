@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -83,7 +84,7 @@ func activationAncestryTree(t *testing.T, source semanticview.Source) pipeline.F
 		return identity
 	}
 	keyed := child(root, "operating", true)
-	keyed.EntityID = "stored-parent-entity"
+	keyed.EntityID = eventtest.UUID("stored-parent-entity")
 	keyless := child(root, "scout", false)
 	plan := makePlan(root)
 	plan.Children = []pipeline.FlowInstanceActivationPlan{makePlan(keyed), makePlan(keyless)}
@@ -102,7 +103,7 @@ func TestActivationPlanExactImmediateAncestry(t *testing.T) {
 		t.Fatal("matrix omitted an immediate or nested keyed/keyless component")
 	}
 	for _, descendant := range plan.Children[0].Children {
-		if descendant.Identity.ParentEntityID != "stored-parent-entity" {
+		if descendant.Identity.ParentEntityID != eventtest.UUID("stored-parent-entity") {
 			t.Fatalf("descendant re-derived its admitted parent: %+v", descendant.Identity)
 		}
 	}

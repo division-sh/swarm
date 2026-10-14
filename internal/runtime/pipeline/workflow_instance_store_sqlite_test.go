@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -134,7 +135,10 @@ func VerifySQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadataForTes
 	if err != nil {
 		t.Fatal(err)
 	}
-	parent.EntityID = "parent-ent"
+	parent.EntityID = eventtest.UUID("parent-ent")
+	if parent.EntityID == flowidentity.EntityID(parent.InstancePath) {
+		t.Fatal("parent-route proof requires an independently stored parent entity")
+	}
 	child, err := flowidentity.KeyedChild(source, parent, "operating/review", "inst-1")
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +160,7 @@ func VerifySQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadataForTes
 		EntityID:           child.EntityID,
 		ParentFlowID:       "operating",
 		ParentFlowInstance: "operating/root",
-		ParentEntityID:     "parent-ent",
+		ParentEntityID:     parent.EntityID,
 		WorkflowName:       child.TemplateID,
 		WorkflowVersion:    source.WorkflowVersion(),
 		Mode:               "template",
@@ -194,15 +198,15 @@ func VerifySQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadataForTes
 	if loaded.StorageRef != "operating/root/review/inst-1" || loaded.WorkflowName != "operating/review" || loaded.InstanceID != child.InstanceID || loaded.EntityID != child.EntityID || loaded.InstanceKey != key {
 		t.Fatalf("loaded child lost its exact constructor identity: %+v", loaded)
 	}
-	if loaded.ParentFlowID != "operating" || loaded.ParentFlowInstance != "operating/root" || loaded.ParentEntityID != "parent-ent" {
+	if loaded.ParentFlowID != "operating" || loaded.ParentFlowInstance != "operating/root" || loaded.ParentEntityID != parent.EntityID {
 		t.Fatalf("loaded parent identity = %q/%q/%q", loaded.ParentFlowID, loaded.ParentFlowInstance, loaded.ParentEntityID)
 	}
 	identity, err := workflowInstancePersistedIdentity(nil, loaded)
 	if err != nil {
 		t.Fatalf("workflowInstancePersistedIdentity: %v", err)
 	}
-	if identity.ParentRoute.FlowID != "operating" || identity.ParentRoute.FlowInstance != "operating/root" || identity.ParentRoute.EntityID != "parent-ent" {
-		t.Fatalf("ParentRoute = %#v, want operating/operating/root/parent-ent", identity.ParentRoute)
+	if identity.ParentRoute.FlowID != "operating" || identity.ParentRoute.FlowInstance != "operating/root" || identity.ParentRoute.EntityID != parent.EntityID {
+		t.Fatalf("ParentRoute = %#v, want operating/operating/root/%s", identity.ParentRoute, parent.EntityID)
 	}
 	storedParent, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, parent.InstancePath))
 	if err != nil || !found || storedParent.WorkflowName != parent.TemplateID || storedParent.EntityID != parent.EntityID || storedParent.StorageRef != parent.InstancePath {
