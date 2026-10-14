@@ -149,6 +149,7 @@ func TestCommittedAgentReadinessPartialAttachmentBothStores(t *testing.T) {
 				if err := am.FinalizeCommittedAgentReadiness(ctx, event, []events.DeliveryRoute{route}); !errors.Is(err, runtimebus.ErrCommittedAgentRouteTransition) {
 					t.Fatalf("live accepted partial attachment must defer exact actor: %v", err)
 				}
+				t.Log("partial attachment: exact absent actor defers through retained readiness owner")
 				after, found, err := pc.LoadDynamicFlowRuntimeReadiness(ctx, runID, instance.Route())
 				if err != nil || !found || !reflect.DeepEqual(row, after) {
 					t.Fatalf("readiness observation mutated native row: found=%t err=%v", found, err)
@@ -227,22 +228,28 @@ func provePartialAttachmentContinuation(t *testing.T, ctx context.Context, selec
 	if !authority.SourceArtifact().Matches(fact) {
 		t.Fatal("partial continuation bus source disagrees with its context")
 	}
+	t.Log("partial continuation: native authority activation started")
 	if err := selected.events.ActivateDeliveryAuthority(ctx, authority); err != nil {
 		t.Fatal(err)
 	}
+	t.Log("partial continuation: native authority activation returned")
 	route.Target = events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "orders", FlowInstance: "orders/one"})
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.requested", "operator", "", []byte(`{"order_id":"one"}`), 0, route.AgentIdentity.RunID,
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "orders", FlowInstance: "orders/one"}), time.Now().UTC())
 	ack := pipelineobligation.Acknowledged("pipeline_persisted")
+	t.Log("partial continuation: native publication started")
 	storetest.CommitNativeDeliveryPublication(t, ctx, selected.events.(storetest.DeliveryPublicationFixtureStore), storetest.AdmitNativeDeliveryEvent(t, event), []events.DeliveryRoute{route}, authority, nil)
+	t.Log("partial continuation: native publication acknowledged; event claim started")
 	publication, err := selected.events.PipelineObligations().ClaimEvent(ctx, event.ID(), pipelineobligation.PurposeRecovery)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Log("partial continuation: event claim returned; native obligation settlement started")
 	outcome, err := selected.events.PipelineObligations().Settle(ctx, publication.Claim, ack)
 	if err != nil || !outcome.DeliveryHandoffCommitted() {
 		t.Fatalf("native exact handoff: %+v err=%v", outcome, err)
 	}
+	t.Log("partial continuation: native obligation settlement committed")
 	id, err := deliverylifecycle.DeliveryID(event.ID(), route)
 	if err != nil {
 		t.Fatal(err)
@@ -251,6 +258,7 @@ func provePartialAttachmentContinuation(t *testing.T, ctx context.Context, selec
 	if err != nil || before.Status != deliverylifecycle.StatusPending || before.ClaimVersion != 0 {
 		t.Fatalf("exact initial delivery: %+v err=%v", before, err)
 	}
+	t.Logf("partial continuation: exact delivery before Start=%+v", before)
 	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(am.FinalizeCommittedAgentReadiness))
 	dispatch := &partialAttachmentDispatch{bus: bus, results: make(chan deliverycontinuation.DispatchResult, 8)}
 	coordinator, err := deliverycontinuation.New(selected.events, selected.events, authority, pipelineExternalTestWorkOwnerForSource(t, fact), dispatch, nil)
@@ -271,11 +279,14 @@ func provePartialAttachmentContinuation(t *testing.T, ctx context.Context, selec
 	if err := bus.SetDeliveryContinuationOwner(coordinator); err != nil {
 		t.Fatal(err)
 	}
+	t.Log("partial continuation: Start entered")
 	if err := coordinator.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
+	t.Log("partial continuation: Start returned; first DispatchResult wait entered")
 	select {
 	case result := <-dispatch.results:
+		t.Logf("partial continuation: first DispatchResult disposition=%v wake=%v failure=%v", result.Disposition(), result.WakeAuthority(), result.Failure())
 		if result.Disposition() != deliverycontinuation.DispatchDeferred || result.WakeAuthority() != deliverycontinuation.DispatchWakeAgentRouteLifecycle {
 			t.Fatalf("accepted partial continuation: disposition=%v failure=%v", result.Disposition(), result.Failure())
 		}
@@ -286,15 +297,18 @@ func provePartialAttachmentContinuation(t *testing.T, ctx context.Context, selec
 	if err != nil || !reflect.DeepEqual(before, partial) {
 		t.Fatalf("deferral acquired or mutated missing actor's delivery: %+v err=%v", partial, err)
 	}
+	t.Log("partial continuation: deferral kept delivery unchanged; releasing held actor")
 	release()
 	select {
 	case err := <-finished:
+		t.Logf("partial continuation: post-release attachment returned err=%v", err)
 		if err != nil {
 			t.Fatal(err)
 		}
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
+	t.Log("partial continuation: readiness wake/post-release delivery settlement wait entered")
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -306,6 +320,7 @@ func provePartialAttachmentContinuation(t *testing.T, ctx context.Context, selec
 			if current.ClaimVersion != 1 {
 				t.Fatalf("exact topology wake repeated execution: %+v", current)
 			}
+			t.Logf("partial continuation: exact delivery settled after readiness wake=%+v", current)
 			return stop
 		}
 		if current.Terminal() {
