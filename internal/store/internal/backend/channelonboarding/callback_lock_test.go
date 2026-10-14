@@ -454,6 +454,7 @@ type callbackLockFixture struct {
 	postgres  bool
 	principal string
 	probe     *callbackLockProbe
+	logout    *logoutProcessFixture
 }
 
 func newCallbackLockFixture(t *testing.T, backend string) callbackLockFixture {
@@ -474,7 +475,7 @@ func newCallbackLockFixture(t *testing.T, backend string) callbackLockFixture {
 	probe := &callbackLockProbe{driver: original.Driver(), dsn: dsn, callbackReady: make(chan bool, 1), publisherReady: make(chan struct{}), release: make(chan struct{})}
 	db := sql.OpenDB(probe)
 	t.Cleanup(func() { _ = db.Close() })
-	f := callbackLockFixture{postgres: backend == "postgres", probe: probe}
+	f := callbackLockFixture{postgres: backend == "postgres", probe: probe, logout: &logoutProcessFixture{}}
 	if f.postgres {
 		b, err := postgresbackend.New(db)
 		if err != nil {
