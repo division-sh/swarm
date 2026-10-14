@@ -125,8 +125,10 @@ func Insert(ctx context.Context, attempt *mutationprotocol.Attempt, record event
 	}
 	// Exact effects name the physical UUID spelling, without rewriting payloads.
 	if runID != "" {
-		if err := attempt.AddFact(runID, runforkrevision.FamilyEvents, eventID); err != nil {
-			return false, err
+		if runforkrevision.CapturesEvent(record.EventName) {
+			if err := attempt.AddFact(runID, runforkrevision.FamilyEvents, eventID); err != nil {
+				return false, err
+			}
 		}
 		if err := attempt.AddEventCountDelta(runID, 1); err != nil {
 			return false, err

@@ -16274,7 +16274,10 @@ platform_tables:
         revision. Unchanged facts MUST NOT be copied into later revisions. This table is not a general temporal database and has no trigger,
         migration, compatibility, or arbitrary-history API. The events family stores payload_base64 derived
         from events.payload_bytes so historical revision hydration reconstructs the exact admitted payload
-        bytes; the derived events.payload JSON projection is not revision or replay evidence. It also retains
+        bytes; the derived events.payload JSON projection is not revision or replay evidence.
+        The exact platform.runtime_log event is excluded from both exact and whole-family fork capture.
+        Its physical event, event-counter delta, operator readback and replay evidence remain in their existing
+        owners; logging alone MUST NOT advance the fork revision or become a selectable cut. It also retains
         operator_reference_event_id as operator provenance, distinct from causal source_event_id, so fixed
         starting-input evidence and strict live loading can compare the complete original publication.
         The transaction-local finalizer selects current projection and latest ledger rows by the complete
