@@ -76,6 +76,7 @@ type LocalPreflightReport struct {
 	Owner              string                  `json:"owner"`
 	Mode               string                  `json:"mode"`
 	Backend            string                  `json:"backend"`
+	ConfigSource       *doctorConfigSource     `json:"config_source,omitempty"`
 	CapabilitySubjects []packs.Subject         `json:"capability_subjects,omitempty"`
 	Findings           []localPreflightFinding `json:"findings"`
 	SchemaInventory    *doctorSchemaInventory  `json:"schema_inventory,omitempty"`
@@ -636,6 +637,7 @@ func WriteLocalPreflightText(out io.Writer, report LocalPreflightReport) {
 		status = "failed"
 	}
 	fmt.Fprintf(out, "claude_cli preflight: %s\n", status)
+	writeDoctorConfigSourceText(out, report.ConfigSource)
 	if report.PackInventory != nil {
 		writePackInventory(out, *report.PackInventory)
 	}

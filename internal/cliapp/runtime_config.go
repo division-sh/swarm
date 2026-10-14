@@ -18,11 +18,13 @@ type RuntimeConfigLoadOptions struct {
 }
 
 type RuntimeConfigLoadResult struct {
-	Config      *config.Config
-	Source      string
-	Path        string
-	Diagnostics []unifiedConfigDiagnostic
-	cli         cliCommandConfig
+	Config        *config.Config
+	Source        string
+	Path          string
+	Diagnostics   []unifiedConfigDiagnostic
+	cli           cliCommandConfig
+	sourcePresent *bool
+	validated     bool // Source projection and Config.Validate, before ambient env/readiness.
 }
 
 // DeploymentConfigured uses the selected file, not a default backend or an
@@ -68,11 +70,13 @@ func LoadRuntimeConfigWithOptions(opts RuntimeConfigLoadOptions) (RuntimeConfigL
 		BackendOverride: opts.BackendOverride,
 	})
 	result := RuntimeConfigLoadResult{
-		Config:      loaded.Config,
-		Source:      loaded.Source,
-		Path:        loaded.Path,
-		Diagnostics: loaded.Diagnostics,
-		cli:         loaded.CLI,
+		Config:        loaded.Config,
+		Source:        loaded.Source,
+		Path:          loaded.Path,
+		Diagnostics:   loaded.Diagnostics,
+		cli:           loaded.CLI,
+		sourcePresent: loaded.sourcePresent,
+		validated:     loaded.validated,
 	}
 	if err != nil {
 		return result, err
