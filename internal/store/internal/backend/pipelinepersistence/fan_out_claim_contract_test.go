@@ -94,7 +94,7 @@ func TestFanOutUnacknowledgedCommitCannotBorrowSuccessorOnBothStores(t *testing.
 					}
 					return outcome
 				}
-				committed, err := commitFanOutChunk(ctx, nil, backend == "postgres", run, time.Now, nil, command)
+				committed, err := commitFanOutChunk(ctx, nil, backend == "postgres", run, time.Now, nil, nil, command)
 				if failure := runtimefailures.Normalize(err, "runtime.fan_out", "commit_chunk"); err == nil || failure.Class != runtimefailures.ClassOutcomeUncertain {
 					t.Fatalf("unacknowledged attempt = %+v, %v; want uncertain outcome", committed, err)
 				}

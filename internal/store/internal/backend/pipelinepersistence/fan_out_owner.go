@@ -677,6 +677,7 @@ func commitFanOutChunk(
 	run func(context.Context, func(context.Context, *mutationprotocol.Attempt) (runtimepipeline.CommittedFanOutChunk, error)) mutationprotocol.Result[runtimepipeline.CommittedFanOutChunk],
 	observeNow func() time.Time,
 	candidateWriter completionCandidateWriter,
+	reobserve func(context.Context, *sql.Tx) error,
 	command runtimepipeline.FanOutChunkCommand,
 ) (runtimepipeline.CommittedFanOutChunk, error) {
 	if err := command.Validate(); err != nil {
@@ -701,6 +702,11 @@ func commitFanOutChunk(
 			}
 			if len(command.Outcomes) > intent.NextChunkSize || intent.Cursor+len(command.Outcomes) > intent.Request.Cardinality {
 				return fmt.Errorf("fan-out chunk exceeds claimed range")
+			}
+			if reobserve != nil {
+				if err := reobserve(txctx, tx); err != nil {
+					return err
+				}
 			}
 			var trigger events.Event
 			for _, outcome := range command.Outcomes {
@@ -967,7 +973,11 @@ func (s *fanOutPostgresOwner) CommitFanOutChunk(ctx context.Context, command run
 		}
 		return outcome
 	}
-	return commitFanOutChunk(ctx, s, true, run, time.Now, s.RunLifecyclePostgresOwner, command)
+	var reobserve func(context.Context, *sql.Tx) error
+	if group != nil {
+		reobserve = group.reobserveInstances
+	}
+	return commitFanOutChunk(ctx, s, true, run, time.Now, s.RunLifecyclePostgresOwner, reobserve, command)
 }
 
 func (s *fanOutSQLiteOwner) CommitFanOutChunk(ctx context.Context, command runtimepipeline.FanOutChunkCommand) (result runtimepipeline.CommittedFanOutChunk, resultErr error) {
@@ -1013,7 +1023,11 @@ func (s *fanOutSQLiteOwner) CommitFanOutChunk(ctx context.Context, command runti
 		}
 		return outcome
 	}
-	return commitFanOutChunk(ctx, s, false, run, s.now, s.RunLifecycleSQLiteOwner, command)
+	var reobserve func(context.Context, *sql.Tx) error
+	if group != nil {
+		reobserve = group.reobserveInstances
+	}
+	return commitFanOutChunk(ctx, s, false, run, s.now, s.RunLifecycleSQLiteOwner, reobserve, command)
 }
 
 func cancelRunFanOut(ctx context.Context, postgres bool, effects interface {
