@@ -638,7 +638,7 @@ func reserveTeardown(ctx context.Context, r runner, req domain.ReserveTeardownRe
 		var logoutConnection, logoutTarget any
 		phase, retiredOperations, retiredActivations := domain.TeardownReserved, int64(0), int64(0)
 		if req.Kind == domain.TeardownLogout {
-			encoded, err := json.Marshal(req.Logout)
+			encoded, err := json.Marshal(prepared.target)
 			if err != nil {
 				return err
 			}
@@ -718,7 +718,7 @@ func listTeardowns(ctx context.Context, r runner) ([]domain.TeardownOperation, e
 	defer rows.Close()
 	var out []domain.TeardownOperation
 	for rows.Next() {
-		op, found, err := scanTeardownRow(rows)
+		op, found, err := scanTeardownRow(rows, r.dialect())
 		if err != nil {
 			return nil, err
 		}
@@ -857,7 +857,7 @@ func loadTeardownByRequestKey(ctx context.Context, q queryer, d dialect, key str
 	if lock && d == dialectPostgres {
 		query += ` FOR UPDATE`
 	}
-	return scanTeardownRow(q.QueryRowContext(ctx, d.bind(query), key))
+	return scanTeardownRow(q.QueryRowContext(ctx, d.bind(query), key), d)
 }
 
 func loadTeardown(ctx context.Context, q queryer, d dialect, id string, lock bool) (domain.TeardownOperation, bool, error) {
@@ -865,10 +865,10 @@ func loadTeardown(ctx context.Context, q queryer, d dialect, id string, lock boo
 	if lock && d == dialectPostgres {
 		query += ` FOR UPDATE`
 	}
-	return scanTeardownRow(q.QueryRowContext(ctx, d.bind(query), id))
+	return scanTeardownRow(q.QueryRowContext(ctx, d.bind(query), id), d)
 }
 
-func scanTeardownRow(row rowScanner) (domain.TeardownOperation, bool, error) {
+func scanTeardownRow(row rowScanner, d dialect) (domain.TeardownOperation, bool, error) {
 	var op domain.TeardownOperation
 	var kind, phase string
 	var interfaceRef, packID, packVersion, manifestHash, semanticGeneration sql.NullString
@@ -887,7 +887,7 @@ func scanTeardownRow(row rowScanner) (domain.TeardownOperation, bool, error) {
 		return domain.TeardownOperation{}, false, err
 	}
 	op.Kind, op.Phase = domain.TeardownKind(kind), domain.TeardownPhase(phase)
-	if op.Logout, err = decodeLogoutTarget(op.Kind, logoutConnection, logoutTarget); err != nil {
+	if op.Logout, err = decodeLogoutTarget(op.Kind, logoutConnection, logoutTarget, d); err != nil {
 		return domain.TeardownOperation{}, false, err
 	}
 	op.Scope = domain.TeardownScope{
