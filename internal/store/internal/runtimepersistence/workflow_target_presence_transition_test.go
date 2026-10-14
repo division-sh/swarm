@@ -362,13 +362,14 @@ func TestSupportedStateOnlyProducersCannotAcquireWorkflowConstructionOnBothStore
 					ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(bundle.SourceArtifact))
 					entityID := uuid.NewString()
 					createdAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+					fields := map[string]any{"account_id": "preserved", "instance_key": "receiver"}
 					switch producer {
 					case "scenario_setup":
 						_, err := store.SetupScenarioEntities(ctx, runtimepipeline.ScenarioSetupRequest{
 							RunID: runID, CreatedAt: createdAt,
 							Entities: []runtimepipeline.ScenarioSetupEntityRequest{{
 								Alias: "receiver", EntityID: entityID, FlowInstance: instancePath,
-								EntityType: "review_item", CurrentState: "active", Fields: map[string]any{"account_id": "preserved"},
+								EntityType: "review_item", CurrentState: "active", Fields: fields,
 							}},
 						})
 						if err != nil {
@@ -378,6 +379,28 @@ func TestSupportedStateOnlyProducersCannotAcquireWorkflowConstructionOnBothStore
 					assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "", "active", 1, 0)
 					before := snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")
 					record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
+					schema, found := source.FlowSchemaByID(flowID)
+					if !found {
+						t.Fatal("state-only producer requires its admitted flow schema")
+					}
+					instance, err := bundle.ResolveFlowTemplateInstance(flowID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					keys, err := instance.CanonicalKeyMaterial(fields)
+					if err != nil || len(keys) != 1 {
+						t.Fatalf("state-only producer requires one declared instance key: keys=%v err=%v", keys, err)
+					}
+					record.Mode, record.InstanceKey = schema.EffectiveMode(), keys[0].Value
+					record.WorkflowVersion = source.WorkflowVersion()
+					payload, err := runtimepipeline.WorkflowInstanceHeaderPayloadForRoute(record.Identity.Route, record.WorkflowVersion)
+					if err != nil {
+						t.Fatal(err)
+					}
+					record.Config, err = json.Marshal(payload)
+					if err != nil {
+						t.Fatal(err)
+					}
 					if _, err := store.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{State: record}); err == nil || !strings.Contains(err.Error(), "constructed target") {
 						t.Fatalf("ordinary execution admitted %s state-only target: %v", producer, err)
 					}
