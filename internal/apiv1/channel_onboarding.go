@@ -14,6 +14,7 @@ import (
 )
 
 type ChannelOnboardingLifecycle interface {
+	Select(context.Context, channelonboarding.StartInput) (channelonboarding.StartSelection, error)
 	Start(context.Context, channelonboarding.StartInput) (channelonboarding.Result, error)
 	Get(context.Context, string) (channelonboarding.Result, error)
 	Retry(context.Context, channelonboarding.RetryInput) (channelonboarding.Result, error)
@@ -29,57 +30,32 @@ func ChannelOnboardingHandlers(opts ChannelOnboardingHandlerOptions) map[string]
 		return nil
 	}
 	return map[string]MethodHandler{
+		"channel.onboarding_select": func(ctx context.Context, req Request) (any, error) {
+			if err := requireOperatorPrincipal(req, opts.Channels); err != nil {
+				return nil, err
+			}
+			input, err := channelOnboardingStartInput(req.Params)
+			if err != nil {
+				return nil, err
+			}
+			selected, err := opts.Onboarding.Select(ctx, input)
+			if err != nil {
+				if runtimefailures.OnlyBranches(err, func(branch error) bool { return branch == channelonboarding.ErrNotFound }) {
+					return nil, NewApplicationError(ChannelInterfaceNotFoundCode, false, map[string]any{"reason": err.Error()})
+				}
+				return nil, channelOnboardingError(err)
+			}
+			return selected, nil
+		},
 		"channel.onboarding_start": func(ctx context.Context, req Request) (any, error) {
 			if err := requireOperatorPrincipal(req, opts.Channels); err != nil {
 				return nil, err
 			}
-			provider, err := requiredStringParam(req.Params, "provider")
+			input, err := channelOnboardingStartInput(req.Params)
 			if err != nil {
 				return nil, err
 			}
-			verbRaw, err := requiredStringParam(req.Params, "verb")
-			if err != nil {
-				return nil, err
-			}
-			verb := channelonboarding.Verb(verbRaw)
-			if !verb.Valid() {
-				return nil, NewInvalidParamsError(map[string]any{"field": "verb", "reason": "must be connect, reconnect, or rebind"})
-			}
-			bundleHash, _, err := optionalStringParam(req.Params, "bundle")
-			if err != nil {
-				return nil, err
-			}
-			interfaceSelector, _, err := optionalStringParam(req.Params, "interface")
-			if err != nil {
-				return nil, err
-			}
-			target, _, err := optionalStringParam(req.Params, "target")
-			if err != nil {
-				return nil, err
-			}
-			idempotencyKey, _, err := optionalStringParam(req.Params, "idempotency_key")
-			if err != nil {
-				return nil, err
-			}
-			credential, _, err := optionalStringParam(req.Params, "provider_credential")
-			if err != nil {
-				return nil, err
-			}
-			saveProof, err := optionalBoolParam(req.Params, "save_proof", true)
-			if err != nil {
-				return nil, err
-			}
-			language, err := channelClientLanguageParam(req.Params)
-			if err != nil {
-				return nil, err
-			}
-			result, err := opts.Onboarding.Start(ctx, channelonboarding.StartInput{
-				Verb: verb,
-				Selection: channelonboarding.CandidateSelection{
-					Provider: provider, BundleHash: bundleHash, InterfaceSelector: interfaceSelector, TargetSelector: target,
-				},
-				IdempotencyKey: idempotencyKey, ProviderCredential: credential, SaveProof: saveProof, ClientLanguage: language,
-			})
+			result, err := opts.Onboarding.Start(ctx, input)
 			if err != nil {
 				return nil, channelOnboardingError(err)
 			}
@@ -133,6 +109,40 @@ func ChannelOnboardingHandlers(opts ChannelOnboardingHandlerOptions) map[string]
 			return result, nil
 		},
 	}
+}
+
+func channelOnboardingStartInput(params map[string]any) (channelonboarding.StartInput, error) {
+	var input channelonboarding.StartInput
+	provider, err := requiredStringParam(params, "provider")
+	if err != nil {
+		return input, err
+	}
+	verb, err := requiredStringParam(params, "verb")
+	if err != nil {
+		return input, err
+	}
+	input.Verb = channelonboarding.Verb(verb)
+	if !input.Verb.Valid() {
+		return input, NewInvalidParamsError(map[string]any{"field": "verb", "reason": "must be connect, reconnect, or rebind"})
+	}
+	input.Selection.Provider = provider
+	for key, target := range map[string]*string{
+		"bundle": &input.Selection.BundleHash, "interface": &input.Selection.InterfaceSelector,
+		"target": &input.Selection.TargetSelector, "idempotency_key": &input.IdempotencyKey,
+		"provider_credential": &input.ProviderCredential, "expected_selection": &input.ExpectedSelection,
+	} {
+		value, _, err := optionalStringParam(params, key)
+		if err != nil {
+			return input, err
+		}
+		*target = value
+	}
+	input.SaveProof, err = optionalBoolParam(params, "save_proof", true)
+	if err != nil {
+		return input, err
+	}
+	input.ClientLanguage, err = channelClientLanguageParam(params)
+	return input, err
 }
 
 func channelClientLanguageParam(params map[string]any) (string, error) {

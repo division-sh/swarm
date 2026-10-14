@@ -533,7 +533,7 @@ store_parity:
         - {role: risk_proof, risk_dimensions: [restart], proof_ids: [connected-channel-onboarding-surface]}
       required_ports: [channelOnboarding]
       platform_tables: [channel_onboarding_operations, channel_onboarding_teardowns, connected_channel_activations]
-      public_methods: [channel.onboarding_start, channel.onboarding_get, channel.onboarding_retry]
+      public_methods: [channel.onboarding_select, channel.onboarding_start, channel.onboarding_get, channel.onboarding_retry, channel.logout]
     - id: operator_channel_delivery
       semantic_owners: [internal/runtime/channeldelivery, internal/runtime/channelnative, internal/store selected channelDelivery and channelNative]
       selected_purposes: [runtime]
@@ -1003,6 +1003,13 @@ mutating_api_parity_ledger:
       SQLite and explicit Postgres, including selected bundle-scope validation,
       idempotency replay, persisted entity state/mutation rows on an event-created
       run, and generic settlement postconditions.
+  - method: channel.logout
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: connected_channel_native_logout_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestRunServeWhatsAppPublicLogoutBothStores}
+    notes: The retained authenticated public-logout journeys prove original journal ownership, teardown, exact replay and no uncertain resend on both stores.
   - method: channel.onboarding_start
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]
@@ -1039,6 +1046,14 @@ mutating_api_parity_ledger:
       - {kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle}
     notes: Machine-proof revocation is exact-interface and expected-revision fenced with revoked readback.
 operator_read_api_parity_ledger:
+  - method: channel.onboarding_select
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - kind: go_test
+        name: TestChannelOnboardingSelectionReadOnlyHTTPBothStores
+        backends: [default_sqlite, explicit_postgres]
+    notes: Real authenticated onboarding selection resolves declarations without reservation, credential storage or executable collaborators on either selected store.
   - method: channel.onboarding_get
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]
