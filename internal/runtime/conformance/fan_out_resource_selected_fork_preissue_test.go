@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -73,8 +74,12 @@ func TestDeploymentSourceSelectedForkBeforeFirstRow(t *testing.T) {
 			if err := f.db.QueryRowContext(f.ctx, `SELECT cursor FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, sourceRunID).Scan(&sourceCursor); err != nil {
 				t.Fatal(err)
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, sourceRunID).Scan(&childCount); err != nil {
-				t.Fatal(err)
+			{
+				var err error
+				childCount, err = storetest.CountSelectedForkRunsForSource(f.ctx, f.selected, sourceRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			if sourceCursor != 0 || childCount != 1 {
 				t.Fatalf("selected pre-issue fork consumed source cursor or duplicated child: source_cursor=%d children=%d", sourceCursor, childCount)

@@ -43,8 +43,12 @@ func TestAudit2277ForkCompletionLoss(t *testing.T) {
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": point.EventID, "allow_source_freeze": true, "idempotency_key": "audit2277-fork"}
 			first := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.fork", params, 30*time.Second)
 			var forks, completions int
-			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, seed.RunID).Scan(&forks); err != nil {
-				t.Fatal(err)
+			{
+				var err error
+				forks, err = readServedSourceForkCardinality(rt.ReceiverStateReader, seed.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM api_idempotency WHERE method='run.fork'`).Scan(&completions); err != nil {
 				t.Fatal(err)
@@ -75,8 +79,12 @@ func TestAudit2277ForkCompletionLoss(t *testing.T) {
 				}
 			}
 			retry := requestServedJSONRPCWithTimeout(t, rt.Endpoint, "run.fork", params, 30*time.Second)
-			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, seed.RunID).Scan(&forks); err != nil {
-				t.Fatal(err)
+			{
+				var err error
+				forks, err = readServedSourceForkCardinality(rt.ReceiverStateReader, seed.RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM api_idempotency WHERE method='run.fork'`).Scan(&completions); err != nil {
 				t.Fatal(err)

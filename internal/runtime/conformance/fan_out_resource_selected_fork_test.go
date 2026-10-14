@@ -740,8 +740,12 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 						}
 					}
 					var childCount, intentCount int
-					if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, sourceRunID).Scan(&childCount); err != nil {
-						t.Fatal(err)
+					{
+						var err error
+						childCount, err = storetest.CountSelectedForkRunsForSource(f.ctx, f.selected, sourceRunID)
+						if err != nil {
+							t.Fatal(err)
+						}
 					}
 					if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`, result.ForkRunID).Scan(&intentCount); err != nil {
 						t.Fatal(err)
@@ -857,8 +861,12 @@ func TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation(t *te
 				t.Fatalf("dynamic receiver selected fork refusal changed: %s", rpcErr)
 			}
 			var children, selectedExecutions int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, sourceRunID).Scan(&children); err != nil {
-				t.Fatal(err)
+			{
+				var err error
+				children, err = storetest.CountSelectedForkRunsForSource(f.ctx, f.selected, sourceRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE source_run_id=$1`, sourceRunID).Scan(&selectedExecutions); err != nil {
 				t.Fatal(err)

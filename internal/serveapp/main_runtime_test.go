@@ -820,8 +820,12 @@ func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t 
 		t.Fatalf("join run.fork failure = %#v, want dependency-unavailable/%s", failure, runfork.RunForkBlockerTimerHistoryUnproven)
 	}
 	var forkRuns, forkTimers int
-	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`, initial.RunID).Scan(&forkRuns); err != nil {
-		t.Fatalf("count rejected join fork runs: %v", err)
+	{
+		var err error
+		forkRuns, err = readServedSourceForkCardinality(reader, initial.RunID)
+		if err != nil {
+			t.Fatalf("count rejected join fork runs: %v", err)
+		}
 	}
 	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM timers WHERE forked_from_run_id = $1::uuid`, initial.RunID).Scan(&forkTimers); err != nil {
 		t.Fatalf("count rejected join fork timers: %v", err)

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -59,8 +60,12 @@ func TestDeploymentSourceSelectedForkConcurrentFirstMaterialization(t *testing.T
 				}
 			}
 			var childCount, operationCount int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, sourceRunID).Scan(&childCount); err != nil {
-				t.Fatal(err)
+			{
+				var err error
+				childCount, err = storetest.CountSelectedForkRunsForSource(f.ctx, f.selected, sourceRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_operations WHERE source_run_id=$1`, sourceRunID).Scan(&operationCount); err != nil {
 				t.Fatal(err)
@@ -82,8 +87,12 @@ func TestDeploymentSourceSelectedForkConcurrentFirstMaterialization(t *testing.T
 					t.Fatalf("contender reported success for a different immutable result: result=%+v resolved=%+v", outcome.result, resolved)
 				}
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, sourceRunID).Scan(&childCount); err != nil {
-				t.Fatal(err)
+			{
+				var err error
+				childCount, err = storetest.CountSelectedForkRunsForSource(f.ctx, f.selected, sourceRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_operations WHERE source_run_id=$1`, sourceRunID).Scan(&operationCount); err != nil {
 				t.Fatal(err)
