@@ -72,9 +72,9 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 			}
 			body += "      " + placement + ":\n"
 			for _, choice := range []struct {
-				name, condition string
-				value           int
-			}{{"positive", "payload.choice > 0", 10}, {"otherwise", "else", 20}} {
+				condition string
+				value     int
+			}{{"payload.choice > 0", 10}, {"else", 20}} {
 				literal := strconv.Itoa(choice.value)
 				if textValues {
 					literal = strconv.Quote(literal)
@@ -84,10 +84,10 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 					selected = fmt.Sprintf("{fields: {value: %s}}", literal)
 				}
 				predicate := publicationChoicePredicate(placement, choice.condition)
-				body += fmt.Sprintf("        - id: %s\n%s          emit: %s\n", choice.name, predicate, selected)
+				body += "        - " + strings.TrimPrefix(predicate, "          ") + fmt.Sprintf("          emit: %s\n", selected)
 			}
 		case "success":
-			body = "      rules:\n        - {id: selected, else: true}\n      on_success:\n        emit: " + emit + "\n"
+			body = "      rules:\n        - {else: true}\n      on_success:\n        emit: " + emit + "\n"
 		case "fanout", "rulefanout", "completefanout":
 			indent := "      "
 			body = ""
@@ -96,14 +96,17 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 				if family == "completefanout" {
 					placement = "on_complete"
 				}
-				predicate := ""
+				body = "      " + placement + ":\n"
 				if placement == "rules" {
-					predicate = "          else: true\n"
+					body += "        - else: true\n"
 				}
-				body = "      " + placement + ":\n        - id: dispatch\n" + predicate
 				indent = "          "
 			}
-			body += indent + "fan_out:\n" + indent + "  items_from: payload.items\n" + indent + "  as: element\n" + indent + "  identity: element\n" + indent + "  emit: " + strings.Replace(emit, "value: "+valueExpr, `value: element`, 1) + "\n"
+			fanOut := indent + "fan_out:\n"
+			if family == "completefanout" {
+				fanOut = "        - fan_out:\n"
+			}
+			body += fanOut + indent + "  items_from: payload.items\n" + indent + "  as: element\n" + indent + "  identity: element\n" + indent + "  emit: " + strings.Replace(emit, "value: "+valueExpr, `value: element`, 1) + "\n"
 		}
 		handlers += fmt.Sprintf("%s:\n  execution_type: system_node\n  subscribes_to: [%s]\n  event_handlers:\n    %s:\n%s", family, request, request, body)
 	}
