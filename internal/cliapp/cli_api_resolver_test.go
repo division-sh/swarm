@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -242,8 +243,20 @@ func TestCLISwarmDirConfigValidation(t *testing.T) {
 	}
 	t.Setenv("SWARM_CONFIG", path)
 
-	if _, err := resolveCLISwarmDir(cliSwarmDirOptions{}); err == nil || !strings.Contains(err.Error(), "decode swarm.yaml CLI config") {
-		t.Fatalf("resolveCLISwarmDir err = %v, want swarm.yaml CLI decode validation", err)
+	got, err := resolveCLISwarmDir(cliSwarmDirOptions{})
+	if err == nil || !strings.Contains(err.Error(), "decode swarm.yaml config") || !strings.Contains(err.Error(), "cannot unmarshal !!seq into string") || !strings.Contains(err.Error(), path) {
+		t.Fatalf("resolveCLISwarmDir err = %v, want located selected-file type refusal", err)
+	}
+	var refused unifiedConfigError
+	if !errors.As(err, &refused) {
+		t.Fatalf("missing source admission diagnostic: %v", err)
+	}
+	blockers := unifiedConfigBlockers(refused.Diagnostics)
+	if len(blockers) != 1 || blockers[0].Kind != unifiedConfigDiagnosticParseFailed || blockers[0].Path != path || blockers[0].Line == 0 || blockers[0].Column == 0 {
+		t.Fatalf("wrong source admission diagnostic: %#v", blockers)
+	}
+	if got.Path != "" || got.Source != "" {
+		t.Fatalf("invalid source selected a swarm directory: %#v", got)
 	}
 }
 
