@@ -44,6 +44,8 @@ func TestRuleDefaultRejectsUnreachableAndEmptyRows(t *testing.T) {
 		{"aliased nonlast", "_note: &row {emit: first}\nrules: [*row, {when: true}]", "unreachable"},
 		{"merged nonlast", "_note: &row {emit: first}\nrules: [{<<: *row}, {when: true}]", "unreachable"},
 		{"empty mapping", "rules: [{}]", "is empty"},
+		{"empty inherited advance", "advances_to: done\nrules: [{}]", "is empty"},
+		{"empty inherited emit", "emit: done\nrules: [{}]", "is empty"},
 		{"empty emit", "rules: [{emit: null}]", "is empty"},
 		{"empty writes", "rules: [{data_accumulation: {writes: []}}]", "is empty"},
 		{"empty advance", "rules: [{advances_to: ''}]", "is empty"},

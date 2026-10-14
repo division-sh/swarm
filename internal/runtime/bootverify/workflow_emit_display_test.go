@@ -19,8 +19,8 @@ func TestEmitCompletenessConsumesSharedRuleDisplayAndKeepsSingularJoins(t *testi
 	}{
 		{
 			name:   "rules",
-			source: "rules:\n  - when: payload.ready\n    emit: chosen\n  - else: true\n    emit: fallback",
-			labels: []string{"rules[0]: when payload.ready.emit", "rules[1]: else.emit"},
+			source: "rules:\n  - when: payload.ready\n    emit: chosen\n  - emit: fallback",
+			labels: []string{"rules[0]: when payload.ready.emit", "rules[1]: default.emit"},
 		},
 		{
 			name:   "completion",
