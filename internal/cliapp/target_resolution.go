@@ -83,6 +83,7 @@ type doctorTargetReport struct {
 	Data            doctorTargetPath           `json:"data"`
 	Env             []localPreflightFinding    `json:"env,omitempty"`
 	Config          []localPreflightFinding    `json:"config,omitempty"`
+	ConfigSource    *doctorConfigSource        `json:"config_source,omitempty"`
 	CommandClasses  []doctorTargetCommandClass `json:"command_classes"`
 	SplitSiblings   []string                   `json:"split_siblings"`
 }
@@ -136,45 +137,43 @@ type doctorTargetCommandClass struct {
 }
 
 func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions) error {
-	envFindings := doctorSwarmEnvFindings(repo, opts.configPath)
-	envReport := doctorTargetEnvReport(envFindings)
-	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.configPath})
-	if err != nil {
-		if !envReport.HasBlockers() {
-			return returnCLIValidationError(cmd.ErrOrStderr(), err)
+	runtimeCfgResult, loadErr := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{
+		RepoRoot:        repo,
+		ExplicitPath:    opts.configPath,
+		BackendOverride: opts.backend,
+	})
+	envReport := doctorTargetEnvReport(doctorSwarmEnvFindings(runtimeCfgResult))
+	configReport := LocalPreflightReport{Owner: unifiedConfigOwner, Mode: "doctor_target"}
+	addDoctorConfigReadback(&configReport, repo, runtimeCfgResult)
+	if !runtimeCfgResult.validated {
+		if loadErr != nil && len(unifiedConfigBlockers(runtimeCfgResult.Diagnostics)) == 0 {
+			configReport.add(localPreflightConfigPrerequisite, "config_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, loadErr.Error(), "fix the selected configuration")
 		}
-		cfg = cliCommandConfig{}
+		return returnDoctorTargetResult(cmd, doctorTargetReport{
+			Owner: localTargetOwner, Mode: "target", OK: false,
+			Env: envReport.Findings, Config: configReport.finalize().Findings, ConfigSource: configReport.ConfigSource,
+		}, opts.asJSON)
 	}
+	configReport = configReport.finalize()
+	cfg := runtimeCfgResult.cli
 	swarmDirFlag, swarmDirFlagSet := rootSwarmDirFlag(cmd)
 	swarmDir, err := resolveCLISwarmDirFromConfig(opts.apiOptions.invocationRoot, cliSwarmDirOptions{SwarmDir: swarmDirFlag, SwarmDirFlagSet: swarmDirFlagSet}, cfg)
 	if err != nil {
 		return returnCLIValidationError(cmd.ErrOrStderr(), err)
 	}
-	runtimeCfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{
-		RepoRoot:        repo,
-		ExplicitPath:    opts.configPath,
-		BackendOverride: opts.backend,
-	})
-	if err != nil {
-		if !envReport.HasBlockers() {
-			return returnCLIValidationError(cmd.ErrOrStderr(), err)
-		}
-		runtimeCfgResult.Config = &config.Config{}
-	}
-	configReport := LocalPreflightReport{Owner: unifiedConfigOwner, Mode: "doctor_target"}
-	addUnifiedConfigDiagnosticsToReport(&configReport, runtimeCfgResult.Diagnostics)
-	if diagnostics := unifiedConfigDiagnosticsFromError(err); len(diagnostics) > 0 {
-		addUnifiedConfigDiagnosticsToReport(&configReport, diagnostics)
-	}
-	configReport = configReport.finalize()
 	report, err := buildDoctorTargetReport(cmd.Context(), repo, cmd, opts, cfg, swarmDir, runtimeCfgResult.Config)
 	if err != nil {
 		return returnCLIValidationError(cmd.ErrOrStderr(), err)
 	}
 	report.Env = envReport.Findings
 	report.Config = configReport.Findings
+	report.ConfigSource = configReport.ConfigSource
 	report.OK = report.OK && !envReport.HasBlockers() && !configReport.HasBlockers()
-	if opts.asJSON {
+	return returnDoctorTargetResult(cmd, report, opts.asJSON)
+}
+
+func returnDoctorTargetResult(cmd *cobra.Command, report doctorTargetReport, asJSON bool) error {
+	if asJSON {
 		if err := writeDoctorTargetJSON(cmd.OutOrStdout(), report); err != nil {
 			return err
 		}
@@ -638,6 +637,7 @@ func writeDoctorTargetText(out io.Writer, report doctorTargetReport) {
 	}
 	fmt.Fprintf(out, "swarm target diagnostics: %s\n", status)
 	fmt.Fprintf(out, "owner: %s\n", report.Owner)
+	writeDoctorConfigSourceText(out, report.ConfigSource)
 	if len(report.Env) > 0 {
 		fmt.Fprintln(out, "env:")
 		for _, finding := range report.Env {

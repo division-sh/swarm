@@ -273,10 +273,13 @@ type swarmEnvGuardContext struct {
 	DelegatedSources  map[string]string
 }
 
-func doctorSwarmEnvFindings(RepoRoot, runtimeConfigPath string) []swarmEnvFinding {
+func doctorSwarmEnvFindings(loaded RuntimeConfigLoadResult) []swarmEnvFinding {
+	delegated := map[string]string{}
+	if loaded.validated && loaded.Config != nil {
+		delegated = unifiedConfigDelegation(loaded.Config)
+	}
 	return collectSwarmEnvFindings(swarmEnvGuardContext{
-		RepoRoot:          RepoRoot,
-		RuntimeConfigPath: runtimeConfigPath,
+		DelegatedSources: delegated,
 	})
 }
 
