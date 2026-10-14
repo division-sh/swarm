@@ -57,6 +57,7 @@ const (
 	ScenarioOperatorChannelProofRevokeLifecycle      = "operator_channel_proof_revoke_lifecycle"
 	ScenarioConnectedChannelOnboardingLifecycle      = "connected_channel_onboarding_lifecycle"
 	ScenarioConnectedChannelOnboardingRetryLifecycle = "connected_channel_onboarding_retry_lifecycle"
+	ScenarioConnectedChannelNativeLogoutLifecycle    = "connected_channel_native_logout_lifecycle"
 )
 
 type Scenario struct {
@@ -118,6 +119,7 @@ func Scenarios() []Scenario {
 		servedControlScenario(ScenarioOperatorChannelProofRevokeLifecycle, "channel.proof_revoke", "TestServedParityHarnessOperatorChannelLifecycle"),
 		servedControlScenario(ScenarioConnectedChannelOnboardingLifecycle, "channel.onboarding_start", "TestChannelConnectTelegramFirstUserJourney"),
 		servedControlScenario(ScenarioConnectedChannelOnboardingRetryLifecycle, "channel.onboarding_retry", "TestChannelConnectTelegramFirstUserJourney"),
+		servedControlScenario(ScenarioConnectedChannelNativeLogoutLifecycle, "channel.logout", "TestRunServeWhatsAppPublicLogoutBothStores"),
 	}
 }
 
