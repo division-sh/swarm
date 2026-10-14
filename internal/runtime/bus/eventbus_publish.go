@@ -819,7 +819,12 @@ func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.
 				return closedPublicationRoutes{}, errors.New("direct event publication requires at least one recipient")
 			}
 			planRoutes = func(context.Context, events.Event) (RoutePlan, error) {
-				plan, err := planner.PlanDirect(withClosedPublicationPlanning(ctx), evt, requested)
+				var plan RoutePlan
+				err := eb.withPublicationInstancePlanning(ctx, evt, planner, func(ctx context.Context, bounded deliveryPlanner) error {
+					var err error
+					plan, err = bounded.PlanDirect(withClosedPublicationPlanning(ctx), evt, requested)
+					return err
+				})
 				if err != nil {
 					return RoutePlan{}, err
 				}
@@ -2270,7 +2275,12 @@ func (eb *EventBus) planSubscribedRoutePlanWithPlanner(ctx context.Context, evt 
 	if err := validateEventRootTargetCoordinates(eb.semanticSource, evt); err != nil {
 		return RoutePlan{}, err
 	}
-	plan, err := planner.planForRecipientMaterialization(ctx, evt)
+	var plan RoutePlan
+	err = eb.withPublicationInstancePlanning(ctx, evt, planner, func(ctx context.Context, bounded deliveryPlanner) error {
+		var err error
+		plan, err = bounded.planForRecipientMaterialization(ctx, evt)
+		return err
+	})
 	if err != nil {
 		return RoutePlan{}, err
 	}

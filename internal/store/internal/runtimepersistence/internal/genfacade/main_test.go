@@ -41,6 +41,15 @@ func (*Owner) Configure(Options) error { return nil }
 	}
 }
 
+func TestLegacyEvaluationFixtureCannotBecomeProductionFacadeAuthority(t *testing.T) {
+	if !constructionBinding("BeginFanOutEvaluation") {
+		t.Fatal("legacy test-only evaluation shim would be emitted as production group authority")
+	}
+	if constructionBinding("WithFlowInstancePlanningSnapshot") {
+		t.Fatal("canonical finite index planning reader was hidden with legacy group authority")
+	}
+}
+
 func typeCheckFixture(t *testing.T, source string) *types.Package {
 	t.Helper()
 	fset := token.NewFileSet()

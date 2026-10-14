@@ -18,6 +18,12 @@ type FlowInstanceIndexReader interface {
 	ListFlowInstances(context.Context, FlowInstanceLookupScope) ([]FlowInstanceObservation, error)
 }
 
+// FlowInstancePlanningSnapshotOwner scopes canonical index reads to one planning
+// pass. The reader expires on return; it grants no claim or mutation authority.
+type FlowInstancePlanningSnapshotOwner interface {
+	WithFlowInstancePlanningSnapshot(context.Context, FlowInstanceLookupScope, func(context.Context, FlowInstanceIndexReader) error) error
+}
+
 type FlowInstanceLookupRequest struct {
 	source                           semanticview.Source
 	fact                             correlation.SourceArtifactFact
