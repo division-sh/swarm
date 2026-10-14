@@ -299,6 +299,36 @@ func TestAgentFirstClaimProfileReadbackRefusesInexactEvidenceBothStores(t *testi
 	}
 }
 
+func TestAgentFirstClaimProfileCorruptionRefusesReclaimBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, variant := range []AgentClaimProfileFault{AgentClaimProfileMissing, AgentClaimProfileCorrupt, AgentClaimProfileForeign} {
+			t.Run(backend+"/"+string(variant), func(t *testing.T) {
+				f := newAgentClaimProfileFixture(t, backend)
+				event, first, original := f.claim(t)
+				foreign := deliverylifecycle.Claim{}
+				if variant == AgentClaimProfileForeign {
+					_, other, _ := f.claim(t)
+					foreign = other.Claim
+				}
+				if err := ApplyAgentClaimProfileFaultForTest(f.ctx, f.store, first.Claim, original, variant, foreign); err != nil {
+					t.Fatal(err)
+				}
+				if err := ExpireExactDeliveryClaimFaultForTest(f.ctx, f.store, first.Claim); err != nil {
+					t.Fatal(err)
+				}
+				before := profileFixtureSnapshot(t, f)
+				refused, err := f.store.ClaimDelivery(f.ctx, f.authority, event, f.route)
+				if _, acquired := refused.Acquired(); acquired || err == nil || !strings.Contains(err.Error(), "first-claim agent profile") {
+					t.Fatalf("corrupt first capture reached successor claim or the wrong gate: result=%+v err=%v", refused, err)
+				}
+				if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(before, after) {
+					t.Fatal("refused corrupt-capture reclaim changed complete storage")
+				}
+			})
+		}
+	}
+}
+
 func assertOnlyAgentProfileCellChanged(t *testing.T, before, after map[string]SelectedForkStorageTableSnapshot, deliveryID string) {
 	t.Helper()
 	beforeBytes, err := json.Marshal(before)
