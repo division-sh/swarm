@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forknotice"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicjoin"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicrollback"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runidentity"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
@@ -38,7 +39,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "efa537a32db6c9244ca4d97a74fe4a19d8612501a4c9bd4ba0850df83bab4792"
+const targetDigest = "92dcc48a8773818a8528541fe6011aefe7e7f06677ebd531de848e5667a55ac6"
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -334,8 +335,11 @@ func main() {
 			rows = extend(rows, change)
 		}
 	}
-	rows = preserveRunIdentityRecipes(rows)
-	changes = preserveRunIdentityTransitions(changes)
+	rollbackPins := publicRollbackHistoryPins()
+	rows = restoreGeneratedPublicRollbackRecipes(rows, rollbackPins)
+	changes = restoreGeneratedPublicRollbackTransitions(changes, rollbackPins)
+	rows = composePublicRollbackRecipes(preserveRunIdentityRecipes(rows), rollbackPins)
+	changes = composePublicRollbackTransitions(preserveRunIdentityTransitions(changes), rollbackPins)
 	raw, err := json.Marshal(changes)
 	must(err)
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
@@ -352,6 +356,82 @@ func main() {
 	} else if len(os.Args) != 1 {
 		panic("usage: reconcile-family145 [-write]")
 	}
+}
+
+func publicRollbackHistoryPins() []publicrollback.Pin {
+	raw, err := os.ReadFile(publicrollback.Path)
+	must(err)
+	pins, err := publicrollback.Decode(raw)
+	must(err)
+	return pins
+}
+
+func restoreGeneratedPublicRollbackRecipes(rows []recipe, pins []publicrollback.Pin) []recipe {
+	for i, row := range rows {
+		for _, pin := range pins {
+			if row.File == pin.File && row.Function == pin.Function {
+				if row.After != pin.After || row.Successor != "" {
+					panic("rollback generated recipe escaped exact endpoint")
+				}
+				rows[i].After = pin.Before
+			}
+		}
+	}
+	return rows
+}
+
+func restoreGeneratedPublicRollbackTransitions(rows []transition, pins []publicrollback.Pin) []transition {
+	for i, row := range rows {
+		for _, pin := range pins {
+			if row.File == pin.File && row.Function == pin.Function {
+				if row.After != pin.After || row.Removed {
+					panic("rollback generated transition escaped exact endpoint")
+				}
+				rows[i].After = pin.Before
+			}
+		}
+	}
+	return rows
+}
+
+func composePublicRollbackRecipes(rows []recipe, pins []publicrollback.Pin) []recipe {
+	for _, pin := range pins {
+		matches := 0
+		for i, row := range rows {
+			if row.File != pin.File || row.Function != pin.Function {
+				continue
+			}
+			matches++
+			if row.After != pin.Before || row.Successor != "" || row.Removed {
+				panic("rollback immutable recipe changed")
+			}
+			rows[i].Successor = pin.After
+		}
+		if matches != 1 {
+			panic("rollback recipe lacks exact unique history")
+		}
+	}
+	return rows
+}
+
+func composePublicRollbackTransitions(rows []transition, pins []publicrollback.Pin) []transition {
+	for _, pin := range pins {
+		matches := 0
+		for i, row := range rows {
+			if row.File != pin.File || row.Function != pin.Function {
+				continue
+			}
+			matches++
+			if row.After != pin.Before || row.Removed {
+				panic("rollback immutable transition changed")
+			}
+			rows[i].After = pin.After
+		}
+		if matches != 1 {
+			panic("rollback transition lacks exact unique history")
+		}
+	}
+	return rows
 }
 
 func preserveRunIdentityRecipes(generated []recipe) []recipe {

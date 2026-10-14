@@ -376,6 +376,10 @@ func debtRequestKeyBodies(root string) ([]debtRequestKeyBody, error) {
 
 func debtRequestKeySourcePrevious(root, file, function, current string) (string, error) {
 	var err error
+	current, err = debtPublicRollbackSourcePrevious(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	current, err = debtRunScalarSourcePrevious(root, file, function, current)
 	if err != nil {
 		return "", err
@@ -644,7 +648,8 @@ func debtRequestKeySourcePins(root string) error {
 		if body.File != "internal/serveapp/test_command_runtime_test.go" || !wanted[body.Function] {
 			continue
 		}
-		if declarations[body.Function] != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
+		current, err := debtPublicRollbackSourcePrevious(root, body.File, body.Function, declarations[body.Function])
+		if err != nil || current != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
 			return fmt.Errorf("reviewed request-key raw-call capture/cut/body changed: %s", body.Function)
 		}
 		delete(wanted, body.Function)
@@ -2066,7 +2071,7 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
-	if debtRunIdentityCollectorTransition(base, current, trusted, head, retirement...) || debtReviewedCollectorTransition(base, current, trusted, head) || debtDeliveryRetirementCollectorTransition(base, current, trusted, head, retirement...) || debtEventNameCollectorTransition(base, current, trusted, head, retirement...) || debtWorkflowStateCollectorTransition(base, current, trusted, head, retirement...) {
+	if debtPublicRollbackCollectorTransition(base, current, trusted, head, retirement...) || debtRunIdentityCollectorTransition(base, current, trusted, head, retirement...) || debtReviewedCollectorTransition(base, current, trusted, head) || debtDeliveryRetirementCollectorTransition(base, current, trusted, head, retirement...) || debtEventNameCollectorTransition(base, current, trusted, head, retirement...) || debtWorkflowStateCollectorTransition(base, current, trusted, head, retirement...) {
 		return nil
 	}
 	if current == debtFixtureRoleCollectorTo && head.Collector == current {

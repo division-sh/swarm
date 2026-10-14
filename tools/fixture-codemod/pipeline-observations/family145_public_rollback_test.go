@@ -3,10 +3,12 @@ package main
 import (
 	"crypto/sha256"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -24,6 +26,76 @@ func publicRollbackPins(t *testing.T) []publicrollback.Pin {
 		t.Fatal(err)
 	}
 	return pins
+}
+
+func restorePublicRollbackHistory(rows []map[string]any, recipes bool) {
+	pins, err := publicrollback.Decode(publicRollbackBytes)
+	if err != nil {
+		panic(err)
+	}
+	for _, row := range rows {
+		for _, pin := range pins {
+			if row["File"] != pin.File || row["Function"] != pin.Function {
+				continue
+			}
+			if recipes && row["After"] == pin.Before && row["Successor"] == pin.After {
+				delete(row, "Successor")
+			} else if !recipes && row["After"] == pin.After {
+				row["After"] = pin.Before
+			}
+		}
+	}
+}
+
+func TestFamily145PublicRollbackPreservesHistoricalRecordsAndOrder(t *testing.T) {
+	for _, path := range []string{"tools/fixture-codemod/pipeline-observations/recipes.json", "tools/fixture-codemod/pipeline-observations/family145-transitions.json"} {
+		previous, err := exec.Command("git", "show", publicrollback.Predecessor+":"+path).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		current, err := os.ReadFile(filepath.Join("../../..", path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var before, after []map[string]any
+		if err := json.Unmarshal(previous, &before); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(current, &after); err != nil {
+			t.Fatal(err)
+		}
+		restored := cloneRollbackHistory(t, after)
+		restorePublicRollbackHistory(restored, strings.HasSuffix(path, "recipes.json"))
+		if !reflect.DeepEqual(before, restored) {
+			t.Fatal("rollback changed historical records, metadata or order:", path)
+		}
+		for i, row := range before {
+			if reflect.DeepEqual(row, after[i]) {
+				continue
+			}
+			for _, key := range []string{"File", "Function", "Before", "Mechanical", "Removed", "Family"} {
+				mutant := cloneRollbackHistory(t, after)
+				mutant[i][key] = "unreviewedHistory"
+				restorePublicRollbackHistory(mutant, strings.HasSuffix(path, "recipes.json"))
+				if reflect.DeepEqual(before, mutant) {
+					t.Fatal("history inverse erased changed metadata:", key)
+				}
+			}
+		}
+	}
+}
+
+func cloneRollbackHistory(t *testing.T, rows []map[string]any) []map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var copy []map[string]any
+	if err := json.Unmarshal(raw, &copy); err != nil {
+		t.Fatal(err)
+	}
+	return copy
 }
 
 func TestFamily145PublicRollbackWholeRuleKeepsAllSevenCutsAndBothCallers(t *testing.T) {

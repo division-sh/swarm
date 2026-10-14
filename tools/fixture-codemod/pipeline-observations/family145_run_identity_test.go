@@ -268,6 +268,7 @@ func TestFamily145RunIdentityPreservesHistoricalRecordsAndOrder(t *testing.T) {
 }
 
 func restoreRunIdentityHistory(rows []map[string]any, recipes bool) ([]map[string]any, int) {
+	restorePublicRollbackHistory(rows, recipes)
 	retained, additions := []map[string]any{}, 0
 	for _, row := range rows {
 		for _, pin := range runIdentityPins {

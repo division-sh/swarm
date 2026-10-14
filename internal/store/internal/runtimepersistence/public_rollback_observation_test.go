@@ -144,3 +144,94 @@ func assertPublicRollbackSnapshotRefusals(t *testing.T, ctx context.Context, sel
 		}
 	}
 }
+
+func TestPublicInputRollbackObservationsRefuseLiveForeignQueryAndReadAckFailuresBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			probe := &operatorSnapshotProbe{readOnlyGate: true}
+			selected, _, _ := newStopCommitStore(t, backend.name, probe)
+			foreign := backend.open(t).store.(rollbackRoutingFixture)
+			ctx := testAuthorActivityContext()
+			direct, other := runForkSnapshotFixtureEvent(t, ctx, selected), runForkSnapshotFixtureEvent(t, ctx, selected)
+			seedPublicRollbackRoutes(t, ctx, selected, direct.RunID(), other.RunID())
+			for _, operation := range []publicRollbackFailureCase{
+				{"template_prefix", 3, func(ctx context.Context) (int, error) {
+					return CountTemplatePrefixRoutingRulesForTest(ctx, selected, "telegram-chat")
+				}},
+				{"all_event_scopes", 1, func(ctx context.Context) (int, error) {
+					return CountTemplateEventReplayScopesForTest(ctx, selected, direct.ID())
+				}},
+			} {
+				t.Run(operation.name, func(t *testing.T) {
+					provePublicRollbackNativeFailures(t, ctx, selected.(rollbackRoutingFixture), foreign, probe, operation)
+				})
+			}
+		})
+	}
+}
+
+type publicRollbackFailureCase struct {
+	name string
+	want int
+	read func(context.Context) (int, error)
+}
+
+func provePublicRollbackNativeFailures(t *testing.T, ctx context.Context, selected, foreign rollbackRoutingFixture, probe *operatorSnapshotProbe, operation publicRollbackFailureCase) {
+	t.Helper()
+	if err := foreign.InspectSnapshot(ctx, func(scoped context.Context) error {
+		if count, err := operation.read(scoped); err == nil || count != 0 {
+			t.Fatalf("different live native snapshot supplied evidence: %d %v", count, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	queryFailure := errors.New("exact rollback observation query failed")
+	_, release := probe.arm("other", 1, queryFailure, nil)
+	release()
+	count, err := operation.read(ctx)
+	if !errors.Is(err, queryFailure) || count != 0 {
+		t.Fatalf("failed query supplied successful-zero/nonzero evidence: %d %v", count, err)
+	}
+	assertPublicRollbackFaultReceipt(t, probe)
+	probe.disarm()
+	ackFailure := errors.New("exact rollback observation outer read acknowledgment lost")
+	_, release = probe.arm("other", 1, nil, ackFailure)
+	release()
+	count, err = operation.read(ctx)
+	if !errors.Is(err, ackFailure) || count != 0 {
+		t.Fatalf("failed read acknowledgment supplied provisional evidence: %d %v", count, err)
+	}
+	assertPublicRollbackFaultReceipt(t, probe)
+	probe.disarm()
+	// A borrowed snapshot may observe the nonzero row, but its caller
+	// must reject that value when the outer acknowledgment fails.
+	_, release = probe.arm("other", 1, nil, ackFailure)
+	release()
+	observed := 0
+	err = selected.InspectSnapshot(ctx, func(scoped context.Context) error {
+		var err error
+		observed, err = operation.read(scoped)
+		if err != nil || observed != operation.want {
+			t.Fatalf("missing nonzero provisional positive control: %d %v", observed, err)
+		}
+		return err
+	})
+	if !errors.Is(err, ackFailure) || observed != operation.want {
+		t.Fatalf("outer acknowledgment fault missed the nonzero cut: %d %v", observed, err)
+	}
+	assertPublicRollbackFaultReceipt(t, probe)
+	probe.disarm()
+	if count, err := operation.read(ctx); err != nil || count != operation.want {
+		t.Fatalf("fault damaged live owner or erased the positive row: %d %v", count, err)
+	}
+}
+
+func assertPublicRollbackFaultReceipt(t *testing.T, probe *operatorSnapshotProbe) {
+	t.Helper()
+	probe.mu.Lock()
+	defer probe.mu.Unlock()
+	if !probe.fired || probe.seen["other"] != 1 || probe.outside != 0 || probe.writes != 0 || probe.active != 0 || probe.finished != 1 {
+		t.Fatalf("rollback fault missed its exact native read or leaked work: %+v", probe)
+	}
+}

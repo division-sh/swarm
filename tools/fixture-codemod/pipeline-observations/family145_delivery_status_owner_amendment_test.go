@@ -43,6 +43,15 @@ func deliveryStatusEarlierOwnerSource(t *testing.T, path string, current, origin
 		}
 		current = deliveryStatusEarlierStopOwner(t, path, current, original)
 	case "internal/store/internal/runtimepersistence/test_served_delivery_observation.go":
+		for _, endpoint := range [][2]string{
+			{"CountTemplatePrefixRoutingRulesForTest", `func CountTemplatePrefixRoutingRulesForTest(ctx context.Context, selected any, template string)(int,error){return readFanOutSemanticStorage(ctx,selected,nil,func(ctx context.Context,tx *sql.Tx)(int,error){return pipelinepersistence.CountTemplatePrefixRoutingRulesTx(ctx,tx,template)})}`},
+			{"CountTemplateEventReplayScopesForTest", `func CountTemplateEventReplayScopesForTest(ctx context.Context, selected any, event string)(int,error){return readFanOutSemanticStorage(ctx,selected,[]string{event},func(ctx context.Context,tx *sql.Tx)(int,error){return pipelinepersistence.CountTemplateEventReplayScopesTx(ctx,tx,event)})}`},
+		} {
+			current, err = removePublicRollbackDeclaration(current, endpoint[0], endpoint[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 		prior, _, _, lookupErr := deliveryStatusSourceDeclaration(original, "ReadServedDeliveryStatusCountForTest")
 		if lookupErr != nil {
 			t.Fatal(lookupErr)
@@ -53,6 +62,19 @@ func deliveryStatusEarlierOwnerSource(t *testing.T, path string, current, origin
 		}
 	}
 	return current
+}
+
+func removePublicRollbackDeclaration(raw []byte, name, expected string) ([]byte, error) {
+	current, start, end, err := deliveryStatusSourceDeclaration(raw, name)
+	if err != nil {
+		return nil, err
+	}
+	if canonicalDeliveryStatusDeclaration(current) != canonicalDeliveryStatusDeclaration(expected) || end >= len(raw) || raw[end] != '\n' {
+		return nil, fmt.Errorf("unreviewed rollback declaration addition: %s", name)
+	}
+	// The addition occupied one declaration plus its trailing newline; deleting
+	// that exact span preserves the historical spacing of adjacent declarations.
+	return append(append([]byte{}, raw[:start]...), raw[end+1:]...), nil
 }
 
 func deliveryStatusEarlierStopOwner(t *testing.T, path string, current, original []byte) []byte {
