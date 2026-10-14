@@ -22,6 +22,7 @@ func TestRuntimeLogForkHistoryExclusionBothStores(t *testing.T) {
 			store := fixture.store.(interface {
 				diagnosticRuntimeLogFixtureStore
 				PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+				MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 				ListOperatorRuntimeLogs(context.Context, operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error)
 			})
 			ctx := testAuthorActivityContext()
@@ -88,6 +89,20 @@ func TestRuntimeLogForkHistoryExclusionBothStores(t *testing.T) {
 			preserved, err := ReadSemanticEventFixtureEvidenceForTest(ctx, fixture.store, root.RunID(), log.ID())
 			if err != nil || !reflect.DeepEqual(preserved, after) {
 				t.Errorf("broad capture/refusal changed diagnostic evidence: got=%+v want=%+v err=%v", preserved, after, err)
+			}
+			child, err := store.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
+				SourceRunID: root.RunID(),
+			})
+			if err != nil || child.ForkRunID == "" || child.ForkPoint != original.ForkPoint {
+				t.Fatalf("business cut could not materialize after diagnostic append: child=%+v err=%v", child, err)
+			}
+			childLogs, err := store.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{RunID: child.ForkRunID, Limit: 10})
+			if err != nil || len(childLogs.Logs) != 0 {
+				t.Fatalf("source diagnostics projected into child: logs=%+v err=%v", childLogs, err)
+			}
+			sourceLogs, err := store.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{RunID: root.RunID(), Limit: 10})
+			if err != nil || !reflect.DeepEqual(sourceLogs, logs) {
+				t.Errorf("child materialization changed source diagnostic readback: got=%+v want=%+v err=%v", sourceLogs, logs, err)
 			}
 		})
 	}
