@@ -191,185 +191,225 @@ func (r connectRoutePlanResolver) resolveReplyPlans(ctx context.Context, matched
 	return exact, record, nil
 }
 
+type connectMatchedPlanState struct {
+	out                  connectRoutePlanDispatch
+	receiverPinAdmission runtimepinrouting.ConnectReceiverPinAdmission
+	createdRoutes        map[runtimeflowidentity.Route]struct{}
+	replyContextConsumed bool
+}
+
 func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Event, matched []runtimepinrouting.ConnectRoutePlan, values map[string]string, replyRecord runtimereplycontext.Record) (connectRoutePlanDispatch, error) {
 	emptyEvaluation, err := events.NewConnectEvaluationLedger(nil)
 	if err != nil {
 		return connectRoutePlanDispatch{}, err
 	}
-	out := connectRoutePlanDispatch{
-		Matched:    true,
-		Evaluation: emptyEvaluation,
-		ExtraDetail: map[string]any{
-			"connect_route_plans_count": len(matched),
+	state := connectMatchedPlanState{
+		out: connectRoutePlanDispatch{
+			Matched: true, Evaluation: emptyEvaluation,
+			ExtraDetail: map[string]any{"connect_route_plans_count": len(matched)},
 		},
+		createdRoutes: make(map[runtimeflowidentity.Route]struct{}, len(matched)),
 	}
-	var receiverPinAdmission runtimepinrouting.ConnectReceiverPinAdmission
-	createdRoutes := make(map[runtimeflowidentity.Route]struct{}, len(matched))
-	replyContextConsumed := false
 	for index, plan := range matched {
-		if plan.ReplyResolution() != nil && plan.ReplyResolution().Role() == runtimepinrouting.ConnectReplyRoleResponse {
-			routes, subscribers, claim, failure, detail, err := r.materializeReplyResponse(ctx, evt, plan, values, replyRecord)
-			if err != nil {
-				return connectRoutePlanDispatch{}, err
-			}
-			if !failure.Empty() {
-				if err := r.appendBlockedPlanEvaluation(&out, plan, nil); err != nil {
-					return connectRoutePlanDispatch{}, err
+		blocked, err := r.matchConnectPlan(ctx, evt, plan, values, replyRecord, &state)
+		if err != nil {
+			return connectRoutePlanDispatch{}, err
+		}
+		if blocked {
+			if state.out.unavailableReceiverError != nil {
+				if err := r.remainingMatchedPlanErrors(ctx, evt, matched[index+1:], values, replyRecord, state); err != nil {
+					return connectRoutePlanDispatch{}, errors.Join(state.out.unavailableReceiverError, err)
 				}
-				out.Failure = failure
-				for key, value := range detail {
-					out.ExtraDetail[key] = value
-				}
-				return out, nil
 			}
-			targets := make([]events.RouteIdentity, 0, len(routes))
-			for _, route := range routes {
-				targets = append(targets, route.Target)
-			}
-			if err := r.appendMaterializedPlanEvaluation(ctx, evt.RunID(), &out, plan, targets); err != nil {
-				return connectRoutePlanDispatch{}, err
-			}
-			routes, err = stampConnectExecutionClaims(plan, routes)
-			if err != nil {
-				return connectRoutePlanDispatch{}, err
-			}
-			if err := receiverPinAdmission.Admit(plan, routes); err != nil {
-				return connectRoutePlanDispatch{}, err
-			}
-			if pins, collision := connectReceiverPinCollisionDetail(receiverPinAdmission); collision {
-				out.Failure = connectRoutePlanTargetFailure(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
-				out.ExtraDetail["connect_route_plan_failure"] = runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code()
-				out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = pins
-				return out, nil
-			}
-			replyContextConsumed = true
-			if claim != nil {
-				out.ReplyClaims = append(out.ReplyClaims, *claim)
-			}
-			receiverEvent := plan.ReceiverLocalEvent()
-			intents, err := routePlanDeliveryIntentsFromConnectRoutes(evt.RunID(), routes, routeIntentProducerConnectRoutePlan, receiverEvent)
-			if err != nil {
-				return connectRoutePlanDispatch{}, err
-			}
-			liveRecipients, err := connectRoutePlanLiveRecipients(evt.RunID(), routes)
-			if err != nil {
-				return connectRoutePlanDispatch{}, err
-			}
-			out.DeliveryIntents = append(out.DeliveryIntents, intents...)
-			out.LiveRecipients = append(out.LiveRecipients, liveRecipients...)
-			out.RoutedRecipients = append(out.RoutedRecipients, subscribers...)
-			continue
+			return state.out, nil
 		}
-		materialized, decision, err := r.materializeConnectRoutePlan(ctx, evt, plan, values)
-		if err != nil {
-			return connectRoutePlanDispatch{}, err
-		}
-		if !materialized.Failure.Empty() {
-			if err := r.appendBlockedPlanEvaluation(&out, plan, connectMaterializedTargets(materialized)); err != nil {
-				return connectRoutePlanDispatch{}, err
-			}
-			out.Failure = connectRoutePlanTargetFailure(materialized.Failure)
-			out.ExtraDetail["connect_route_plan_failure"] = materialized.Failure.Code()
-			out.ExtraDetail["connect_route_plan_source_event"] = plan.SourceEndpoint().Readback().ResolvedEvent
-			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.ReceiverEndpoint().Readback().ResolvedEvent
-			for key, value := range connectRoutePlanFailureDetail(plan, materialized.Failure, values) {
-				out.ExtraDetail[key] = value
-			}
-			if decision.unavailableReceiverError != nil {
-				// A semantic refusal cannot hide a later independent read failure.
-				if _, err := r.planMatched(ctx, evt, matched[index+1:], values, replyRecord); err != nil {
-					return connectRoutePlanDispatch{}, errors.Join(decision.unavailableReceiverError, err)
-				}
-				out.unavailableReceiverError = decision.unavailableReceiverError
-				out.ActivationPlans, out.ReplyCreations, out.ReplyClaims = nil, nil, nil
-			}
-			return out, nil
-		}
-		if target := explicitRootPublicationTarget(evt); !target.Empty() {
-			var selected bool
-			materialized, selected = materialized.SelectReceiverTarget(target)
-			if !selected {
-				continue
-			}
-		}
-		if !decision.Empty() {
-			out.ExtraDetail["connect_route_plan_template_instance_lifecycle"] = decision.Detail()
-		}
-		if decision.Activation != nil {
-			out.ActivationPlans = append(out.ActivationPlans, *decision.Activation)
-		}
-		if decision.Activation != nil {
-			if err := r.installFlowConstructionPreview(ctx, evt.RunID(), *decision.Activation); err != nil {
-				return connectRoutePlanDispatch{}, err
-			}
-		}
-		if !decision.Empty() {
-			if err := selectConnectionConstruction(ctx, decision.identity); err != nil {
-				return connectRoutePlanDispatch{}, err
-			}
-		}
-		if decision.Activation != nil {
-			if route := decision.Route(); route.Valid() {
-				createdRoutes[route] = struct{}{}
-			}
-		}
-		_, routeCreatedInPlan := createdRoutes[decision.Route()]
-		routes, liveRoutes, subscribers, evaluation, err := r.deliveryRoutesForMaterialization(ctx, evt.RunID(), plan, materialized, decision, routeCreatedInPlan)
-		if err != nil {
-			return connectRoutePlanDispatch{}, err
-		}
-		if err := mergeConnectEvaluation(&out.Evaluation, evaluation); err != nil {
-			return connectRoutePlanDispatch{}, err
-		}
-		if plan.ReplyResolution() != nil && plan.ReplyResolution().Role() == runtimepinrouting.ConnectReplyRoleRequest {
-			var creation *runtimereplycontext.Record
-			routes, creation, err = r.materializeReplyRequest(ctx, evt, plan, routes, values)
-			if err != nil {
-				return connectRoutePlanDispatch{}, err
-			}
-			if creation != nil {
-				out.ReplyCreations = append(out.ReplyCreations, *creation)
-			}
-		}
-		routes, err = stampConnectExecutionClaims(plan, routes)
-		if err != nil {
-			return connectRoutePlanDispatch{}, err
-		}
-		liveRoutes, err = stampConnectExecutionClaims(plan, liveRoutes)
-		if err != nil {
-			return connectRoutePlanDispatch{}, err
-		}
-		if len(routes) == 0 {
-			out.ExtraDetail["connect_route_plan_source_event"] = plan.SourceEndpoint().Readback().ResolvedEvent
-			out.ExtraDetail["connect_route_plan_receiver_event"] = plan.ReceiverEndpoint().Readback().ResolvedEvent
-			continue
-		}
-		if err := receiverPinAdmission.Admit(plan, routes); err != nil {
-			return connectRoutePlanDispatch{}, err
-		}
-		if pins, collision := connectReceiverPinCollisionDetail(receiverPinAdmission); collision {
-			out.Failure = connectRoutePlanTargetFailure(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
-			out.ExtraDetail["connect_route_plan_failure"] = runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code()
-			out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = pins
-			return out, nil
-		}
-		intents, err := connectRoutePlanDeliveryIntents(evt.RunID(), plan, routes, liveRoutes, routeCreatedInPlan, r.routeTable.staticAgentDeclarationPlans())
-		if err != nil {
-			return connectRoutePlanDispatch{}, err
-		}
-		out.DeliveryIntents = append(out.DeliveryIntents, intents...)
-		liveRecipients, err := connectRoutePlanLiveRecipients(evt.RunID(), liveRoutes)
-		if err != nil {
-			return connectRoutePlanDispatch{}, err
-		}
-		out.LiveRecipients = append(out.LiveRecipients, liveRecipients...)
-		out.RoutedRecipients = append(out.RoutedRecipients, subscribers...)
 	}
+	out := state.out
 	out.LiveRecipients = normalizeRoutePlanLiveRecipients(out.LiveRecipients)
 	out.DeliveryIntents = normalizeRoutePlanDeliveryIntents(out.DeliveryIntents)
 	out.RoutedRecipients = dedupeSubscribers(out.RoutedRecipients)
-	out.ReplyContextConsumed = replyContextConsumed
+	out.ReplyContextConsumed = state.replyContextConsumed
 	return out, nil
+}
+
+// Error examination keeps the same ordered construction dependencies but cannot
+// export suffix preparation into the refused publication's preview or result.
+func (r connectRoutePlanResolver) remainingMatchedPlanErrors(ctx context.Context, evt events.Event, remaining []runtimepinrouting.ConnectRoutePlan, values map[string]string, replyRecord runtimereplycontext.Record, state connectMatchedPlanState) error {
+	preview := &connectRoutePlanPreviewRoutes{selected: make(map[string][]runtimeflowidentity.Instance)}
+	if current, _ := ctx.Value(connectRoutePlanPreviewRoutesKey{}).(*connectRoutePlanPreviewRoutes); current != nil {
+		preview.plans = append([]runtimepipeline.FlowInstanceActivationPlan(nil), current.plans...)
+		for flow, instances := range current.selected {
+			preview.selected[flow] = append([]runtimeflowidentity.Instance(nil), instances...)
+		}
+	}
+	ctx = context.WithValue(ctx, connectRoutePlanPreviewRoutesKey{}, preview)
+	state.out = connectRoutePlanDispatch{ExtraDetail: make(map[string]any)}
+	var failures error
+	for _, plan := range remaining {
+		_, err := r.matchConnectPlan(ctx, evt, plan, values, replyRecord, &state)
+		failures = errors.Join(failures, err)
+	}
+	return failures
+}
+
+func (r connectRoutePlanResolver) matchConnectPlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, replyRecord runtimereplycontext.Record, state *connectMatchedPlanState) (bool, error) {
+	out := &state.out
+	receiverPinAdmission := &state.receiverPinAdmission
+	createdRoutes := state.createdRoutes
+	if plan.ReplyResolution() != nil && plan.ReplyResolution().Role() == runtimepinrouting.ConnectReplyRoleResponse {
+		routes, subscribers, claim, failure, detail, err := r.materializeReplyResponse(ctx, evt, plan, values, replyRecord)
+		if err != nil {
+			return false, err
+		}
+		if !failure.Empty() {
+			if err := r.appendBlockedPlanEvaluation(out, plan, nil); err != nil {
+				return false, err
+			}
+			out.Failure = failure
+			for key, value := range detail {
+				out.ExtraDetail[key] = value
+			}
+			return true, nil
+		}
+		targets := make([]events.RouteIdentity, 0, len(routes))
+		for _, route := range routes {
+			targets = append(targets, route.Target)
+		}
+		if err := r.appendMaterializedPlanEvaluation(ctx, evt.RunID(), out, plan, targets); err != nil {
+			return false, err
+		}
+		routes, err = stampConnectExecutionClaims(plan, routes)
+		if err != nil {
+			return false, err
+		}
+		if err := receiverPinAdmission.Admit(plan, routes); err != nil {
+			return false, err
+		}
+		if pins, collision := connectReceiverPinCollisionDetail(*receiverPinAdmission); collision {
+			out.Failure = connectRoutePlanTargetFailure(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
+			out.ExtraDetail["connect_route_plan_failure"] = runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code()
+			out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = pins
+			return true, nil
+		}
+		state.replyContextConsumed = true
+		if claim != nil {
+			out.ReplyClaims = append(out.ReplyClaims, *claim)
+		}
+		receiverEvent := plan.ReceiverLocalEvent()
+		intents, err := routePlanDeliveryIntentsFromConnectRoutes(evt.RunID(), routes, routeIntentProducerConnectRoutePlan, receiverEvent)
+		if err != nil {
+			return false, err
+		}
+		liveRecipients, err := connectRoutePlanLiveRecipients(evt.RunID(), routes)
+		if err != nil {
+			return false, err
+		}
+		out.DeliveryIntents = append(out.DeliveryIntents, intents...)
+		out.LiveRecipients = append(out.LiveRecipients, liveRecipients...)
+		out.RoutedRecipients = append(out.RoutedRecipients, subscribers...)
+		return false, nil
+	}
+	materialized, decision, err := r.materializeConnectRoutePlan(ctx, evt, plan, values)
+	if err != nil {
+		return false, err
+	}
+	if !materialized.Failure.Empty() {
+		if err := r.appendBlockedPlanEvaluation(out, plan, connectMaterializedTargets(materialized)); err != nil {
+			return false, err
+		}
+		out.Failure = connectRoutePlanTargetFailure(materialized.Failure)
+		out.ExtraDetail["connect_route_plan_failure"] = materialized.Failure.Code()
+		out.ExtraDetail["connect_route_plan_source_event"] = plan.SourceEndpoint().Readback().ResolvedEvent
+		out.ExtraDetail["connect_route_plan_receiver_event"] = plan.ReceiverEndpoint().Readback().ResolvedEvent
+		for key, value := range connectRoutePlanFailureDetail(plan, materialized.Failure, values) {
+			out.ExtraDetail[key] = value
+		}
+		if decision.unavailableReceiverError != nil {
+			out.unavailableReceiverError = decision.unavailableReceiverError
+			out.ActivationPlans, out.ReplyCreations, out.ReplyClaims = nil, nil, nil
+		}
+		return true, nil
+	}
+	if target := explicitRootPublicationTarget(evt); !target.Empty() {
+		var selected bool
+		materialized, selected = materialized.SelectReceiverTarget(target)
+		if !selected {
+			return false, nil
+		}
+	}
+	if !decision.Empty() {
+		out.ExtraDetail["connect_route_plan_template_instance_lifecycle"] = decision.Detail()
+	}
+	if decision.Activation != nil {
+		out.ActivationPlans = append(out.ActivationPlans, *decision.Activation)
+	}
+	if decision.Activation != nil {
+		if err := r.installFlowConstructionPreview(ctx, evt.RunID(), *decision.Activation); err != nil {
+			return false, err
+		}
+	}
+	if !decision.Empty() {
+		if err := selectConnectionConstruction(ctx, decision.identity); err != nil {
+			return false, err
+		}
+	}
+	if decision.Activation != nil {
+		if route := decision.Route(); route.Valid() {
+			createdRoutes[route] = struct{}{}
+		}
+	}
+	_, routeCreatedInPlan := createdRoutes[decision.Route()]
+	routes, liveRoutes, subscribers, evaluation, err := r.deliveryRoutesForMaterialization(ctx, evt.RunID(), plan, materialized, decision, routeCreatedInPlan)
+	if err != nil {
+		return false, err
+	}
+	if err := mergeConnectEvaluation(&out.Evaluation, evaluation); err != nil {
+		return false, err
+	}
+	if plan.ReplyResolution() != nil && plan.ReplyResolution().Role() == runtimepinrouting.ConnectReplyRoleRequest {
+		var creation *runtimereplycontext.Record
+		routes, creation, err = r.materializeReplyRequest(ctx, evt, plan, routes, values)
+		if err != nil {
+			return false, err
+		}
+		if creation != nil {
+			out.ReplyCreations = append(out.ReplyCreations, *creation)
+		}
+	}
+	routes, err = stampConnectExecutionClaims(plan, routes)
+	if err != nil {
+		return false, err
+	}
+	liveRoutes, err = stampConnectExecutionClaims(plan, liveRoutes)
+	if err != nil {
+		return false, err
+	}
+	if len(routes) == 0 {
+		out.ExtraDetail["connect_route_plan_source_event"] = plan.SourceEndpoint().Readback().ResolvedEvent
+		out.ExtraDetail["connect_route_plan_receiver_event"] = plan.ReceiverEndpoint().Readback().ResolvedEvent
+		return false, nil
+	}
+	if err := receiverPinAdmission.Admit(plan, routes); err != nil {
+		return false, err
+	}
+	if pins, collision := connectReceiverPinCollisionDetail(*receiverPinAdmission); collision {
+		out.Failure = connectRoutePlanTargetFailure(runtimepinrouting.ConnectFailureDeliveryTopologyInvalid)
+		out.ExtraDetail["connect_route_plan_failure"] = runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code()
+		out.ExtraDetail["connect_route_plan_receiver_pin_collision"] = pins
+		return true, nil
+	}
+	intents, err := connectRoutePlanDeliveryIntents(evt.RunID(), plan, routes, liveRoutes, routeCreatedInPlan, r.routeTable.staticAgentDeclarationPlans())
+	if err != nil {
+		return false, err
+	}
+	out.DeliveryIntents = append(out.DeliveryIntents, intents...)
+	liveRecipients, err := connectRoutePlanLiveRecipients(evt.RunID(), liveRoutes)
+	if err != nil {
+		return false, err
+	}
+	out.LiveRecipients = append(out.LiveRecipients, liveRecipients...)
+	out.RoutedRecipients = append(out.RoutedRecipients, subscribers...)
+	return false, nil
 }
 
 func stampConnectExecutionClaims(plan runtimepinrouting.ConnectRoutePlan, routes []runtimepinrouting.ConnectDeliveryRoute) ([]runtimepinrouting.ConnectDeliveryRoute, error) {
