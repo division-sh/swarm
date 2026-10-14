@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 
@@ -55,14 +56,17 @@ func validateConfigSource(value yamlsource.Value, shape reflect.Type, owner stri
 }
 
 func validateConfigValue(value yamlsource.Value, shape reflect.Type, owner string) error {
+	if value.Presence() == yamlsource.PresenceMissing {
+		return nil
+	}
 	for shape.Kind() == reflect.Pointer {
 		shape = shape.Elem()
 	}
+	if err := validateConfigContainerShape(value, shape, owner); err != nil {
+		return err
+	}
 	switch shape.Kind() {
 	case reflect.Struct:
-		if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
-			return nil // Scalar, null and wrong-shape semantics remain with typed projection.
-		}
 		declared := map[string]reflect.Type{}
 		add := func(model reflect.Type) {
 			for i := 0; i < model.NumField(); i++ {
@@ -125,4 +129,31 @@ func validateConfigValue(value yamlsource.Value, shape reflect.Type, owner strin
 		}
 	}
 	return nil
+}
+
+func validateConfigContainerShape(value yamlsource.Value, shape reflect.Type, owner string) error {
+	expected := ""
+	switch shape.Kind() {
+	case reflect.Struct, reflect.Map:
+		if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
+			expected = "mapping"
+		}
+	case reflect.Slice:
+		if value.Presence() != yamlsource.PresenceSequence && value.Presence() != yamlsource.PresenceEmptySequence {
+			expected = "sequence"
+		}
+	}
+	if expected == "" {
+		return nil
+	}
+	diagnostic := runtimecontracts.NewExpectedShapeDiagnostic(
+		"config.source_shape", owner,
+		fmt.Sprintf("%s must be a YAML %s, got %s", owner, expected, value.Presence()),
+		"use the declared container shape or omit the key to keep its default; null is not a reset", nil,
+	)
+	location := value.IntroductionLocation()
+	diagnostic.Location.File = location.File
+	diagnostic.Location.Line = location.Line
+	diagnostic.Location.Column = location.Column
+	return diagnostic
 }
