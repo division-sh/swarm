@@ -58,6 +58,12 @@ func TestHistoricalDeliveryProjectionCoversEveryRouteField(t *testing.T) {
 	if strings.Contains(spec.query, "claim_token") {
 		t.Error("historical projection must not copy a live worker claim token")
 	}
+	if strings.Contains(spec.query, "d.updated_at") {
+		t.Error("historical projection must not read the physical delivery update clock")
+	}
+	if _, exists := projected["updated_at"]; exists {
+		t.Error("historical delivery fact contains the physical update clock")
+	}
 }
 
 func TestHistoricalDeliveryProjectionExcludesLeaseExpiry(t *testing.T) {
