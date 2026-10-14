@@ -49,6 +49,7 @@ func nativeSharedCoordinatorSource(t *testing.T, source string) string {
 }
 
 func TestNativeSharedCoordinatorRemovesOnlyUnusedAuthorityAcrossEveryCaller(t *testing.T) {
+	packet := loadReviewedSuccessors2617(t)
 	var rows []recipe
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
@@ -65,10 +66,10 @@ func TestNativeSharedCoordinatorRemovesOnlyUnusedAuthorityAcrossEveryCaller(t *t
 		got, afterErr := canonicalFunction(row.After)
 		body := selectedCausalObservationBody(t, row.File, row.Function)
 		actual, sourceErr := canonicalFunction(body)
-		currentBody, successorErr := r52SharedCoordinatorCurrentBody(current, body)
+		currentBody, successorErr := reviewedSharedCoordinatorCurrentBody2617(current, body, packet)
 		currentAfter, currentErr := canonicalFunction(currentBody)
 		if err != nil || afterErr != nil || sourceErr != nil || successorErr != nil || currentErr != nil || want != got || actual != currentAfter {
-			t.Fatalf("%s changed outside unused authority propagation", row.Function)
+			t.Fatalf("%s changed outside unused authority propagation: %v", row.Function, successorErr)
 		}
 		if current.Successor == "" {
 			unlisted := current

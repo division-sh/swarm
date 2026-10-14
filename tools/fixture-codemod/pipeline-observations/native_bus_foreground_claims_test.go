@@ -38,9 +38,7 @@ func TestNativeBusForegroundClaimUsesOneCoordinatorAndPreservesEverySiblingAsser
 		if before != normalizedForegroundClaimJoin(row.After) {
 			t.Fatal("foreground claim, acknowledged return, sibling exclusion or settlement assertions changed")
 		}
-		actual, err := canonicalFunction(selectedCausalObservationBody(t, row.File, row.Function))
-		want, wantErr := canonicalFunction(row.After)
-		if err != nil || wantErr != nil || actual != want {
+		if !residualComparatorCurrent2617(t, row, selectedCausalObservationBody(t, row.File, row.Function)) {
 			t.Fatal("foreground claim consumer diverged from finite migration")
 		}
 	}

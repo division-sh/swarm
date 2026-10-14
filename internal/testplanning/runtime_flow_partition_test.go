@@ -10,7 +10,10 @@ import (
 )
 
 const originalRuntime02Selection = `^Test([D-E].*|F($|[^ao].*|a($|[^n].*|n($|[^O].*|O($|[^u].*|u($|[^t].*))))|o($|[^r].*|r($|[^k].*|k($|[^G].*)))))$`
-const originalRuntime02RequiredEvidence = "6abc0e274dae375592588471f77b26a9293470bb13489491e27429e0b9c4b81b"
+
+// R7 replaces route acquisition with exact activation verification, retains
+// native parent/receipt corruption cuts, and requires the real cleanup sinks.
+const runtime02RequiredEvidence = "a4efe0a79d06cb8f0ebaba69cfd16d5ba8c4931b361b322c5375018716a8dbfd"
 
 func TestRuntime02RequiredEvidenceRemainsExact(t *testing.T) {
 	if err := validateRuntime02RequiredEvidence(loadPersistenceDebtPolicy(t)); err != nil {
@@ -30,15 +33,15 @@ func validateRuntime02RequiredEvidence(policy Policy) error {
 			children[root] = cells
 		}
 	}
-	// This source-pinned digest preserves every original named backend/fault
-	// cell and its order without maintaining another execution inventory.
+	// Pin the approved evidence mapping and order while preserving complete-root
+	// ownership. Retired route resources are not executable proof obligations.
 	data, err := json.Marshal(children)
 	if err != nil {
 		return err
 	}
 	actual := fmt.Sprintf("%x", sha256.Sum256(data))
-	if actual != originalRuntime02RequiredEvidence {
-		return fmt.Errorf("original full-02 required evidence changed: %s", actual)
+	if actual != runtime02RequiredEvidence {
+		return fmt.Errorf("approved full-02 required evidence changed: %s", actual)
 	}
 	return nil
 }
@@ -80,7 +83,7 @@ func TestRuntimeFlowSplitRejectsCoverageAndEvidenceDrift(t *testing.T) {
 			}
 		})
 	}
-	for _, change := range []string{"omit_backend", "extra_backend", "duplicate_owner"} {
+	for _, change := range []string{"omit_backend", "extra_backend", "duplicate_owner", "restore_route_cleanup", "omit_agent_fence"} {
 		t.Run(change, func(t *testing.T) {
 			policy := loadPersistenceDebtPolicy(t)
 			unit := policy.Units["store-runtime-flow-lifecycle"]
@@ -92,7 +95,20 @@ func TestRuntimeFlowSplitRejectsCoverageAndEvidenceDrift(t *testing.T) {
 				unit.RequiredChildren[root] = append(unit.RequiredChildren[root], "postgres/extra")
 			case "duplicate_owner":
 				policy.Units["store-runtime-full-02"].RequiredChildren[root] = unit.RequiredChildren[root]
+			case "restore_route_cleanup":
+				root = "TestFlowAttachmentCleanupRetainsExactPredecessorBothStores"
+				unit.RequiredChildren[root] = append(unit.RequiredChildren[root], "sqlite/route/fail_once")
+			case "omit_agent_fence":
+				root = "TestFlowAttachmentCleanupRetainsExactPredecessorBothStores"
+				children := append([]string(nil), unit.RequiredChildren[root]...)
+				unit.RequiredChildren[root] = nil
+				for _, child := range children {
+					if child != "postgres/agent_fence/fail_once" {
+						unit.RequiredChildren[root] = append(unit.RequiredChildren[root], child)
+					}
+				}
 			}
+			policy.Units["store-runtime-flow-lifecycle"] = unit
 			if validateRuntime02RequiredEvidence(policy) == nil {
 				t.Fatal("changed backend/fault execution obligations were accepted")
 			}

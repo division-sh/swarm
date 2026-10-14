@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"strings"
@@ -66,7 +67,11 @@ func TestNativeNestedAPIConstructionClosesEveryReviewedLocalPool(t *testing.T) {
 		}
 		matched++
 		actual := selectedCausalObservationBody(t, row.File, row.Function)
-		want, err := canonicalFunction(row.After)
+		expectedBody, err := nativeNestedAPIConstructionExpectedBody(row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := canonicalFunction(expectedBody)
 		got, actualErr := canonicalFunction(actual)
 		if err != nil || actualErr != nil || want != got || strings.Contains(actual, "testutil.StartPostgres") || strings.Contains(actual, "AdmitPostgresRuntimeStore") || strings.Count(actual, "storetest.StartPostgresRuntimeStore(t)") != expected {
 			t.Fatalf("nested API construction regained raw/foreign setup: %s", row.Function)
@@ -81,5 +86,67 @@ func TestNativeNestedAPIConstructionClosesEveryReviewedLocalPool(t *testing.T) {
 	}
 	if matched != len(nativeNestedAPIConstructionRoots) {
 		t.Fatalf("nested API construction recipes=%d,want%d", matched, len(nativeNestedAPIConstructionRoots))
+	}
+}
+
+func nativeNestedAPIConstructionExpectedBody(row recipe) (string, error) {
+	if row.File != "internal/apiv1/operator_event_replay_test.go" || row.Function != "TestOperatorEventReplayQueuesWhenDispatchGated" {
+		return row.After, nil
+	}
+	// Only this caller's body at reviewed checkpoint a394ade4e is a successor.
+	if row.Family != "native-api-delivery-receipt-count-consumer" || row.Removed || row.Mechanical != nil ||
+		!historicalCurrentSourcePinned(row.Before, "a9c4ff26b4ebe249af37de019ead6383e3e1ba250427bf4f3e2ed3ef71a1af49") ||
+		!historicalCurrentSourcePinned(row.After, "c2540920cad3ff24caa1ab179499c356360814a6de1eaaba8579107105d236d3") ||
+		!historicalCurrentSourcePinned(row.Successor, "759bf4f0146d8b290afeca1108b24ae8b8ad25aba9d7d5b91f1e6b91ffda08d3") {
+		return "", fmt.Errorf("gated replay changed its historical snapshots or exact reviewed successor")
+	}
+	return row.Successor, nil
+}
+
+func TestNativeNestedAPIConstructionRejectsUnreviewedGatedReplaySuccessors(t *testing.T) {
+	var rows []recipe
+	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
+		t.Fatal(err)
+	}
+	var selected *recipe
+	for i := range rows {
+		if rows[i].File == "internal/apiv1/operator_event_replay_test.go" && rows[i].Function == "TestOperatorEventReplayQueuesWhenDispatchGated" {
+			if selected != nil {
+				t.Fatal("ambiguous gated replay recipe")
+			}
+			selected = &rows[i]
+		}
+	}
+	if selected == nil {
+		t.Fatal("missing gated replay recipe")
+	}
+	if _, err := nativeNestedAPIConstructionExpectedBody(*selected); err != nil {
+		t.Fatal(err)
+	}
+	for _, cut := range []string{"opts := tc.opts", "scan.requested", "assertNoReplayEvent(t, ch)", "got != 1", "got != 0", "storetest.StartPostgresRuntimeStore(t)"} {
+		t.Run(cut, func(t *testing.T) {
+			mutant := *selected
+			mutant.Successor = strings.Replace(mutant.Successor, cut, "unreviewedCut", 1)
+			if mutant.Successor == selected.Successor {
+				t.Fatal("mutation missed its intended cut")
+			}
+			if _, err := nativeNestedAPIConstructionExpectedBody(mutant); err == nil {
+				t.Fatal("unreviewed gated replay body admitted")
+			}
+		})
+	}
+	for _, change := range []string{"foreign_file", "foreign_function"} {
+		t.Run(change, func(t *testing.T) {
+			mutant := *selected
+			if change == "foreign_file" {
+				mutant.File = "foreign.go"
+			} else {
+				mutant.Function = "TestForeignCaller"
+			}
+			body, err := nativeNestedAPIConstructionExpectedBody(mutant)
+			if err != nil || body != mutant.After {
+				t.Fatal("gated replay successor escaped its exact file/function")
+			}
+		})
 	}
 }
