@@ -2730,6 +2730,38 @@ type targetFailurePublicationStore interface {
 	LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
 }
 
+type constructedTargetReleaseFault struct {
+	runtimepipelineobligation.Store
+	fault    error
+	cancel   context.CancelFunc
+	mu       sync.Mutex
+	acquired []runtimepipelineobligation.Claim
+	released []runtimepipelineobligation.Claim
+	errors   []error
+}
+
+func (s *constructedTargetReleaseFault) ClaimPublication(ctx context.Context, eventID string) (runtimepipelineobligation.Claim, error) {
+	claim, err := s.Store.ClaimPublication(ctx, eventID)
+	if err == nil {
+		s.mu.Lock()
+		s.acquired = append(s.acquired, claim)
+		s.mu.Unlock()
+	}
+	return claim, err
+}
+
+func (s *constructedTargetReleaseFault) Release(ctx context.Context, claim runtimepipelineobligation.Claim) error {
+	err := s.Store.Release(ctx, claim)
+	s.mu.Lock()
+	s.released = append(s.released, claim)
+	s.errors = append(s.errors, err)
+	s.mu.Unlock()
+	if s.cancel != nil {
+		s.cancel()
+	}
+	return errors.Join(err, s.fault)
+}
+
 func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 	t.Helper()
 	repo := canonicalrouting.RepoRoot(t)
@@ -2741,10 +2773,13 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
 	var selected targetFailurePublicationStore
+	var reopen func() targetFailurePublicationStore
 	if backend == "postgres" {
-		selected = storetest.StartPostgresRuntimeStore(t)
+		primary, open := storetest.StartPostgresRuntimeStoreWithReopen(t)
+		selected, reopen = primary, func() targetFailurePublicationStore { return open() }
 	} else {
-		selected = storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+		primary, open := storetest.StartSQLiteRuntimeStoreWithReopen(t, ctx)
+		selected, reopen = primary, func() targetFailurePublicationStore { return open() }
 	}
 	at := time.Now().UTC()
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: at})
@@ -2846,6 +2881,19 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 		if err != nil || len(exactDiagnostic.DeadLetters) != 1 || !reflect.DeepEqual(view.DeadLetters, exactDiagnostic.DeadLetters) {
 			t.Fatalf("exact replay changed terminal diagnostic: before=%+v after=%+v err=%v", view.DeadLetters, exactDiagnostic.DeadLetters, err)
 		}
+		freshStore := reopen()
+		freshBus, err := newScopedTestEventBus(freshStore, runtimebus.EventBusOptions{ContractBundle: source})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := freshBus.Publish(ctx, evt); err != nil {
+			t.Fatalf("fresh owner refused exact terminal diagnostic replay: %v", err)
+		}
+		freshEvidence := storetest.ReadSemanticEventFixtureEvidence(t, ctx, freshStore, runID, evt.ID())
+		freshDiagnostic, err := freshStore.LoadOperatorEvent(ctx, evt.ID())
+		if err != nil || !reflect.DeepEqual(evidence, freshEvidence) || !reflect.DeepEqual(view.DeadLetters, freshDiagnostic.DeadLetters) || len(freshDiagnostic.Deliveries) != 0 {
+			t.Fatalf("fresh replay changed exact diagnostic or executable route: evidence=%+v diagnostic=%+v err=%v", freshEvidence, freshDiagnostic, err)
+		}
 		foreign := target
 		foreign.EntityID = uuid.NewString()
 		changed, err := events.ResolveEnvelope(evt, events.EnvelopeForTargetRoute(evt.NormalizedEnvelope(), foreign))
@@ -2855,6 +2903,9 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 		if err := eb.Publish(ctx, changed); err == nil {
 			t.Fatal("terminal replay accepted a different target")
 		}
+		if err := freshBus.Publish(ctx, changed); err == nil {
+			t.Fatal("fresh terminal replay accepted a different target")
+		}
 		if rejected := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, evt.ID()); !reflect.DeepEqual(evidence, rejected) {
 			t.Fatalf("foreign terminal replay mutated evidence: before=%+v after=%+v", evidence, rejected)
 		}
@@ -2863,6 +2914,83 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 			t.Fatalf("hostile replay changed terminal diagnostic: before=%+v after=%+v err=%v", view.DeadLetters, hostileDiagnostic.DeadLetters, err)
 		}
 	})
+	for _, mode := range []string{"clean-release", "store-error", "cancellation", "store-error-and-cancellation"} {
+		t.Run("ordinary_terminal_refusal_preserves_"+mode, func(t *testing.T) {
+			requestCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+			storeFailure := errors.New("independent native claim release failure")
+			owner := &constructedTargetReleaseFault{Store: selected.PipelineObligations()}
+			if strings.Contains(mode, "store-error") {
+				owner.fault = storeFailure
+			}
+			if strings.Contains(mode, "cancellation") {
+				owner.fault = errors.Join(owner.fault, context.Canceled)
+				owner.cancel = cancel
+			}
+			ordinary, err := newScopedTestEventBus(selected, runtimebus.EventBusOptions{ContractBundle: source, PipelineObligations: owner})
+			if err != nil {
+				t.Fatal(err)
+			}
+			evt := publication(events.RouteIdentity{})
+			if !evt.TargetRoute().Empty() {
+				t.Fatalf("ordinary publication borrowed an explicit target: %+v", evt.TargetRoute())
+			}
+			lookup, err := runtimepipeline.NewFlowInstanceLookupScope(source, testSourceArtifactFact(source), runID, []string{".", "consumer"}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, evt.ID())
+			construction, err := selected.ListFlowInstances(ctx, lookup)
+			if err != nil || len(construction) != 2 {
+				t.Fatalf("original native construction: count=%d err=%v", len(construction), err)
+			}
+			replies, err := storetest.ReadReplyContextStorageCounts(ctx, selected, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			diagnostics, err := storetest.ObserveH1DeadLetters(ctx, selected, runID)
+			if err != nil || len(diagnostics) != 1 {
+				t.Fatalf("original authorized diagnostic: %+v err=%v", diagnostics, err)
+			}
+			err = ordinary.Publish(requestCtx, evt)
+			var refusal *runtimepipeline.TerminatedReceiverError
+			if !errors.As(err, &refusal) || refusal.FlowID != "consumer" {
+				t.Fatalf("ordinary publication lost its original typed terminated refusal: %v", err)
+			}
+			if strings.Contains(mode, "store-error") && !errors.Is(err, storeFailure) {
+				t.Fatalf("ordinary refusal lost independent store cause: %v", err)
+			}
+			if strings.Contains(mode, "cancellation") && (!errors.Is(err, context.Canceled) || !errors.Is(requestCtx.Err(), context.Canceled)) {
+				t.Fatalf("ordinary refusal lost cancellation: publication=%v context=%v", err, requestCtx.Err())
+			}
+			owner.mu.Lock()
+			acquired, released, releaseErrors := slices.Clone(owner.acquired), slices.Clone(owner.released), slices.Clone(owner.errors)
+			owner.mu.Unlock()
+			if len(acquired) != 1 || len(released) != 1 || acquired[0] != released[0] || acquired[0].EventID() != evt.ID() || len(releaseErrors) != 1 || releaseErrors[0] != nil {
+				t.Fatalf("native claim must be acquired/released exactly once before fault: acquired=%+v released=%+v errors=%v", acquired, released, releaseErrors)
+			}
+			if after := storetest.ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, evt.ID()); !reflect.DeepEqual(before, after) {
+				t.Fatalf("ordinary refusal changed event/delivery/settlement evidence: before=%+v after=%+v", before, after)
+			}
+			if after, err := selected.ListFlowInstances(ctx, lookup); err != nil || !reflect.DeepEqual(construction, after) {
+				t.Fatalf("ordinary refusal changed native construction: before=%+v after=%+v err=%v", construction, after, err)
+			}
+			if after, err := storetest.ReadReplyContextStorageCounts(ctx, selected, runID); err != nil || !reflect.DeepEqual(replies, after) {
+				t.Fatalf("ordinary refusal changed reply evidence: before=%+v after=%+v err=%v", replies, after, err)
+			}
+			if after, err := storetest.ObserveH1DeadLetters(ctx, selected, runID); err != nil || !reflect.DeepEqual(diagnostics, after) {
+				t.Fatalf("ordinary refusal changed authorized diagnostic: before=%+v after=%+v err=%v", diagnostics, after, err)
+			}
+			claim, err := selected.PipelineObligations().ClaimPublication(ctx, evt.ID())
+			if err != nil {
+				t.Fatalf("native publication claim stayed held after refusal: %v", err)
+			}
+			if err := selected.PipelineObligations().Release(ctx, claim); err != nil {
+				t.Fatalf("release independent administrative verification claim: %v", err)
+			}
+			t.Logf("%s: typed consumer refusal retained; all injected causes retained; one exact native release; event/delivery/construction/reply/diagnostic unchanged; claim reacquired and released independently", mode)
+		})
+	}
 	select {
 	case got := <-decoy:
 		t.Fatalf("unrelated recipient received targeted publication: %+v", got)
