@@ -1062,6 +1062,18 @@ seam_families:
       source/run-bounded native observation owner and preserves cancellation,
       independent store failures and joined failures. This test adds no direct
       route producer, target permission, mutable membership or compatibility.
+  - id: ordinary_planning_pool_bound_direct_proof
+    layer: route_plan_consumers
+    classification: valid_consumer
+    paths:
+      - internal/store/internal/runtimepersistence/ordinary_instance_planning_pool_test.go
+    search_dimensions: [direct_delivery_path]
+    notes: >
+      Both-store real PublishDirect preparation reaches the canonical index
+      owner with one connection available beyond its existing publication
+      lease. The test stops at an exact effect-free commit refusal, preserving
+      the selected agent/receiver command and full durable snapshot. No direct
+      routing authority, SQL port, provider launch or mutation is introduced.
   - id: materialized_target_index_scope_proof
     layer: route_plan_consumers
     classification: valid_consumer

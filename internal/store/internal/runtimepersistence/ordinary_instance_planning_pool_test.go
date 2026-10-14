@@ -185,6 +185,10 @@ func TestOrdinaryPublicationPlanningPoolBoundariesBothStores(t *testing.T) {
 			}
 			event := eventtest.ExistingRunRootIngressWithRoutingSource(uuid.NewString(), events.EventType(source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, "account.notify.requested")), notifyallchildren.OwnerFlowID, "", []byte(`{"account_id":"existing","command":"inspect"}`), 0, correlation.RunIDFromContext(f.ctx), events.EventEnvelope{}, eventtest.StaticFlowRoutingSource(producer.TemplateID, producer.InstancePath, producer.EntityID), time.Now().UTC())
 			event = eventtest.TargetRouted(event, events.RouteIdentity{FlowID: constructed.Identity.TemplateID, FlowInstance: constructed.Identity.InstancePath, EntityID: agents[0].EntityID})
+			beforeDirect, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+			if err != nil {
+				t.Fatal(err)
+			}
 			ctx, cancel := context.WithTimeout(f.ctx, 5*time.Second)
 			defer cancel()
 			if err := direct.PublishDirect(ctx, event, []string{agents[0].Identity.AgentID()}); !errors.Is(err, refusal) {
@@ -199,6 +203,9 @@ func TestOrdinaryPublicationPlanningPoolBoundariesBothStores(t *testing.T) {
 			routes := boundedStore.command.Commit.DeliveryRoutes
 			if len(routes) != 1 || routes[0].AgentIdentity != agents[0].Identity || routes[0].Target.Route().FlowInstance != constructed.Identity.InstancePath {
 				t.Fatalf("direct planning changed the exact receiver command: %+v", routes)
+			}
+			if afterDirect, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(beforeDirect, afterDirect) {
+				t.Fatalf("effect-free direct refusal changed durable evidence or retained a claim: %v", err)
 			}
 		})
 	}

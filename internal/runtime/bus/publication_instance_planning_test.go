@@ -33,15 +33,16 @@ func TestPublicationPlanningReadsDurableAgentsBeforeIndexCut(t *testing.T) {
 	event := admitRunProposalEvent(t, false).Event()
 	reader := &publicationPlanningBoundaryReader{}
 	reads := 0
+	loadAgents := func(ctx context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+		reads++
+		if reader.inside {
+			return nil, false, errors.New("durable agents require a second pool connection")
+		}
+		return nil, true, ctx.Err()
+	}
 	planner := deliveryPlanner{
-		connectPlanner: connectRoutePlanResolver{lifecycle: connectInstanceSelector{index: reader}},
-		recipientPolicy: deliveryRecipientPolicy{loadActiveAgentDescriptors: func(ctx context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
-			reads++
-			if reader.inside {
-				return nil, false, errors.New("durable agents require a second pool connection")
-			}
-			return nil, true, ctx.Err()
-		}},
+		connectPlanner:  connectRoutePlanResolver{lifecycle: connectInstanceSelector{index: reader}, loadAgents: loadAgents},
+		recipientPolicy: deliveryRecipientPolicy{loadActiveAgentDescriptors: loadAgents},
 	}
 	bus := &EventBus{semanticSource: source}
 	if err := bus.withPublicationInstancePlanning(constructionIndexContext(t, source), event, planner, func(ctx context.Context, bounded deliveryPlanner) error {
@@ -60,6 +61,15 @@ func TestPublicationPlanningReadsDurableAgentsBeforeIndexCut(t *testing.T) {
 	}); err != nil || reads != 1 || reader.passes != 1 {
 		t.Fatalf("agent reads crossed the index cut: reads=%d passes=%d err=%v", reads, reader.passes, err)
 	}
+	planner.connectPlanner.loadAgents = nil
+	if err := bus.withPublicationInstancePlanning(constructionIndexContext(t, source), event, planner, func(_ context.Context, bounded deliveryPlanner) error {
+		if bounded.connectPlanner.loadAgents != nil {
+			t.Fatal("agent projection supplied an absent connect-agent owner")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	fault := errors.New("durable active-agent refusal")
 	planner.recipientPolicy.loadActiveAgentDescriptors = func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 		return nil, true, fault
@@ -67,7 +77,7 @@ func TestPublicationPlanningReadsDurableAgentsBeforeIndexCut(t *testing.T) {
 	if err := bus.withPublicationInstancePlanning(constructionIndexContext(t, source), event, planner, func(context.Context, deliveryPlanner) error {
 		t.Fatal("failed active-agent read admitted planning")
 		return nil
-	}); !errors.Is(err, fault) || reader.passes != 1 {
+	}); !errors.Is(err, fault) || reader.passes != 2 {
 		t.Fatalf("independent active-agent refusal was suppressed: passes=%d err=%v", reader.passes, err)
 	}
 }

@@ -46,7 +46,9 @@ func (eb *EventBus) withPublicationInstancePlanning(ctx context.Context, event e
 			return agents, available, nil
 		}
 		planner.recipientPolicy.loadActiveAgentDescriptors = loadAgents
-		planner.connectPlanner.loadAgents = loadAgents
+		if planner.connectPlanner.loadAgents != nil {
+			planner.connectPlanner.loadAgents = loadAgents
+		}
 	}
 	return owner.WithFlowInstancePlanningSnapshot(ctx, scope, func(ctx context.Context, reader pipeline.FlowInstanceIndexReader) error {
 		bounded := planner
