@@ -3600,10 +3600,16 @@
     "body_sha256": "3fd95d54c67216c35209a1558bb6439e86f8a0b94d0f545a03e92f1781e12dab"
   },
   {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::loadSelectedRecoveryExecutionTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "853985b6f32de2d81c97c1f4b37c99151cabdb6c114467de69c975440278c587"
+  },
+  {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::loadSelectedRecoveryRecordTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "e025cc5b1191678c3f170c14e24081bffee67741d970c9e3a44164e546d1e98d"
+    "body_sha256": "5080326d7c576c92babe54766b606ce0dace182a5c2bcae63f8d479bab176b1e"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::planSelectedRecoveryTx",
@@ -3664,6 +3670,12 @@
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
     "body_sha256": "6081fed1a66d2a3ff8c12d87895aa9d00d5d75e53fbb9dc40096505634f5c760"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedRecoveryExecutionQuery",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "1df05b85cd9b687d0e90733662e0e99aa68ca27f36f7068cd8d9bae4350b10c3"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::settleInterruptedSelectedFiniteFeedOperationTx",
