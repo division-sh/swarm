@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -72,11 +71,7 @@ func TestIssue2655ServedDeploymentKeepsAdmittedRevisionBothStores(t *testing.T) 
 			t.Cleanup(provider.Close)
 			probe := &admittedRevisionForkFixture{SelectedContractForkLifecycle: f.selected.(runforkexecution.SelectedContractForkLifecycle)}
 			probe.advance = func(ctx context.Context, runID string) {
-				dialect := authoractivityfixture.DialectSQLite
-				if backend == "postgres" {
-					dialect = authoractivityfixture.DialectPostgres
-				}
-				storetest.InsertExistingRunRootEventRecord(t, ctx, f.db, dialect, postCutEvent, runID, "task.assigned", eventtest.Producer(events.EventProducerExternal, "admitted-revision-proof"), []byte(`{}`), events.EventEnvelope{}, time.Now().UTC())
+				storetest.InsertRevisionedExistingRunRootEventRecord(t, ctx, f.selected, postCutEvent, runID, "task.assigned", eventtest.Producer(events.EventProducerExternal, "admitted-revision-proof"), []byte(`{}`), events.EventEnvelope{}, time.Now().UTC())
 			}
 			owner := selectedExternalOwnerWithCut(t, f, &selectedExternalEffectCut{}, probe)
 			forkServer := selectedExternalForkServer(t, f, owner, provider.URL)

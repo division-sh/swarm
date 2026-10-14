@@ -22,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -65,12 +64,8 @@ func TestIssue2655EventSelectorsKeepPreparedRevisionBothStores(t *testing.T) {
 				if err != nil || fixed.ForkPoint != point {
 					t.Fatalf("prepared event is not its exact committed point: fixed=%+v expected=%+v err=%v", fixed.ForkPoint, point, err)
 				}
-				dialect := authoractivityfixture.DialectSQLite
-				if backend == "postgres" {
-					dialect = authoractivityfixture.DialectPostgres
-				}
 				laterEvent := uuid.NewString()
-				storetest.InsertExistingRunRootEventRecord(t, ctx, f.db, dialect, laterEvent, sourceRun, selectedDeploymentEvent, eventtest.Producer(events.EventProducerExternal, "later-event-proof"), []byte(`{"account_id":"later-event","document":{}}`), events.EventEnvelope{}, time.Now().UTC())
+				storetest.InsertRevisionedExistingRunRootEventRecord(t, ctx, f.selected, laterEvent, sourceRun, selectedDeploymentEvent, eventtest.Producer(events.EventProducerExternal, "later-event-proof"), []byte(`{"account_id":"later-event","document":{}}`), events.EventEnvelope{}, time.Now().UTC())
 				current, err := fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun})
 				if err != nil || current.ForkPoint.EventID != laterEvent || current.ForkPoint.Revision <= request.Preparation.ForkPoint.Revision {
 					t.Fatalf("source did not acquire a newer event point: current=%+v err=%v", current.ForkPoint, err)
@@ -121,14 +116,10 @@ func issue2655EventSource(t *testing.T, backend string) (*deploymentResourceFixt
 	if len(page.Events) != 1 {
 		t.Fatalf("initial source event count=%d want one", len(page.Events))
 	}
-	dialect := authoractivityfixture.DialectSQLite
-	if backend == "postgres" {
-		dialect = authoractivityfixture.DialectPostgres
-	}
 	// The latest cut must follow initial delivery settlement, not select the
 	// runtime log emitted while that node was still executing. Explicit cuts
 	// continue to use the original creating event returned below.
-	storetest.InsertExistingRunRootEventRecord(t, f.ctx, f.db, dialect, uuid.NewString(), sourceRun, selectedDeploymentEvent, eventtest.Producer(events.EventProducerExternal, "supported-at-cut-anchor"), []byte(`{"account_id":"at-cut-anchor","document":{}}`), events.EventEnvelope{}, time.Now().UTC())
+	storetest.InsertRevisionedExistingRunRootEventRecord(t, f.ctx, f.selected, uuid.NewString(), sourceRun, selectedDeploymentEvent, eventtest.Producer(events.EventProducerExternal, "supported-at-cut-anchor"), []byte(`{"account_id":"at-cut-anchor","document":{}}`), events.EventEnvelope{}, time.Now().UTC())
 	return f, sourceRun, page.Events[0].EventID
 }
 
@@ -199,12 +190,8 @@ func TestIssue2655EventOperationSelectorCorrespondenceBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				fork := f.selected.(runforkexecution.SelectedContractForkLifecycle)
-				dialect := authoractivityfixture.DialectSQLite
-				if backend == "postgres" {
-					dialect = authoractivityfixture.DialectPostgres
-				}
 				postCutEvent := uuid.NewString()
-				storetest.InsertExistingRunRootEventRecord(t, ctx, f.db, dialect, postCutEvent, sourceRun, selectedDeploymentEvent, eventtest.Producer(events.EventProducerExternal, "selector-post-cut"), []byte(`{"account_id":"selector-post-cut","document":{}}`), events.EventEnvelope{}, time.Now().UTC())
+				storetest.InsertRevisionedExistingRunRootEventRecord(t, ctx, f.selected, postCutEvent, sourceRun, selectedDeploymentEvent, eventtest.Producer(events.EventProducerExternal, "selector-post-cut"), []byte(`{"account_id":"selector-post-cut","document":{}}`), events.EventEnvelope{}, time.Now().UTC())
 				advanced, err := fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun})
 				if err != nil || advanced.ForkPoint.Revision <= request.Preparation.ForkPoint.Revision || advanced.ForkPoint.EventID != postCutEvent {
 					t.Fatalf("selector source did not advance canonically: point=%+v err=%v", advanced.ForkPoint, err)
