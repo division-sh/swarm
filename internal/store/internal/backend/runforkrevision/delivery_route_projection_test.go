@@ -76,3 +76,20 @@ func TestHistoricalDeliveryProjectionExcludesLeaseExpiry(t *testing.T) {
 		t.Error("historical delivery fact contains operational lease expiry")
 	}
 }
+
+func TestHistoricalDeliveryProjectionExcludesPhysicalHandoff(t *testing.T) {
+	spec, ok := canonicalProjectionSpec(FamilyEventDeliveries)
+	if !ok {
+		t.Fatal("missing delivery projection")
+	}
+	if strings.Contains(spec.query, "continuation_handoff_at") {
+		t.Error("historical delivery projection reads the physical handoff stamp")
+	}
+	values := make(map[string]any, len(spec.columns))
+	for _, column := range spec.columns {
+		values[column.name] = nil
+	}
+	if _, exists := spec.build(values)["continuation_handoff_at"]; exists {
+		t.Error("historical delivery fact contains an operational handoff stamp")
+	}
+}
