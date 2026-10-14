@@ -8,8 +8,6 @@ dual-dialect-node:
         - condition: payload.score >= 70
           advances_to: done
       rules:
-        - id: high_score
-          when: payload.score >= 70
-        - id: unmatched
-          else: true
+        - when: payload.score >= 70
+        - else: true
       advances_to: done
