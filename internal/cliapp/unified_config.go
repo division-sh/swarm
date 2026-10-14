@@ -503,31 +503,15 @@ func unifiedConfigProviderLimitRule(pathParts []string) (unifiedConfigKeyRule, b
 		// Provider profile ids are dynamic, but their policy leaves are finite.
 		return section, true
 	case 4:
-		if pathParts[3] == "models" {
-			return section, true
-		}
 		_, ok := unifiedConfigProviderLimitPolicyLeaves()[pathParts[3]]
 		return unifiedConfigKeyRule{}, ok
-	case 5:
-		if pathParts[3] == "models" {
-			// Model keys under a provider profile are dynamic.
-			return section, true
-		}
-	case 6:
-		if pathParts[3] == "models" {
-			_, ok := unifiedConfigProviderLimitPolicyLeaves()[pathParts[5]]
-			return unifiedConfigKeyRule{}, ok
-		}
 	}
 	return unifiedConfigKeyRule{}, false
 }
 
 func unifiedConfigProviderLimitPolicyLeaves() map[string]struct{} {
 	return map[string]struct{}{
-		"rate_limit":               {},
-		"rate_limit_max_wait":      {},
-		"max_concurrency":          {},
-		"max_concurrency_max_wait": {},
+		"max_concurrency": {},
 	}
 }
 
@@ -544,12 +528,9 @@ func unknownUnifiedConfigDiagnostic(path, file string, location yamlsource.Locat
 			allowed[fields[len(fields)-1]] = struct{}{}
 		}
 	}
-	if len(parent) >= 3 && parent[0] == "llm" && parent[1] == "provider_limits" {
+	if len(parent) == 3 && parent[0] == "llm" && parent[1] == "provider_limits" {
 		for field := range unifiedConfigProviderLimitPolicyLeaves() {
 			allowed[field] = struct{}{}
-		}
-		if len(parent) == 3 {
-			allowed["models"] = struct{}{}
 		}
 	}
 	if len(parent) == 3 && parent[0] == "channels" && parent[1] == "bindings" {

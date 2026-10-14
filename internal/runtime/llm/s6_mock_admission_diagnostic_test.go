@@ -2,6 +2,7 @@ package llm
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,7 +28,7 @@ func s6MockPolicyConfig(policy config.LLMProviderLimitPolicy) *config.Config {
 func TestS6MockConfiguredBucketDiagnostic(t *testing.T) {
 	profile := mustAdmissionProfile(t, llmselection.BackendMock)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
-	limit := config.LLMProviderLimitPolicy{MaxConcurrency: 1, MaxConcurrencyMaxWait: "0s"}
+	limit := config.LLMProviderLimitPolicy{MaxConcurrency: 1}
 	for _, tc := range []struct {
 		name, key string
 		policy    config.LLMProviderLimitPolicy
@@ -38,6 +39,12 @@ func TestS6MockConfiguredBucketDiagnostic(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := s6MockPolicyConfig(tc.policy)
+			if tc.policy.Models != nil {
+				if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), `field "models" is not supported`) {
+					t.Fatalf("retired model policy admitted: %v", err)
+				}
+				return
+			}
 			if err := cfg.Validate(); err != nil {
 				t.Fatalf("production mock config refused: %v", err)
 			}
@@ -88,9 +95,7 @@ func TestS6MockCapturedLiveModelBucketDiagnostic(t *testing.T) {
 	}
 	profile := mustAdmissionProfile(t, resolved.Actor.ResolvedLLMBackend)
 	model := llmselection.ResolvedModel{ModelAlias: resolved.Actor.Model, ConcreteModel: resolved.Actor.ResolvedModel}
-	cfg := s6MockPolicyConfig(config.LLMProviderLimitPolicy{Models: map[string]config.LLMProviderLimitPolicy{
-		"s6-configured-live-model": {MaxConcurrency: 1, MaxConcurrencyMaxWait: "0s"},
-	}})
+	cfg := s6MockPolicyConfig(config.LLMProviderLimitPolicy{MaxConcurrency: 1})
 	cfg.LLM.Backend, cfg.LLM.Models = live.ID, models
 	cfg.LLM.ClaudeCLI.Command, cfg.LLM.ClaudeCLI.OutputFormat = "claude", "json"
 	if err := cfg.Validate(); err != nil {
@@ -98,24 +103,24 @@ func TestS6MockCapturedLiveModelBucketDiagnostic(t *testing.T) {
 	}
 	registry := NewProviderAdmissionRegistry(cfg)
 	policy, found, err := registry.policy(profile, model)
-	if err != nil || !found || policy.ConcurrencyKey != "llm_provider:mock:mock:cli:s6-configured-live-model" {
+	if err != nil || !found || policy.ConcurrencyKey != "llm_provider:mock:mock:cli:*" {
 		t.Fatalf("captured mock/live model bucket: %+v found=%t err=%v", policy, found, err)
 	}
 	release, err := registry.Admit(unmanagedLLMTestContext(), profile, model)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, refused := registry.Admit(unmanagedLLMTestContext(), profile, model)
+	_, refused := registry.Admit(unmanagedLLMTestContext(), profile, mustAdmissionModel(t, profile, llmselection.ModelAliasRegular))
 	release()
 	requireProviderAdmissionRateLimited(t, refused)
-	if _, found, err := registry.policy(profile, mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)); err != nil || found {
-		t.Fatalf("builtin mock model must not replace captured selection: found=%t err=%v", found, err)
+	if other, found, err := registry.policy(profile, mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)); err != nil || !found || other.ConcurrencyKey != policy.ConcurrencyKey {
+		t.Fatalf("model selection split profile capacity: found=%t policy=%+v err=%v", found, other, err)
 	}
 }
 
 // This characterizes the current bypass, not the future DC-8 dispatcher.
 func TestS6MockFactoryExplicitCapBypassDiagnostic(t *testing.T) {
-	cfg := s6MockPolicyConfig(config.LLMProviderLimitPolicy{MaxConcurrency: 1, MaxConcurrencyMaxWait: "0s", RateLimit: "1/h", RateLimitMaxWait: "0s"})
+	cfg := s6MockPolicyConfig(config.LLMProviderLimitPolicy{MaxConcurrency: 1})
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -147,5 +152,5 @@ func TestS6MockFactoryExplicitCapBypassDiagnostic(t *testing.T) {
 			t.Fatalf("actual mock completion %d: response=%+v", i, response)
 		}
 	}
-	t.Log("validated mock rate_limit=1/h; two real Python completions succeeded; registry saturation covered separately, no dispatcher repair applied")
+	t.Log("validated mock max_concurrency=1; two real Python completions succeeded; registry saturation covered separately, no dispatcher repair applied")
 }
