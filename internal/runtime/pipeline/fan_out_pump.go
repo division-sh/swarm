@@ -131,7 +131,7 @@ func (pc *PipelineCoordinator) claimAndServeFanOutTurn(ctx context.Context, owne
 		if stage == "" {
 			stage = "load_evaluation"
 		}
-		return blockClaim(stage, -1, loadErr.Cause, nil)
+		return blockClaim(stage, -1, groupErr, nil)
 	}
 	if err := input.Validate(intent); groupErr == nil && err != nil {
 		return blockClaim("validate_evaluation", -1, err, nil)
