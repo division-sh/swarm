@@ -57,6 +57,11 @@ func TestDecodeHistoricalSnapshotRejectsPhysicalContinuationHandoff(t *testing.T
 	handoff := time.Now().UTC().Truncate(time.Microsecond)
 	fact["continuation_handoff_at"] = handoff.Format(time.RFC3339Nano)
 	assertHistoricalRejects(t, fact)
+	t.Run("physical_update_clock", func(t *testing.T) {
+		fact := historicalRouteFact(t, historicalRouteFixtures(t)[0].route, deliverylifecycle.StatusPending)
+		fact["updated_at"] = handoff.Format(time.RFC3339Nano)
+		assertHistoricalRejects(t, fact)
+	})
 }
 
 func TestDecodeHistoricalSnapshotNonConnectPreservesEmptyClaim(t *testing.T) {
