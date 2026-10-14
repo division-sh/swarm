@@ -131,6 +131,7 @@ func TestNativeToolRunSeedCallerInventoryIsComplete(t *testing.T) {
 		"TestEntityTools_ReadImportedCanonicalEntityContractOnBothStores":              1,
 		"TestSQLiteEntityPersistence_MarshalsStructuredFilterValues":                   1,
 		"TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence":                     1,
+		"TestRoleScopedEntityTools_EntitylessDeliveryPreservesTriggerEligibility":      1,
 		"TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStores": 2,
 		"newEntityToolTestHarnessWithBundleAndLegacyAccess":                            1,
 		"TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores":                    1,

@@ -67,6 +67,9 @@ func sameReviewedRecipeKey(left, right recipe) bool {
 }
 
 func matchesReviewedSuccessor2617(row recipe, source string, pin reviewedSuccessor2617) bool {
+	if original, err := fixtureSetupCurrentEndpoint2617(row, source); err == nil {
+		row, source = original, original.Successor
+	}
 	history := row
 	history.Successor = pin.Original.Successor
 	return reflect.DeepEqual(history, pin.Original) &&
@@ -150,7 +153,14 @@ func TestReviewedSuccessors2617PreserveExactHistoryAndRejectHostileCompositions(
 			if err != nil {
 				t.Fatal(err)
 			}
-			original, err := reverseReviewedSuccessor2617(candidate, pin.Edits)
+			historicalCandidate := candidate
+			if previous, err := fixtureSetupCurrentEndpoint2617(row, actual); err == nil {
+				historicalCandidate, err = canonicalFunction(previous.Successor)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			original, err := reverseReviewedSuccessor2617(historicalCandidate, pin.Edits)
 			if err != nil || !historicalCurrentSourcePinned(original, pin.Pin.PriorSHA256) {
 				t.Fatalf("only the listed edits must recover the prior endpoint: %v", err)
 			}

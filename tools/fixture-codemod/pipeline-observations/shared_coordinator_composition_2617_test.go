@@ -97,6 +97,12 @@ func reviewedSharedCoordinatorCurrentBody2617(row recipe, actual string, prior r
 		}
 		return "", fmt.Errorf("combined lifecycle endpoint is unlisted")
 	}
+	if original, err := fixtureSetupCurrentEndpoint2617(row, actual); err == nil {
+		if _, err := reviewedSharedCoordinatorBody2617(original, prior); err != nil {
+			return "", err
+		}
+		return row.Successor, nil
+	}
 	return reviewedSharedCoordinatorBody2617(row, prior)
 }
 
