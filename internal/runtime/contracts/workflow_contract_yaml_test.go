@@ -1638,13 +1638,20 @@ func TestSystemNodeEventHandlerDecode_RejectsInvalidKeyedRuleShape(t *testing.T)
 		{name: "null rules", raw: "rules: null\n", want: "DIALECT-RULES-ORDER"},
 		{name: "null on complete", raw: "on_complete: null\n", want: "DIALECT-OC-ORDER"},
 		{name: "duplicate keyed label", raw: "rules:\n  selected: {else: true}\n  selected: {else: true}\n", want: "DIALECT-RULES-ORDER"},
-		{name: "duplicate canonical row field", raw: "rules:\n  - else: true\n    emit: first\n    emit: second\n", want: "duplicate normalized key"},
+		{name: "duplicate canonical row field", raw: "rules:\n  - else: true\n    emit: first\n    emit: second\n", want: `duplicate effective YAML key "emit"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler SystemNodeEventHandler
 			err := decodeNodeTestYAML([]byte(tc.raw), &handler)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.want)
+			}
+			if tc.name == "duplicate canonical row field" {
+				for _, want := range []string{`$["rules"][0]["emit"]`, "nodes.yaml:3:5", "nodes.yaml:4:5"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("duplicate row field lost exact source ownership %q: %v", want, err)
+					}
+				}
 			}
 		})
 	}
