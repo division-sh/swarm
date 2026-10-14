@@ -19,6 +19,10 @@ retired merely because this carrier is closed.
 Canonical owners remain durabledata, pipelinepersistence, eventrecord,
 runforkpersistence, delivery and effectpersistence. Public/private bridges expose
 fixed projections only, never SQL/table selectors or a transaction callback.
+These include new named physical projection ports within those existing owners,
+not a claim of "no new ports". Reviewer boundary precheck6179135536 independently
+found47 new query shapes without an identical standalone observation operation;
+embedded validation/recovery procedures are not interchangeable scalar readers.
 Single-row origin-filtered versions/cursors/cardinality are distinct from the
 existing run-only version and aggregate progress. Full physical counts remain
 physical, including diagnostic events where originally counted. Independent
@@ -37,8 +41,11 @@ by a replacement SQL predicate.
 
 The one malformed root.ready import-shape fault is fixed to its original bytes
 and bundle/declaration predicate, in test_deployment_import_shape_fault.go via
-the original selected coordinator's runWorkflowProjectionFault. There is no
-production-package fault primitive or arbitrary update API. Its queued-writer
+the original selected coordinator's runWorkflowProjectionFault. The test_ prefix
+is not a Go build exclusion: this seam compiles in runtimepersistence. Confinement
+is fixture-only guarded consumption through the thin storetest facade, not a
+production caller or an ordinary durabledata mutation primitive. There is no
+arbitrary update API. Its queued-writer
 cancellation proof joins both the fault and holder before fixture teardown.
 
 The compiled consumer census found an additional diagnostic companion,
@@ -136,10 +143,13 @@ Accepted remaining before this checkpoint is5516/3497, including unchanged
 uncredited mock78/62 and numeric-fork9/8 holds. If the reviewer accepts196/186,
 qualified remaining becomes5320/3311, including those87/70; cumulative accepted
 since04:02Z would become1313/1111. Do not infer acceptance from physical debt.
-Final signed read-only ratchet and repair-delta complexity receipts will be
-recorded against the checkpoint SHA, with no census refresh on that ratchet.
-The earlier signed whole-batch complexity at2d84 is GREEN: cognitive30/50
-557/196, cyclomatic30/50 259/59, zero new hotspots across24260 callables.
+Final signed read-only ratchet at7d39ac7b6a passes34.352s, without refresh.
+The bounded remaining-affected-history collection passes493.263s,23 roots,
+including every complete signed history/source chain affected by this batch
+and the finite historical-receipt control. Final signed whole-batch complexity
+at7d39 versus1c4 is GREEN: cognitive30/50 557/196, cyclomatic30/50 259/59,
+zero new hotspots across24260 callables. Runtime, code, ledger and quality
+receipts carry across the final non-normative terminology/receipt update.
 
 ## Manifestation Coverage
 
