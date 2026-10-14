@@ -60,9 +60,9 @@ func TestDeliveryOperationalWritesDoNotAdvanceForkHistoryBothStores(t *testing.T
 			}); err != nil {
 				t.Fatal(err)
 			}
-			handedOff := loadDeliverySnapshotFixture(t, ctx, store, event.ID(), route)
-			if handedOff.ContinuationHandoffAt.IsZero() {
-				t.Fatal("physical continuation handoff was not committed")
+			handedOff, err := ObserveDeliveryEventEvidenceForTest(ctx, fixture.store, event.ID())
+			if err != nil || len(handedOff.Deliveries) != 1 || !handedOff.Deliveries[0].HandoffPresent || handedOff.Deliveries[0].HandoffAt.IsZero() {
+				t.Fatalf("physical continuation handoff was not committed: evidence=%+v err=%v", handedOff, err)
 			}
 			assertNoCapture("handoff")
 			claimed, err := claimDeliveryFixture(ctx, store, event, route)
