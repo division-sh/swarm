@@ -833,11 +833,9 @@ func TestSystemNodeEventHandlerDecode_RejectsTopLevelEmitWhenRulesExistWithoutRu
 	err := decodeNodeTestYAML([]byte(`
 emit: root.done
 rules:
-  pass:
-    when: payload.ok
+  - when: payload.ok
     advances_to: done
-  unmatched:
-    else: true
+  - else: true
 `), &handler)
 	if err == nil || !strings.Contains(err.Error(), "AMBIGUOUS-EMIT") {
 		t.Fatalf("yaml.Unmarshal error = %v, want AMBIGUOUS-EMIT", err)
@@ -848,8 +846,7 @@ func TestSystemNodeEventHandlerDecode_RejectsRuleLevelSetsGate(t *testing.T) {
 	var handler SystemNodeEventHandler
 	err := decodeNodeTestYAML([]byte(`
 rules:
-  gated:
-    else: true
+  - else: true
     sets_gate: approved
 `), &handler)
 	if err == nil || !strings.Contains(err.Error(), `rule field "sets_gate" is not supported.`) {
@@ -898,37 +895,31 @@ func TestSystemNodeEventHandlerDecode_LowersPolicySheetSelectionRows(t *testing.
 	var handler SystemNodeEventHandler
 	if err := decodeNodeTestYAML([]byte(`
 rules:
-  - id: cto_revision_gate
-    when: payload.spec_revision > entity.last_cto_reviewed_revision && entity.revision_count >= policy.inner_revision_max
+  - when: payload.spec_revision > entity.last_cto_reviewed_revision && entity.revision_count >= policy.inner_revision_max
     advances_to: cto_review
-  - id: deep_scan
-    case:
+  - case:
       selector: payload.mode
       equals: deep
     emit: scan.deep_requested
-  - id: repository_quick_scan
-    case:
+  - case:
       selectors: [payload.mode, payload.target]
       equals: [quick, repository]
     emit: scan.quick_repo_requested
-  - id: treasury_warning
-    range:
+  - range:
       value: entity.spend_ratio
       gte: policy.warning_pct / 100
       lt: policy.throttle_pct / 100
       monotonicity:
         - policy.warning_pct / 100 <= policy.throttle_pct / 100 <= 1.0
     emit: treasury.warning_recorded
-  - id: treasury_throttle
-    range:
+  - range:
       value: entity.spend_ratio
       gte: policy.throttle_pct / 100
       lt: 1.0
       monotonicity:
         - policy.warning_pct / 100 <= policy.throttle_pct / 100 <= 1.0
     emit: treasury.throttle_recorded
-  - id: default_route
-    default: true
+  - default: true
     emit: scan.default_requested
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
@@ -972,8 +963,7 @@ func TestSystemNodeEventHandlerDecode_LowersPolicySheetLookupValueRows(t *testin
 	var handler SystemNodeEventHandler
 	if err := decodeNodeTestYAML([]byte(`
 rules:
-  - id: scaffold_paths
-    lookup:
+  - lookup:
       on: [payload.scaffold_type, payload.language]
       entries:
         - key: [service, go]
@@ -982,11 +972,9 @@ rules:
           value: templates/library/go
       into: computed.template_path
       default: fail
-  - id: use_service_template
-    when: computed.template_path == "templates/service/go"
+  - when: computed.template_path == "templates/service/go"
     emit: repo.service_template_selected
-  - id: fallback
-    default: true
+  - default: true
     emit: repo.other_template_selected
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
@@ -1010,6 +998,9 @@ rules:
 	if lookupRule.Compute.Lookup == nil {
 		t.Fatal("lookup Compute.Lookup = nil")
 	}
+	if lookupRule.PolicyRow.Lookup != lookupRule.Compute.Lookup || lookupRule.Compute.Lookup.RowID != "rules[0]: lookup" {
+		t.Fatalf("lookup DTO did not consume the admitted row presentation: %#v", lookupRule)
+	}
 	if got := lookupRule.Compute.Lookup.On; !reflect.DeepEqual(got, []string{"payload.scaffold_type", "payload.language"}) {
 		t.Fatalf("lookup on = %#v", got)
 	}
@@ -1031,18 +1022,15 @@ func TestSystemNodeEventHandlerDecode_LowersPolicySheetValidateValueRows(t *test
 	var handler SystemNodeEventHandler
 	if err := decodeNodeTestYAML([]byte(`
 rules:
-  - id: validate_manifest
-    validate:
+  - validate:
       set: deploy_manifest
       input:
         source_ref: payload.source_ref
         manifest_source_ref: payload.file_manifest.source_ref
       into: computed.validation.deploy_manifest
-  - id: invalid_manifest
-    when: computed.validation.deploy_manifest.valid == false
+  - when: computed.validation.deploy_manifest.valid == false
     emit: deploy.manifest_invalid
-  - id: fallback
-    default: true
+  - default: true
     emit: deploy.manifest_accepted
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
@@ -1063,6 +1051,9 @@ rules:
 	if got := validateRule.Compute.StoreAs; got != "computed.validation.deploy_manifest" {
 		t.Fatalf("validate StoreAs = %q, want computed.validation.deploy_manifest", got)
 	}
+	if validateRule.Compute.Validation == nil || validateRule.PolicyRow.Validation != validateRule.Compute.Validation || validateRule.Compute.Validation.RowID != "rules[0]: validate" {
+		t.Fatalf("validation DTO did not consume the admitted row presentation: %#v", validateRule)
+	}
 	if validateRule.Compute.Validation == nil {
 		t.Fatal("validate Compute.Validation = nil")
 	}
@@ -1081,8 +1072,7 @@ func TestSystemNodeEventHandlerDecode_LowersPolicySheetComputeModuleValueRows(t 
 	var handler SystemNodeEventHandler
 	if err := decodeNodeTestYAML([]byte(`
 rules:
-  - id: render_bundle
-    compute_module:
+  - compute_module:
       module: structured_renderer
       input:
         component: payload.component
@@ -1090,11 +1080,9 @@ rules:
         language: payload.language
         files: payload.files
       into: computed.rendered_bundle
-  - id: emit_rendered_bundle
-    when: computed.rendered_bundle.format == "yaml"
+  - when: computed.rendered_bundle.format == "yaml"
     emit: bundle.rendered
-  - id: fallback
-    default: true
+  - default: true
     emit: bundle.render_failed
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
@@ -1117,6 +1105,9 @@ rules:
 	}
 	if moduleRule.Compute.Module == nil {
 		t.Fatal("compute_module Compute.Module = nil")
+	}
+	if moduleRule.PolicyRow.Module != moduleRule.Compute.Module || moduleRule.Compute.Module.RowID != "rules[0]: compute_module" {
+		t.Fatalf("module DTO did not consume the admitted row presentation: %#v", moduleRule)
 	}
 	if got := moduleRule.Compute.Module.Module; got != "structured_renderer" {
 		t.Fatalf("compute_module module = %q, want structured_renderer", got)
@@ -1182,8 +1173,7 @@ func TestSystemNodeEventHandlerDecode_RejectsInvalidPolicySheetRows(t *testing.T
 			name: "missing default",
 			body: `
 rules:
-  - id: deep_scan
-    case:
+  - case:
       selector: payload.mode
       equals: deep
     emit: scan.deep_requested
@@ -1194,18 +1184,15 @@ rules:
 			name: "duplicate case key",
 			body: `
 rules:
-  - id: deep_a
-    case:
+  - case:
       selector: payload.mode
       equals: deep
     emit: scan.deep_a
-  - id: deep_b
-    case:
+  - case:
       selector: payload.mode
       equals: deep
     emit: scan.deep_b
-  - id: fallback
-    default: true
+  - default: true
     emit: scan.default
 `,
 			contains: "duplicate case key",
@@ -1214,20 +1201,17 @@ rules:
 			name: "overlapping literal ranges",
 			body: `
 rules:
-  - id: low
-    range:
+  - range:
       value: payload.score
       gte: 0
       lt: 10
     advances_to: low
-  - id: overlap
-    range:
+  - range:
       value: payload.score
       gte: 5
       lt: 15
     advances_to: overlap
-  - id: fallback
-    default: true
+  - default: true
     advances_to: fallback
 `,
 			contains: "overlapping literal ranges",
@@ -1236,13 +1220,11 @@ rules:
 			name: "dynamic bound",
 			body: `
 rules:
-  - id: dynamic_bound
-    range:
+  - range:
       value: entity.spend_ratio
       gte: payload.warning_ratio
     advances_to: warning
-  - id: fallback
-    default: true
+  - default: true
     advances_to: fallback
 `,
 			contains: "dynamic bound",
@@ -1251,14 +1233,12 @@ rules:
 			name: "policy bound missing monotonicity",
 			body: `
 rules:
-  - id: warning
-    range:
+  - range:
       value: entity.spend_ratio
       gte: policy.warning_ratio
       lt: policy.throttle_ratio
     advances_to: warning
-  - id: fallback
-    default: true
+  - default: true
     advances_to: fallback
 `,
 			contains: "requires monotonicity",
@@ -1267,22 +1247,19 @@ rules:
 			name: "overlapping open ended policy ranges",
 			body: `
 rules:
-  - id: warning
-    range:
+  - range:
       value: entity.spend_ratio
       gte: policy.warning_ratio
       monotonicity:
         - policy.warning_ratio <= policy.throttle_ratio <= 1.0
     advances_to: warning
-  - id: throttle
-    range:
+  - range:
       value: entity.spend_ratio
       gte: policy.throttle_ratio
       monotonicity:
         - policy.warning_ratio <= policy.throttle_ratio <= 1.0
     advances_to: throttle
-  - id: fallback
-    default: true
+  - default: true
     advances_to: fallback
 `,
 			contains: "overlapping ranges",
@@ -1291,13 +1268,11 @@ rules:
 			name: "unsupported selector root",
 			body: `
 rules:
-  - id: fanout_selector
-    case:
+  - case:
       selector: fan_out.count
       equals: 3
     advances_to: fanout
-  - id: fallback
-    default: true
+  - default: true
     advances_to: fallback
 `,
 			contains: "unsupported root",
@@ -1306,13 +1281,11 @@ rules:
 			name: "selector operator injection",
 			body: `
 rules:
-  - id: injected
-    case:
+  - case:
       selector: 'payload.mode=="admin"||payload.mode'
       equals: deep
     advances_to: injected
-  - id: fallback
-    default: true
+  - default: true
     advances_to: fallback
 `,
 			contains: "simple dotted path",
@@ -1321,8 +1294,7 @@ rules:
 			name: "policy field dual owner",
 			body: `
 rules:
-  - id: bad_policy
-    policy:
+  - policy:
       row: true
     advances_to: bad
 `,
@@ -1332,8 +1304,7 @@ rules:
 			name: "lookup into entity",
 			body: `
 rules:
-  - id: bad_lookup
-    lookup:
+  - lookup:
       on: payload.kind
       entries:
         - key: service
@@ -1347,8 +1318,7 @@ rules:
 			name: "lookup duplicate key",
 			body: `
 rules:
-  - id: duplicate_lookup
-    lookup:
+  - lookup:
       on: [payload.kind, payload.language]
       entries:
         - key: [service, go]
@@ -1364,8 +1334,7 @@ rules:
 			name: "lookup entity root unsupported",
 			body: `
 rules:
-  - id: entity_lookup
-    lookup:
+  - lookup:
       on: entity.kind
       entries:
         - key: service
@@ -1379,8 +1348,7 @@ rules:
 			name: "lookup policy root unsupported",
 			body: `
 rules:
-  - id: policy_lookup
-    lookup:
+  - lookup:
       on: policy.kind
       entries:
         - key: service
@@ -1394,8 +1362,7 @@ rules:
 			name: "lookup event root unsupported",
 			body: `
 rules:
-  - id: event_lookup
-    lookup:
+  - lookup:
       on: event.kind
       entries:
         - key: service
@@ -1409,8 +1376,7 @@ rules:
 			name: "lookup branch output",
 			body: `
 rules:
-  - id: bad_lookup_branch
-    lookup:
+  - lookup:
       on: payload.kind
       entries:
         - key: service
@@ -1425,8 +1391,7 @@ rules:
 			name: "compute module into entity",
 			body: `
 rules:
-  - id: bad_module
-    compute_module:
+  - compute_module:
       module: structured_renderer
       input:
         component: payload.component
@@ -1438,8 +1403,7 @@ rules:
 			name: "compute module branch output",
 			body: `
 rules:
-  - id: bad_module_branch
-    compute_module:
+  - compute_module:
       module: structured_renderer
       input:
         component: payload.component
@@ -1479,8 +1443,7 @@ compute:
 			name: "typed row outside rules",
 			body: `
 on_complete:
-  - id: done
-    when: payload.ok
+  - when: payload.ok
     advances_to: done
 `,
 			contains: "only supported under handler.rules",
@@ -2597,8 +2560,7 @@ func TestSystemNodeEventHandlerDecode_RejectsEventlessRuleEmitWithoutTemplate(t 
 	var handler SystemNodeEventHandler
 	err := decodeNodeTestYAML([]byte(`
 rules:
-  done:
-    else: true
+  - else: true
     emit:
       fields:
         scan_id: payload.scan_id
@@ -2931,14 +2893,12 @@ on_success:
       audit:
         "ok"
 rules:
-  needs_human:
-    when: payload.amount >= 100
+  - when: payload.amount >= 100
     emit:
       event: rule.needs_human
       fields:
         amount: payload.amount
-  unmatched:
-    else: true
+  - else: true
 `), &handler); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
@@ -2962,18 +2922,15 @@ emit:
     account_id: entity.id
     score: payload.score
 rules:
-  high:
-    when: payload.score >= 80
+  - when: payload.score >= 80
     emit:
       fields:
         bucket: "high"
-  medium:
-    when: payload.score >= 40
+  - when: payload.score >= 40
     emit:
       fields:
         bucket: "medium"
-  low:
-    else: true
+  - else: true
     emit:
       fields:
         bucket: "low"
@@ -3015,8 +2972,7 @@ func TestSystemNodeEventHandlerDecode_RejectsInvalidRulesEmitTemplateSpecializat
 emit:
   event: account.bucketed
 rules:
-  high:
-    when: payload.score >= 80
+  - when: payload.score >= 80
     emit:
       fields:
         bucket: '"high"'
@@ -3031,8 +2987,7 @@ emit:
   fields:
     bucket: '"base"'
 rules:
-  low:
-    else: true
+  - else: true
     emit:
       fields:
         bucket: '"low"'
@@ -3045,13 +3000,11 @@ rules:
 emit:
   event: account.bucketed
 rules:
-  high:
-    when: payload.score >= 80
+  - when: payload.score >= 80
     emit:
       fields:
         bucket: '"high"'
-  low:
-    else: true
+  - else: true
     emit:
       event: account.dropped
       fields:
@@ -3065,8 +3018,7 @@ rules:
 emit:
   event: account.bucketed
 rules:
-  low:
-    else: true
+  - else: true
     emit:
       target: sender
       fields:
@@ -3082,8 +3034,7 @@ emit:
 on_success:
   emit: account.audit
 rules:
-  low:
-    else: true
+  - else: true
     emit:
       fields:
         bucket: '"low"'
@@ -3123,8 +3074,7 @@ emit: handler.default
 on_success:
   emit: handler.succeeded
 rules:
-  done:
-    else: true
+  - else: true
     emit: rule.done
 `,
 			contains: "handler-top-level emit is only allowed on single-emit handlers",
@@ -3135,12 +3085,10 @@ rules:
 on_success:
   emit: handler.succeeded
 rules:
-  done:
-    else: true
+  - else: true
     emit: rule.done
 on_complete:
-  - id: complete
-    emit: flow.complete
+  - emit: flow.complete
 `,
 			contains: "not supported with on_complete",
 		},
@@ -3150,8 +3098,7 @@ on_complete:
 on_success:
   emit: handler.succeeded
 rules:
-  done:
-    else: true
+  - else: true
     emit: rule.done
 fan_out:
   items_from: payload.items
@@ -3167,8 +3114,7 @@ fan_out:
 on_success:
   emit: handler.succeeded
 rules:
-  done:
-    else: true
+  - else: true
     fan_out:
       items_from: payload.items
       as: line_item
@@ -3183,8 +3129,7 @@ rules:
 on_success:
   action: notify
 rules:
-  done:
-    else: true
+  - else: true
     emit: rule.done
 `,
 			contains: "on_success field",
