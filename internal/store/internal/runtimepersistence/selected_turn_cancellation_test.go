@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -43,13 +44,46 @@ func TestSelectedProviderTurnRetainsActualBusinessOriginBothStores(t *testing.T)
 			}
 			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(actor.AgentID()), AgentIdentity: actor,
 				Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "global", FlowInstance: actor.FlowInstance(), EntityID: req.Instance.EntityID})}
-			event = eventtest.TargetRouted(event, route.Target.Route())
 			req.TriggerEvent, req.OccurredAt = event, event.CreatedAt()
-			constructHistoricalSourceFixture(t, ctx, selected, req)
-			route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target, actor.Route)
+			rootRequest := sqliteFlowActivationRequest(bundle, ".", actor.RunID, "", actor.RunID)
+			rootRequest.Instance, rootRequest.TriggerEvent, rootRequest.OccurredAt = root, event, event.CreatedAt()
+			rootPlan := constructHistoricalSourceFixture(t, ctx, selected, rootRequest)
+			var constructed pipeline.FlowInstanceActivationPlan
+			for _, child := range rootPlan.ConstructionPlans() {
+				if child.Identity == req.Instance {
+					constructed = child
+				}
+			}
+			if constructed.Identity != req.Instance || constructed.CreatingInput.EventID != event.ID() {
+				t.Fatal("selected turn fixture lost exact receiver construction and creating occurrence")
+			}
+			dependency := events.MustExistingEntityTarget(route.Target.Route())
+			route.Initialization, err = events.AdmitStoredFlowReceiverInitialization(actor.RunID, constructed.CreatingInput.EventID, dependency, actor.Route)
 			if err != nil {
 				t.Fatal(err)
 			}
+			agents, err := selected.LoadAgents(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			actorFound := false
+			for _, agent := range agents {
+				if agent.Config.Identity != actor {
+					continue
+				}
+				if actorFound || agent.Config.EntityID != "" {
+					t.Fatal("selected turn fixture changed its exact entityless actor ownership")
+				}
+				actorFound = true
+			}
+			if !actorFound {
+				t.Fatal("selected turn fixture omitted its admitted actor")
+			}
+			// Construction is a flow dependency, not the entityless actor's state ownership.
+			actorTarget := route.Target.Route()
+			actorTarget.EntityID = ""
+			route.Target = events.MustEntitylessReceiverTarget(actorTarget)
+			event = eventtest.TargetRouted(event, route.Target.Route())
 			deliveryAuthority, err := deliverylifecycle.NewSelectedExecutionAuthority(fact, fork.ExecutionID, actor.RunID, fork.ExecutionGeneration)
 			if err != nil {
 				t.Fatal(err)
