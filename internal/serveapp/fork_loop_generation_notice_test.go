@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
@@ -37,17 +39,14 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 				t.Fatalf("original input declaration: %+v %v %v", role, found, err)
 			}
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "work.requested", "bundle_hash": rt.BundleHash,
-				"payload": map[string]any{"token": "loop-notice-proof"}, "idempotency_key": "loop-notice-start",
-			})
+			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "loop-notice-proof"}, "idempotency_key": "loop-notice-start"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, started.RunID)
 			var frontier string
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='review/review.requested'`, started.RunID).Scan(&frontier); err != nil {
 				t.Fatal(err)
 			}
-			source := readForkLoopActivation(t, rt, started.RunID)
+			source := readForkLoopActivation(t, rt.ReceiverStateReader, started.RunID)
 			if source.Attempt != 1 || source.MaxAttempts != 3 || source.FlowID != "review" || source.CurrentStage != "reviewing" {
 				t.Fatalf("ordinary source loop: %+v", source)
 			}
@@ -61,7 +60,7 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 				t.Fatalf("fork: %+v", fork)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
-			child := readForkLoopActivation(t, rt, fork.ForkRunID)
+			child := readForkLoopActivation(t, rt.ReceiverStateReader, fork.ForkRunID)
 			expected, err := loopruntime.Fork(source, fork.ForkRunID, flowidentity.EntityID("review"))
 			if err != nil {
 				t.Fatal(err)
@@ -88,10 +87,16 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 	}
 }
 
-func readForkLoopActivation(t *testing.T, rt servedControlProofRuntime, runID string) loopruntime.Activation {
+func readForkLoopActivation(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID string) loopruntime.Activation {
 	t.Helper()
 	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(accumulator AS TEXT) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, flowidentity.EntityID("review")).Scan(&raw); err != nil {
+	if err := func() error {
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (string, error) {
+			return storetest.ReadEntityAccumulatorTextStorage(ctx, selectedProofReceiverStateReader, runID, flowidentity.EntityID("review"))
+		})
+		raw = observed
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
 	var state map[string]any
@@ -122,7 +127,7 @@ func requireForkLoopStateEffect(t *testing.T, rt servedControlProofRuntime, runI
 	if entity.Entity.RunID != runID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != "review" || entity.Entity.CurrentState != "reviewing" || entity.Fields["observed_revision"] != revision || entity.Fields["observed_token"] != "loop-notice-proof" {
 		t.Fatalf("loop business fields lost current generation: %+v", entity)
 	}
-	activation := readForkLoopActivation(t, rt, runID)
+	activation := readForkLoopActivation(t, rt.ReceiverStateReader, runID)
 	if !activation.Generation().Valid() || activation.RevisionID != revision {
 		t.Fatalf("durable loop generation: %+v", activation)
 	}
@@ -144,7 +149,7 @@ func requireForkLoopStateEffect(t *testing.T, rt servedControlProofRuntime, runI
 	var claim, outcomeClaim, outcomes int
 	var outcome, selectionContext, disposition string
 	delivery := public.Deliveries[0]
-	route := readServedForkDeliveryEvidence(t, rt, runID)[delivery.DeliveryID].route
+	route := readServedForkDeliveryEvidence(t, rt.ReceiverStateReader, runID)[delivery.DeliveryID].route
 	node, nodeRecipient := route.Recipient.Node()
 	if !nodeRecipient || node.FlowPath() != "review" || node.NodeID() != "controller" || route.Target.Code() != "existing_entity" || route.Target.Route() != (events.RouteIdentity{FlowID: "review", FlowInstance: "review", EntityID: entityID}) {
 		t.Fatalf("loop effect borrowed recipient or target identity: %+v", route)
@@ -161,6 +166,6 @@ func requireForkLoopStateEffect(t *testing.T, rt servedControlProofRuntime, runI
 	if claim != 1 || outcomeClaim != 1 || outcomes != 1 || outcome != "delivered" || selectionContext != "none" || disposition != "not_applicable" {
 		t.Fatalf("loop settlement claim=%d/%d outcomes=%d outcome=%s selection=%s/%s", claim, outcomeClaim, outcomes, outcome, selectionContext, disposition)
 	}
-	requireForkReceiverNoPublicationOrNotice(t, rt, runID, eventID)
+	requireForkReceiverNoPublicationOrNotice(t, rt.ReceiverStateReader, runID, eventID)
 	return route
 }

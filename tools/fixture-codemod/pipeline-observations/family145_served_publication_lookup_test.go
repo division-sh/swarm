@@ -38,7 +38,7 @@ func servedPublicationLookupEarlierDeclaration(t *testing.T, file, function, cur
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join("../../..", file))
-		if err != nil || requestKeyDeclaration(t, raw, function) != pin.After || current != pin.After {
+		if err != nil || servedSetupEarlierSource(t, file, function, requestKeyDeclaration(t, raw, function)) != pin.After || current != pin.After {
 			t.Fatal("lookup composition requires the actual unique final source:", function, err)
 		}
 		return pin.Before
@@ -58,7 +58,7 @@ func TestFamily145ServedPublicationLookupWholeTypedChainKeepsEveryPredicateAndAs
 			t.Fatal("publication lookup escaped the typed finite rule:", pin.Function, count, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || servedPublicationLookupEarlierDeclaration(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.Before {
+		if err != nil || servedPublicationLookupEarlierDeclaration(t, pin.File, pin.Function, servedSetupEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))) != pin.Before {
 			t.Fatal("publication lookup actual current declaration changed:", pin.Function, err)
 		}
 		finite := recipe{File: pin.File, Function: pin.Function, Before: pin.Before, After: pin.After}

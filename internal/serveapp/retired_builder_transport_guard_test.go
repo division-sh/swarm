@@ -63,23 +63,24 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 	expectedUnrelatedTextCounts := map[string]int{
 		// Exact historical and current factory/producer-label snapshots, pinned by
 		// the finite codemod guards; these do not restore the retired product.
-		"tools/fixture-codemod/pipeline-observations/recipes.json":                            16,
-		"tools/fixture-codemod/pipeline-observations/family144-transitions.json":              4,
-		"tools/fixture-codemod/pipeline-observations/family145-transitions.json":              10,
-		"tools/fixture-codemod/pipeline-observations/family145-channel-anchor-preimages.json": 2,
-		"internal/runtime/bootverify/workflow_transition_relation_test.go":                    1,
-		"internal/runtime/semanticview/lifecycle_emitter_ownership_guard_test.go":             1,
-		"internal/store/internal/runtimepersistence/dynamic_flow_creation_revision_test.go":   1,
-		"internal/events/construction_test.go":                                                3,
-		"internal/runtime/conformance/repo_validation_snapshot_test.go":                       1,
-		"internal/runtime/contracts/mock_performance_ownership_guard_test.go":                 1,
-		"internal/runtime/llm/runtime_resolver.go":                                            1,
-		"internal/runtime/pythonmodule/artifact_manifest_generated.go":                        2,
-		"internal/store/internal/runtimepersistence/run_debug_read_surface_test.go":           5,
-		"internal/store/selected/boundary_test.go":                                            1,
-		"internal/store/testdata/persistence_authority_findings.tsv":                          1,
-		"internal/userfacing/human_code_projection_cli_test.go":                               5,
-		"scripts/rewrite-value-slots-2556/intent.json":                                        1,
+		"tools/fixture-codemod/pipeline-observations/recipes.json":                                18,
+		"tools/fixture-codemod/pipeline-observations/family144-transitions.json":                  4,
+		"tools/fixture-codemod/pipeline-observations/family145-transitions.json":                  12,
+		"tools/fixture-codemod/pipeline-observations/family145-channel-anchor-preimages.json":     2,
+		"tools/fixture-codemod/pipeline-observations/family145-channel-settlement-preimages.json": 2,
+		"internal/runtime/bootverify/workflow_transition_relation_test.go":                        1,
+		"internal/runtime/semanticview/lifecycle_emitter_ownership_guard_test.go":                 1,
+		"internal/store/internal/runtimepersistence/dynamic_flow_creation_revision_test.go":       1,
+		"internal/events/construction_test.go":                                                    3,
+		"internal/runtime/conformance/repo_validation_snapshot_test.go":                           1,
+		"internal/runtime/contracts/mock_performance_ownership_guard_test.go":                     1,
+		"internal/runtime/llm/runtime_resolver.go":                                                1,
+		"internal/runtime/pythonmodule/artifact_manifest_generated.go":                            2,
+		"internal/store/internal/runtimepersistence/run_debug_read_surface_test.go":               5,
+		"internal/store/selected/boundary_test.go":                                                1,
+		"internal/store/testdata/persistence_authority_findings.tsv":                              1,
+		"internal/userfacing/human_code_projection_cli_test.go":                                   5,
+		"scripts/rewrite-value-slots-2556/intent.json":                                            1,
 	}
 	classificationDocuments := map[string]bool{
 		".github/audit-artifacts/issue-2550-preimplementation.md": true,
@@ -179,6 +180,7 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 	if len(violations) > 0 {
 		t.Fatalf("retired Builder semantic references escaped the exact tracked-file classification:\n%s", strings.Join(violations, "\n"))
 	}
+	requireChannelSettlementReferenceCorpora(t, repoRoot)
 }
 
 func retiredBuilderCandidates(relative string, body []byte) ([]retiredBuilderCandidate, error) {
@@ -225,7 +227,7 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 	const recipePath = "tools/fixture-codemod/pipeline-observations/recipes.json"
 	recipes, recipeErr := os.ReadFile(filepath.Join(repoRootForTest(), recipePath))
 	recipeCandidates, scanErr := retiredBuilderCandidates(recipePath, recipes)
-	if recipeErr != nil || scanErr != nil || len(recipeCandidates) != 16 {
+	if recipeErr != nil || scanErr != nil || len(recipeCandidates) != 18 {
 		t.Fatalf("exact runtime factory snapshot inventory changed: %+v, %v, %v", recipeCandidates, recipeErr, scanErr)
 	}
 	for _, candidate := range recipeCandidates {
@@ -235,7 +237,7 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 	}
 	extraRecipe := append(append([]byte(nil), recipes...), []byte("\n\"After\": \"func foreignFactory() { builder() }\"\n")...)
 	extraCandidates, extraErr := retiredBuilderCandidates(recipePath, extraRecipe)
-	if extraErr != nil || len(extraCandidates) != 17 || isExplicitUnrelatedBuilderText(recipePath, extraCandidates[16].text) {
+	if extraErr != nil || len(extraCandidates) != 19 || isExplicitUnrelatedBuilderText(recipePath, extraCandidates[18].text) {
 		t.Fatalf("foreign snapshot text escaped exact inventory: %+v, %v", extraCandidates, extraErr)
 	}
 	const transitionPath = "tools/fixture-codemod/pipeline-observations/family144-transitions.json"
@@ -266,7 +268,7 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 		t.Fatal(err)
 	}
 	family145Candidates, err := retiredBuilderCandidates(family145Path, family145Bytes)
-	if err != nil || len(family145Candidates) != 10 {
+	if err != nil || len(family145Candidates) != 12 {
 		t.Fatalf("exact family145 text-reference inventory changed: count%d/%v", len(family145Candidates), err)
 	}
 	for _, candidate := range family145Candidates {
@@ -405,7 +407,7 @@ func isExplicitUnrelatedBuilderText(relative, line string) bool {
 
 func isExactFamily145ReferenceSnapshot(path, line string) bool {
 	corpus := strings.TrimPrefix(path, "tools/fixture-codemod/pipeline-observations/")
-	if corpus != "recipes.json" && corpus != "family145-transitions.json" && corpus != "family145-channel-anchor-preimages.json" {
+	if corpus != "recipes.json" && corpus != "family145-transitions.json" && corpus != "family145-channel-anchor-preimages.json" && corpus != "family145-channel-settlement-preimages.json" {
 		return false
 	}
 	var field map[string]string
@@ -449,9 +451,109 @@ func TestChannelAnchorReferenceSnapshotsCannotAdmitChangedSourceOrProductReferen
 	}
 }
 
+var channelSettlementReferenceCounts = map[string]int{
+	"tools/fixture-codemod/pipeline-observations/recipes.json":                                18,
+	"tools/fixture-codemod/pipeline-observations/family145-transitions.json":                  12,
+	"tools/fixture-codemod/pipeline-observations/family145-channel-settlement-preimages.json": 2,
+}
+
+func requireChannelSettlementReferenceCorpora(t *testing.T, root string) {
+	t.Helper()
+	for corpus := range channelSettlementReferenceCounts {
+		body, err := os.ReadFile(filepath.Join(root, corpus))
+		if err != nil || !exactChannelSettlementReferenceMultiplicity(corpus, body) {
+			t.Fatalf("ordinary accumulator snapshot multiplicity changed: %s: %v", corpus, err)
+		}
+	}
+}
+
+func exactChannelSettlementReferenceMultiplicity(path string, body []byte) bool {
+	want, known := channelSettlementReferenceCounts[path]
+	rows, err := retiredBuilderCandidates(path, body)
+	if !known || err != nil || len(rows) != want {
+		return false
+	}
+	for _, row := range rows {
+		if !isExplicitUnrelatedBuilderText(path, row.text) {
+			return false
+		}
+	}
+	return true
+}
+
+func TestChannelSettlementReferenceSnapshotsRejectChangedEvidenceAndDuplicateRecords(t *testing.T) {
+	for corpus, want := range channelSettlementReferenceCounts {
+		body, err := os.ReadFile(filepath.Join(repoRootForTest(), corpus))
+		if err != nil || !exactChannelSettlementReferenceMultiplicity(corpus, body) {
+			t.Fatal("exact approved snapshot inventory refused:", corpus, err)
+		}
+		candidates, err := retiredBuilderCandidates(corpus, body)
+		if err != nil || len(candidates) != want {
+			t.Fatal("snapshot count changed:", corpus, err)
+		}
+		for _, row := range candidates {
+			if !strings.Contains(row.text, "func proveObjectChannelPages(") {
+				continue
+			}
+			requireChannelSettlementReferenceHostility(t, corpus, row.text)
+			duplicate := append(append([]byte{}, body...), []byte("\n"+row.text+"\n")...)
+			if exactChannelSettlementReferenceMultiplicity(corpus, duplicate) {
+				t.Fatal("extra identical approved field paid for another occurrence")
+			}
+		}
+		requireChannelSettlementDuplicateRecordRefusal(t, corpus, body)
+	}
+}
+
+func requireChannelSettlementReferenceHostility(t *testing.T, path, line string) {
+	t.Helper()
+	for _, other := range []string{"foreign.json", "tools/fixture-codemod/pipeline-observations/family145-channel-anchor-preimages.json"} {
+		if isExplicitUnrelatedBuilderText(other, line) {
+			t.Fatal("wrong corpus inherited exact disposition")
+		}
+	}
+	for _, mutant := range []string{
+		strings.Replace(line, `"Before":`, `"Successor":`, 1),
+		strings.Replace(line, `"After":`, `"Successor":`, 1),
+		strings.Replace(line, "func proveObjectChannelPages(", "func foreignObjectChannelPages(", 1),
+		strings.Replace(line, "strings.Builder", "retiredBuilderEscape()", 1),
+		strings.Replace(line, `\n`, `\n retiredBuilderEscape()\n`, 1),
+	} {
+		if mutant != line && isExplicitUnrelatedBuilderText(path, mutant) {
+			t.Fatal("changed field/function/body/product reference inherited exact disposition")
+		}
+	}
+}
+
+func requireChannelSettlementDuplicateRecordRefusal(t *testing.T, corpus string, body []byte) {
+	t.Helper()
+	var rows []map[string]any
+	if err := json.Unmarshal(body, &rows); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row["Function"] != "proveObjectChannelPages" {
+			continue
+		}
+		out, err := json.MarshalIndent(append(rows, row), "", "  ")
+		if err != nil || exactChannelSettlementReferenceMultiplicity(corpus, out) {
+			t.Fatal("duplicated approved complete record escaped corpus multiplicity:", err)
+		}
+		return
+	}
+	t.Fatal("approved complete record missing")
+}
+
 // Exact approved source/field evidence: buildErr and strings.Builder, not the
 // retired product. Historical bodies are neither edited nor broadly exempted.
 var family145ReferenceSnapshots = []struct{ corpus, function, field, digest string }{
+	// Ruling6168648501: exact ordinary text-accumulator source, multiplicity1 each.
+	{"recipes.json", "proveObjectChannelPages", "Before", "c52c553017283fd7937ce1395f80199241072bc9f97275773da7505603f5a6af"},
+	{"recipes.json", "proveObjectChannelPages", "After", "10705b404bc6700ea0b4269c798f886ab317d71d6d3c5121ecb79819c866df35"},
+	{"family145-transitions.json", "proveObjectChannelPages", "Before", "c52c553017283fd7937ce1395f80199241072bc9f97275773da7505603f5a6af"},
+	{"family145-transitions.json", "proveObjectChannelPages", "After", "10705b404bc6700ea0b4269c798f886ab317d71d6d3c5121ecb79819c866df35"},
+	{"family145-channel-settlement-preimages.json", "proveObjectChannelPages", "Before", "c52c553017283fd7937ce1395f80199241072bc9f97275773da7505603f5a6af"},
+	{"family145-channel-settlement-preimages.json", "proveObjectChannelPages", "After", "10705b404bc6700ea0b4269c798f886ab317d71d6d3c5121ecb79819c866df35"},
 	{"recipes.json", "runChannelDeliveryInboundDispositionE2E", "Before", "5be2795a666eeb21728756b05239ec4a4cdb28045b06528da78a26e2b34664ca"},
 	{"recipes.json", "runChannelDeliveryInboundDispositionE2E", "After", "d88540e3887eb4d53eb7586716efe669a82442a9417021f259504262133094d5"},
 	{"family145-transitions.json", "runChannelDeliveryInboundDispositionE2E", "Before", "5be2795a666eeb21728756b05239ec4a4cdb28045b06528da78a26e2b34664ca"},

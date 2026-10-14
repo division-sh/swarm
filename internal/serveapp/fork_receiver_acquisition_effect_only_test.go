@@ -17,12 +17,11 @@ import (
 
 func requireSupplementalForkAcquisitionSettlement(t *testing.T, rt servedControlProofRuntime, runID, eventID string, policy canonicalrouting.ForkReceiverPolicy) events.DeliveryRoute {
 	t.Helper()
-	// The fixture authors a direct static consumer, not a runtime-classified owner.
 	entityID := flowidentity.EntityID("consumer")
 	wantTarget := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: entityID}
 	var matched []servedForkDeliveryEvidence
 	var deliveryID string
-	for id, delivery := range readServedForkDeliveryEvidence(t, rt, runID) {
+	for id, delivery := range readServedForkDeliveryEvidence(t, rt.ReceiverStateReader, runID) {
 		if node, ok := delivery.route.Recipient.Node(); delivery.eventID == eventID && ok && node.FlowPath() == "consumer" && node.NodeID() == "collector" {
 			matched = append(matched, delivery)
 			deliveryID = id
@@ -92,7 +91,9 @@ func requireSupplementalForkAcquisitionSettlement(t *testing.T, rt servedControl
 		t.Fatal(err)
 	}
 	rows.Close()
-	sort.Slice(gotMutations, func(i, j int) bool { return gotMutations[i].WriterID < gotMutations[j].WriterID })
+	sort.Slice(gotMutations, func(i, j int) bool {
+		return gotMutations[i].WriterID < gotMutations[j].WriterID
+	})
 	if !reflect.DeepEqual(gotMutations, wantMutations) {
 		t.Fatalf("fresh acquisition marker history: got=%+v want=%+v", gotMutations, wantMutations)
 	}
@@ -100,7 +101,6 @@ func requireSupplementalForkAcquisitionSettlement(t *testing.T, rt servedControl
 	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND caused_by_event=$2 AND domain='authored_field' AND path='marker'`, runID, eventID).Scan(&mutations); err != nil {
 		t.Fatal(err)
 	}
-	// Only exact platform runtime-log diagnostics are excluded from domain effects.
 	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND source_event_id=$2 AND NOT (event_class=$3 AND event_name=$4)`, runID, eventID, string(events.EventAdmissionDiagnosticDirect), string(events.EventTypePlatformRuntimeLog)).Scan(&emitted); err != nil {
 		t.Fatal(err)
 	}

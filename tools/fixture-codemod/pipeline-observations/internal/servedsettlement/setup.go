@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelsettlement"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 const SetupPredecessor = "6c51b51d27d0932b6f90029325af3ba6f84f698f"
@@ -98,6 +99,9 @@ func ValidateSetupCurrentSource(root string, pins []runphysical.Pin) error {
 		}
 		current, err := setupCurrentBody(files[pin.File], pin.Function)
 		if err == nil {
+			current, err = selectedreadrole.EarlierSource(root, pin.File, pin.Function, current)
+		}
+		if err == nil {
 			current, err = channelsettlement.EarlierSource(root, pin.File, pin.Function, current)
 		}
 		if err != nil || current != pin.After {
@@ -109,6 +113,10 @@ func ValidateSetupCurrentSource(root string, pins []runphysical.Pin) error {
 
 func SetupEarlierSource(root, file, function, current string) (string, error) {
 	var err error
+	current, err = selectedreadrole.EarlierSource(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	current, err = budgetdiagnostic.EarlierSource(root, file, function, current)
 	if err != nil {
 		return "", err

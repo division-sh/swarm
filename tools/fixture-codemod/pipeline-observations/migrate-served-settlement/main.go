@@ -34,9 +34,17 @@ func main() {
 	lookup := flag.Bool("lookup", false, "apply the finite publication lookup extension")
 	scalar := flag.Bool("scalar", false, "apply existing-owner served fixture scalar reads")
 	roles := flag.Bool("roles", false, "remove derivative raw fixture arguments from read-only helpers")
+	readRoles := flag.Bool("read-roles", false, "migrate the finite selected read-role continuation")
 	flag.Parse()
 	if flag.NArg() != 0 || (*lookup && (*scalar || *roles)) {
 		panic("usage: migrate-served-settlement [-lookup|-scalar|-roles] [-write]")
+	}
+	if *readRoles {
+		if *lookup || *scalar || *roles {
+			panic("read-role continuation cannot replay another migration stage")
+		}
+		migrateReadRoles(*write)
+		return
 	}
 	if *roles {
 		migrateRoles(*write, *scalar)
@@ -280,6 +288,10 @@ func destinationCandidate(path string, pins []runphysical.Pin) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return destinationSource(path, raw, pins)
+}
+
+func destinationSource(path string, raw []byte, pins []runphysical.Pin) ([]byte, error) {
 	set := token.NewFileSet()
 	file, err := parser.ParseFile(set, path, raw, parser.AllErrors)
 	if err != nil {

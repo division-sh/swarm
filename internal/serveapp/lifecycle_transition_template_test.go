@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type lifecycleTemplateSibling struct {
@@ -42,10 +43,16 @@ func startLifecycleTemplateRuntime(t *testing.T, backend servedparity.Backend, r
 	return rt
 }
 
-func readLifecycleTemplateGate(t *testing.T, rt servedControlProofRuntime, runID, entityID, flow string) gateruntime.Activation {
+func readLifecycleTemplateGate(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID, entityID, flow string) gateruntime.Activation {
 	t.Helper()
 	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(accumulator AS TEXT) FROM flow_instances WHERE run_id=$1 AND entity_id=$2 AND flow_template=$3`, runID, entityID, flow).Scan(&raw); err != nil {
+	if err := func() error {
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (string, error) {
+			return storetest.ReadTemplateEntityAccumulatorTextStorage(ctx, selectedProofReceiverStateReader, runID, entityID, flow)
+		})
+		raw = observed
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
 	var buckets map[string]map[string]any
@@ -59,10 +66,16 @@ func readLifecycleTemplateGate(t *testing.T, rt servedControlProofRuntime, runID
 	return gate
 }
 
-func requireLifecycleTemplateInstance(t *testing.T, rt servedControlProofRuntime, runID, instance, flow string) {
+func requireLifecycleTemplateInstance(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID, instance, flow string) {
 	t.Helper()
 	var template string
-	if err := rt.DB.QueryRow(`SELECT flow_template FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, runID, instance).Scan(&template); err != nil {
+	if err := func() error {
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (string, error) {
+			return storetest.ReadInstanceTemplateStorage(ctx, selectedProofReceiverStateReader, runID, instance)
+		})
+		template = observed
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
 	if template != flow {
@@ -87,40 +100,35 @@ func requireLifecycleTemplateEntity(t *testing.T, rt servedControlProofRuntime, 
 	return "", ""
 }
 
-func logLifecycleTemplateCompletionRows(t *testing.T, rt servedControlProofRuntime, runID string) {
+func logLifecycleTemplateCompletionRows(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID string) {
 	t.Helper()
-	queries := []struct{ label, sql string }{
-		{"events", `SELECT event_id,event_name,CAST(payload AS TEXT),routing_source_kind,CAST(source_route AS TEXT),CAST(target_route AS TEXT),CAST(route_settlement AS TEXT) FROM events WHERE run_id=$1 AND (event_name LIKE '%work.completed' OR event_name='mailbox.card_decided') ORDER BY created_at,event_id`},
-		{"deliveries", `SELECT d.delivery_id,d.event_id,d.subscriber_id,d.status,COALESCE(d.reason_code,''),CAST(d.delivery_target_route AS TEXT) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 AND (e.event_name LIKE '%work.completed' OR e.event_name='mailbox.card_decided') ORDER BY d.created_at,d.delivery_id`},
-		{"receipts", `SELECT r.event_id,r.subscriber_id,r.outcome,COALESCE(r.reason_code,''),CAST(r.side_effects AS TEXT) FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 AND (e.event_name LIKE '%work.completed' OR e.event_name='mailbox.card_decided') ORDER BY r.processed_at`},
-	}
+	queries := []struct {
+		label string
+		read  func(context.Context, any, string) (storetest.ServedTemplateCompletionDiagnosticStorage, error)
+	}{{"events", storetest.ReadTemplateCompletionEventDiagnosticsStorage}, {"deliveries", storetest.ReadTemplateCompletionDeliveryDiagnosticsStorage}, {"receipts", storetest.ReadTemplateCompletionReceiptDiagnosticsStorage}}
 	for _, q := range queries {
-		rows, err := rt.DB.Query(q.sql, runID)
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (storetest.ServedTemplateCompletionDiagnosticStorage, error) {
+			return q.read(ctx, selectedProofReceiverStateReader, runID)
+		})
 		if err != nil {
 			t.Logf("TEMPLATE_COMPLETION %s query error: %v", q.label, err)
 			continue
 		}
-		columns, err := rows.Columns()
-		if err != nil {
+		columns := observed.Columns
+		if err := observed.ColumnsError; err != nil {
 			t.Fatal(err)
 		}
 		count := 0
-		for rows.Next() {
-			values := make([]sql.NullString, len(columns))
-			args := make([]any, len(columns))
-			for i := range values {
-				args[i] = &values[i]
-			}
-			if err := rows.Scan(args...); err != nil {
-				t.Fatal(err)
-			}
+		for _, values := range observed.Rows {
 			t.Logf("TEMPLATE_COMPLETION run=%s table=%s columns=%v row=%v", runID, q.label, columns, values)
 			count++
 		}
-		if err := rows.Err(); err != nil {
+		if err := observed.ScanError; err != nil {
 			t.Fatal(err)
 		}
-		rows.Close()
+		if err := observed.IterationError; err != nil {
+			t.Fatal(err)
+		}
 		t.Logf("TEMPLATE_COMPLETION run=%s table=%s count=%d", runID, q.label, count)
 	}
 }
@@ -164,7 +172,7 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 		runID, sourceEvent = seed.RunID, seed.EventID
 		s.entity, s.instance = requireLifecycleTemplateEntity(t, rt, runID, s.flow, "drafting")
 		requireStep("start", seed, "waiting", "drafting")
-		requireLifecycleTemplateInstance(t, rt, runID, s.instance, s.flow)
+		requireLifecycleTemplateInstance(t, rt.ReceiverStateReader, runID, s.instance, s.flow)
 		var keyed operatorread.OperatorEntityFull
 		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": s.entity}, &keyed)
 		if keyed.Fields["case_id"] != "shared" || s.instance == s.flow {
@@ -196,7 +204,7 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 		}
 		s.revision = readLifecycleLoop(t, rt.Endpoint, runID, s.entity).RevisionID
 		s.gateEntity, s.gateInstance = requireLifecycleTemplateEntity(t, rt, runID, s.flow+"/sink", "review")
-		requireLifecycleTemplateInstance(t, rt, runID, s.gateInstance, s.flow+"/sink")
+		requireLifecycleTemplateInstance(t, rt.ReceiverStateReader, runID, s.gateInstance, s.flow+"/sink")
 		var rawConfig string
 		if err := rt.DB.QueryRow(`SELECT CAST(config AS TEXT) FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, runID, s.gateInstance).Scan(&rawConfig); err != nil {
 			t.Fatal(err)
@@ -226,7 +234,7 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 				t.Fatalf("%s ordinary/cap selection history[%d]=%#v", side, i, compiled)
 			}
 		}
-		s.gate = readLifecycleTemplateGate(t, rt, runID, s.gateEntity, s.flow+"/sink")
+		s.gate = readLifecycleTemplateGate(t, rt.ReceiverStateReader, runID, s.gateEntity, s.flow+"/sink")
 		var cards struct {
 			Items []struct {
 				DecisionCard struct {
@@ -270,7 +278,7 @@ func requireLifecycleTemplateVerdict(t *testing.T, rt servedControlProofRuntime,
 	if !ok || !reflect.DeepEqual(compiled, frozen.Transition) || compiled.FlowID() != s.flow+"/sink" || compiled.Edge().DecisionID != "review_decision" || compiled.Edge().Verdict != "approve" {
 		t.Fatalf("%s gate lost exact frozen source: history=%#v frozen=%#v", s.side, history, frozen)
 	}
-	gate := readLifecycleTemplateGate(t, rt, runID, s.gateEntity, s.flow+"/sink")
+	gate := readLifecycleTemplateGate(t, rt.ReceiverStateReader, runID, s.gateEntity, s.flow+"/sink")
 	if gate.CardID != s.gate.CardID || gate.ActivationID != s.gate.ActivationID || gate.RoutesJSON != s.gate.RoutesJSON || gate.DecisionEventID != history[0].TriggerEventID {
 		t.Fatalf("%s gate receipt split activation/history: %#v", s.side, gate)
 	}
@@ -294,7 +302,7 @@ func completeLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntim
 	}
 	close(start)
 	workers.Wait()
-	logLifecycleTemplateCompletionRows(t, rt, runID)
+	logLifecycleTemplateCompletionRows(t, rt.ReceiverStateReader, runID)
 	if t.Failed() {
 		t.FailNow()
 	}
@@ -376,7 +384,7 @@ func TestServedCompiledTransitionTemplateSiblingForkCapabilityRefusalOnBothStore
 					t.Fatalf("template capability refusal attempt %d mutated application rows", attempt)
 				}
 				for _, sibling := range siblings {
-					if got := readLifecycleTemplateGate(t, rt, runID, sibling.gateEntity, sibling.flow+"/sink"); !reflect.DeepEqual(got, sibling.gate) {
+					if got := readLifecycleTemplateGate(t, rt.ReceiverStateReader, runID, sibling.gateEntity, sibling.flow+"/sink"); !reflect.DeepEqual(got, sibling.gate) {
 						t.Fatalf("refusal changed sibling gate: before=%+v after=%+v", sibling.gate, got)
 					}
 				}

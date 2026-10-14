@@ -152,6 +152,7 @@ func servedDeclarationUsesChanges(fn *ast.FuncDecl, changes map[string]servedset
 
 func servedSettlementEarlierDeclaration(t *testing.T, file, function, current string) string {
 	t.Helper()
+	current = servedSetupEarlierSource(t, file, function, current)
 	for _, pin := range servedPublicationLookupPins(t) {
 		if pin.File == file && pin.Function == function {
 			return servedPublicationLookupEarlierDeclaration(t, file, function, current)

@@ -28,14 +28,14 @@ func readServedForkRecipientSourceDomain(t *testing.T, owner runtimebus.EventSto
 
 func requireServedForkConsumerAuthority(t *testing.T, rt servedControlProofRuntime, runID, eventID string) {
 	t.Helper()
-	deliveries := readServedForkDeliveryEvidence(t, rt, runID)
+	deliveries := readServedForkDeliveryEvidence(t, rt.ReceiverStateReader, runID)
 	matched := 0
 	for id, delivery := range deliveries {
 		if delivery.eventID != eventID {
 			continue
 		}
 		matched++
-		logServedForkWorkflowRows(t, rt, runID)
+		logServedForkWorkflowRows(t, rt.ReceiverStateReader, runID)
 		routeJSON, err := json.Marshal(delivery.route)
 		if err != nil {
 			t.Fatal(err)
@@ -58,7 +58,7 @@ func requireServedForkConsumerAuthority(t *testing.T, rt servedControlProofRunti
 		if status != "delivered" || outcome != "delivered" || claimVersion != 1 || outcomeVersion != claimVersion || outcomes != 1 {
 			t.Logf("failed consumer entity-state rows run=%s: %v", runID, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), runID)["entity_state"])
 			t.Logf("failed consumer run=%s event=%s delivery=%s\n%s", runID, eventID, id, servedInspectionRuntimeLogDebugSummary(rt.ReceiverStateReader, runID))
-			logServedForkHandlerDiagnostics(t, rt)
+			logServedForkHandlerDiagnostics(t, rt.ReceiverStateReader)
 			t.Fatalf("consumer did not settle exactly once: status=%s outcome=%s claim=%d outcome_claim=%d outcomes=%d failure=%s", status, outcome, claimVersion, outcomeVersion, outcomes, failure)
 		}
 	}
@@ -67,49 +67,59 @@ func requireServedForkConsumerAuthority(t *testing.T, rt servedControlProofRunti
 	}
 }
 
-func logServedForkWorkflowRows(t *testing.T, rt servedControlProofRuntime, runID string) {
+func logServedForkWorkflowRows(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID string) {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT instance_path,flow_template,mode,CAST(config AS TEXT),status FROM flow_instances WHERE run_id=$1 ORDER BY instance_path`, runID)
+	rows, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (storetest.ServedForkWorkflowDiagnosticsStorage, error) {
+		return storetest.ReadServedForkWorkflowDiagnosticsStorage(ctx, selectedProofReceiverStateReader, runID)
+	})
 	if err != nil {
 		t.Logf("workflow diagnostic query failed: %v", err)
 		return
 	}
-	defer rows.Close()
 	count := 0
-	for rows.Next() {
+	for _, selectedReadRow := range rows.Rows {
 		var path, template, mode, config, status string
-		if err := rows.Scan(&path, &template, &mode, &config, &status); err != nil {
-			t.Logf("workflow diagnostic scan failed: %v", err)
-			return
-		}
+		path = selectedReadRow.Path
+		template = selectedReadRow.Template
+		mode = selectedReadRow.Mode
+		config = selectedReadRow.Config
+		status = selectedReadRow.Status
 		count++
 		t.Logf("workflow companion run=%s instance_path=%s flow_template=%s mode=%s status=%s config=%s", runID, path, template, mode, status, config)
 	}
-	if err := rows.Err(); err != nil {
+	if err := rows.ScanError; err != nil {
+		t.Logf("workflow diagnostic scan failed: %v", err)
+		return
+	}
+	if err := rows.IterationError; err != nil {
 		t.Logf("workflow diagnostic iteration failed: %v", err)
 	}
 	t.Logf("workflow companion census run=%s rows=%d", runID, count)
 }
 
-func logServedForkHandlerDiagnostics(t *testing.T, rt servedControlProofRuntime) {
+func logServedForkHandlerDiagnostics(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader) {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT event_id,COALESCE(CAST(run_id AS TEXT),''),CAST(payload AS TEXT) FROM events WHERE event_name='platform.runtime_log' ORDER BY created_at,event_id`)
+	rows, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (storetest.ServedForkRuntimeDiagnosticsStorage, error) {
+		return storetest.ReadServedForkRuntimeDiagnosticsStorage(ctx, selectedProofReceiverStateReader)
+	})
 	if err != nil {
 		t.Logf("runtime diagnostic query failed: %v", err)
 		return
 	}
-	defer rows.Close()
 	count := 0
-	for rows.Next() {
+	for _, selectedReadRow := range rows.Rows {
 		var eventID, runID, payload string
-		if err := rows.Scan(&eventID, &runID, &payload); err != nil {
-			t.Logf("runtime diagnostic scan failed: %v", err)
-			return
-		}
+		eventID = selectedReadRow.EventID
+		runID = selectedReadRow.RunID
+		payload = selectedReadRow.Payload
 		count++
 		t.Logf("runtime diagnostic event=%s run=%s payload=%s", eventID, runID, payload)
 	}
-	if err := rows.Err(); err != nil {
+	if err := rows.ScanError; err != nil {
+		t.Logf("runtime diagnostic scan failed: %v", err)
+		return
+	}
+	if err := rows.IterationError; err != nil {
 		t.Logf("runtime diagnostic iteration failed: %v", err)
 	}
 	t.Logf("runtime diagnostic census: %d rows, all runs including runless, no row limit", count)

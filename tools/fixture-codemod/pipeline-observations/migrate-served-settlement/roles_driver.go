@@ -280,6 +280,10 @@ func typedRoleCalls(root string, pkgs []*packages.Package, roles map[string]serv
 }
 
 func servedRoleCandidates(originals map[string][]byte, roles map[string]servedRole, uses, scalarTypes map[string]string) (map[string][]byte, []runphysical.Pin) {
+	return servedRoleCandidatesAt(originals, roles, uses, scalarTypes, destinationCandidate)
+}
+
+func servedRoleCandidatesAt(originals map[string][]byte, roles map[string]servedRole, uses, scalarTypes map[string]string, destination func(string, []runphysical.Pin) ([]byte, error)) (map[string][]byte, []runphysical.Pin) {
 	paths := make([]string, 0, len(originals))
 	for path := range originals {
 		paths = append(paths, path)
@@ -315,7 +319,7 @@ func servedRoleCandidates(originals map[string][]byte, roles map[string]servedRo
 		if len(rows) == 0 {
 			continue
 		}
-		out, err := destinationCandidate(path, rows)
+		out, err := destination(path, rows)
 		must(err)
 		out = servedNativeRuntimeImport(out)
 		if len(scalarFilePins(path, originals[path], scalarTypes)) > 0 {

@@ -242,7 +242,7 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 				t.Logf("post-issuance descendant settlement receipts: detached=%+v successor=%+v", transactions.Snapshot().ByOperation[storetest.TransactionDeliverySettle], continuation.Snapshot().ByOperation[storetest.TransactionDeliverySettle])
 			}
 			assertIssue2394ReporterHistory(t, rt.DB, runID)
-			validEvents := assertIssue2394ReporterEvents(t, rt, runID, portfolio, wanted)
+			validEvents := assertIssue2394ReporterEvents(t, rt.Endpoint, rt.ReceiverStateReader, runID, portfolio, wanted)
 			for _, id := range []string{"numeric-000", "numeric-499"} {
 				assertIssue2394ReporterEventGet(t, rt.Endpoint, validEvents[id])
 			}
@@ -253,7 +253,7 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 			assertIssue2394ReporterSummary(t, final.FanOut, runID, true)
 			assertIssue2394ReporterRejections(t, rt.DB, runID)
 			wanted["mixed-before"], wanted["mixed-after"] = mixed[0], mixed[3]
-			finalEvents := assertIssue2394ReporterEvents(t, rt, runID, portfolio, wanted)
+			finalEvents := assertIssue2394ReporterEvents(t, rt.Endpoint, rt.ReceiverStateReader, runID, portfolio, wanted)
 			for id, before := range validEvents {
 				if !reflect.DeepEqual(before, finalEvents[id]) {
 					t.Fatalf("mixed batch changed original valid event %s", id)
@@ -262,7 +262,7 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 			for _, id := range []string{"mixed-before", "mixed-after"} {
 				assertIssue2394ReporterEventGet(t, rt.Endpoint, finalEvents[id])
 			}
-			assertIssue2394ReporterClients(t, rt, runID, final.FanOut)
+			assertIssue2394ReporterClients(t, rt.Endpoint, rt.ReceiverStateReader, runID, final.FanOut)
 			if transactionOptions.Delay > 0 {
 				observed := transactions
 				wantChunks := uint64(21)
@@ -461,7 +461,7 @@ func assertIssue2394ReporterSummary(t *testing.T, f fanoutobligation.RunSummary,
 	assertIssue2394ReporterRejectionAttributes(t, sample.Failure, 1)
 }
 
-func assertIssue2394ReporterEvents(t *testing.T, rt servedControlProofRuntime, runID, portfolio string, wanted map[string]map[string]any) map[string]operatorread.OperatorEventFull {
+func assertIssue2394ReporterEvents(t *testing.T, selectedProofEndpoint string, selectedProofReceiverStateReader receiverProofStateReader, runID, portfolio string, wanted map[string]map[string]any) map[string]operatorread.OperatorEventFull {
 	t.Helper()
 	seen := make(map[string]operatorread.OperatorEventFull)
 	ids, cursors := make(map[string]bool), make(map[string]bool)
@@ -472,7 +472,7 @@ func assertIssue2394ReporterEvents(t *testing.T, rt servedControlProofRuntime, r
 			params["cursor"] = cursor
 		}
 		var page operatorread.OperatorEventListResult
-		issue2394ReporterRPC(t, rt.Endpoint, "event.list", params, &page)
+		issue2394ReporterRPC(t, selectedProofEndpoint, "event.list", params, &page)
 		for _, event := range page.Events {
 			account, _ := event.Payload["account_id"].(string)
 			row, present := wanted[account]
@@ -497,11 +497,12 @@ func assertIssue2394ReporterEvents(t *testing.T, rt servedControlProofRuntime, r
 	if len(seen) != len(wanted) {
 		t.Fatalf("original reporter emitted %d unique events, want %d", len(seen), len(wanted))
 	}
-	rows, err := rt.DB.Query(`SELECT CAST(event_id AS TEXT),ordinal FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed'`, runID)
+	rows, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) ([]storetest.CommittedFanOutOrdinalStorage, error) {
+		return storetest.ReadCommittedRunFanOutOrdinalsStorage(ctx, selectedProofReceiverStateReader, runID)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	ordinals := make(map[string]int)
 	for account, event := range seen {
 		ordinal := wanted[account]["eng_roles"].(int) % 25
@@ -513,20 +514,16 @@ func assertIssue2394ReporterEvents(t *testing.T, rt servedControlProofRuntime, r
 		ordinals[event.EventID] = ordinal
 	}
 	outcomes := make(map[string]bool)
-	for rows.Next() {
+	for _, selectedReadRow := range rows {
 		var id string
 		var ordinal int
-		if err := rows.Scan(&id, &ordinal); err != nil {
-			t.Fatal(err)
-		}
+		id = selectedReadRow.ID
+		ordinal = selectedReadRow.Ordinal
 		want, exists := ordinals[id]
 		if !exists || outcomes[id] || ordinal != want {
 			t.Fatalf("committed outcome lost exact event/ordinal: id=%s ordinal=%d want=%d exists=%t", id, ordinal, want, exists)
 		}
 		outcomes[id] = true
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	if len(outcomes) != len(wanted) {
 		t.Fatalf("durable unique committed outcomes=%d want=%d", len(outcomes), len(wanted))
@@ -648,12 +645,12 @@ func assertIssue2394ReporterRejectionAttributes(t *testing.T, failure runtimefai
 	}
 }
 
-func assertIssue2394ReporterClients(t *testing.T, rt servedControlProofRuntime, runID string, summary fanoutobligation.RunSummary) {
+func assertIssue2394ReporterClients(t *testing.T, selectedProofEndpoint string, selectedProofReceiverStateReader receiverProofStateReader, runID string, summary fanoutobligation.RunSummary) {
 	t.Helper()
-	before := issue2394SurfaceSnapshot(t, rt.DB, runID)
+	before := readServedReporterSnapshot(t, selectedProofReceiverStateReader, runID)
 	var page fanoutobligation.ListPage
 	query := fanoutobligation.ListQuery{RunID: runID, Limit: 100}
-	issue2394ReporterRPC(t, rt.Endpoint, "run.fan_out.list", map[string]any{"run_id": runID, "limit": 100}, &page)
+	issue2394ReporterRPC(t, selectedProofEndpoint, "run.fan_out.list", map[string]any{"run_id": runID, "limit": 100}, &page)
 	if err := page.Validate(query); err != nil {
 		t.Fatal(err)
 	}
@@ -665,7 +662,7 @@ func assertIssue2394ReporterClients(t *testing.T, rt servedControlProofRuntime, 
 			t.Fatalf("original HTTP list lost settled/live evidence: %+v", intent)
 		}
 	}
-	keys := strings.Fields(issue2394SurfaceCLI(t, rt.Endpoint, "run", "fan-out", "list", runID, "--limit", "100", "--quiet"))
+	keys := strings.Fields(issue2394SurfaceCLI(t, selectedProofEndpoint, "run", "fan-out", "list", runID, "--limit", "100", "--quiet"))
 	if len(keys) != len(page.Intents) {
 		t.Fatalf("CLI original reporter list has %d keys, want21", len(keys))
 	}
@@ -675,20 +672,20 @@ func assertIssue2394ReporterClients(t *testing.T, rt servedControlProofRuntime, 
 		}
 	}
 	var jsonStatus cliapp.DiagnosticRunDiagnosisResult
-	output := issue2394SurfaceCLI(t, rt.Endpoint, "run", "status", runID, "--json")
+	output := issue2394SurfaceCLI(t, selectedProofEndpoint, "run", "status", runID, "--json")
 	if err := json.Unmarshal([]byte(output), &jsonStatus); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(jsonStatus.FanOut, summary) || strings.Contains(output, `"rejected":`) {
 		t.Fatalf("original API/CLI JSON evidence changed: %s", output)
 	}
-	human := issue2394SurfaceCLI(t, rt.Endpoint, "run", "status", runID)
+	human := issue2394SurfaceCLI(t, selectedProofEndpoint, "run", "status", runID)
 	for _, want := range []string{"502 committed items", "2 semantic rejections", "$.external_id", `actual=""`, "emit_payload_contract_violation"} {
 		if !strings.Contains(human, want) {
 			t.Fatalf("original human status missing %q: %s", want, human)
 		}
 	}
-	if after := issue2394SurfaceSnapshot(t, rt.DB, runID); !reflect.DeepEqual(before, after) {
+	if after := readServedReporterSnapshot(t, selectedProofReceiverStateReader, runID); !reflect.DeepEqual(before, after) {
 		t.Fatal("original reporter supported read surfaces changed durable evidence")
 	}
 }

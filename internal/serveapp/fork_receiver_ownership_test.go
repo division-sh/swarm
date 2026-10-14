@@ -101,11 +101,9 @@ func readForkReceiverCompanions(t *testing.T, reader receiverProofStateReader, r
 	return out
 }
 
-func requireOptionalForkReceiverHeaderProgress(t *testing.T, rt servedControlProofRuntime, runID, path string, before, after map[string][]string, deliveries int) {
+func requireOptionalForkReceiverHeaderProgress(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID, path string, before, after map[string][]string, deliveries int) {
 	t.Helper()
-	if !reflect.DeepEqual(before["flow_instance_runtime_readiness"], after["flow_instance_runtime_readiness"]) ||
-		!reflect.DeepEqual(before["flow_instances/columns"], after["flow_instances/columns"]) ||
-		len(before["flow_instances"]) != 1 || len(after["flow_instances"]) != 1 {
+	if !reflect.DeepEqual(before["flow_instance_runtime_readiness"], after["flow_instance_runtime_readiness"]) || !reflect.DeepEqual(before["flow_instances/columns"], after["flow_instances/columns"]) || len(before["flow_instances"]) != 1 || len(after["flow_instances"]) != 1 {
 		t.Fatalf("optional receiver lost its exact header/readiness shape: before=%v after=%v", before, after)
 	}
 	var columns []string
@@ -113,9 +111,7 @@ func requireOptionalForkReceiverHeaderProgress(t *testing.T, rt servedControlPro
 	for _, value := range []struct {
 		raw    string
 		target any
-	}{
-		{before["flow_instances/columns"][0], &columns}, {before["flow_instances"][0], &old}, {after["flow_instances"][0], &current},
-	} {
+	}{{before["flow_instances/columns"][0], &columns}, {before["flow_instances"][0], &old}, {after["flow_instances"][0], &current}} {
 		if err := json.Unmarshal([]byte(value.raw), value.target); err != nil {
 			t.Fatal(err)
 		}
@@ -133,7 +129,13 @@ func requireOptionalForkReceiverHeaderProgress(t *testing.T, rt servedControlPro
 			}
 		case "updated_at":
 			var advanced bool
-			if err := rt.DB.QueryRow(`SELECT updated_at>$3 FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, runID, path, old[index]).Scan(&advanced); err != nil || !advanced || reflect.DeepEqual(old[index], current[index]) {
+			if err := func() error {
+				observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (bool, error) {
+					return storetest.ReadInstanceClockAdvancedStorage(ctx, selectedProofReceiverStateReader, runID, path, old[index])
+				})
+				advanced = observed
+				return err
+			}(); err != nil || !advanced || reflect.DeepEqual(old[index], current[index]) {
 				t.Fatalf("optional header update time did not advance: %v -> %v err=%v", old[index], current[index], err)
 			}
 		case "config":
@@ -162,7 +164,7 @@ func requireForkReceiverDelivery(t *testing.T, rt servedControlProofRuntime, run
 	t.Helper()
 	var matched []servedForkDeliveryEvidence
 	var deliveryID string
-	for id, delivery := range readServedForkDeliveryEvidence(t, rt, runID) {
+	for id, delivery := range readServedForkDeliveryEvidence(t, rt.ReceiverStateReader, runID) {
 		node, ok := delivery.route.Recipient.Node()
 		if delivery.eventID == sourceEvent && ok && node.FlowPath() == path && node.NodeID() == "collector" {
 			matched = append(matched, delivery)
@@ -189,7 +191,7 @@ func requireForkReceiverDelivery(t *testing.T, rt servedControlProofRuntime, run
 		t.Fatal(err)
 	}
 	if status != "delivered" || outcome != "delivered" || claim != 1 || outcomeClaim != 1 || outcomes != 1 {
-		logServedForkHandlerDiagnostics(t, rt)
+		logServedForkHandlerDiagnostics(t, rt.ReceiverStateReader)
 		t.Fatalf("%s/%s: final settlement status=%s outcome=%s claim=%d/%d count=%d failure=%s", runID, path, status, outcome, claim, outcomeClaim, outcomes, failure)
 	}
 	var selectionContext, disposition, selectionFlow, family, semanticPath, displayLabel string
@@ -355,7 +357,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 				if !reflect.DeepEqual(seedRows[path], sourceRows[path]) {
 					t.Fatalf("optional receiver changed seeded state %s: before=%+v after=%+v", path, seedRows[path], sourceRows[path])
 				}
-				requireOptionalForkReceiverHeaderProgress(t, rt, seed.RunID, path, seedCompanions[path], readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID, path), len(frontiers))
+				requireOptionalForkReceiverHeaderProgress(t, rt.ReceiverStateReader, seed.RunID, path, seedCompanions[path], readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID, path), len(frontiers))
 			}
 		}
 	}
@@ -430,7 +432,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	}
 	if option.executionOnly {
 		for _, occurrence := range frontiers {
-			requireForkReceiverMutationOwners(t, rt, seed.RunID, occurrence, prefix, receivers)
+			requireForkReceiverMutationOwners(t, rt.ReceiverStateReader, seed.RunID, occurrence, prefix, receivers)
 		}
 	}
 	t.Logf("source success reached: run=%s frontier=%s receivers=%d", seed.RunID, frontier, len(receivers))
@@ -550,7 +552,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		t.Fatalf("producer state was rehomed: source=%+v child=%+v", producer, childRows)
 	}
 	if option.executionOnly {
-		requireForkReceiverMutationOwners(t, rt, fork.ForkRunID, childEvent, prefix, receivers)
+		requireForkReceiverMutationOwners(t, rt.ReceiverStateReader, fork.ForkRunID, childEvent, prefix, receivers)
 	}
 	if entitylessProducer {
 		if _, exists := childRows[prefix+"producer"]; exists {
@@ -822,7 +824,7 @@ func requireForkReceiverBusinessMutation(t *testing.T, rt servedControlProofRunt
 	t.Helper()
 	var exact []servedForkDeliveryEvidence
 	var deliveryID string
-	for id, delivery := range readServedForkDeliveryEvidence(t, rt, runID) {
+	for id, delivery := range readServedForkDeliveryEvidence(t, rt.ReceiverStateReader, runID) {
 		if node, ok := delivery.route.Recipient.Node(); delivery.eventID == eventID && ok && node.FlowPath() == "consumer" && node.NodeID() == "collector" {
 			exact = append(exact, delivery)
 			deliveryID = id
@@ -871,7 +873,6 @@ func requireForkReceiverBusinessMutation(t *testing.T, rt servedControlProofRunt
 	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND caused_by_event=$2 AND domain='authored_field' AND path='processed_token'`, runID, eventID).Scan(&mutations); err != nil {
 		t.Fatal(err)
 	}
-	// Runtime log records are admitted diagnostics, not authored emissions.
 	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND source_event_id=$2 AND NOT (event_class=$3 AND event_name=$4)`, runID, eventID, string(events.EventAdmissionDiagnosticDirect), string(events.EventTypePlatformRuntimeLog)).Scan(&emitted); err != nil {
 		t.Fatal(err)
 	}

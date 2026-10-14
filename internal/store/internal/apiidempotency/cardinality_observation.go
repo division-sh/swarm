@@ -18,3 +18,9 @@ func ReadMethodKeyCardinalityTx(ctx context.Context, tx *sql.Tx, method, key str
 	}
 	return count, nil
 }
+
+func CountPhysicalAPIReceiptsStorageTx(ctx context.Context, tx *sql.Tx) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM api_idempotency`).Scan(&count)
+	return count, err
+}

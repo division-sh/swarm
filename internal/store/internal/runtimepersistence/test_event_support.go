@@ -31,6 +31,42 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
+func CountSourceNonDiagnosticEventsStorageForTest(ctx context.Context, selected any, runID, sourceEventID, diagnosticClass, diagnosticName string) (int, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountSourceNonDiagnosticEventsStorageTx(ctx, tx, runID, sourceEventID, diagnosticClass, diagnosticName)
+	})
+}
+func CountGlobalBusinessEventsStorageForTest(ctx context.Context, selected any) (int, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountGlobalBusinessEventsStorageTx(ctx, tx)
+	})
+}
+
+type ServedForkRuntimeDiagnosticsStorage = eventrecord.ServedForkRuntimeDiagnosticsStorage
+
+func ReadServedForkRuntimeDiagnosticsStorageForTest(ctx context.Context, selected any) (ServedForkRuntimeDiagnosticsStorage, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (ServedForkRuntimeDiagnosticsStorage, error) {
+		return eventrecord.ReadServedForkRuntimeDiagnosticsStorageTx(ctx, tx)
+	})
+}
+func ReadTemplateCompletionEventDiagnosticsStorageForTest(ctx context.Context, selected any, runID string) (ServedTemplateCompletionDiagnosticStorage, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (ServedTemplateCompletionDiagnosticStorage, error) {
+		out, err := eventrecord.ReadTemplateCompletionEventDiagnosticsStorageTx(ctx, tx, runID)
+		return ServedTemplateCompletionDiagnosticStorage(out), err
+	})
+}
+func ReadReporterEventSnapshotStorageForTest(ctx context.Context, selected any, runID string) (ServedTemplateCompletionDiagnosticStorage, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (ServedTemplateCompletionDiagnosticStorage, error) {
+		out, err := eventrecord.ReadReporterEventSnapshotStorageTx(ctx, tx, runID)
+		return ServedTemplateCompletionDiagnosticStorage(out), err
+	})
+}
+func CountPhysicalEventsStorageForTest(ctx context.Context, selected any) (int, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountPhysicalEventsStorageTx(ctx, tx)
+	})
+}
+
 type StandingEventNameDiagnostic = eventrecord.StandingEventNameDiagnostic
 
 func ReadStandingEventNameDiagnosticsForTest(ctx context.Context, selected any) ([]StandingEventNameDiagnostic, error) {

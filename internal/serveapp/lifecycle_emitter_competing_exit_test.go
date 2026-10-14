@@ -71,7 +71,7 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 							}
 							cancel := map[string]any{"run_id": seed.RunID, "source_event_id": seed.EventID, "event_name": "work.cancelled", "payload": map[string]any{"seed": true}, "idempotency_key": "competing-cancel"}
 							if exit == "timer" {
-								due = lifecycleCompetingTimerDue(t, rt, seed.RunID, entityID)
+								due = lifecycleCompetingTimerDue(t, rt.ReceiverStateReader, seed.RunID, entityID)
 							}
 							var gateReply, exitReply servedJSONRPCEnvelope
 							switch order {
@@ -290,10 +290,16 @@ func lifecycleCompetingTerminalEntity(t *testing.T, selectedProofEndpoint string
 	return operatorread.OperatorEntityFull{}
 }
 
-func lifecycleCompetingTimerDue(t *testing.T, rt servedControlProofRuntime, runID, entityID string) time.Time {
+func lifecycleCompetingTimerDue(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID, entityID string) time.Time {
 	t.Helper()
 	var raw any
-	if err := rt.DB.QueryRow(`SELECT fire_at FROM timers WHERE run_id = $1 AND entity_id = $2 AND task_type = 'workflow_timer'`, runID, entityID).Scan(&raw); err != nil {
+	if err := func() error {
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (any, error) {
+			return storetest.ReadWorkflowTimerDueValueStorage(ctx, selectedProofReceiverStateReader, runID, entityID)
+		})
+		raw = observed
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
 	if due, ok := raw.(time.Time); ok {

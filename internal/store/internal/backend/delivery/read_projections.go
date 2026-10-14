@@ -18,6 +18,143 @@ import (
 	"github.com/google/uuid"
 )
 
+type ServedDeliveryRouteEvidenceStorage struct {
+	ID, EventID, Identity, Kind, Recipient, Target, Context, Projection, Claim, Initialization string
+}
+
+type ServedTemplateCompletionDiagnosticStorage struct {
+	Columns                                 []string
+	Rows                                    [][]sql.NullString
+	ColumnsError, ScanError, IterationError error
+}
+
+func scanServedPhysicalDiagnosticRows(rows *sql.Rows) (ServedTemplateCompletionDiagnosticStorage, error) {
+	var out ServedTemplateCompletionDiagnosticStorage
+	defer rows.Close()
+	out.Columns, out.ColumnsError = rows.Columns()
+	if out.ColumnsError != nil {
+		return out, nil
+	}
+	for rows.Next() {
+		values := make([]sql.NullString, len(out.Columns))
+		args := make([]any, len(values))
+		for i := range values {
+			args[i] = &values[i]
+		}
+		if err := rows.Scan(args...); err != nil {
+			out.ScanError = err
+			return out, nil
+		}
+		out.Rows = append(out.Rows, values)
+	}
+	out.IterationError = rows.Err()
+	return out, nil
+}
+func ReadTemplateCompletionDeliveryDiagnosticsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (ServedTemplateCompletionDiagnosticStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT d.delivery_id,d.event_id,d.subscriber_id,d.status,COALESCE(d.reason_code,''),CAST(d.delivery_target_route AS TEXT) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 AND (e.event_name LIKE '%work.completed' OR e.event_name='mailbox.card_decided') ORDER BY d.created_at,d.delivery_id`, runID)
+	if err != nil {
+		return ServedTemplateCompletionDiagnosticStorage{}, err
+	}
+	return scanServedPhysicalDiagnosticRows(rows)
+}
+
+func ReadServedDeliveryRouteEvidenceStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]ServedDeliveryRouteEvidenceStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT delivery_id,event_id,route_identity,subscriber_type,subscriber_id,CAST(delivery_target_route AS TEXT),CAST(delivery_context AS TEXT),CAST(delivery_payload_projection AS TEXT),CAST(connect_execution_claim AS TEXT),CAST(receiver_materialization_plan AS TEXT) FROM event_deliveries WHERE run_id=$1 ORDER BY delivery_id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ServedDeliveryRouteEvidenceStorage
+	for rows.Next() {
+		var row ServedDeliveryRouteEvidenceStorage
+		if err := rows.Scan(&row.ID, &row.EventID, &row.Identity, &row.Kind, &row.Recipient, &row.Target, &row.Context, &row.Projection, &row.Claim, &row.Initialization); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+type DeliveryRecoveryIdentityStorage struct{ EventID, Route, Status string }
+
+func ReadDeliveryRecoveryIdentityStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string) (DeliveryRecoveryIdentityStorage, error) {
+	var out DeliveryRecoveryIdentityStorage
+	err := tx.QueryRowContext(ctx, `SELECT event_id, CAST(delivery_target_route AS TEXT), status FROM event_deliveries WHERE delivery_id=$1`, deliveryID).Scan(&out.EventID, &out.Route, &out.Status)
+	return out, err
+}
+
+type DeliveryRecoveryAttemptStorage struct {
+	Version         int64
+	Outcome, Reason string
+}
+
+func ReadDeliveryRecoveryAttemptsStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string) ([]DeliveryRecoveryAttemptStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT claim_version, COALESCE(outcome,''), COALESCE(reason_code,'') FROM event_delivery_attempts WHERE delivery_id=$1 ORDER BY claim_version`, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DeliveryRecoveryAttemptStorage
+	for rows.Next() {
+		var row DeliveryRecoveryAttemptStorage
+		if err := rows.Scan(&row.Version, &row.Outcome, &row.Reason); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func CountSourceRunDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID, sourceEventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 AND e.source_event_id=$2`, runID, sourceEventID).Scan(&count)
+	return count, err
+}
+
+type OrderedFanOutOutcomeStorage struct {
+	Ordinal  int
+	ID, Kind string
+}
+
+func ReadOrderedRunFanOutOutcomesStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]OrderedFanOutOutcomeStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT ordinal,CAST(event_id AS TEXT),outcome_kind FROM fan_out_outcomes WHERE run_id=$1 ORDER BY ordinal`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OrderedFanOutOutcomeStorage
+	for rows.Next() {
+		var row OrderedFanOutOutcomeStorage
+		if err := rows.Scan(&row.Ordinal, &row.ID, &row.Kind); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+type CommittedFanOutOrdinalStorage struct {
+	ID      string
+	Ordinal int
+}
+
+func ReadCommittedRunFanOutOrdinalsStorageTx(ctx context.Context, tx *sql.Tx, runID string) ([]CommittedFanOutOrdinalStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(event_id AS TEXT),ordinal FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed'`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CommittedFanOutOrdinalStorage
+	for rows.Next() {
+		var row CommittedFanOutOrdinalStorage
+		if err := rows.Scan(&row.ID, &row.Ordinal); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
 type StandingDeliveryDiagnostic struct{ EventID, Subscriber, Status string }
 
 func ReadStandingDeliveryDiagnosticsTx(ctx context.Context, tx *sql.Tx, postgres bool) ([]StandingDeliveryDiagnostic, error) {

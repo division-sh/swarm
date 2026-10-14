@@ -109,7 +109,10 @@ func debtServedSetupLiveSources(root string) ([]debtRunIdentitySourceBody, error
 				return nil, err
 			}
 		}
-		current, err := debtChannelSettlementSourcePrevious(root, pin.File, pin.Function, files[pin.File][pin.Function])
+		current, err := debtSelectedReadRoleSourcePrevious(root, pin.File, pin.Function, files[pin.File][pin.Function])
+		if err == nil {
+			current, err = debtChannelSettlementSourcePrevious(root, pin.File, pin.Function, current)
+		}
 		if err != nil || current != pin.After {
 			return nil, fmt.Errorf("served setup actual current source changed: %s", pin.Function)
 		}
@@ -119,7 +122,10 @@ func debtServedSetupLiveSources(root string) ([]debtRunIdentitySourceBody, error
 
 func debtServedSetupSourcePrevious(root, file, function, current string) (string, error) {
 	var err error
-	current, err = debtChannelSettlementSourcePrevious(root, file, function, current)
+	current, err = debtSelectedReadRoleSourcePrevious(root, file, function, current)
+	if err == nil {
+		current, err = debtChannelSettlementSourcePrevious(root, file, function, current)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -159,6 +165,7 @@ func debtServedSetupCopySourceEvidence(t *testing.T, root, copy string) {
 		debtSourceBlobCopyDeclaration(t, copy, pin.File, pin.Function, pin.After)
 	}
 	debtChannelSettlementCopySources(t, root, copy)
+	debtSelectedReadRoleCopySources(t, root, copy)
 }
 
 func TestPersistenceAuthorityDebtServedSetupSourceInverseRejectsStaleAndForeignCuts(t *testing.T) {

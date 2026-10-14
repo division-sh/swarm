@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelsettlement"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedsettlement"
 )
 
@@ -24,6 +25,10 @@ func servedSetupComparisonDeclaration(t *testing.T, pins []runphysical.Pin, path
 	current := requestkey.Node(fn)
 	actual := current
 	var err error
+	current, err = selectedreadrole.EarlierSource("../../..", path, fn.Name.Name, current)
+	if err != nil {
+		t.Fatal(err)
+	}
 	current, err = channelsettlement.EarlierSource("../../..", path, fn.Name.Name, current)
 	if err != nil {
 		t.Fatal(err)
@@ -197,6 +202,10 @@ func servedSetupEarlierHistory(t *testing.T, current []byte, recipes bool) []byt
 func servedSetupEarlierSource(t *testing.T, file, function, current string) string {
 	t.Helper()
 	var err error
+	current, err = selectedreadrole.EarlierSource("../../..", file, function, current)
+	if err != nil {
+		t.Fatal(err)
+	}
 	current, err = budgetdiagnostic.EarlierSource("../../..", file, function, current)
 	if err != nil {
 		t.Fatal(err)

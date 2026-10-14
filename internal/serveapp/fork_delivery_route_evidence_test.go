@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type servedForkDeliveryEvidence struct {
@@ -20,27 +21,31 @@ type servedForkDeliveryEvidence struct {
 	route             events.DeliveryRoute
 }
 
-func readServedForkDeliveryEvidence(t *testing.T, rt servedControlProofRuntime, runID string) map[string]servedForkDeliveryEvidence {
+func readServedForkDeliveryEvidence(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID string) map[string]servedForkDeliveryEvidence {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT delivery_id,event_id,route_identity,subscriber_type,subscriber_id,CAST(delivery_target_route AS TEXT),CAST(delivery_context AS TEXT),CAST(delivery_payload_projection AS TEXT),CAST(connect_execution_claim AS TEXT),CAST(receiver_materialization_plan AS TEXT) FROM event_deliveries WHERE run_id=$1 ORDER BY delivery_id`, runID)
+	rows, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) ([]storetest.ServedDeliveryRouteEvidenceStorage, error) {
+		return storetest.ReadServedDeliveryRouteEvidenceStorage(ctx, selectedProofReceiverStateReader, runID)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	out := map[string]servedForkDeliveryEvidence{}
-	for rows.Next() {
+	for _, selectedReadRow := range rows {
 		var id, eventID, identity, kind, recipient, target, contextJSON, projection, claim, initialization string
-		if err := rows.Scan(&id, &eventID, &identity, &kind, &recipient, &target, &contextJSON, &projection, &claim, &initialization); err != nil {
-			t.Fatal(err)
-		}
+		id = selectedReadRow.ID
+		eventID = selectedReadRow.EventID
+		identity = selectedReadRow.Identity
+		kind = selectedReadRow.Kind
+		recipient = selectedReadRow.Recipient
+		target = selectedReadRow.Target
+		contextJSON = selectedReadRow.Context
+		projection = selectedReadRow.Projection
+		claim = selectedReadRow.Claim
+		initialization = selectedReadRow.Initialization
 		if kind != "node" {
 			t.Fatalf("ordinary node fixture unexpectedly produced %s delivery", kind)
 		}
-		wire, err := json.Marshal(map[string]any{
-			"subscriber_type": kind, "subscriber_id": recipient,
-			"delivery_target_ownership": json.RawMessage(target), "delivery_context": json.RawMessage(contextJSON),
-			"delivery_payload_projection": json.RawMessage(projection), "connect_execution_claim": json.RawMessage(claim),
-		})
+		wire, err := json.Marshal(map[string]any{"subscriber_type": kind, "subscriber_id": recipient, "delivery_target_ownership": json.RawMessage(target), "delivery_context": json.RawMessage(contextJSON), "delivery_payload_projection": json.RawMessage(projection), "connect_execution_claim": json.RawMessage(claim)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -62,9 +67,6 @@ func readServedForkDeliveryEvidence(t *testing.T, rt servedControlProofRuntime, 
 			t.Fatalf("live delivery %s full route disagrees with stored identity: %v", id, err)
 		}
 		out[id] = servedForkDeliveryEvidence{eventID: eventID, identity: identity, route: route.Normalized()}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	return out
 }
@@ -131,7 +133,7 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "parent.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"work_id": "fork-connected-history"}, "idempotency_key": "fork-history-seed"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			live := readServedForkDeliveryEvidence(t, rt, seed.RunID)
+			live := readServedForkDeliveryEvidence(t, rt.ReceiverStateReader, seed.RunID)
 			if selected == nil {
 				t.Fatal("served runtime did not expose its selected persistence owner")
 			}
@@ -201,7 +203,7 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 				if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.SourceRunID != seed.RunID || fork.ForkEventID != plan.ForkPoint.EventID {
 					t.Fatalf("invalid fork identity: %+v", fork)
 				}
-				if got := readServedForkDeliveryEvidence(t, rt, seed.RunID); !reflect.DeepEqual(got, live) {
+				if got := readServedForkDeliveryEvidence(t, rt.ReceiverStateReader, seed.RunID); !reflect.DeepEqual(got, live) {
 					t.Fatalf("fork changed source delivery authority: got=%#v want=%#v", got, live)
 				}
 			})

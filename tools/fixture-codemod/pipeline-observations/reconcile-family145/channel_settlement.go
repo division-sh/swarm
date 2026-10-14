@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/budgetdiagnostic"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelsettlement"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 func composeChannelSettlementHistory(rows []recipe, changes []transition) ([]recipe, []transition) {
@@ -60,4 +61,29 @@ func composeBudgetDiagnosticHistory(rows []recipe, changes []transition) ([]reci
 
 func budgetEarlierDeclaration(path, function, current string) (string, error) {
 	return budgetdiagnostic.EarlierSource(".", path, function, current)
+}
+
+func composeSelectedReadRoleHistory(rows []recipe, changes []transition) ([]recipe, []transition) {
+	pins, err := selectedreadrole.ReadPins(".")
+	must(err)
+	must(selectedreadrole.ValidateCurrent(".", pins))
+	for _, input := range []struct {
+		value, out any
+		recipes    bool
+	}{{rows, &rows, true}, {changes, &changes, false}} {
+		prior, err := selectedreadrole.PriorHistory(".", input.recipes)
+		must(err)
+		candidate, err := json.Marshal(input.value)
+		must(err)
+		var old, current []map[string]any
+		must(json.Unmarshal(prior, &old))
+		must(json.Unmarshal(candidate, &current))
+		if !reflect.DeepEqual(old, current) {
+			panic("selected read-role earlier reconciliation changed its complete signed predecessor")
+		}
+		raw, err := selectedreadrole.ComposeHistory(".", prior, input.recipes)
+		must(err)
+		must(json.Unmarshal(raw, input.out))
+	}
+	return rows, changes
 }

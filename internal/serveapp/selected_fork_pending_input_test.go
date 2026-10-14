@@ -199,7 +199,7 @@ func TestExplicitTargetRestrictsConnectedSiblingsBothStores(t *testing.T) {
 			if len(point.Deliveries) != 1 {
 				t.Fatalf("targeted publication deliveries = %+v, want one child", point.Deliveries)
 			}
-			assertNoUnselectedTargetActivation(t, rt, seed.RunID)
+			assertNoUnselectedTargetActivation(t, rt.ReceiverStateReader, seed.RunID)
 			var readback operatorread.OperatorEventFull
 			requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": point.EventID}, &readback)
 			if len(readback.Deliveries) != 1 || readback.Deliveries[0].Target.FlowInstance != "child" || readback.Deliveries[0].Target.EntityID != childEntity {
@@ -227,16 +227,22 @@ func TestExplicitTargetRestrictsConnectedSiblingsBothStores(t *testing.T) {
 			if childState != "done" || siblingState != "ready" {
 				t.Fatalf("unselected sibling executed: child=%s sibling=%s", childState, siblingState)
 			}
-			assertNoUnselectedTargetActivation(t, rt, seed.RunID)
+			assertNoUnselectedTargetActivation(t, rt.ReceiverStateReader, seed.RunID)
 			requirePendingInputStateCount(t, rt.ReceiverStateReader, seed.RunID, "ready", 2)
 		})
 	}
 }
 
-func assertNoUnselectedTargetActivation(t *testing.T, rt servedControlProofRuntime, runID string) {
+func assertNoUnselectedTargetActivation(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID string) {
 	t.Helper()
 	var count int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND flow_template='on_demand'`, runID).Scan(&count); err != nil {
+	if err := func() error {
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (int, error) {
+			return storetest.CountRunUnselectedTemplateActivationsStorage(ctx, selectedProofReceiverStateReader, runID)
+		})
+		count = observed
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
 	if count != 0 {

@@ -33,6 +33,7 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runidentity"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runscalar"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedeventcount"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedsettlement"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/sourceblob"
@@ -44,7 +45,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "567321752839b36421fe4b1a7bf551ef025412273a69a6a61c7e8598b18fb03d"
+const targetDigest = "202e95e047cbe01ebcf2f123c6ccd35ca2a45ec37632ded7502815323af52061"
 
 var sourceForkComparison = map[string]string{}
 var runDeliveryComparison = map[string]string{}
@@ -367,6 +368,7 @@ func main() {
 	rows, changes = composeServedSetupHistory(rows, changes, setupPins)
 	rows, changes = composeChannelSettlementHistory(rows, changes)
 	rows, changes = composeBudgetDiagnosticHistory(rows, changes)
+	rows, changes = composeSelectedReadRoleHistory(rows, changes)
 	raw, err := json.Marshal(changes)
 	must(err)
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
@@ -421,6 +423,8 @@ func composeServedBatchHistory(rows []recipe, changes []transition, pins []runph
 
 func servedBatchEarlierDeclaration(path, function, current string) string {
 	var err error
+	current, err = selectedreadrole.EarlierSource(".", path, function, current)
+	must(err)
 	current, err = budgetEarlierDeclaration(path, function, current)
 	must(err)
 	current, err = channelsettlement.EarlierSource(".", path, function, current)

@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 const Predecessor = "a552cdb3a2953add81cea117bafcadddd9803c11"
@@ -149,6 +150,10 @@ func advance(rows []map[string]any, pin runphysical.Pin, recipes bool) ([]map[st
 }
 
 func EarlierHistory(root string, current []byte, recipes bool) ([]byte, error) {
+	current, err := selectedreadrole.EarlierHistory(root, current, recipes)
+	if err != nil {
+		return nil, err
+	}
 	pins, err := ReadPins(root)
 	if err != nil {
 		return nil, err

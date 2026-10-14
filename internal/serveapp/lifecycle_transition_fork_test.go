@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestRetainedRootForkOriginalArtifactPreserved(t *testing.T) {
@@ -121,8 +123,8 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 	if !ok || parentEntity == "" {
 		t.Fatal("parent gate has no exact entity anchor")
 	}
-	parentGate := readLifecycleTemplateGate(t, rt, parentRun, parentEntity, ".")
-	childGate := readLifecycleTemplateGate(t, rt, runID, entity, ".")
+	parentGate := readLifecycleTemplateGate(t, rt.ReceiverStateReader, parentRun, parentEntity, ".")
+	childGate := readLifecycleTemplateGate(t, rt.ReceiverStateReader, runID, entity, ".")
 	if childGate.ActivationID != ca["stage_activation_id"] || childGate.CardID != child["card_id"] || childGate.RoutesJSON != parentGate.RoutesJSON || childGate.BundleHash != parentGate.BundleHash || childGate.DecisionID != parentGate.DecisionID || childGate.Stage != parentGate.Stage || childGate.Status != parentGate.Status || !childGate.OpenedAt.Equal(parentGate.OpenedAt) {
 		t.Fatalf("fork changed frozen gate authority: parent=%#v child=%#v", parentGate, childGate)
 	}
@@ -194,12 +196,9 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 func requireLifecycleRootLoopForkRevision(t *testing.T, rt servedControlProofRuntime, parentRun, parentEntity, frontierID, runID string) {
 	t.Helper()
 	entity := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, runID, "", "review")
-	parent := readLifecycleStoredLoop(t, rt, parentRun, parentEntity)
-	child := readLifecycleStoredLoop(t, rt, runID, entity)
-	if child.ActivationID == parent.ActivationID || child.RevisionID == parent.RevisionID ||
-		child.Attempt != parent.Attempt || child.MaxAttempts != parent.MaxAttempts ||
-		parent.CurrentStage != "drafting" || child.CurrentStage != "review" || child.Status != parent.Status ||
-		child.CloseReason != parent.CloseReason || child.LoopID != parent.LoopID || child.RevisionField != parent.RevisionField {
+	parent := readLifecycleStoredLoop(t, rt.ReceiverStateReader, parentRun, parentEntity)
+	child := readLifecycleStoredLoop(t, rt.ReceiverStateReader, runID, entity)
+	if child.ActivationID == parent.ActivationID || child.RevisionID == parent.RevisionID || child.Attempt != parent.Attempt || child.MaxAttempts != parent.MaxAttempts || parent.CurrentStage != "drafting" || child.CurrentStage != "review" || child.Status != parent.Status || child.CloseReason != parent.CloseReason || child.LoopID != parent.LoopID || child.RevisionField != parent.RevisionField {
 		t.Fatalf("fork loop identity/business facts: parent=%#v child=%#v", parent, child)
 	}
 	public := readLifecycleLoop(t, rt.Endpoint, runID, entity)
@@ -220,8 +219,7 @@ func requireLifecycleRootLoopForkRevision(t *testing.T, rt servedControlProofRun
 	if err := json.Unmarshal([]byte(copied), &childPayload); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(sourcePayload, map[string]any{"revision_id": parent.RevisionID}) ||
-		!reflect.DeepEqual(childPayload, map[string]any{"revision_id": child.RevisionID}) {
+	if !reflect.DeepEqual(sourcePayload, map[string]any{"revision_id": parent.RevisionID}) || !reflect.DeepEqual(childPayload, map[string]any{"revision_id": child.RevisionID}) {
 		t.Fatalf("root-declared revision did not project: source=%#v child=%#v", sourcePayload, childPayload)
 	}
 	for run, event := range map[string]string{parentRun: frontierID, runID: childEvent} {
@@ -242,10 +240,16 @@ func requireLifecycleRootLoopForkRevision(t *testing.T, rt servedControlProofRun
 	}
 }
 
-func readLifecycleStoredLoop(t *testing.T, rt servedControlProofRuntime, runID, entityID string) loopruntime.Activation {
+func readLifecycleStoredLoop(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID, entityID string) loopruntime.Activation {
 	t.Helper()
 	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(accumulator AS TEXT) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, entityID).Scan(&raw); err != nil {
+	if err := func() error {
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (string, error) {
+			return storetest.ReadEntityAccumulatorTextStorage(ctx, selectedProofReceiverStateReader, runID, entityID)
+		})
+		raw = observed
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
 	var bucket map[string]map[string]any

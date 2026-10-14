@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 func TestBudgetHistoryIsOneExactAppendAndAdvanceWithoutMetadataLoss(t *testing.T) {
@@ -17,6 +20,11 @@ func TestBudgetHistoryIsOneExactAppendAndAdvanceWithoutMetadataLoss(t *testing.T
 			t.Fatal(err)
 		}
 		current, err := ComposeHistory(root, prior, recipes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		canonical := budgetReadRoleBoundary(t, root, current, recipes)
+		current, err = selectedreadrole.ComposeHistory(root, canonical, recipes)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -42,6 +50,25 @@ func TestBudgetHistoryIsOneExactAppendAndAdvanceWithoutMetadataLoss(t *testing.T
 			t.Fatal("unsigned predecessor bytes accepted")
 		}
 	}
+}
+
+func budgetReadRoleBoundary(t *testing.T, root string, current []byte, recipes bool) []byte {
+	t.Helper()
+	canonical, err := selectedreadrole.PriorHistory(root, recipes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var generated, signed []map[string]any
+	if err := json.Unmarshal(current, &generated); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(canonical, &signed); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(generated, signed) {
+		t.Fatal("budget generation differs from the complete signed read-role boundary")
+	}
+	return canonical
 }
 
 func TestBudgetSourceInverseRequiresEveryActualCurrentDeclaration(t *testing.T) {

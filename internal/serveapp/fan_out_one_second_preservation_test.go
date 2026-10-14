@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -86,8 +87,8 @@ func TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores(t *testi
 			if f.RunID != runID || f.Intents != 1 || f.Cardinality != 64 || f.Cursor != 64 || f.Committed != 64 || f.Settled != 64 || f.SemanticRejected != 0 || f.SemanticRejectionSample != nil || f.Canceled != 0 || f.Owed != 0 || f.Open != 0 || f.Blocked != 0 || f.Unsettled != 0 || f.BarrierArmed != 0 || f.BarrierPending != 0 {
 				t.Fatalf("one-second delayed exact settlement changed: %+v", f)
 			}
-			assertIssue2394TwoFullChunkHistory(t, rt, runID)
-			assertIssue2394OneSecondPayloads(t, rt, runID, portfolio, rows)
+			assertIssue2394TwoFullChunkHistory(t, rt.ReceiverStateReader, runID)
+			assertIssue2394OneSecondPayloads(t, rt.Endpoint, rt.ReceiverStateReader, runID, portfolio, rows)
 			before := issue2394SurfaceSnapshot(t, rt.DB, runID)
 			query := fanoutobligation.ListQuery{RunID: runID, Limit: 100}
 			var page fanoutobligation.ListPage
@@ -136,20 +137,20 @@ func TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores(t *testi
 	}
 }
 
-func assertIssue2394TwoFullChunkHistory(t *testing.T, rt servedControlProofRuntime, runID string) {
+func assertIssue2394TwoFullChunkHistory(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID string) {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT fact_key,fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations' ORDER BY revision,fact_key`, runID)
+	rows, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) ([]storetest.FanOutObligationHistoryStorage, error) {
+		return storetest.ReadFanOutObligationHistoryStorage(ctx, selectedProofReceiverStateReader, runID)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	history := make(map[string][]int)
-	for rows.Next() {
+	for _, selectedReadRow := range rows {
 		var key string
 		var raw []byte
-		if err := rows.Scan(&key, &raw); err != nil {
-			t.Fatal(err)
-		}
+		key = selectedReadRow.Key
+		raw = selectedReadRow.Fact
 		var fact struct {
 			Kind        string `json:"fact_kind"`
 			Cursor      int    `json:"cursor"`
@@ -165,9 +166,6 @@ func assertIssue2394TwoFullChunkHistory(t *testing.T, rt servedControlProofRunti
 			history[key] = append(history[key], fact.Cursor)
 		}
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
 	if len(history) != 1 {
 		t.Fatalf("history contains %d intents, want1", len(history))
 	}
@@ -178,10 +176,10 @@ func assertIssue2394TwoFullChunkHistory(t *testing.T, rt servedControlProofRunti
 	}
 }
 
-func assertIssue2394OneSecondPayloads(t *testing.T, rt servedControlProofRuntime, runID, portfolio string, wanted []map[string]any) {
+func assertIssue2394OneSecondPayloads(t *testing.T, selectedProofEndpoint string, selectedProofReceiverStateReader receiverProofStateReader, runID, portfolio string, wanted []map[string]any) {
 	t.Helper()
 	var page operatorread.OperatorEventListResult
-	issue2394ReporterRPC(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID, "event_name": "portfolio/account.registered"}, "limit": 100}, &page)
+	issue2394ReporterRPC(t, selectedProofEndpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID, "event_name": "portfolio/account.registered"}, "limit": 100}, &page)
 	if len(page.Events) != 64 || page.NextCursor != "" {
 		t.Fatalf("delayed publication lost exact64 events: %+v", page)
 	}
@@ -192,18 +190,19 @@ func assertIssue2394OneSecondPayloads(t *testing.T, rt servedControlProofRuntime
 		}
 		byID[event.EventID] = event
 	}
-	rows, err := rt.DB.Query(`SELECT ordinal,CAST(event_id AS TEXT),outcome_kind FROM fan_out_outcomes WHERE run_id=$1 ORDER BY ordinal`, runID)
+	rows, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) ([]storetest.OrderedFanOutOutcomeStorage, error) {
+		return storetest.ReadOrderedRunFanOutOutcomesStorage(ctx, selectedProofReceiverStateReader, runID)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	count := 0
-	for rows.Next() {
+	for _, selectedReadRow := range rows {
 		var ordinal int
 		var id, kind string
-		if err := rows.Scan(&ordinal, &id, &kind); err != nil {
-			t.Fatal(err)
-		}
+		ordinal = selectedReadRow.Ordinal
+		id = selectedReadRow.ID
+		kind = selectedReadRow.Kind
 		if ordinal != count || ordinal >= len(wanted) || kind != "committed" {
 			t.Fatalf("delayed outcome changed ordinal/kind: ordinal=%d count=%d kind=%s", ordinal, count, kind)
 		}
@@ -216,9 +215,6 @@ func assertIssue2394OneSecondPayloads(t *testing.T, rt servedControlProofRuntime
 		assertIssue2394RegistrationDelivery(t, event)
 		delete(byID, id)
 		count++
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	if count != 64 || len(byID) != 0 {
 		t.Fatalf("delayed outcomes=%d unmatched events=%d, want64/0", count, len(byID))

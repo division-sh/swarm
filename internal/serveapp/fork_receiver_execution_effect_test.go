@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // Optional-node settlement is execution evidence, not a replacement mailbox
@@ -57,20 +59,38 @@ func requireForkReceiverExecution(t *testing.T, rt servedControlProofRuntime, ru
 			t.Fatalf("public receiver state: %+v rows=%+v", entity, row)
 		}
 	}
-	requireForkReceiverNoPublicationOrNotice(t, rt, runID, sourceEvent)
+	requireForkReceiverNoPublicationOrNotice(t, rt.ReceiverStateReader, runID, sourceEvent)
 	return route
 }
 
-func requireForkReceiverNoPublicationOrNotice(t *testing.T, rt servedControlProofRuntime, runID, sourceEvent string) {
+func requireForkReceiverNoPublicationOrNotice(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID, sourceEvent string) {
 	t.Helper()
 	var notices, emitted, deliveries int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM mailbox WHERE source_event_id=$1`, sourceEvent).Scan(&notices); err != nil {
+	if err := func() error {
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (int, error) {
+			return storetest.CountSourceNoticeStorage(ctx, selectedProofReceiverStateReader, sourceEvent)
+		})
+		notices = observed
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND source_event_id=$2 AND NOT (event_class=$3 AND event_name=$4)`, runID, sourceEvent, string(events.EventAdmissionDiagnosticDirect), string(events.EventTypePlatformRuntimeLog)).Scan(&emitted); err != nil {
+	if err := func() error {
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (int, error) {
+			return storetest.CountSourceNonDiagnosticEventsStorage(ctx, selectedProofReceiverStateReader, runID, sourceEvent, string(events.EventAdmissionDiagnosticDirect), string(events.EventTypePlatformRuntimeLog))
+		})
+		emitted = observed
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 AND e.source_event_id=$2`, runID, sourceEvent).Scan(&deliveries); err != nil {
+	if err := func() error {
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (int, error) {
+			return storetest.CountSourceRunDeliveryStorage(ctx, selectedProofReceiverStateReader, runID, sourceEvent)
+		})
+		deliveries = observed
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
 	if notices != 0 || emitted != 0 || deliveries != 0 {
@@ -78,7 +98,7 @@ func requireForkReceiverNoPublicationOrNotice(t *testing.T, rt servedControlProo
 	}
 }
 
-func requireForkReceiverMutationOwners(t *testing.T, rt servedControlProofRuntime, runID, eventID, prefix string, receivers []canonicalrouting.ForkReceiver) {
+func requireForkReceiverMutationOwners(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID, eventID, prefix string, receivers []canonicalrouting.ForkReceiver) {
 	t.Helper()
 	allowed := map[string]bool{}
 	for _, receiver := range receivers {
@@ -86,21 +106,17 @@ func requireForkReceiverMutationOwners(t *testing.T, rt servedControlProofRuntim
 			allowed[flowidentity.EntityID(prefix+receiver.Path)] = true
 		}
 	}
-	rows, err := rt.DB.Query(`SELECT DISTINCT entity_id FROM entity_mutations WHERE run_id=$1 AND caused_by_event=$2`, runID, eventID)
+	rows, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) ([]string, error) {
+		return storetest.ReadRunEventMutationOwnersStorage(ctx, selectedProofReceiverStateReader, runID, eventID)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
-	for rows.Next() {
+	for _, selectedReadRow := range rows {
 		var id string
-		if err := rows.Scan(&id); err != nil {
-			t.Fatal(err)
-		}
+		id = selectedReadRow
 		if !allowed[id] {
 			t.Fatalf("receiver execution mutated a non-state-owning receiver, source or sibling entity: %s", id)
 		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 }
