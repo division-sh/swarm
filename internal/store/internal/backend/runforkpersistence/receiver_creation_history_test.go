@@ -24,11 +24,15 @@ func TestReceiverConstructionHistoryExactCoordinates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	recordedHeader, err := pipeline.DecodeWorkflowInstanceRecordedHeader(identity.Route(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
 	state := runfork.RunForkEntityState{EntityID: entityID, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 		Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 		FlowTemplate: "child", FlowInstance: "child", FlowConfig: config, Mode: "static",
 	}}
-	exact := pipeline.WorkflowInstance{InstanceID: "child", StorageRef: "child", EntityID: entityID, WorkflowName: "child", Mode: "static", ParentFlowID: ".", ParentFlowInstance: forkRun, ParentEntityID: forkRun}
+	exact := pipeline.WorkflowInstance{InstanceID: "child", StorageRef: "child", EntityID: entityID, WorkflowName: "child", WorkflowVersion: recordedHeader.WorkflowVersion(), Mode: "static", ParentFlowID: ".", ParentFlowInstance: forkRun, ParentEntityID: forkRun}
 	construction := historicalFlowInstanceConstructionCut{
 		plan:  runfork.RunForkPlan{SourceRunID: sourceRun, ForkPoint: runfork.RunForkPoint{Revision: 1}, Entities: []runfork.RunForkEntityState{state}},
 		route: identity.Route(),
