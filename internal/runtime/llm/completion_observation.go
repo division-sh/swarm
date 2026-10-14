@@ -60,6 +60,9 @@ func claudeCompletionUsageFromRaw(raw []byte) (runtimeeffects.CompletionUsage, e
 	if terminal.duplicates["total_cost_usd"] {
 		cost, costErr = nil, fmt.Errorf("duplicate claude terminal cost")
 	}
+	if len(usage.Evidence.Models) == 0 && modelErr == nil && contributorErr == nil {
+		completionObservationProblem(&usage.Evidence, runtimeeffects.CompletionModelCLITerminal, "model", "absent")
+	}
 	if costErr != nil {
 		completionObservationProblem(&usage.Evidence, "claude.result.total_cost_usd", "cost", "invalid")
 	}

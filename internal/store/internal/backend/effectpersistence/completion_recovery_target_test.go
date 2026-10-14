@@ -12,7 +12,15 @@ import (
 func TestCompletionRecoveryRejectsForeignOrMalformedTargetEvidence(t *testing.T) {
 	for _, scenario := range []string{"foreign_uuid", "malformed_evidence_uuid", "malformed_stored_uuid", "different_kind", "different_ordinal"} {
 		t.Run(scenario, func(t *testing.T) {
-			evidence := completionRecoveryAuthorityEvidence{ExecutionMode: "mock"}
+			evidence := completionRecoveryAuthorityEvidence{
+				ExecutionMode: "mock",
+				ProviderRequest: runtimeeffects.CompletionRequest{
+					ModelAlias: "requested", RequestedModel: "requested-A", BackendProfile: "claude_cli", Provider: "claude", Transport: "cli",
+				},
+			}
+			if err := evidence.ProviderRequest.Validate(); err != nil {
+				t.Fatal(err)
+			}
 			evidence.UsageTarget.Kind = string(runtimeeffects.UsageTargetAgentTurn)
 			evidence.UsageTarget.ID = "ef3e7bbf-cb27-47bb-b089-715d34a8388c"
 			recovered := completionRecoveryAttempt{

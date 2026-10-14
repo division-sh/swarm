@@ -78,6 +78,56 @@ func TestCompletion2270NoContributorDoubleCharge(t *testing.T) {
 	}
 }
 
+func TestCompletion2270AbsentCLIModelIsExplicit(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields string
+		absent       bool
+		invalid      bool
+	}{
+		{"omitted", "", true, false},
+		{"null", `"model":null,"modelUsage":null,`, true, false},
+		{"empty", `"model":"","modelUsage":{},`, true, false},
+		{"terminal", `"model":"reported-B",`, false, false},
+		{"contributor", `"model":null,"modelUsage":{"reported-B":{}},`, false, false},
+		{"multiple-contributors", `"modelUsage":{"reported-B":{},"reported-C":{}},`, false, false},
+		{"invalid-terminal", `"model":17,`, false, true},
+		{"invalid-contributors", `"modelUsage":[],`, false, true},
+	} {
+		for _, format := range []string{"json", "ndjson"} {
+			t.Run(tc.name+"/"+format, func(t *testing.T) {
+				raw := `{"type":"result",` + tc.fields + `"usage":{"input_tokens":10,"output_tokens":2},"total_cost_usd":0.25}`
+				if format == "ndjson" {
+					raw = "{\"type\":\"result\",\"model\":\"earlier\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}\n" + raw
+				}
+				usage, err := claudeCompletionUsageFromRaw([]byte(raw))
+				if (err != nil) != tc.invalid || usage.Exactness != runtimeeffects.CompletionUsageExact || usage.InputTokens == nil || *usage.InputTokens != 10 || usage.OutputTokens == nil || *usage.OutputTokens != 2 || usage.ProviderReportedCostUSD == nil || *usage.ProviderReportedCostUSD != 0.25 {
+					t.Fatalf("model evidence erased valid independent dimensions: usage=%+v err=%v", usage, err)
+				}
+				var absent, invalid int
+				for _, problem := range usage.Evidence.Problems {
+					if problem.Dimension == "model" {
+						if problem.Code == "absent" {
+							absent++
+						}
+						if problem.Code == "invalid" {
+							invalid++
+						}
+					}
+				}
+				if (absent == 1) != tc.absent || absent > 1 || (invalid > 0) != tc.invalid {
+					t.Fatalf("model absence/invalidity was not explicit: %+v", usage.Evidence)
+				}
+				if tc.absent && (len(usage.Evidence.Models) != 0 || usage.ResolvedModel != "") {
+					t.Fatalf("missing model resurrected earlier observations: %+v", usage.Evidence)
+				}
+				if err := usage.Validate(); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}
+
 func completionEvidencePtr[T any](v T) *T { return &v }
 
 func TestCompletion2270ContributorDimensionsIndependent(t *testing.T) {
