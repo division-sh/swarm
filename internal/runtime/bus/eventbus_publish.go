@@ -711,10 +711,11 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		}
 	}
 
-	routePlan, err := eb.planClosedPublicationRoutes(ctx, evt, publication)
+	routes, err := eb.planClosedPublicationRoutes(ctx, evt, publication)
 	if err != nil {
 		return releaseFailure(err)
 	}
+	routePlan := routes.plan
 	if eb.semanticSource != nil && !explicitRootPublicationTarget(evt).Empty() && len(routePlan.DeliveryRoutes()) == 0 && !routePlan.authorizesTerminalTargetDiagnostic(evt) {
 		return releaseFailure(fmt.Errorf("explicit root target %s has no selected root-local or compiled-connection delivery", evt.TargetRoute().FlowInstance))
 	}
@@ -736,7 +737,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	if err := validateRoutePlanEventProjection(evt, routePlan); err != nil {
 		return releaseFailure(err)
 	}
-	if err := eb.prepareJoinAdmission(ctx, evt, publication.prospective, &routePlan); err != nil {
+	if err := eb.prepareJoinAdmission(ctx, evt, publication.prospective, &routePlan, routes.owners); err != nil {
 		return releaseFailure(fmt.Errorf("admit exact join recipients: %w", err))
 	}
 	if err := routePlan.ValidatePersistentDeliveries(); err != nil {
@@ -788,8 +789,10 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	}, nil
 }
 
-func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.Event, publication eventBusCommitPublishPlan) (RoutePlan, error) {
+func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.Event, publication eventBusCommitPublishPlan) (closedPublicationRoutes, error) {
 	planner := eb.publicationDeliveryPlanner(publication.prospective, publication.runProposal)
+	owners := &publicationTargetOwnerEvidence{event: evt, planner: planner}
+	planner.preparedOwners = owners
 	planRoutes := func(context.Context, events.Event) (RoutePlan, error) {
 		return eb.planSubscribedRoutePlanWithPlanner(withClosedPublicationPlanning(ctx), evt, true, planner)
 	}
@@ -803,7 +806,7 @@ func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.
 		default:
 			requested := uniqueStrings(publication.directRecipients)
 			if len(requested) == 0 {
-				return RoutePlan{}, errors.New("direct event publication requires at least one recipient")
+				return closedPublicationRoutes{}, errors.New("direct event publication requires at least one recipient")
 			}
 			planRoutes = func(context.Context, events.Event) (RoutePlan, error) {
 				plan, err := planner.PlanDirect(withClosedPublicationPlanning(ctx), evt, requested)
@@ -820,9 +823,9 @@ func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.
 
 	routePlan, err := planRoutes(ctx, evt)
 	if err != nil {
-		return RoutePlan{}, err
+		return closedPublicationRoutes{}, err
 	}
-	return routePlan, nil
+	return closedPublicationRoutes{plan: routePlan, owners: owners}, nil
 }
 
 func (eb *EventBus) prepareClosedPublicationDispatch(ctx context.Context, evt events.Event, publication eventBusCommitPublishPlan, recoveringTimeout bool, prepared *PreparedPublish) error {
@@ -2320,7 +2323,7 @@ func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Conte
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	return projection.resolveRoutePlan(routePlan)
+	return planner.resolvePreparedRoutePlan(projection, routePlan)
 }
 
 func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt events.Event, routePlan RoutePlan) error {

@@ -188,6 +188,7 @@ type deliveryPlanner struct {
 	routeResolver   deliveryRouteResolver
 	recipientPolicy deliveryRecipientPolicy
 	connectPlanner  connectRoutePlanResolver
+	preparedOwners  *publicationTargetOwnerEvidence
 }
 
 func newDeliveryPlanner(routeResolver deliveryRouteResolver, recipientPolicy deliveryRecipientPolicy, connectPlanners ...connectRoutePlanResolver) deliveryPlanner {
@@ -260,7 +261,7 @@ func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (
 			Recipient: joinRecipient, TargetBlueprint: joinTarget, Handler: joinHandler,
 			Producer: routeIntentProducerInternalTargetCarrier, Persist: true,
 		})
-		return projection.resolveRoutePlan(routePlan)
+		return p.resolvePreparedRoutePlan(projection, routePlan)
 	}
 	projection, err = projection.withActivationPlans(preparedConnectPlans(ctx))
 	if err != nil {
@@ -287,17 +288,17 @@ func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (
 			if len(localPlan.LiveRecipients) > 0 || len(localPlan.DeliveryIntents) > 0 {
 				return RoutePlan{}, mixedPubsubConnectCompositionFailure{failure: routePlan.TargetFailure}
 			}
-			return projection.resolveRoutePlan(routePlan)
+			return p.resolvePreparedRoutePlan(projection, routePlan)
 		}
 		if routePlan.ReplyContextConsumed {
-			return projection.resolveRoutePlan(routePlan)
+			return p.resolvePreparedRoutePlan(projection, routePlan)
 		}
 		localPlan, err := p.planIndependentPubsubBranch(ctx, evt, true)
 		if err != nil {
 			return RoutePlan{}, err
 		}
 		routePlan = composeIndependentPubsubBranch(routePlan, localPlan)
-		return projection.resolveRoutePlan(routePlan)
+		return p.resolvePreparedRoutePlan(projection, routePlan)
 	}
 	routePlan, err = p.planIndependentPubsubBranch(ctx, evt, false)
 	if err != nil {
@@ -305,7 +306,7 @@ func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (
 	}
 	routePlan.ConnectEvaluation = connectPlan.Evaluation
 	routePlan.ActivationPlans = rootPlans
-	return projection.resolveRoutePlan(routePlan)
+	return p.resolvePreparedRoutePlan(projection, routePlan)
 }
 
 func (p deliveryPlanner) previewPreparedConstructions(ctx context.Context, runID string, plans []runtimepipeline.FlowInstanceActivationPlan) (context.Context, error) {
@@ -542,7 +543,7 @@ func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recip
 		routePlan.ExtraDetail["filtered_out_recipients"] = filtered
 		routePlan.ExtraDetail["filtered_out_recipients_count"] = len(filtered)
 	}
-	return projection.resolveRoutePlan(routePlan)
+	return p.resolvePreparedRoutePlan(projection, routePlan)
 }
 
 func (p deliveryPlanner) PlanExactDirect(ctx context.Context, evt events.Event, routes []events.DeliveryRoute) (RoutePlan, error) {
