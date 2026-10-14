@@ -123,6 +123,9 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 	if nearest := NearestFieldOption(key, options); nearest != "" {
 		remediation = fmt.Sprintf("Did you mean %q? %s", nearest, remediation)
 	}
+	if context == "rule" && (key == "else" || key == "default") {
+		remediation = "DIALECT-RULES-DEFAULT: the handler.rules default branch is the last row written without a predicate."
+	}
 	diagnostic := &LoaderDiagnostic{
 		Code:         "contract_loader.undefined_field",
 		Problem:      fmt.Sprintf("%s field %q is not supported.", context, key),

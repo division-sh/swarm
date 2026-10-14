@@ -16,7 +16,7 @@ func TestProjectNodePolicySelectionValues(t *testing.T) {
           emit: task.eu
         - range: {value: payload.score, gte: 10, lt: 20}
           emit: task.mid
-        - else: true
+        - emit: fallback
           emit: task.other
 `))
 	if err != nil {
@@ -36,7 +36,7 @@ func TestProjectNodePolicySelectionValues(t *testing.T) {
 }
 
 func TestProjectNodePolicySelectionRejectsDynamicRangeBound(t *testing.T) {
-	snapshot, err := yamlsource.Load([]byte("worker:\n  event_handlers:\n    task.ready:\n      rules:\n        - range: {value: payload.score, gt: payload.min}\n        - else: true\n"))
+	snapshot, err := yamlsource.Load([]byte("worker:\n  event_handlers:\n    task.ready:\n      rules:\n        - range: {value: payload.score, gt: payload.min}\n        - emit: fallback\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

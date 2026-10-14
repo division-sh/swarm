@@ -7,4 +7,3 @@ test-node:
       rules:
         - when: payload.empty_schema_rule == true
           advances_to: done
-        - else: true
