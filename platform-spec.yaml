@@ -24198,7 +24198,8 @@ test_specification:
       entry: go run ./cmd/swarm-test preflight
       selection: >-
         Preflight is local-only informational proof, not a fourth hosted tier or completed core/lifecycle/full.
-        Its reviewed finite selection always runs independently of changed paths. The initial thirteen source-guard
+        Its reviewed finite guard selection always runs independently of changed paths; the bounded conditional
+        debt obligation below supplements it. The initial thirteen source-guard
         candidates retain exact package/root identity; eighteen reviewed escape roots (the effects primitive manifest,
         delivery-continuation consumer guard, fourteen exact runforkreadiness roots, the runforkexecution receiver
         compiler guard and the async-site census) join them. With eleven safety roots and the initial eighty-one
@@ -24229,8 +24230,20 @@ test_specification:
       eligibility: >-
         Known-flaky execution variants are excluded by reviewed finite membership, never a dynamic ledger skip list.
         A selected whole root containing the known-flaky leaf must be excluded rather than filtered or weakened.
-        Debt-ratchet, complete tagged candidate-overlay, redundant test linkage, blocked-SQL/runtime origin and native
-        unused analysis are not in the initial selection; their existing affected/hosted proofs remain mandatory.
+        Complete tagged candidate-overlay, redundant test linkage, blocked-SQL/runtime origin and native unused
+        analysis remain outside the finite selection; their existing affected/hosted proofs remain mandatory.
+        Any changed Go source (including tests, build-tagged source and non-store callers), go.mod/go.sum/go.work/
+        go.work.sum, platform-spec.yaml, .github/test-proof-plan.yaml, or path in internal/store/ or
+        internal/storetest/ requires the unchanged TestPersistenceAuthorityDebtRatchet and
+        TestNativeFixtureFamiliesDoNotReceiveRawAuthority roots, with their native child obligations, once in the
+        same internal/store phase with the existing actual20m command timeout. Named store trees include the
+        registry, baseline, collector sidecar and runtime-persistence policy inputs; Go selection includes the
+        collector implementations and checkoutsource fixture-role owner. Both old/new rename/copy and deleted paths
+        count. NUL-framed diff evidence, origin/master tip, comparator, build and source identity are frozen;
+        unreadable, incomplete, unknown or ambiguous input cannot earn a docs-only exemption. Ref movement and
+        ambient debt event/refresh/publication authority refuse. The frozen comparator is an expectation, not a
+        replacement trusted-base owner: the unchanged native ratchet must report that exact trusted source after
+        passing. Unrelated docs-only or exact readable empty diffs retain the finite guard membership.
         The four stateful runforkexecution behavioral roots remain focused/hosted: they construct, recover and
         execute fork state and require PostgreSQL. Selecting the service-free receiver/compiler guard gives no
         coverage credit to those behavioral journeys.
@@ -24241,6 +24254,30 @@ test_specification:
         Local-Tier focused still names affected behavior, stateful, race and process-death proofs. The informational
         Preflight receipt cannot authorize CI-Tier, CI-Units, hosted deferrals, retries or a merge waiver; hosted
         qualification and native cadence remain independent. Shared guards are not run twice merely for two labels.
+      ci_admission: >-
+        User ruling6169583770 requires preflight/local commit status before non-exempt CI. Local gh authenticates,
+        resolves and verifies the uploaded exact origin-repository candidate early; private commit reads require
+        appropriate read access as well as status-write permission. No automatic push, different-head terminal,
+        imported-success command, cryptographic attestation or branch-protection change is introduced. Conflicting
+        remote/environment overrides refuse. Upload a signed candidate to a non-PR staging ref, execute the complete
+        local command, then put the SAME SHA on the PR; rebases need fresh proof. Pending/terminal descriptions bind
+        unique attempt and receipt identity. CI requires latest context success to match the latest STARTED attempt
+        for that exact repository/SHA, so an older late success cannot override newer pending/failure. Death,
+        cancellation, missing/malformed/mismatched identities, incomplete history or unacknowledged publication
+        cannot reuse prior success. Complete persisted proof and joined cleanup precede success; publication errors
+        are separate, with no automatic whole-preflight retry. Token-holder honesty remains an explicit residual
+        risk; status is an audit trail, not protection against manually forged evidence.
+        One small runner-tool admission job with statuses:read executes before checkout, Go, modules or builds.
+        CI-plan and independent complexity/static/SQLite jobs depend on it without serializing independent feedback
+        behind expensive planning. Drafts still skip plan/proof/SQLite/timing/tier; admitted drafts get static and
+        complexity feedback, not qualification. Denied/canceled admission reaches only a bounded failure summary;
+        always-path timing and summary/tier consumers cannot evaluate absent plans or build after denial.
+        Same-repository actual automation/* PR heads, master PUSH, SCHEDULE, ALL workflow_dispatch including both
+        keep-going modes, and genuine merge_group/checks_requested synthetic commits are admission-exempt. No
+        merge-group trigger or operational queue qualification is enabled. Main push remains non-exempt; ordinary
+        fork PRs read the exact head repository and pull_request.head.sha, never the synthetic merge SHA, and
+        automation-named forks receive no exemption. Unknown/malformed events, refs, repositories or SHAs refuse.
+        Exemption never waives native full-dispatch/nightly/unused/summary/tier obligations or grants new privileges.
       measurement: >-
         Five minutes on warm vemew is a soft target, not a test deadline. Complete command measurement includes
         launcher compilation, discovery, package compilation/TestMain, actual checks and joined cleanup, with phase
