@@ -95,7 +95,8 @@ func TestChannelActivationExecutableReaderCensus(t *testing.T) {
 	}
 }
 
-func TestLearnedActivationConsumersKeepCompleteResponsibilityProjection(t *testing.T) {
+func assertLearnedActivationConsumersKeepCompleteResponsibilityProjection(t *testing.T) {
+	t.Helper()
 	for path, function := range map[string]string{
 		"channel_activation_admission.go":   "validateLearnedChannelPublication",
 		"../serveapp/channel_onboarding.go": "compileServeLearnedChannelActivations",
@@ -163,6 +164,7 @@ func TestStructuralReadersDoNotConstructChannelActivation(t *testing.T) {
 }
 
 func TestChannelActivationExecutionConsumersUseCanonicalOwner(t *testing.T) {
+	assertLearnedActivationConsumersKeepCompleteResponsibilityProjection(t)
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	checks := map[string][]string{
 		"internal/channelonboarding/session_activity.go":                               {"CompileSessionActivityTarget", "PrivateTarget", "PublicationGeneration", "ResolveSessionActivitySite"},
