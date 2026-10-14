@@ -39,21 +39,17 @@ pins:
   event_handlers:
     requested:
       rules:
-        - id: by_key
-          lookup:
+        - lookup:
             on: `+tc.path+`
             entries: [{key: `+tc.key+`, value: chosen}]
             into: computed.choice
             default: fail
-        - id: use_choice
-          when: computed.choice == "chosen"
+        - when: computed.choice == "chosen"
           advances_to: done
           emit:
             event: completed
             fields:
               choice: computed.choice
-        - id: fallback
-          else: true
 `)
 			var stdout, stderr bytes.Buffer
 			code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), RepoRoot(), root, &stdout, &stderr)
@@ -63,7 +59,7 @@ pins:
 			if tc.want && !strings.Contains(stdout.String(), "verify ok: source=") {
 				t.Fatalf("missing actual verify success: %s", stdout.String())
 			}
-			if !tc.want && !strings.Contains(stderr.String(), "executable_reader_expression_validation") {
+			if !tc.want && !strings.Contains(stderr.String(), "[BLOCKER] executable_reader_expression_validation") {
 				t.Fatalf("unsupported read did not reach executable-reader refusal: %s", stderr.String())
 			}
 		})
