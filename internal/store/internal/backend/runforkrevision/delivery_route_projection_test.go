@@ -64,6 +64,12 @@ func TestHistoricalDeliveryProjectionCoversEveryRouteField(t *testing.T) {
 	if _, exists := projected["updated_at"]; exists {
 		t.Error("historical delivery fact contains the physical update clock")
 	}
+	if _, exists := projected["claim_version"]; exists {
+		t.Error("historical delivery fact contains an unconditional live claim generation")
+	}
+	if !strings.Contains(spec.query, "CASE WHEN d.settled_at IS NOT NULL THEN d.claim_version END") {
+		t.Error("historical projection must read claim generation only as exact settlement evidence")
+	}
 }
 
 func TestHistoricalDeliveryProjectionExcludesLeaseExpiry(t *testing.T) {
