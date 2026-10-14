@@ -329,13 +329,13 @@ func transitionRelationDeclarations(family string) (schema, handlers, events str
     created: {advances_to: working}
     selected:
       rules:
-        first: {when: true, advances_to: done}
-        second: {else: true, advances_to: done}
+        - {when: true, advances_to: done}
+        - {else: true, advances_to: done}
     inherited:
       advances_to: done
       rules:
-        first: {when: true}
-        second: {else: true}
+        - {when: true}
+        - {else: true}
     completed:
       on_complete:
         - {condition: true, advances_to: done}
