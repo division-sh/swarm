@@ -50,7 +50,7 @@ func settleProviderCanceledOrigin(ctx context.Context, mutation *mutationprotoco
 				return deliverylifecycle.Snapshot{}, fmt.Errorf("selected canceled origin requires its fenced recovery owner")
 			}
 		}
-		terminal, err := adapter.prepareProviderOriginRecovery(ctx, tx, mutation, claim)
+		terminal, err := adapter.prepareProviderOriginRecovery(ctx, tx, claim)
 		if err != nil {
 			return deliverylifecycle.Snapshot{}, err
 		}
