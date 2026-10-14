@@ -802,6 +802,17 @@ func seedLifecycleReadinessOwner(
 		SemanticSource: semanticview.Wrap(bundle), WorkflowInstances: workflows, WorkOwner: storeTestWorkOwner(t),
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	}, selected))
+	parentConstruction, err := manager.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source, Instance: parent, OccurredAt: now,
+	})
+	if err != nil {
+		t.Fatalf("prepare lifecycle readiness parent: %v", err)
+	}
+	committer := agentFixtureFlowActivationCommitter{store: selected}
+	parentCommitted, err := committer.CommitFlowInstanceActivation(ctx, parentConstruction)
+	if err != nil || !parentCommitted.Acknowledged || !parentCommitted.Created || parentCommitted.Plan.Identity != parent {
+		t.Fatalf("construct exact lifecycle readiness parent: result=%+v err=%v", parentCommitted, err)
+	}
 	construction, err := manager.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
 		ContractBundle: semanticview.Wrap(bundle), Instance: plan.Identity, OccurredAt: now,
 		ConstructorInput: "lifecycle.constructed", ResolvedKey: plan.Identity.InstanceID,
@@ -813,7 +824,7 @@ func seedLifecycleReadinessOwner(
 	// These store-admission controls supply their exact actor expectations but
 	// still commit the header, entry evidence and receipt through O2 atomically.
 	construction.Readiness = plan
-	committed, err := (agentFixtureFlowActivationCommitter{store: selected}).CommitFlowInstanceActivation(ctx, construction)
+	committed, err := committer.CommitFlowInstanceActivation(ctx, construction)
 	if err != nil || !committed.Acknowledged || !committed.Created {
 		t.Fatalf("construct lifecycle readiness owner: result=%+v err=%v", committed, err)
 	}
