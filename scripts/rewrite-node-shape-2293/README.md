@@ -12,12 +12,14 @@ go run ./scripts/rewrite-node-shape-2293 -write path/to/nodes.yaml
 Dry run is the default. The complete selection is checked before any write.
 Only node-level `execution_type`, `subscribes_to`, and `produces` are removed;
 the `event_handlers` members are inserted in place, retaining declaration and
-handler order. The YAML node-backed emitter retains quoted/block scalar styles,
-handler bodies, nested data, timers, and the state fields owned by slice 3.
+handler order. Read-only `yamlsource` syntax coordinates drive source-span edits;
+there is no off-owner YAML decoder, mutable syntax carrier or map re-emission.
+This retains quoted/block scalar bytes, handler bodies, nested data, timers, and
+the state fields owned by slice 3.
 Already rewritten input returns its original bytes unchanged.
 
 Node aliases and merge references retain their original anchor ownership.
-Handler-container anchors/aliases, nonmapping containers, cyclic or duplicate
+Inline/quoted node-field edits, handler-container anchors/aliases, nonmapping containers, cyclic or duplicate
 effective mappings require an explicit source-ledger disposition instead of
 being silently expanded or repaired. Non-node files and historical sources are
 not discovered or selected implicitly. Generated Go sources and intentional

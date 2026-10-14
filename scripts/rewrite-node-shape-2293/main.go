@@ -3,7 +3,6 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"os"
@@ -11,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/yamlsource"
-	"gopkg.in/yaml.v3"
 )
 
 type rewriteCounts struct {
@@ -23,14 +21,15 @@ func (c rewriteCounts) changed() bool {
 }
 
 func rewriteNodeSource(source []byte) ([]byte, rewriteCounts, error) {
-	var document yaml.Node
-	if err := yaml.Unmarshal(source, &document); err != nil {
+	snapshot, err := yamlsource.Load(source)
+	if err != nil {
 		return nil, rewriteCounts{}, err
 	}
-	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
+	root, ok := snapshot.Root().Child(0)
+	if !ok || root.Kind() != yamlsource.MappingNode {
 		return nil, rewriteCounts{}, fmt.Errorf("expected complete nodes.yaml declarations")
 	}
-	value := yamlsource.ValueFromNode(document.Content[0])
+	value := snapshot.Document("nodes.yaml").Root()
 	if err := value.ValidateAcyclic(); err != nil {
 		return nil, rewriteCounts{}, err
 	}
@@ -40,82 +39,166 @@ func rewriteNodeSource(source []byte) ([]byte, rewriteCounts, error) {
 	if err := value.ValidateUniqueMappings(); err != nil {
 		return nil, rewriteCounts{}, err
 	}
+	// Edit retained source spans, never re-emit maps or change CEL scalar styles.
+	lines := strings.SplitAfter(string(source), "\n")
+	type lineEdit struct {
+		remove  bool
+		dedent  int
+		replace string
+	}
+	edits := make(map[int]lineEdit)
+	ends := make(map[yamlsource.Node]int)
+	for i := 0; i < root.Len(); i += 2 {
+		node, _ := root.Child(i + 1)
+		end := len(lines)
+		if next, ok := root.Child(i + 2); ok {
+			end = next.Line() - 1
+		}
+		ends[node] = end
+	}
+	indent := func(line string) int { return len(line) - len(strings.TrimLeft(line, " ")) }
 	var counts rewriteCounts
-	seen := make(map[*yaml.Node]bool)
-	var rewrite func(*yaml.Node) error
-	rewrite = func(node *yaml.Node) error {
+	seen := make(map[yamlsource.Node]bool)
+	var rewrite func(yamlsource.Node) error
+	rewrite = func(node yamlsource.Node) error {
 		if seen[node] {
 			return nil
 		}
-		if node.Kind == yaml.AliasNode {
-			if err := rewrite(node.Alias); err != nil {
+		if target, alias := node.Alias(); alias {
+			if err := rewrite(target); err != nil {
 				return err
 			}
 			seen[node] = true
 			return nil
 		}
-		if node.Kind != yaml.MappingNode {
-			return fmt.Errorf("node declaration at line %d is not a mapping", node.Line)
+		if node.Kind() != yamlsource.MappingNode {
+			return fmt.Errorf("node declaration at line %d is not a mapping", node.Line())
 		}
-		var next []*yaml.Node
-		for i := 0; i < len(node.Content); i += 2 {
-			key, value := node.Content[i], node.Content[i+1]
-			switch key.Value {
-			case "subscribes_to":
-				counts.Subscriptions++
-			case "execution_type":
-				counts.ExecutionTypes++
-			case "produces":
-				counts.Produces++
+		end, owned := ends[node]
+		if !owned {
+			return fmt.Errorf("node at line %d needs an explicit source-ledger rewrite (anchor outside a node declaration)", node.Line())
+		}
+		remainingFields := 0
+		hasContainer := false
+		for i := 0; i < node.Len(); i += 2 {
+			key, _ := node.Child(i)
+			switch key.Value() {
 			case "event_handlers":
-				// A wrapper anchor names only the handler map, not the whole node;
-				// moving it to the node would silently change alias semantics.
-				if value.Kind != yaml.MappingNode || value.Anchor != "" {
-					return fmt.Errorf("event_handlers at line %d needs an explicit source-ledger rewrite (alias, anchor or nonmapping)", key.Line)
-				}
-				counts.HandlerContainers++
-				next = append(next, value.Content...)
+				hasContainer = true
+			case "subscribes_to", "execution_type", "produces":
+			default:
+				remainingFields++
+			}
+		}
+		for i := 0; i < node.Len(); i += 2 {
+			key, _ := node.Child(i)
+			field, _ := node.Child(i + 1)
+			switch key.Value() {
 			case "<<":
-				if value.Kind == yaml.SequenceNode {
-					for _, member := range value.Content {
+				if field.Kind() == yamlsource.SequenceNode {
+					for j := 0; j < field.Len(); j++ {
+						member, _ := field.Child(j)
 						if err := rewrite(member); err != nil {
 							return err
 						}
 					}
-				} else if err := rewrite(value); err != nil {
+				} else if err := rewrite(field); err != nil {
 					return err
 				}
-				next = append(next, key, value)
+				continue
+			case "subscribes_to", "execution_type", "produces", "event_handlers":
 			default:
-				next = append(next, key, value)
+				continue
+			}
+			start := key.Line() - 1
+			stop := end
+			if next, ok := node.Child(i + 2); ok {
+				stop = next.Line() - 1
+			}
+			line := strings.TrimSpace(lines[start])
+			prefix := key.Value() + ":"
+			if !strings.HasPrefix(line, prefix) || stop <= start {
+				return fmt.Errorf("%s at line %d needs an explicit source-ledger rewrite (inline or quoted field)", key.Value(), key.Line())
+			}
+			if key.Value() != "event_handlers" {
+				for j := start; j < stop; j++ {
+					edits[j] = lineEdit{remove: true}
+				}
+				switch key.Value() {
+				case "subscribes_to":
+					counts.Subscriptions++
+				case "execution_type":
+					counts.ExecutionTypes++
+				case "produces":
+					counts.Produces++
+				}
+				continue
+			}
+			tail := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+			if field.Kind() != yamlsource.MappingNode || (tail != "" && tail != "{}" && !strings.HasPrefix(tail, "#")) {
+				return fmt.Errorf("event_handlers at line %d needs an explicit source-ledger rewrite (alias, anchor, inline or nonmapping)", key.Line())
+			}
+			counts.HandlerContainers++
+			edits[start] = lineEdit{remove: true}
+			if strings.HasPrefix(tail, "#") {
+				edits[start] = lineEdit{replace: strings.Repeat(" ", indent(lines[start])) + tail + "\n"}
+			}
+			if field.Len() == 0 {
+				if remainingFields == 0 {
+					edits[start] = lineEdit{replace: strings.Repeat(" ", indent(lines[start])) + "{}\n"}
+				}
+				continue
+			}
+			first, _ := field.Child(0)
+			delta := indent(lines[first.Line()-1]) - indent(lines[start])
+			if delta <= 0 {
+				return fmt.Errorf("handler container at line %d is not block-indented", key.Line())
+			}
+			for j := start + 1; j < stop; j++ {
+				if strings.TrimSpace(lines[j]) != "" && indent(lines[j]) >= delta {
+					edits[j] = lineEdit{dedent: delta}
+				}
 			}
 		}
-		node.Content = next
+		if remainingFields == 0 && !hasContainer && node.Len() != 0 {
+			first, _ := node.Child(0)
+			line := first.Line() - 1
+			edits[line] = lineEdit{replace: strings.Repeat(" ", indent(lines[line])) + "{}\n"}
+		}
 		seen[node] = true
 		return nil
 	}
-	root := document.Content[0]
-	for i := 0; i < len(root.Content); i += 2 {
-		if err := rewrite(root.Content[i+1]); err != nil {
-			return nil, rewriteCounts{}, fmt.Errorf("node %q: %w", root.Content[i].Value, err)
+	for i := 0; i < root.Len(); i += 2 {
+		key, _ := root.Child(i)
+		node, _ := root.Child(i + 1)
+		if err := rewrite(node); err != nil {
+			return nil, rewriteCounts{}, fmt.Errorf("node %q: %w", key.Value(), err)
 		}
-	}
-	if err := yamlsource.ValueFromNode(root).ValidateUniqueMappings(); err != nil {
-		return nil, rewriteCounts{}, err
 	}
 	if !counts.changed() {
 		return source, counts, nil
 	}
-	var output bytes.Buffer
-	encoder := yaml.NewEncoder(&output)
-	encoder.SetIndent(2)
-	if err := encoder.Encode(&document); err != nil {
+	var output strings.Builder
+	for i, line := range lines {
+		edit := edits[i]
+		switch {
+		case edit.remove:
+			continue
+		case edit.replace != "":
+			output.WriteString(edit.replace)
+		default:
+			output.WriteString(line[edit.dedent:])
+		}
+	}
+	result := []byte(output.String())
+	projected, err := yamlsource.Load(result)
+	if err != nil {
 		return nil, rewriteCounts{}, err
 	}
-	if err := encoder.Close(); err != nil {
+	if err := projected.Document("nodes.yaml").Root().ValidateUniqueMappings(); err != nil {
 		return nil, rewriteCounts{}, err
 	}
-	return output.Bytes(), counts, nil
+	return result, counts, nil
 }
 
 func run(paths []string, write bool) error {

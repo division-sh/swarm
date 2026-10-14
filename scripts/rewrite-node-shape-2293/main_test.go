@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -100,16 +101,113 @@ func TestNodeShapeRewriteRequiresExplicitUnsafeSourceDisposition(t *testing.T) {
 		{"worker:\n  event_handlers: &handlers {ready: {}}\n", "needs an explicit source-ledger rewrite"},
 		{"first: &handlers {ready: {}}\nworker:\n  event_handlers: *handlers\n", "needs an explicit source-ledger rewrite"},
 		{"worker:\n  event_handlers: null\n", "needs an explicit source-ledger rewrite"},
+		{"worker:\n  event_handlers: {ready: {}}\n", "needs an explicit source-ledger rewrite"},
 		{"worker: &node\n  <<: *node\n", "YAML-ALIAS-CYCLE"},
 		{"worker:\n  subscribes_to: [first]\n  subscribes_to: [second]\n  event_handlers: {}\n", "duplicate effective YAML key"},
 		{"worker:\n  event_handlers: {first: {}}\n  event_handlers: {second: {}}\n", "duplicate effective YAML key"},
-		{"worker:\n  timers: []\n  event_handlers: {timers: {}}\n", "duplicate effective YAML key"},
+		{"worker:\n  timers: []\n  event_handlers:\n    timers: {}\n", "duplicate effective YAML key"},
 	} {
 		output, counts, err := rewriteNodeSource([]byte(tc.source))
 		if err == nil || !strings.Contains(err.Error(), tc.want) || output != nil || counts.changed() {
 			t.Fatalf("unsafe source silently rewritten or wrong refusal: output=%q counts=%+v error=%v want=%q", output, counts, err, tc.want)
 		}
 	}
+}
+
+func TestNodeShapeRewritePreservesExplicitEmptyNode(t *testing.T) {
+	for _, source := range []string{
+		"worker:\n  event_handlers: {}\n",
+		"worker:\n  execution_type: system_node\n",
+		"worker:\n  produces: []\n  event_handlers: {}\n",
+	} {
+		output, counts, err := rewriteNodeSource([]byte(source))
+		if err != nil || !counts.changed() {
+			t.Fatalf("empty node rewrite counts=%+v error=%v", counts, err)
+		}
+		var after yaml.Node
+		if err := yaml.Unmarshal(output, &after); err != nil {
+			t.Fatal(err)
+		}
+		node := after.Content[0].Content[1]
+		if node.Kind != yaml.MappingNode || len(node.Content) != 0 {
+			t.Fatalf("empty node became null or gained invented fields: %q", output)
+		}
+	}
+}
+
+func TestNodeShapeRewriteDiskCorpusPreservesEveryHandler(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command("git", "ls-files", "*nodes.yaml")
+	command.Dir = root
+	paths, err := command.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := strings.Fields(string(paths))
+	if len(files) == 0 {
+		t.Fatal("no checked-in node declaration selected")
+	}
+	var handlers int
+	for _, path := range files {
+		source, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		output, _, err := rewriteNodeSource(source)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		var before, after yaml.Node
+		if err := yaml.Unmarshal(source, &before); err != nil {
+			t.Fatal(err)
+		}
+		if err := yaml.Unmarshal(output, &after); err != nil {
+			t.Fatal(err)
+		}
+		oldRoot, newRoot := before.Content[0], after.Content[0]
+		if len(oldRoot.Content) != len(newRoot.Content) {
+			t.Fatalf("%s: declaration membership changed", path)
+		}
+		for i := 0; i < len(oldRoot.Content); i += 2 {
+			if oldRoot.Content[i].Value != newRoot.Content[i].Value {
+				t.Fatalf("%s: declaration order changed", path)
+			}
+			oldNode, newNode := oldRoot.Content[i+1], newRoot.Content[i+1]
+			for j := 0; j < len(oldNode.Content); j += 2 {
+				key, value := oldNode.Content[j], oldNode.Content[j+1]
+				switch key.Value {
+				case "subscribes_to", "execution_type", "produces":
+					continue
+				case "event_handlers":
+					for k := 0; k < len(value.Content); k += 2 {
+						assertSameYAMLValue(t, value.Content[k+1], requireMappingValue(t, newNode, value.Content[k].Value))
+						handlers++
+					}
+				default:
+					assertSameYAMLValue(t, value, requireMappingValue(t, newNode, key.Value))
+				}
+			}
+		}
+		again, counts, err := rewriteNodeSource(output)
+		if err != nil || counts.changed() || !bytes.Equal(again, output) {
+			t.Fatalf("%s: rewrite is not byte-idempotent: counts=%+v error=%v", path, counts, err)
+		}
+	}
+	t.Logf("preserved all handlers=%d across files=%d", handlers, len(files))
+}
+
+func requireMappingValue(t *testing.T, node *yaml.Node, name string) *yaml.Node {
+	t.Helper()
+	for i := 0; i < len(node.Content); i += 2 {
+		if node.Content[i].Value == name {
+			return node.Content[i+1]
+		}
+	}
+	t.Fatalf("rewritten node lost field/handler %q", name)
+	return nil
 }
 
 func TestNodeShapeRewriteDryRunNeverChangesSelectedFile(t *testing.T) {
