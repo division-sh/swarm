@@ -10,7 +10,9 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -45,13 +47,46 @@ func TestRunForkHistoricalContextNestedAgentOwningRunBothStores(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
+					selected := opened.store.(agentFixtureFlowStore)
+					record := agentFixtureStaticRecord(t, identity)
+					record.Config.FlowID = target.FlowID
+					record.Config.Memory.Enabled = false
+					if err := agentfixture.UpsertStatic(t, ctx, selected, record); err != nil {
+						t.Fatalf("retain exact historical agent lifecycle: %v", err)
+					}
+					plan := currentAgentFixtureSourceSet(t, ctx, selected)
+					if len(plan.Sources) != 1 {
+						t.Fatalf("historical agent source census: %+v", plan)
+					}
+					grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, plan.Sources[0])
+					if err != nil {
+						t.Fatal(err)
+					}
+					admitAgentFixtureFlowGrant(t, ctx, grant)
+					binding, err := grant.ProcessExecutionBinding()
+					if err != nil {
+						t.Fatal(err)
+					}
+					state, found, err := selected.LoadAgentLifecycleState(ctx, identity)
+					if err != nil || !found || state.Identity != identity || state.Phase != manager.AgentLifecycleRunning || state.ProcessBinding != binding {
+						t.Fatalf("historical agent lifecycle/grant mismatch: state=%+v binding=%+v found=%v err=%v", state, binding, found, err)
+					}
+					authority, err := runtimedelivery.NewNormalExecutionAuthority(mustStoreTestSourceArtifactFact(binding.BundleHash), binding.GenerationGrantID, binding.RuntimeGeneration)
+					if err != nil {
+						t.Fatal(err)
+					}
 					route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity, Target: events.MustEntitylessReceiverTarget(target)}
 					at := time.Now().UTC().Truncate(time.Microsecond)
-					event := eventtest.PersistedProjection(uuid.NewString(), "history.agent_ready", "history-proof", "", []byte(`{}`), 0, runID, "", events.EnvelopeForTargetSet(events.EventEnvelope{}, []events.RouteIdentity{target}), at)
-					if err := commitSemanticEventFixtureWithRoutes(ctx, opened.store, event, []events.DeliveryRoute{route}); err != nil {
-						t.Fatalf("canonical agent publication: %v", err)
+					event := eventtest.PersistedProjection(uuid.NewString(), "history.agent_ready", "history-proof", "", []byte(`{}`), 0, runID, "", events.EnvelopeForTargetRoute(events.EventEnvelope{}, target), at)
+					event, err = bindSemanticEventFixturePayload(event)
+					if err != nil {
+						t.Fatal(err)
 					}
+					commitSelectedReceiverClaimEvent(t, ctx, selected, event, route, authority)
 					live := loadDeliverySnapshotFixture(t, ctx, opened.store, event.ID(), route)
+					if live.Status != runtimedelivery.StatusPending || live.ClaimVersion != 0 || !live.Authority.Equal(authority) {
+						t.Fatalf("historical agent obligation lost exact pending authority: %+v", live)
+					}
 					revision := routeEvidenceHead(t, ctx, opened.db, runID)
 					historical := routeEvidenceSnapshot(t, ctx, opened.db, runID, live.DeliveryID, revision)
 					assertRouteEvidenceEqual(t, historical.Route, route)
