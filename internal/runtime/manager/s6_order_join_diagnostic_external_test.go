@@ -204,6 +204,91 @@ func TestS6AuthoredAgentReadyCursorJoinDiagnosticBothStores(t *testing.T) {
 	}
 }
 
+func TestS6AuthoredCrossRunOrderDiagnosticBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := openManagerNativeDelivery(t, backend)
+			ctx := fixture.Context
+			owner := fixture.Store.(managerNativeDeliveryOwner)
+			at := time.Now().UTC().Truncate(time.Microsecond)
+			var publications []runtimebus.PublicationCommand
+			for i, eventID := range []string{"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"} {
+				runID := uuid.NewString()
+				fixture.RequireRun(t, runID)
+				identity := agentidentitytest.RootRuntimeForRun(t, runID, "s6-cross-run", "s6.audit")
+				route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
+				// The later COMMIT carries both an earlier timestamp and a lower UUID.
+				event := eventtest.ExistingRunRootIngress(eventID, "s6.authored.requested", "source", "", nil, 0, runID, events.EventEnvelope{}, at.Add(-time.Duration(i)*time.Hour))
+				scope := authoractivity.BundleScope(eventID, fixture.Authority.SourceArtifact().BundleHash())
+				descriptor := authoractivity.EventDescriptor{EventType: string(event.Type()), Disposition: authoractivity.StoryAuthored}
+				catalog, err := owner.RegisterAuthorActivityEventCatalog(scope, []authoractivity.EventDescriptor{descriptor})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(catalog.Release)
+				ledger, err := events.NewConnectEvaluationLedger(nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				settlement, err := events.NewDeliverySettlement(events.EventWriteNormalPublication, ledger)
+				if err != nil {
+					t.Fatal(err)
+				}
+				publications = append(publications, runtimebus.PublicationCommand{
+					Commit: runtimebus.CommitPublishRequest{
+						Event: storetest.AdmitNativeDeliveryEvent(t, event), RouteSettlement: settlement,
+						DeliveryRoutes: []events.DeliveryRoute{route}, DeliveryAuthority: fixture.Authority, ReplayScope: pipelineobligation.ScopeSubscribed,
+					},
+					AuthorScope: scope, HasAuthorScope: true, AuthorDescriptor: descriptor, HasAuthorDescriptor: true,
+				})
+			}
+			for _, index := range []int{0, 1, 0} {
+				command := publications[index]
+				claim, err := owner.PipelineObligations().ClaimPublication(ctx, command.Commit.Event.ID())
+				if err != nil {
+					t.Fatal(err)
+				}
+				command.Commit.PipelineClaim = claim
+				committed, err := owner.CommitPublication(ctx, command)
+				releaseErr := owner.PipelineObligations().Release(context.WithoutCancel(ctx), claim)
+				if err != nil || releaseErr != nil || !committed.Acknowledged {
+					t.Fatalf("native publication/duplicate %d: acknowledged=%t err=%v release=%v", index, committed.Acknowledged, err, releaseErr)
+				}
+			}
+			var sequences []int64
+			for _, command := range publications {
+				event := command.Commit.Event.Event()
+				occurrences := s6OrderDiagnosticActivity(t, ctx, owner, event.RunID(), event.ID())
+				var exact []authoractivity.Occurrence
+				for _, occurrence := range occurrences {
+					if occurrence.Kind == authoractivity.KindEventEmitted && occurrence.SourceOwner == "events" && occurrence.SourceIdentity == event.ID() {
+						exact = append(exact, occurrence)
+					}
+				}
+				if len(exact) != 1 || exact[0].Sequence <= 0 {
+					t.Fatalf("exact publication/duplicate sequence: %+v", exact)
+				}
+				sequences = append(sequences, exact[0].Sequence)
+			}
+			if sequences[0] >= sequences[1] {
+				t.Fatalf("cross-run order followed timestamp/UUID rather than native COMMIT: %v", sequences)
+			}
+			for _, command := range publications {
+				event := command.Commit.Event.Event()
+				id, err := deliverylifecycle.DeliveryID(event.ID(), command.Commit.DeliveryRoutes[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				snapshot, err := owner.Snapshot(ctx, id)
+				if err != nil || snapshot.Status != deliverylifecycle.StatusPending || snapshot.ClaimVersion != 0 {
+					t.Fatalf("ordering read/duplicate changed unclaimed row: %+v err=%v", snapshot, err)
+				}
+			}
+			t.Logf("exact cross-run event sequences=%v; later timestamp backdated by 1h and UUID lower; duplicate retains one event occurrence and pending/v0", sequences)
+		})
+	}
+}
+
 func s6OrderDiagnosticActivity(t *testing.T, ctx context.Context, owner managerNativeDeliveryOwner, runID string, publicationScopes ...string) []authoractivity.Occurrence {
 	t.Helper()
 	scope, found := authoractivity.ScopeFromContext(ctx)
