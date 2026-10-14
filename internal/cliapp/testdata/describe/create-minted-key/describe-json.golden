@@ -1132,16 +1132,6 @@
       }
     },
     {
-      "path": "nodes[\"producer:producer-node\"].event_handlers[\"validation.started\"].rules[0].id",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "producer/nodes.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
       "path": "nodes[\"producer:producer-node\"].event_handlers[\"validation.started\"].rules[0].when",
       "provenance": {
         "origin": "authored",
@@ -1163,16 +1153,6 @@
     },
     {
       "path": "nodes[\"producer:producer-node\"].event_handlers[\"validation.started\"].rules[1].else",
-      "provenance": {
-        "origin": "authored",
-        "source_file": "producer/nodes.yaml",
-        "source_line": 1,
-        "source_column": 1,
-        "source_presence": "scalar"
-      }
-    },
-    {
-      "path": "nodes[\"producer:producer-node\"].event_handlers[\"validation.started\"].rules[1].id",
       "provenance": {
         "origin": "authored",
         "source_file": "producer/nodes.yaml",
