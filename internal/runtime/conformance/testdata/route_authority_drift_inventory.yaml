@@ -893,6 +893,7 @@ seam_families:
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
       - internal/runtime/bus/delivery_planner.go
       - internal/runtime/bus/delivery_planner_test.go
+      - internal/runtime/bus/publication_target_owners_test.go
       - internal/runtime/bus/route_preparation_native_test.go
       - internal/runtime/bus/eventbus.go
       - internal/runtime/bus/eventbus_publish.go
