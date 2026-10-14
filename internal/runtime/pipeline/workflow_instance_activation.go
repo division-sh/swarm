@@ -401,8 +401,25 @@ func (p FlowInstanceActivationPlan) Validate() error {
 	}
 	seen := map[string]bool{p.Identity.InstancePath: true}
 	for index, child := range p.Children {
-		withinParent := strings.HasPrefix(child.Identity.InstancePath, p.Identity.InstancePath+"/") ||
-			(p.Identity.TemplateID == "." && p.Identity.InstancePath == p.Readiness.RunID && child.Identity.InstancePath == child.Identity.ScopeKey && !strings.Contains(child.Identity.ScopeKey, "/"))
+		localScope := strings.TrimPrefix(child.Identity.ScopeKey, p.Identity.ScopeKey+"/")
+		parentPath := p.Identity.InstancePath + "/"
+		immediateScope := strings.HasPrefix(child.Identity.ScopeKey, p.Identity.ScopeKey+"/")
+		// The run root owns a UUID coordinate, while its immediate children
+		// keep their authored scope and optional local discriminator.
+		if p.Identity.TemplateID == "." && p.Identity.ScopeKey == "." && p.Identity.InstancePath == p.Readiness.RunID &&
+			p.Identity.InstanceID == p.Readiness.RunID && p.Identity.EntityID == runtimeflowidentity.EntityID(p.Readiness.RunID) {
+			localScope, parentPath, immediateScope = child.Identity.ScopeKey, "", true
+		}
+		mode := workflowInstanceMode(child.Instance)
+		expectedPath := parentPath + localScope
+		expectedID := localScope
+		if mode == "template" {
+			expectedPath += "/" + child.Identity.InstanceID
+			expectedID = child.Identity.InstanceID
+		}
+		withinParent := immediateScope && localScope != "" && localScope != "." && !strings.Contains(localScope, "/") &&
+			expectedID != "" && !strings.Contains(expectedID, "/") && child.Identity.InstanceID == expectedID &&
+			child.Identity.InstancePath == expectedPath && ValidateCapturedConstructionModeKey(mode, child.Instance.InstanceKey) == nil
 		if child.Identity.ParentRoute != (runtimeflowidentity.ParentRoute{FlowID: p.Identity.TemplateID, FlowInstance: p.Identity.InstancePath, EntityID: p.Identity.EntityID}) ||
 			child.Instance.ParentEntityID != p.Identity.EntityID || child.Readiness.RunID != p.Readiness.RunID ||
 			child.Readiness.BundleHash != p.Readiness.BundleHash || child.Readiness.WorkflowVersion != p.Readiness.WorkflowVersion || child.Readiness.ExecutionMode != p.Readiness.ExecutionMode ||
