@@ -2737,12 +2737,10 @@ contract_formats:
     events_yaml: "hello.requested:\n  message: text\nhello.completed:\n  result: text"
     agents_yaml: '{}'
   produces_derivation: >-
-    The produces field on system nodes is OPTIONAL. If omitted, the platform derives the effective production surface from
-    every supported declarative emit site at boot: handler top-level emit, rule-local emit, rules emit template specialization
-    effective emits, selected on_complete emit, join outcome emit, and fan_out emit. Runtime routing, producer authority,
-    and transition checks consume this effective production surface, not raw authored produces. If present, produces is an
-    explicit authored assertion surface: the verifier checks it matches actual emits, including an explicit empty list, with
-    a PRODUCES-DRIFT warning. Authors should omit produces and let the platform derive it.
+    A node's outputs are the events its handlers emit. One canonical owner derives the effective production surface from
+    handler top-level emit, rule-local emit, rules emit template specialization, selected on_complete emit, guard escalation,
+    join outcome emit, fan_out emit, and generated activity result events. Runtime routing, producer authority, transition
+    checks, verification and describe consume this derived surface. An authored produces field is not supported.
   underscore_prefix_convention:
     description: Fields starting with _ in contract YAML files.
     semantic_fields:
@@ -5419,9 +5417,6 @@ handler_specification:
           event_handlers keys when omitted. Join timeout delivery is platform-owned and derived from effective join plans.
           Open stream accumulation derives no closure or deadline subscription. Slash-free flow-local wildcard
           subscriptions remain explicit.
-        produces: list of event names this node emits. Omit for ordinary nodes; the effective production surface is derived
-          from supported declarative emit sites. If present, this is an explicit authored assertion checked against actual
-          emits.
         description: string — human-readable description
         state_schema: map — fields the node persists per entity (accumulator state)
         state_table: string — table name for node state persistence
@@ -10082,13 +10077,6 @@ engine:
         gated pack owner exists, or the immutable resolved artifact fails canonical identity validation. This check is fail
         closed; no logical-id, role, mode, shard-parent, directory, environment, or generated-prose fallback exists.
       when: boot-only
-    - id: produces_drift
-      severity: warning
-      scope: per-node
-      trigger: >-
-        A node's explicit produces list does not match the set of events derived from its supported declarative emit
-        sites: handler top-level emit, rules emit, on_complete emit, and fan_out emit.
-      when: boot-only
     - id: invalid_field_detection
       severity: error
       scope: contract
@@ -10126,11 +10114,6 @@ engine:
       scope: per-node
       trigger: A non-empty data_accumulation.source_event does not match its handler event and is not a derived fan_out source.
         Creating inputs consume the canonical same-name typed constructor; input pins own no initialization bindings.
-      when: boot-only
-    - id: phantom_produces
-      severity: warning
-      scope: per-node
-      trigger: A node's produces list includes an event that no handler in the node actually emits.
       when: boot-only
     - id: native_tools_valid
       severity: error
@@ -10313,7 +10296,7 @@ engine:
           Unperformed observations and startup execution obligations remain visible; never bare ok or an unconditional
           promise of live readiness. Portable validation explicitly reports structural scope.
         stderr: Human-readable analyzer diagnostics, advisory lint evidence, warnings, and blocking failures.
-    check_count: 70 primary checks plus 2 supplemental checks; managed credentials share the primary credential observation and constructor eligibility has one source check
+    check_count: 68 primary checks plus 2 supplemental checks; managed credentials share the primary credential observation and constructor eligibility has one source check
     implementation_notes:
       framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
         finding has the check ID, severity, message, location (flow, node, agent, or event name), optional evidence, and

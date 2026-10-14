@@ -1,5 +1,0 @@
-test-node:
-  item.requested:
-    advances_to: done
-    emit:
-      event: item.surprise

@@ -1,0 +1,15 @@
+[
+  {
+    "path": "internal/runtime/semanticview/authored_emit_sites_test.go",
+    "declaration": "loadAuthoredEmitSiteLoweringFixture",
+    "ordinal": 11,
+    "before": "`\ndispatcher:\n  execution_type: system_node\n  event_handlers:\n    scan.corpus_dispatch:\n      emit:\n        event: market_research.scan_assigned\n        from: entity\n        fields:\n          geography: payload.geography\n`",
+    "after": "`\ndispatcher:\n  scan.corpus_dispatch:\n    emit:\n      event: market_research.scan_assigned\n      from: entity\n      fields:\n        geography: payload.geography\n`",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 1,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  }
+]

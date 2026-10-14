@@ -71,6 +71,9 @@ func projectSystemNodeValue(value yamlsource.Value) (SystemNodeContract, error) 
 		case "execution_type", "subscribes_to", "produces", "event_handlers":
 			diagnostic := NewUndefinedFieldDiagnostic("node", entry.Name, systemNodeContractFields, entry)
 			diagnostic.Remediation += " Handlers are written directly under the node, keyed by event name; a node receives exactly the events it handles."
+			if entry.Name == "produces" {
+				diagnostic.Remediation += " A node's outputs are the events its handlers emit."
+			}
 			return SystemNodeContract{}, diagnostic
 		}
 		if _, reserved := systemNodeContractFields[entry.Name]; reserved {

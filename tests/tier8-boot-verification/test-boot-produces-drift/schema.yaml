@@ -1,6 +1,0 @@
-stages:
-  pending: {}
-  done: {final: true}
-pins:
-  inputs:
-    - item.requested

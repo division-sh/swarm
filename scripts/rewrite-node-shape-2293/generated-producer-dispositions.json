@@ -1,0 +1,23 @@
+{
+  "source": "internal/runtime/semanticview/authored_emit_sites_test.go",
+  "before_revision": "a3fac1cfd91ec7d7eb9217cd6b5d18305a5edd3c",
+  "disposition": "explicit fragment-generator carrier deletion and two-space handler dedent only; no map re-emission or scalar/body changes",
+  "declarations": [
+    "authoredEmitSiteNodeYAML",
+    "authoredEmitSiteNodeYAMLWithGuardObject",
+    "authoredEmitSiteRulesSuccessNodeYAML",
+    "authoredEmitSiteTemplateNodeYAML"
+  ],
+  "activity_sites": 0,
+  "activity_proof": "loadAuthoredEmitSiteFixture asserts the canonical admitted ActivitySites set is empty",
+  "proofs": [
+    "TestAuthoredEmitSites_EnumeratesRootAndFlowOwnedScopes",
+    "TestAuthoredEmitSites_GuardEscalationObjectCarriesFields",
+    "TestAuthoredEmitSites_EnumeratesOnSuccessEmitWithRules",
+    "TestAuthoredEmitSites_UsesRulesEmitTemplateEffectiveSite",
+    "TestAuthoredEmitSites_PreservesSameNodeIDAcrossDistinctFilesystemFlows",
+    "TestExecutableNodeProducerOwnerMatchesGuardEmitSites"
+  ],
+  "complete_literal_ledger": "go-producer-inputs.json",
+  "complete_literal_proof": "TestAuthoredEmitSites_LowersEmitFromToCanonicalFields"
+}

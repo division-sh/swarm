@@ -96,21 +96,12 @@ type InvalidAuthoredSubscription struct {
 	Admission AuthoredSubscriptionAdmission `json:"-"`
 }
 
-type NodeProducerAssertion struct {
-	NodeID     string                         `json:"node_id"`
-	FlowID     string                         `json:"flow_id,omitempty"`
-	Node       runtimeidentity.ExecutableNode `json:"-"`
-	Declared   bool                           `json:"declared"`
-	EventTypes []string                       `json:"event_types"`
-}
-
 type AuthoredEventEndpointCensus struct {
 	source       Source
 	producers    []AuthoredEventEndpoint
 	consumers    []AuthoredEventEndpoint
 	inputPins    []AuthoredEventEndpoint
 	outputPins   []AuthoredEventEndpoint
-	assertions   []NodeProducerAssertion
 	endpointByID map[string]AuthoredEventEndpoint
 }
 
@@ -147,15 +138,6 @@ func (c AuthoredEventEndpointCensus) InputPins() []AuthoredEventEndpoint {
 
 func (c AuthoredEventEndpointCensus) OutputPins() []AuthoredEventEndpoint {
 	return cloneEventEndpoints(c.outputPins)
-}
-
-func (c AuthoredEventEndpointCensus) ProducerAssertions() []NodeProducerAssertion {
-	out := make([]NodeProducerAssertion, len(c.assertions))
-	for i := range c.assertions {
-		out[i] = c.assertions[i]
-		out[i].EventTypes = append([]string(nil), c.assertions[i].EventTypes...)
-	}
-	return out
 }
 
 func (c AuthoredEventEndpointCensus) Endpoint(id string) (AuthoredEventEndpoint, bool) {
@@ -427,7 +409,6 @@ type endpointCensusBuilder struct {
 	consumers  []AuthoredEventEndpoint
 	inputPins  []AuthoredEventEndpoint
 	outputPins []AuthoredEventEndpoint
-	assertions []NodeProducerAssertion
 }
 
 func (b *endpointCensusBuilder) addNodeEndpoints() {
@@ -454,16 +435,8 @@ func (b *endpointCensusBuilder) addNodeEndpoints() {
 			continue
 		}
 		nodeID := nodeRef.NodeID()
-		node := record.Entry
 		source := record.Source
 		flowID := nodeRef.FlowPath()
-		b.assertions = append(b.assertions, NodeProducerAssertion{
-			NodeID:     nodeID,
-			FlowID:     flowID,
-			Node:       nodeRef,
-			Declared:   node.ProducesDeclared || node.Produces != nil,
-			EventTypes: normalizedSortedStrings(node.Produces),
-		})
 		for _, eventType := range ExecutableNodeEffectiveProduces(b.source, nodeRef) {
 			proof := ResolveFlowEventProof(b.source, flowID, eventType)
 			if _, exists := authoredByNodeEvent[nodeEventKey(nodeRef.Key(), proof.EventKey())]; exists {
@@ -836,12 +809,6 @@ func (b *endpointCensusBuilder) build() AuthoredEventEndpointCensus {
 	sortEventEndpoints(b.consumers)
 	sortEventEndpoints(b.inputPins)
 	sortEventEndpoints(b.outputPins)
-	sort.SliceStable(b.assertions, func(i, j int) bool {
-		if b.assertions[i].FlowID != b.assertions[j].FlowID {
-			return b.assertions[i].FlowID < b.assertions[j].FlowID
-		}
-		return b.assertions[i].NodeID < b.assertions[j].NodeID
-	})
 	index := map[string]AuthoredEventEndpoint{}
 	for _, endpoints := range [][]AuthoredEventEndpoint{b.producers, b.consumers, b.inputPins, b.outputPins} {
 		for _, endpoint := range endpoints {
@@ -854,7 +821,6 @@ func (b *endpointCensusBuilder) build() AuthoredEventEndpointCensus {
 		consumers:    cloneEventEndpoints(b.consumers),
 		inputPins:    cloneEventEndpoints(b.inputPins),
 		outputPins:   cloneEventEndpoints(b.outputPins),
-		assertions:   append([]NodeProducerAssertion(nil), b.assertions...),
 		endpointByID: index,
 	}
 }

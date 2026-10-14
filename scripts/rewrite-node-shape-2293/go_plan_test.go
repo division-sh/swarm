@@ -77,7 +77,16 @@ func TestNodeShapeGoPlanRejectsPartialGenerators(t *testing.T) {
 }
 
 func TestNodeShapeGoProjectionLedgerReplaysReviewedLiterals(t *testing.T) {
-	data, err := os.ReadFile("go-projection-inputs.json")
+	proveNodeShapeGoLedger(t, "go-projection-inputs.json", 14)
+}
+
+func TestNodeShapeGoProducerLedgerReplaysReviewedLiteral(t *testing.T) {
+	proveNodeShapeGoLedger(t, "go-producer-inputs.json", 1)
+}
+
+func proveNodeShapeGoLedger(t *testing.T, path string, count int) {
+	t.Helper()
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +94,7 @@ func TestNodeShapeGoProjectionLedgerReplaysReviewedLiterals(t *testing.T) {
 	if err := json.Unmarshal(data, &inputs); err != nil {
 		t.Fatal(err)
 	}
-	if len(inputs) != 14 {
+	if len(inputs) != count {
 		t.Fatalf("projection input membership changed: %d", len(inputs))
 	}
 	for _, input := range inputs {

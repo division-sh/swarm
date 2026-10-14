@@ -232,6 +232,9 @@ support.ready:
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
+	if sites := bundle.ActivitySites(); len(sites) != 0 {
+		t.Fatalf("emit-site fragment fixtures introduced unbanked activity identities: %#v", sites)
+	}
 	return Wrap(bundle)
 }
 
@@ -267,14 +270,12 @@ scan:
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 dispatcher:
-  execution_type: system_node
-  event_handlers:
-    scan.corpus_dispatch:
-      emit:
-        event: market_research.scan_assigned
-        from: entity
-        fields:
-          geography: payload.geography
+  scan.corpus_dispatch:
+    emit:
+      event: market_research.scan_assigned
+      from: entity
+      fields:
+        geography: payload.geography
 `)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -289,19 +290,17 @@ func authoredEmitSiteNodeYAML(nodeID, trigger, eventType, guardEventType string)
 	}
 	guardYAML := ""
 	if strings.TrimSpace(guardEventType) != "" {
-		guardYAML = `      guard:
-        id: guard-escalate
-        check: false
-        on_fail: "escalate:` + guardEventType + `"
+		guardYAML = `    guard:
+      id: guard-escalate
+      check: false
+      on_fail: "escalate:` + guardEventType + `"
 `
 	}
 	return nodeID + `:
-  execution_type: system_node
-  event_handlers:
-    ` + trigger + `:
+  ` + trigger + `:
 ` + guardYAML + `
-      emit:
-        event: ` + eventType + `
+    emit:
+      event: ` + eventType + `
 `
 }
 
@@ -310,22 +309,20 @@ func authoredEmitSiteNodeYAMLWithGuardObject(nodeID, trigger, eventType, guardEv
 		return ""
 	}
 	return nodeID + `:
-  execution_type: system_node
-  event_handlers:
-    ` + trigger + `:
-      guard:
-        id: guard-escalate
-        check: false
-        on_fail:
-          escalate:
-            event: ` + guardEventType + `
-            fields:
-              score: payload.score
-              reason:
-                "score_below_threshold"
+  ` + trigger + `:
+    guard:
+      id: guard-escalate
+      check: false
+      on_fail:
+        escalate:
+          event: ` + guardEventType + `
+          fields:
+            score: payload.score
+            reason:
+              "score_below_threshold"
 
-      emit:
-        event: ` + eventType + `
+    emit:
+      event: ` + eventType + `
 `
 }
 
@@ -334,15 +331,13 @@ func authoredEmitSiteRulesSuccessNodeYAML(nodeID, trigger, ruleEventType, succes
 		return ""
 	}
 	return nodeID + `:
-  execution_type: system_node
-  event_handlers:
-    ` + trigger + `:
-      on_success:
-        emit: ` + successEventType + `
-      rules:
-        routed:
-          else: true
-          emit: ` + ruleEventType + `
+  ` + trigger + `:
+    on_success:
+      emit: ` + successEventType + `
+    rules:
+      routed:
+        else: true
+        emit: ` + ruleEventType + `
 `
 }
 
@@ -351,24 +346,22 @@ func authoredEmitSiteTemplateNodeYAML(nodeID, trigger, eventType string) string 
 		return ""
 	}
 	return nodeID + `:
-  execution_type: system_node
-  event_handlers:
-    ` + trigger + `:
-      emit:
-        event: ` + eventType + `
-        fields:
-          shared: payload.shared
-      rules:
-        high:
-          when: payload.score >= 80
-          emit:
-            fields:
-              bucket: 'high'
-        low:
-          else: true
-          emit:
-            fields:
-              bucket: 'low'
+  ` + trigger + `:
+    emit:
+      event: ` + eventType + `
+      fields:
+        shared: payload.shared
+    rules:
+      high:
+        when: payload.score >= 80
+        emit:
+          fields:
+            bucket: 'high'
+      low:
+        else: true
+        emit:
+          fields:
+            bucket: 'low'
 `
 }
 

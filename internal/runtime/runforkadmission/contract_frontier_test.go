@@ -676,7 +676,6 @@ func testContractFrontierTemplateSource(t testing.TB) semanticview.Source {
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"reviewer": {
 				SubscribesTo: []string{"task.started"},
-				Produces:     []string{"task.started"},
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{

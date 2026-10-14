@@ -78,6 +78,7 @@ func requireNodeShapeCarrierRefusal(t *testing.T, nodes map[string]SystemNodeCon
 		!strings.Contains(diagnostic.Problem, fmt.Sprintf("node field %q", field)) ||
 		!strings.Contains(err.Error(), "Handlers are written directly under the node, keyed by event name") ||
 		!strings.Contains(err.Error(), "a node receives exactly the events it handles") ||
+		field == "produces" && !strings.Contains(err.Error(), "A node's outputs are the events its handlers emit.") ||
 		diagnostic.Location.File != "nodes.yaml" || diagnostic.Location.Line != 2 ||
 		!reflect.DeepEqual(diagnostic.ValidOptions, []string{"gate_state", "state_schema", "state_table", "timers"}) {
 		t.Fatalf("retired carrier %q did not fail on presence with exact key, vocabulary and source: nodes=%v error=%v diagnostic=%+v", field, nodes, err, diagnostic)

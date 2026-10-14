@@ -522,7 +522,6 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
 				"test-node": {
 					ID: "test-node", ExecutionType: runtimecontracts.SystemNodeExecutionType,
-					Produces: []string{"flow_a/connector.succeeded", "flow_a/connector.failed"},
 				},
 			},
 		},

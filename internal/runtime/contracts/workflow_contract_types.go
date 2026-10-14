@@ -1445,8 +1445,6 @@ type SystemNodeContract struct {
 	ExecutionType       string                            `yaml:"execution_type"`
 	Implementation      string                            `yaml:"-"`
 	SubscribesTo        []string                          `yaml:"subscribes_to"`
-	Produces            []string                          `yaml:"produces"`
-	ProducesDeclared    bool                              `yaml:"-" json:"-"`
 	StateTable          string                            `yaml:"state_table"`
 	IdempotencyTable    string                            `yaml:"-"`
 	Timers              []WorkflowTimerContract           `yaml:"timers"`

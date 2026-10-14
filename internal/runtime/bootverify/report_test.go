@@ -1661,7 +1661,6 @@ func TestRun_MapsEmptyEventPayloadSchemaConditionRefsToNamedError(t *testing.T) 
 					"complete-task": {
 						ExecutionType: "system_node",
 						SubscribesTo:  []string{"task.requested"},
-						Produces:      []string{"task.completed"},
 						EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 							"task.requested": handler,
 						},
@@ -1699,7 +1698,6 @@ func TestRun_DoesNotMapMissingEventSchemaToConditionPayloadAlignment(t *testing.
 			"complete-task": {
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{"task.requested"},
-				Produces:      []string{"task.completed"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"task.requested": {
 						Guard:      &runtimecontracts.GuardSpec{Check: `payload.missing == "x"`},
@@ -2389,14 +2387,12 @@ func TestRun_ReportsSemanticModelMultiHopEventCycle(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
 		"node-a": {
 			SubscribesTo: []string{"task.a"},
-			Produces:     []string{"task.b"},
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"task.a": {Emit: runtimecontracts.EmitSpec{Event: "task.b"}},
 			},
 		},
 		"node-b": {
 			SubscribesTo: []string{"task.b"},
-			Produces:     []string{"task.a"},
 			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 				"task.b": {Emit: runtimecontracts.EmitSpec{Event: "task.a"}},
 			},
@@ -3023,84 +3019,6 @@ func TestRun_DoesNotRequireWebSearchFallbackPolicyForNativeTools(t *testing.T) {
 		if strings.Contains(finding.Message, "web_search_provider") {
 			t.Fatalf("unexpected fallback policy error: %#v", report.Errors())
 		}
-	}
-}
-
-func TestRun_MapsProducesDriftToNamedWarning(t *testing.T) {
-	source := loadTier8Fixture(t, "test-boot-produces-drift")
-
-	report := Run(context.Background(), source, Options{})
-
-	if report.HasErrors() {
-		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
-	}
-	if !reportContains(report.Warnings(), "produces_drift", "outside produces list") {
-		t.Fatalf("expected produces_drift warning, got %#v", report.Warnings())
-	}
-}
-
-func TestRun_DoesNotWarnForProducesDriftWhenDeclaredEventsMatchEmits(t *testing.T) {
-	report := Run(context.Background(), semanticview.Wrap(bootverifyDeclarationDriftBundle()), Options{})
-
-	if reportContains(report.Warnings(), "produces_drift", "outside produces list") {
-		t.Fatalf("unexpected produces_drift warning for matching declaration/emission, got %#v", report.Warnings())
-	}
-}
-
-func TestRun_DoesNotWarnForProducesDriftWhenProducesOmitted(t *testing.T) {
-	bundle := bootverifyDeclarationDriftBundle()
-	node := bundle.Nodes["producer"]
-	node.Produces = nil
-	bundle.Nodes["producer"] = node
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if reportContains(report.Warnings(), "produces_drift", "outside produces list") {
-		t.Fatalf("unexpected produces_drift warning for omitted produces, got %#v", report.Warnings())
-	}
-	if reportContains(report.Warnings(), "phantom_produces", "no handler emits") {
-		t.Fatalf("unexpected phantom_produces warning for omitted produces, got %#v", report.Warnings())
-	}
-}
-
-func TestRun_ExplicitEmptyProducesRemainsAssertion(t *testing.T) {
-	bundle := bootverifyDeclarationDriftBundle()
-	node := bundle.Nodes["producer"]
-	node.Produces = []string{}
-	bundle.Nodes["producer"] = node
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Warnings(), "produces_drift", "outside produces list") {
-		t.Fatalf("expected produces_drift warning for explicit empty produces assertion, got %#v", report.Warnings())
-	}
-}
-
-func TestRun_MapsPhantomProducesToNamedWarning(t *testing.T) {
-	bundle := bootverifyDeclarationDriftBundle()
-	bundle.Nodes["producer"] = runtimecontracts.SystemNodeContract{
-		Produces: []string{"task.done", "task.unused"},
-		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-			"task.start": {Emit: runtimecontracts.EmitSpec{Event: "task.done"}},
-		},
-		SubscribesTo: []string{"task.start"},
-	}
-
-	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
-
-	if report.HasErrors() {
-		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
-	}
-	if !reportContains(report.Warnings(), "phantom_produces", "task.unused") {
-		t.Fatalf("expected phantom_produces warning, got %#v", report.Warnings())
-	}
-}
-
-func TestRun_DoesNotWarnForPhantomProducesWhenDeclaredEventsMatchEmits(t *testing.T) {
-	report := Run(context.Background(), semanticview.Wrap(bootverifyDeclarationDriftBundle()), Options{})
-
-	if reportContains(report.Warnings(), "phantom_produces", "no handler emits") {
-		t.Fatalf("unexpected phantom_produces warning for matching declaration/emission, got %#v", report.Warnings())
 	}
 }
 
@@ -4019,37 +3937,6 @@ func TestRun_DoesNotErrorForSameFlowTimerInputProducerPath(t *testing.T) {
 	}
 }
 
-func TestRun_DoesNotUseEventMetadataAsInputProducerPathProof(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name   string
-		mutate func(*runtimecontracts.WorkflowContractBundle)
-	}{
-		{
-			name: "produces only",
-			mutate: func(bundle *runtimecontracts.WorkflowContractBundle) {
-				node := bundle.Nodes["dispatcher"]
-				node.Produces = append(node.Produces, "child/task.feedback")
-				bundle.Nodes["dispatcher"] = node
-			},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			bundle := loadTier8FixtureBundle(t, "test-boot-missing-pin")
-			tc.mutate(bundle)
-
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-			if !reportContains(report.Errors(), "input_pin_wiring", "task.feedback") {
-				t.Fatalf("expected input_pin_wiring error for %s, got %#v", tc.name, report.Errors())
-			}
-		})
-	}
-}
-
 func TestRun_DoesNotWarnForLocalizedCrossFlowEventRouting(t *testing.T) {
 	root := writeLocalizedEventRoutingFixture(t)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
@@ -4120,7 +4007,7 @@ func TestRun_RejectsExactQualifiedNodeAndAgentSubscriptions(t *testing.T) {
 					}
 					switch kind {
 					case "node":
-						listener := runtimecontracts.SystemNodeContract{SubscribesTo: []string{authored}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{authored: {}}, ProducesDeclared: true}
+						listener := runtimecontracts.SystemNodeContract{SubscribesTo: []string{authored}, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{authored: {}}}
 						bundle.Nodes["listener"] = listener
 						bundle.FlowTree.Root.Nodes["listener"] = listener
 					case "agent":
@@ -4158,9 +4045,8 @@ func TestRun_RejectsAbsoluteSiblingQualifiedSubscription(t *testing.T) {
 		Path:  "consumer",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"listener": {
-				SubscribesTo:     []string{"producer/task.done"},
-				EventHandlers:    map[string]runtimecontracts.SystemNodeEventHandler{"producer/task.done": {}},
-				ProducesDeclared: true,
+				SubscribesTo:  []string{"producer/task.done"},
+				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"producer/task.done": {}},
 			},
 		},
 	}
@@ -7000,35 +6886,6 @@ func bootverifyTransitionRuntimeOwnershipBundle() *runtimecontracts.WorkflowCont
 			ByID: map[string]*runtimecontracts.FlowContractView{
 				".": root,
 			},
-		},
-	}
-	bundle.Platform.Platform.Name = "test"
-	bundle.Platform.Platform.Version = "1.0.0"
-	return bundle
-}
-
-func bootverifyDeclarationDriftBundle() *runtimecontracts.WorkflowContractBundle {
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		Platform: runtimecontracts.PlatformSpecDocument{},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"producer": {
-					"task.start": {Emit: runtimecontracts.EmitSpec{Event: "task.done"}},
-				},
-			},
-		},
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"producer": {
-				SubscribesTo: []string{"task.start"},
-				Produces:     []string{"task.done"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"task.start": {Emit: runtimecontracts.EmitSpec{Event: "task.done"}},
-				},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"task.start": {},
-			"task.done":  {},
 		},
 	}
 	bundle.Platform.Platform.Name = "test"

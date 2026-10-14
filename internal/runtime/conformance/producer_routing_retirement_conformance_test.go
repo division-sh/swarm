@@ -93,6 +93,12 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 			if _, exists := testEntrypoints[baseProof]; !exists {
 				t.Fatalf("proof %q does not identify an actual TestXxx entrypoint", row.Proof)
 			}
+			if row.ID == "B167" {
+				if err := retiredProducerAssertionFixtureError(repoRoot, row); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
 			if row.Disposition == "retired_pin_grant_fixture" {
 				requireRemovedPinGrantFixture(t, repoRoot, row)
 				return
@@ -158,9 +164,9 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 				if err := retiredProducerRoutingOutputError(outputPins, row.Event); err != nil {
 					t.Fatal(err)
 				}
-				// These two emits are the direct evidence for their original negative
-				// classifications; only their unrelated output authority was removed.
-				if row.ID != "B154" && row.ID != "B167" && containsProducerRoutingValue(emits, row.Event) {
+				// This emit is the direct evidence for its original negative
+				// classification; only its unrelated output authority was removed.
+				if row.ID != "B154" && containsProducerRoutingValue(emits, row.Event) {
 					t.Fatalf("removed event %q is still emitted", row.Event)
 				}
 			case "same_flow", "external":
@@ -177,6 +183,54 @@ func TestProducerRoutingRetirementLedger(t *testing.T) {
 	}
 	if fmt.Sprint(gotDispositionCounts) != fmt.Sprint(wantDispositionCounts) {
 		t.Fatalf("disposition counts = %v, want %v", gotDispositionCounts, wantDispositionCounts)
+	}
+}
+
+// Q2 6170252119 removes the complete drift fixture, not its historical B167 row.
+func retiredProducerAssertionFixtureError(repo string, row producerRoutingRetirementLedgerRow) error {
+	const fixture = "tests/tier8-boot-verification/test-boot-produces-drift"
+	want := producerRoutingRetirementLedgerRow{
+		ID: "B167", Path: fixture + "/nodes.yaml", Event: "item.surprise",
+		Disposition: "negative_removal", Proof: "TestTier8BootCatalogFixtures_RealRuntimeBoot/test-boot-produces-drift",
+	}
+	if row != want {
+		return fmt.Errorf("produces retirement changed historical B167 evidence: %+v", row)
+	}
+	if _, err := os.Stat(filepath.Join(repo, fixture)); !os.IsNotExist(err) {
+		return fmt.Errorf("retired produces assertion fixture reappeared or cannot be inspected: %v", err)
+	}
+	return nil
+}
+
+func TestProducerAssertionRetirementPreservesExactHistoricalRow(t *testing.T) {
+	root := t.TempDir()
+	row := producerRoutingRetirementLedgerRow{
+		ID: "B167", Path: "tests/tier8-boot-verification/test-boot-produces-drift/nodes.yaml", Event: "item.surprise",
+		Disposition: "negative_removal", Proof: "TestTier8BootCatalogFixtures_RealRuntimeBoot/test-boot-produces-drift",
+	}
+	if err := retiredProducerAssertionFixtureError(root, row); err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(*producerRoutingRetirementLedgerRow){
+		func(r *producerRoutingRetirementLedgerRow) { r.ID = "B154" },
+		func(r *producerRoutingRetirementLedgerRow) { r.Path = "foreign/nodes.yaml" },
+		func(r *producerRoutingRetirementLedgerRow) { r.Event = "foreign.event" },
+		func(r *producerRoutingRetirementLedgerRow) { r.Disposition = "dead_removal" },
+		func(r *producerRoutingRetirementLedgerRow) { r.Proof = "TestForeign" },
+		func(r *producerRoutingRetirementLedgerRow) { r.RemovedFixture = "foreign" },
+		func(r *producerRoutingRetirementLedgerRow) { r.RetiredFixture = "foreign" },
+	} {
+		foreign := row
+		mutate(&foreign)
+		if err := retiredProducerAssertionFixtureError(root, foreign); err == nil {
+			t.Fatalf("retirement accepted foreign historical evidence: %+v", foreign)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(root, filepath.Dir(row.Path)), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := retiredProducerAssertionFixtureError(root, row); err == nil {
+		t.Fatal("retirement accepted a restored assertion fixture")
 	}
 }
 

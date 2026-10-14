@@ -251,14 +251,6 @@ func TestCompiledLifecycleEmitterRetiredExternalMetadataRejected(t *testing.T) {
 	}
 }
 
-func TestCompiledLifecycleEmitterCannotSatisfyNodeAssertion(t *testing.T) {
-	source := loadLifecycleStaticDiagnosticSource(t, canonicalrouting.LifecycleStaticHandlerAssertion)
-	report := Run(context.Background(), source, Options{})
-	if !reportContains(report.Findings, "phantom_produces", "work.completed") {
-		t.Fatalf("gate satisfied unrelated node produces assertion: %#v", report.Findings)
-	}
-}
-
 func TestCompiledLifecycleEmitterTimerOtherProducer(t *testing.T) {
 	self := loadLifecycleStaticDiagnosticSource(t, canonicalrouting.LifecycleStaticTimerSelfOnly)
 	selfTimers := self.WorkflowTimers()

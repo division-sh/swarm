@@ -221,7 +221,6 @@ groups:
       - tests/tier8-boot-verification/test-boot-payload-empty-schema-mismatch
       - tests/tier8-boot-verification/test-boot-payload-mismatch
       - tests/tier8-boot-verification/test-boot-policy-conflict
-      - tests/tier8-boot-verification/test-boot-produces-drift
       - tests/tier8-boot-verification/test-boot-prompt-missing
       - tests/tier8-boot-verification/test-boot-required-agent-missing
       - tests/tier8-boot-verification/test-boot-self-emit

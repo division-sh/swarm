@@ -44,6 +44,12 @@ foreign edits, forged output or missing/duplicate coordinates before writing.
 Partial string generators and malformed-YAML negative controls are not rewritten
 implicitly; their flat-source corrections remain explicit fixture changes.
 
+`go-producer-inputs.json` banks the complete emit-lowering fixture literal.
+`generated-producer-dispositions.json` lists the four explicit fragment-generator
+edits and their original source/proofs. These generators have no activities, as
+asserted through the admitted bundle owner, so no activity identity is synthesized
+or renamed by their carrier-only cutover.
+
 The runtime decoder cut, scalar guard/disposition rewrite, explicit activity-ID
 materialization, generated-source rewrite, and final consumer/pin reconciliation
 remain in the same atomic slice-1 PR. This carrier tool must not be used to

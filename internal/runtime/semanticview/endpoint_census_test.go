@@ -12,7 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-func TestAuthoredEventEndpointCensusEnumeratesExecutableFactsAndAssertions(t *testing.T) {
+func TestAuthoredEventEndpointCensusEnumeratesExecutableFacts(t *testing.T) {
 	source := endpointCensusFixture(t, []runtimecontracts.FlowInputEventPin{{
 		Event: "work.requested",
 	}})
@@ -27,11 +27,6 @@ func TestAuthoredEventEndpointCensusEnumeratesExecutableFactsAndAssertions(t *te
 	if got := endpointCount(census.InputPins(), EventEndpointFlowInputPin, "worker", "work.requested"); got != 1 {
 		t.Fatalf("input endpoints = %d, want 1: %#v", got, census.InputPins())
 	}
-	assertions := census.ProducerAssertions()
-	if len(assertions) != 1 || assertions[0].NodeID != "worker-node" || !assertions[0].Declared || len(assertions[0].EventTypes) != 0 {
-		t.Fatalf("producer assertions = %#v, want explicit empty worker-node assertion", assertions)
-	}
-
 	producers := census.Producers()
 	producers[0].NodeID = "mutated"
 	if got := census.Producers()[0].NodeID; got == "mutated" {
@@ -609,8 +604,6 @@ func endpointCensusFixture(t testing.TB, inputPins []runtimecontracts.FlowInputE
 
 func endpointCensusBundle(inputPins []runtimecontracts.FlowInputEventPin) *runtimecontracts.WorkflowContractBundle {
 	node := runtimecontracts.SystemNodeContract{
-		ProducesDeclared: true,
-		Produces:         []string{},
 		EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 			"work.requested": {
 				Emit: runtimecontracts.EmitSpec{Event: "work.completed"},

@@ -30,7 +30,6 @@ import (
 
 func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
 	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
-		Produces:     []string{"task.started"},
 		SubscribesTo: []string{"task.started"},
 	})
 	eb, err := newScopedTestEventBus(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source})
@@ -569,7 +568,6 @@ func (s *routePersistenceTestStore) RunRuntimeMutationContext(ctx context.Contex
 func TestEventBusPublishPersistedFlowInstanceRouteDoesNotRewritePersistence(t *testing.T) {
 	store := &routePersistenceTestStore{}
 	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
-		Produces:     []string{"task.started"},
 		SubscribesTo: []string{"task.started"},
 	})
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
@@ -781,7 +779,6 @@ func (s *routePersistenceTestStore) DeleteFlowInstanceRoute(_ context.Context, i
 func TestEventBusFlowInstanceRouteIdentityOwnerRejectsMismatchedExplicitPath(t *testing.T) {
 	store := &routePersistenceTestStore{}
 	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
-		Produces:     []string{"task.started"},
 		SubscribesTo: []string{"task.started"},
 	})
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
@@ -858,7 +855,6 @@ func (s *routePersistenceTestStore) ListFlowInstanceRoutes(context.Context) ([]r
 func TestEventBusFlowInstanceRoutesPersistAcrossAddAndRemove(t *testing.T) {
 	store := &routePersistenceTestStore{}
 	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
-		Produces:     []string{"task.started"},
 		SubscribesTo: []string{"task.started"},
 	})
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
@@ -888,7 +884,6 @@ func TestEventBusAddFlowInstanceRouteDoesNotPublishWhenTopologyCommitFails(t *te
 		deleteErr:        context.Canceled,
 	}
 	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
-		Produces:     []string{"task.started"},
 		SubscribesTo: []string{"task.started"},
 	})
 	eb, err := newScopedTestEventBus(store, runtimebus.EventBusOptions{ContractBundle: source})
@@ -975,7 +970,6 @@ func TestEventBusFlowInstanceRoutePersistsAndDeliversRenderedActivationConfigSub
 
 func TestEventBusRemoveNestedFlowInstanceDropsDerivedRoutes(t *testing.T) {
 	source := routeMaterializationNodeSource(t, "child/grandchild", runtimecontracts.SystemNodeContract{
-		Produces:     []string{"micro.started"},
 		SubscribesTo: []string{"micro.started"},
 	})
 	eb, err := newScopedTestEventBus(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source})
@@ -1708,7 +1702,6 @@ func TestDeriveRouteTable_NestedTemplateInstancesPersistSemanticScopeKey(t *test
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"worker": {
 				SubscribesTo: []string{"micro.started"},
-				Produces:     []string{"micro.started"},
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{

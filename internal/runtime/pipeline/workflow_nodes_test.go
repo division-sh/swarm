@@ -301,7 +301,6 @@ func TestLoadWorkflowNodes_DoesNotUseSiblingOutputForCrossFlowPinAutoWire(t *tes
 		Path: "consumer",
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"consumer-node": {
-				Produces: []string{"scan.completed"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"scan.requested": {
 						Emit: runtimecontracts.EmitSpec{Event: "scan.completed"},

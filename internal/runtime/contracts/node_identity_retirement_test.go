@@ -82,7 +82,7 @@ event_handlers:
 	if err := decodeNodeTestYAML([]byte(body), &node); err != nil {
 		t.Fatal(err)
 	}
-	if node.ExecutionType != "system_node" || !reflect.DeepEqual(node.SubscribesTo, []string{"task.requested", "task.extra"}) || !reflect.DeepEqual(node.Produces, []string{"task.completed"}) || node.Timers[0].ID != "reminder" || node.EventHandlers["task.requested"].Activity.ID != "send" {
+	if node.ExecutionType != "system_node" || !reflect.DeepEqual(node.SubscribesTo, []string{"task.requested", "task.extra"}) || node.Timers[0].ID != "reminder" || node.EventHandlers["task.requested"].Activity.ID != "send" {
 		t.Fatalf("independent node behavior changed: %#v", node)
 	}
 	if err := decodeNodeTestYAML([]byte("id: worker\n"+body), &node); err == nil || !strings.Contains(err.Error(), retiredNodeID) {

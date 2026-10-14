@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -217,7 +218,10 @@ func TestRewrite2566EntryGoldenMatchesTypedCorpus(t *testing.T) {
 			if filepath.ToSlash(filepath.Join(entry.Source, entry.Flow, filepath.Base(entry.File))) != entry.File {
 				t.Fatalf("invalid exact source/flow tuple: %+v", entry)
 			}
-			body, err := os.ReadFile(filepath.Join("../..", entry.File))
+			body, retired, err := retiredProducesEntrySource("../..", entry)
+			if err == nil && !retired {
+				body, err = os.ReadFile(filepath.Join("../..", entry.File))
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -233,6 +237,60 @@ func TestRewrite2566EntryGoldenMatchesTypedCorpus(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+// Q2 6170252119 deletes this assertion fixture, not its reviewed entry evidence.
+func retiredProducesEntrySource(root string, entry entryGolden) ([]byte, bool, error) {
+	const fixture = "tests/tier8-boot-verification/test-boot-produces-drift"
+	if entry.File != fixture+"/schema.yaml" {
+		return nil, false, nil
+	}
+	want := entryGolden{File: fixture + "/schema.yaml", Source: fixture, Flow: ".", Entry: "pending",
+		Order: []string{"pending", "done"}, Finals: []string{"done"}}
+	if !reflect.DeepEqual(entry, want) {
+		return nil, true, fmt.Errorf("retired assertion entry changed historical evidence: %+v", entry)
+	}
+	if _, err := os.Stat(filepath.Join(root, fixture)); !os.IsNotExist(err) {
+		return nil, true, fmt.Errorf("retired assertion fixture reappeared or cannot be inspected: %v", err)
+	}
+	body, err := exec.Command("git", "-C", root, "show", "2295dd7034a5f6f422a536ef7707693160610ab5:"+entry.File).Output()
+	return body, true, err
+}
+
+func TestRewrite2566RetiredProducesFixtureKeepsHistoricalEntry(t *testing.T) {
+	const fixture = "tests/tier8-boot-verification/test-boot-produces-drift"
+	entry := entryGolden{File: fixture + "/schema.yaml", Source: fixture, Flow: ".", Entry: "pending",
+		Order: []string{"pending", "done"}, Finals: []string{"done"}}
+	body, retired, err := retiredProducesEntrySource("../..", entry)
+	if err != nil || !retired || digest(body) != "9f0aa12914590aca0518da7f7e23dfe3d071c553e6ad3909c44187db9be5ad7f" {
+		t.Fatalf("retired fixture lost exact historical schema: retired=%v error=%v", retired, err)
+	}
+	for _, mutate := range []func(*entryGolden){
+		func(e *entryGolden) { e.Source = "foreign" },
+		func(e *entryGolden) { e.Flow = "foreign" },
+		func(e *entryGolden) { e.Entry = "done" },
+		func(e *entryGolden) { e.Order = []string{"done", "pending"} },
+		func(e *entryGolden) { e.Finals = []string{"pending"} },
+		func(e *entryGolden) { e.Current = &currentEntrySelector{File: "foreign.go"} },
+	} {
+		foreign := entry
+		mutate(&foreign)
+		if _, _, err := retiredProducesEntrySource("../..", foreign); err == nil {
+			t.Fatalf("retirement accepted a changed historical decision: %+v", foreign)
+		}
+	}
+	foreign := entry
+	foreign.File = "foreign/schema.yaml"
+	if body, retired, err := retiredProducesEntrySource("../..", foreign); err != nil || retired || body != nil {
+		t.Fatalf("foreign missing source got historical substitution: retired=%v error=%v", retired, err)
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, fixture), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := retiredProducesEntrySource(root, entry); err == nil {
+		t.Fatal("entry proof accepted a restored assertion fixture")
 	}
 }
 

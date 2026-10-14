@@ -28,14 +28,15 @@ func TestCatalogRequiredInventory(t *testing.T) {
 			verifyCounts[fixture.Metadata.Verify]++
 		}
 	}
-	if got := len(inventory.Fixtures); got != 156 {
-		t.Fatalf("fixture count = %d, want 156", got)
+	// #2293 Q2 6170252119 deletes the produces-drift assertion fixture.
+	if got := len(inventory.Fixtures); got != 155 {
+		t.Fatalf("fixture count = %d, want 155 after produces assertion retirement", got)
 	}
-	if counts[DispositionRuntime] != 99 || counts[DispositionVerifyOnly] != 37 || counts[DispositionRetired] != 20 {
-		t.Fatalf("disposition counts = %#v, want runtime=99 verify-only=37 retired=20", counts)
+	if counts[DispositionRuntime] != 99 || counts[DispositionVerifyOnly] != 36 || counts[DispositionRetired] != 20 {
+		t.Fatalf("disposition counts = %#v, want runtime=99 verify-only=36 retired=20", counts)
 	}
-	if verifyCounts[VerifyPass] != 3 || verifyCounts[VerifyWarning] != 6 || verifyCounts[VerifyReject] != 28 {
-		t.Fatalf("verify-only counts = %#v, want pass=3 warning=6 reject=28", verifyCounts)
+	if verifyCounts[VerifyPass] != 3 || verifyCounts[VerifyWarning] != 5 || verifyCounts[VerifyReject] != 28 {
+		t.Fatalf("verify-only counts = %#v, want pass=3 warning=5 reject=28", verifyCounts)
 	}
 	if got := len(inventory.PublicCompanions()); got != 86 {
 		t.Fatalf("public companion count = %d, want 86", got)

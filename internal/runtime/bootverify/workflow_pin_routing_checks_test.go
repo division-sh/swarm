@@ -38,7 +38,6 @@ func pinRoutingCheckBundle(sameFlowConsumer bool) *runtimecontracts.WorkflowCont
 			"producer": {
 				ExecutionType: "system_node",
 				SubscribesTo:  []string{"request.started"},
-				Produces:      []string{"result.ready"},
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 					"request.started": {Emit: runtimecontracts.EmitSpec{Event: "result.ready"}},
 				},

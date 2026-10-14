@@ -21,7 +21,6 @@ const (
 	LifecycleStaticMixedOutput
 	LifecycleStaticMixedDisconnected
 	LifecycleStaticActorCollision
-	LifecycleStaticHandlerAssertion
 	LifecycleStaticGateUnknownEvent
 	LifecycleStaticGateBadField
 	LifecycleStaticGateReserved
@@ -120,11 +119,6 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		nodes = strings.ReplaceAll(nodes, "requester", "review_decision")
 		writeClosedVariantFile(t, root, "agents.yaml", "reviewer:\n  role: review_decision\n  intent: prompts/reviewer.md\n  subscriptions: [work.requested]\n")
 		writeClosedVariantFile(t, root, "prompts/reviewer.md", "Observe work requests.\n")
-	case LifecycleStaticHandlerAssertion:
-		if !strings.Contains(nodes, "requester:\n") {
-			t.Fatal("missing requester declaration for phantom producer assertion")
-		}
-		nodes = strings.Replace(nodes, "requester:\n", "requester:\n  produces: [work.completed]\n", 1)
 	case LifecycleStaticGateUnknownEvent:
 		schema = strings.Replace(schema, "event: work.completed", "event: absent.event", 1)
 	case LifecycleStaticGateBadField:

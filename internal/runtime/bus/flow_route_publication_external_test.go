@@ -17,7 +17,7 @@ import (
 
 func TestFlowRoutePublicationRetiresOnlyItsAttempt(t *testing.T) {
 	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
-		Produces: []string{"task.started"}, SubscribesTo: []string{"task.started"},
+		SubscribesTo: []string{"task.started"},
 	})
 	owned, err := runtimecorrelation.NewSourceArtifactFact(sourceartifactfixture.BundleHash)
 	if err != nil {
@@ -121,7 +121,7 @@ func TestFlowRoutePublicationRetiresOnlyItsAttempt(t *testing.T) {
 
 func TestFlowRoutePublicationFenceBeforePublish(t *testing.T) {
 	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
-		Produces: []string{"task.started"}, SubscribesTo: []string{"task.started"},
+		SubscribesTo: []string{"task.started"},
 	})
 	owned, err := runtimecorrelation.NewSourceArtifactFact(sourceartifactfixture.BundleHash)
 	if err != nil {
@@ -157,7 +157,7 @@ func TestFlowRoutePublicationFenceBeforePublish(t *testing.T) {
 
 func TestCommittedFlowRouteRetirementCannotRemoveSuccessor(t *testing.T) {
 	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
-		Produces: []string{"task.started"}, SubscribesTo: []string{"task.started"},
+		SubscribesTo: []string{"task.started"},
 	})
 	owned, err := runtimecorrelation.NewSourceArtifactFact(sourceartifactfixture.BundleHash)
 	if err != nil {
@@ -212,7 +212,7 @@ func TestCommittedFlowRouteRetirementCannotRemoveSuccessor(t *testing.T) {
 
 func TestFlowRoutePublicationRejectsForeignSourceContext(t *testing.T) {
 	source := routeMaterializationNodeSource(t, "review", runtimecontracts.SystemNodeContract{
-		Produces: []string{"task.started"}, SubscribesTo: []string{"task.started"},
+		SubscribesTo: []string{"task.started"},
 	})
 	owned, err := runtimecorrelation.NewSourceArtifactFact(sourceartifactfixture.BundleHash)
 	if err != nil {
