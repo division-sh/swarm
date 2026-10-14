@@ -144,12 +144,17 @@
     {
       "file": "internal/runtime/testfixtures/canonicalrouting/notify_all_children.go",
       "before_hash": "2fb1e9553437fc0ba0606d7612abb2f3c9db48ba30863e5531eacb4a33cf309c",
-      "after_hash": "5f6736da423c00f34f2504d5a6eb3745a389b0e017b34ce7e397d66b6f3bbaa5",
+      "after_hash": "16534f83b35657cf53278d6bfe5223855ae89dd89240e370540104153312123c",
       "edits": [
         {
           "offset": 1457,
           "before": "",
           "after": "\tFiniteLifecycle             bool\n"
+        },
+        {
+          "offset": 6849,
+          "before": "\t\tapplyClosedReplacement(t, filepath.Join(root, \"events.yaml\"), `  account_ids: \"[text]\"\n`, `  account_ids: \"[NumericAccount]\"\n",
+          "after": "\t\tapplyClosedReplacement(t, filepath.Join(root, \"events.yaml\"), `  account_ids: [text]\n`, `  account_ids: [NumericAccount]\n"
         },
         {
           "offset": 14591,
