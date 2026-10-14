@@ -40,8 +40,11 @@ func TestDecodeHistoricalSnapshotCompleteRouteRoundTrip(t *testing.T) {
 					if decoded.Authority.Validate() == nil {
 						t.Fatal("historical evidence unexpectedly grants live execution authority")
 					}
-					if status == deliverylifecycle.StatusInProgress && decoded.ClaimVersion != 2 {
-						t.Fatal("historical attempt coordinate changed")
+					if status == deliverylifecycle.StatusInProgress && decoded.ClaimVersion != 0 {
+						t.Fatal("historical evidence retained a live attempt generation")
+					}
+					if (status == deliverylifecycle.StatusDelivered || status == deliverylifecycle.StatusDeadLetter) && decoded.ClaimVersion != 2 {
+						t.Fatal("historical evidence lost the exact settlement generation")
 					}
 					if !decoded.ClaimExpiresAt.IsZero() {
 						t.Fatal("historical evidence retained live lease expiry")
@@ -355,6 +358,25 @@ func TestDecodeHistoricalSnapshotRejectsUnknownFieldsAndLiveTokens(t *testing.T)
 					assertHistoricalRejects(t, fact)
 				})
 			}
+			for _, status := range []deliverylifecycle.Status{deliverylifecycle.StatusPending, deliverylifecycle.StatusInProgress, deliverylifecycle.StatusFailed} {
+				t.Run("unsettled_generation_"+string(status), func(t *testing.T) {
+					fact := historicalRouteFact(t, fixture.route, status)
+					fact["settled_claim_version"] = 3
+					assertHistoricalRejects(t, fact)
+				})
+			}
+			for _, status := range []deliverylifecycle.Status{deliverylifecycle.StatusDelivered, deliverylifecycle.StatusDeadLetter, deliverylifecycle.StatusCanceled} {
+				t.Run("missing_settlement_generation_"+string(status), func(t *testing.T) {
+					fact := historicalRouteFact(t, fixture.route, status)
+					delete(fact, "settled_claim_version")
+					assertHistoricalRejects(t, fact)
+				})
+				t.Run("negative_settlement_generation_"+string(status), func(t *testing.T) {
+					fact := historicalRouteFact(t, fixture.route, status)
+					fact["settled_claim_version"] = -1
+					assertHistoricalRejects(t, fact)
+				})
+			}
 		})
 	}
 }
@@ -461,7 +483,7 @@ func historicalRouteFact(t testing.TB, route events.DeliveryRoute, status delive
 	case deliverylifecycle.StatusPending:
 		fact["next_eligible_at"] = now
 	case deliverylifecycle.StatusInProgress:
-		fact["claim_version"], fact["started_at"] = 2, now
+		fact["started_at"] = now
 	case deliverylifecycle.StatusFailed:
 		fact["retry_count"], fact["next_eligible_at"] = 1, now.Add(time.Second)
 		fallthrough
@@ -472,12 +494,12 @@ func historicalRouteFact(t testing.TB, route events.DeliveryRoute, status delive
 		}
 		fact["failure"] = failure
 		if status == deliverylifecycle.StatusDeadLetter {
-			fact["reason_code"], fact["settled_at"] = "terminal_failure", now
+			fact["reason_code"], fact["settled_at"], fact["settled_claim_version"] = "terminal_failure", now, 2
 		}
 	case deliverylifecycle.StatusDelivered:
-		fact["settled_at"] = now
+		fact["settled_at"], fact["settled_claim_version"] = now, 2
 	case deliverylifecycle.StatusCanceled:
-		fact["reason_code"], fact["settled_at"] = string(deliverylifecycle.CancellationTerminate), now
+		fact["reason_code"], fact["settled_at"], fact["settled_claim_version"] = string(deliverylifecycle.CancellationTerminate), now, 0
 	default:
 		t.Fatalf("unsupported test status %q", status)
 	}
