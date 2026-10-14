@@ -51,6 +51,18 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 					}
 					construction := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)
 					f := snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, ctx: construction.ctx, runID: correlation.RunIDFromContext(construction.ctx)}
+					parentFixture := f
+					parentFixture.entityID = f.runID
+					var parentRecord pipeline.FlowInstanceActivationRecord
+					var parentSource pipeline.WorkflowTargetPersistenceRecord
+					if !root {
+						parentRecord = constructA2ForkStructuralParent(t, &construction)
+						parentFixture.entityID = parentRecord.State.EntityID
+						parentSource = readA2ForkStructuralParent(t, parentFixture, parentRecord.Identity)
+						if parentSource.Lifecycle.State.CurrentState != "pending" || !parentSource.Lifecycle.State.EnteredStageAt.Equal(parentRecord.EnteredStageAt) {
+							t.Fatalf("constructed parent is not the exact pending structural root: %#v", parentSource)
+						}
+					}
 					at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 					instanceID := "one"
 					if root {
@@ -165,8 +177,33 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					plan := f.plan(t)
-					if len(plan.Entities) != 1 {
-						t.Fatalf("fixed entities = %#v", plan.Entities)
+					expected := map[string]pipeline.FlowInstanceActivationRecord{f.entityID: persisted}
+					if !root {
+						if f.entityID == f.runID {
+							t.Fatal("business child aliases its constructed root")
+						}
+						expected[f.runID] = parentRecord
+					}
+					seen := map[string]bool{}
+					for _, entity := range plan.Entities {
+						record, found := expected[entity.EntityID]
+						if !found || seen[entity.EntityID] {
+							t.Fatalf("extra or duplicate fixed entity: %#v", entity)
+						}
+						seen[entity.EntityID] = true
+						state := f.state
+						if !root && entity.EntityID == f.runID {
+							state = parentRecord.State
+							if state.Identity.Route.ScopeKey != "." || state.ParentInstance != "" || state.InstanceKey != "" || len(entity.Fields) != 0 || entity.CurrentState != "pending" {
+								t.Fatalf("fixed structural parent changed scope or business state: %#v", entity)
+							}
+						} else if !root && (state.Identity.Route.ScopeKey != "owner" || state.ParentInstance != f.runID || state.InstanceKey != "one" || entity.CurrentState != "active") {
+							t.Fatalf("fixed business child changed constructor identity: %#v", entity)
+						}
+						assertA2ForkConstructionMetadata(t, entity, record, state)
+					}
+					if len(seen) != len(expected) {
+						t.Fatalf("missing fixed entity identities: seen=%v expected=%v", seen, expected)
 					}
 					source := readSnapshotOwnershipEntity(t, f, f.runID)
 					request := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID}
@@ -179,6 +216,9 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 						childFixture.entityID = result.ForkRunID
 					}
 					child := readSnapshotOwnershipEntity(t, childFixture, result.ForkRunID)
+					if !root {
+						assertA2ForkStructuralParent(t, parentFixture, result.ForkRunID, parentSource)
+					}
 					inherited, found, err := workflowlifecycle.LoadStageEntry(child.Buckets[2])
 					want := entry
 					want.RunID, want.OriginRunID = result.ForkRunID, f.runID
@@ -214,6 +254,12 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 					if err != nil || again.ForkRunID != result.ForkRunID || snapshotOwnershipCounts(t, f, result.ForkRunID) != before {
 						t.Fatalf("fork exact replay changed history: %#v %v", again, err)
 					}
+					if !root {
+						assertA2ForkStructuralParent(t, parentFixture, result.ForkRunID, parentSource)
+						if !reflect.DeepEqual(parentSource, readA2ForkStructuralParent(t, parentFixture, parentRecord.Identity)) {
+							t.Fatal("fork projection changed its constructed source parent")
+						}
+					}
 					if !reflect.DeepEqual(source, readSnapshotOwnershipEntity(t, f, f.runID)) || !reflect.DeepEqual(plan.Entities, f.plan(t).Entities) {
 						t.Fatal("fork projection changed source/fixed history")
 					}
@@ -224,5 +270,109 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func constructA2ForkStructuralParent(t *testing.T, fixture *receiverConfigActivationFixture) pipeline.FlowInstanceActivationRecord {
+	t.Helper()
+	runID := correlation.RunIDFromContext(fixture.ctx)
+	request := sqliteFlowActivationRequest(fixture.bundle, ".", runID, "", runID)
+	request.Instance = flowidentity.Stored(request.ContractBundle, ".", runID, runID, runID, "")
+	plan, err := fixture.manager.PrepareFlowInstanceActivation(fixture.ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.ConstructionPlans()) != 1 || len(plan.Instance.Fields) != 0 {
+		t.Fatal("fork fixture requires one entityless keyless root")
+	}
+	record, err := plan.PersistenceRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	committed, err := (agentFixtureFlowActivationCommitter{store: fixture.store}).CommitFlowInstanceActivation(fixture.ctx, plan)
+	if err != nil || !committed.Acknowledged || !committed.Created {
+		t.Fatalf("construct fork parent: %+v %v", committed, err)
+	}
+	fixture.rootConstructed = true
+	return record
+}
+
+func assertA2ForkConstructionMetadata(t *testing.T, entity runfork.RunForkEntityState, record pipeline.FlowInstanceActivationRecord, state pipeline.WorkflowEngineStateRecord) {
+	t.Helper()
+	want := runfork.RunForkMaterializedEntitySnapshotMetadata{
+		InitialMaterialization: canonicalSnapshotOwnershipJSON(t, record.InitialMaterialization),
+		FlowConfig:             canonicalSnapshotOwnershipJSON(t, state.Config),
+		Owner:                  runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
+		Source:                 runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
+		FlowInstance:           state.Identity.Route.InstancePath, FlowTemplate: state.WorkflowName,
+		ParentInstance: state.ParentInstance, InstanceKey: state.InstanceKey,
+		EntityType: state.EntityType, Slug: state.Slug, Name: state.Name,
+		StageDefined: state.StageDefined, Mode: state.Mode, Status: state.Status,
+		CreatedAt: state.CreatedAt, UpdatedAt: state.UpdatedAt, TerminatedAt: state.TerminatedAt, EnteredStateAt: state.EnteredStageAt,
+	}
+	if entity.MaterializationMetadata == nil {
+		t.Fatal("fixed entity lost source-bound construction metadata")
+	}
+	got := *entity.MaterializationMetadata
+	got.InitialMaterialization = canonicalSnapshotOwnershipJSON(t, got.InitialMaterialization)
+	got.FlowConfig = canonicalSnapshotOwnershipJSON(t, got.FlowConfig)
+	if !reflect.DeepEqual(got, want) || entity.EnteredStateAt == nil || !entity.EnteredStateAt.Equal(state.EnteredStageAt) {
+		t.Fatalf("fixed metadata differs from independently admitted setup: got=%#v want=%#v", got, want)
+	}
+}
+
+func readA2ForkStructuralParent(t *testing.T, fixture snapshotOwnershipFixture, owner flowidentity.RunScopedFlowInstance) pipeline.WorkflowTargetPersistenceRecord {
+	t.Helper()
+	entityID := identity.NormalizeEntityID(fixture.entityID)
+	target, err := fixture.store.(pipeline.WorkflowTargetPersistenceReader).LoadWorkflowTargetPersistence(fixture.ctx, owner, entityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := target.Validate(owner.Route, entityID); err != nil || target.Presence != pipeline.WorkflowTargetPersistenceCompleteFieldless || target.Lifecycle.ParentInstance != "" || target.Lifecycle.InstanceKey != "" || target.Lifecycle.WorkflowName != "." {
+		t.Fatalf("parent is not the exact constructed fieldless root: %#v %v", target, err)
+	}
+	return target
+}
+
+func assertA2ForkStructuralParent(t *testing.T, fixture snapshotOwnershipFixture, forkRunID string, source pipeline.WorkflowTargetPersistenceRecord) {
+	t.Helper()
+	forkFixture := fixture
+	forkFixture.entityID = forkRunID
+	owner, err := flowidentity.NewRunScopedFlowInstance(forkRunID, flowidentity.StoredRoute(".", forkRunID, forkRunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := readA2ForkStructuralParent(t, forkFixture, owner)
+	header, sourceHeader := got.Lifecycle.State, source.Lifecycle.State
+	if header.FlowInstance != forkRunID || header.EntityID != forkRunID || header.CurrentState != sourceHeader.CurrentState || header.Revision != 1 || !header.EnteredStageAt.Equal(sourceHeader.EnteredStageAt) || got.Lifecycle.Mode != source.Lifecycle.Mode || got.Lifecycle.StageDefined != source.Lifecycle.StageDefined {
+		t.Fatalf("fork-local structural parent changed captured state/entry: got=%#v source=%#v", got, source)
+	}
+	if !reflect.DeepEqual(header.Gates, sourceHeader.Gates) || !reflect.DeepEqual(header.Accumulator, sourceHeader.Accumulator) {
+		t.Fatal("fork-local structural parent changed gates or accumulator")
+	}
+	var sourceBookkeeping, forkBookkeeping map[string]any
+	if err := json.Unmarshal(sourceHeader.Bookkeeping, &sourceBookkeeping); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(header.Bookkeeping, &forkBookkeeping); err != nil {
+		t.Fatal(err)
+	}
+	sourceEntry, found, err := workflowlifecycle.LoadStageEntry(sourceBookkeeping)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forkEntry, forkFound, err := workflowlifecycle.LoadStageEntry(forkBookkeeping)
+	if err != nil || found != forkFound {
+		t.Fatalf("structural parent stage-entry presence changed: source=%t fork=%t %v", found, forkFound, err)
+	}
+	if found {
+		want := sourceEntry
+		want.RunID, want.OriginRunID = forkRunID, fixture.runID
+		want.EntityID, want.InstanceID, want.InstancePath = forkRunID, forkRunID, forkRunID
+		if forkEntry != want {
+			t.Fatalf("structural parent entry not rebased by historical owner: got=%#v want=%#v", forkEntry, want)
+		}
+	} else if !reflect.DeepEqual(forkBookkeeping, sourceBookkeeping) {
+		t.Fatal("structural parent invented bookkeeping")
 	}
 }
