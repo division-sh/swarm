@@ -139,11 +139,20 @@ func runtimeConnectionReservation(ctx context.Context, opts RuntimeConnectionOpt
 	if err := validateRuntimeIncoming(ctx, opts.Incoming, opts.Store, op); err != nil {
 		return nil, empty, err
 	}
-	if !opts.ProcessBinding.IsZero() && (opts.ProcessBinding.Validate() != nil || opts.ProcessBinding.BundleHash != op.Coordinate.BundleHash ||
-		opts.ProcessBinding.RuntimeInstanceID != op.Coordinate.RuntimeInstanceID) {
-		return nil, empty, errRuntimeConnection
+	if err := validateRuntimeConnectionProcessBinding(opts.ProcessBinding, op); err != nil {
+		return nil, empty, err
 	}
 	return parent, op, nil
+}
+
+func validateRuntimeConnectionProcessBinding(binding processbinding.Binding, op channelonboarding.Operation) error {
+	if binding.IsZero() {
+		return nil
+	}
+	if binding.Validate() != nil || binding.BundleHash != op.Coordinate.BundleHash || binding.RuntimeInstanceID != op.Coordinate.RuntimeInstanceID {
+		return errRuntimeConnection
+	}
+	return nil
 }
 
 func validateRuntimeConnectionPlan(plan packs.SatisfactionPlan, op channelonboarding.Operation) error {
