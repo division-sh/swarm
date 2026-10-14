@@ -31,11 +31,11 @@ func transitionMutationSource(t *testing.T) semanticview.Source {
     advance:
       advances_to: done
       rules:
-        - {id: chosen, else: true}
+        - {when: true}
     foreign:
       advances_to: other
       rules:
-        - {id: other, else: true}
+        - {when: true}
 `,
 	})
 }
@@ -60,7 +60,7 @@ func VerifyPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStoresFor
 	if !ok {
 		t.Fatal("missing selected rule reference")
 	}
-	selection, err := handlerselection.Selected(handlerselection.ContextRules, ref, "chosen")
+	selection, err := handlerselection.Selected(handlerselection.ContextRules, ref, handlers["advance"].Rules[0].DisplayLabel("rules", 0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func VerifyPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStoresFor
 		t.Fatal(err)
 	}
 	foreignRef, _ := handlers["foreign"].Rules[0].DeclarationIdentity()
-	foreignSelection, err := handlerselection.Selected(handlerselection.ContextRules, foreignRef, "other")
+	foreignSelection, err := handlerselection.Selected(handlerselection.ContextRules, foreignRef, handlers["foreign"].Rules[0].DisplayLabel("rules", 0))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func VerifyPipelineCompiledTransitionRejectsContradictoryEvidenceOnBothStoresFor
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrongContext, err := handlerselection.Selected(handlerselection.ContextOnComplete, ref, "chosen")
+	wrongContext, err := handlerselection.Selected(handlerselection.ContextOnComplete, ref, handlers["advance"].Rules[0].DisplayLabel("rules", 0))
 	if err != nil {
 		t.Fatal(err)
 	}
