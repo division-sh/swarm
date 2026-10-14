@@ -44,9 +44,8 @@ func TestRequestBindingCompiledRetryBothStores(t *testing.T) {
 			writeReleaseFile(t, filepath.Join(project, "input.jsonl"), rows[0]+"\n")
 			writeReleaseFile(t, filepath.Join(project, "different.jsonl"), rows[1]+"\n")
 			writeReleaseFile(t, filepath.Join(project, "event.json"), "{}\n")
-			writeReleaseFile(t, filepath.Join(project, ".swarm/swarm.yaml"), goldenRuntimeConfig(selected))
+			writeReleaseFile(t, filepath.Join(project, ".swarm/swarm.yaml"), goldenRuntimeConfig(selected)+"connection:\n  api_token_file: api-token\n")
 			writeReleaseFile(t, filepath.Join(project, "api-token"), goldenAPIToken+"\n")
-			writeReleaseFile(t, filepath.Join(root, "home/.config/swarm/swarm.yaml"), "connection:\n  api_token_file: api-token\n")
 			env := goldenProcessEnv(t, root, selected.passwordEnv, 0)
 			p := startReleaseServe(t, releaseProcessSpec{BinaryPath: binary, InternalMockLifecycleBinary: lifecycle,
 				WorkingDir: project, Source: "contracts", ConfigPath: ".swarm/swarm.yaml", Store: backend,

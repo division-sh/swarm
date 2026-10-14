@@ -39,11 +39,10 @@ func TestGoldenNumericDataScatterParkRestartBothStores(t *testing.T) {
 			project := filepath.Join(root, "yaml-project")
 			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), numericScatterSource), filepath.Join(project, "contracts"))
 			expected, corpus := loadNumericFeedCorpus(t, filepath.Join(project, "contracts"))
-			writeReleaseFile(t, filepath.Join(project, ".swarm/swarm.yaml"), goldenRuntimeConfig(store))
+			writeReleaseFile(t, filepath.Join(project, ".swarm/swarm.yaml"), goldenRuntimeConfig(store)+"connection:\n  api_token_file: api-token\n")
 			writeReleaseFile(t, filepath.Join(project, "api-token"), goldenAPIToken+"\n")
 			env := goldenProcessEnv(t, root, store.passwordEnv, 0)
 			assertGoldenProcessHasNoExternalExecutables(t, env)
-			writeReleaseFile(t, filepath.Join(root, "home/.config/swarm/swarm.yaml"), "connection:\n  api_token_file: api-token\n")
 			cliEnv := make([]string, 0, len(env))
 			for _, entry := range env {
 				if !strings.HasPrefix(entry, goldenPostgresPass+"=") {
