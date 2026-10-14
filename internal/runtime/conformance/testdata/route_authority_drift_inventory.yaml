@@ -699,6 +699,7 @@ seam_families:
       - internal/apiv1/operator_event_replay_test.go
       - internal/runtime/semanticview/agent_subscription_admission.go
       - internal/runtime/semanticview/agent_subscription_admission_test.go
+      - internal/runtime/semanticview/s6_agent_order_origin_diagnostic_test.go
       - internal/runtime/semanticview/source_artifact.go
       - internal/runtime/semanticview/endpoint_census.go
       - internal/runtime/semanticview/endpoint_census_test.go
@@ -735,6 +736,7 @@ seam_families:
       - internal/runtime/manager/recovery_test.go
       - internal/runtime/manager/runtime.go
       - internal/runtime/bus/agent_subscription_admission_test.go
+      - internal/runtime/bus/s6_order_metadata_diagnostic_test.go
       - internal/runtime/inbound_postgres_test.go
       - internal/runtime/inbound_raw_settlement_store_test.go
       - internal/runtime/runforkexecution/agent_runtime_materialization_test.go
@@ -749,6 +751,9 @@ seam_families:
       descendant wildcard observation consumes the typed filesystem-scope owner.
       Private agent admission state remains the only capability accepted by
       live agent route APIs; raw strings and channels are non-authoritative.
+      The S6 source-join diagnostics consume this admission and the existing
+      publication metadata resolver read-only. They install no subscription or
+      runtime route and do not prove a native order or recovered provider join.
   - id: unadmitted_live_agent_pattern_routes
     layer: invalid_old_authority
     classification: invalid_old_authority_path
