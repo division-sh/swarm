@@ -179,13 +179,15 @@ func seedA2NativeJoinFixture(t *testing.T, ctx context.Context, backend string, 
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	// The claim requires complete native construction, not a header/field-only
 	// projection. No creating input or delivery precedes this component fixture.
+	// This keyless physical-COMMIT control is not keyed constructor admission.
 	commitPreparedWorkflowAggregateFixture(t, ctx, selected.(agentFixtureFlowStore), runID, pipeline.WorkflowInstance{
 		InstanceID: "one", StorageRef: path, EntityID: entityID, EntityType: "review_item",
-		WorkflowName: flowID, WorkflowVersion: "1", Mode: "template", StageDefined: true,
+		WorkflowName: flowID, WorkflowVersion: "1", Mode: "static", StageDefined: true,
 		CurrentState: "active", Fields: map[string]any{"account_id": "preserved"},
 		CreatedAt: at, EnteredStageAt: at,
 	}, at)
 	record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, path, entityID, "active", 1, at)
+	record.Mode = "static"
 	construction, err := selected.(pipeline.FlowConstructionPublicationReader).LoadFlowConstructionPublication(ctx, record.Identity, entityID)
 	if err != nil || construction.CreatingInput != (pipeline.FlowConstructionInput{}) || construction.Identity.EntityID != entityID || construction.Identity.InstancePath != path {
 		t.Fatalf("native no-input join construction: evidence=%+v err=%v", construction, err)
