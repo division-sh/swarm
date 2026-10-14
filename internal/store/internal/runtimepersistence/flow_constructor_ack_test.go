@@ -167,10 +167,18 @@ func TestFlowConstructorActivationConsumesExactInputBothStores(t *testing.T) {
 					files["review/nodes.yaml"] = "inspect:\n  execution_type: system_node\n  event_handlers:\n    task.started:\n      guard: {check: entity.missing != ''}\n"
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
+				f.constructKeylessRoot(t)
 				req := sqliteFlowActivationRequest(f.bundle, "review", "r1", "", "review/r1")
 				runID := correlation.RunIDFromContext(f.ctx)
-				parent := flowidentity.Stored(req.ContractBundle, ".", runID, runID, "", "")
-				child, err := flowidentity.KeyedChild(req.ContractBundle, parent, "review", "r1")
+				lookup, err := pipeline.NewExactFlowInstanceLookup(req.ContractBundle, mustStoreTestSourceArtifactFact(f.bundle.SourceArtifact.BundleHash()), flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute(".", runID, runID)})
+				if err != nil {
+					t.Fatal(err)
+				}
+				parent, found, err := f.store.(pipeline.FlowInstanceIndexReader).LookupFlowInstance(f.ctx, lookup)
+				if err != nil || !found {
+					t.Fatalf("constructor input lost its admitted parent: found=%t err=%v", found, err)
+				}
+				child, err := flowidentity.KeyedChild(req.ContractBundle, parent.Identity(), "review", "r1")
 				if err != nil {
 					t.Fatal(err)
 				}
