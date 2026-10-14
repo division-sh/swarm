@@ -186,7 +186,7 @@ func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Comm
 	cmd.Flags().StringVar(&opts.connectURL, "connect", "", "Existing Swarm API base URL")
 	cmd.Flags().BoolVar(&opts.noFollow, "no-follow", false, "Start through a connected server and print the run id without opening a trace subscription")
 	cmd.Flags().StringVar(&opts.reattachRunID, "reattach", "", "Existing run id to reattach to")
-	cmd.Flags().StringVar(&opts.configPath, "config", "", "Path to swarm.yaml config for local foreground startup")
+	cmd.Flags().StringVar(&opts.configPath, "config", "", deploymentConfigFlagHelp+" (local foreground only)")
 	cmd.Flags().StringVar(&opts.backend, "backend", "", "LLM backend profile for local foreground startup: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringArrayVar(&opts.dataImports, "data", nil, "Fused immutable data import and pin: name=file.jsonl (repeatable)")
 	cmd.Flags().StringArrayVar(&opts.dataPins, "pin", nil, "Exact data version pin: name@head, name@vN, or name@ResourceVersionID (repeatable)")
