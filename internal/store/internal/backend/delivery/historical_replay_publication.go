@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"reflect"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/bus"
@@ -32,7 +33,7 @@ func (a *Adapter) CommitHistoricalReplayInitialPublication(ctx context.Context, 
 		return bus.EventAppendOutcomeUnknown, nil, err
 	}
 	if outcome == bus.EventAppendExactDuplicate {
-		proofs, err := a.CommitInitial(ctx, attempt, prepared.Event.ID(), prepared.Event.Event().RunID(), prepared.DeliveryRoutes, authority)
+		proofs, err := a.historicalReplayDuplicateProofs(ctx, attempt, prepared, authority)
 		return outcome, proofs, err
 	}
 	if outcome != bus.EventAppendInserted {
@@ -50,6 +51,23 @@ func (a *Adapter) CommitHistoricalReplayInitialPublication(ctx context.Context, 
 		return proofs, nil
 	})
 	return outcome, proofs, err
+}
+
+func (a *Adapter) historicalReplayDuplicateProofs(ctx context.Context, attempt *mutationprotocol.Attempt, prepared bus.PreparedPublishEvent, authority deliverylifecycle.ExecutionAuthority) ([]deliverylifecycle.DurableHandoffProof, error) {
+	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) ([]deliverylifecycle.DurableHandoffProof, error) {
+		snapshots, err := a.SnapshotsForEvent(ctx, tx, prepared.Event.ID())
+		if err != nil {
+			return nil, err
+		}
+		routes := make([]events.DeliveryRoute, 0, len(snapshots))
+		for _, snapshot := range snapshots {
+			routes = append(routes, snapshot.Route)
+		}
+		if !reflect.DeepEqual(events.NormalizeDeliveryRoutes(routes), events.NormalizeDeliveryRoutes(prepared.DeliveryRoutes)) {
+			return nil, fmt.Errorf("historical replay duplicate crosses its complete durable delivery aggregate")
+		}
+		return a.commitInitialTx(ctx, tx, attempt, prepared.Event.ID(), prepared.Event.Event().RunID(), prepared.DeliveryRoutes, authority)
+	})
 }
 
 func historicalReplayInitialObligations(prepared bus.PreparedPublishEvent, authority deliverylifecycle.ExecutionAuthority) ([]deliverylifecycle.Obligation, error) {
