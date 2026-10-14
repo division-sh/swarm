@@ -83,6 +83,16 @@ func TestClosedPublicationTargetOwnerEvidenceBoundaries(t *testing.T) {
 	}
 }
 
+type publicationScopeTestReader struct {
+	constructionIndexTestReader
+	requested []pipeline.FlowInstanceLookupScope
+}
+
+func (r *publicationScopeTestReader) ListFlowInstances(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error) {
+	r.requested = append(r.requested, scope)
+	return r.constructionIndexTestReader.ListFlowInstances(ctx, scope)
+}
+
 func TestClosedPublicationReturnScopeExtendsOnlyCompiledOrigin(t *testing.T) {
 	source := connectRoutePlanCarriedKeyResolutionSource(t, contracts.FlowInputResolutionModeSelect)
 	ctx := constructionIndexContext(t, source)
@@ -92,7 +102,7 @@ func TestClosedPublicationReturnScopeExtendsOnlyCompiledOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reader := &unscopedConnectIndexTestReader{constructionIndexTestReader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{
+	reader := &publicationScopeTestReader{constructionIndexTestReader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{
 		constructionIndexObservation(t, source, event.RunID(), root, ""),
 		constructionIndexObservation(t, source, event.RunID(), child, ""),
 	}}}
