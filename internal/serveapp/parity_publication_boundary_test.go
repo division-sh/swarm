@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func claimServedPausedPublication(ctx context.Context, owner pipelineobligation.Store, eventID string) (pipelineobligation.ClaimedWork, error) {
@@ -171,8 +172,12 @@ func TestServedParityPausedPublicationClaimBoundaryBothStores(t *testing.T) {
 				return projected
 			}
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
-			rt := startServedControlProofRuntime(t, backend)
-			runID, initialID, _ := createServedControlWaitingRun(t, rt, "held-publication")
+			backendName := "sqlite"
+			if backend == servedparity.BackendExplicitPostgres {
+				backendName = "postgres"
+			}
+			_, rt := startServedBoundaryFixture(t, backendName, writeServedEventPublishFollowUpFixture(t))
+			runID, initialID := createServedBoundaryWaitingRun(t, rt, "held-publication")
 			rt.Probe.RequirePostCommitDispatchCompleted(initialID)
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": "held-pause"})
 			hold.mu.Lock()
@@ -182,7 +187,7 @@ func TestServedParityPausedPublicationClaimBoundaryBothStores(t *testing.T) {
 				"event_name": "item.processed", "run_id": runID, "source_event_id": initialID,
 				"payload": map[string]any{"item_id": "review"}, "idempotency_key": "held-queued",
 			})
-			ctx, cancel := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 5*time.Second)
+			ctx, cancel := context.WithTimeout(servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash), 5*time.Second)
 			defer cancel()
 			select {
 			case claim := <-hold.entered:
@@ -192,7 +197,7 @@ func TestServedParityPausedPublicationClaimBoundaryBothStores(t *testing.T) {
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}
-			waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), "pending", 1)
+			waitServedBoundaryDeliveryCount(t, rt, runID, queued.EventID, identitytest.RootNode(t, "item-observer").Key(), "pending", 1)
 			if _, err := hold.Store.ClaimEvent(ctx, queued.EventID, pipelineobligation.PurposePublication); !errors.Is(err, pipelineobligation.ErrBusy) {
 				t.Fatalf("original boundary missed its exact live foreground claim: %v", err)
 			}
@@ -212,7 +217,9 @@ func TestServedParityPausedPublicationClaimBoundaryBothStores(t *testing.T) {
 			if _, err := hold.Store.Settle(ctx, work.Claim, pipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
 				t.Fatal(err)
 			}
-			requireServedDirectivePipelineReceiptCount(t, rt, queued.EventID, 1)
+			if count, err := storetest.CountPipelineEventReceiptStorage(ctx, rt.Selected.RuntimeDeps().EventStore, queued.EventID); err != nil || count != 1 {
+				t.Fatalf("exact paused publication receipt count=%d, want 1; err=%v", count, err)
+			}
 			t.Logf("exact foreground claim %s: pending delivery preceded native Release; BUSY -> owned claim -> one receipt", queued.EventID)
 		})
 	}
