@@ -25,8 +25,92 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ci-preflight:
+    name: Exact-head local preflight admission
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      statuses: read
+    steps:
+      - name: Admit exact source before checkout
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          repository_pattern='^[A-Za-z0-9-]+/[A-Za-z0-9_.-]+$'
+          sha_pattern='^[0-9a-f]{40}$'
+          [[ "$GITHUB_REPOSITORY" =~ $repository_pattern ]]
+          [[ "$GITHUB_SHA" =~ $sha_pattern ]]
+          git check-ref-format "$GITHUB_REF"
+          jq -e --arg repository "$GITHUB_REPOSITORY" '.repository.full_name == $repository' "$GITHUB_EVENT_PATH" >/dev/null
+          repository="$GITHUB_REPOSITORY"
+          head="$GITHUB_SHA"
+          exempt=false
+          case "$EVENT_NAME" in
+            pull_request)
+              [[ "$GITHUB_REF" =~ ^refs/pull/[1-9][0-9]*/(merge|head)$ ]]
+              jq -e '.action | IN("opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft")' "$GITHUB_EVENT_PATH" >/dev/null
+              readarray -t coordinates < <(jq -er '[.pull_request.head.repo.full_name, .pull_request.head.sha, .pull_request.head.ref] | .[] | select(type == "string" and length > 0)' "$GITHUB_EVENT_PATH")
+              test "${#coordinates[@]}" = 3
+              repository="${coordinates[0]}"; head="${coordinates[1]}"; branch="${coordinates[2]}"
+              [[ "$repository" =~ $repository_pattern ]]
+              [[ "$head" =~ $sha_pattern ]]
+              git check-ref-format "refs/heads/$branch"
+              jq -e '.pull_request.draft | type == "boolean"' "$GITHUB_EVENT_PATH" >/dev/null
+              if [ "$repository" = "$GITHUB_REPOSITORY" ] && [[ "$branch" = automation/* ]]; then exempt=true; fi
+              ;;
+            push)
+              jq -e --arg ref "$GITHUB_REF" --arg head "$GITHUB_SHA" '.ref == $ref and .after == $head and .deleted == false' "$GITHUB_EVENT_PATH" >/dev/null
+              case "$GITHUB_REF" in refs/heads/master) exempt=true ;; refs/heads/main) ;; *) exit 1 ;; esac
+              ;;
+            schedule)
+              [[ "$GITHUB_REF" = refs/heads/* ]]
+              exempt=true
+              ;;
+            workflow_dispatch)
+              case "$GITHUB_REF" in refs/heads/*|refs/tags/*) ;; *) exit 1 ;; esac
+              exempt=true
+              ;;
+            merge_group)
+              jq -e --arg ref "$GITHUB_REF" --arg head "$GITHUB_SHA" '.action == "checks_requested" and .merge_group.head_sha == $head and .merge_group.head_ref == $ref and (.merge_group.base_ref | startswith("refs/heads/"))' "$GITHUB_EVENT_PATH" >/dev/null
+              [[ "$GITHUB_REF" = refs/heads/gh-readonly-queue/* ]]
+              git check-ref-format "$(jq -er .merge_group.base_ref "$GITHUB_EVENT_PATH")"
+              exempt=true
+              ;;
+            *) echo 'Unknown event; local preflight admission refused.' >&2; exit 1 ;;
+          esac
+          if [ "$exempt" = true ]; then
+            printf 'Local preflight admission exempt: %s %s. Native CI obligations unchanged.\n' "$EVENT_NAME" "$GITHUB_REF" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Read the append-only history: a late old success cannot supersede a newer attempt.
+          gh api --hostname github.com --paginate --slurp "repos/$repository/commits/$head/statuses?per_page=100" > "$RUNNER_TEMP/local-preflight-statuses.json"
+          jq -e '
+            def identity:
+              .description | capture("^attempt:(?<attempt>[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}) receipt:(?<receipt>[0-9]{8}T[0-9]{6}\\.[0-9]{9}-(?<suffix>[0-9a-f-]{36}))$") |
+              select(.attempt == .suffix);
+            if type != "array" or any(.[]; type != "array") then error("invalid status pages") else flatten end |
+            map(select((.context | ascii_downcase) == "preflight/local")) as $history |
+            ($history[0]) as $latest |
+            ($history | map(select(.state == "pending")) | .[0]) as $start |
+            ($latest | identity) as $completion_identity |
+            ($start | identity) as $start_identity |
+            $latest.context == "preflight/local" and $start.context == "preflight/local" and
+            $latest.state == "success" and $latest.id > $start.id and $start.id > 0 and
+            ($latest.id | type == "number" and . == floor) and ($start.id | type == "number" and . == floor) and
+            all(range(1; $history | length); . as $i | $history[$i-1].id > $history[$i].id) and
+            $completion_identity == $start_identity
+          ' "$RUNNER_TEMP/local-preflight-statuses.json" >/dev/null || {
+            echo "Missing, failed, interrupted or superseded preflight/local on $repository@$head; run the complete local preflight on this exact uploaded SHA." >&2
+            exit 1
+          }
+          printf 'Exact local preflight admitted: %s@%s.\n' "$repository" "$head" >> "$GITHUB_STEP_SUMMARY"
+
   complexity:
     name: Independently measured complexity ratchet
+    needs: [ci-preflight]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -52,7 +136,8 @@ jobs:
 
   ci-plan:
     name: CI plan
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    needs: [ci-preflight]
+    if: needs.ci-preflight.result == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -244,6 +329,7 @@ jobs:
         run: go test ./internal/runtime/conformance -run '^TestCanonicalFormsRegistryRatchetsOffOwnerDecodeBypasses$' -count=1
 
   static-checks:
+    needs: [ci-preflight]
     name: Static checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -274,7 +360,8 @@ jobs:
         run: go vet ./...
 
   sqlite-local-dev:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    needs: [ci-preflight]
+    if: needs.ci-preflight.result == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     name: ${{ github.event_name == 'workflow_dispatch' && 'Full dispatch SQLite smoke' || 'SQLite local smoke' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -549,8 +636,8 @@ jobs:
 
   timing-budget:
     name: CI timing budget
-    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.master_replay != 'true' }}
-    needs: [ci-plan, proof-unit]
+    if: ${{ always() && needs.ci-preflight.result == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && needs.ci-plan.outputs.master_replay != 'true' }}
+    needs: [ci-preflight, ci-plan, proof-unit]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -641,7 +728,7 @@ jobs:
   required-tests:
     name: ${{ github.event_name == 'workflow_dispatch' && 'Full dispatch summary' || 'Required test summary' }}
     if: always()
-    needs: [complexity, ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, unused-linux, unused-darwin, unused-checks, proof-unit, semantic-smoke, timing-budget]
+    needs: [ci-preflight, complexity, ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, unused-linux, unused-darwin, unused-checks, proof-unit, semantic-smoke, timing-budget]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -649,23 +736,28 @@ jobs:
       pull-requests: read
       actions: read
     steps:
+      - name: Refuse missing local preflight admission
+        if: needs.ci-preflight.result != 'success'
+        run: |
+          echo 'Local preflight admission denied or canceled; no checkout, Go setup, plan or proof evaluation.' | tee -a "$GITHUB_STEP_SUMMARY"
+          exit 1
       - uses: actions/checkout@v4
-        if: needs.ci-plan.result == 'success'
+        if: needs.ci-preflight.result == 'success' && needs.ci-plan.result == 'success'
         with:
           ref: ${{ needs.ci-plan.outputs.execution_sha }}
       - uses: actions/setup-go@v5
-        if: needs.ci-plan.result == 'success'
+        if: needs.ci-preflight.result == 'success' && needs.ci-plan.result == 'success'
         with:
           go-version-file: go.mod
           cache: true
       - name: Download exact proof plan
-        if: needs.ci-plan.result == 'success'
+        if: needs.ci-preflight.result == 'success' && needs.ci-plan.result == 'success'
         uses: actions/download-artifact@v4
         with:
           name: ci-plan-${{ github.run_id }}-${{ github.run_attempt }}
           path: test-results/plan
       - name: Revalidate current PR tier
-        if: github.event_name == 'pull_request' && needs.ci-plan.result == 'success'
+        if: needs.ci-preflight.result == 'success' && github.event_name == 'pull_request' && needs.ci-plan.result == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -677,7 +769,7 @@ jobs:
             -plan test-results/plan/proof-plan.json \
             -current-pr-json test-results/current-pr.json -workflow-head-sha "$WORKFLOW_HEAD_SHA"
       - name: Revalidate reused master evidence
-        if: needs.ci-plan.outputs.master_replay == 'true'
+        if: needs.ci-preflight.result == 'success' && needs.ci-plan.outputs.master_replay == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -690,6 +782,7 @@ jobs:
           jq -e '.verified == true' test-results/revalidated-master.json
           test "$(jq -r .digest test-results/revalidated-plan.json)" = "$(jq -r .digest test-results/plan/proof-plan.json)"
       - name: Summarize required checks
+        if: needs.ci-preflight.result == 'success'
         shell: bash
         env:
           IS_DRAFT: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
@@ -716,6 +809,7 @@ jobs:
           done
           if [ '${{ needs.ci-plan.outputs.soak_matrix }}' != '{"include":[]}' ] && [ "${{ needs.proof-unit.result }}" != success ]; then failed=1; fi
           for item in \
+            "ci-preflight:${{ needs.ci-preflight.result }}" \
             "complexity:${{ needs.complexity.result }}" \
             "static-checks:${{ needs.static-checks.result }}" \
             "macos-sqlite-possession:${{ needs.macos-sqlite-possession.result }}" \
@@ -737,8 +831,8 @@ jobs:
 
   ci-tier:
     name: ${{ needs.ci-plan.outputs.selection_check }}
-    needs: [ci-plan, required-tests]
-    if: ${{ always() && needs.ci-plan.result == 'success' }}
+    needs: [ci-preflight, ci-plan, required-tests]
+    if: ${{ always() && needs.ci-preflight.result == 'success' && needs.ci-plan.result == 'success' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     permissions:
