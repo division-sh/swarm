@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 )
 
@@ -40,18 +41,18 @@ func TestServeBootstrapConstructionCallerCancellationBothStores(t *testing.T) {
 				f := newServeBootstrapTestFixture(t, backend)
 				blocked := &blockedBootstrapReservationRead{Store: f.adapter.store, entered: make(chan struct{}), release: make(chan struct{})}
 				selectRuntime := f.adapter.selectRuntime
-				f.adapter.selectRuntime = func(ctx context.Context, candidate channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error) {
-					owned, incoming, release, err := selectRuntime(ctx, candidate)
+				f.adapter.selectRuntime = func(ctx context.Context, candidate channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error) {
+					owned, incoming, binding, release, err := selectRuntime(ctx, candidate)
 					if err != nil {
-						return nil, nil, nil, err
+						return nil, nil, processbinding.Binding{}, nil, err
 					}
 					// Production selection already retains this counted construction use.
 					use, err := f.owner.Begin(ctx)
 					if err != nil {
-						return nil, nil, nil, errors.Join(err, release())
+						return nil, nil, processbinding.Binding{}, nil, errors.Join(err, release())
 					}
 					blocked.armed.Store(true)
-					return owned, incoming, func() error { return errors.Join(release(), use.Done()) }, nil
+					return owned, incoming, binding, func() error { return errors.Join(release(), use.Done()) }, nil
 				}
 				var releaseOnce sync.Once
 				release := func() { releaseOnce.Do(func() { close(blocked.release) }) }
@@ -127,24 +128,24 @@ func TestServeBootstrapSelectionFailureReleasesOriginalUseBothStores(t *testing.
 				defer cancel()
 				selectionFailure, releaseFailure := errors.New("selection failed"), errors.New("release failed")
 				var releases atomic.Int64
-				f.adapter.selectRuntime = func(ctx context.Context, _ channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error) {
+				f.adapter.selectRuntime = func(ctx context.Context, _ channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error) {
 					f.selections.Add(1)
 					use, err := f.owner.Begin(ctx)
 					if err != nil {
-						return nil, nil, nil, err
+						return nil, nil, processbinding.Binding{}, nil, err
 					}
 					release := func() error {
 						releases.Add(1)
 						return errors.Join(use.Done(), releaseFailure)
 					}
 					if mode == "selection_error" {
-						return f.owned, nil, release, selectionFailure
+						return f.owned, nil, processbinding.Binding{}, release, selectionFailure
 					}
 					if mode == "invalid_owner" {
-						return nil, nil, release, nil
+						return nil, nil, processbinding.Binding{}, release, nil
 					}
 					cancel()
-					return f.owned, nil, release, nil
+					return f.owned, nil, processbinding.Binding{}, release, nil
 				}
 				err := f.adapter.BootstrapSession(caller, f.op, f.candidate)
 				if !errors.Is(err, releaseFailure) || mode == "selection_error" && !errors.Is(err, selectionFailure) ||
