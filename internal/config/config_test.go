@@ -401,7 +401,7 @@ func TestValidate_CLI_TestRequiresCommandAndJson(t *testing.T) {
 
 func TestLoad_FailsClosedOnMalformedBudgetExtension(t *testing.T) {
 	cfgText := strings.Join([]string{
-		"runtime:",
+		"runtime: {}",
 		"llm:",
 		"  backend: anthropic",
 		"  session:",
@@ -415,8 +415,9 @@ func TestLoad_FailsClosedOnMalformedBudgetExtension(t *testing.T) {
 	if err := os.WriteFile(p, []byte(cfgText), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "decode extensions") {
-		t.Fatalf("Load error = %v, want decode extensions failure", err)
+	// #1801/6170905244: reject the malformed container before projection.
+	if _, err := Load(p); err == nil || !strings.Contains(err.Error(), "config.budget.human_tasks must be a YAML mapping") {
+		t.Fatalf("Load error = %v, want located budget container refusal", err)
 	}
 }
 
@@ -554,7 +555,7 @@ func TestValidateLLMProviderLimits(t *testing.T) {
 
 func TestLoad_RejectsUnsupportedShardingExtension(t *testing.T) {
 	cfgText := strings.Join([]string{
-		"runtime:",
+		"runtime: {}",
 		"llm:",
 		"  backend: anthropic",
 		"  session:",
