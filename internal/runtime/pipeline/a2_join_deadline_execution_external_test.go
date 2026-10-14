@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -60,8 +59,6 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
 			t.Run(backend.name+"/"+name, func(t *testing.T) {
 				selected := backend.open(t)
 				runID := uuid.NewString()
-				insertGateRecoveryRun(t, selected.events, runID)
-				ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				files := a2CountJoinFiles(2)
 				files["schema.yaml"] = strings.Replace(files["schema.yaml"], "[item.completed, halt.requested]", "[item.completed, halt.requested, touch]", 1)
 				files["events.yaml"] += "touch:\n"
@@ -85,18 +82,19 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
 					files["nodes.yaml"] = strings.Replace(files["nodes.yaml"], "members: {count: 2, by: payload.member_id}", "members: {from: state.members_list, by: payload.member_id}", 1)
 				}
 				source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))
+				ctx, fact := nativeConstructionContextFixture(t, selected.events, source, runID)
 				node := externalPipelineSourceNode(t, source, ".", "collector")
 				module := proposedEffectProofModule{source: source, nodes: []pipeline.WorkflowNode{{Node: node,
 					Subscriptions: []events.EventType{"item.completed", "halt.requested", "touch"}, ExecutionType: contracts.SystemNodeExecutionType}}}
 				probe := &a2HeldDeadlineDeliveryProbe{Probe: lifecycleprobe.New(), entered: make(chan struct{}), release: make(chan struct{})}
 				logger := &exactJoinRuntimeLogger{}
-				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, TestLifecycleProbe: probe, Logger: logger},
+				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, TestLifecycleProbe: probe, Logger: logger},
 					"platform.join_complete", "platform.join_timeout")
 				if err != nil {
 					t.Fatal(err)
 				}
 				schedules, driver := newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
-				options := pipeline.PipelineCoordinatorOptions{Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe}
+				options := pipeline.PipelineCoordinatorOptions{Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe}
 				pc := newGateRecoveryCoordinator(bus, selected, options)
 				bus.SetInterceptors(pc)
 				t.Cleanup(probe.resume)
@@ -106,7 +104,7 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
 				entryTime := time.Now().UTC().Truncate(time.Microsecond).Add(-2 * time.Hour)
 				commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, pipeline.WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: runID, WorkflowName: source.WorkflowName(), WorkflowVersion: source.WorkflowVersion(),
-					CurrentState: "awaiting", EntityType: "count_state", Fields: map[string]any{
+					CurrentState: "awaiting", StageDefined: true, EntityType: "count_state", Fields: map[string]any{
 						"final_expected": int64(0), "final_completed": int64(0), "final_results": []any{}, "final_reason": "",
 						"final_missing": []any{}, "final_timed_out": false, "marker": int64(0), "members_list": []any{"a", "z"},
 					},
@@ -116,6 +114,9 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
 					instance, found, err := pc.Load(ctx, owner)
 					if err != nil || !found {
 						t.Fatalf("deadline receiver: found=%v err=%v", found, err)
+					}
+					if !instance.StageDefined {
+						t.Fatalf("retained deadline receiver lost stage_defined at stage %q", instance.CurrentState)
 					}
 					return instance
 				}
