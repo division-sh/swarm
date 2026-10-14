@@ -404,7 +404,8 @@ func TestFanOutChunkCommitsMixedRealEventBusPlansAtomicallyOnBothStores(t *testi
 			if err != nil {
 				t.Fatalf("construct mixed-route EventBus: %v", err)
 			}
-			sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: uuid.NewString()}.Normalized()
+			constructedProducer := fanOutConstructedProducerForTest(t, runCtx, owner.(pipeline.FlowInstanceIndexReader), semanticview.Wrap(bundle), fixture.runID)
+			sourceRoute := events.RouteIdentity{FlowID: constructedProducer.TemplateID, FlowInstance: constructedProducer.InstancePath, EntityID: constructedProducer.EntityID}.Normalized()
 			routingSource, err := events.NewStaticFlowRoutingSource(sourceRoute)
 			if err != nil {
 				t.Fatalf("construct mixed-route source: %v", err)
@@ -425,7 +426,7 @@ func TestFanOutChunkCommitsMixedRealEventBusPlansAtomicallyOnBothStores(t *testi
 				t.Fatal(err)
 			}
 			capsule.NodeKey, capsule.ExecutionFlowID, capsule.EntityID = producer.Key(), "producer", sourceRoute.EntityID
-			capsule.Route = runtimeflowidentity.StoredRoute("producer", "producer", "producer")
+			capsule.Route = constructedProducer.Route()
 			capsule.ProducerSource = routingSource
 			capsuleRaw, err = json.Marshal(capsule)
 			if err != nil {
