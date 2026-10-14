@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -413,7 +414,7 @@ func seedRunForkFreezeExternalEffectAuthority(t *testing.T, ctx context.Context,
 		AgentID: agentID, AgentIdentity: identity, SessionID: sessionID,
 		Memory: agentmemory.Plan{}, FlowInstance: identity.FlowInstance(),
 	}
-	capabilitySurface := managedCompletionTestSurface(t, authority, "test")
+	capabilitySurface := sourceFreezeToolEffectSurface(t, authority, "test")
 	if err := (admitTestPostgresStore(t, db)).SaveManagedCapabilitySurface(ctx, capabilitySurface); err != nil {
 		t.Fatalf("seed source-freeze external-effect capability surface: %v", err)
 	}
@@ -454,6 +455,25 @@ func seedRunForkFreezeExternalEffectAuthority(t *testing.T, ctx context.Context,
 	`, uuid.NewString(), operationID, leaseExpiry, turnID, capabilitySurface.ID, attemptState, now, completedAt); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func sourceFreezeToolEffectSurface(t testing.TB, authority runtimeeffects.Authority, provider string) managedcapabilities.Surface {
+	t.Helper()
+	// These historical tool effects do not declare a completion profile.
+	surface, err := managedcapabilities.New(managedcapabilities.Plan{
+		ActorIdentity: authority.Target.AgentIdentity, RuntimeMode: "task",
+		Provider: provider, Transport: "api", ProviderContract: "store-test-provider-contract",
+		Authority: managedcapabilities.Authority{
+			Kind: managedcapabilities.AuthorityProviderTurn, ID: authority.Target.ID,
+			ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: authority.ID,
+			RunID: authority.Target.RunID, SessionID: authority.Target.SessionID, TurnOrdinal: 1,
+		},
+		CreatedAt: time.Unix(1, 0).UTC(),
+	})
+	if err != nil {
+		t.Fatalf("build source-freeze tool effect surface: %v", err)
+	}
+	return surface
 }
 
 func seedRunForkSourceFreezePair(t *testing.T, db *sql.DB, sourceStatus, forkStatus string, now time.Time) runForkActivationLineage {

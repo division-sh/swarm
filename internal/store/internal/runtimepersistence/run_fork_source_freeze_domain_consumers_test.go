@@ -412,7 +412,7 @@ func seedForkedExternalEffectAttempt(t *testing.T, fixture *forkedConsumerTestBa
 		AgentID: agentID, AgentIdentity: identity, SessionID: sessionID,
 		Memory: agentmemory.Plan{}, FlowInstance: identity.FlowInstance(),
 	}
-	capabilitySurface := managedCompletionTestSurface(t, authority, "native_command")
+	capabilitySurface := sourceFreezeToolEffectSurface(t, authority, "native_command")
 	capabilityStore := managedCapabilityTestStore(fixture.sqlite)
 	if fixture.postgres != nil {
 		capabilityStore = fixture.postgres
