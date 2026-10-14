@@ -991,7 +991,7 @@ func setPostgresEnvFromDSN(t *testing.T, dsn string) {
 	t.Setenv("PGPASSWORD", parsed.Password)
 	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
 	t.Setenv("SWARM_CONFIG", configPath)
-	writeRuntimeConfigText(t, configPath, fmt.Sprintf(`runtime:
+	writeRuntimeConfigText(t, configPath, fmt.Sprintf(`runtime: {}
 store:
   backend: postgres
 database:
