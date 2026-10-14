@@ -81,7 +81,7 @@ The 40 functions are an audit ceiling, not a mandate to move all small support.
 
 Current direct value-admission entrances (17 sites / 13 files) are:
 apiv1/operator_test_setup.go:341; cliapp/test_command.go:962;
-engine/context_builder.go:32; workflowentityquery/reader.go:94;
+engine.BuildBaseContext; workflowentityquery/reader.go:94;
 tools/executor_entity.go:82; pipeline/engine_adapter.go:601;
 pipeline/flow_constructor.go:241,246,274;
 pipeline/workflow_instance_activation.go:75,76;
