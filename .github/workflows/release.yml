@@ -296,6 +296,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
           persist-credentials: false
           clean: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -345,6 +346,30 @@ jobs:
               retained[heading + 1:heading + 1] = ['\n', *grouped]
           else:
               retained = ['## Changes by area\n\n', *grouped, *retained]
+          selection = os.environ['SOURCE_SHA']
+          if os.environ['PREVIOUS']:
+              selection = os.environ['PREVIOUS'] + '..' + selection
+          inventory = subprocess.check_output([
+              'git', 'log', '-z', '--reverse', '--format=%H%x00%s', selection], text=True)
+          fields = inventory.split('\0')
+          if fields[-1] != '' or len(fields) % 2 != 1:
+              raise SystemExit('commit inventory is incomplete')
+          commits = []
+          for index in range(0, len(fields) - 1, 2):
+              sha, subject = fields[index:index + 2]
+              if re.fullmatch('[0-9a-f]{40,64}', sha) is None:
+                  raise SystemExit('commit inventory has an invalid object id')
+              commits.append((sha, subject or '(no subject)'))
+          if commits:
+              retained.extend([
+                  '\n## Commit inventory\n\n',
+                  'Every commit in the exact release range is retained, including '
+                  'PR-associated and direct commits.\n\n',
+              ])
+              for sha, subject in commits:
+                  subject = re.sub(r'([\\`*_{}\[\]<>#!])', r'\\\1', subject)
+                  url = 'https://github.com/' + os.environ['GITHUB_REPOSITORY'] + '/commit/' + sha
+                  retained.append(f'- {subject} ([{sha[:12]}]({url}))\n')
           retained.extend([
               '\n## Native binary requirements\n\n',
               '- Linux amd64: built with CGO on Ubuntu 22.04; requires a compatible '
@@ -359,6 +384,8 @@ jobs:
           set -euo pipefail
           cd "$RUNNER_TEMP/release-assets"
           test "$(printf '%s\n' * | LC_ALL=C sort)" = "$(printf '%s\n' SHA256SUMS "swarm_${VERSION}_darwin_arm64.tar.gz" "swarm_${VERSION}_linux_amd64.tar.gz" | LC_ALL=C sort)"
+          # Both stable and prerelease latest promotion remain manual in this
+          # draft; the user must approve this choice during workflow-file review.
           flags=(--draft --verify-tag --title "Swarm $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" --latest=false)
           if test "$PRERELEASE" = true; then flags+=(--prerelease); fi
           gh release create "$VERSION" "${flags[@]}"
