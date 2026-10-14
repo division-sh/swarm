@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -361,13 +362,12 @@ func TestFanOutDeliveryBarrierCompletionAndSupersessionWinnerMatrixOnBothStores(
 				base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 				fixture := seedFanOutOwnerFixtureWithArtifact(t, f.ctx, db, owner, postgres, 0, base, f.bundle.SourceArtifact)
 				ctx := correlation.WithRunID(f.ctx, fixture.runID)
-				handle, entityID, activation := seedFanOutDeliveryBarrierForLoop(t, ctx, db, fixture, base)
-				seedFanOutBarrierLoopState(t, ctx, db, fixture.runID, entityID, activation, base)
+				route, state := constructFanOutCompletionReceiver(t, ctx, f, "completion_one", base)
+				handle, entityID, activation := seedConstructedFanOutBarrierLoopForTest(t, ctx, f, fixture, base)
 				advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, base.Add(time.Second))
 				summary := fanoutbarrier.Summary{Total: 0}
 				activationID := mustFanOutBarrierScheduleActivationID(t, ctx, db, fixture)
 
-				route, state := constructFanOutCompletionReceiver(t, ctx, f, "completion_one", base)
 				occurrenceID := runtimegenericschedule.OccurrenceEventID(activationID, base.Add(time.Second))
 				occurrence := fanOutBarrierChildEventWithID(t, fixture, occurrenceID, 700, base.Add(2*time.Second))
 				if err := commitSemanticEventFixtureWithRoutes(ctx, selected, occurrence, []events.DeliveryRoute{route}); err != nil {
@@ -814,8 +814,18 @@ func seedFanOutDeliveryBarrierForLoop(t *testing.T, ctx context.Context, db *sql
 	return handle, entityID, activation
 }
 
-func seedFanOutDeliveryBarrierRecord(t *testing.T, ctx context.Context, db *sql.DB, fixture fanOutOwnerFixture, entityID string, generation attemptgeneration.Generation, at time.Time) timeridentity.TimerHandle {
+func seedFanOutDeliveryBarrierRecord(t *testing.T, ctx context.Context, db *sql.DB, fixture fanOutOwnerFixture, entityID string, generation attemptgeneration.Generation, at time.Time, constructedRoute ...flowidentity.Route) timeridentity.TimerHandle {
 	t.Helper()
+	owner := flowidentity.StoredRoute(".", "root", "root")
+	if len(constructedRoute) > 1 {
+		t.Fatal("barrier fixture requires one exact constructed route")
+	}
+	if len(constructedRoute) == 1 {
+		owner = constructedRoute[0]
+		if !owner.Valid() {
+			t.Fatal("barrier fixture requires its valid constructed route")
+		}
+	}
 	var digest string
 	if err := db.QueryRowContext(ctx, `SELECT semantic_digest FROM fan_out_intents WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family='fan_out' AND semantic_path=$4`, fixture.runID, fixture.deliveryID, fixture.flowPath, fixture.semanticPath).Scan(&digest); err != nil {
 		t.Fatal(err)
@@ -852,10 +862,10 @@ func seedFanOutDeliveryBarrierRecord(t *testing.T, ctx context.Context, db *sql.
 			target_flow_path,target_node_id,handler_event,join_id,
 			route_scope_key,route_instance_id,route_instance_path,entity_id,routing_source,
 			execution_mode,timer_handle,status,created_at,updated_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'.','root','root',$12,$13,$14,$15,'armed',$16,$16)
+	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$17,$18,$19,$12,$13,$14,$15,'armed',$16,$16)
 	`, fixture.runID, fixture.deliveryID, fixture.flowPath, "fan_out", fixture.semanticPath, fixture.bundleHash, digest,
 		ref.FlowPath(), ref.NodeID(), ref.HandlerEvent(), ref.JoinID(), entityID,
-		string(routingRaw), string(executionmode.Live), string(handleRaw), at)
+		string(routingRaw), string(executionmode.Live), string(handleRaw), at, owner.ScopeKey, owner.InstanceID, owner.InstancePath)
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
