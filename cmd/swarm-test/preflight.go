@@ -15,18 +15,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/internal/testtiming"
 )
 
 type preflightPhase struct {
-	Name    string                         `json:"name"`
-	Args    []string                       `json:"args"`
-	Package *testplanning.PreflightPackage `json:"package,omitempty"`
+	Name     string                         `json:"name"`
+	Args     []string                       `json:"args"`
+	Package  *testplanning.PreflightPackage `json:"package,omitempty"`
+	DebtBase string                         `json:"debt_base,omitempty"`
 }
 
 type preflightReceipt struct {
 	Plan             testplanning.PreflightPlan `json:"plan"`
+	Attestation      preflightStatusIdentity    `json:"attestation"`
 	Started          time.Time                  `json:"started"`
 	EndToEndSeconds  float64                    `json:"end_to_end_seconds"`
 	QueueWaitSeconds float64                    `json:"queue_wait_seconds"`
@@ -58,51 +62,80 @@ func runPreflight(ctx context.Context) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	attemptID := uuid.NewString()
+	receiptID := started.UTC().Format("20060102T150405.000000000") + "-" + attemptID
+	directory := filepath.Join("test-results", "preflight", receiptID)
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	attempt, err := beginPreflightStatus(ctx, head, receiptID, attemptID)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	receipt := preflightReceipt{Plan: testplanning.PreflightPlan{HeadSHA: head}, Attestation: attempt.identity, Started: started.UTC()}
+	receipt.Plan, err = preparePreflight(ctx, head)
+	if err == nil {
+		err = attempt.bindPlan(receipt.Plan)
+	}
+	if err == nil {
+		receipt.SetupSeconds = time.Since(started).Seconds()
+		err = executePreflight(ctx, directory, &receipt)
+	} else {
+		receipt.Plan.HeadSHA = head
+	}
+	receipt.EndToEndSeconds = time.Since(started).Seconds()
+	receipt.SetupSeconds = receipt.EndToEndSeconds - receipt.ExecutionSeconds - receipt.CleanupSeconds
+	if err != nil {
+		receipt.Complete = false
+		receipt.Problem = err.Error()
+	}
+	raw, marshalErr := json.MarshalIndent(receipt, "", "  ")
+	if marshalErr == nil {
+		marshalErr = os.WriteFile(filepath.Join(directory, "receipt.json"), append(raw, '\n'), 0600)
+	}
+	err = errors.Join(err, marshalErr)
+	if marshalErr != nil {
+		receipt.Complete = false
+	}
+	printPreflightReceipt(os.Stderr, receipt, directory)
+	publicationStarted := time.Now()
+	statusID, publicationErr := attempt.finish(ctx, directory, receipt)
+	if publicationErr != nil {
+		fmt.Fprintln(os.Stderr, "local preflight status publication failed; no success attested:", publicationErr)
+	} else {
+		fmt.Fprintf(os.Stderr, "preflight status: context=%s repository=%s head=%s attempt=%s receipt=%s id=%d publication=%.3fs\n",
+			preflightStatusContext, attempt.identity.Repository, head, attemptID, receiptID, statusID, time.Since(publicationStarted).Seconds())
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+	}
+	if err != nil || publicationErr != nil {
+		return 1
+	}
+	return 0
+}
+
+func preparePreflight(ctx context.Context, head string) (testplanning.PreflightPlan, error) {
 	base, err := exec.CommandContext(ctx, "git", "rev-parse", "origin/master").Output()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "preflight requires a pinned local origin/master:", err)
-		return 1
+		return testplanning.PreflightPlan{}, fmt.Errorf("preflight requires a pinned local origin/master: %w", err)
 	}
 	plan, err := loadPreflightPlan(ctx, head, strings.TrimSpace(string(base)))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		return plan, err
 	}
 	ledgerFile, err := os.Open(".github/flake-ledger.json")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		return plan, err
 	}
 	ledger, err := testtiming.ReadFailureLedger(ledgerFile)
 	closeErr := ledgerFile.Close()
 	if err = errors.Join(err, closeErr); err == nil {
 		err = testtiming.ValidatePreflightEligibility(plan, ledger)
 	}
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	directory := filepath.Join("test-results", "preflight", started.UTC().Format("20060102T150405.000000000"))
-	if err := os.MkdirAll(directory, 0700); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	receipt := preflightReceipt{Plan: plan, Started: started.UTC(), SetupSeconds: time.Since(started).Seconds()}
-	err = executePreflight(ctx, directory, &receipt)
-	receipt.EndToEndSeconds = time.Since(started).Seconds()
-	receipt.SetupSeconds = receipt.EndToEndSeconds - receipt.ExecutionSeconds - receipt.CleanupSeconds
-	if err != nil {
-		receipt.Problem = err.Error()
-	}
-	raw, marshalErr := json.MarshalIndent(receipt, "", "  ")
-	err = errors.Join(err, marshalErr, os.WriteFile(filepath.Join(directory, "receipt.json"), append(raw, '\n'), 0600))
-	receipt.Complete = receipt.Complete && err == nil
-	printPreflightReceipt(os.Stderr, receipt, directory)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	return 0
+	return plan, err
 }
 
 func printPreflightReceipt(output io.Writer, receipt preflightReceipt, directory string) {
@@ -110,9 +143,16 @@ func printPreflightReceipt(output io.Writer, receipt preflightReceipt, directory
 		fmt.Fprintln(output, "preflight soft target exceeded: review/re-rank membership; no test deadline or selector changed")
 	}
 	fmt.Fprintf(output, "preflight: complete=%t end-to-end=%.3fs queue=%.3fs setup/validation=%.3fs execution=%.3fs cleanup=%.3fs; source=%s go=%s selection=%s receipts=%s\n", receipt.Complete, receipt.EndToEndSeconds, receipt.QueueWaitSeconds, receipt.SetupSeconds, receipt.ExecutionSeconds, receipt.CleanupSeconds, receipt.Plan.HeadSHA, receipt.Plan.BuildContext.GOVERSION, receipt.Plan.Digest, directory)
+	if receipt.Plan.Comparison != nil {
+		fmt.Fprintf(output, "preflight comparison: debt-required=%t origin/master=%s native-source=%s diff=%s\n", receipt.Plan.Comparison.DebtRequired, receipt.Plan.Comparison.OriginMasterSHA, receipt.Plan.BaseSHA, receipt.Plan.Comparison.DiffSHA256)
+	}
 }
 
 func loadPreflightPlan(ctx context.Context, head, base string) (testplanning.PreflightPlan, error) {
+	base, comparison, err := observePreflightComparison(ctx, head, base)
+	if err != nil {
+		return testplanning.PreflightPlan{}, err
+	}
 	inventory, err := testplanning.DiscoverRootInventory(ctx, ".")
 	if err != nil {
 		return testplanning.PreflightPlan{}, err
@@ -149,7 +189,7 @@ func loadPreflightPlan(ctx context.Context, head, base string) (testplanning.Pre
 	if err != nil {
 		return testplanning.PreflightPlan{}, err
 	}
-	return testplanning.BuildPreflightPlan(".", base, inventory, native)
+	return testplanning.BuildPreflightPlan(".", base, inventory, native, comparison)
 }
 
 func preflightPhases(plan testplanning.PreflightPlan) []preflightPhase {
@@ -178,14 +218,24 @@ func preflightPhases(plan testplanning.PreflightPlan) []preflightPhase {
 	phases = append(phases, preflightPhase{Name: "complexity", Args: []string{"go", "run", "./cmd/swarm-complexity", "-head", plan.HeadSHA, "-base", plan.BaseSHA}})
 	for _, pkg := range plan.Packages {
 		if !slices.Contains(cheap, pkg.Package) {
-			phases = append(phases, preflightPackagePhase(pkg))
+			phase := preflightPackagePhase(pkg)
+			if plan.Comparison != nil && plan.Comparison.DebtRequired && pkg.Package == "github.com/division-sh/swarm/internal/store" {
+				phase.DebtBase = plan.BaseSHA
+			}
+			phases = append(phases, phase)
 		}
 	}
 	return append(phases, preflightPhase{Name: "vet", Args: []string{"go", "vet", "./..."}})
 }
 
 func preflightPackagePhase(pkg testplanning.PreflightPackage) preflightPhase {
-	return preflightPhase{Name: pkg.Package, Package: &pkg, Args: []string{"go", "test", "-json", "-count=1", "-run", pkg.Run, pkg.Package}}
+	args := []string{"go", "test", "-json", "-count=1"}
+	for _, root := range pkg.Required {
+		if root.Name == "TestPersistenceAuthorityDebtRatchet" {
+			args = append(args, "-timeout=20m")
+		}
+	}
+	return preflightPhase{Name: pkg.Package, Package: &pkg, Args: append(args, "-run", pkg.Run, pkg.Package)}
 }
 
 func executePreflight(ctx context.Context, directory string, receipt *preflightReceipt) error {
@@ -225,6 +275,15 @@ func checkPreflightSource(ctx context.Context, plan testplanning.PreflightPlan) 
 	if _, err := completionSource(".", plan.HeadSHA, true); err != nil {
 		return err
 	}
+	if plan.Comparison != nil {
+		base, observed, err := observePreflightComparison(ctx, plan.HeadSHA, plan.Comparison.OriginMasterSHA)
+		if err != nil {
+			return err
+		}
+		if base != plan.BaseSHA || observed != *plan.Comparison {
+			return fmt.Errorf("frozen preflight comparison changed")
+		}
+	}
 	build, err := testplanning.EffectiveBuildContext(ctx, ".")
 	if err != nil {
 		return err
@@ -258,7 +317,16 @@ func executePreflightPhase(ctx context.Context, directory string, phase prefligh
 		if err != nil {
 			return timing, err
 		}
-		return timing, testtiming.ValidatePreflightReport(*phase.Package, report)
+		if err := testtiming.ValidatePreflightReport(*phase.Package, report); err != nil {
+			return timing, err
+		}
+		if phase.DebtBase != "" {
+			if _, err := log.Seek(0, io.SeekStart); err != nil {
+				return timing, err
+			}
+			return timing, validatePreflightDebtSource(log, phase.DebtBase)
+		}
+		return timing, nil
 	}
 	if phase.Name == "format" {
 		raw, err := io.ReadAll(log)
