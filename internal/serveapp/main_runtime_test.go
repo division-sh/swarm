@@ -3296,6 +3296,10 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	if rootFlowID == "" {
 		t.Fatal("served decision-card fixture requires canonical root flow identity")
 	}
+	rootSchema, ok := workflow.SemanticSource().FlowSchemaByID(rootFlowID)
+	if !ok {
+		t.Fatal("served decision-card fixture requires the admitted root schema")
+	}
 	entityType := servedRequiredRootEntityType(t, workflow)
 	{
 		construction3123Ctx := materializeCtx
@@ -3303,7 +3307,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		construction3123Instance, construction3123Lifecycle, err := workflow.PrepareInitialEntryLifecycle(construction3123Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(rootFlowID, runID, runID)}, runtimepipeline.WorkflowInstance{
 			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: workflowVersion,
 			CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
-			EntityType: entityType,
+			EntityType: entityType, Mode: rootSchema.EffectiveMode(),
 		}, construction3123At)
 		if err != nil {
 			t.Fatalf("prepare fixture initial lifecycle: %v", err)
@@ -4552,6 +4556,10 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	if rootFlowID == "" {
 		t.Fatal("served run-control fixture requires canonical root flow identity")
 	}
+	rootSchema, ok := workflow.SemanticSource().FlowSchemaByID(rootFlowID)
+	if !ok {
+		t.Fatal("served run-control fixture requires the admitted root schema")
+	}
 	entityType := servedRequiredRootEntityType(t, workflow)
 	{
 		construction4356Ctx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
@@ -4559,7 +4567,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		construction4356Instance, construction4356Lifecycle, err := workflow.PrepareInitialEntryLifecycle(construction4356Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(rootFlowID, runID, runID)}, runtimepipeline.WorkflowInstance{
 			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
 			CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
-			EntityType: entityType,
+			EntityType: entityType, Mode: rootSchema.EffectiveMode(),
 		}, construction4356At)
 		if err != nil {
 			t.Fatalf("prepare fixture initial lifecycle: %v", err)
