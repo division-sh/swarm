@@ -184,14 +184,19 @@ func VerifyLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStoresForTest(t *te
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := open(t, backend)
-			store, ctx := fixture.Persistence.store, fixture.Context
-			runID := uuid.NewString()
-			if err := fixture.RequireRun(ctx, runID); err != nil {
-				t.Fatal(err)
+			store := fixture.Persistence.store
+			// Each independent cell constructs one keyless validation instance.
+			newRunContext := func(t *testing.T) context.Context {
+				t.Helper()
+				runID := uuid.NewString()
+				if err := fixture.RequireRun(fixture.Context, runID); err != nil {
+					t.Fatal(err)
+				}
+				return runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(fixture.Context, runID), executionmode.Live)
 			}
-			ctx = runtimeeffects.WithExecutionMode(runtimecorrelation.WithRunID(ctx, runID), executionmode.Live)
 
 			t.Run("claim_wins", func(t *testing.T) {
+				ctx := newRunContext(t)
 				activation, flowInstance, entityID := seedNativeLoopActivityInstance(t, fixture, ctx, "review")
 				record := loopActivityStartRecord(ctx, activation, flowInstance, entityID, uuid.NewString())
 				started, inserted, err := store.ClaimActivityAttemptForLoopGeneration(ctx, record)
@@ -207,6 +212,7 @@ func VerifyLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStoresForTest(t *te
 
 			for _, operation := range []string{"repeat", "close"} {
 				t.Run(operation+"_wins", func(t *testing.T) {
+					ctx := newRunContext(t)
 					activation, flowInstance, entityID := seedNativeLoopActivityInstance(t, fixture, ctx, "review")
 					record := loopActivityStartRecord(ctx, activation, flowInstance, entityID, uuid.NewString())
 					advanceLoopActivityInstance(t, store, ctx, flowInstance, operation)
@@ -220,6 +226,7 @@ func VerifyLoopActivityClaimOrdersAgainstRepeatAndCloseOnBothStoresForTest(t *te
 			}
 
 			t.Run("duplicate_claim", func(t *testing.T) {
+				ctx := newRunContext(t)
 				activation, flowInstance, entityID := seedNativeLoopActivityInstance(t, fixture, ctx, "review")
 				record := loopActivityStartRecord(ctx, activation, flowInstance, entityID, uuid.NewString())
 				if _, inserted, err := store.ClaimActivityAttemptForLoopGeneration(ctx, record); err != nil || !inserted {
