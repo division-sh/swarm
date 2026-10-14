@@ -149,7 +149,7 @@ func proofHistoryInputs(t *testing.T) map[string][]string {
 func TestProofHistoryInputsMatchPinnedSourceConsumers(t *testing.T) {
 	files := map[string][]string{
 		"github.com/division-sh/swarm/internal/store":              {"internal/store/persistence_authority_debt_run_fixture_transition_test.go"},
-		"github.com/division-sh/swarm/scripts/rewrite-stages-2566": {"scripts/rewrite-stages-2566/current_entries_test.go", "scripts/rewrite-stages-2566/embedded_entries.go", "scripts/rewrite-stages-2566/intent.json"},
+		"github.com/division-sh/swarm/scripts/rewrite-stages-2566": {"scripts/rewrite-stages-2566/current_entries_test.go", "scripts/rewrite-stages-2566/embedded_entries.go", "scripts/rewrite-stages-2566/entries_test.go", "scripts/rewrite-stages-2566/intent.json"},
 	}
 	inputs := proofHistoryInputs(t)
 	if len(inputs) != len(files) {
