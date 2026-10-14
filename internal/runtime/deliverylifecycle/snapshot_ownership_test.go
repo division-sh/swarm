@@ -77,8 +77,8 @@ func TestDecodeHistoricalSnapshotPreservesOwningRunWithoutCapability(t *testing.
 					if decoded.Authority.Validate() == nil {
 						t.Fatal("historical ownership must not grant execution authority")
 					}
-					if decoded.ClaimVersion != 2 || !decoded.ClaimExpiresAt.IsZero() {
-						t.Fatal("historical attempt coordinate must not carry live lease expiry")
+					if decoded.ClaimVersion != 0 || !decoded.ClaimExpiresAt.IsZero() {
+						t.Fatal("historical ownership must not carry a live generation or lease expiry")
 					}
 				})
 			}
