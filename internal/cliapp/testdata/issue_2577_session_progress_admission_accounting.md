@@ -30,10 +30,16 @@ CLI race PASS3.388s; full channelonboarding package race PASS1.448s. The precise
 blocked-open RED (both original 5s caller deadlines) remains on #2577 6178823545.
 No deadline/assertion, SDK pin, admission policy, baseline or debt allowance changed.
 
-Served QR fixtures still need the bounded explicit-pending continuation mapping
-requested in 6179762669. Known Get-only consumers: the shared process-death
-pairing helper, paired RunServe, served process, and unbound-connect fixtures.
-The single authorized original launched-logout served exposure is unspent.
+Served QR fixture mapping is approved by 6179981115: the shared process-death
+pairing helper, paired RunServe, served process, and unbound-connect fixtures
+consume exact-operation Retry only for validated preparation, within the same
+absolute original pairing deadline. Errors, terminal/closed/uncertain state or
+changed identity/source fail; missing QR alone permits only Get. Every original
+claim, confirmation, readiness, journal and no-replay assertion remains.
+TestServedSessionPairingContinuationRequiresCanonicalPending covers these
+consumer controls on both stores, including expiry without a renewed window.
+The single authorized original launched-logout served exposure remains a
+separate receipt obligation; this accounting update does not claim it passed.
 No supported-provider/served completion, destructive-reset closure, physical
 P01-P09, upstream SDK PR or hosted lifecycle qualification claim is made here.
 The separate retained PostgreSQL timing RED remains open under #2353.
