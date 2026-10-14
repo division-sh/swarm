@@ -3,9 +3,11 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -120,28 +122,65 @@ func assertNativeMissingRunLeftNoMutationForTest(t *testing.T, fixture *Pipeline
 	}
 }
 
-func VerifySQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadataForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+func VerifySQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadataForTest(t *testing.T, source semanticview.Source, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
 	fixture := open(t)
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(fixture.Context, runID)
 	if err := fixture.RequireRun(ctx, runID); err != nil {
 		t.Fatal(err)
 	}
-	storageRef := "review/inst-1"
+	root := flowidentity.Stored(source, ".", runID, runID, flowidentity.EntityID(runID), "")
+	parent, err := flowidentity.KeyedChild(source, root, "operating", "root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent.EntityID = "parent-ent"
+	child, err := flowidentity.KeyedChild(source, parent, "operating/review", "inst-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, constructed := range []flowidentity.Instance{root, parent, child} {
+		if err := constructed.ValidateConstruction(source, runID); err != nil {
+			t.Fatalf("admit exact storage identity: %v", err)
+		}
+	}
+	key, err := AdmitFlowInstanceKey(source, child.TemplateID, "inst-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	storageRef := child.InstancePath
 
-	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-		InstanceID:         "inst-1",
+	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
+		InstanceID:         child.InstanceID,
 		StorageRef:         storageRef,
+		EntityID:           child.EntityID,
 		ParentFlowID:       "operating",
 		ParentFlowInstance: "operating/root",
 		ParentEntityID:     "parent-ent",
-		WorkflowName:       "review",
-		WorkflowVersion:    "v1",
+		WorkflowName:       child.TemplateID,
+		WorkflowVersion:    source.WorkflowVersion(),
+		Mode:               "template",
+		InstanceKey:        key,
 		CurrentState:       "created",
+		StageDefined:       true,
 		EnteredStageAt:     time.Now().UTC(),
-		Fields:             map[string]any{},
+		Fields:             map[string]any{"instance_key": "inst-1"},
 		EntityType:         "test_entity",
-	})); err != nil {
+	})
+	// Keep the original unrelated coordinate as a pre-mutation ancestry refusal.
+	unrelated := instance
+	unrelated.StorageRef, unrelated.WorkflowName = "review/inst-1", "review"
+	unrelated.EntityID = flowidentity.EntityID(unrelated.StorageRef)
+	if err := fixture.Construct(ctx, unrelated); err == nil || !strings.Contains(err.Error(), "disagrees with its exact parent/source/occurrence") {
+		t.Fatalf("unrelated child escaped exact ancestry validation: %v", err)
+	}
+	for _, path := range []string{root.InstancePath, parent.InstancePath, unrelated.StorageRef, child.InstancePath} {
+		_, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, path))
+		if err != nil || found {
+			t.Fatalf("refused construction leaked %s: found=%t err=%v", path, found, err)
+		}
+	}
+	if err := fixture.Construct(ctx, instance); err != nil {
 		t.Fatalf("Create workflow instance: %v", err)
 	}
 
@@ -152,6 +191,9 @@ func VerifySQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadataForTes
 	if !ok {
 		t.Fatal("expected workflow instance to persist")
 	}
+	if loaded.StorageRef != "operating/root/review/inst-1" || loaded.WorkflowName != "operating/review" || loaded.InstanceID != child.InstanceID || loaded.EntityID != child.EntityID || loaded.InstanceKey != key {
+		t.Fatalf("loaded child lost its exact constructor identity: %+v", loaded)
+	}
 	if loaded.ParentFlowID != "operating" || loaded.ParentFlowInstance != "operating/root" || loaded.ParentEntityID != "parent-ent" {
 		t.Fatalf("loaded parent identity = %q/%q/%q", loaded.ParentFlowID, loaded.ParentFlowInstance, loaded.ParentEntityID)
 	}
@@ -161,6 +203,14 @@ func VerifySQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadataForTes
 	}
 	if identity.ParentRoute.FlowID != "operating" || identity.ParentRoute.FlowInstance != "operating/root" || identity.ParentRoute.EntityID != "parent-ent" {
 		t.Fatalf("ParentRoute = %#v, want operating/operating/root/parent-ent", identity.ParentRoute)
+	}
+	storedParent, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, parent.InstancePath))
+	if err != nil || !found || storedParent.WorkflowName != parent.TemplateID || storedParent.EntityID != parent.EntityID || storedParent.StorageRef != parent.InstancePath {
+		t.Fatalf("exact structural parent missing after atomic construction: parent=%+v found=%t err=%v", storedParent, found, err)
+	}
+	storedRoot, found, err := fixture.Persistence.LoadWorkflowInstance(ctx, testRunScopedWorkflowInstanceFromContext(ctx, root.InstancePath))
+	if err != nil || !found || storedRoot.WorkflowName != "." || storedRoot.EntityID != runID || storedRoot.StorageRef != runID || storedRoot.InstanceID != runID || storedRoot.ParentEntityID != "" {
+		t.Fatalf("actual run root missing after atomic construction: root=%+v found=%t err=%v", storedRoot, found, err)
 	}
 }
 
