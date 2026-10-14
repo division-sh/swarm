@@ -36,6 +36,7 @@ func TestAgentFirstClaimProfileSurvivesNativeReopenAndRefusesClosedOwnerBothStor
 			}
 			f := admitAgentClaimProfileFixture(t, testAuthorActivityContext(), open())
 			_, first, original := f.claim(t)
+			originalStorage := profileFixtureSnapshot(t, f)
 			if err := f.store.(interface{ Close() error }).Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -52,6 +53,9 @@ func TestAgentFirstClaimProfileSurvivesNativeReopenAndRefusesClosedOwnerBothStor
 			// Bootstrap may write its own bookkeeping. Fence the attempted fault
 			// after reopening, then conserve every physical application table.
 			before := profileFixtureSnapshot(t, reopened)
+			if !reflect.DeepEqual(originalStorage["event_delivery_attempts"], before["event_delivery_attempts"]) {
+				t.Fatal("native reopen changed immutable attempt or capture bytes")
+			}
 			if err := f.ctx.Err(); err != nil {
 				t.Fatal(err)
 			}
