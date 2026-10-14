@@ -55,9 +55,6 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("budget.human_tasks.categories_enabled", `["ops"]`, "Human task categories covered by the budget."),
 
 		e("paths.platform_spec_path", "platform-spec.yaml", "Platform spec path override."),
-		e("paths.agent_config_map_file", "./agent-config-map.yaml", "Agent config map file."),
-		e("paths.verification_gates_file", "./verification-gates.yaml", "Verification gates file."),
-		e("paths.tooling_lock_file", "./tooling.lock", "Tooling lock file."),
 
 		e("connection.api_server", "http://127.0.0.1:8081", "CLI API target for this deployment."),
 		e("connection.api_token_file", ".swarm/api-token", "CLI API bearer-token file reference; never inline the token."),
