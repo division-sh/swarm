@@ -2241,7 +2241,12 @@
     ],
     "finals": [],
     "function": "issue2564M25Bundle",
-    "literal": 2
+    "literal": 2,
+    "current": {
+      "file": "internal/runtime/pipeline/issue2564_activity_result_retry_test.go",
+      "function": "issue2564M25Bundle",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/pipeline/issue2564_h2_baseline_mechanisms_test.go",
