@@ -3,6 +3,12 @@
   "Gate": "https://github.com/division-sh/swarm/pull/2659#issuecomment-6161724853",
   "File": "internal/runtime/runforkexecution/execution_test.go",
   "Function": "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority",
+  "Family": "native-run-setup-family144",
+  "PopulationSize": 893,
+  "PopulationSHA256": "51ea18af3ea1d7f838670c826d11b6d074f946fbec108acfda90ca50a428c5b7",
+  "RecipeIndex": 785,
+  "FrozenBeforeSHA256": "0095c88157da39be35aba627ff3991757f724e15a0d0c95b3843670d92b05c1f",
+  "FrozenAfterSHA256": "8bd9808550c6259b25b91fa5ac5fa8f102ea2706ed1dc538a7c73d580258368f",
   "BeforeSHA256": "1c028407640323f18259955a47d357a75ac8a6cb5ceddec8632b38fbc7fe7279",
   "AfterSHA256": "606fead6ef4ab22b5c95df3e0512a5151705c5767573d973d2e9f6081e9972d8"
 }
