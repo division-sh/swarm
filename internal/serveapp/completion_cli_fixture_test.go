@@ -12,12 +12,12 @@ import (
 	"testing"
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 const completion2270InvocationFile = "swarm-completion-2270-business.jsonl"
@@ -229,24 +229,16 @@ func validateCompletion2270SingleInvocation(rows []completion2270Invocation, att
 	return nil
 }
 
-func completion2270NativeBackend(t *testing.T, rt servedControlProofRuntime) claudeAttemptProofBackend {
-	t.Helper()
-	fact, err := correlation.NewSourceArtifactFact(rt.BundleHash)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return claudeAttemptProofBackend{name: rt.Backend, db: rt.DB, source: fact}
-}
-
-func requireCompletion2270NoBusinessStartup(t *testing.T, rt servedControlProofRuntime, proof *completion2270InvocationProof) {
+func requireCompletion2270NoBusinessStartup(t *testing.T, selected effects.Store, proof *completion2270InvocationProof) {
 	t.Helper()
 	evidence, err := proof.read(context.Background())
-	if err != nil || len(evidence) != 0 || len(loadClaudeAttemptProofAttempts(t, completion2270NativeBackend(t, rt))) != 0 {
-		t.Fatalf("startup probe gained business completion evidence: invocations=%+v err=%v", evidence, err)
+	attempts, readErr := storetest.ReadCompletionAttemptStorage(context.Background(), selected, "claude_cli", "")
+	if err != nil || readErr != nil || len(evidence) != 0 || len(attempts) != 0 {
+		t.Fatalf("startup probe gained business completion evidence: invocations=%+v attempts=%+v err=%v read_err=%v", evidence, attempts, err, readErr)
 	}
 }
 
-func requireCompletion2270BusinessInvocation(t *testing.T, rt servedControlProofRuntime, profile string, calls *atomic.Int32, proof *completion2270InvocationProof, expectedAttempt string) string {
+func requireCompletion2270BusinessInvocation(t *testing.T, selected effects.Store, profile string, calls *atomic.Int32, proof *completion2270InvocationProof, expectedAttempt string) string {
 	t.Helper()
 	if profile != llmselection.BackendClaudeCLI {
 		if calls.Load() != 1 {
@@ -254,21 +246,23 @@ func requireCompletion2270BusinessInvocation(t *testing.T, rt servedControlProof
 		}
 		return ""
 	}
-	backend := completion2270NativeBackend(t, rt)
-	attempts := loadClaudeAttemptProofAttempts(t, backend)
-	if len(attempts) != 1 || attempts[0].state != string(effects.StateSettled) || (expectedAttempt != "" && attempts[0].id != expectedAttempt) {
+	attempts, err := storetest.ReadCompletionAttemptStorage(context.Background(), selected, "claude_cli", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 1 || attempts[0].State != string(effects.StateSettled) || attempts[0].Kind != string(effects.KindProviderTurn) || (expectedAttempt != "" && attempts[0].AttemptID != expectedAttempt) {
 		t.Fatalf("CLI native business attempts=%+v, expected=%s", attempts, expectedAttempt)
 	}
 	evidence, err := proof.read(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validateCompletion2270SingleInvocation(evidence, attempts[0].id); err != nil {
+	if err := validateCompletion2270SingleInvocation(evidence, attempts[0].AttemptID); err != nil {
 		t.Fatal(err)
 	}
-	turns, spend := loadClaudeAttemptProofCompletionRows(t, backend, attempts[0].id)
-	if turns != 1 || spend != 1 {
-		t.Fatalf("CLI attempt %s targets/spend=%d/%d, want one each", attempts[0].id, turns, spend)
+	row := attempts[0]
+	if row.OperationID == "" || row.TargetKind != string(effects.UsageTargetAgentTurn) || len(row.Targets) != 1 || row.Targets[0].TargetID != row.TargetID || row.Targets[0].AttemptID != row.AttemptID || len(row.Spend) != 1 || row.Spend[0].LedgerID == "" || row.Spend[0].AttemptID != row.AttemptID || row.Spend[0].Evidence.Request.RequestedModel != "request-A" {
+		t.Fatalf("CLI attempt lost exact operation/target/spend evidence: %+v", row)
 	}
-	return attempts[0].id
+	return row.AttemptID
 }

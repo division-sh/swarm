@@ -59,12 +59,13 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 							t.Skip("Docker-backed served CLI protocol proof; a skip earns no qualification credit")
 						}
 					}
-					var rt servedControlProofRuntime
+					var rt completion2270ServedProof
 					var invocationProof completion2270InvocationProof
 					var selected *selectedStoreOwner
 					priorCapabilities := buildSelectedAPICapabilities
 					buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
 						selected = owner
+						rt.Selected = owner
 						if profileID == llmselection.BackendClaudeCLI {
 							var err error
 							req, err = completion2270ObserveSelectedWorkspace(req, &invocationProof)
@@ -105,12 +106,10 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 						stubServeRuntimeWorkspaceLifecycle(t)
 						rt.Backend = "sqlite"
 						storeConfig = fmt.Sprintf("store:\n  backend: sqlite\n  sqlite:\n    path: %s\n", filepath.Join(t.TempDir(), "store.db"))
-						captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
-							rt.DB, rt.Postgres, rt.SQLite = selectedRuntimeStoreForTest(t, p)
-						})
 					} else {
 						rt.Backend = "postgres"
-						_, rt.DB, rt.Postgres = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+						configureCompletion2270PostgresFixture(t)
+						stubServeRuntimeWorkspaceLifecycle(t)
 						opts.StoreMode, opts.StoreModeSet = "postgres", true
 					}
 					text := fmt.Sprintf("runtime:\n  recovery_on_startup: false\n%sllm:\n  backend: %s\n  models:\n    regular:\n      %s: request-A\n  openai_compatible:\n    base_url: http://completion-2270.test\n  openai_responses:\n    base_url: http://completion-2270.test\n  session:\n    lock_ttl: 10s\n    rotate_after_turns: 40\n    rotate_on_parse_failures: 3\n", storeConfig, profileID, profileID)
@@ -161,9 +160,11 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 					previous := http.DefaultTransport
 					http.DefaultTransport = completion2270Transport{t: t, profile: profileID, requests: &requests, base: previous}
 					t.Cleanup(func() { http.DefaultTransport = previous })
-					rt.Endpoint, rt.Runtime = startServedEventPublishFollowUpRuntime(t, opts)
+					endpoint, runtime := startServedEventPublishFollowUpRuntime(t, opts)
+					rt.Endpoint = endpoint
+					rt.AuthorContext = servedRuntimeProofAuthorActivityContext(t, runtime, rt.BundleHash)
 					if profileID == llmselection.BackendClaudeCLI {
-						requireCompletion2270NoBusinessStartup(t, rt, &invocationProof)
+						requireCompletion2270NoBusinessStartup(t, rt.Selected.Effects(), &invocationProof)
 					}
 					if kind == "selected" {
 						proveCompletion2270ServedSelected(t, rt, selected, profileID, &requests, &invocationProof)
@@ -176,10 +177,10 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 	}
 }
 
-func proveCompletion2270ServedOrdinary(t *testing.T, rt servedControlProofRuntime, profileID, wantObserved string, requests *atomic.Int32, proof *completion2270InvocationProof) {
+func proveCompletion2270ServedOrdinary(t *testing.T, rt completion2270ServedProof, profileID, wantObserved string, requests *atomic.Int32, proof *completion2270InvocationProof) {
 	t.Helper()
-	runID, eventID, _ := createServedControlWaitingRun(t, rt, "completion-2270-"+uuid.NewString())
-	publishServedLiveAgentHoldEvent(t, rt, runID, eventID, "completion-2270")
+	runID, eventID := createCompletion2270WaitingRun(t, rt)
+	publishCompletion2270BusinessEvent(t, rt, runID, eventID)
 	var conversations operatorread.OperatorConversationListResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.list", map[string]any{"run_id": runID, "agent_id": "load-agent"}, &conversations)
 	if len(conversations.Conversations) != 1 {
@@ -202,15 +203,12 @@ func proveCompletion2270ServedOrdinary(t *testing.T, rt servedControlProofRuntim
 	if len(usage.Breakdown) != 1 || usage.Usage.Exact.LedgerEntries != 1 || usage.Usage.Exact.InputTokens != 12 || usage.Breakdown[0].ResolvedModel != wantObserved || usage.Breakdown[0].CompletionEvidence.Request.RequestedModel != "request-A" {
 		t.Fatalf("served spend lost exact request/report separation: %+v", usage)
 	}
-	requireCompletion2270BusinessInvocation(t, rt, profileID, requests, proof, "")
+	requireCompletion2270BusinessInvocation(t, rt.Selected.Effects(), profileID, requests, proof, "")
 }
 
-func proveCompletion2270ServedAgentHistory(t *testing.T, rt servedControlProofRuntime, runID string, want operatorread.OperatorPublicConversationTurn) {
+func proveCompletion2270ServedAgentHistory(t *testing.T, rt completion2270ServedProof, runID string, want operatorread.OperatorPublicConversationTurn) {
 	t.Helper()
-	var reads operatorread.AgentReader = rt.SQLite
-	if rt.Postgres != nil {
-		reads = rt.Postgres
-	}
+	reads := rt.Selected.Agents()
 	identity, err := reads.ResolveOperatorAgentIdentity(context.Background(), runID, "load-agent", "")
 	if err != nil {
 		t.Fatal(err)
@@ -238,7 +236,7 @@ func proveCompletion2270ServedAgentHistory(t *testing.T, rt servedControlProofRu
 	}
 }
 
-func proveCompletion2270ServedSelected(t *testing.T, rt servedControlProofRuntime, selected *selectedStoreOwner, profileID string, calls *atomic.Int32, proof *completion2270InvocationProof) {
+func proveCompletion2270ServedSelected(t *testing.T, rt completion2270ServedProof, selected *selectedStoreOwner, profileID string, calls *atomic.Int32, proof *completion2270InvocationProof) {
 	t.Helper()
 	owner := selected.RuntimeDeps().EventStore
 	workspaceProof := servedWorkspaceProofRuntime{Events: owner}
@@ -252,7 +250,7 @@ func proveCompletion2270ServedSelected(t *testing.T, rt servedControlProofRuntim
 	parent := readWorkspaceProofSourceDomain(t, owner, seed.RunID)
 	root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 	writeSelectedForkAgentProofFixture(t, root, "selected observer", "[work.ready]", "Observe the admitted selected frontier.", "return {'text': 'observed', 'usage': {'input_tokens': 1, 'output_tokens': 1}}")
-	fact, err := prepareServeSourceArtifact(servedControlProofAuthorActivityContext(t, rt), selected.SourceArtifactWriter(), loadWorkflowValidationBundleAt(t, root))
+	fact, err := prepareServeSourceArtifact(rt.AuthorContext, selected.SourceArtifactWriter(), loadWorkflowValidationBundleAt(t, root))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,10 +279,10 @@ func proveCompletion2270ServedSelected(t *testing.T, rt servedControlProofRuntim
 	if len(usage.Breakdown) != 1 || usage.Usage.Exact.LedgerEntries != 1 || usage.Usage.Exact.InputTokens != 12 || usage.Usage.Exact.OutputTokens != 3 {
 		t.Fatalf("served-selected spend: %+v", usage)
 	}
-	attemptID := requireCompletion2270BusinessInvocation(t, rt, profileID, calls, proof, "")
+	attemptID := requireCompletion2270BusinessInvocation(t, rt.Selected.Effects(), profileID, calls, proof, "")
 	var replay apiv1.RunForkExecutionResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-	requireCompletion2270BusinessInvocation(t, rt, profileID, calls, proof, attemptID)
+	requireCompletion2270BusinessInvocation(t, rt.Selected.Effects(), profileID, calls, proof, attemptID)
 	if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(parent, readWorkspaceProofSourceDomain(t, owner, seed.RunID)) {
 		t.Fatal("served-selected replay changed parent evidence or repeated the provider effect")
 	}
