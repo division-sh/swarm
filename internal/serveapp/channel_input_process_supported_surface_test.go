@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -139,7 +140,11 @@ func proveChannelInputAuthorityRestart(t *testing.T, backend servedparity.Backen
 		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, occurrence), "chooser")
 	}
 	var decisions int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name='mailbox.card_decided'`).Scan(&decisions); err != nil || decisions != 0 {
+	if err := func() error {
+		var err error
+		decisions, err = channelAnchorStorageObservation(t, h).CountEventNameStorage(context.Background(), "mailbox.card_decided")
+		return err
+	}(); err != nil || decisions != 0 {
 		t.Fatalf("obsolete authority decided a card: %d %v", decisions, err)
 	}
 	closeObjectIntentObservation(t, p)

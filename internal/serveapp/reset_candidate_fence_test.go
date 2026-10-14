@@ -371,7 +371,11 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 					t.Fatalf("MCP admitted while second candidate blocked: %d", recorder.Code)
 				}
 				var bootEvents int
-				if err := selectedStoreDatabaseForTest(t, stores).QueryRow("SELECT COUNT(*) FROM events WHERE event_name = 'platform.boot'").Scan(&bootEvents); err != nil || bootEvents != 0 {
+				if err := func() error {
+					var err error
+					bootEvents, err = readServedGlobalEventNameCount(context.Background(), requireReceiverProofStateReader(t, stores.RuntimeDeps().EventStore), "platform.boot")
+					return err
+				}(); err != nil || bootEvents != 0 {
 					t.Fatalf("autonomous boot escaped: %d, %v", bootEvents, err)
 				}
 				if failSecond {

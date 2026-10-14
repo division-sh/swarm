@@ -19,6 +19,7 @@ type ChannelAnchorDecisionStorage = private.ChannelAnchorDecisionStorage
 type StandingFlowStorage = private.StandingFlowStorage
 
 type ChannelAnchorObservation interface {
+	CountEventNameStorage(context.Context, string) (int, error)
 	CountRunNamedEventStorage(context.Context, string, string) (int, error)
 	ReadChannelAnchorCardsStorage(context.Context, string, string, string) ([]ChannelAnchorCardStorage, error)
 	ReadChannelAnchorDecisionStorage(context.Context, string) (ChannelAnchorDecisionStorage, error)
@@ -39,6 +40,19 @@ func OpenChannelObservation(backend, location string) (ChannelObservation, error
 }
 
 func (o channelObservation) Close() error { return o.selected.Close() }
+
+func (o channelObservation) CountEventNameStorage(ctx context.Context, eventName string) (int, error) {
+	var count int
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		count, err = private.CountEventNameStorageForTest(ctx, o.selected, eventName)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
 
 func (o channelObservation) CountRunNamedEventStorage(ctx context.Context, runID, eventName string) (int, error) {
 	var count int

@@ -110,8 +110,10 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
 				WorkspaceBackend: "host", WorkspaceBackendSet: true, StoreMode: backend, StoreModeSet: true}
 			var db *sql.DB
+			var observationLocation string
 			if backend == "sqlite" {
 				path := filepath.Join(t.TempDir(), "dormant-ingress.sqlite")
+				observationLocation = path
 				var err error
 				db, err = sql.Open("sqlite", path)
 				if err != nil {
@@ -123,6 +125,7 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 				dsn, opened, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
 				db = opened
+				observationLocation = dsn
 				opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 			}
 			enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
@@ -189,6 +192,7 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 				return gotRun, gotGeneration
 			}
 			process, endpoint := start()
+			nameReader := openChannelAnchorStorageAtLocation(t, backend, observationLocation)
 			assertDormant(process, endpoint)
 			for _, table := range []string{"standing_services", "standing_service_generations", "standing_service_journal"} {
 				var count int
@@ -228,7 +232,11 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 				t.Fatalf("exact duplicate response = %d/%#v/%v", duplicate.StatusCode, receipt, decodeErr)
 			}
 			var published int
-			if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram'`).Scan(&published); err != nil || published != 1 {
+			if err := func() error {
+				var err error
+				published, err = nameReader.CountEventNameStorage(context.Background(), "inbound.telegram")
+				return err
+			}(); err != nil || published != 1 {
 				t.Fatalf("signed raw event dedupe = %d, %v", published, err)
 			}
 			var serviceID string

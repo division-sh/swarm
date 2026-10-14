@@ -303,7 +303,11 @@ func proveObjectChannelChooserRestart(t *testing.T, h *channelOnboardingE2EHarne
 	postObjectChannelFact(t, p, "obsolete-choice", map[string]any{"token": selected, "cursor": "obsolete-choice", "message": map[string]any{"id": receipt}})
 	waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, "obsolete-choice"), "stale", "rejected")
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name='mailbox.card_decided'`).Scan(&count); err != nil || count != 1 {
+	if err := func() error {
+		var err error
+		count, err = channelAnchorStorageObservation(t, h).CountEventNameStorage(context.Background(), "mailbox.card_decided")
+		return err
+	}(); err != nil || count != 1 {
 		t.Fatalf("duplicate/restart changed chooser completion cardinality: %d %v", count, err)
 	}
 }
@@ -401,7 +405,11 @@ func proveObjectChannelLostPrompt(t *testing.T, h *channelOnboardingE2EHarness, 
 	if err := db.QueryRow(`SELECT COUNT(*),SUM(CASE WHEN state='uncertain' THEN 1 ELSE 0 END) FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1`, card).Scan(&copies, &uncertain); err != nil || copies != 2 || uncertain != 1 {
 		t.Fatalf("prompt recovery changed predecessor truth: %d/%d %v", copies, uncertain, err)
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE event_name='mailbox.card_decided'`).Scan(&decisions); err != nil || decisions != 1 {
+	if err := func() error {
+		var err error
+		decisions, err = channelAnchorStorageObservation(t, h).CountEventNameStorage(context.Background(), "mailbox.card_decided")
+		return err
+	}(); err != nil || decisions != 1 {
 		t.Fatalf("uncertain prompt or fresh answer repeated completion: %d %v", decisions, err)
 	}
 }
