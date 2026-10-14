@@ -15569,6 +15569,7 @@
               },
               "status": {
                 "enum": [
+                  "preparing",
                   "not_started",
                   "awaiting_qr",
                   "qr_expired",
