@@ -251,6 +251,7 @@ func approvedResultSchemaRuntimeMethods() []string {
 	out = append(out, approvedPermanentOperationHTTPRuntimeMethods()...)
 	out = append(out, approvedWebSocketRuntimeMethods()...)
 	out = append(out,
+		"channel.logout",
 		"channel.onboarding_start",
 		"channel.onboarding_retry",
 		"channel.confirm",
@@ -424,6 +425,14 @@ func successfulOperatorChannelRuntimeResult(methodName string) any {
 	if methodName == "channel.list" {
 		return map[string]any{"principal_id": "00000000-0000-0000-0000-000000000801", "channels": []any{}}
 	}
+	if methodName == "channel.logout" {
+		return map[string]any{"operation_id": "00000000-0000-4000-8000-000000000806", "expected_revision": 7,
+			"effect_operation_id": "00000000-0000-4000-8000-000000000809",
+			"teardown": map[string]any{"teardown_id": "00000000-0000-4000-8000-000000000808", "kind": "logout",
+				"principal_id": "00000000-0000-4000-8000-000000000801", "scope": map[string]any{"interface": identity},
+				"phase": "succeeded", "revision": 3, "retired_operations": 1, "retired_activations": 1,
+				"requested_at": "2026-10-10T12:00:00Z", "updated_at": "2026-10-10T12:00:01Z"}}
+	}
 	if strings.HasPrefix(methodName, "channel.onboarding_") {
 		coordinate := map[string]any{
 			"bundle_hash":     "bundle-v2:sha256:" + strings.Repeat("a", 64),
@@ -453,6 +462,9 @@ func successfulOperatorChannelRuntimeResult(methodName string) any {
 			},
 			"activation_posture": "webhook_registration", "identity_ceremony": "authenticated_text_challenge",
 			"provider_credential_role": "bot_token", "signing_credential_role": "signing_secret", "confirmation_operation": "send_message",
+		}
+		if methodName == "channel.onboarding_select" {
+			return map[string]any{"candidate": candidate, "selection_fence": "selected-declaration"}
 		}
 		return map[string]any{"operation": operation, "candidate": candidate}
 	}
