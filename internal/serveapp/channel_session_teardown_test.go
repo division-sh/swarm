@@ -198,7 +198,7 @@ func TestServeSessionTeardownWaitsForOriginalConstructionBothStores(t *testing.T
 				return nil, nil, processbinding.Binding{}, nil, cause
 			}
 			result := make(chan error, 1)
-			go func() { result <- f.adapter.BootstrapSession(f.ctx, f.op, f.candidate) }()
+			go func() { result <- awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false) }()
 			<-entered
 			if _, err := f.adapter.store.AdvanceChannelOnboarding(f.ctx, channelonboarding.AdvanceRequest{
 				OperationID: f.op.OperationID, ExpectedRevision: f.op.Revision, Phase: channelonboarding.PhaseFailed,
@@ -250,7 +250,7 @@ func TestServeSessionTeardownKeepsCurrentSuccessorBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := f.adapter.BootstrapSession(f.ctx, successor, f.candidate); err != nil {
+			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, successor, f.candidate, false); err != nil {
 				t.Fatal(err)
 			}
 			current := f.adapter.connection(id)
