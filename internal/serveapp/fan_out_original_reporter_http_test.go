@@ -397,7 +397,11 @@ func waitIssue2394ReporterCursor(t *testing.T, rt servedControlProofRuntime, run
 		if err := rt.DB.QueryRowContext(ctx, `SELECT COALESCE(SUM(cardinality),0),COALESCE(SUM(cursor),0),COALESCE(SUM(CASE WHEN status IN ('open','blocked') THEN cardinality-cursor ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&cardinality, &cursor, &owed, &blocked); err != nil {
 			t.Fatal(err)
 		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'`, runID).Scan(&dead); err != nil {
+		if err := func() error {
+			var err error
+			dead, err = readServedRunDeadLetterCount(ctx, rt.ReceiverStateReader, runID)
+			return err
+		}(); err != nil {
 			t.Fatal(err)
 		}
 		if dead != 0 || blocked != 0 || cursor > expected || cardinality > expected {
@@ -444,7 +448,11 @@ func waitIssue2394ReporterDiagnosisWithin(t *testing.T, rt servedControlProofRun
 				issue2394ReporterRPC(t, rt, "run.diagnose", map[string]any{"run_id": runID}, &result)
 				lastReadinessProbe = time.Now()
 				var stillUnsettled int
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status NOT IN ('delivered','dead_letter')`, runID).Scan(&stillUnsettled); err != nil {
+				if err := func() error {
+					var err error
+					stillUnsettled, err = readServedRunNonterminalDeliveryCount(context.Background(), rt.ReceiverStateReader, runID)
+					return err
+				}(); err != nil {
 					t.Fatal(err)
 				}
 				if stillUnsettled != 0 && result.TestQuiescence != nil && cliapp.BoolPointerValue(result.TestQuiescence.Ready) {

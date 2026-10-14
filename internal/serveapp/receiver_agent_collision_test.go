@@ -102,7 +102,11 @@ func requireServedReceiverAgentCollision(t *testing.T, rt servedControlProofRunt
 		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM agent_turns WHERE run_id=$1 AND execution_mode='live' AND parse_ok=TRUE`, runID).Scan(&completed); err != nil {
 			t.Fatal(err)
 		}
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'`, runID).Scan(&failed); err != nil {
+		if err := func() error {
+			var err error
+			failed, err = readServedRunDeadLetterCount(context.Background(), rt.ReceiverStateReader, runID)
+			return err
+		}(); err != nil {
 			t.Fatal(err)
 		}
 		if failed != 0 {

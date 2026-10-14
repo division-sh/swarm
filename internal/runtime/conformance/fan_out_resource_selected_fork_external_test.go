@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -402,10 +403,18 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				}
 				if stage.name == "settled" {
 					var failed, pending int
-					if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='dead_letter'`, childID).Scan(&failed); err != nil {
+					if err := func() error {
+						var err error
+						failed, err = storetest.CountRunDeadLetterDeliveries(f.ctx, f.selected, childID)
+						return err
+					}(); err != nil {
 						t.Fatal(err)
 					}
-					if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','in_progress')`, childID).Scan(&pending); err != nil {
+					if err := func() error {
+						var err error
+						pending, err = storetest.CountDeploymentPendingDeliveriesStorage(f.ctx, f.selected, childID)
+						return err
+					}(); err != nil {
 						t.Fatal(err)
 					}
 					if failed != 0 || pending != 0 {
@@ -438,7 +447,11 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 				if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, childID).Scan(&feedCount); err != nil {
 					t.Fatal(err)
 				}
-				if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`, childID).Scan(&deliveryCount); err != nil {
+				if err := func() error {
+					var err error
+					deliveryCount, err = storetest.CountRunDeliveryStorage(f.ctx, f.selected, childID)
+					return err
+				}(); err != nil {
 					t.Fatal(err)
 				}
 				t.Logf("R5 %s recovered feed=%d deliveries=%d", stage.name, feedCount, deliveryCount)
