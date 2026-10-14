@@ -12,6 +12,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/store/eventfixture"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
@@ -413,6 +414,28 @@ func CommitSemanticForkFrontierForTest(ctx context.Context, selected any, admitt
 		return false, fmt.Errorf("semantic fork frontier fixture requires the original PostgreSQL owner, got %T", selected)
 	}
 	return commitSelectedSemanticEventFixtureForTest(ctx, selected, admitted, settlement, routes, scope, disposition, true, true)
+}
+
+// InsertRevisionedExistingRunRootEventForTest keeps event admission and revision
+// capture on the original native store, without handing callers SQL authority.
+func InsertRevisionedExistingRunRootEventForTest(ctx context.Context, selected any, eventID, runID string,
+	eventType events.EventType, producer events.ProducerIdentity, payload []byte,
+	envelope events.EventEnvelope, createdAt time.Time,
+) (events.Event, error) {
+	dialect, err := eventFixtureDialectForTest(selected)
+	if err != nil {
+		return events.Event{}, err
+	}
+	var event events.Event
+	err = runEventFixtureMutationForTest(ctx, selected, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
+		var err error
+		event, err = eventfixture.ExistingRunRoot(txctx, attempt, dialect, eventID, runID, eventType, producer, payload, envelope, createdAt)
+		return err
+	})
+	if err != nil {
+		return events.Event{}, err
+	}
+	return event, nil
 }
 
 func eventFixtureDialectForTest(selected any) (authoractivityfixture.Dialect, error) {
