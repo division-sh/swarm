@@ -71,7 +71,7 @@ func recoverUnlaunchedLogout(ctx context.Context, r runner, id string, revision 
 }
 
 func logoutOriginalWithdrawnWithoutAuthorizationTx(ctx context.Context, tx *sql.Tx, d dialect, op domain.TeardownOperation) (bool, error) {
-	withdrawn, err := startupowner.RuntimeAuthorityWithdrawnTx(ctx, tx, op.Logout.Coordinate.RuntimeInstanceID, d == dialectSQLite)
+	withdrawn, err := startupowner.RuntimeAuthorityWithdrawnTx(ctx, tx, op.Logout.ProcessStamp, d == dialectSQLite)
 	if err != nil || !withdrawn {
 		return false, err
 	}

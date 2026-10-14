@@ -20,15 +20,18 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/sourceartifact"
@@ -58,6 +61,7 @@ type serveBootstrapTestFixture struct {
 	candidate  channelonboarding.Candidate
 	principal  operatorchannel.Principal
 	selections atomic.Int64
+	binding    processbinding.Binding
 }
 
 func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapTestFixture {
@@ -137,13 +141,52 @@ func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapT
 		t.Fatal(err)
 	}
 	f := &serveBootstrapTestFixture{ctx: ctx, owned: owned, owner: owner, op: op, candidate: candidate, principal: principal}
+	grant := admitServeSessionProcessFixture(t, selected.(startupownership.Store), op.Coordinate.RuntimeInstanceID, op.Coordinate.BundleHash)
+	f.binding, err = grant.ProcessExecutionBinding()
+	if err != nil {
+		t.Fatal(err)
+	}
 	f.adapter = &serveSessionBootstrap{connections: make(map[string]*serveSessionBootstrapAttempt),
 		store: selected, credentials: current, directory: directory,
-		selectRuntime: func(context.Context, channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error) {
+		selectRuntime: func(context.Context, channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error) {
 			f.selections.Add(1)
-			return owned, nil, func() error { return nil }, nil
+			return owned, nil, f.binding, func() error { return nil }, nil
 		}}
 	return f
+}
+
+func admitServeSessionProcessFixture(t *testing.T, selected startupownership.Store, runtimeID, bundleHash string) startupownership.LiveGenerationGrant {
+	t.Helper()
+	ctx := context.Background()
+	process, err := selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+		OwnerID: "serve-session-process-fixture", BootID: uuid.NewString(), RuntimeInstanceID: runtimeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := process.Release(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: bundleHash}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := process.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+		t.Fatal(err)
+	}
+	grant, err := process.IssueGenerationGrant(ctx, startupownership.GrantRequest{
+		BundleHash: bundleHash, RuntimeInstanceID: runtimeID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grant.AdmitExecution(ctx); err != nil {
+		t.Fatal(err)
+	}
+	return grant
 }
 
 // Only the SDK's external TLS/Noise peer is supplied. The actual production
@@ -267,10 +310,10 @@ func TestServeSessionBootstrapCanceledAttemptCacheBothStores(t *testing.T) {
 			caller, cancel := context.WithCancel(f.ctx)
 			defer cancel()
 			selectRuntime := f.adapter.selectRuntime
-			f.adapter.selectRuntime = func(ctx context.Context, candidate channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error) {
-				owned, incoming, release, err := selectRuntime(ctx, candidate)
+			f.adapter.selectRuntime = func(ctx context.Context, candidate channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error) {
+				owned, incoming, binding, release, err := selectRuntime(ctx, candidate)
 				cancel()
-				return owned, incoming, release, err
+				return owned, incoming, binding, release, err
 			}
 			if err := f.adapter.BootstrapSession(caller, f.op, f.candidate); !errors.Is(err, context.Canceled) {
 				t.Fatal("canceled handoff succeeded", err)
@@ -333,9 +376,9 @@ func TestServeSessionBootstrapInstallsIncomingOwnersBothStores(t *testing.T) {
 				if mode == "missing_bus" {
 					incoming.Bus = nil
 				}
-				f.adapter.selectRuntime = func(context.Context, channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error) {
+				f.adapter.selectRuntime = func(context.Context, channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error) {
 					f.selections.Add(1)
-					return f.owned, incoming, func() error { return nil }, nil
+					return f.owned, incoming, f.binding, func() error { return nil }, nil
 				}
 				if mode == "installed" {
 					serveBootstrapWireFixture(t, "healthy", f.owner)
