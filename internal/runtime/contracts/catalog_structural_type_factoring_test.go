@@ -5,14 +5,16 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
-// Only D-independent laws are characterized here. Alternate-list spelling,
-// decoder precedence and production factoring remain held until #2648 merges.
+// C01-C19 characterize the distinct laws of the complete factoring family.
 func TestCatalogStructuralTypeFactoring(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -39,6 +41,123 @@ func TestCatalogStructuralTypeFactoring(t *testing.T) {
 		{"C19_ResolveExecutableNodeEventFieldType", catalogFactoringNodeField},
 	} {
 		t.Run(tc.name, tc.run)
+	}
+}
+
+func TestCatalogStructuralTypeFactoringPostDPrecedence(t *testing.T) {
+	catalog := catalogFactoringCatalog()
+	catalog.Scalars["Retired"] = ScalarTypeDecl{Base: "list<text>"}
+	for _, ref := range []string{"list", "list<text>", "[list<text>]", "map[integer]list<Missing>", "map[Missing]list<text>", "Retired"} {
+		t.Run("retirement_before_nested_resolution/"+ref, func(t *testing.T) {
+			input := CatalogTypeReference{Type: ref, Catalog: catalog}
+			for name, resolve := range map[string]func() (ResolvedCatalogType, error){
+				"Resolve": input.Resolve,
+				"ResolveReference": func() (ResolvedCatalogType, error) {
+					return (CatalogTypeReference{Type: "Missing", Catalog: catalog}).ResolveReference(" " + ref + " ")
+				},
+				"ResolveMapKey": input.ResolveMapKey,
+			} {
+				t.Run(name, func(t *testing.T) {
+					resolved, err := resolve()
+					retired := ref
+					if ref == "Retired" {
+						retired = "list<text>"
+					}
+					want := ErrInvalidField.Error() + ": catalog type list type " + strconv.Quote(retired) + " is not supported; use [T]"
+					if err == nil || err.Error() != want || !errors.Is(err, ErrInvalidField) || !reflect.DeepEqual(resolved, ResolvedCatalogType{}) {
+						t.Fatalf("ordered retirement refusal = %#v / %v, want %q", resolved, err, want)
+					}
+				})
+			}
+			if input.Empty() || input.ComparableDomain() != "" {
+				t.Fatal("a supplied retired reference obtained omission or domain credit")
+			}
+		})
+	}
+	for _, tc := range []struct{ ref, problem string }{
+		{"text[]", `type reference "text[]" is retired; use [text]`},
+		{"[]text", `type reference "[]text" is retired; use [text]`},
+		{"[text[]]", `type reference "text[]" is retired; use [text]`},
+		{"map[integer]text[]", `type reference "map[integer]text[]" is retired; use [map[integer]text]`},
+	} {
+		t.Run("B_spelling_gate/"+tc.ref, func(t *testing.T) {
+			_, err := (CatalogTypeReference{Type: tc.ref, Catalog: catalog}).Resolve()
+			catalogFactoringRefusal(t, err, tc.problem)
+		})
+	}
+	for _, surface := range []string{"types", "entities", "events", "nodes"} {
+		t.Run("source_decoder/"+surface, func(t *testing.T) {
+			decode := func(source string) (string, error) {
+				snapshot, err := yamlsource.Load([]byte("items: " + source + "\n"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				fields, err := snapshot.Document("post-d.yaml").Root().Mapping()
+				if err != nil || len(fields) != 1 {
+					t.Fatalf("source mapping: %v", err)
+				}
+				value := fields[0].Value
+				switch surface {
+				case "types":
+					field, err := projectTypeFieldSpec(value)
+					return field.Type, err
+				case "entities":
+					field, err := projectEntityFieldDecl(value)
+					return field.Type, err
+				case "events":
+					field, _, _, err := admitEventPayloadField(value)
+					return field.Type, err
+				case "nodes":
+					field, err := projectNodeStateFieldValue("items", value)
+					return field.Type, err
+				default:
+					t.Fatalf("unclassified surface %s", surface)
+					return "", nil
+				}
+			}
+			for _, source := range []string{"{type: Missing, of: null}", "{type: 'list<Missing>', of: null}"} {
+				_, err := decode(source)
+				if err == nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), `field "of"`) || !strings.Contains(err.Error(), "post-d.yaml:") || !strings.Contains(err.Error(), "[T]") {
+					t.Fatalf("long-form presence must win before reference admission: %s / %v", source, err)
+				}
+			}
+			for _, source := range []string{"'[text]'", "['text']"} {
+				if _, err := decode(source); err == nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "[T]") {
+					t.Fatalf("styled data became a bare declaration: %s / %v", source, err)
+				}
+			}
+			for _, source := range []string{"[text]", "\n  - text", "{type: '[text]'}"} {
+				if typeRef, err := decode(source); err != nil || typeRef != "[text]" {
+					t.Fatalf("canonical declaration = %s / %v", typeRef, err)
+				}
+			}
+		})
+	}
+	bundle := catalogFactoringScopedBundle(t)
+	for _, tc := range []struct {
+		flow string
+		want CatalogTypeKind
+	}{{".", CatalogTypeText}, {"child", CatalogTypeInteger}} {
+		t.Run("scoped_list/"+tc.flow, func(t *testing.T) {
+			ref, found := ResolveEventFieldType(bundle, tc.flow, "record.ready", "items")
+			if !found || ref.Type != "[Box]" {
+				t.Fatalf("declaring list field missing: %#v / %v", ref, found)
+			}
+			resolved := catalogFactoringResolved(t, ref.Type, ref.Catalog)
+			if resolved.Kind != CatalogTypeList || resolved.Element == nil {
+				t.Fatalf("declaring list shape lost: %#v", resolved)
+			}
+			field, found := resolved.Element.Field("value")
+			if !found || field.Type.Kind != tc.want {
+				t.Fatalf("list element chose the wrong declaring catalog: %#v / %v", field, found)
+			}
+			if tc.flow == "child" {
+				nodeRef, found := ResolveExecutableNodeEventFieldType(bundle, identitytest.ExecutableNode(t, "child", "consumer"), "record.ready", "items")
+				if !found || nodeRef.Type != "[Box]" || nodeRef.ComparableDomain() != ref.ComparableDomain() {
+					t.Fatalf("executable node lost the scoped list reference: %#v / %v", nodeRef, found)
+				}
+			}
+		})
 	}
 }
 
@@ -521,10 +640,10 @@ func catalogFactoringScopedBundle(t *testing.T) *WorkflowContractBundle {
 	for file, body := range map[string]string{
 		"schema.yaml":       "name: catalog-factoring\nstages: {done: {final: true}}\n",
 		"types.yaml":        "scalars: {Label: text}\ntypes:\n  Box:\n    value: Label\n",
-		"events.yaml":       "record.ready:\n  item: Box\n",
+		"events.yaml":       "record.ready:\n  item: Box\n  items: [Box]\n",
 		"child/schema.yaml": "name: child\nstages: {done: {final: true}}\n",
 		"child/types.yaml":  "scalars: {Label: integer}\n",
-		"child/events.yaml": "record.ready:\n  item: Box\n",
+		"child/events.yaml": "record.ready:\n  item: Box\n  items: [Box]\n",
 		"child/nodes.yaml":  "consumer:\n  execution_type: system_node\n  event_handlers:\n    record.ready: {}\n",
 	} {
 		writeFixtureFile(t, filepath.Join(root, file), body)
