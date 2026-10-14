@@ -114,7 +114,7 @@ func TestFanOutInstancePlanningReadinessGrantAndCancellationBeforeEffectsBothSto
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, change := range []string{"readiness_retired", "grant_retired", "cancelled"} {
 			t.Run(backend+"/"+change, func(t *testing.T) {
-				f, _, coordinator := newMixedExecutionFixture(t, backend, nil)
+				f, _, coordinator, agents := newMixedExecutionFixtureWithManager(t, backend, nil)
 				observations := captureFanOutPlanningScopes(t, f, coordinator.SemanticSource(), "producer")
 				producer := observations[0].Identity()
 				f.prepare(t)
@@ -138,6 +138,9 @@ func TestFanOutInstancePlanningReadinessGrantAndCancellationBeforeEffectsBothSto
 						t.Fatal(err)
 					}
 				case "grant_retired":
+					if err := agents.Shutdown(); err != nil {
+						t.Fatal(err)
+					}
 					if err := f.grant.Retire(f.ctx); err != nil {
 						t.Fatal(err)
 					}
