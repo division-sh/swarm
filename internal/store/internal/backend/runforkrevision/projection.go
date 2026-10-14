@@ -385,7 +385,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				d.subscriber_type, d.subscriber_id, d.agent_name_owner, d.agent_name_source, d.agent_route_presence,
 				d.agent_flow_scope_key, CAST(d.agent_flow_instance_id AS TEXT), d.agent_flow_instance_path,
 				d.delivery_target_route, d.delivery_context, d.delivery_payload_projection, d.connect_execution_claim, d.receiver_materialization_plan, d.status,
-				d.retry_count, d.max_retries, d.next_eligible_at, d.claim_version,
+				d.retry_count, d.max_retries, d.next_eligible_at, CASE WHEN d.settled_at IS NOT NULL THEN d.claim_version END,
 				d.reason_code, d.failure, CAST(current_attempt.active_session_id AS TEXT), d.started_at, d.settled_at, d.created_at,
 				CAST(s.delivery_id AS TEXT), s.selection_context, s.disposition, s.flow_path, s.declaration_family, s.semantic_path, s.display_label`,
 			source: `event_deliveries d
@@ -395,8 +395,11 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				"delivery_target_ownership": valueJSON, "delivery_context": valueJSON,
 				"delivery_payload_projection": valueJSON, "connect_execution_claim": valueJSON, "receiver_materialization_plan": valueJSON, "failure": valueJSON,
 				"next_eligible_at": valueTime, "started_at": valueTime, "settled_at": valueTime, "created_at": valueTime,
-			}, "delivery_id", "event_id", "run_id", "route_identity", "subscriber_type", "subscriber_id", "agent_name_owner", "agent_name_source", "agent_route_presence", "agent_flow_scope_key", "agent_flow_instance_id", "agent_flow_instance_path", "delivery_target_ownership", "delivery_context", "delivery_payload_projection", "connect_execution_claim", "receiver_materialization_plan", "status", "retry_count", "max_retries", "next_eligible_at", "claim_version", "reason_code", "failure", "active_session_id", "started_at", "settled_at", "created_at", "selection_delivery_id", "selection_context", "selection_disposition", "selection_flow_path", "selection_declaration_family", "selection_semantic_path", "selection_display_label"),
+			}, "delivery_id", "event_id", "run_id", "route_identity", "subscriber_type", "subscriber_id", "agent_name_owner", "agent_name_source", "agent_route_presence", "agent_flow_scope_key", "agent_flow_instance_id", "agent_flow_instance_path", "delivery_target_ownership", "delivery_context", "delivery_payload_projection", "connect_execution_claim", "receiver_materialization_plan", "status", "retry_count", "max_retries", "next_eligible_at", "settled_claim_version", "reason_code", "failure", "active_session_id", "started_at", "settled_at", "created_at", "selection_delivery_id", "selection_context", "selection_disposition", "selection_flow_path", "selection_declaration_family", "selection_semantic_path", "selection_display_label"),
 			build: func(values map[string]any) map[string]any {
+				if values["settled_claim_version"] == nil {
+					delete(values, "settled_claim_version")
+				}
 				selection := map[string]any{"kind": "absent"}
 				if values["selection_delivery_id"] != nil {
 					fact := map[string]any{}
