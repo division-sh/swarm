@@ -126,7 +126,7 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 							settings.WorkspaceImage, settings.SourceProjection = image, projection
 							manager.SetConfig(settings)
 							manager.SetSemanticSource(source)
-							return manager, nil
+							return &completion2270ObservedWorkspace{DockerManager: manager, proof: &invocationProof}, nil
 						}
 						t.Cleanup(func() { cliapp.ConfiguredWorkspaceLifecycleForServe = previous })
 					} else {
