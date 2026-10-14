@@ -40,6 +40,20 @@ func VerifyReceiverConfigAndRuntimeControlsRoundTripBothStoresForTest(t *testing
 				ParentFlowID: "parent", ParentFlowInstance: "parent/one", ParentEntityID: uuid.NewString(),
 				TransitionHistory: []WorkflowTransitionRecord{lifecycleTransitionRecordFixtureForTest(t, "review", "queued", "active", "evt-1", now)},
 			})
+			// The component's captured parent is a real construction prerequisite,
+			// not a parent inferred from the child's deliberately different path.
+			parent := materializedWorkflowInstanceForTest(WorkflowInstance{
+				StorageRef: instance.ParentFlowInstance, EntityID: instance.ParentEntityID,
+				WorkflowName: instance.ParentFlowID, WorkflowVersion: instance.WorkflowVersion,
+				CurrentState: "active", Status: "active", CreatedAt: now, EnteredStageAt: now,
+			})
+			if err := fixture.Construct(ctx, parent); err != nil {
+				t.Fatalf("construct exact config parent: %v", err)
+			}
+			loadedParent, found, err := store.Load(ctx, testRunScopedWorkflowInstance(parent.StorageRef))
+			if err != nil || !found || loadedParent.EntityID != instance.ParentEntityID || loadedParent.WorkflowName != instance.ParentFlowID || loadedParent.StorageRef != instance.ParentFlowInstance {
+				t.Fatalf("config parent construction: parent=%+v found=%t err=%v", loadedParent, found, err)
+			}
 			if err := fixture.Construct(ctx, instance); err != nil {
 				t.Fatal(err)
 			}
