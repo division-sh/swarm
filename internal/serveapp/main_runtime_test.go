@@ -1950,12 +1950,14 @@ func startServedConversationForkProofRuntime(t *testing.T, backend servedparity.
 		opts.MCPListenAddr = "127.0.0.1:0"
 		opts.SelfCheck = true
 		opts.Verbose = true
+		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
+		opts.TestLifecycleProbe = probe
 		opts.TestLLMRuntime = servedOpenAICompatibleNoopLLMRuntime{}
 		endpoint, rt := startServedEventPublishFollowUpRuntime(t, opts)
 		if servedDB == nil {
 			t.Fatal("served conversation fork SQLDB is required")
 		}
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader,
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Probe: probe,
 			Endpoint: endpoint, DB: servedDB, BundleHash: servedEventPublishFixtureBundleHash(t, sourceRoot), Runtime: rt,
 			Postgres: servedPostgres, SQLite: servedSQLite,
 		}
@@ -2034,6 +2036,8 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	if !initial.NewRunCreated || initial.RunID == "" {
 		t.Fatalf("%s conversation fork source run = %#v", rt.Backend, initial)
 	}
+	// Empty delivery queues do not join committed source-agent activation.
+	rt.Probe.RequireEventPersisted(initial.EventID)
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, initial.RunID)
 	ready := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name":      "fork.source_message",
@@ -2642,7 +2646,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	requireNoServedDeliveryStatusDuring(t, rt.DB, rt.Backend, queued.EventID, "node", "item-observer", "delivered", 250*time.Millisecond)
 	// Use the canonical owner to establish handed-only debt explicitly; the
 	// public publication above remains unhanded while the run is paused.
-	work, err := owner.ClaimEvent(waitCtx, queued.EventID, runtimepipelineobligation.PurposePublication)
+	work, err := claimServedPausedPublication(waitCtx, owner, queued.EventID)
 	if err != nil {
 		t.Fatal(err)
 	}
