@@ -422,6 +422,14 @@ func VerifyNativeSiblingFlowJoinDeclarationsStayIndependentAcrossRestartOnBothSt
 		}{{name: "a_then_b"}, {name: "b_then_a", reverse: true}} {
 			t.Run(storeCase.name+"/"+order.name, func(t *testing.T) {
 				files := workflowJoinLifecycleFixtureFiles(false, "")
+				const expectedField = "  expected: [text]\n"
+				for _, name := range []string{"entities.yaml", "orders/entities.yaml"} {
+					if strings.Count(files[name], expectedField) != 1 {
+						t.Fatalf("%s requires its exact expected-member declaration", name)
+					}
+					files[name] = strings.Replace(files[name], expectedField,
+						"  expected: {type: '[text]', initial: ['a', 'b']}\n", 1)
+				}
 				for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
 					for _, flowID := range []string{"a", "b"} {
 						files[flowID+"/"+name] = strings.Replace(files["orders/"+name], "name: orders", "name: "+flowID, 1)
