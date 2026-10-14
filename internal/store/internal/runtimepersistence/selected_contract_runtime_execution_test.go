@@ -1043,6 +1043,8 @@ func TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres
 	if err := rows.Close(); err != nil {
 		t.Fatalf("close retained-discard tombstone rows: %v", err)
 	}
+	// Native root/receiver construction contributes metadata and journal facts
+	// alongside the explicit revision-matrix seed, including fieldless headers.
 	wantTombstones := []runforkrevision.Family{
 		runforkrevision.FamilyAgentSessions,
 		runforkrevision.FamilyCommittedReplayScopes,
@@ -1050,6 +1052,9 @@ func TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres
 		runforkrevision.FamilyDeadLetters,
 		runforkrevision.FamilyEntityMetadata,
 		runforkrevision.FamilyEntityMetadata,
+		runforkrevision.FamilyEntityMetadata,
+		runforkrevision.FamilyEntityMutations,
+		runforkrevision.FamilyEntityMutations,
 		runforkrevision.FamilyEntityMutations,
 		runforkrevision.FamilyEntityMutations,
 		runforkrevision.FamilyEntityMutations,
