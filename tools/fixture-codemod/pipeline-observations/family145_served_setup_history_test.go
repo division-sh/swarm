@@ -80,7 +80,11 @@ func TestFamily145ServedSetupHistoryPreservesAllFieldsOrderAndExactAdvances(t *t
 		if !reflect.DeepEqual(restored, prior) {
 			t.Fatal("setup history lost original bytes, metadata or order")
 		}
-		current, err := channelsettlement.EarlierHistory("../../..", current, recipes)
+		current, err := selectedreadrole.EarlierEntityToolHistory("../../..", current, recipes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		current, err = channelsettlement.EarlierHistory("../../..", current, recipes)
 		if err != nil {
 			t.Fatal(err)
 		}
