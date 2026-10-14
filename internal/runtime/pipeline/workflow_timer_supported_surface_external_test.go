@@ -13,18 +13,20 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/google/uuid"
 )
 
@@ -113,7 +115,6 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 		t.Run(tc.name, func(t *testing.T) {
 			selected := tc.open(t)
 			runID := uuid.NewString()
-			entityID := uuid.NewString()
 			ctx, fact := workflowLifecycleSourceContext(t, selected, bundle, runID)
 			logger := &exactJoinRuntimeLogger{}
 			eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, Logger: logger})
@@ -135,73 +136,39 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 			})
 
 			createdAt := time.Now().UTC()
-			{
-				consumerConstructor, err := runtimepipeline.CompileFlowConstructor(source, "consumer", "")
-				if err != nil {
+			root := flowidentity.Stored(source, semanticview.RootExecutionFlowID(source), runID, runID, runID, "")
+			planner := manager.NewAgentManagerWithOptions(nil, nil, manager.AgentManagerOptions{
+				BaseContext: ctx, SemanticSource: source, SourceArtifactFact: fact,
+				WorkflowInstances: coordinator, ExecutionPosture: executionposture.Live,
+				ReceiverExecution: eventreceiver.NormalExecution(),
+			})
+			plan, err := planner.PrepareFlowInstanceActivation(ctx, runtimepipeline.FlowInstanceActivationRequest{
+				ContractBundle: source, Instance: root, OccurredAt: createdAt,
+			})
+			if err != nil {
+				t.Fatalf("prepare authored timer constructor tree: %v", err)
+			}
+			committed, err := eventBus.CommitFlowInstanceActivation(ctx, plan)
+			if err != nil || !committed.Acknowledged || !committed.Created || len(committed.Children) != 2 {
+				t.Fatalf("construct authored timer tree: acknowledged=%v created=%v children=%d err=%v", committed.Acknowledged, committed.Created, len(committed.Children), err)
+			}
+			var entityID string
+			for _, child := range committed.Children {
+				if !child.Acknowledged || !child.Created {
+					t.Fatalf("authored timer child construction was not acknowledged: %+v", child)
+				}
+				if err := coordinator.FinalizeInitialEntryLifecycle(ctx, child.Lifecycle); err != nil {
 					t.Fatal(err)
 				}
-				consumerFields, err := consumerConstructor.InitialFields(nil, nil)
-				if err != nil {
-					t.Fatal(err)
+				if child.Plan.Identity.TemplateID == "producer" {
+					entityID = child.Plan.Instance.EntityID
 				}
-				consumerTopology, found := semanticview.WorkflowStageTopology(source, "consumer")
-				if !found {
-					t.Fatal("consumer compiled stage topology missing")
-				}
-				consumerInitial, err := consumerTopology.InitialStoredStage()
-				if err != nil {
-					t.Fatal(err)
-				}
-				consumerContract, _ := entityruntime.ResolveForFlow(source, "consumer")
-				consumerOwner := testRunScopedWorkflowInstanceForRun(runID, "consumer")
-				consumerInstance, consumerLifecycle, err := coordinator.PrepareInitialEntryLifecycle(ctx, consumerOwner, runtimepipeline.WorkflowInstance{
-					InstanceID: "consumer", StorageRef: "consumer", WorkflowName: "consumer", WorkflowVersion: source.WorkflowVersion(),
-					EntityID: runtimepipeline.FlowInstanceEntityID("consumer"), EntityType: consumerContract.EntityType,
-					ParentFlowID: semanticview.RootExecutionFlowID(source), ParentFlowInstance: runID, ParentEntityID: runID,
-					CurrentState: consumerInitial.ID(), StageDefined: consumerTopology.StageCount() != 0,
-					Fields: consumerFields, CreatedAt: createdAt,
-				}, createdAt)
-				if err != nil {
-					t.Fatalf("prepare consumer constructor lifecycle: %v", err)
-				}
-				consumerCommand, err := flowactivationfixture.Command(ctx, consumerInstance, consumerLifecycle, createdAt)
-				if err != nil {
-					t.Fatal(err)
-				}
-				consumerCommitted, err := eventBus.CommitFlowInstanceActivation(ctx, consumerCommand.Plan)
-				if err != nil || !consumerCommitted.Acknowledged || !consumerCommitted.Created {
-					t.Fatalf("construct timer consumer: acknowledged=%v created=%v err=%v", consumerCommitted.Acknowledged, consumerCommitted.Created, err)
-				}
-				if err := coordinator.FinalizeInitialEntryLifecycle(ctx, consumerCommitted.Lifecycle); err != nil {
-					t.Fatal(err)
-				}
-				construction142Ctx := ctx
-				construction142At := createdAt
-				construction142Instance, construction142Lifecycle, err := coordinator.PrepareInitialEntryLifecycle(construction142Ctx, testRunScopedWorkflowInstanceForRun(runID, "producer"), runtimepipeline.WorkflowInstance{
-					InstanceID: "producer", StorageRef: "producer", EntityID: entityID, WorkflowName: "producer", WorkflowVersion: source.WorkflowVersion(),
-					CurrentState: "waiting", StageDefined: true, EnteredStageAt: createdAt, CreatedAt: createdAt,
-					Fields:     map[string]any{},
-					EntityType: "test_entity",
-				}, construction142At)
-				if err != nil {
-					t.Fatalf("prepare fixture initial lifecycle: %v", err)
-				}
-				construction142Command, err := flowactivationfixture.Command(construction142Ctx, construction142Instance, construction142Lifecycle, construction142At)
-				if err != nil {
-					t.Fatalf("prepare fixture activation command: %v", err)
-				}
-				construction142Committed, err := any(selected.events).(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(construction142Ctx, construction142Command)
-				if err != nil {
-					t.Fatalf("materialize producer workflow instance: %v", err)
-				}
-				if err == nil && !construction142Committed.Acknowledged {
-					t.Fatal("fixture activation was not acknowledged")
-				}
-				if construction142Committed.Acknowledged && construction142Committed.Created {
-					if finalizeErr := coordinator.FinalizeInitialEntryLifecycle(construction142Ctx, construction142Committed.Lifecycle); finalizeErr != nil {
-						t.Fatalf("finalize fixture initial lifecycle: %v", finalizeErr)
-					}
-				}
+			}
+			if entityID == "" {
+				t.Fatal("authored timer constructor did not produce its exact producer")
+			}
+			if err := coordinator.FinalizeInitialEntryLifecycle(ctx, committed.Lifecycle); err != nil {
+				t.Fatal(err)
 			}
 			if err := coordinator.ArmInitialEntryTimers(ctx, testRunScopedWorkflowInstanceForRun(runID, "producer")); err != nil {
 				t.Fatalf("arm authored workflow timer: %v", err)
