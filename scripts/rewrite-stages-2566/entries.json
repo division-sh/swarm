@@ -2232,7 +2232,7 @@
     "finals": [],
     "function": "issue2564M25Bundle",
     "literal": 2,
-    "current": {
+    "current_selector": {
       "file": "internal/runtime/pipeline/issue2564_activity_result_retry_test.go",
       "function": "issue2564M25Bundle",
       "literal": 4
