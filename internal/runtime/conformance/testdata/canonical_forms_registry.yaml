@@ -410,7 +410,7 @@ rows:
       retired_duplicates: [scalar_description, single_rule_mapping, keyed_rule_mapping, authored_row_id, authored_row_description]
       distinct_overrides: []
     corpus: {rules_sequences: 1, rules_mappings: 0, scalar_rows: 0}
-    action_retirement: "#2307 retired action fields. USER/LEAD #2287 ruling6148375122 additionally requires ordered unnamed handler/completion rows; ids/descriptions fail on presence. Ordinary completion keeps condition; joins keep singular outcomes and their own closed fields. Rule activities require explicit activity.id, with no display/index fallback. default:true, predicate-less rows and mandatory no-op else remain separately banked. Historical corpus counts are immutable."
+    action_retirement: "#2307 retired action fields. USER/LEAD #2287 ruling6148375122 requires ordered unnamed handler/completion rows; ids/descriptions fail on presence. Ordinary completion keeps condition; joins keep singular outcomes and their own closed fields. Rule activities require explicit activity.id, with no display/index fallback. USER ruling6169683113 deletes else/default row fields, derives the effectful trailing predicate-less default, and preserves successful no_match without a mandatory default. Historical corpus counts are immutable."
 
   - id: handler.policy_selection_rows
     ruled: mechanical-ratified
@@ -424,7 +424,7 @@ rows:
       canonical_candidate: typed_policy_sheet_rows_with_when_only_predicate
       retired_duplicates: [condition_under_handler_rules, else_default, selector_one_item_selectors, scalar_one_item_equals]
       distinct_overrides: [multi_selector_case, literal_and_typed_lookup_values]
-    f2_resolution: "handler.rules.condition rejects at context-aware admission; when retains PolicyRow metadata and typed-row validation; on_complete.condition remains distinct. #2287 removes authored row id/description and binds internal lookup/validate/module RowID diagnostics to the shared admitted display. else/default and other row-shape census candidates are not retired by this slice."
+    f2_resolution: "handler.rules.condition rejects at context-aware admission; when retains PolicyRow metadata and typed-row validation; on_complete.condition remains distinct. #2287 removes authored row id/description and binds internal lookup/validate/module RowID diagnostics to the shared admitted display. USER ruling6169683113 rejects else/default fields on presence and derives default kind from a trailing effectful predicate-less selection row; ordinary CEL readers/evaluation have no sentinel exception. Plain when-only blocks need no default; policy-sheet and emit-template defaults remain required, and lookup.default: fail is untouched. Other row-shape census candidates remain separately open."
     corpus: {condition: 0, when: 1, else: 1, default: 0}
 
   - id: handler.emit_action_activity

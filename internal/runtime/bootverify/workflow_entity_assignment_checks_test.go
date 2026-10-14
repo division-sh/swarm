@@ -153,7 +153,7 @@ func TestEntityDefiniteAssignmentProgramPoints(t *testing.T) {
 		{"exhaustive branches both write", func(h *c.SystemNodeEventHandler) {
 			h.Rules = []c.HandlerRuleEntry{
 				{Condition: "payload.score > 0", DataAccumulation: c.WorkflowDataAccumulation{Writes: []c.WorkflowDataWrite{{TargetField: "base_score", Value: c.LiteralExpression(7)}}}},
-				{Condition: "else", DataAccumulation: c.WorkflowDataAccumulation{Writes: []c.WorkflowDataWrite{{TargetField: "base_score", Value: c.LiteralExpression(0)}}}},
+				{DataAccumulation: c.WorkflowDataAccumulation{Writes: []c.WorkflowDataWrite{{TargetField: "base_score", Value: c.LiteralExpression(0)}}}},
 			}
 			h.DataAccumulation.Writes = []c.WorkflowDataWrite{{TargetField: "adjusted_score", Value: c.RefExpression("entity.base_score")}}
 		}, false},

@@ -1414,7 +1414,7 @@ func VerifyExecuteNodeContractHandlerRulesEmitTemplatePublishesOneMergedEventFor
 				}},
 			},
 			{
-				Condition: "else",
+				Condition: "",
 				Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
 					"bucket": runtimecontracts.CELExpression(`"low"`),
 				}},

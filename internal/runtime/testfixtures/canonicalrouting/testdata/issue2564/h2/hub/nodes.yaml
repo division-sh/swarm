@@ -16,7 +16,6 @@ hub-node:
         - when: _entity.current_state == 's1'
           data_accumulation:
             writes: [{target_field: c1, value: entity.c1 + 1}]
-        - else: true
-          data_accumulation:
+        - data_accumulation:
             writes: [{target_field: c2, value: entity.c2 + 1}]
     hub.close: {advances_to: closed}

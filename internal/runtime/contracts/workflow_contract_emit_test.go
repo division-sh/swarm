@@ -65,7 +65,7 @@ func TestHandlerRuleEmitTemplateSitesMergeHandlerTemplateWithRuleFields(t *testi
 				}},
 			},
 			{
-				Condition: "else",
+				Condition: "",
 				Emit: EmitSpec{Fields: map[string]ExpressionValue{
 					"bucket": CELExpression(`"low"`),
 				}},

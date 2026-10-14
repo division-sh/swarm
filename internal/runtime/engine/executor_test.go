@@ -995,7 +995,7 @@ func TestExecutor_ValidateRequestRejectsConflictingCompletionDialect(t *testing.
 	err = exec.ValidateRequest(ExecutionRequest{
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "true"}},
-			Rules:      []runtimecontracts.HandlerRuleEntry{{Condition: "else"}},
+			Rules:      []runtimecontracts.HandlerRuleEntry{{}},
 		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "declares both on_complete and rules") {
@@ -1348,7 +1348,7 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 				}},
 			},
 			OnComplete: []runtimecontracts.HandlerRuleEntry{
-				{Condition: "else", Emit: runtimecontracts.EmitSpec{Event: "vertical.rejected"}},
+				{Emit: runtimecontracts.EmitSpec{Event: "vertical.rejected"}},
 			},
 		},
 	}
@@ -1645,7 +1645,7 @@ func TestExecutor_AccumulatorProjectionMaterializesWithRulesBeforeEmitFields(t *
 			}},
 		},
 		Rules: []runtimecontracts.HandlerRuleEntry{{
-			Condition: "else",
+			Condition: "",
 			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{
 				Writes: []runtimecontracts.WorkflowDataWrite{{
 					TargetField: "entity.rule_marker",
@@ -3529,7 +3529,7 @@ func TestExecutor_RuleActivityIntentKeepsExplicitNamesAndSelectedRef(t *testing.
 		HandlerEventKey: "source.requested",
 		Event:           eventtest.RunCreatingRootIngress("evt-1", "source.requested", "", "task-1", json.RawMessage(`{"url":"https://example.com"}`), 2, "run-1", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{
-			Condition: "else", Activity: runtimecontracts.ActivitySpec{
+			Activity: runtimecontracts.ActivitySpec{
 				ID: "pinned_request", Tool: "source_scrape", Input: map[string]runtimecontracts.ExpressionValue{"url": runtimecontracts.CELExpression("payload.url")},
 			},
 		}}},
@@ -3572,7 +3572,7 @@ func TestExecutor_UnnamedRuleActivityRefusesBeforeEffects(t *testing.T) {
 			HandlerEventKey: "source.requested",
 			Event:           eventtest.RunCreatingRootIngress("evt-1", "source.requested", "", "task-1", json.RawMessage(`{"url":"https://example.com"}`), 2, "run-1", "", events.EventEnvelope{}, time.Time{}),
 			Handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{
-				Condition: "else", Activity: runtimecontracts.ActivitySpec{
+				Activity: runtimecontracts.ActivitySpec{
 					ID: id, Tool: "source_scrape", Input: map[string]runtimecontracts.ExpressionValue{"url": runtimecontracts.CELExpression("payload.url")},
 				},
 			}}},
@@ -4468,7 +4468,7 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 			AdvancesTo: "default",
 			Rules: []runtimecontracts.HandlerRuleEntry{
 				{Condition: "payload.score > 5", AdvancesTo: "approved"},
-				{Condition: "else", AdvancesTo: "rejected"},
+				{AdvancesTo: "rejected"},
 			},
 		},
 		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
@@ -4761,7 +4761,7 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 							}},
 						},
 						{
-							Condition: "else",
+							Condition: "",
 							Emit: runtimecontracts.EmitSpec{Fields: map[string]runtimecontracts.ExpressionValue{
 								"bucket": runtimecontracts.CELExpression(`"low"`),
 							}},
@@ -5083,7 +5083,7 @@ func TestExecutor_RejectsOnSuccessEmitWithRuleFanOut(t *testing.T) {
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "handler.succeeded"}},
 			Rules: []runtimecontracts.HandlerRuleEntry{{
-				Condition: "else",
+				Condition: "",
 				FanOut: &runtimecontracts.FanOutSpec{
 					ItemsFrom: "payload.items",
 					As:        "fan_item",
@@ -6014,7 +6014,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 			eventType: "batch.ready",
 			handler: func(spec *runtimecontracts.FanOutSpec) runtimecontracts.SystemNodeEventHandler {
 				return runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{
-					Condition: "else", FanOut: spec, AdvancesTo: "dispatched",
+					FanOut: spec, AdvancesTo: "dispatched",
 				}}}
 			},
 		},
@@ -6023,7 +6023,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 			eventType: "batch.ready",
 			handler: func(spec *runtimecontracts.FanOutSpec) runtimecontracts.SystemNodeEventHandler {
 				return runtimecontracts.SystemNodeEventHandler{OnComplete: []runtimecontracts.HandlerRuleEntry{{
-					Condition: "else", FanOut: spec, AdvancesTo: "dispatched",
+					FanOut: spec, AdvancesTo: "dispatched",
 				}}}
 			},
 		},
@@ -6508,7 +6508,7 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 			name: "rule emit",
 			handler: runtimecontracts.SystemNodeEventHandler{
 				Rules: []runtimecontracts.HandlerRuleEntry{{
-					Condition: "else",
+					Condition: "",
 					Emit:      runtimecontracts.EmitSpec{Event: "component-scaffold/component.scaffolded"},
 				}},
 			},

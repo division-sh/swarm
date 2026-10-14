@@ -61,15 +61,15 @@ func TestRuleActivityAdmissionRequiresExplicitID(t *testing.T) {
 		{"id: {}, tool: send", "must be a scalar id, got empty_mapping"},
 	} {
 		var handler SystemNodeEventHandler
-		err := decodeNodeTestYAML([]byte("rules: [{else: true, activity: {"+tc.fragment+"}}]"), &handler)
+		err := decodeNodeTestYAML([]byte("rules: [{activity: {"+tc.fragment+"}}]"), &handler)
 		if err == nil || !strings.Contains(err.Error(), tc.diagnostic) || !strings.Contains(err.Error(), `["rules"][0]["activity"]`) {
 			t.Fatalf("rule activity %s: error = %v, want %s at the activity source", tc.fragment, err, tc.diagnostic)
 		}
 	}
 	for _, source := range []string{
-		"rules:\n  - else: true\n    activity: {id: explicit_send, tool: send}\n",
-		"_note: &activity {id: explicit_send, tool: send}\nrules: [{else: true, activity: *activity}]\n",
-		"_note: &activity {id: explicit_send, tool: send}\nrules: [{else: true, activity: {<<: *activity}}]\n",
+		"rules:\n  - activity: {id: explicit_send, tool: send}\n",
+		"_note: &activity {id: explicit_send, tool: send}\nrules: [{activity: *activity}]\n",
+		"_note: &activity {id: explicit_send, tool: send}\nrules: [{activity: {<<: *activity}}]\n",
 	} {
 		var handler SystemNodeEventHandler
 		if err := decodeNodeTestYAML([]byte(source), &handler); err != nil {

@@ -25,8 +25,8 @@ func TestHandlerRuleIdentityDerivesFromCanonicalDeclarationSite(t *testing.T) {
 		return handler.Rules[0]
 	}
 
-	before := decode("rules:\n  - when: payload.ready\n  - else: true\n")
-	after := decode("rules:\n  - when: payload.ready == true\n  - else: true\n")
+	before := decode("rules:\n  - when: payload.ready\n")
+	after := decode("rules:\n  - when: payload.ready == true\n")
 	beforeRef, beforeOK := before.DeclarationIdentity()
 	afterRef, afterOK := after.DeclarationIdentity()
 	if !beforeOK || !afterOK || !beforeRef.Equal(afterRef) {
@@ -66,16 +66,16 @@ func TestHandlerRuleReorderIsDeleteAndAdd(t *testing.T) {
 		return out
 	}
 
-	before := decode("rules:\n  - {when: payload.ready}\n  - {else: true}\n")
-	after := decode("rules:\n  - {else: true}\n  - {when: payload.ready}\n")
-	if before["payload.ready"].Equal(after["payload.ready"]) || before["else"].Equal(after["else"]) {
+	before := decode("rules:\n  - {when: payload.ready}\n  - {when: payload.other}\n")
+	after := decode("rules:\n  - {when: payload.other}\n  - {when: payload.ready}\n")
+	if before["payload.ready"].Equal(after["payload.ready"]) || before["payload.other"].Equal(after["payload.other"]) {
 		t.Fatalf("reordered rows retained positional identity: before=%#v after=%#v", before, after)
 	}
 }
 
 func TestHandlerRuleIdentitySeparatesFlowsAndEvents(t *testing.T) {
 	var handler SystemNodeEventHandler
-	if err := decodeNodeTestYAML([]byte("rules:\n  - {else: true}\n"), &handler); err != nil {
+	if err := decodeNodeTestYAML([]byte("rules:\n  - {emit: done}\n"), &handler); err != nil {
 		t.Fatal(err)
 	}
 	qualify := func(flowPath, event string) runtimeidentity.DeclarationIdentity {
@@ -105,7 +105,7 @@ func TestHandlerRuleIdentitySeparatesFlowsAndEvents(t *testing.T) {
 
 func TestAuthoredElementIDIsRetired(t *testing.T) {
 	var handler SystemNodeEventHandler
-	err := decodeNodeTestYAML([]byte("rules:\n  - element_id: 00000000-0000-4000-8000-000000000001\n    else: true\n"), &handler)
+	err := decodeNodeTestYAML([]byte("rules:\n  - element_id: 00000000-0000-4000-8000-000000000001\n    emit: done\n"), &handler)
 	if err == nil || !strings.Contains(err.Error(), `rule field "element_id" is not supported`) {
 		t.Fatalf("retired element_id error = %v", err)
 	}

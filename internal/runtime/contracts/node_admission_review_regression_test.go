@@ -51,12 +51,12 @@ func TestReviewer2492ValidControls(t *testing.T) {
 }
 
 func TestReviewer2492NestedDiagnosticPath(t *testing.T) {
-	_, err := admitReviewNode(t, "rules:\n  - when: else")
+	_, err := admitReviewNode(t, "rules:\n  - when: 'true'")
 	const path = `$["worker"]["event_handlers"]["task.ready"]["rules"][0]["when"]`
 	if err == nil || !strings.Contains(err.Error(), path) {
 		t.Fatalf("want semantic path %s, got %v", path, err)
 	}
-	snapshot, err := yamlsource.Load([]byte("worker:\n  execution_type: system_node\n  event_handlers:\n    start:\n      rules:\n        - when: else\n"))
+	snapshot, err := yamlsource.Load([]byte("worker:\n  execution_type: system_node\n  event_handlers:\n    start:\n      rules:\n        - when: 'true'\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestNodeClosedComputeAndCompletionPresence(t *testing.T) {
 			}
 		}
 	}
-	for _, body := range []string{"activity: {tool: search}", "rules: [{when: true, activity: {id: worker_task_ready_rule_0_search, tool: search}}, {else: true}]", "on_complete: [{condition: true, emit: task.done}]", "sets_gate: done"} {
+	for _, body := range []string{"activity: {tool: search}", "rules: [{when: true, activity: {id: worker_task_ready_rule_0_search, tool: search}}]", "on_complete: [{condition: true, emit: task.done}]", "sets_gate: done"} {
 		if _, err := admitReviewNode(t, body); err != nil {
 			t.Fatalf("supported context %s: %v", body, err)
 		}
@@ -229,9 +229,9 @@ func TestNodeAliasMergePresenceAndSemanticDiagnostics(t *testing.T) {
 			t.Fatalf("alias/merge erased authored presence: %s", row)
 		}
 	}
-	for _, body := range []string{"rules: [{when: else}]", "_note: &bad else\nrules: [{when: *bad}]", "_note: &bad {when: else}\nrules: [{<<: *bad}]"} {
+	for _, body := range []string{"rules: [{when: 'true'}]", "_note: &bad 'true'\nrules: [{when: *bad}]", "_note: &bad {when: 'true'}\nrules: [{<<: *bad}]"} {
 		_, err := admitReviewNode(t, body)
-		if err == nil || !strings.Contains(err.Error(), `["rules"][0]["when"]`) || !strings.Contains(err.Error(), "introduced at nodes.yaml:") || !strings.Contains(err.Error(), "resolved at nodes.yaml:") {
+		if err == nil || !strings.Contains(err.Error(), `["rules"][0]["when"]`) || !strings.Contains(err.Error(), "remove YAML quotes") || !strings.Contains(err.Error(), "introduced at nodes.yaml:") || !strings.Contains(err.Error(), "resolved at nodes.yaml:") {
 			t.Fatalf("nested semantic-validator evidence: %v", err)
 		}
 	}
