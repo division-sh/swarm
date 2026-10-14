@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
-	runtimeconfig "github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -405,7 +404,7 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, fact)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeID, fact.BundleHash()))
 	storetest.RequireBundleDataCatalog(t, ctx, selected.SourceArtifactWriter(), bundle)
-	cfg, err := runtimeconfig.Load(configPath)
+	cfgResult, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,7 +418,7 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 		t.Fatal(err)
 	}
 	deps := selected.RuntimeDeps()
-	deps.Config = cfg
+	deps.Config = cfgResult.Config
 	deps.Options = swarmruntime.RuntimeOptions{ExecutionPosture: executionposture.Live, WorkflowModule: module, SourceArtifactFact: fact, RuntimeInstanceID: runtimeID, ProcessWorkOwner: process, ProviderTriggerCatalog: catalog, ProviderCredentials: credentials}
 	rt, err := swarmruntime.NewRuntime(ctx, deps)
 	if err != nil {
