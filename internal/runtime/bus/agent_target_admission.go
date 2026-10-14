@@ -16,29 +16,39 @@ func (p selectedRunTargetOwnerProjection) withObservedAgentConfigurations() (sel
 	}
 	scope, _ := p.context.Value(selectedTargetOwnerLookupScopeKey{}).(selectedTargetOwnerLookupScope)
 	agents := make(map[agentidentity.Identity]ActiveAgentDescriptor, len(p.agents))
+	recorded := make(map[agentidentity.Identity]ActiveAgentDescriptor, len(p.agents))
 	for identity, descriptor := range p.agents {
 		agents[identity] = descriptor
+		recorded[identity] = descriptor
 	}
-	pending := make(map[agentidentity.Identity]struct{})
+	observed := make(map[agentidentity.Identity]pipeline.FlowInstanceObservation)
 	for _, observation := range scope.observations {
 		readiness, found := observation.Readiness()
-		if !found || !readiness.Eligible() {
+		if !found {
 			continue
 		}
 		for _, expected := range readiness.Plan.Agents {
 			identity := expected.Identity.Normalize()
-			if active, present := agents[identity]; present && active.EntityID != expected.EntityID {
-				return p, fmt.Errorf("agent configuration contradicts exact desired attachment entity")
-			}
-			if readiness.Phase != pipeline.FlowAttachmentReady {
-				if _, present := agents[identity]; !present {
-					agents[identity] = ActiveAgentDescriptor{Identity: identity, EntityID: expected.EntityID}
+			if active, present := recorded[identity]; present && active.EntityID != expected.EntityID {
+				current, err := p.decisionObservation(observation)
+				if err != nil {
+					return p, err
 				}
-				pending[identity] = struct{}{}
+				desired, found := current.Readiness()
+				if found && desired.Eligible() {
+					return p, fmt.Errorf("agent configuration contradicts exact desired attachment entity")
+				}
+			}
+			if prior, present := observed[identity]; present && prior.Identity() != observation.Identity() {
+				return p, fmt.Errorf("agent has ambiguous desired construction")
+			}
+			observed[identity] = observation
+			if _, present := agents[identity]; !present {
+				agents[identity] = ActiveAgentDescriptor{Identity: identity, EntityID: expected.EntityID}
 			}
 		}
 	}
-	p.agents, p.constructingAgents = agents, pending
+	p.recordedAgents, p.agents, p.observedAgents = recorded, agents, observed
 	return p, nil
 }
 
@@ -86,6 +96,13 @@ func (p selectedRunTargetOwnerProjection) admitAgentTarget(event events.Event, i
 	descriptor = descriptor.Normalized()
 	if runtimeCreatedTargetlessAgentIntent(intent) {
 		return intent, nil
+	}
+	descriptor, found, _, err := p.decisionAgentDescriptor(identity)
+	if err != nil {
+		return intent, err
+	}
+	if !found {
+		return intent, fmt.Errorf("exact admitted agent configuration is unavailable for %s", identity.Description())
 	}
 	dependency, selected, err := p.agentConstructionDependency(event, identity, intent.ReceiverBlueprint)
 	if err != nil {
@@ -234,6 +251,10 @@ func (p selectedRunTargetOwnerProjection) agentConstructionDependency(event even
 			selected = observation
 		}
 		if selected.Valid() {
+			selected, err := p.decisionObservation(selected)
+			if err != nil {
+				return events.ReceiverInitialization{}, events.RouteIdentity{}, err
+			}
 			return admitObservedAgentConstructionDependency(actor.RunID, selected, requested)
 		}
 	}

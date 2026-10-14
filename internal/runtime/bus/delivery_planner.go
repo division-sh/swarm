@@ -124,6 +124,7 @@ type deliveryRecipientManifest struct {
 
 type deliveryRecipientPolicy struct {
 	prospective                 runtimepipeline.PreparedWorkflowPublicationState
+	instances                   runtimepipeline.FlowInstanceIndexReader
 	loadActiveAgentDescriptors  func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error)
 	loadActiveTargetDescriptors func(context.Context) ([]ActiveTargetDescriptor, bool, error)
 	semanticSource              semanticview.Source
@@ -199,6 +200,7 @@ func newDeliveryPlanner(routeResolver deliveryRouteResolver, recipientPolicy del
 	if len(connectPlanners) > 0 {
 		planner.connectPlanner = connectPlanners[0]
 	}
+	planner.recipientPolicy.instances = planner.connectPlanner.lifecycle.index
 	return planner
 }
 
@@ -227,6 +229,7 @@ func (p deliveryPlanner) planForRecipientMaterialization(ctx context.Context, ev
 }
 
 func (p deliveryPlanner) planRecipients(ctx context.Context, evt events.Event) (RoutePlan, error) {
+	p.recipientPolicy.instances = p.connectPlanner.lifecycle.index
 	routePlan := newRoutePlan(evt)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	ctx = withConnectRoutePlanPreview(ctx)
@@ -457,6 +460,7 @@ func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRout
 }
 
 func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, evt events.Event, plan RoutePlan) (selectedRunTargetOwnerProjection, error) {
+	p.recipientPolicy.instances = p.connectPlanner.lifecycle.index
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	if p.connectPlanner.source != nil {
 		var targets []events.RouteIdentity
@@ -506,6 +510,7 @@ func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, 
 }
 
 func (p deliveryPlanner) PlanDirect(ctx context.Context, evt events.Event, recipients []string) (RoutePlan, error) {
+	p.recipientPolicy.instances = p.connectPlanner.lifecycle.index
 	routePlan := newRoutePlan(evt)
 	if evt.Type() == events.EventType("platform.runtime_log") {
 		return routePlan, nil
@@ -980,6 +985,13 @@ func filterDeliveryRecipientCandidates(
 			if len(targets) > 0 && !targetOK {
 				continue
 			}
+			descriptor, available, constructing, err := projection.decisionAgentDescriptor(descriptor.Identity)
+			if err != nil {
+				return deliveryRecipientManifest{}, err
+			}
+			if !available {
+				continue
+			}
 			if implicitLocal {
 				// Source-node ownership scopes the publication, not the agent's entity.
 				target = localSource.route
@@ -990,7 +1002,7 @@ func filterDeliveryRecipientCandidates(
 			if scoped.AgentLifecycle == agentLifecycleAdmissionStaticDeclaration {
 				scoped.AgentLifecycle = agentLifecycleAdmissionNone
 			}
-			if _, constructing := projection.constructingAgents[descriptor.Identity]; constructing {
+			if constructing {
 				scoped.AgentLifecycle = agentLifecycleAdmissionMaterializingFlow
 			}
 			allowed = append(allowed, scoped.ID)

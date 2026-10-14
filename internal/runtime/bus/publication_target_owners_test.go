@@ -25,19 +25,41 @@ func TestClosedPublicationTargetOwnerEvidenceBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bounded := withSelectedTargetOwnerLookupScope(correlation.WithInboundEvent(ctx, event), selectedTargetOwnerLookupScope{lookup: scope})
+	observation := constructionIndexObservation(t, source, event.RunID(), root, "")
+	reader := &publicationDecisionTestReader{constructionIndexTestReader: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{observation}}}
+	bounded := withSelectedTargetOwnerLookupScope(correlation.WithInboundEvent(ctx, event), selectedTargetOwnerLookupScope{lookup: scope, observations: []pipeline.FlowInstanceObservation{observation}})
 	origin := events.RouteIdentity{FlowID: root.TemplateID, FlowInstance: root.InstancePath, EntityID: root.EntityID}
-	record := replycontext.Record{ID: "prepared-reply", RunID: event.RunID(), RequestEventID: event.ID(), Origin: origin}
+	record := replycontext.Record{ID: "prepared-reply", RunID: event.RunID(), RequestEventID: event.ID(), Origin: origin,
+		RequesterFlowID: ".", RequestOutputPin: "work.requested", ReplyInputPin: "work.completed",
+		ProviderFlowID: "producer", ProviderInputPin: "work.requested", ProviderOutputPin: "work.completed", RequestCorrelationID: event.ID()}
 	base := publicationTargetOwnerEvidence{
 		event: event, present: true, origins: map[string]events.RouteIdentity{record.ID: origin},
 		projection: selectedRunTargetOwnerProjection{context: bounded, source: source, required: true,
 			descriptors: []ActiveTargetDescriptor{{ID: root.InstanceID, FlowID: root.TemplateID, FlowInstance: root.InstancePath, EntityID: root.EntityID}}},
-		planner: deliveryPlanner{connectPlanner: connectRoutePlanResolver{source: source}},
+		planner: deliveryPlanner{connectPlanner: connectRoutePlanResolver{source: source, lifecycle: connectInstanceSelector{index: reader}}},
 	}
-	plan := RoutePlan{Event: event}
+	plan := RoutePlan{Event: event, ReplyCreations: []replycontext.Record{record}}
+	base.projection.instances = constructionIndexTestReader{err: errors.New("expired ordinary snapshot")}
+	preparer := base.planner
+	preparer.preparedOwners = &base
+	plan, err = preparer.resolvePreparedRoutePlan(base.projection, plan)
+	if err != nil || base.projection.instances != nil {
+		t.Fatalf("prepared owners retained their expired reader: %v", err)
+	}
 	if owner, err := base.returnOwner(ctx, event, &plan, record); err != nil || owner.Route() != origin || !owner.ExistingEntity() {
 		t.Fatalf("exact prepared return = %+v, %v", owner, err)
 	}
+	if len(reader.lookups) != 1 || reader.lookups[0].ExactPath() != root.InstancePath {
+		t.Fatalf("covered reply used inventory instead of its live exact reader: %+v", reader.lookups)
+	}
+	readFailure := errors.New("independent covered reply read failure")
+	reader.err = readFailure
+	before := plan
+	owner, err := base.returnOwner(ctx, event, &plan, record)
+	if !owner.Empty() || !errors.Is(err, readFailure) || len(reader.lookups) != 2 || !reflect.DeepEqual(before, plan) {
+		t.Fatalf("covered reply suppressed exact read failure or mutated the plan: owner=%+v err=%v reads=%+v", owner, err, reader.lookups)
+	}
+	reader.err = nil
 	for _, name := range []string{"absent", "wrong_event", "wrong_run", "wrong_source", "missing_scope", "crossed_scope", "logical_instance", "parent", "cancelled"} {
 		t.Run(name, func(t *testing.T) {
 			candidate, incoming, incomingContext, reply := base, event, ctx, record
