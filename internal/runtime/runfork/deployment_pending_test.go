@@ -37,9 +37,6 @@ func TestDeploymentPendingCandidateRequiresExactFixedDeliveryAndHandoff(t *testi
 	base := func(phase RunForkDeploymentPendingPhase) RunForkPlan {
 		pending := RunForkPendingWork{EventID: eventID, DeliveryID: deliveryID, SubscriberType: "node", SubscriberID: "receiver",
 			RoutingSource: source, Classification: RunForkPendingClassificationPending, Status: "pending"}
-		if phase == RunForkDeploymentPendingReceiver {
-			pending.ContinuationHandoffAt = &now
-		}
 		plan := RunForkPlan{PendingWork: []RunForkPendingWork{pending}, FanOutObligations: []RunForkFanOutObligation{{
 			Intent: intent, PendingDeployment: []RunForkDeploymentPendingEvent{{Ordinal: 0, SourceEventID: eventID,
 				SourceDeliveryIDs: []string{deliveryID}, Phase: phase}},
@@ -64,7 +61,11 @@ func TestDeploymentPendingCandidateRequiresExactFixedDeliveryAndHandoff(t *testi
 			p.FanOutObligations[0].PendingDeployment[0].Phase = RunForkDeploymentPendingReceiver
 		}},
 		{"missing_receipt", RunForkDeploymentPendingReceiver, func(p *RunForkPlan) { p.PendingWork = p.PendingWork[:1] }},
-		{"missing_handoff", RunForkDeploymentPendingReceiver, func(p *RunForkPlan) { p.PendingWork[0].ContinuationHandoffAt = nil }},
+		{"missing_receipt_time", RunForkDeploymentPendingReceiver, func(p *RunForkPlan) { p.PendingWork[1].ReceiptAt = nil }},
+		{"duplicate_receipt", RunForkDeploymentPendingReceiver, func(p *RunForkPlan) {
+			p.PendingWork = append(p.PendingWork, p.PendingWork[1])
+		}},
+		{"failed_receipt", RunForkDeploymentPendingReceiver, func(p *RunForkPlan) { p.PendingWork[1].ReceiptOutcome = "dead_letter" }},
 		{"foreign_delivery", RunForkDeploymentPendingPublication, func(p *RunForkPlan) {
 			p.FanOutObligations[0].PendingDeployment[0].SourceDeliveryIDs[0] = uuid.NewString()
 		}},

@@ -379,8 +379,7 @@ func fixedRunForkFanOutEventDisposition(
 			return false, "", nil, "", fmt.Errorf("nonterminal event %s delivery %s has no supported historical replay", eventID, delivery.Snapshot.DeliveryID)
 		}
 		if deployment != nil && (pending.Classification != runfork.RunForkPendingClassificationPending || pending.Status != "pending" ||
-			pending.RetryCount != 0 || pending.ActiveSessionID != "" || pending.StartedAt != nil || pending.DeliveredAt != nil || pending.ReceiptAt != nil ||
-			((phase == runfork.RunForkDeploymentPendingPublication) != (pending.ContinuationHandoffAt == nil))) {
+			pending.RetryCount != 0 || pending.ActiveSessionID != "" || pending.StartedAt != nil || pending.DeliveredAt != nil || pending.ReceiptAt != nil) {
 			return false, "", nil, "", fmt.Errorf("deployment event %s delivery %s contradicts its pending handoff phase", eventID, delivery.Snapshot.DeliveryID)
 		}
 		deliveryIDs = append(deliveryIDs, delivery.Snapshot.DeliveryID)
