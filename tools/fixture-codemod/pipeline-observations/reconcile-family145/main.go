@@ -45,7 +45,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "6fe8fd0f30dc94f3acf4dd9172d9a42677399f6b0ae815406738823e73151ba6"
+const targetDigest = "2a2471f86acb1e59df7976b1adc71712ffa015cb325a82122b38de6de3181f12"
 
 var sourceForkComparison = map[string]string{}
 var runDeliveryComparison = map[string]string{}
@@ -370,6 +370,7 @@ func main() {
 	rows, changes = composeBudgetDiagnosticHistory(rows, changes)
 	rows, changes = composeSelectedReadRoleHistory(rows, changes)
 	rows, changes = composeProcessReadHistory(rows, changes)
+	rows, changes = composeReadbackHistory(rows, changes)
 	raw, err := json.Marshal(changes)
 	must(err)
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))

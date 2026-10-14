@@ -94,6 +94,9 @@ func ValidateCurrent(root string, pins []runphysical.Pin) error {
 	}
 	for _, pin := range pins {
 		current, err := Body(files[pin.File], pin.Function)
+		if err == nil {
+			current, err = EarlierReadbackSource(root, pin.File, pin.Function, current)
+		}
 		if err != nil || current != pin.After {
 			return fmt.Errorf("selected read-role actual source changed: %s/%s: %v", pin.File, pin.Function, err)
 		}
@@ -103,6 +106,11 @@ func ValidateCurrent(root string, pins []runphysical.Pin) error {
 }
 
 func EarlierSource(root, file, function, current string) (string, error) {
+	var err error
+	current, err = EarlierReadbackSource(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	if !strings.HasPrefix(file, "internal/serveapp/") || !functions[function] {
 		return current, nil
 	}

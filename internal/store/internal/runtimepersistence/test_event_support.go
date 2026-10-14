@@ -31,6 +31,52 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
+type PublicationResultSourceStorage = eventrecord.PublicationResultSourceStorage
+type ReceiverFinishedEffectStorage = eventrecord.ReceiverFinishedEffectStorage
+type ActivityPublicationSourceStorage = eventrecord.ActivityPublicationSourceStorage
+
+func ReadActivityPublicationSourceStorageForTest(ctx context.Context, selected any, runID, eventID string) (ActivityPublicationSourceStorage, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (ActivityPublicationSourceStorage, error) {
+		return eventrecord.ReadActivityPublicationSourceStorageTx(ctx, tx, runID, eventID)
+	})
+}
+
+func CountActivityPublicationResultArmsStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountActivityPublicationResultArmsStorageTx(ctx, tx, runID)
+	})
+}
+
+func ReadReceiverFinishedEffectStorageForTest(ctx context.Context, selected any, runID, name, sourceEventID string) (ReceiverFinishedEffectStorage, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (ReceiverFinishedEffectStorage, error) {
+		return eventrecord.ReadReceiverFinishedEffectStorageTx(ctx, tx, runID, name, sourceEventID)
+	})
+}
+
+func ReadNumericCompletionPayloadStorageForTest(ctx context.Context, selected any, runID string) (string, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return eventrecord.ReadNumericCompletionPayloadStorageTx(ctx, tx, runID)
+	})
+}
+
+func CountNumericRunNamedEventStorageForTest(ctx context.Context, selected any, runID, name string) (int, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountNumericRunNamedEventStorageTx(ctx, tx, runID, name)
+	})
+}
+
+func ReadPublicationResultSourcesStorageForTest(ctx context.Context, selected any, runID string) ([]PublicationResultSourceStorage, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) ([]PublicationResultSourceStorage, error) {
+		return eventrecord.ReadPublicationResultSourcesStorageTx(ctx, tx, runID)
+	})
+}
+
+func ReadOrderedConnectionReadyEventIDsStorageForTest(ctx context.Context, selected any, runID string) ([]string, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
+		return eventrecord.ReadOrderedConnectionReadyEventIDsStorageTx(ctx, tx, runID)
+	})
+}
+
 func ReadDirectivePayloadOperationIDStorageForTest(ctx context.Context, selected any, eventID string) (string, error) {
 	_, postgres := selected.(*PostgresStore)
 	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (string, error) {

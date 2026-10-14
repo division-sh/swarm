@@ -39,41 +39,37 @@ func TestServedPublicationDirectRestartBothStores(t *testing.T) {
 				opts, start := lifecycleRestartHarness(t, backend, canonicalrouting.CopyPublicationDirectTextSite(t, mode))
 				first, rt := start()
 				name := "direct.requested"
-				params := map[string]any{"event_name": name, "bundle_hash": rt.BundleHash,
-					"payload": map[string]any{"case_id": "alpha", "choice": 1, "items": []string{}}, "idempotency_key": "publication-restart-seed"}
+				params := map[string]any{"event_name": name, "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "alpha", "choice": 1, "items": []string{}}, "idempotency_key": "publication-restart-seed"}
 				published := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 				waitPublicationSiteCompletion(t, rt.ReceiverStateReader, published.RunID)
 				want := map[string][]int{"alpha/result.direct": {1}}
-				requirePublicationSiteReadback(t, rt, published.RunID, mode, want, true)
+				requirePublicationSiteReadback(t, rt.Endpoint, rt.ReceiverStateReader, published.RunID, mode, want, true)
 				if code := first.stop(); code != 0 {
 					t.Fatalf("first process stop=%d", code)
 				}
 				setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 				second, rt := start()
-				requirePublicationSiteReadback(t, rt, published.RunID, mode, want, true)
+				requirePublicationSiteReadback(t, rt.Endpoint, rt.ReceiverStateReader, published.RunID, mode, want, true)
 				duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 				if duplicate.EventID != published.EventID || duplicate.RunID != published.RunID {
 					t.Fatalf("restart changed idempotent ingress: %+v -> %+v", published, duplicate)
 				}
 				waitPublicationSiteCompletion(t, rt.ReceiverStateReader, published.RunID)
-				requirePublicationSiteReadback(t, rt, published.RunID, mode, want, true)
+				requirePublicationSiteReadback(t, rt.Endpoint, rt.ReceiverStateReader, published.RunID, mode, want, true)
 				for _, caseID := range []string{"alpha", "beta"} {
-					next := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-						"event_name": name, "run_id": published.RunID, "idempotency_key": "publication-after-restart-" + caseID,
-						"payload": map[string]any{"case_id": caseID, "choice": 2, "items": []string{}},
-					})
+					next := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": name, "run_id": published.RunID, "idempotency_key": "publication-after-restart-" + caseID, "payload": map[string]any{"case_id": caseID, "choice": 2, "items": []string{}}})
 					if next.RunID != published.RunID || next.EventID == published.EventID {
 						t.Fatalf("fresh publication changed run or reused original event: %+v", next)
 					}
 					waitPublicationSiteCompletion(t, rt.ReceiverStateReader, published.RunID)
 					want[caseID+"/result.direct"] = append(want[caseID+"/result.direct"], 2)
-					requirePublicationSiteReadback(t, rt, published.RunID, mode, want, true)
+					requirePublicationSiteReadback(t, rt.Endpoint, rt.ReceiverStateReader, published.RunID, mode, want, true)
 				}
 				if code := second.stop(); code != 0 {
 					t.Fatalf("second process stop=%d", code)
 				}
 				_, rt = start()
-				requirePublicationSiteReadback(t, rt, published.RunID, mode, want, true)
+				requirePublicationSiteReadback(t, rt.Endpoint, rt.ReceiverStateReader, published.RunID, mode, want, true)
 			})
 		}
 	}
@@ -138,16 +134,16 @@ func proveServedPublicationSites(t *testing.T, textValues bool, selectedFamilies
 							published := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 							runID = published.RunID
 							waitPublicationSiteCompletion(t, rt.ReceiverStateReader, runID)
-							waitPublicationSiteFanOut(t, rt, runID)
+							waitPublicationSiteFanOut(t, rt.ReceiverStateReader, runID)
 							key := caseID + "/result." + family
 							want[key] = append(want[key], values...)
-							requirePublicationSiteReadback(t, rt, runID, mode, want, textValues)
+							requirePublicationSiteReadback(t, rt.Endpoint, rt.ReceiverStateReader, runID, mode, want, textValues)
 							duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 							if duplicate.EventID != published.EventID || duplicate.RunID != runID {
 								t.Fatalf("duplicate changed ingress: %+v -> %+v", published, duplicate)
 							}
 							waitPublicationSiteCompletion(t, rt.ReceiverStateReader, runID)
-							requirePublicationSiteReadback(t, rt, runID, mode, want, textValues)
+							requirePublicationSiteReadback(t, rt.Endpoint, rt.ReceiverStateReader, runID, mode, want, textValues)
 						}
 					}
 				}
@@ -203,51 +199,52 @@ func servedInspectionRuntimeLogDebugSummary(reader receiverProofStateReader, run
 	return summary
 }
 
-func waitPublicationSiteFanOut(t *testing.T, rt servedControlProofRuntime, runID string) {
+func waitPublicationSiteFanOut(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID string) {
 	t.Helper()
 	for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
-		var pending, refused int
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND status<>'closed'`, runID).Scan(&pending); err != nil {
+		pending, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (int, error) {
+			return storetest.CountOpenPublicationFanOutIntentsStorage(ctx, selectedProofReceiverStateReader, runID)
+		})
+		if err != nil {
 			t.Fatal(err)
 		}
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind<>'committed'`, runID).Scan(&refused); err != nil {
+		refused, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (int, error) {
+			return storetest.CountNoncommittedPublicationFanOutOutcomesStorage(ctx, selectedProofReceiverStateReader, runID)
+		})
+		if err != nil {
 			t.Fatal(err)
 		}
 		if refused != 0 {
-			var failure string
-			if err := rt.DB.QueryRow(`SELECT CAST(failure AS TEXT) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind<>'committed' LIMIT 1`, runID).Scan(&failure); err != nil {
+			failure, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (string, error) {
+				return storetest.ReadPublicationFanOutFailureStorage(ctx, selectedProofReceiverStateReader, runID)
+			})
+			if err != nil {
 				t.Fatal(err)
 			}
 			t.Fatalf("fan-out semantic rejection: %s", failure)
 		}
 		if pending == 0 {
-			waitPublicationSiteCompletion(t, rt.ReceiverStateReader, runID)
+			waitPublicationSiteCompletion(t, selectedProofReceiverStateReader, runID)
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("fan-out did not finish: %s", servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
+	t.Fatalf("fan-out did not finish: %s", servedInspectionRunDebugSummary(selectedProofReceiverStateReader, runID))
 }
 
-func requirePublicationSiteReadback(t *testing.T, rt servedControlProofRuntime, runID, mode string, want map[string][]int, textValues bool) {
+func requirePublicationSiteReadback(t *testing.T, selectedProofEndpoint string, selectedProofReceiverStateReader receiverProofStateReader, runID, mode string, want map[string][]int, textValues bool) {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT event_id,event_name,CAST(payload AS TEXT),routing_source_kind,CAST(source_route AS TEXT),COALESCE(CAST(source_event_id AS TEXT),'') FROM events WHERE run_id=$1 AND (event_name LIKE 'result.%' OR event_name LIKE '%/result.%')`, runID)
+	rows, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) ([]storetest.PublicationResultSourceStorage, error) {
+		return storetest.ReadPublicationResultSourcesStorage(ctx, selectedProofReceiverStateReader, runID)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	type result struct{ id, name, raw, kind, route, cause string }
 	var results []result
-	for rows.Next() {
-		var r result
-		if err := rows.Scan(&r.id, &r.name, &r.raw, &r.kind, &r.route, &r.cause); err != nil {
-			t.Fatal(err)
-		}
-		results = append(results, r)
+	for _, row := range rows {
+		results = append(results, result{row.ID, row.Name, row.Payload, row.Kind, row.Route, row.Cause})
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
 	got := map[string][]int{}
 	for _, r := range results {
 		var payload struct {
@@ -274,17 +271,20 @@ func requirePublicationSiteReadback(t *testing.T, rt servedControlProofRuntime, 
 		if err := json.Unmarshal([]byte(r.route), &route); err != nil {
 			t.Fatal(err)
 		}
-		// Node emissions retain flow-owned identity, including the constructed root.
 		flow, path, kind := ".", runID, "static_flow"
 		if mode != "root" {
 			flow, path, kind = "source", "source", "static_flow"
 		}
 		if mode == "template" {
 			kind = "concrete_template_instance"
-			var rawFields, declaration string
-			if err := rt.DB.QueryRow(`SELECT e.flow_instance,CAST(e.fields AS TEXT),f.flow_template FROM entity_state e JOIN flow_instances f ON f.run_id=e.run_id AND f.instance_path=e.flow_instance WHERE e.run_id=$1 AND e.entity_id=$2`, runID, route.EntityID).Scan(&path, &rawFields, &declaration); err != nil {
+			identity, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (storetest.PublicationTemplateIdentityStorage, error) {
+				return storetest.ReadPublicationTemplateIdentityStorage(ctx, selectedProofReceiverStateReader, runID, route.EntityID)
+			})
+			if err != nil {
 				t.Fatal(err)
 			}
+			path = identity.Path
+			rawFields, declaration := identity.Fields, identity.Declaration
 			var fields map[string]any
 			if err := json.Unmarshal([]byte(rawFields), &fields); err != nil {
 				t.Fatal(err)
@@ -307,10 +307,13 @@ func requirePublicationSiteReadback(t *testing.T, rt servedControlProofRuntime, 
 			if err != nil {
 				t.Fatal(err)
 			}
-			var selectionContext, disposition, selectedFlow, selectedFamily, semanticPath, label string
-			if err := rt.DB.QueryRow(`SELECT s.selection_context,s.disposition,s.flow_path,s.declaration_family,s.semantic_path,s.display_label FROM event_delivery_handler_rule_selections s JOIN event_deliveries d ON d.delivery_id=s.delivery_id WHERE d.run_id=$1 AND d.event_id=$2 AND d.subscriber_id=$3`, runID, r.cause, producer.Key()).Scan(&selectionContext, &disposition, &selectedFlow, &selectedFamily, &semanticPath, &label); err != nil {
+			selection, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (storetest.PublicationRuleSelectionStorage, error) {
+				return storetest.ReadPublicationRuleSelectionStorage(ctx, selectedProofReceiverStateReader, runID, r.cause, producer.Key())
+			})
+			if err != nil {
 				t.Fatalf("publication lacks exact selected-rule cause: %v", err)
 			}
+			selectionContext, disposition, selectedFlow, selectedFamily, semanticPath, label := selection.Context, selection.Disposition, selection.Flow, selection.Family, selection.Path, selection.Label
 			placement, context, index, wantLabel := "rules", "handler_rules", 0, "positive"
 			if family == "completion" || family == "completefanout" {
 				placement, context = "on_complete", "handler_on_complete"
@@ -328,7 +331,7 @@ func requirePublicationSiteReadback(t *testing.T, rt servedControlProofRuntime, 
 			}
 		}
 		var public operatorread.OperatorEventFull
-		requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": r.id}, &public)
+		requireServedJSONRPCResult(t, selectedProofEndpoint, "event.get", map[string]any{"event_id": r.id}, &public)
 		if public.EventID != r.id || public.RunID != runID || public.EventName != r.name || len(public.Deliveries) != 3 || public.Payload["case_id"] != payload.CaseID {
 			t.Fatalf("public publication/delivery cardinality: %+v", public)
 		}

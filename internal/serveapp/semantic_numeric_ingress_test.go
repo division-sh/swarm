@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -31,16 +33,18 @@ func TestServedSemanticNumericIdempotencyReplay(t *testing.T) {
 			unsetStoreSelectorEnv(t)
 			stubServeRuntimeWorkspaceLifecycle(t)
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
-			var db *sql.DB
+
 			if backend == servedparity.BackendExplicitPostgres {
-				_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+				installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+					return serveRuntimeWorkspaceStub{}
+				})
 				opts.ConfigPath = writeServeRuntimeTestConfig(t)
 				opts.StoreMode = "postgres"
 				opts.StoreModeSet = true
 			} else {
 				opts.ConfigPath = writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "semantic.db"))
 			}
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
+
 			start := func() (*serveRuntimeTestProcess, string) {
 				p := startServeRuntimeTestProcess(t, opts)
 				p.waitForReadyLine()
@@ -72,12 +76,12 @@ func TestServedSemanticNumericIdempotencyReplay(t *testing.T) {
 						replay := semanticNumericRPC(t, endpoint, c.transport, semanticNumericRequest(bundleHash, c.method, c.run, c.key, equivalent))
 						requireSemanticReplay(t, c.result, replay)
 					}
-					semanticNumericOutput(t, endpoint, db, reader, c.run)
+					semanticNumericOutput(t, endpoint, reader, c.run)
 					conflict := semanticNumericRPC(t, endpoint, c.transport, semanticNumericRequest(bundleHash, c.method, c.run, c.key, "8"))
 					if conflict.Error == nil || conflict.Error.Data["code"] != apiv1.IdempotencyConflictCode {
 						t.Fatalf("conflict = %#v", conflict)
 					}
-					semanticNumericOutput(t, endpoint, db, reader, c.run)
+					semanticNumericOutput(t, endpoint, reader, c.run)
 					cases = append(cases, c)
 				}
 			}
@@ -88,7 +92,7 @@ func TestServedSemanticNumericIdempotencyReplay(t *testing.T) {
 			for _, c := range cases {
 				replay := semanticNumericRPC(t, endpoint, c.transport, semanticNumericRequest(bundleHash, c.method, c.run, c.key, "7e0"))
 				requireSemanticReplay(t, c.result, replay)
-				semanticNumericOutput(t, endpoint, db, reader, c.run)
+				semanticNumericOutput(t, endpoint, reader, c.run)
 			}
 			if code := process.stop(); code != 0 {
 				t.Fatalf("restart stop=%d", code)
@@ -163,7 +167,7 @@ func TestServedSemanticNumericEventSubscription(t *testing.T) {
 			if err := json.Unmarshal(response.Result, &started); err != nil {
 				t.Fatal(err)
 			}
-			semanticNumericOutput(t, rt.Endpoint, rt.DB, rt.ReceiverStateReader, started.RunID)
+			semanticNumericOutput(t, rt.Endpoint, rt.ReceiverStateReader, started.RunID)
 			url := "ws" + strings.TrimPrefix(strings.TrimSuffix(rt.Endpoint, "/v1/rpc"), "http") + "/v1/ws"
 			conn, _, err := websocket.DefaultDialer.Dial(url, http.Header{"Authorization": []string{"Bearer " + apiv1.DefaultLoopbackAPIToken}})
 			if err != nil {
@@ -292,13 +296,16 @@ func requireSemanticReplay(t *testing.T, want json.RawMessage, got servedJSONRPC
 	}
 }
 
-func semanticNumericOutput(t *testing.T, endpoint string, db *sql.DB, reader receiverProofStateReader, run string) {
+func semanticNumericOutput(t *testing.T, endpoint string, reader receiverProofStateReader, run string) {
 	t.Helper()
 	var raw string
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		err := db.QueryRow(`SELECT CAST(payload AS TEXT) FROM events WHERE CAST(run_id AS TEXT)=$1 AND event_name='numeric.completed'`, run).Scan(&raw)
+		observed, err := readServedSelectedRole(context.Background(), reader, func(ctx context.Context) (string, error) {
+			return storetest.ReadNumericCompletionPayloadStorage(ctx, reader, run)
+		})
 		if err == nil {
+			raw = observed
 			break
 		}
 		if err != sql.ErrNoRows {
@@ -319,8 +326,10 @@ func semanticNumericOutput(t *testing.T, endpoint string, db *sql.DB, reader rec
 		t.Fatalf("execution output = %#v, want %#v (raw %s)", projected, want, raw)
 	}
 	for _, event := range []string{"numeric.requested", "numeric.completed"} {
-		var n int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE CAST(run_id AS TEXT)=$1 AND event_name=$2`, run, event).Scan(&n); err != nil || n != 1 {
+		n, err := readServedSelectedRole(context.Background(), reader, func(ctx context.Context) (int, error) {
+			return storetest.CountNumericRunNamedEventStorage(ctx, reader, run, event)
+		})
+		if err != nil || n != 1 {
 			t.Fatalf("%s count=%d err=%v", event, n, err)
 		}
 	}
@@ -333,10 +342,13 @@ func semanticNumericOutput(t *testing.T, endpoint string, db *sql.DB, reader rec
 			servedparity.PostconditionNoUnfiredDueTimers,
 		},
 	})
-	var fields, state string
-	if err := db.QueryRow(`SELECT CAST(fields AS TEXT), current_state FROM entity_state WHERE CAST(run_id AS TEXT)=$1`, run).Scan(&fields, &state); err != nil {
+	stored, err := readServedSelectedRole(context.Background(), reader, func(ctx context.Context) (storetest.NumericRunEntityStorage, error) {
+		return storetest.ReadNumericRunEntityStorage(ctx, reader, run)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
+	fields, state := stored.Fields, stored.State
 	var entity map[string]any
 	if err := canonicaljson.DecodePreservingNumberLexemes([]byte(fields), &entity); err != nil {
 		t.Fatal(err)

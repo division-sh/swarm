@@ -98,7 +98,7 @@ pins:
 			if first.Error != nil {
 				t.Fatalf("gate decision: %#v", first.Error)
 			}
-			semanticNumericOutput(t, rt.Endpoint, rt.DB, rt.ReceiverStateReader, published.RunID)
+			semanticNumericOutput(t, rt.Endpoint, rt.ReceiverStateReader, published.RunID)
 			proveReplay := func(spelling string) {
 				t.Helper()
 				replayed := semanticNumericRPC(t, rt.Endpoint, "http", body(spelling))
@@ -121,7 +121,7 @@ pins:
 					t.Fatal(err)
 				}
 				requireSemanticReplay(t, want, replayed)
-				semanticNumericOutput(t, rt.Endpoint, rt.DB, rt.ReceiverStateReader, published.RunID)
+				semanticNumericOutput(t, rt.Endpoint, rt.ReceiverStateReader, published.RunID)
 			}
 			proveReplay("7e0")
 			rt = restart()

@@ -112,3 +112,28 @@ func composeProcessReadHistory(rows []recipe, changes []transition) ([]recipe, [
 	}
 	return rows, changes
 }
+
+func composeReadbackHistory(rows []recipe, changes []transition) ([]recipe, []transition) {
+	pins, err := selectedreadrole.ReadReadbackPins(".")
+	must(err)
+	must(selectedreadrole.ValidateReadbackCurrent(".", pins))
+	for _, input := range []struct {
+		value, out any
+		recipes    bool
+	}{{rows, &rows, true}, {changes, &changes, false}} {
+		prior, err := selectedreadrole.PriorReadbackHistory(".", input.recipes)
+		must(err)
+		candidate, err := json.Marshal(input.value)
+		must(err)
+		var old, current []map[string]any
+		must(json.Unmarshal(prior, &old))
+		must(json.Unmarshal(candidate, &current))
+		if !reflect.DeepEqual(old, current) {
+			panic("readback reconciliation changed its complete signed predecessor")
+		}
+		raw, err := selectedreadrole.ComposeReadbackHistory(".", prior, input.recipes)
+		must(err)
+		must(json.Unmarshal(raw, input.out))
+	}
+	return rows, changes
+}

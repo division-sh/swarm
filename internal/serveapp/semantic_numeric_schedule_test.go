@@ -80,13 +80,13 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 			}
 			admit("7")
 			admit("7.0")
-			semanticNumericOutput(t, rt.Endpoint, rt.DB, rt.ReceiverStateReader, run)
+			semanticNumericOutput(t, rt.Endpoint, rt.ReceiverStateReader, run)
 			if code := process.stop(); code != 0 {
 				t.Fatalf("stop=%d", code)
 			}
 			process, rt = start()
 			admit("7e0")
-			semanticNumericOutput(t, rt.Endpoint, rt.DB, rt.ReceiverStateReader, run)
+			semanticNumericOutput(t, rt.Endpoint, rt.ReceiverStateReader, run)
 			if code := process.stop(); code != 0 {
 				t.Fatalf("restart stop=%d", code)
 			}

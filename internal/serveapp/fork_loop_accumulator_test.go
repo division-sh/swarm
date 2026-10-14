@@ -134,13 +134,13 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 						if !reflect.DeepEqual(bucket["received"], map[string]any{"loop-notice-proof": canonicaljson.HashBytes(canonical)}) {
 							t.Fatalf("current child dedup evidence: %#v", bucket)
 						}
-						requireForkLoopStateEffect(t, rt, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), want.RevisionID)
+						requireForkLoopStateEffect(t, rt.Endpoint, rt.ReceiverStateReader, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), want.RevisionID)
 					}
 					if _, exists := child[key]; exists {
 						t.Fatal("child retained source generation key")
 					}
 				}
-				requireForkLoopStateEffect(t, rt, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), readForkLoopActivation(t, rt.ReceiverStateReader, fork.ForkRunID).RevisionID)
+				requireForkLoopStateEffect(t, rt.Endpoint, rt.ReceiverStateReader, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), readForkLoopActivation(t, rt.ReceiverStateReader, fork.ForkRunID).RevisionID)
 				var replay apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
 				if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(child, readForkHandlerAccumulators(t, rt.ReceiverStateReader, fork.ForkRunID)) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), started.RunID)) {

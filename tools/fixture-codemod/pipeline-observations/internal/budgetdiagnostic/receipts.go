@@ -150,7 +150,11 @@ func advance(rows []map[string]any, pin runphysical.Pin, recipes bool) ([]map[st
 }
 
 func EarlierHistory(root string, current []byte, recipes bool) ([]byte, error) {
-	current, err := selectedreadrole.EarlierProcessHistory(root, current, recipes)
+	current, err := selectedreadrole.EarlierReadbackHistory(root, current, recipes)
+	if err != nil {
+		return nil, err
+	}
+	current, err = selectedreadrole.EarlierProcessHistory(root, current, recipes)
 	if err != nil {
 		return nil, err
 	}

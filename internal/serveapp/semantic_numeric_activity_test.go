@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -130,12 +131,12 @@ func proveActivitySemanticResultExecutionParity(t *testing.T, mock, fork bool) {
 			if err := rt.DB.QueryRow(`SELECT CAST(run_id AS TEXT) FROM events WHERE event_name='numeric.requested'`).Scan(&run); err != nil {
 				t.Fatal(err)
 			}
-			semanticNumericOutput(t, rt.Endpoint, rt.DB, rt.ReceiverStateReader, run)
+			semanticNumericOutput(t, rt.Endpoint, rt.ReceiverStateReader, run)
 			requireSemanticReplay(t, first.Result, semanticNumericRPC(t, rt.Endpoint, "http", semanticNumericRequest(rt.BundleHash, "event.publish", "", key, "7e0")))
-			semanticNumericOutput(t, rt.Endpoint, rt.DB, rt.ReceiverStateReader, run)
+			semanticNumericOutput(t, rt.Endpoint, rt.ReceiverStateReader, run)
 			rt = restart()
 			requireSemanticReplay(t, first.Result, semanticNumericRPC(t, rt.Endpoint, "http", semanticNumericRequest(rt.BundleHash, "event.publish", "", key, "7.0")))
-			semanticNumericOutput(t, rt.Endpoint, rt.DB, rt.ReceiverStateReader, run)
+			semanticNumericOutput(t, rt.Endpoint, rt.ReceiverStateReader, run)
 			if fork {
 				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, run)
 				var frontier string
@@ -182,14 +183,14 @@ collector:
 				if child.ForkRunID == "" || child.ForkRunID == run || child.SourceRunID != run {
 					t.Fatalf("fork identity: %+v", child)
 				}
-				requireNumericMockForkOutput(t, rt, child.ForkRunID)
+				requireNumericMockForkOutput(t, rt.Endpoint, rt.ReadRunDeliveries, rt.ReceiverStateReader, child.ForkRunID)
 				var attempts int
 				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE run_id=$1 AND status='succeeded' AND execution_mode='mock'`, child.ForkRunID).Scan(&attempts); err != nil || attempts != 1 {
 					t.Fatalf("fork mock attempts=%d err=%v", attempts, err)
 				}
 				rt = restart()
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-				requireNumericMockForkOutput(t, rt, child.ForkRunID)
+				requireNumericMockForkOutput(t, rt.Endpoint, rt.ReadRunDeliveries, rt.ReceiverStateReader, child.ForkRunID)
 				if !reflect.DeepEqual(child, replay) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), run)) {
 					t.Fatal("fork replay changed result or source")
 				}
@@ -210,24 +211,30 @@ collector:
 	}
 }
 
-func requireNumericMockForkOutput(t *testing.T, rt servedControlProofRuntime, run string) {
+func requireNumericMockForkOutput(t *testing.T, selectedProofEndpoint string, selectedProofReadRunDeliveries servedRunDeliveryReader, selectedProofReceiverStateReader receiverProofStateReader, run string) {
 	t.Helper()
-	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, run)
-	var entityID string
-	if err := rt.DB.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1`, run).Scan(&entityID); err != nil {
+	waitServedRunDeliveryQuiescence(t, selectedProofReadRunDeliveries, run)
+	entityID, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (string, error) {
+		return storetest.ReadNumericRunEntityIdentityStorage(ctx, selectedProofReceiverStateReader, run)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	var entity operatorread.OperatorEntityFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": run, "entity_id": entityID}, &entity)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "entity.get", map[string]any{"run_id": run, "entity_id": entityID}, &entity)
 	if entity.Fields["score"] != float64(24) {
 		t.Fatalf("selected mock arithmetic: %+v", entity.Fields)
 	}
-	var count int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE run_id=$1`, run).Scan(&count); err != nil || count != 1 {
+	count, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (int, error) {
+		return storetest.CountConnectorRunActivityAttempts(ctx, selectedProofReceiverStateReader, run)
+	})
+	if err != nil || count != 1 {
 		t.Fatalf("selected attempts=%d err=%v", count, err)
 	}
-	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(result_payload AS TEXT) FROM activity_attempts WHERE run_id=$1 AND status='succeeded' AND execution_mode='mock'`, run).Scan(&raw); err != nil {
+	raw, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (string, error) {
+		return storetest.ReadNumericMockActivityResultStorage(ctx, selectedProofReceiverStateReader, run)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	var decoded any

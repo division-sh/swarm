@@ -37,9 +37,18 @@ func main() {
 	readRoles := flag.Bool("read-roles", false, "migrate the finite selected read-role continuation")
 	processRead := flag.Bool("process-read", false, "replay the finite independent process-read observer repair")
 	captureProcessRead := flag.Bool("capture-process-read", false, "capture the finite repaired process-read declarations from their signed predecessor")
+	readback := flag.Bool("readback", false, "propagate the finite repaired receiver/publication read roles")
+	captureReadback := flag.Bool("capture-readback", false, "capture the finite repaired receiver/publication role candidate")
 	flag.Parse()
 	if flag.NArg() != 0 || (*lookup && (*scalar || *roles)) {
 		panic("usage: migrate-served-settlement [-lookup|-scalar|-roles] [-write]")
+	}
+	if *readback || *captureReadback {
+		if *lookup || *scalar || *roles || *readRoles || *processRead || *captureProcessRead || (*readback && *captureReadback) {
+			panic("readback repair cannot replay another migration stage")
+		}
+		migrateReadback(*write, *captureReadback)
+		return
 	}
 	if *processRead || *captureProcessRead {
 		if *lookup || *scalar || *roles || *readRoles || (*processRead && *captureProcessRead) {

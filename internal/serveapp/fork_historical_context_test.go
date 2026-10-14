@@ -44,7 +44,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			sourceRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
-			sourceRoute := requireForkReceiverBusinessMutation(t, rt, seed.RunID, frontier, sourceRows["consumer"].ID)
+			sourceRoute := requireForkReceiverBusinessMutation(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, frontier, sourceRows["consumer"].ID)
 			sibling := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-sibling"})
 			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, sibling.RunID)
 			family, ok := selected.RunFork()
@@ -186,7 +186,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, result.ForkRunID)
 			childEvent := activityidentity.ForkLineageEventID(result.ForkRunID, frontier)
-			childRoute := requireForkReceiverBusinessMutation(t, rt, result.ForkRunID, childEvent, sourceRows["consumer"].ID)
+			childRoute := requireForkReceiverBusinessMutation(t, rt.Endpoint, rt.ReceiverStateReader, result.ForkRunID, childEvent, sourceRows["consumer"].ID)
 			if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) {
 				t.Fatal("admitted historical route lost exact compiled connect evidence")
 			}
