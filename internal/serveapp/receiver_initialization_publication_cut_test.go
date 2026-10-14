@@ -13,7 +13,7 @@ import (
 
 // Only these two constructor routes use the release log as a snapshot-writer
 // fence. Their earlier delivery/configuration/candidate gates remain required.
-func requireReceiverInitializationHeldOrigin(t *testing.T, reader receiverProofStateReader, endpoint string, probe *lifecycleprobe.Probe, hold *exactOriginDiagnosticHold, seed servedEventPublishRPCResult, release func()) {
+func requireReceiverInitializationHeldOrigin(t *testing.T, reader receiverProofStateReader, endpoint string, probe *lifecycleprobe.Probe, hold *exactOriginDiagnosticHold, seed servedEventPublishRPCResult, release func(), completion *receiverCompletionBoundary, bundleHash string) {
 	t.Helper()
 	defer release()
 	ctx, cancel := context.WithTimeout(t.Context(), servedEventPublishLifecycleProbeWaitTimeout)
@@ -41,6 +41,7 @@ func requireReceiverInitializationHeldOrigin(t *testing.T, reader receiverProofS
 			t.Fatal("exact published-log fence opened before its native diagnostic write")
 		}
 	}
+	requireReceiverCompletionBoundary(t, ctx, completion, bundleHash, seed.RunID)
 	before := requireReceiverApplicationSnapshot(t, reader)
 	release()
 	if err := waitExactOriginPublications(ctx, probe, seed.EventID); err != nil {
