@@ -399,6 +399,7 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/bus.EventBus.activeAgentDescriptors::call internal/runtime/correlation.InboundEventFromContext":                             1,
 		"internal/runtime/bus.EventBus.activeTargetDescriptors::call internal/runtime/correlation.InboundEventFromContext":                            1,
 		"internal/runtime/bus.EventBus.planSubscribedRoutePlanWithPlanner::call internal/runtime/correlation.WithInboundEvent":                        1,
+		"internal/runtime/bus.EventBus.withPublicationInstancePlanning::call internal/runtime/correlation.WithInboundEvent":                           1, // Admitted publication for the pre-index agent projection (2617:6177396109).
 		"internal/runtime/pipeline.FreshActivityRequestLineage::call internal/runtime/pipeline.workflowNodeEventHandlerResolutionForDeliveryContext":  1,
 		"internal/runtime/pipeline.PipelineCoordinator.notifyTestFlowTerminationCommitted::call internal/runtime/correlation.InboundEventFromContext": 1,
 		"internal/runtime.BudgetTracker.evaluateScope::call internal/runtime/correlation.InboundEventFromContext":                                     1,
