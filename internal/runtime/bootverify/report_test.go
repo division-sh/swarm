@@ -3271,7 +3271,7 @@ func TestRun_LowersEmitFromThroughRulesEmitTemplateSpecialization(t *testing.T) 
 
 	report := Run(context.Background(), compileBootverifyRootSource(bundle), Options{})
 
-	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[0]: else.emit_template") {
+	if reportContains(report.Errors(), "semantic_drift_payload_completeness", "rules[0]: default.emit_template") {
 		t.Fatalf("unexpected template payload completeness error after emit.from lowering, got %#v", report.Errors())
 	}
 	if reportContains(report.Errors(), "emit_field_expression_validation", "payload.geography") {
