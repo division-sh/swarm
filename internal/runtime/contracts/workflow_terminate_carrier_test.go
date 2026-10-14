@@ -21,7 +21,7 @@ func TestTerminateBelongsToExactAdvanceCarrier(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler SystemNodeEventHandler
-			if err := decodeNodeTestYAML([]byte(fmt.Sprintf("advances_to: done\nterminate: %t\nrules:\n  - id: override\n    else: true\n    advances_to: other\n    terminate: %t\n", tc.root, tc.rule)), &handler); err != nil {
+			if err := decodeNodeTestYAML([]byte(fmt.Sprintf("advances_to: done\nterminate: %t\nrules:\n  - else: true\n    advances_to: other\n    terminate: %t\n", tc.root, tc.rule)), &handler); err != nil {
 				t.Fatal(err)
 			}
 			handler, err = QualifySystemNodeHandlerRuleRefsForEvent(node, "work.finished", handler)

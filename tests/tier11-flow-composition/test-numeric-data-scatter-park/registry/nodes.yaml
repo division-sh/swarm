@@ -26,15 +26,13 @@ registry-intake:
           - source_field: qualified
             target_field: qualified
       rules:
-        - id: qualified_for_investigation
-          when: payload.qualified == true && policy.investigate == true
+        - when: payload.qualified == true && policy.investigate == true
           advances_to: investigating
           emit:
             event: investigate.requested
             fields:
               item_id: payload.item_id
-        - id: parked
-          else: true
+        - else: true
 registry-finalize:
   execution_type: system_node
   subscribes_to: [assessment.reported, investigation.timed_out]
