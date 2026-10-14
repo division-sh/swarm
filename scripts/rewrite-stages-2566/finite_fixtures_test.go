@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runstart"
@@ -167,6 +168,9 @@ func TestRewrite2566NoFinalRootCensusIsExplicitlyClassified(t *testing.T) {
 			"examples/routing/template-select-existing", "examples/routing/template-select-or-create",
 		},
 		"standing/startup/provider/component sources, not finite run.start": {
+			// #2577 served ordered-input/rebind and notice-acknowledgment
+			// journeys use standing provider ingress, never finite run.start.
+			"internal/serveapp/testdata/whatsapp-session-input", "internal/serveapp/testdata/whatsapp-session-notice",
 			// Public structural readers and standing declare/restart, not finite run.start.
 			"internal/releasee2e/testdata/admission_factoring",
 			"internal/runtime/testfixtures/canonicalrouting/testdata/issue2564/h1",
@@ -244,5 +248,22 @@ func TestRewrite2566NoFinalRootCensusIsExplicitlyClassified(t *testing.T) {
 	}
 	if !reflect.DeepEqual(actual, expected) {
 		t.Fatalf("no-final root census needs explicit caller classification: actual=%v expected=%v", actual, expected)
+	}
+}
+
+func TestRewrite2566WhatsAppStandingFixturesRefuseFiniteInitiation(t *testing.T) {
+	repo := canonicalrouting.RepoRoot(t)
+	for _, name := range []string{"whatsapp-session-input", "whatsapp-session-notice"} {
+		t.Run(name, func(t *testing.T) {
+			bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, filepath.Join(repo, "internal/serveapp/testdata", name),
+				contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var refusal *runstart.FiniteStartError
+			if err := runstart.ValidateFinite(semanticview.Wrap(bundle), nil); !errors.As(err, &refusal) || refusal.FlowID != "." {
+				t.Fatalf("standing WhatsApp source gained finite initiation authority: %v", err)
+			}
+		})
 	}
 }
