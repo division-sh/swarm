@@ -102,7 +102,7 @@ func TestSingleDeploymentConfigReleaseSelectionAndRefusal(t *testing.T) {
 				for _, finding := range report.Config {
 					if finding.Severity == "blocker" {
 						blockers++
-						if finding.Code != "config_unknown_key" || finding.Status != "failed" || !strings.Contains(finding.Message, path+":2:3") || !strings.Contains(finding.Message, "paths."+key) {
+						if finding.Code != "config_unknown_key" || finding.Status != "failed" || !strings.HasPrefix(finding.Message, path+":paths."+key+":") || !strings.Contains(finding.Message, "(line 2, column 3)") {
 							t.Fatalf("wrong refusal: %#v", finding)
 						}
 					}
