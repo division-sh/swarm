@@ -3,6 +3,7 @@ package cliapp
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -13,6 +14,39 @@ func writeSingleDeploymentConfig(t *testing.T, path, body string) {
 		t.Fatal(err)
 	}
 	writeRuntimeConfigText(t, path, body)
+}
+
+func ignoredUserGlobalConfigPath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(dir, "swarm", "swarm.yaml")
+}
+
+func writeIgnoredExecutableConfig(t *testing.T, body string) string {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(filepath.Dir(executable), "config.yaml")
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatalf("create exclusive legacy fixture beside this test binary: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Remove(path); err != nil {
+			t.Errorf("remove owned legacy fixture: %v", err)
+		}
+	})
+	_, writeErr := file.WriteString(body)
+	closeErr := file.Close()
+	if writeErr != nil || closeErr != nil {
+		t.Fatalf("write/close legacy fixture: %v / %v", writeErr, closeErr)
+	}
+	return path
 }
 
 func TestSingleDeploymentConfigSelectsOnlyDeclaredFile(t *testing.T) {
@@ -26,7 +60,7 @@ func TestSingleDeploymentConfigSelectsOnlyDeclaredFile(t *testing.T) {
 				if ignored == "invalid" {
 					globalBody, projectBody = "llm: [\n", "invented_project_setting: true\n"
 				}
-				global := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "swarm", "swarm.yaml")
+				global := ignoredUserGlobalConfigPath(t)
 				writeSingleDeploymentConfig(t, global, globalBody)
 				writeSingleDeploymentConfig(t, filepath.Join(root, "swarm.yaml"), projectBody)
 				deployment := filepath.Join(root, ".swarm", "swarm.yaml")
@@ -79,13 +113,10 @@ func TestSingleDeploymentConfigDoesNotProbeDeletedLegacyLocations(t *testing.T) 
 			root := t.TempDir()
 			path := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "swarm", "config.yaml")
 			if location == "executable" {
-				bin := t.TempDir()
-				path = filepath.Join(bin, "config.yaml")
-				previous := runtimeConfigExecutablePath
-				runtimeConfigExecutablePath = func() (string, error) { return filepath.Join(bin, "swarm"), nil }
-				t.Cleanup(func() { runtimeConfigExecutablePath = previous })
+				path = writeIgnoredExecutableConfig(t, "malformed: [\n")
+			} else {
+				writeSingleDeploymentConfig(t, path, "malformed: [\n")
 			}
-			writeSingleDeploymentConfig(t, path, "malformed: [\n")
 			selected := filepath.Join(root, "selected.yaml")
 			writeSingleDeploymentConfig(t, selected, "runtime:\n  recovery_on_startup: false\n")
 			loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root, ExplicitPath: selected})
@@ -257,5 +288,64 @@ func TestSingleDeploymentConfigNullContainerRefusalNamesSelectedFile(t *testing.
 				}
 			})
 		}
+	}
+}
+
+func TestSingleDeploymentConfigHasNoLayerOrOriginMetadata(t *testing.T) {
+	for _, model := range []reflect.Type{reflect.TypeFor[unifiedConfigLoadResult](), reflect.TypeFor[RuntimeConfigLoadResult](), reflect.TypeFor[unifiedConfigDiagnostic]()} {
+		for _, name := range []string{"Layers", "KeyOrigins", "Layer"} {
+			if _, found := model.FieldByName(name); found {
+				t.Errorf("%s still carries retired %s", model.Name(), name)
+			}
+		}
+	}
+}
+
+func TestSingleDeploymentConfigInvalidDocumentCannotDelegateEnv(t *testing.T) {
+	for _, invalid := range []string{"runtime: null\n", "runtime: {unknown: true}\n", "runtime: {recovery_on_startup: true, recovery_on_startup: false}\n"} {
+		t.Run(invalid, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			root := t.TempDir()
+			selected := filepath.Join(root, ".swarm", "swarm.yaml")
+			writeSingleDeploymentConfig(t, selected, "database: {password_env: SWARM_REVIEW_DB_SECRET}\n"+invalid)
+			t.Setenv("SWARM_REVIEW_DB_SECRET", "synthetic-env-value")
+			if delegated := unifiedConfigDelegatedSwarmEnvSources(root, ""); len(delegated) != 0 {
+				t.Fatalf("refused document authorized env: %v", delegated)
+			}
+			for _, finding := range doctorSwarmEnvFindings(root, "") {
+				if finding.Name == "SWARM_REVIEW_DB_SECRET" && finding.AcceptedBy != "" {
+					t.Fatalf("doctor credited refused document: %+v", finding)
+				}
+			}
+			if _, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root}); err == nil || !strings.Contains(err.Error(), "unknown SWARM_* env") {
+				t.Fatalf("loader accepted refused env delegation: %v", err)
+			}
+		})
+	}
+}
+
+func TestSingleDeploymentConfigIgnoredFilesCannotDelegateEnv(t *testing.T) {
+	for _, ignored := range []string{"root", "global"} {
+		t.Run(ignored, func(t *testing.T) {
+			isolateCLIAPIConfigEnv(t)
+			root := t.TempDir()
+			path := filepath.Join(root, "swarm.yaml")
+			if ignored == "global" {
+				path = ignoredUserGlobalConfigPath(t)
+			}
+			writeSingleDeploymentConfig(t, path, "database: {password_env: SWARM_REVIEW_DB_SECRET}\n")
+			t.Setenv("SWARM_REVIEW_DB_SECRET", "synthetic-env-value")
+			if delegated := unifiedConfigDelegatedSwarmEnvSources(root, ""); len(delegated) != 0 {
+				t.Fatalf("ignored file authorized env: %v", delegated)
+			}
+			for _, finding := range doctorSwarmEnvFindings(root, "") {
+				if finding.Name == "SWARM_REVIEW_DB_SECRET" && finding.AcceptedBy != "" {
+					t.Fatalf("doctor credited ignored file: %+v", finding)
+				}
+			}
+			if _, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root}); err == nil || !strings.Contains(err.Error(), "unknown SWARM_* env") {
+				t.Fatalf("loader accepted ignored env delegation: %v", err)
+			}
+		})
 	}
 }

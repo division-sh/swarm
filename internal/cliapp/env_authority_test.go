@@ -735,7 +735,7 @@ func TestSwarmEnvGuardAllowsTypedDatabasePasswordEnvDelegation(t *testing.T) {
 	}
 }
 
-func TestSwarmEnvGuardAllowsTypedDatabasePasswordEnvDelegationFromTrustedLayers(t *testing.T) {
+func TestSwarmEnvGuardAllowsTypedDatabasePasswordEnvDelegationFromSelectedFile(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
 		setup func(t *testing.T, repo string)
@@ -752,14 +752,12 @@ func TestSwarmEnvGuardAllowsTypedDatabasePasswordEnvDelegationFromTrustedLayers(
 			},
 		},
 		{
-			name: "user global",
-			setup: func(t *testing.T, _ string) {
+			name: "locator",
+			setup: func(t *testing.T, repo string) {
 				t.Helper()
-				path := userGlobalUnifiedConfigPath()
-				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-					t.Fatalf("mkdir user global config: %v", err)
-				}
+				path := filepath.Join(repo, "operator.yaml")
 				writeWorkflowValidationFixtureFile(t, path, "database:\n  password_env: SWARM_DB_PASSWORD\n")
+				t.Setenv("SWARM_CONFIG", path)
 			},
 		},
 	} {
@@ -792,7 +790,7 @@ func TestSwarmEnvGuardAllowsTypedDatabasePasswordEnvDelegationFromTrustedLayers(
 	}
 }
 
-func TestSwarmEnvGuardRejectsProjectTypedDatabasePasswordEnvDelegation(t *testing.T) {
+func TestSwarmEnvGuardIgnoresProjectTypedDatabasePasswordEnvDelegation(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_DB_PASSWORD", "secret")
 	repo := t.TempDir()
@@ -832,7 +830,7 @@ func TestSwarmEnvGuardHonorsTypedDatabasePasswordEnvClearOverride(t *testing.T) 
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_DB_PASSWORD", "secret")
 	repo := t.TempDir()
-	userPath := userGlobalUnifiedConfigPath()
+	userPath := ignoredUserGlobalConfigPath(t)
 	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
 		t.Fatalf("mkdir user global config: %v", err)
 	}
@@ -876,13 +874,7 @@ func TestSwarmEnvGuardHonorsTypedDatabasePasswordEnvClearOverride(t *testing.T) 
 func TestSwarmEnvGuardRejectsExecutableAdjacentTypedDatabasePasswordEnvDelegation(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	t.Setenv("SWARM_DB_PASSWORD", "secret")
-	binDir := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(binDir, "config.yaml"), "database:\n  password_env: SWARM_DB_PASSWORD\n")
-	originalExecutablePath := runtimeConfigExecutablePath
-	runtimeConfigExecutablePath = func() (string, error) {
-		return filepath.Join(binDir, "swarm"), nil
-	}
-	t.Cleanup(func() { runtimeConfigExecutablePath = originalExecutablePath })
+	writeIgnoredExecutableConfig(t, "database:\n  password_env: SWARM_DB_PASSWORD\n")
 
 	called := false
 	opts := defaultRootCommandOptions()
