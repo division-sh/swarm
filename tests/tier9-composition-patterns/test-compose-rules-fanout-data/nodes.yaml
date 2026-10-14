@@ -8,13 +8,11 @@ dispatcher:
         items_from: payload.items
         store_as: entity.dispatch_count
       rules:
-        - id: parallel
-          when: payload.mode == 'parallel'
+        - when: payload.mode == 'parallel'
           advances_to: dispatched
           emit:
             event: batch.dispatched
-        - id: sequential
-          when: payload.mode == 'sequential'
+        - when: payload.mode == 'sequential'
           data_accumulation:
             writes:
               - target_field: dispatch_count
@@ -22,8 +20,7 @@ dispatcher:
           advances_to: dispatched
           emit:
             event: batch.dispatched
-        - id: fallback
-          else: true
+        - else: true
           data_accumulation:
             writes:
               - target_field: dispatch_count

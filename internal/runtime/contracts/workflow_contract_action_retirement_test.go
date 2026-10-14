@@ -14,6 +14,14 @@ func requireRetiredHandlerAction(t *testing.T, err error, key string) {
 	}
 }
 
+func requireRetiredHandlerCollectionShape(t *testing.T, err error) {
+	t.Helper()
+	if err == nil || !strings.Contains(err.Error(), "DIALECT-RULES-ORDER") ||
+		!strings.Contains(err.Error(), "ordered list") || !strings.Contains(err.Error(), "nodes.yaml:") {
+		t.Fatalf("alternate rules collection must refuse at the located shape owner: %v", err)
+	}
+}
+
 func TestRetiredHandlerActionsRejectedOnPresence(t *testing.T) {
 	for _, value := range []string{
 		"create_flow_instance", "record_evidence", "mailbox_write", "artifact_repo_commit", "unknown_action",
@@ -48,6 +56,18 @@ func TestRetiredHandlerActionOptionsRejected(t *testing.T) {
 				t.Run(site.name+"/"+key+"/"+value, func(t *testing.T) {
 					var handler SystemNodeEventHandler
 					err := decodeNodeTestYAML([]byte(fmt.Sprintf(site.pattern, key, value)), &handler)
+					switch site.name {
+					case "rules_singleton", "rules_keyed":
+						requireRetiredHandlerCollectionShape(t, err)
+						err = decodeNodeTestYAML([]byte(fmt.Sprintf("rules: [{else: true, %s: %s}]\n", key, value)), &handler)
+					case "rules_lone_field":
+						requireRetiredHandlerCollectionShape(t, err)
+						body := fmt.Sprintf("rules: [{%s: %s}]\n", key, value)
+						if value == "{}" || value == "{nested: value}" {
+							body = fmt.Sprintf("rules: [%s]\n", value)
+						}
+						err = decodeNodeTestYAML([]byte(body), &handler)
+					}
 					if site.name == "rules_lone_field" && value == "{}" {
 						if err == nil || !strings.Contains(err.Error(), "EMPTY-AUTHORED-RULE") {
 							t.Fatalf("empty keyed rule %q was admitted: %v", key, err)
@@ -80,7 +100,13 @@ func TestRetiredHandlerActionAliasesRejected(t *testing.T) {
 			t.Run(key+"/row_alias/"+target, func(t *testing.T) {
 				var handler SystemNodeEventHandler
 				raw := "retired: &retired {" + key + ": null}\n" + target + "\n"
-				requireRetiredHandlerAction(t, decodeNodeTestMember([]byte(raw), "handler", &handler), key)
+				err := decodeNodeTestMember([]byte(raw), "handler", &handler)
+				if target == "handler: {rules: {chosen: *retired}}" {
+					requireRetiredHandlerCollectionShape(t, err)
+					raw = "retired: &retired {" + key + ": null}\nhandler: {rules: [*retired]}\n"
+					err = decodeNodeTestMember([]byte(raw), "handler", &handler)
+				}
+				requireRetiredHandlerAction(t, err, key)
 			})
 		}
 	}
@@ -113,6 +139,12 @@ func TestLoadWorkflowContractBundleRejectsRetiredHandlerActions(t *testing.T) {
 				root := t.TempDir()
 				writeFieldReconciliationBundle(t, root, "", "worker:\n  event_handlers:\n    work.requested: "+handler+"\n")
 				_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+				if handler == "{rules: {selected: {"+key+": {}}}}" {
+					requireRetiredHandlerCollectionShape(t, err)
+					canonical := "{rules: [{" + key + ": {}}]}"
+					writeFieldReconciliationBundle(t, root, "", "worker:\n  event_handlers:\n    work.requested: "+canonical+"\n")
+					_, err = LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+				}
 				requireRetiredHandlerAction(t, err, key)
 			})
 		}
