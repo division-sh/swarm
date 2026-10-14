@@ -93,7 +93,7 @@ func TestFanOutEvaluationSingleAdmissionRealConsumersBothStores(t *testing.T) {
 
 func TestFanOutEvaluationHydrationIntervalFencesBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, cut := range []string{"expiry", "cancel", "validation_error", "retired_grant", "source_head", "stop"} {
+		for _, cut := range []string{"healthy", "expiry", "cancel", "validation_error", "retired_grant", "source_head", "stop"} {
 			t.Run(backend+"/"+cut, func(t *testing.T) {
 				f := newGroupProofFixture(t, backend, 1)
 				if err := f.group.Close(f.ctx); err != nil {
@@ -169,6 +169,19 @@ func TestFanOutEvaluationHydrationIntervalFencesBothStores(t *testing.T) {
 					}()
 				}
 				switch cut {
+				case "healthy":
+					if err != nil || group == nil {
+						t.Fatalf("healthy composition: %v %v", group, err)
+					}
+					if err := group.Seal(f.ctx, input.StartOrdinal+len(input.Items), nil); err != nil {
+						t.Fatal(err)
+					}
+					committed, err := f.owner.CommitFanOutChunk(f.ctx, rejectedFanOutChunk(f.claim, 0, len(input.Items), time.Now().UTC()))
+					if err != nil || committed.Intent.Cursor != 1 {
+						t.Fatalf("healthy sealed range: %+v %v", committed, err)
+					}
+					assertFanOutCursorAndOutcomeCount(t, f.ctx, f.db, f.seed, 1, 1)
+					return
 				case "expiry":
 					if group != nil || !errors.Is(err, fanoutobligation.ErrStaleClaim) {
 						t.Fatalf("expiry opened a group: %v %v", group, err)
@@ -183,15 +196,18 @@ func TestFanOutEvaluationHydrationIntervalFencesBothStores(t *testing.T) {
 						t.Fatalf("cancellation hid independent validation: %v %v", group, err)
 					}
 				default:
-					if err == nil && group == nil {
-						t.Fatal("successful composition returned no group")
+					if err != nil || group == nil {
+						t.Fatalf("authority cut did not reach group admission: %v %v", group, err)
 					}
-					if err == nil {
-						committed, err := f.owner.CommitFanOutChunk(f.ctx, rejectedFanOutChunk(f.claim, 0, len(input.Items), time.Now().UTC()))
-						if err == nil || len(committed.Publications) != 0 {
-							t.Fatalf("hydration authority change admitted durable effects: %+v %v", committed, err)
-						}
+					if err := group.Seal(f.ctx, input.StartOrdinal+len(input.Items), nil); err != nil {
+						t.Fatal(err)
 					}
+					committed, err := f.owner.CommitFanOutChunk(f.ctx, rejectedFanOutChunk(f.claim, 0, len(input.Items), time.Now().UTC()))
+					intended := err != nil && ((cut == "stop" && errors.Is(err, fanoutobligation.ErrStaleClaim)) || (cut == "source_head" && strings.Contains(err.Error(), "fan-out grant no longer owns the current source-set head")) || (cut == "retired_grant" && strings.Contains(err.Error(), "grant is retired")))
+					if !intended || len(committed.Publications) != 0 {
+						t.Fatalf("hydration authority change admitted durable effects: %+v %v", committed, err)
+					}
+					t.Logf("sealed range reached exact %s refusal: %v", cut, err)
 				}
 				f.unchanged(t, before)
 			})

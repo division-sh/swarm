@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -135,6 +136,30 @@ func TestSelectedDeploymentServingRequiresExactLiveGrantBothStores(t *testing.T)
 				feeds[0].Status != fanoutobligation.StatusOpen || feeds[0].Cursor != 0 {
 				t.Fatalf("exact selected feed census: feeds=%#v err=%v", feeds, err)
 			}
+			claim.Candidate = &feedKey
+			intent, selectedClaim, found, err := owner.ClaimFanOutIntent(ctx, claim)
+			if err != nil || !found {
+				t.Fatalf("claim exact selected feed: found=%v err=%v", found, err)
+			}
+			beforeEvaluation, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			validated := false
+			input, group, err := owner.BeginFanOutEvaluation(ctx, selectedClaim, func(input pipeline.FanOutEvaluationInput) error {
+				validated = true
+				return input.Validate(intent)
+			})
+			if err != nil || group == nil || !validated || input.StartOrdinal != 0 || len(input.Items) != 1 || !reflect.DeepEqual(input.Items[0], map[string]any{"name": "selected"}) || input.Trigger.ID() != "" {
+				t.Fatalf("exact selected composite evaluation: input=%+v group=%v validated=%v err=%v", input, group, validated, err)
+			}
+			if err := group.Close(ctx); err != nil {
+				t.Fatal(err)
+			}
+			afterEvaluation, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, store)
+			if err != nil || !reflect.DeepEqual(beforeEvaluation, afterEvaluation) {
+				t.Fatalf("selected composite admission changed durable state: %v", err)
+			}
 			if _, err := db.ExecContext(ctx, `UPDATE fan_out_intents SET bundle_hash=$1 WHERE run_id=$2 AND deployment_feed_id=$3`,
 				"bundle-v2:sha256:"+strings.Repeat("6", 64), fixture.forkRun, feedKey.DeploymentFeedID); err != nil {
 				t.Fatal(err)
@@ -169,6 +194,9 @@ func TestSelectedDeploymentServingRequiresExactLiveGrantBothStores(t *testing.T)
 			}
 			if _, err := serving.ListSelectedDeploymentFeeds(ctx, evidence); err == nil {
 				t.Fatal("stale selected grant retained feed-list authority")
+			}
+			if _, group, err := owner.BeginFanOutEvaluation(ctx, selectedClaim, func(input pipeline.FanOutEvaluationInput) error { return input.Validate(intent) }); err == nil || group != nil {
+				t.Fatalf("composite evaluation retained stale selected execution fence: group=%v err=%v", group, err)
 			}
 			claim.Candidate = &feedKey
 			if _, _, _, err := owner.ClaimFanOutIntent(ctx, claim); err == nil {
