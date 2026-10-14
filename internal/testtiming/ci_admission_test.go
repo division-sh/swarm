@@ -111,6 +111,7 @@ func ciEventFacts(event string, draft bool, soak string) map[string]string {
 		"github.event.pull_request.draft":     strconv.FormatBool(draft),
 		"needs.ci-plan.outputs.soak_matrix":   strconv.Quote(soak),
 		"needs.required-tests.result":         strconv.Quote("success"),
+		"needs.ci-preflight.result":           strconv.Quote("success"),
 		"needs.ci-plan.outputs.master_replay": strconv.Quote("false"),
 		"needs.ci-plan.outputs.proof_matrix":  strconv.Quote(`{"include":[{"unit":"ordinary"}]}`),
 		"needs.ci-plan.outputs.profile": strconv.Quote(func() string {
@@ -130,7 +131,7 @@ func TestCITierIncreaseKeepsLateSummaryAndNewHeadEvent(t *testing.T) {
 		t.Fatal("tier increases must use new-head/ready qualification, not redundant edited runs")
 	}
 	summary := workflow.Jobs["required-tests"]
-	wantNeeds := []string{"complexity", "ci-plan", "static-checks", "sqlite-local-dev", "macos-sqlite-possession", "unused-linux", "unused-darwin", "unused-checks", "proof-unit", "semantic-smoke", "timing-budget"}
+	wantNeeds := []string{"ci-preflight", "complexity", "ci-plan", "static-checks", "sqlite-local-dev", "macos-sqlite-possession", "unused-linux", "unused-darwin", "unused-checks", "proof-unit", "semantic-smoke", "timing-budget"}
 	if summary.TimeoutMinutes != 5 || !slices.Equal(summary.Needs, wantNeeds) {
 		t.Fatalf("summary must remain late and bounded: timeout=%v needs=%v", summary.TimeoutMinutes, summary.Needs)
 	}
