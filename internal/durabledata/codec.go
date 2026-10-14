@@ -201,6 +201,9 @@ func normalizeImportOmissions(value semanticvalue.Value, schema map[string]any) 
 					continue
 				}
 			}
+			if _, declared := properties[member.Name]; !declared && member.Value.Kind() != semanticvalue.KindNull {
+				property, _ = schema["additionalProperties"].(map[string]any)
+			}
 			normalized, err := normalizeImportOmissions(member.Value, property)
 			if err != nil {
 				return semanticvalue.Value{}, err
