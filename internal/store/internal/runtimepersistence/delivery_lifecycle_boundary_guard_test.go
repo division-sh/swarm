@@ -18,12 +18,14 @@ var executableDeliverySQL = regexp.MustCompile(`(?is)\b(?:from|join|into|update|
 
 var executableDeliverySQLOwners = map[string]string{
 	"internal/store/internal/backend/delivery/adapter.go":                                            "private canonical executable-delivery lifecycle adapter",
+	"internal/store/internal/backend/delivery/agent_claim_profile.go":                                "canonical immutable first-claim profile evidence under the delivery transaction",
 	"internal/store/internal/backend/delivery/creating_predecessor.go":                               "canonical creating-turn outcome admission under the original delivery transaction",
 	"internal/store/internal/backend/delivery/lifecycle.go":                                          "named delivery lifecycle owner resolving affected runs before mutation",
 	"internal/store/internal/backend/delivery/queued_cancellation.go":                                "canonical exact queued and claimed agent-origin cancellation in the owning mutation",
 	"internal/store/internal/backend/delivery/read_projections.go":                                   "private canonical bounded executable-delivery read projections",
 	"internal/store/internal/backend/delivery/selected_successor_handoff.go":                         "selected-fork exact unfinished-delivery authority handoff",
 	"internal/store/internal/backend/delivery/snapshots_batch.go":                                    "private canonical batched executable-delivery snapshot admission",
+	"internal/store/internal/backend/delivery/test_agent_claim_profile_fault.go":                     "named exact first-claim capture CAS fault under the original selected transaction",
 	"internal/store/internal/backend/runforkrevision/projection.go":                                  "private immutable fork-revision canonical projection",
 	"internal/store/internal/adminpersistence/destructive_reset_cleanup.go":                          "named destructive-reset physical cleanup",
 	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go": "selected-fork physical cleanup after typed terminalization",
