@@ -48,7 +48,9 @@ func TestIssue2394ServedReporterTransactionCensusBothStores(t *testing.T) {
 			opts, start := lifecycleRestartHarness(t, backend, root)
 			opts.TestLLMRuntime = servedNoopLLMRuntime{}
 			var selected any
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected = p.deps.EventStore })
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+				selected = p.deps.EventStore
+			})
 			process, rt := start()
 			t.Cleanup(func() {
 				if t.Failed() {
@@ -60,10 +62,7 @@ func TestIssue2394ServedReporterTransactionCensusBothStores(t *testing.T) {
 			var started struct {
 				RunID string `json:"run_id"`
 			}
-			issue2394ReporterRPC(t, rt, "run.start", map[string]any{
-				"run_id": runID, "bundle_hash": rt.BundleHash, "event_name": "portfolio.opened",
-				"payload": map[string]any{"portfolio_id": portfolio, "threshold": 75}, "idempotency_key": uuid.NewString(),
-			}, &started)
+			issue2394ReporterRPC(t, rt.Endpoint, "run.start", map[string]any{"run_id": runID, "bundle_hash": rt.BundleHash, "event_name": "portfolio.opened", "payload": map[string]any{"portfolio_id": portfolio, "threshold": 75}, "idempotency_key": uuid.NewString()}, &started)
 			if started.RunID != runID {
 				t.Fatalf("run identity changed: %+v", started)
 			}
@@ -71,12 +70,9 @@ func TestIssue2394ServedReporterTransactionCensusBothStores(t *testing.T) {
 			transactions := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{})
 			rows := make([]map[string]any, 8)
 			for ordinal := range rows {
-				rows[ordinal] = map[string]any{
-					"account_id": fmt.Sprintf("census-%02d", ordinal), "eng_roles": ordinal,
-					"gem_score": float64(ordinal) + 0.25, "external_id": uuid.NewString(),
-				}
+				rows[ordinal] = map[string]any{"account_id": fmt.Sprintf("census-%02d", ordinal), "eng_roles": ordinal, "gem_score": float64(ordinal) + 0.25, "external_id": uuid.NewString()}
 			}
-			publishIssue2394ReporterBatch(t, rt, runID, portfolio, rows)
+			publishIssue2394ReporterBatch(t, rt.Endpoint, runID, portfolio, rows)
 			waitIssue2394ReporterCursor(t, rt, runID, len(rows))
 			waitIssue2394ReporterDiagnosis(t, rt, runID, len(rows))
 			receipt := transactions.Snapshot()
@@ -84,24 +80,13 @@ func TestIssue2394ServedReporterTransactionCensusBothStores(t *testing.T) {
 			claims := receipt.ByOperation[storetest.TransactionDeliveryClaim].WriteCommits
 			mutations := receipt.ByOperation[storetest.TransactionWorkflowMutation].WriteCommits
 			settlements := receipt.ByOperation[storetest.TransactionDeliverySettle].WriteCommits
-			// The fan-out handler mutates once; its empty receivers settle without state writes.
 			if claims != uint64(len(rows)+1) || mutations != 1 || settlements != uint64(len(rows)) || candidateWrites == 0 || receipt.Total.Failed != 0 {
 				t.Fatalf("eight real consumers lost exact claim/mutation/settlement/candidate accounting: claims=%d mutations=%d settlements=%d candidates=%d receipt=%+v", claims, mutations, settlements, candidateWrites, receipt)
 			}
-			t.Logf("eight-row real-consumer commits: total_writes=%d delivery_claims=%d workflow_mutations=%d delivery_settlements=%d completion_candidates=%d continuation_scans=%d continuation_observes=%d", receipt.Total.WriteCommits, claims, mutations, settlements, candidateWrites,
-				receipt.ByOperation[storetest.TransactionDeliveryContinuationScan].ReadCommits,
-				receipt.ByOperation[storetest.TransactionDeliveryContinuationObserve].ReadCommits)
-			for _, operation := range []storetest.TransactionOperation{
-				storetest.TransactionDeliveryClaim,
-				storetest.TransactionWorkflowMutation,
-				storetest.TransactionDeliverySettle,
-				storetest.TransactionRunCompletionCandidate,
-			} {
+			t.Logf("eight-row real-consumer commits: total_writes=%d delivery_claims=%d workflow_mutations=%d delivery_settlements=%d completion_candidates=%d continuation_scans=%d continuation_observes=%d", receipt.Total.WriteCommits, claims, mutations, settlements, candidateWrites, receipt.ByOperation[storetest.TransactionDeliveryContinuationScan].ReadCommits, receipt.ByOperation[storetest.TransactionDeliveryContinuationObserve].ReadCommits)
+			for _, operation := range []storetest.TransactionOperation{storetest.TransactionDeliveryClaim, storetest.TransactionWorkflowMutation, storetest.TransactionDeliverySettle, storetest.TransactionRunCompletionCandidate} {
 				counts := receipt.ByOperation[operation]
-				t.Logf("transaction phases %s: commits=%d permit=%s pool=%s begin=%s fence=%s domain=%s finalize=%s delay=%s commit=%s cleanup=%s",
-					operation, counts.WriteCommits, counts.PermitWait, counts.PoolWait, counts.BeginDuration,
-					counts.Mutation.FenceDuration, counts.Mutation.DomainDuration, counts.Mutation.FinalizeDuration,
-					counts.DelayDuration, counts.CommitDuration, counts.CleanupDuration)
+				t.Logf("transaction phases %s: commits=%d permit=%s pool=%s begin=%s fence=%s domain=%s finalize=%s delay=%s commit=%s cleanup=%s", operation, counts.WriteCommits, counts.PermitWait, counts.PoolWait, counts.BeginDuration, counts.Mutation.FenceDuration, counts.Mutation.DomainDuration, counts.Mutation.FinalizeDuration, counts.DelayDuration, counts.CommitDuration, counts.CleanupDuration)
 			}
 		})
 	}
@@ -112,8 +97,6 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 		t.Run(backend, func(t *testing.T) {
 			var transactions, continuation *storetest.TransactionCollector
 			var issuanceReceipt storetest.TransactionSnapshot
-			// Registered before the harness: inspect captured attempts only after
-			// serve and selected-store cleanup have joined, not immediately at Stop.
 			if transactionOptions.Delay > 0 {
 				t.Cleanup(func() {
 					for _, collector := range []*storetest.TransactionCollector{transactions, continuation} {
@@ -140,20 +123,15 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 			mergeCeiling := issuanceBudget
 			validDrainCeiling := 5 * time.Minute
 			if backend == "postgres" && transactionOptions.Delay == 0 {
-				// #2394 retains the 10s objective and prior 15s/20s ceilings.
-				// The lead authorized a 30% served-only allowance on 2026-10-02.
 				mergeCeiling = 26 * time.Second
 			}
 			if transactionOptions.Delay == 300*time.Millisecond && (transactionOptions.DelayScope == storetest.DelayAllCommits || servingWindow) {
-				// #2394 retains 120s issuance / 5m drain as performance objectives.
 				if backend == "postgres" {
 					mergeCeiling, validDrainCeiling = 150*time.Second, 6*time.Minute
 				} else {
 					mergeCeiling, validDrainCeiling = 165*time.Second, 8*time.Minute
 				}
 			}
-			// Serve fixtures replace process-global hooks. Only isolated copies of
-			// this test binary may overlap the delayed backend journeys.
 			if transactionOptions.Delay > 0 && runIssue2394DelayedHTTPProcess(t, backend) {
 				return
 			}
@@ -161,7 +139,9 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 			opts, start := lifecycleRestartHarness(t, backend, root)
 			opts.TestLLMRuntime = servedNoopLLMRuntime{}
 			var selected any
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected = p.deps.EventStore })
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+				selected = p.deps.EventStore
+			})
 			process, rt := start()
 			t.Cleanup(func() {
 				if t.Failed() {
@@ -173,10 +153,7 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 			var started struct {
 				RunID string `json:"run_id"`
 			}
-			issue2394ReporterRPC(t, rt, "run.start", map[string]any{
-				"run_id": runID, "bundle_hash": rt.BundleHash, "event_name": "portfolio.opened",
-				"payload": map[string]any{"portfolio_id": portfolio, "threshold": 75}, "idempotency_key": uuid.NewString(),
-			}, &started)
+			issue2394ReporterRPC(t, rt.Endpoint, "run.start", map[string]any{"run_id": runID, "bundle_hash": rt.BundleHash, "event_name": "portfolio.opened", "payload": map[string]any{"portfolio_id": portfolio, "threshold": 75}, "idempotency_key": uuid.NewString()}, &started)
 			if started.RunID != runID {
 				t.Fatalf("HTTP start changed run identity: %+v", started)
 			}
@@ -201,18 +178,13 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 				rows := make([]map[string]any, 0, 25)
 				for row := 0; row < 25; row++ {
 					ordinal := batch*25 + row
-					payload := map[string]any{
-						"account_id": fmt.Sprintf("numeric-%03d", ordinal), "eng_roles": ordinal,
-						"gem_score": float64(ordinal) + 0.25, "external_id": uuid.NewString(),
-					}
+					payload := map[string]any{"account_id": fmt.Sprintf("numeric-%03d", ordinal), "eng_roles": ordinal, "gem_score": float64(ordinal) + 0.25, "external_id": uuid.NewString()}
 					rows = append(rows, payload)
 					wanted[payload["account_id"].(string)] = payload
 				}
-				publishIssue2394ReporterBatch(t, rt, runID, portfolio, rows)
+				publishIssue2394ReporterBatch(t, rt.Endpoint, runID, portfolio, rows)
 			}
 			observed := waitIssue2394ReporterCursor(t, rt, runID, 500)
-			// The SQL visibility observation can precede transaction-probe cleanup.
-			// Wait for the real receipt, never substitute this poll's wall clock.
 			var receipt storetest.TransactionSnapshot
 			for deadline := time.Now().Add(5 * time.Minute); ; {
 				receipt = transactions.Snapshot()
@@ -235,8 +207,7 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 			if backend == "postgres" && transactionOptions.Delay == 0 {
 				t.Logf("normal PostgreSQL served reporter: measured=%s original_objective=%s prior_ceiling=%s previous_ceiling=%s current_ceiling=%s", elapsed, issuanceBudget, 15*time.Second, 20*time.Second, mergeCeiling)
 			}
-			t.Logf("HTTP original500 first batch submission -> final durable chunk acknowledgement: %s (original_target=%s merge_ceiling=%s); cursor observed at %s; delay=%s scope=%s; transaction receipt=%+v",
-				elapsed, issuanceBudget, mergeCeiling, observed.Sub(issuanceStarted), transactionOptions.Delay, transactionOptions.DelayScope, receipt)
+			t.Logf("HTTP original500 first batch submission -> final durable chunk acknowledgement: %s (original_target=%s merge_ceiling=%s); cursor observed at %s; delay=%s scope=%s; transaction receipt=%+v", elapsed, issuanceBudget, mergeCeiling, observed.Sub(issuanceStarted), transactionOptions.Delay, transactionOptions.DelayScope, receipt)
 			if elapsed > mergeCeiling {
 				t.Errorf("original500 HTTP issuance exceeded %s merge ceiling (original target %s): %s", mergeCeiling, issuanceBudget, elapsed)
 			}
@@ -273,16 +244,10 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 			assertIssue2394ReporterHistory(t, rt.DB, runID)
 			validEvents := assertIssue2394ReporterEvents(t, rt, runID, portfolio, wanted)
 			for _, id := range []string{"numeric-000", "numeric-499"} {
-				assertIssue2394ReporterEventGet(t, rt, validEvents[id])
+				assertIssue2394ReporterEventGet(t, rt.Endpoint, validEvents[id])
 			}
-
-			mixed := []map[string]any{
-				{"account_id": "mixed-before", "eng_roles": 1, "gem_score": 1.25, "external_id": uuid.NewString()},
-				{"account_id": "mixed-empty-uuid", "eng_roles": 2, "gem_score": 2.25, "external_id": ""},
-				{"account_id": "mixed-bad-number", "eng_roles": 3, "gem_score": "not-a-number", "external_id": uuid.NewString()},
-				{"account_id": "mixed-after", "eng_roles": 4, "gem_score": 4.25, "external_id": uuid.NewString()},
-			}
-			publishIssue2394ReporterBatch(t, rt, runID, portfolio, mixed)
+			mixed := []map[string]any{{"account_id": "mixed-before", "eng_roles": 1, "gem_score": 1.25, "external_id": uuid.NewString()}, {"account_id": "mixed-empty-uuid", "eng_roles": 2, "gem_score": 2.25, "external_id": ""}, {"account_id": "mixed-bad-number", "eng_roles": 3, "gem_score": "not-a-number", "external_id": uuid.NewString()}, {"account_id": "mixed-after", "eng_roles": 4, "gem_score": 4.25, "external_id": uuid.NewString()}}
+			publishIssue2394ReporterBatch(t, rt.Endpoint, runID, portfolio, mixed)
 			waitIssue2394ReporterCursor(t, rt, runID, 504)
 			final := waitIssue2394ReporterDiagnosis(t, rt, runID, 504)
 			assertIssue2394ReporterSummary(t, final.FanOut, runID, true)
@@ -295,7 +260,7 @@ func runIssue2394OriginalReporterHTTP(t *testing.T, transactionOptions storetest
 				}
 			}
 			for _, id := range []string{"mixed-before", "mixed-after"} {
-				assertIssue2394ReporterEventGet(t, rt, finalEvents[id])
+				assertIssue2394ReporterEventGet(t, rt.Endpoint, finalEvents[id])
 			}
 			assertIssue2394ReporterClients(t, rt, runID, final.FanOut)
 			if transactionOptions.Delay > 0 {
@@ -365,9 +330,9 @@ func runIssue2394DelayedHTTPProcess(t *testing.T, backend string) bool {
 
 // A longer transport timeout admits injected commit latency; it does not change
 // the first-submission-to-durable-acknowledgement performance assertion above.
-func issue2394ReporterRPC(t *testing.T, rt servedControlProofRuntime, method string, params map[string]any, out any) {
+func issue2394ReporterRPC(t *testing.T, selectedProofEndpoint string, method string, params map[string]any, out any) {
 	t.Helper()
-	response := requestServedJSONRPCWithTimeout(t, rt.Endpoint, method, params, 30*time.Second)
+	response := requestServedJSONRPCWithTimeout(t, selectedProofEndpoint, method, params, 30*time.Second)
 	if response.Error != nil {
 		t.Fatalf("%s refused: %+v", method, response.Error)
 	}
@@ -376,13 +341,10 @@ func issue2394ReporterRPC(t *testing.T, rt servedControlProofRuntime, method str
 	}
 }
 
-func publishIssue2394ReporterBatch(t *testing.T, rt servedControlProofRuntime, runID, portfolio string, rows []map[string]any) {
+func publishIssue2394ReporterBatch(t *testing.T, selectedProofEndpoint string, runID, portfolio string, rows []map[string]any) {
 	t.Helper()
 	var result servedEventPublishRPCResult
-	issue2394ReporterRPC(t, rt, "event.publish", map[string]any{
-		"run_id": runID, "event_name": "portfolio.accounts.register.requested",
-		"payload": map[string]any{"portfolio_id": portfolio, "account_ids": rows}, "idempotency_key": uuid.NewString(),
-	}, &result)
+	issue2394ReporterRPC(t, selectedProofEndpoint, "event.publish", map[string]any{"run_id": runID, "event_name": "portfolio.accounts.register.requested", "payload": map[string]any{"portfolio_id": portfolio, "account_ids": rows}, "idempotency_key": uuid.NewString()}, &result)
 	if result.RunID != runID || result.EventID == "" {
 		t.Fatalf("HTTP batch admission lost exact run/event identity: %+v", result)
 	}
@@ -430,13 +392,12 @@ func waitIssue2394ReporterDiagnosisWithin(t *testing.T, rt servedControlProofRun
 	started := time.Now()
 	objectiveReported := false
 	for deadline := started.Add(mergeCeiling); time.Now().Before(deadline); {
-		// The raw count only wakes the public diagnosis; it is not the readiness oracle.
 		if err := rt.DB.QueryRow(`SELECT COALESCE(SUM(CASE WHEN status NOT IN ('delivered','dead_letter') THEN 1 ELSE 0 END),0),
 			COALESCE(SUM(CASE WHEN status='dead_letter' THEN 1 ELSE 0 END),0) FROM event_deliveries WHERE run_id=$1`, runID).Scan(&unsettled, &dead); err != nil {
 			t.Fatal(err)
 		}
 		if dead != 0 {
-			issue2394ReporterRPC(t, rt, "run.diagnose", map[string]any{"run_id": runID}, &result)
+			issue2394ReporterRPC(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &result)
 			t.Fatalf("original HTTP reporter dead-lettered %d deliveries: %+v", dead, result)
 		}
 		if unsettled != 0 {
@@ -445,7 +406,7 @@ func waitIssue2394ReporterDiagnosisWithin(t *testing.T, rt servedControlProofRun
 				objectiveReported = true
 			}
 			if time.Since(lastReadinessProbe) >= 2*time.Second {
-				issue2394ReporterRPC(t, rt, "run.diagnose", map[string]any{"run_id": runID}, &result)
+				issue2394ReporterRPC(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &result)
 				lastReadinessProbe = time.Now()
 				var stillUnsettled int
 				if err := func() error {
@@ -462,10 +423,9 @@ func waitIssue2394ReporterDiagnosisWithin(t *testing.T, rt servedControlProofRun
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
-		issue2394ReporterRPC(t, rt, "run.diagnose", map[string]any{"run_id": runID}, &result)
+		issue2394ReporterRPC(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &result)
 		f := result.FanOut
-		if f.Cursor == cursor && f.Owed == 0 && f.Open == 0 && f.Blocked == 0 && f.Unsettled == 0 && f.BarrierArmed == 0 && f.BarrierPending == 0 &&
-			result.TestQuiescence != nil && cliapp.BoolPointerValue(result.TestQuiescence.Ready) {
+		if f.Cursor == cursor && f.Owed == 0 && f.Open == 0 && f.Blocked == 0 && f.Unsettled == 0 && f.BarrierArmed == 0 && f.BarrierPending == 0 && result.TestQuiescence != nil && cliapp.BoolPointerValue(result.TestQuiescence.Ready) {
 			t.Logf("original HTTP reporter valid-phase drain: %s (original objective=5m merge ceiling=%s)", time.Since(started), mergeCeiling)
 			return result
 		}
@@ -512,7 +472,7 @@ func assertIssue2394ReporterEvents(t *testing.T, rt servedControlProofRuntime, r
 			params["cursor"] = cursor
 		}
 		var page operatorread.OperatorEventListResult
-		issue2394ReporterRPC(t, rt, "event.list", params, &page)
+		issue2394ReporterRPC(t, rt.Endpoint, "event.list", params, &page)
 		for _, event := range page.Events {
 			account, _ := event.Payload["account_id"].(string)
 			row, present := wanted[account]
@@ -574,10 +534,10 @@ func assertIssue2394ReporterEvents(t *testing.T, rt servedControlProofRuntime, r
 	return seen
 }
 
-func assertIssue2394ReporterEventGet(t *testing.T, rt servedControlProofRuntime, want operatorread.OperatorEventFull) {
+func assertIssue2394ReporterEventGet(t *testing.T, selectedProofEndpoint string, want operatorread.OperatorEventFull) {
 	t.Helper()
 	var got operatorread.OperatorEventFull
-	issue2394ReporterRPC(t, rt, "event.get", map[string]any{"event_id": want.EventID}, &got)
+	issue2394ReporterRPC(t, selectedProofEndpoint, "event.get", map[string]any{"event_id": want.EventID}, &got)
 	if got.EventID != want.EventID || got.RunID != want.RunID || !reflect.DeepEqual(got.Payload, want.Payload) {
 		t.Fatalf("original reporter event.get changed payload: %+v want=%+v", got, want)
 	}
@@ -693,7 +653,7 @@ func assertIssue2394ReporterClients(t *testing.T, rt servedControlProofRuntime, 
 	before := issue2394SurfaceSnapshot(t, rt.DB, runID)
 	var page fanoutobligation.ListPage
 	query := fanoutobligation.ListQuery{RunID: runID, Limit: 100}
-	issue2394ReporterRPC(t, rt, "run.fan_out.list", map[string]any{"run_id": runID, "limit": 100}, &page)
+	issue2394ReporterRPC(t, rt.Endpoint, "run.fan_out.list", map[string]any{"run_id": runID, "limit": 100}, &page)
 	if err := page.Validate(query); err != nil {
 		t.Fatal(err)
 	}
@@ -705,7 +665,7 @@ func assertIssue2394ReporterClients(t *testing.T, rt servedControlProofRuntime, 
 			t.Fatalf("original HTTP list lost settled/live evidence: %+v", intent)
 		}
 	}
-	keys := strings.Fields(issue2394SurfaceCLI(t, rt, "run", "fan-out", "list", runID, "--limit", "100", "--quiet"))
+	keys := strings.Fields(issue2394SurfaceCLI(t, rt.Endpoint, "run", "fan-out", "list", runID, "--limit", "100", "--quiet"))
 	if len(keys) != len(page.Intents) {
 		t.Fatalf("CLI original reporter list has %d keys, want21", len(keys))
 	}
@@ -715,14 +675,14 @@ func assertIssue2394ReporterClients(t *testing.T, rt servedControlProofRuntime, 
 		}
 	}
 	var jsonStatus cliapp.DiagnosticRunDiagnosisResult
-	output := issue2394SurfaceCLI(t, rt, "run", "status", runID, "--json")
+	output := issue2394SurfaceCLI(t, rt.Endpoint, "run", "status", runID, "--json")
 	if err := json.Unmarshal([]byte(output), &jsonStatus); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(jsonStatus.FanOut, summary) || strings.Contains(output, `"rejected":`) {
 		t.Fatalf("original API/CLI JSON evidence changed: %s", output)
 	}
-	human := issue2394SurfaceCLI(t, rt, "run", "status", runID)
+	human := issue2394SurfaceCLI(t, rt.Endpoint, "run", "status", runID)
 	for _, want := range []string{"502 committed items", "2 semantic rejections", "$.external_id", `actual=""`, "emit_payload_contract_violation"} {
 		if !strings.Contains(human, want) {
 			t.Fatalf("original human status missing %q: %s", want, human)

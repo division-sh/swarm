@@ -62,7 +62,7 @@ func TestFamily145RequestKeySuccessorCompositionIsFinite(t *testing.T) {
 func proveRequestKeySuccessorComposition(t *testing.T, pin runphysical.Pin) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join("../../..", pin.File))
-	if err != nil || requestKeyDeclaration(t, raw, pin.Function) != pin.After {
+	if err != nil || servedSetupEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, raw, pin.Function)) != pin.After {
 		t.Fatal("successor source changed:", err)
 	}
 	if family145RequestKeyCurrentPrevious(pin.File, pin.Function, pin.After) != pin.Before {

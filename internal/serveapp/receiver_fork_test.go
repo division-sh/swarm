@@ -59,7 +59,9 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					selected = owner
 					return previous(owner)
 				}
-				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+				t.Cleanup(func() {
+					projectRuntimePersistenceForServe = previous
+				})
 				root := canonicalrouting.CopyReceiverOptionalChild(t, true)
 				if fieldless {
 					root = canonicalrouting.CopyReceiverFieldlessFork(t)
@@ -84,7 +86,9 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						return ctx.Err()
 					}
 				})
-				t.Cleanup(func() { close(release) })
+				t.Cleanup(func() {
+					close(release)
+				})
 				t.Cleanup(publication.unblock)
 				var seedEventID string
 				params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-request"}
@@ -118,8 +122,6 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, request.RunID)
 				}
 				if fieldless {
-					// Fieldless instances still have canonical construction headers;
-					// absence of business fields is no longer absence of construction.
 					count, err := readServedRunFieldRows(rt.ReceiverStateReader, request.RunID)
 					if err != nil || count != 0 {
 						t.Fatalf("fieldless fixture has %d field rows: %v", count, err)
@@ -128,8 +130,6 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				var forkRunID string
 				forkPoint := request.EventID
 				if fieldless {
-					// The original ingress remains a non-agent historical-replay
-					// refusal; its settled output admits a constructed fieldless cut.
 					var outputID string
 					deadline := time.Now().Add(servedProofPollDeadline)
 					for {
@@ -153,7 +153,6 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					}
 				}
 				if surface == "historical_refusal" {
-					// Terminal deliveries alone do not join deferred publication settlement.
 					deadline := time.Now().Add(servedProofPollDeadline)
 					for {
 						var diagnosis cliapp.DiagnosticRunDiagnosisResult
@@ -171,8 +170,6 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					}
 				}
 				if surface == "pending_refusal" {
-					// Join only the source publications, not the still-blocked node.
-					// Their diagnostic tails must finish before freezing the fingerprint.
 					publication.unblock()
 					deadline := time.Now().Add(servedEventPublishLifecycleProbeWaitTimeout)
 					probe.Expect(seedEventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
@@ -190,7 +187,9 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 							if !reflect.DeepEqual(rows, after[table]) {
 								t.Errorf("source %s changed at %s", table, boundary)
 								for _, row := range after[table] {
-									if !slices.ContainsFunc(rows, func(previous []string) bool { return reflect.DeepEqual(previous, row) }) {
+									if !slices.ContainsFunc(rows, func(previous []string) bool {
+										return reflect.DeepEqual(previous, row)
+									}) {
 										t.Logf("source %s added row at %s: %#v", table, boundary, row)
 									}
 								}
@@ -214,12 +213,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					if !ok {
 						t.Fatal("missing fork owner")
 					}
-					result, err := family.Execute(servedControlProofAuthorActivityContext(t, rt), runtimerunforkexecution.SelectedContractExecutionRequest{
-						SourceRunID: request.RunID, At: forkPoint, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
-						SourceLoader:      runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
-						ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
-						AgentRuntime:      rt.ForkRuntime,
-					})
+					result, err := family.Execute(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), runtimerunforkexecution.SelectedContractExecutionRequest{SourceRunID: request.RunID, At: forkPoint, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash, SourceLoader: runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()}, ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))), AgentRuntime: rt.ForkRuntime})
 					if admitted {
 						if err != nil {
 							t.Fatalf("canonical admitted fork failed: %v", err)
@@ -236,8 +230,6 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 						if err == nil || !strings.Contains(err.Error(), want) || result.Activation.Activated || result.Activation.SourceFrozen {
 							t.Fatalf("unsupported replay did not fail closed: %v activated=%t sourceFrozen=%t", err, result.Activation.Activated, result.Activation.SourceFrozen)
 						}
-						// The canonical discard retains completion evidence in a cancelled
-						// run tombstone, but removes executable fork state and deliveries.
 						var status string
 						if err := rt.DB.QueryRow(`SELECT status FROM runs WHERE run_id=$1 AND forked_from_run_id=$2`, result.Materialization.ForkRunID, request.RunID).Scan(&status); err != nil {
 							t.Fatal(err)
@@ -271,12 +263,11 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 				rootPhase := "planned"
 				rootRevision := 2
 				if fieldless {
-					// Historical source-only headers do not acquire attachment.
 					rootPhase = ""
 					rootRevision = 1
 				}
-				requireReceiverConstructedInstance(t, rt, forkRunID, forkRunID, ".", forkRunID, rootType, rootState, "", rootPhase, rootRevision, rootFields)
-				requireReceiverConstructedInstance(t, rt, forkRunID, "sink", "sink", flowidentity.EntityID("sink"), childType, "pending", forkRunID, "ready", 1, childFields)
+				requireReceiverConstructedInstance(t, rt.BundleHash, rt.ReceiverStateReader, forkRunID, forkRunID, ".", forkRunID, rootType, rootState, "", rootPhase, rootRevision, rootFields)
+				requireReceiverConstructedInstance(t, rt.BundleHash, rt.ReceiverStateReader, forkRunID, "sink", "sink", flowidentity.EntityID("sink"), childType, "pending", forkRunID, "ready", 1, childFields)
 				var companions int
 				headers, err := readServedRunConstructionHeaders(rt.ReceiverStateReader, forkRunID)
 				if err != nil || headers != 2 {

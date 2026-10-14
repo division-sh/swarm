@@ -78,7 +78,7 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			if !ok {
 				t.Fatal("missing fork owner")
 			}
-			ctx := servedControlProofAuthorActivityContext(t, rt)
+			ctx := servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime)
 			plan, err := family.Plan(ctx, runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: marker.EventID})
 			if err != nil {
 				t.Fatal(err)

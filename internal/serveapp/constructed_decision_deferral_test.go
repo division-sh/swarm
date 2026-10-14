@@ -27,7 +27,7 @@ func TestServedFieldlessGateDeferralBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				ctx := servedControlProofAuthorActivityContext(t, rt)
+				ctx := servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime)
 				if _, replayed, err := rt.Runtime.Pipeline.CommitDecisionCardMutation(ctx, req, mutation); err != nil || replayed {
 					t.Fatalf("real constructed gate deferral: replay=%t err=%v", replayed, err)
 				}
@@ -37,7 +37,6 @@ func TestServedFieldlessGateDeferralBothStores(t *testing.T) {
 					t.Fatalf("served replay repeated gate deferral: %v", replay)
 				}
 				requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "mailbox.defer", "fieldless-gate-deferral", 1)
-
 				wantRows := 0
 				if fields {
 					wantRows = 1
@@ -64,7 +63,7 @@ func TestServedConstructedDecisionCardDeferralBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx := servedControlProofAuthorActivityContext(t, rt)
+			ctx := servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime)
 			if _, replayed, err := rt.Runtime.Pipeline.CommitDecisionCardMutation(ctx, req, mutation); err != nil || replayed {
 				t.Fatalf("constructed decision deferral: replay=%t err=%v", replayed, err)
 			}

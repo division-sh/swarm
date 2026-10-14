@@ -35,7 +35,9 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				selected = owner
 				return previous(owner)
 			}
-			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+			t.Cleanup(func() {
+				projectRuntimePersistenceForServe = previous
+			})
 			root := canonicalrouting.CopyForkLoopRetainedJoin(t)
 			if separateCheckpoint {
 				root = canonicalrouting.CopyForkLoopRetainedJoinSeparateCheckpoint(t)
@@ -46,10 +48,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				t.Fatal(err)
 			}
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "work.requested", "bundle_hash": rt.BundleHash,
-				"payload": map[string]any{"token": "member-one"}, "idempotency_key": "retained-join-start",
-			})
+			started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "member-one"}, "idempotency_key": "retained-join-start"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			rows, err := rt.DB.Query(`SELECT CAST(d.failure AS TEXT) FROM dead_letters d JOIN events e ON e.event_id=d.original_event_id WHERE e.run_id=$1`, started.RunID)
 			if err != nil {
@@ -73,10 +72,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			if len(joins) != 1 || first.Attempt != 1 {
 				t.Fatalf("first ordinary join: loop=%+v joins=%+v", first, joins)
 			}
-			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "review.retry", "run_id": started.RunID, "source_event_id": started.EventID,
-				"payload": map[string]any{"revision_id": first.RevisionID, "token": "member-one"}, "idempotency_key": "retained-join-repeat",
-			})
+			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "review.retry", "run_id": started.RunID, "source_event_id": started.EventID, "payload": map[string]any{"revision_id": first.RevisionID, "token": "member-one"}, "idempotency_key": "retained-join-repeat"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, started.RunID)
 			current, sourceJoins := readRetainedRootJoins(t, rt, started.RunID)
@@ -120,10 +116,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				}
 			}
 			if separateCheckpoint {
-				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-					"event_name": "checkpoint.requested", "run_id": started.RunID, "source_event_id": started.EventID,
-					"payload": map[string]any{"revision_id": current.RevisionID}, "idempotency_key": "retained-join-checkpoint",
-				})
+				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "checkpoint.requested", "run_id": started.RunID, "source_event_id": started.EventID, "payload": map[string]any{"revision_id": current.RevisionID}, "idempotency_key": "retained-join-checkpoint"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, started.RunID)
 			}
@@ -135,8 +128,6 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			if err := rt.DB.QueryRow(`SELECT MIN(revision) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='events' AND fact_key=$2 AND present`, started.RunID, frontier).Scan(&frontierRevision); err != nil || frontierRevision <= 0 {
 				t.Fatalf("missing fixed-revision frontier: revision=%d err=%v", frontierRevision, err)
 			}
-			// Delivery settlement does not join the lifecycle candidate executor. Stop
-			// the real source writers before measuring the store-only refusal.
 			if err := rt.Runtime.Shutdown(); err != nil {
 				t.Fatalf("join source runtime before refusal snapshot: %v", err)
 			}
@@ -148,7 +139,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			request := runfork.RunForkMaterializeRequest{SourceRunID: started.RunID, At: frontier, OriginalLoopCarriage: carriage}
 			const refusal = "fork materialization requires execution-ready plan; blockers: timer_history_unproven, flow_route_history_unproven"
 			for attempt := 0; attempt < 2; attempt++ {
-				child, err := owner.Materialize(servedControlProofAuthorActivityContext(t, rt), request)
+				child, err := owner.Materialize(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), request)
 				if err == nil || err.Error() != refusal {
 					t.Fatalf("completed ordinary join history must retain both exact policy blockers: result=%+v err=%v", child, err)
 				}

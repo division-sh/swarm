@@ -21,11 +21,17 @@ func TestServedCompiledGateOutcomeRestartOnBothStores(t *testing.T) {
 			first, rt := start(true)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "gate-cut-seed"})
 			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, "", "review")
-			params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+			params := lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, "approve")
 			response := make(chan gateCompletionHTTPResult, 1)
-			go func() { response <- gateCompletionHTTP(context.Background(), rt.Endpoint, params) }()
+			go func() {
+				response <- gateCompletionHTTP(context.Background(), rt.Endpoint, params)
+			}()
 			reached := make(chan error, 1)
-			go func() { var b [1]byte; _, err := io.ReadFull(ready, b[:]); reached <- err }()
+			go func() {
+				var b [1]byte
+				_, err := io.ReadFull(ready, b[:])
+				reached <- err
+			}()
 			select {
 			case err := <-reached:
 				if err != nil {

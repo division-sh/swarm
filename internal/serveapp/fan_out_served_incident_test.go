@@ -34,18 +34,9 @@ func TestIssue2394ServedFanOutFailureIncidentBothStores(t *testing.T) {
 			opts, start := lifecycleRestartHarness(t, backend, root)
 			opts.TestLLMRuntime = servedNoopLLMRuntime{}
 			_, rt := start()
-			opened := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"bundle_hash": rt.BundleHash, "event_name": "portfolio.opened", "idempotency_key": uuid.NewString(),
-				"payload": map[string]any{"portfolio_id": "incident", "threshold": 75},
-			})
+			opened := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "event_name": "portfolio.opened", "idempotency_key": uuid.NewString(), "payload": map[string]any{"portfolio_id": "incident", "threshold": 75}})
 			waitPublicationSiteCompletion(t, rt.ReceiverStateReader, opened.RunID)
-			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"run_id": opened.RunID, "event_name": "portfolio.accounts.register.requested", "idempotency_key": uuid.NewString(),
-				"payload": map[string]any{"portfolio_id": "incident", "account_ids": []map[string]any{
-					{"account_id": "valid-first", "eng_roles": 7, "gem_score": 7, "external_id": uuid.NewString()},
-					{"account_id": "evaluation-fails", "eng_roles": 8, "gem_score": "not-a-number", "external_id": uuid.NewString()},
-				}},
-			})
+			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"run_id": opened.RunID, "event_name": "portfolio.accounts.register.requested", "idempotency_key": uuid.NewString(), "payload": map[string]any{"portfolio_id": "incident", "account_ids": []map[string]any{{"account_id": "valid-first", "eng_roles": 7, "gem_score": 7, "external_id": uuid.NewString()}, {"account_id": "evaluation-fails", "eng_roles": 8, "gem_score": "not-a-number", "external_id": uuid.NewString()}}}})
 			const code = "fan_out_evaluate_ordinal_failed"
 			var page fanoutobligation.ListPage
 			var logs operatorread.OperatorRuntimeLogListResult
@@ -57,9 +48,7 @@ func TestIssue2394ServedFanOutFailureIncidentBothStores(t *testing.T) {
 				if len(page.Intents) == 1 && page.Intents[0].Cursor != 0 {
 					t.Fatalf("evaluation failure became committed/rejected ordinal progress: %+v", page)
 				}
-				requireServedJSONRPCResult(t, rt.Endpoint, "runtime.logs", map[string]any{
-					"run_id": opened.RunID, "component": "workflow-runtime", "level": "warn", "limit": 100,
-				}, &logs)
+				requireServedJSONRPCResult(t, rt.Endpoint, "runtime.logs", map[string]any{"run_id": opened.RunID, "component": "workflow-runtime", "level": "warn", "limit": 100}, &logs)
 				for _, log := range logs.Logs {
 					if log.ErrorCode == code {
 						if log.RunID != opened.RunID || log.Action != "serve_fan_out_obligation" || log.Failure == nil || log.Failure.Detail.Code != code {
@@ -68,9 +57,7 @@ func TestIssue2394ServedFanOutFailureIncidentBothStores(t *testing.T) {
 						sampleID = log.LogID
 					}
 				}
-				requireServedJSONRPCResult(t, rt.Endpoint, "runtime.incidents", map[string]any{
-					"bundle_hash": rt.BundleHash, "component": "workflow-runtime", "level": "warn", "limit": 100,
-				}, &incidents)
+				requireServedJSONRPCResult(t, rt.Endpoint, "runtime.incidents", map[string]any{"bundle_hash": rt.BundleHash, "component": "workflow-runtime", "level": "warn", "limit": 100}, &incidents)
 				for _, row := range incidents.Incidents {
 					if row.ErrorCode == code {
 						incident = row
@@ -85,8 +72,7 @@ func TestIssue2394ServedFanOutFailureIncidentBothStores(t *testing.T) {
 				t.Fatalf("served positive failure evidence missing: page=%+v logs=%+v incidents=%+v", page, logs, incidents)
 			}
 			row := page.Intents[0]
-			if row.Cardinality != 2 || row.Cursor != 0 || row.Owed != 2 || row.Failure == nil || row.Failure.Detail.Code != code ||
-				row.Runtime.Availability != "available" || row.Runtime.Eligible == nil || *row.Runtime.Eligible {
+			if row.Cardinality != 2 || row.Cursor != 0 || row.Owed != 2 || row.Failure == nil || row.Failure.Detail.Code != code || row.Runtime.Availability != "available" || row.Runtime.Eligible == nil || *row.Runtime.Eligible {
 				t.Fatalf("blocked runtime intent lost exact failure/eligibility: %+v", row)
 			}
 			if incident.Count != 1 || len(incident.SampleLogIDs) != 1 || incident.SampleLogIDs[0] != sampleID || incident.Component != "workflow-runtime" {
@@ -99,7 +85,7 @@ func TestIssue2394ServedFanOutFailureIncidentBothStores(t *testing.T) {
 				t.Fatalf("diagnosis lost blocked versus semantic-rejection distinction: %+v", diagnosis.FanOut)
 			}
 			var cliPage fanoutobligation.ListPage
-			if err := json.Unmarshal([]byte(issue2394SurfaceCLI(t, rt, "run", "fan-out", "list", opened.RunID, "--status", "blocked", "--json")), &cliPage); err != nil {
+			if err := json.Unmarshal([]byte(issue2394SurfaceCLI(t, rt.Endpoint, "run", "fan-out", "list", opened.RunID, "--status", "blocked", "--json")), &cliPage); err != nil {
 				t.Fatal(err)
 			}
 			if len(cliPage.Intents) != 1 || cliPage.Intents[0].Key != row.Key || !reflect.DeepEqual(cliPage.Intents[0].Failure, row.Failure) {
@@ -107,20 +93,16 @@ func TestIssue2394ServedFanOutFailureIncidentBothStores(t *testing.T) {
 			}
 			t.Run("status_json", func(t *testing.T) {
 				var result cliapp.DiagnosticRunDiagnosisResult
-				if err := json.Unmarshal([]byte(issue2394SurfaceCLI(t, rt, "run", "status", opened.RunID, "--json")), &result); err != nil {
+				if err := json.Unmarshal([]byte(issue2394SurfaceCLI(t, rt.Endpoint, "run", "status", opened.RunID, "--json")), &result); err != nil {
 					t.Fatal(err)
 				}
 				if result.FanOut.Blocked != 1 || result.FanOut.Owed != 2 || !reflect.DeepEqual(result.FanOut.BlockedIntents, diagnosis.FanOut.BlockedIntents) {
 					t.Fatalf("CLI JSON diagnosis lost exact blocked evidence: %+v", result.FanOut)
 				}
 			})
-			for _, args := range [][]string{
-				{"run", "status", opened.RunID},
-				{"logs", "--run-id", opened.RunID, "--component", "workflow-runtime", "--level", "warn", "--limit", "100"},
-				{"incidents", "--component", "workflow-runtime", "--level", "warn", "--limit", "100"},
-			} {
+			for _, args := range [][]string{{"run", "status", opened.RunID}, {"logs", "--run-id", opened.RunID, "--component", "workflow-runtime", "--level", "warn", "--limit", "100"}, {"incidents", "--component", "workflow-runtime", "--level", "warn", "--limit", "100"}} {
 				t.Run(args[0], func(t *testing.T) {
-					output := issue2394SurfaceCLI(t, rt, args...)
+					output := issue2394SurfaceCLI(t, rt.Endpoint, args...)
 					if !strings.Contains(output, code) {
 						t.Fatalf("CLI %v lost actual typed failure %s: %s", args, code, output)
 					}

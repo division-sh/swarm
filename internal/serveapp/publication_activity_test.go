@@ -53,14 +53,11 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 						params, decisionParams                           map[string]any
 					}
 					var completed []completedCase
-					// Each outcome retains a fresh run. Only source admission and process
-					// startup are shared; every result is checked again after restart.
 					for _, outcome := range outcomes {
 						t.Run(outcome, func(t *testing.T) {
 							beforeCalls := calls.Load()
 							exhausted.Store(outcome == "exhausted")
-							params := map[string]any{"event_name": inputName, "bundle_hash": rt.BundleHash,
-								"payload": map[string]any{"case_id": "alpha", "message": "exact-provider-input"}, "idempotency_key": "activity-seed-" + outcome}
+							params := map[string]any{"event_name": inputName, "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "alpha", "message": "exact-provider-input"}, "idempotency_key": "activity-seed-" + outcome}
 							seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 							defer func() {
 								if !t.Failed() {
@@ -86,7 +83,7 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 							}()
 							var decisionParams map[string]any
 							if approval {
-								decisionParams = lifecycleGateDecisionParams(t, rt, seed.RunID, outcome)
+								decisionParams = lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, outcome)
 								decisionParams["idempotency_key"] = "activity-decision-" + outcome
 								if calls.Load() != beforeCalls {
 									t.Fatal("provider executed before human approval")

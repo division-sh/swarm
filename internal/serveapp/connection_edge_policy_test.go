@@ -73,7 +73,7 @@ func TestEdgeOwnedMixedConnectionProjectionsBothStores(t *testing.T) {
 					}
 					_, start := lifecycleRestartHarness(t, backend, root)
 					process, rt := start()
-					seed := publishMixedConnectionRequest(t, rt, "", "mixed-create")
+					seed := publishMixedConnectionRequest(t, rt.BundleHash, rt.Endpoint, "", "mixed-create")
 					waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed)
 					before := requireMixedConnectionReadback(t, rt, backend, plans, seed, intrinsic, 1)
 					if code := process.stop(); code != 0 {
@@ -83,7 +83,7 @@ func TestEdgeOwnedMixedConnectionProjectionsBothStores(t *testing.T) {
 					if got := requireMixedConnectionReadback(t, rt, backend, plans, seed, intrinsic, 1); !reflect.DeepEqual(got, before) {
 						t.Fatalf("restart reminted routes: %v -> %v", before, got)
 					}
-					publishMixedConnectionRequest(t, rt, seed, "mixed-reuse")
+					publishMixedConnectionRequest(t, rt.BundleHash, rt.Endpoint, seed, "mixed-reuse")
 					waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed)
 					paths := requireMixedConnectionReadback(t, rt, backend, plans, seed, intrinsic, 2)
 					if len(paths) != 3 {
@@ -98,12 +98,9 @@ func TestEdgeOwnedMixedConnectionProjectionsBothStores(t *testing.T) {
 	}
 }
 
-func publishMixedConnectionRequest(t *testing.T, rt servedControlProofRuntime, runID, idempotency string) string {
+func publishMixedConnectionRequest(t *testing.T, selectedProofBundleHash string, selectedProofEndpoint string, runID, idempotency string) string {
 	t.Helper()
-	result := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name": "work.requested", "bundle_hash": rt.BundleHash, "run_id": runID, "idempotency_key": idempotency,
-		"payload": map[string]any{"creation_id": "00000000-0000-4000-8000-000000000001", "reuse_id": "00000000-0000-4000-8000-000000000002"},
-	})
+	result := requireServedEventPublishRPCResult(t, selectedProofEndpoint, map[string]any{"event_name": "work.requested", "bundle_hash": selectedProofBundleHash, "run_id": runID, "idempotency_key": idempotency, "payload": map[string]any{"creation_id": "00000000-0000-4000-8000-000000000001", "reuse_id": "00000000-0000-4000-8000-000000000002"}})
 	if runID != "" && result.RunID != runID {
 		t.Fatal("reuse changed run")
 	}

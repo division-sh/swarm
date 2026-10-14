@@ -79,13 +79,13 @@ func TestServedSelectionProcessCutsBothStores(t *testing.T) {
 				} else if status != "in_progress" || facts != 0 || publications != 0 {
 					t.Fatalf("preselection cut already persisted final effects: status=%s facts=%d events=%d", status, facts, publications)
 				}
-				assertServedSelectionTrace(t, rt, eventID, seed.RunID, committed)
+				assertServedSelectionTrace(t, rt.Endpoint, eventID, seed.RunID, committed)
 				if err := first.kill(); err != nil || first.waitError() == nil {
 					t.Fatalf("expected actual process death: %v", err)
 				}
 				<-responseDone
 				second, recovered := start(false)
-				assertServedSelectionTrace(t, recovered, eventID, seed.RunID, true)
+				assertServedSelectionTrace(t, recovered.Endpoint, eventID, seed.RunID, true)
 				requireServedEventPublishEntityState(t, recovered.ReceiverStateReader, backend, seed.RunID, "", "done")
 				waitServedRunDeliveryQuiescence(t, recovered.ReadRunDeliveries, seed.RunID)
 				duplicate := requireServedEventPublishRPCResult(t, recovered.Endpoint, params)

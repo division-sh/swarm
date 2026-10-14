@@ -1,8 +1,10 @@
 package serveapp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"reflect"
 	"testing"
 
@@ -123,14 +125,16 @@ func TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStore
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := rt.DB.QueryRow(`SELECT count(*) FROM events WHERE run_id=$1 AND event_name='work.ready'`, seed.RunID).Scan(&publications); err != nil {
+			if err := rt.ReceiverStateReader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+				var err error
+				publications, err = storetest.CountRunNamedEventStorage(ctx, rt.ReceiverStateReader, seed.RunID, "work.ready")
+				return err
+			}); err != nil {
 				t.Fatal(err)
 			}
 			if err := rt.DB.QueryRow(`SELECT count(*) FROM event_deliveries WHERE event_id=$1 AND status='dead_letter'`, seed.EventID).Scan(&failed); err != nil {
 				t.Fatal(err)
 			}
-			// Construction precedes execution. A rejected handler must preserve
-			// its initial header/fields, not erase the successfully constructed tree.
 			if states != 1 || publications != 0 || failed != 1 {
 				t.Fatalf("terminal planning states=%d publications=%d refused=%d; %s", states, publications, failed, servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID))
 			}

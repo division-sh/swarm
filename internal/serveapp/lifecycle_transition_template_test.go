@@ -238,7 +238,7 @@ func prepareLifecycleTemplateSiblings(t *testing.T, rt servedControlProofRuntime
 		if len(cards.Items) != 1 || cards.Items[0].DecisionCard.CardID != s.gate.CardID {
 			t.Fatalf("%s filtered mailbox does not identify exact activation: %#v gate=%#v", side, cards, s.gate)
 		}
-		s.decision = lifecycleDecisionParamsForCard(t, rt, s.gate.CardID, "approve")
+		s.decision = lifecycleDecisionParamsForCard(t, rt.Endpoint, s.gate.CardID, "approve")
 		s.decision["idempotency_key"] = side + "-template-decide"
 		t.Logf("TEMPLATE_PENDING run=%s side=%s instance=%s entity=%s revision=%s gate_instance=%s gate_entity=%s activation=%s card=%s routes=%s", runID, side, s.instance, s.entity, s.revision, s.gateInstance, s.gateEntity, s.gate.ActivationID, s.gate.CardID, s.gate.RoutesJSON)
 		siblings = append(siblings, s)

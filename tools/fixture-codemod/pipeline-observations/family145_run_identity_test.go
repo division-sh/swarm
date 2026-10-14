@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runidentity"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedsettlement"
 )
 
 //go:embed family145-run-identity-preimages.json
@@ -202,7 +203,11 @@ func runIdentityFileError(path string, file *ast.File) error {
 			}
 			allowed[fn.Name.Pos()] = true
 		}
-		current := sourceBlobEarlierInventoryEndpoint(path, fn.Name.Name, requestkey.Node(fn))
+		current, err := servedsettlement.SetupEarlierSource("../../..", path, fn.Name.Name, requestkey.Node(fn))
+		if err != nil {
+			return err
+		}
+		current = sourceBlobEarlierInventoryEndpoint(path, fn.Name.Name, current)
 		for _, pin := range runIdentityPins {
 			if pin.File == path && pin.Function == fn.Name.Name && pin.After == current {
 				recordRunIdentityReferences(allowed, fn)

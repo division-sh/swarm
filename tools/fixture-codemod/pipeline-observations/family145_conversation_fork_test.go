@@ -7,6 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -147,7 +148,7 @@ func family145ConversationForkOwnerSource(t *testing.T, path, function string) s
 	}
 	for _, declaration := range file.Decls {
 		if fn, ok := declaration.(*ast.FuncDecl); ok && fn.Name.Name == function {
-			return family145NodeString(fn)
+			return servedSetupEarlierSource(t, filepath.ToSlash(filepath.Clean(filepath.Join("internal/store", path))), function, family145NodeString(fn))
 		}
 	}
 	t.Fatalf("missing original row-family owner port: %s", function)

@@ -60,7 +60,9 @@ func proveActivitySemanticResultExecutionParity(t *testing.T, mock, fork bool) {
 					}
 					return caps, err
 				}
-				t.Cleanup(func() { buildSelectedAPICapabilities = prior })
+				t.Cleanup(func() {
+					buildSelectedAPICapabilities = prior
+				})
 			}
 			var calls atomic.Int32
 			provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -167,13 +169,11 @@ collector:
 					}
 				}
 				target := loadWorkflowValidationBundleAt(t, targetRoot)
-				fact, err := prepareServeSourceArtifact(servedControlProofAuthorActivityContext(t, rt), selected.SourceArtifactWriter(), target)
+				fact, err := prepareServeSourceArtifact(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), selected.SourceArtifactWriter(), target)
 				if err != nil || fact.BundleHash() == rt.BundleHash {
 					t.Fatalf("selected numeric artifact: %v", err)
 				}
 				params := map[string]any{"source_run_id": run, "fork_event_id": frontier, "bundle_hash": fact.BundleHash(), "allow_source_freeze": true, "idempotency_key": "numeric-mock-fork"}
-				// Selected execution must compile the retained artifact, not reread
-				// this distinguishable current-directory responder declaration.
 				if err := os.WriteFile(filepath.Join(targetRoot, "tools.yaml"), []byte(strings.ReplaceAll(targetTool, "enum: [11]", "enum: [99]")), 0600); err != nil {
 					t.Fatal(err)
 				}

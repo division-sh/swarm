@@ -22,7 +22,7 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverRecordedConfig(t))
-			params := receiverInitializationPublishParams(rt, "recorded-config-source", "business-key", `{"count":7,"ratio":7.0,"active":false,"label":"recorded business config","attributes":{"nested":[7,7.0]}}`)
+			params := receiverInitializationPublishParams(rt.BundleHash, "recorded-config-source", "business-key", `{"count":7,"ratio":7.0,"active":false,"label":"recorded business config","attributes":{"nested":[7,7.0]}}`)
 			requestWire, err := json.Marshal(params)
 			if err != nil || !bytes.Contains(requestWire, []byte(`"ratio":7.0`)) || !bytes.Contains(requestWire, []byte(`[7,7.0]`)) {
 				t.Fatalf("test transport lost explicit decimal tokens: %s err=%v", requestWire, err)
@@ -39,10 +39,7 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2 AND source_event_id=$3`, seed.RunID, path+"/account.initialized", creating).Scan(&consumed); err != nil {
 				t.Fatal(err)
 			}
-			// Semantic public ingress maps 7, 7.0 and 7e0 to CEL int. Declared
-			// Internal state literals are not ingress and retain their double kind.
-			want := map[string]any{"account_id": "business-key", "count": int64(7), "ratio": int64(7), "active": false, "label": "recorded business config", "attributes": map[string]any{"nested": []any{int64(7), int64(7)}},
-				"status": false, "flow_path": "business/path", "instance_id": "business-instance", "workflow_version": float64(7)}
+			want := map[string]any{"account_id": "business-key", "count": int64(7), "ratio": int64(7), "active": false, "label": "recorded business config", "attributes": map[string]any{"nested": []any{int64(7), int64(7)}}, "status": false, "flow_path": "business/path", "instance_id": "business-instance", "workflow_version": float64(7)}
 			record, receiver := requireReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, "account", path, entityID)
 			raw := record.Lifecycle.Config
 			var envelope map[string]any
@@ -69,8 +66,6 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 			if envelope["instance_id"] != "ti-138096d2b56ac1568ac40ea7" || envelope["flow_path"] != path || envelope["storage_ref"] != path {
 				t.Fatalf("business names overwrote physical control identity: %#v", envelope)
 			}
-			// Public JSON decoding uses a generic numeric carrier. The native
-			// config check above separately distinguishes integers from doubles.
 			wire, err := canonicaljson.MarshalPreservingNumberKinds(want)
 			if err != nil {
 				t.Fatal(err)
@@ -109,7 +104,6 @@ func TestTypedReceiverConfigSourceAndForkRefusalBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND caused_by_event=$3 AND writer_type='platform' AND writer_id='workflow_engine' AND handler_step='mutate' AND domain='authored_field' AND path IN ('count','label','ratio','active','attributes','status','flow_path','instance_id','workflow_version')`, seed.RunID, entityID, consumed).Scan(&writes); err != nil || writes != 0 {
 				t.Fatalf("automatic consumer reconstructed supplied state: writes=%d err=%v", writes, err)
 			}
-			// Delivery settlement precedes the completion owner's candidate cleanup.
 			deadline := time.Now().Add(servedProofPollDeadline)
 			for {
 				var candidateSettled bool

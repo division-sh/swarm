@@ -29,13 +29,12 @@ type servedEntityFilterList struct {
 
 func startServedMailboxEntityFilterProof(t *testing.T, backend servedparity.Backend) (servedControlProofRuntime, []string, []string, func(map[string]any) servedEntityFilterList, map[string]bool) {
 	t.Helper()
-	rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string { return canonicalrouting.CopyMailboxEntityFilter(t) })
+	rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
+		return canonicalrouting.CopyMailboxEntityFilter(t)
+	})
 	var runs, entities, events []string
 	for i := 0; i < 3; i++ {
-		published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-			"event_name": "review.requested", "bundle_hash": rt.BundleHash,
-			"payload": map[string]any{"item_id": uuid.NewString()}, "idempotency_key": uuid.NewString(),
-		})
+		published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "review.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"item_id": uuid.NewString()}, "idempotency_key": uuid.NewString()})
 		if !published.NewRunCreated || published.RunID == "" || published.EventID == "" {
 			t.Fatalf("event.publish = %+v, want new run", published)
 		}
@@ -44,11 +43,8 @@ func startServedMailboxEntityFilterProof(t *testing.T, backend servedparity.Back
 		runs = append(runs, published.RunID)
 		events = append(events, published.EventID)
 	}
-	// Keep the global unread count nonzero outside the selected entity.
-	notice := runtimetools.MailboxItem{EventID: events[2], EntityID: entities[2], FlowInstance: runs[2],
-		Type: runtimetools.NotifyHumanMailboxItemType, Priority: "normal", Status: "pending",
-		Summary: "independent informational notice", Context: json.RawMessage(`{}`)}
-	ctx := servedControlProofAuthorActivityContext(t, rt)
+	notice := runtimetools.MailboxItem{EventID: events[2], EntityID: entities[2], FlowInstance: runs[2], Type: runtimetools.NotifyHumanMailboxItemType, Priority: "normal", Status: "pending", Summary: "independent informational notice", Context: json.RawMessage(`{}`)}
+	ctx := servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime)
 	var err error
 	if rt.SQLite != nil {
 		_, err = rt.SQLite.InsertMailboxItem(ctx, notice)

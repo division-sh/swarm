@@ -80,7 +80,7 @@ func TestFamily145RunPhysicalWholeChainPreservesPredicatesAssertionsAndCuts(t *t
 			t.Fatal("physical run count is not its signed predecessor:", pin.Function, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, current, pin.Function) != pin.After {
+		if err != nil || servedSetupEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("physical run count output changed:", pin.Function, err)
 		}
 		after, err := runphysical.Transform(rule, pin.Before)
@@ -175,7 +175,7 @@ func runPhysicalOwnedFile(t *testing.T, pins []runphysical.Pin, path string, fil
 				return true
 			}
 			calls++
-			current := requestkey.Node(fn)
+			current := servedSetupEarlierSource(t, path, fn.Name.Name, requestkey.Node(fn))
 			if runphysical.Previous(pins, path, fn.Name.Name, current) == current {
 				t.Error("physical run count caller is not the reviewed whole rule:", path, fn.Name.Name)
 			}

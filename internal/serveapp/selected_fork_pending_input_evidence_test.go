@@ -38,7 +38,7 @@ func TestSelectedForkPendingInputEvidenceBothStores(t *testing.T) {
 				if !ok {
 					t.Fatal("missing selected fork owner")
 				}
-				ctx := servedControlProofAuthorActivityContext(t, rt)
+				ctx := servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime)
 				plan, err := family.Plan(ctx, runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: point.EventID})
 				if err != nil {
 					t.Fatal(err)

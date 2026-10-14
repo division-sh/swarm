@@ -160,7 +160,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				if len(cards.Items) != 1 {
 					t.Fatalf("nested gate cards=%#v", cards)
 				}
-				decision := lifecycleDecisionParamsForCard(t, rt, cards.Items[0].DecisionCard.CardID, "approve")
+				decision := lifecycleDecisionParamsForCard(t, rt.Endpoint, cards.Items[0].DecisionCard.CardID, "approve")
 				decision["idempotency_key"] = side + "-decide"
 				decisions = append(decisions, decision)
 			}
@@ -204,7 +204,6 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				requireLifecycleEventCount(t, rt.ReceiverStateReader, runID, prefix+"sink/work.completed", 1)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
-
 			entities, err := readServedRunFieldRows(rt.ReceiverStateReader, runID)
 			if err != nil {
 				t.Fatal(err)

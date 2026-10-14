@@ -81,20 +81,20 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 	}
 }
 
-func lifecycleGateDecisionParams(t *testing.T, rt servedControlProofRuntime, runID, verdict string) map[string]any {
+func lifecycleGateDecisionParams(t *testing.T, selectedProofEndpoint string, selectedProofReceiverStateReader receiverProofStateReader, runID, verdict string) map[string]any {
 	t.Helper()
-	cardID := waitLifecycleGateCard(t, rt, runID)
-	return lifecycleDecisionParamsForCard(t, rt, cardID, verdict)
+	cardID := waitLifecycleGateCard(t, selectedProofEndpoint, selectedProofReceiverStateReader, runID)
+	return lifecycleDecisionParamsForCard(t, selectedProofEndpoint, cardID, verdict)
 }
 
-func lifecycleDecisionParamsForCard(t *testing.T, rt servedControlProofRuntime, cardID, verdict string) map[string]any {
+func lifecycleDecisionParamsForCard(t *testing.T, selectedProofEndpoint string, cardID, verdict string) map[string]any {
 	t.Helper()
 	var detail struct {
 		DecisionCard struct {
 			ContentHash string `json:"card_content_hash"`
 		} `json:"decision_card"`
 	}
-	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, &detail)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, &detail)
 	if detail.DecisionCard.ContentHash == "" {
 		t.Fatal("missing frozen card hash")
 	}
@@ -111,7 +111,7 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			seedParams := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "frozen-start"}
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, seedParams)
 			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "review")
-			params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+			params := lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, "approve")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			if code := first.stop(); code != 0 {
@@ -133,11 +133,9 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			if code := second.stop(); code != 0 {
 				t.Fatalf("unpinned stop=%d", code)
 			}
-			// Returning to the exact source tree restores executable authority;
-			// the intervening B boot must not rewrite A's frozen decision.
 			opts.SourceRoot = sourceA
 			second, rt = start()
-			if got := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve"); got["card_id"] != params["card_id"] || got["observed_content_hash"] != params["observed_content_hash"] {
+			if got := lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, "approve"); got["card_id"] != params["card_id"] || got["observed_content_hash"] != params["observed_content_hash"] {
 				t.Fatalf("restart reminted frozen card: %#v / %#v", params, got)
 			}
 			var decided map[string]any

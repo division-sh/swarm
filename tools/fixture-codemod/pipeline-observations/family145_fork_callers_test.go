@@ -23,7 +23,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 		File, Function, Before, After string
 		Removed                       bool `json:"Removed,omitempty"`
 	}
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
+	if err := json.Unmarshal(servedSetupEarlierHistory(t, family145TransitionBytes, false), &rows); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := json.Marshal(rows)

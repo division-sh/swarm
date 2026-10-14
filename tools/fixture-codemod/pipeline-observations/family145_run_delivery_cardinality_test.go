@@ -35,7 +35,7 @@ func TestFamily145RunDeliveryCardinalityWholeRuleKeepsExactPredicatesAndTemporal
 			t.Fatal("run delivery predecessor changed:", pin.Function, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, current, pin.Function) != pin.After {
+		if err != nil || servedSetupEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("run delivery current endpoint changed:", pin.Function, err)
 		}
 		after, err := runphysical.Transform(rundelivery.Rules[index], pin.Before)

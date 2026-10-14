@@ -42,7 +42,13 @@ func servedObservationPriorHistory(t *testing.T, recipes bool) []byte {
 
 func servedObservationEarlierHistory(t *testing.T, current []byte, recipes bool) []byte {
 	t.Helper()
-	raw, err := servedsettlement.RestoreBatchHistory(current, servedObservationPriorHistory(t, recipes), servedObservationBatchPins(t), recipes)
+	current = servedSetupEarlierHistory(t, current, recipes)
+	return restoreServedObservationHistory(t, current, servedObservationPriorHistory(t, recipes), servedObservationBatchPins(t), recipes)
+}
+
+func restoreServedObservationHistory(t *testing.T, current, prior []byte, pins []runphysical.Pin, recipes bool) []byte {
+	t.Helper()
+	raw, err := servedsettlement.RestoreBatchHistory(current, prior, pins, recipes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +57,7 @@ func servedObservationEarlierHistory(t *testing.T, current []byte, recipes bool)
 
 func servedObservationEarlierSource(t *testing.T, file, function, current string) string {
 	t.Helper()
+	current = servedSetupEarlierSource(t, file, function, current)
 	for _, pin := range servedObservationInventoryPins {
 		if pin.File == file && pin.Function == function {
 			previous, err := servedsettlement.EarlierSource(servedObservationBatchPins(t), file, function, current)
@@ -93,11 +100,12 @@ func TestFamily145ServedObservationBatchPreservesCompleteHistoryAndEveryIntermed
 		if recipes {
 			current, count = recipeBytes, 1532
 		}
+		current = servedSetupEarlierHistory(t, current, recipes)
 		var rows, composed, old, restored []map[string]any
 		for _, input := range []struct {
 			raw []byte
 			out *[]map[string]any
-		}{{current, &rows}, {expected, &composed}, {prior, &old}, {servedObservationEarlierHistory(t, current, recipes), &restored}} {
+		}{{current, &rows}, {expected, &composed}, {prior, &old}, {restoreServedObservationHistory(t, current, prior, pins, recipes), &restored}} {
 			if err := json.Unmarshal(input.raw, input.out); err != nil {
 				t.Fatal(err)
 			}
@@ -189,7 +197,7 @@ func TestFamily145ServedObservationBatchCurrentnessRefusesMissingDuplicateForeig
 			t.Fatal("foreign declaration received a batch inverse:", pin.Function, err)
 		}
 		actual, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, actual, pin.Function) != pin.After {
+		if err != nil || servedSetupEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, actual, pin.Function)) != pin.After {
 			t.Fatal("actual source changed:", pin.Function, err)
 		}
 	}

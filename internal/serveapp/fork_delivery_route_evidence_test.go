@@ -105,7 +105,6 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 				caps, err := priorCapabilities(owner, req)
 				if executor, ok := caps.RunFork.(apiv1.SelectedContractRunForkExecutor); err == nil && ok {
 					execute := executor.ExecuteSelectedContractRunFork
-					// Keep the owner error visible before JSON-RPC normalizes it.
 					executor.ExecuteSelectedContractRunFork = func(ctx context.Context, req runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
 						result, err := execute(ctx, req)
 						if err != nil {
@@ -117,19 +116,20 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 				}
 				return caps, err
 			}
-			t.Cleanup(func() { buildSelectedAPICapabilities = priorCapabilities })
+			t.Cleanup(func() {
+				buildSelectedAPICapabilities = priorCapabilities
+			})
 			var selected *selectedStoreOwner
 			previous := projectRuntimePersistenceForServe
 			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
 				selected = owner
 				return previous(owner)
 			}
-			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
-				"payload": map[string]any{"work_id": "fork-connected-history"}, "idempotency_key": "fork-history-seed",
+			t.Cleanup(func() {
+				projectRuntimePersistenceForServe = previous
 			})
+			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "parent.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"work_id": "fork-connected-history"}, "idempotency_key": "fork-history-seed"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			live := readServedForkDeliveryEvidence(t, rt, seed.RunID)
 			if selected == nil {
@@ -139,7 +139,7 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 			if !ok {
 				t.Fatal("served runtime has no selected fork owner")
 			}
-			ctx := servedControlProofAuthorActivityContext(t, rt)
+			ctx := servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime)
 			plan, err := planner.Plan(ctx, runfork.RunForkPlanRequest{SourceRunID: seed.RunID})
 			if err != nil {
 				t.Fatalf("plan real connected source: %v", err)
@@ -168,8 +168,6 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 						continue
 					}
 					matches := 0
-					// The fixed event revision, not today's settled status, decides
-					// whether the exact stamped route belongs to frontier or history.
 					for _, event := range frontier.FrontierEvents {
 						if event.SourceEventID != want.eventID {
 							continue
@@ -199,10 +197,7 @@ func TestServedForkConnectedDeliveryRouteEvidenceOnBothStores(t *testing.T) {
 			}
 			t.Run("http_fork", func(t *testing.T) {
 				var fork apiv1.RunForkExecutionResult
-				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", map[string]any{
-					"source_run_id": seed.RunID, "fork_event_id": plan.ForkPoint.EventID,
-					"allow_source_freeze": true, "idempotency_key": "fork-history",
-				}, &fork)
+				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", map[string]any{"source_run_id": seed.RunID, "fork_event_id": plan.ForkPoint.EventID, "allow_source_freeze": true, "idempotency_key": "fork-history"}, &fork)
 				if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.SourceRunID != seed.RunID || fork.ForkEventID != plan.ForkPoint.EventID {
 					t.Fatalf("invalid fork identity: %+v", fork)
 				}

@@ -92,7 +92,7 @@ func runMailboxResponseProjectionRollback(t *testing.T) {
 						witness := filepath.Join(t.TempDir(), "projection-reached")
 						t.Setenv("SWARM_TEST_MAILBOX_PROJECTION_WITNESS", witness)
 						t.Setenv("SWARM_TEST_MAILBOX_PROJECTION_RESOURCE", req.ResourceID)
-						_, replayed, err := mailboxTokenlessMutation(f.ctx, rt, owner, req, params)
+						_, replayed, err := mailboxTokenlessMutation(f.ctx, rt.Runtime, owner, req, params)
 						if err == nil || !strings.Contains(err.Error(), "mailbox_exact_response_projection_cut") || replayed {
 							t.Fatalf("exact response projection did not fail: replay=%t err=%v", replayed, err)
 						}

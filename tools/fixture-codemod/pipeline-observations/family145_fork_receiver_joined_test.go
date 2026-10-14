@@ -165,6 +165,7 @@ func family145ForkReceiverJoinedOriginalOracle(t *testing.T, before string) {
 
 func family145ForkReceiverJoinedOwnedInventory(t *testing.T) map[string]int {
 	t.Helper()
+	setupPins := servedSetupPins(t)
 	root := filepath.Join("..", "..", "..")
 	counts := map[string]int{}
 	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal", "serveapp"), func(path string, entry fs.DirEntry, err error) error {
@@ -187,7 +188,11 @@ func family145ForkReceiverJoinedOwnedInventory(t *testing.T) map[string]int {
 			if function.Name.Name == "readForkReceiverRows" || function.Name.Name == "servedEventPublishEntityState" {
 				t.Fatal("retired duplicate receiver owner returned")
 			}
-			family145ForkReceiverJoinedFunctionCalls(t, function, counts)
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				return err
+			}
+			family145ForkReceiverJoinedFunctionCalls(t, servedSetupComparisonDeclaration(t, setupPins, filepath.ToSlash(rel), function), counts)
 		}
 		return nil
 	})

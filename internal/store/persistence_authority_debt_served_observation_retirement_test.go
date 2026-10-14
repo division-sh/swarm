@@ -122,7 +122,8 @@ func debtServedObservationRetirementSourcePins(root string) error {
 				return err
 			}
 		}
-		if files[key[0]][key[1]] != pin.After {
+		current, err := debtServedSetupSourcePrevious(root, key[0], key[1], files[key[0]][key[1]])
+		if err != nil || current != pin.After {
 			return fmt.Errorf("served observation retirement changed actual final body: %s: %v", key[1], err)
 		}
 	}

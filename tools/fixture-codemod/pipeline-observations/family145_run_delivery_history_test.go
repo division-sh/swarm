@@ -23,7 +23,8 @@ func runDeliveryLivePins(t *testing.T) []rundelivery.Pin {
 		if err != nil {
 			t.Fatal("run delivery live endpoint changed:", pin.Function, err)
 		}
-		if err := rundelivery.ValidateCurrentSource(pin, raw); err != nil {
+		previous := servedSetupEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, raw, pin.Function))
+		if err := rundelivery.ValidateCurrentSource(pin, []byte("package proof\n"+previous)); err != nil {
 			t.Fatal(err)
 		}
 	}

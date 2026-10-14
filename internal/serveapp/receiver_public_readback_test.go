@@ -18,19 +18,17 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func requireReceiverConstructedInstance(t *testing.T, rt servedControlProofRuntime, runID, instance, template, entityID, entityType, state, parent, wantPhase string, wantRevision int, fields map[string]any) {
+func requireReceiverConstructedInstance(t *testing.T, selectedProofBundleHash string, selectedProofReceiverStateReader receiverProofStateReader, runID, instance, template, entityID, entityType, state, parent, wantPhase string, wantRevision int, fields map[string]any) {
 	t.Helper()
-	physical := requireReceiverConstructionStorage(t, rt.ReceiverStateReader, runID, instance, entityID, entityType)
+	physical := requireReceiverConstructionStorage(t, selectedProofReceiverStateReader, runID, instance, entityID, entityType)
 	if physical.EntityID != entityID || physical.Template != template || physical.State != state || physical.EntityType != entityType || physical.EntityTypePresent != (entityType != "") || physical.Revision != wantRevision || physical.CreatedAt == "" || physical.UpdatedAt == "" || !physical.OrderedClocks {
 		t.Fatalf("constructed receiver mismatch: run=%s instance=%s physical=%+v", runID, instance, physical)
 	}
-	// Historical source-only fork headers preserve their recorded clocks.
 	if wantRevision == 1 && wantPhase != "" && physical.UpdatedAt != physical.CreatedAt {
 		t.Fatal("delivery-only settlement changed the construction header clock")
 	}
 	phase, planHash := physical.Phase, physical.PlanHash
 	if wantPhase == "" {
-		// A historical, fieldless source-only root is inventoried, not attached.
 		if physical.ReadinessPresent || template != "." || entityType != "" || parent != "" {
 			t.Fatalf("historical source-only projection acquired attachment: phase=%s", phase)
 		}
@@ -50,7 +48,7 @@ func requireReceiverConstructedInstance(t *testing.T, rt servedControlProofRunti
 			}
 			wantParent = flowidentity.ParentRoute{FlowID: parentTemplate, FlowInstance: parent, EntityID: flowidentity.EntityID(parent)}
 		}
-		if plan.RunID != runID || plan.BundleHash != rt.BundleHash || plan.Identity.TemplateID != template || plan.Identity.InstancePath != instance || plan.Identity.EntityID != entityID || plan.Identity.ParentRoute != wantParent || plan.Identity.ParentEntityID != wantParent.EntityID {
+		if plan.RunID != runID || plan.BundleHash != selectedProofBundleHash || plan.Identity.TemplateID != template || plan.Identity.InstancePath != instance || plan.Identity.EntityID != entityID || plan.Identity.ParentRoute != wantParent || plan.Identity.ParentEntityID != wantParent.EntityID {
 			t.Fatalf("receiver attachment lost exact construction/source identity: %+v", plan)
 		}
 	}

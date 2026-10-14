@@ -30,7 +30,11 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			reached := make(chan struct{}, 1)
 			release := make(chan struct{})
 			var releaseOnce sync.Once
-			releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
+			releaseHandler := func() {
+				releaseOnce.Do(func() {
+					close(release)
+				})
+			}
 			defer releaseHandler()
 			opts.TestWorkflowNodeHandlerStartHook = func(ctx context.Context, _ string, event events.Event) error {
 				if event.Type() != "work.completed" {
@@ -50,13 +54,11 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			first, rt := start()
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "gate-cut-seed"})
 			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "review")
-			params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+			params := lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, "approve")
 			var decision map[string]any
 			requestCtx, cancelRequest := context.WithCancel(context.Background())
 			defer cancelRequest()
 			requestDone := make(chan error, 1)
-			// A committed verdict may await its downstream publication before
-			// answering HTTP; issue it concurrently with the restart barrier.
 			go func() {
 				raw, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "gate-cut", "method": "mailbox.decide", "params": params})
 				if err != nil {
@@ -101,8 +103,6 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='work.completed'`, seed.RunID).Scan(&outcomeID); err != nil {
 				t.Fatal(err)
 			}
-			// Dispatch retains a commit-owned context. Graceful drain releases
-			// this test barrier; it is not a substitute for killing a process.
 			releaseHandler()
 			select {
 			case err := <-requestDone:

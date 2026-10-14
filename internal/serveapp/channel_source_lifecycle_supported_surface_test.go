@@ -312,7 +312,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						t.Fatal("fork reused parent card/run identity")
 					}
 					rt := servedControlProofRuntime{Endpoint: h.rpcEndpoint(), DB: db, Backend: storeBackend, BundleHash: hash}
-					decision := lifecycleDecisionParamsForCard(t, rt, child, "approve")
+					decision := lifecycleDecisionParamsForCard(t, rt.Endpoint, child, "approve")
 					refusal := requireServedJSONRPCError(t, h.rpcEndpoint(), "mailbox.decide", decision)
 					if refusal.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" {
 						t.Fatalf("fork acquired ordinary card mutation authority: %+v", refusal)

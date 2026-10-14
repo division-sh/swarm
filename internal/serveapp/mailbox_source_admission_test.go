@@ -74,12 +74,12 @@ func TestMailboxSourceAdmissionBeforeReplayAndAtCommitBothStores(t *testing.T) {
 						waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, f.base.RunID)
 						before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID)
 						for _, ctx := range []context.Context{context.Background(), correlation.WithSourceArtifactFact(f.ctx, mustServeTestPersistedSourceArtifactFact(unavailable))} {
-							_, replayed, err := mailboxTokenlessMutation(ctx, rt, owner, req, params)
+							_, replayed, err := mailboxTokenlessMutation(ctx, rt.Runtime, owner, req, params)
 							if err == nil || replayed || !strings.Contains(strings.ToLower(err.Error()), "source") {
 								t.Fatalf("completion bypassed missing/foreign source admission: replay=%t err=%v", replayed, err)
 							}
 						}
-						_, replayed, err := mailboxTokenlessMutation(f.ctx, rt, owner, req, params)
+						_, replayed, err := mailboxTokenlessMutation(f.ctx, rt.Runtime, owner, req, params)
 						if err != nil || !replayed {
 							t.Fatalf("source-positive control lost completion: replay=%t err=%v", replayed, err)
 						}

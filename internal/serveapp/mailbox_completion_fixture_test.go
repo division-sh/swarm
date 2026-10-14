@@ -135,7 +135,7 @@ func mailboxCompletionFixtureInRuntime(t *testing.T, rt servedControlProofRuntim
 	if err := rt.DB.QueryRow(`SELECT card_id FROM decision_cards WHERE run_id=$1 AND status='pending'`, seed.RunID).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	ctx := servedControlProofAuthorActivityContext(t, rt)
+	ctx := servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime)
 	base, err := owner.GetDecisionCard(ctx, id)
 	if err != nil {
 		t.Fatal(err)

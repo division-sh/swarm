@@ -3,6 +3,7 @@ package serveapp
 import (
 	"context"
 	"encoding/json"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"path/filepath"
 	"reflect"
 	"sync/atomic"
@@ -81,7 +82,11 @@ func requireForkReceiverPostRevisionPolicyRefusal(t *testing.T, rt servedControl
 	}
 	sourceBefore := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), sourceRunID)
 	var sourceStatus string
-	if err := rt.DB.QueryRow(`SELECT status FROM runs WHERE run_id=$1`, sourceRunID).Scan(&sourceStatus); err != nil {
+	if err := rt.ReceiverStateReader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		sourceStatus, err = storetest.ReadRunStatusStorage(ctx, rt.ReceiverStateReader, sourceRunID)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	family, ok := selected.RunFork()
@@ -89,18 +94,11 @@ func requireForkReceiverPostRevisionPolicyRefusal(t *testing.T, rt servedControl
 		t.Fatal("missing actual selected fork owner")
 	}
 	probe := &forkReceiverRefusalProbe{}
-	ctx, cancel := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), servedProofPollDeadline)
+	ctx, cancel := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), servedProofPollDeadline)
 	defer cancel()
 	forkOptions := rt.ForkRuntime
 	forkOptions.AgentManagerOptions = runtimemanager.AgentManagerOptions{TestLifecycleProbe: probe}
-	result, err := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
-		SourceRunID: sourceRunID, At: frontierEventID, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
-		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
-			RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore(),
-		},
-		ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
-		AgentRuntime:      forkOptions,
-	})
+	result, err := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{SourceRunID: sourceRunID, At: frontierEventID, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash, SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()}, ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))), AgentRuntime: forkOptions})
 	const refusal = "selected-contract committed replay-scope marker policy blocked: source_committed_replay_scope_advanced_after_fork_point"
 	if err == nil || err.Error() != refusal {
 		t.Fatalf("want exact store-owned post-revision refusal, got %v", err)
@@ -122,13 +120,9 @@ func requireForkReceiverPostRevisionPolicyRefusal(t *testing.T, rt servedControl
 		t.Fatalf("selected runtime authority was not closed: state=%s terminal=%t leaseReleased=%t err=%v", executionState, terminal, leaseReleased, err)
 	}
 	var failure runtimefailures.Envelope
-	// The completion envelope intentionally does not retain an arbitrary
-	// error string. The exact store refusal is asserted above, separately.
 	if err := json.Unmarshal([]byte(failureJSON), &failure); err != nil || failure.Class != runtimefailures.ClassInternalFailure || failure.Detail.Code != "unclassified_runtime_error" || failure.Component != runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner || failure.Operation != "execute" {
 		t.Fatalf("retained completion lost its canonical failure owner: %+v err=%v", failure, err)
 	}
-	// Retained revision facts distinguish never-published from published
-	// then deleted. Entity materialization itself is lawful nonzero work.
 	var materializedOwners, removedOwners int
 	if err := rt.DB.QueryRow(`SELECT COUNT(DISTINCT fact_key) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='entity_metadata' AND present`, child).Scan(&materializedOwners); err != nil || materializedOwners != materialized.MaterializedEntityCount {
 		t.Fatalf("missing committed materialization evidence: owners=%d err=%v", materializedOwners, err)
@@ -136,27 +130,12 @@ func requireForkReceiverPostRevisionPolicyRefusal(t *testing.T, rt servedControl
 	if err := rt.DB.QueryRow(`SELECT COUNT(DISTINCT fact_key) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='entity_metadata' AND NOT present`, child).Scan(&removedOwners); err != nil || removedOwners != materializedOwners {
 		t.Fatalf("cleanup lost materialized owner tombstones: removed=%d owners=%d err=%v", removedOwners, materializedOwners, err)
 	}
-	for _, query := range []string{
-		`SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND family IN ('events','event_deliveries','committed_replay_scopes','event_receipts','dead_letters') AND present`,
-		`SELECT COUNT(*) FROM events WHERE run_id=$1`,
-		`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`,
-		`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`,
-		`SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1`,
-		`SELECT COUNT(*) FROM activity_attempts WHERE run_id=$1`,
-		`SELECT COUNT(*) FROM timers WHERE run_id=$1`,
-		`SELECT COUNT(*) FROM agents WHERE run_id=$1`,
-		`SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE fork_run_id=$1`,
-		`SELECT COUNT(*) FROM run_fork_selected_contract_route_recoveries WHERE fork_run_id=$1`,
-		`SELECT COUNT(*) FROM runtime_external_effect_operations WHERE selected_execution_id IN (SELECT execution_id FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1)`,
-	} {
+	for _, query := range []string{`SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND family IN ('events','event_deliveries','committed_replay_scopes','event_receipts','dead_letters') AND present`, `SELECT COUNT(*) FROM events WHERE run_id=$1`, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`, `SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, `SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1`, `SELECT COUNT(*) FROM activity_attempts WHERE run_id=$1`, `SELECT COUNT(*) FROM timers WHERE run_id=$1`, `SELECT COUNT(*) FROM agents WHERE run_id=$1`, `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE fork_run_id=$1`, `SELECT COUNT(*) FROM run_fork_selected_contract_route_recoveries WHERE fork_run_id=$1`, `SELECT COUNT(*) FROM runtime_external_effect_operations WHERE selected_execution_id IN (SELECT execution_id FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1)`} {
 		var count int
 		if err := rt.DB.QueryRow(query, child).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("refused fork retained work or published before cleanup: count=%d query=%s err=%v", count, query, err)
 		}
 	}
-	// Discard retains companion metadata with the cancelled run tombstone.
-	// Ask the actual readiness owner whether it remains eligible; an active
-	// status label alone is neither a grant nor proof of executable work.
 	projection, err := rt.Runtime.Manager.InspectDynamicFlowRuntimeReadinessForSource(ctx, rt.Runtime.Options.SourceArtifactFact)
 	if err != nil {
 		t.Fatal(err)
@@ -168,12 +147,15 @@ func requireForkReceiverPostRevisionPolicyRefusal(t *testing.T, rt servedControl
 			}
 		}
 	}
-
 	if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), sourceRunID)) {
 		t.Fatal("refusal or cleanup mutated completed source domain")
 	}
 	var afterStatus string
-	if err := rt.DB.QueryRow(`SELECT status FROM runs WHERE run_id=$1`, sourceRunID).Scan(&afterStatus); err != nil || afterStatus != sourceStatus {
+	if err := rt.ReceiverStateReader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		afterStatus, err = storetest.ReadRunStatusStorage(ctx, rt.ReceiverStateReader, sourceRunID)
+		return err
+	}); err != nil || afterStatus != sourceStatus {
 		t.Fatalf("refusal froze or changed source status: before=%s after=%s err=%v", sourceStatus, afterStatus, err)
 	}
 	t.Logf("exact refusal after lawful materialization: frontierEventID_revision=%d later_scope_revision=%d owners=%d removed=%d selected_publications=0", frontierEventIDRevision, scopeRevision, materializedOwners, removedOwners)

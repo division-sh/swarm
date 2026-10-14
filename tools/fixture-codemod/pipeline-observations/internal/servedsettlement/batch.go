@@ -99,12 +99,22 @@ func ReadBatchPins(root string) ([]runphysical.Pin, error) {
 }
 
 func ValidateBatchCurrentSource(root string, pins []runphysical.Pin) error {
+	setup, err := ReadSetupPins(root)
+	if err != nil {
+		return err
+	}
+	if err := ValidateSetupCurrentSource(root, setup); err != nil {
+		return err
+	}
 	for _, pin := range pins {
 		raw, err := os.ReadFile(filepath.Join(root, pin.File))
 		if err != nil {
 			return err
 		}
 		current, err := UniqueBody(raw, pin.Function)
+		if err == nil {
+			current, err = EarlierSource(setup, pin.File, pin.Function, current)
+		}
 		if err != nil || current != pin.After {
 			return fmt.Errorf("served batch actual unique current source changed: %s: %v", pin.Function, err)
 		}
@@ -183,6 +193,10 @@ func RestoreBatchHistory(current, prior []byte, pins []runphysical.Pin, recipes 
 }
 
 func composeBatchPin(rows []batchHistoryRow, pin runphysical.Pin, recipes bool) ([]batchHistoryRow, error) {
+	return composeBatchPinWithAppends(rows, pin, recipes, batchAppends)
+}
+
+func composeBatchPinWithAppends(rows []batchHistoryRow, pin runphysical.Pin, recipes bool, appends map[string]bool) ([]batchHistoryRow, error) {
 	match := -1
 	for index, row := range rows {
 		if row["File"] == pin.File && row["Function"] == pin.Function {
@@ -192,7 +206,7 @@ func composeBatchPin(rows []batchHistoryRow, pin runphysical.Pin, recipes bool) 
 			match = index
 		}
 	}
-	if (match == -1) != batchAppends[pin.Function] {
+	if (match == -1) != appends[pin.Function] {
 		return nil, fmt.Errorf("served batch historical row is missing or foreign: %s", pin.Function)
 	}
 	if match == -1 {

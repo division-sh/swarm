@@ -71,7 +71,7 @@ func TestFamily145ChannelIntentOriginal34CallsAndCompleteSiblingRepairsAreSource
 		if err != nil {
 			t.Fatal(err)
 		}
-		if family145ChannelAnchorPrevious(t, pin.File, pin.Function, intentDeclaration(t, raw, pin.Function)) != pin.After {
+		if family145ChannelAnchorPrevious(t, pin.File, pin.Function, servedSetupEarlierSource(t, pin.File, pin.Function, intentDeclaration(t, raw, pin.Function))) != pin.After {
 			t.Fatal("intent current body escaped finite rule:", key)
 		}
 		verifyIntentPredecessor(t, pin)

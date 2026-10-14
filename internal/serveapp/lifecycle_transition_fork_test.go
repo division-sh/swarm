@@ -48,7 +48,7 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, seed.RunID, stage)
 			var parentCard map[string]any
 			if gate {
-				parentCard = lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+				parentCard = lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, "approve")
 			} else {
 				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "loop.start", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-loop-start"})
 				stage = "drafting"
@@ -68,7 +68,6 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			var fork, duplicate apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
-
 			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 || !reflect.DeepEqual(fork, duplicate) {
 				t.Fatalf("fork=%#v duplicate=%#v", fork, duplicate)
 			}
@@ -93,7 +92,7 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProofRuntime, parentRun string, parentParams map[string]any, runID string) {
 	t.Helper()
 	entity := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, runID, "", "review")
-	childParams := lifecycleGateDecisionParams(t, rt, runID, "approve")
+	childParams := lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, runID, "approve")
 	readCard := func(id any) map[string]any {
 		var detail struct {
 			Card map[string]any `json:"decision_card"`
@@ -124,10 +123,7 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 	}
 	parentGate := readLifecycleTemplateGate(t, rt, parentRun, parentEntity, ".")
 	childGate := readLifecycleTemplateGate(t, rt, runID, entity, ".")
-	if childGate.ActivationID != ca["stage_activation_id"] || childGate.CardID != child["card_id"] ||
-		childGate.RoutesJSON != parentGate.RoutesJSON || childGate.BundleHash != parentGate.BundleHash ||
-		childGate.DecisionID != parentGate.DecisionID || childGate.Stage != parentGate.Stage ||
-		childGate.Status != parentGate.Status || !childGate.OpenedAt.Equal(parentGate.OpenedAt) {
+	if childGate.ActivationID != ca["stage_activation_id"] || childGate.CardID != child["card_id"] || childGate.RoutesJSON != parentGate.RoutesJSON || childGate.BundleHash != parentGate.BundleHash || childGate.DecisionID != parentGate.DecisionID || childGate.Stage != parentGate.Stage || childGate.Status != parentGate.Status || !childGate.OpenedAt.Equal(parentGate.OpenedAt) {
 		t.Fatalf("fork changed frozen gate authority: parent=%#v child=%#v", parentGate, childGate)
 	}
 	for _, key := range []string{"flow_id", "stage"} {
@@ -135,8 +131,7 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 			t.Fatalf("fork changed declaration %s: %#v", key, ca)
 		}
 	}
-	if ca["entity_id"] != entity || ca["stage_activation_id"] == "" || ca["stage_activation_id"] == pa["stage_activation_id"] ||
-		ca["flow_instance"] != runID || ca["flow_instance_id"] != runID {
+	if ca["entity_id"] != entity || ca["stage_activation_id"] == "" || ca["stage_activation_id"] == pa["stage_activation_id"] || ca["flow_instance"] != runID || ca["flow_instance_id"] != runID {
 		t.Fatalf("fork-local anchor not exact: parent=%#v child=%#v", pa, ca)
 	}
 	source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entity})
@@ -158,8 +153,6 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 	if err := rt.DB.QueryRow(`SELECT binding_id FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1`, runID).Scan(&bindingID); err != nil {
 		t.Fatal(err)
 	}
-	// Await legitimate completion maintenance before attributing a snapshot delta
-	// to refusal. No application table or completion-candidate column is excluded.
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for {
 		var settled bool
@@ -178,9 +171,7 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 	for attempt := 0; attempt < 2; attempt++ {
 		refusal := requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", childParams)
 		details, ok := refusal.Data["details"].(map[string]any)
-		if refusal.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" || refusal.Data["retryable"] != false || !ok ||
-			details["operation"] != "mailbox.decide" || details["run_id"] != runID || details["binding_id"] != bindingID ||
-			details["required_capability"] != "selected_fork_deferred_execution" {
+		if refusal.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" || refusal.Data["retryable"] != false || !ok || details["operation"] != "mailbox.decide" || details["run_id"] != runID || details["binding_id"] != bindingID || details["required_capability"] != "selected_fork_deferred_execution" {
 			t.Fatalf("wrong selected refusal: %+v", refusal)
 		}
 		after := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)

@@ -30,18 +30,14 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				selected = owner
 				return previous(owner)
 			}
-			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+			t.Cleanup(func() {
+				projectRuntimePersistenceForServe = previous
+			})
 			root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
-				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-seed",
-			})
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-seed"})
 			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
-			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
-				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-request",
-			})
+			requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-request"})
 			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			var frontier, deliveryID string
 			if err := rt.DB.QueryRow(`SELECT e.event_id, d.delivery_id FROM events e JOIN event_deliveries d ON d.event_id=e.event_id WHERE e.run_id=$1 AND e.event_name='producer/work.ready'`, seed.RunID).Scan(&frontier, &deliveryID); err != nil {
@@ -49,16 +45,13 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			}
 			sourceRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 			sourceRoute := requireForkReceiverBusinessMutation(t, rt, seed.RunID, frontier, sourceRows["consumer"].ID)
-			sibling := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
-				"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-sibling",
-			})
+			sibling := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "historical-context-sibling"})
 			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, sibling.RunID)
 			family, ok := selected.RunFork()
 			if !ok {
 				t.Fatal("missing real selected fork owner")
 			}
-			ctx := servedControlProofAuthorActivityContext(t, rt)
+			ctx := servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime)
 			plan, err := family.Plan(ctx, runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: frontier})
 			if err != nil {
 				t.Fatal(err)
@@ -67,8 +60,6 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			if err != nil || defaultPlan.ForkPoint.EventID != frontier || defaultPlan.ForkPoint.Revision != plan.ForkPoint.Revision {
 				t.Fatalf("default selector must select this actual final publication: %#v, %v", defaultPlan.ForkPoint, err)
 			}
-			// Exercise the real direct store using an already-admitted request,
-			// rather than allowing request construction to be the only guard.
 			direct, ok := family.Availability().(forkHistoricalSelectedStore)
 			if !ok {
 				t.Fatal("selected availability projection does not expose the actual store fixture")
@@ -133,12 +124,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				requireHistoricalRefusal(err)
 				_, err = family.Materialize(ctx, runfork.RunForkMaterializeRequest{SourceRunID: seed.RunID, At: at})
 				requireHistoricalRefusal(err)
-				result, err := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
-					SourceRunID: seed.RunID, At: at, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
-					SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
-					ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: rt.BundleHash},
-					AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.Runtime.ExecutionPosture},
-				})
+				result, err := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{SourceRunID: seed.RunID, At: at, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash, SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()}, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: rt.BundleHash}, AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.Runtime.ExecutionPosture}})
 				requireHistoricalRefusal(err)
 				if result.Materialization.ForkRunID != "" || result.ExecutedEventCount != 0 {
 					t.Fatalf("corrupt R reached child execution: %#v", result)
@@ -149,13 +135,9 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				}
 				for attempt := 0; attempt < 2; attempt++ {
 					rpcErr := requireServedJSONRPCError(t, rt.Endpoint, "run.fork", params)
-					// HTTP sanitizes backend errors. The direct entry above proves the
-					// exact owner refusal; this cell proves the real public write boundary.
 					if rpcErr.Code != -32603 {
 						t.Fatalf("unexpected public refusal: %+v", rpcErr)
 					}
-					// A failed operation releases its API idempotency reservation;
-					// unlike successful execution it leaves no committed response row.
 					requireUnchanged()
 				}
 			}
@@ -171,8 +153,6 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 				t.Fatalf("lawful selected staging: %#v, %v", staged, err)
 			}
 			writeFact(corrupt)
-			// The staged child, binding, readiness and revision rows are lawful.
-			// Each refusal must preserve them exactly, not pretend no child exists.
 			before = snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 			_, err = direct.MaterializeRunForkForSelectedContractExecution(ctx, request)
 			requireHistoricalRefusal(err)
@@ -180,27 +160,17 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			activation, err := direct.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
-				ExecutionSource: loaded.Source, ForkRunID: staged.ForkRunID, AllowSourceFreeze: true,
-				AllowedSourceEventIDs: eventIDs, FrontierAdmission: request.FrontierAdmission,
-				RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning,
-			})
+			activation, err := direct.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{ExecutionSource: loaded.Source, ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, AllowedSourceEventIDs: eventIDs, FrontierAdmission: request.FrontierAdmission, RouteTopology: request.RouteTopology, RecipientPlanning: request.RecipientPlanning})
 			requireHistoricalRefusal(err)
 			if activation.Activated {
 				t.Fatal("direct selected activation accepted corrupt R")
 			}
-			recovered, err := family.Activate(ctx, runforkexecution.SelectedContractActivationGateRequest{
-				ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, SourceLoader: loader,
-				AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.Runtime.ExecutionPosture},
-			})
+			recovered, err := family.Activate(ctx, runforkexecution.SelectedContractActivationGateRequest{ForkRunID: staged.ForkRunID, AllowSourceFreeze: true, SourceLoader: loader, AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{ExecutionPosture: rt.Runtime.ExecutionPosture}})
 			requireHistoricalRefusal(err)
 			if recovered.Activated || recovered.ExecutedEventCount != 0 || len(recovered.ForkEvents) != 0 {
 				t.Fatalf("recovered activation reached execution: %#v", recovered)
 			}
 			writeFact(original)
-			// Source settlement (including pipeline receipt/handoff) and fault
-			// restoration precede the healthy baseline. Source freeze/lineage and
-			// the successful API response are lawful writes, not business effects.
 			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			sourceBefore := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)
 			siblingBefore := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), sibling.RunID)
@@ -220,9 +190,7 @@ func TestRunForkHistoricalIdentityPublicExecutionBothStores(t *testing.T) {
 			if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) {
 				t.Fatal("admitted historical route lost exact compiled connect evidence")
 			}
-			if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)) || !reflect.DeepEqual(siblingBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), sibling.RunID)) ||
-				!reflect.DeepEqual(sourceCompanions, readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID)) || !reflect.DeepEqual(siblingCompanions, readForkReceiverCompanions(t, rt.ReceiverStateReader, sibling.RunID)) ||
-				!reflect.DeepEqual(sourceNotices, readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, seed.RunID)) || !reflect.DeepEqual(siblingNotices, readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, sibling.RunID)) {
+			if !reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)) || !reflect.DeepEqual(siblingBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), sibling.RunID)) || !reflect.DeepEqual(sourceCompanions, readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID)) || !reflect.DeepEqual(siblingCompanions, readForkReceiverCompanions(t, rt.ReceiverStateReader, sibling.RunID)) || !reflect.DeepEqual(sourceNotices, readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, seed.RunID)) || !reflect.DeepEqual(siblingNotices, readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, sibling.RunID)) {
 				t.Fatal("healthy fork changed complete source/sibling business rows, companions, or notices")
 			}
 			completed := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)

@@ -32,7 +32,6 @@ func TestReceiverCompositionEntitylessRootExportBothStores(t *testing.T) {
 			if len(event.Deliveries) != 0 || event.NoDelivery == nil || event.NoDelivery.Reason == "" || len(event.DeadLetters) != 0 {
 				t.Fatalf("root export boundary lacks exact no-delivery disposition: %#v", event)
 			}
-
 			entities, err := readServedRunFieldRows(rt.ReceiverStateReader, published.RunID)
 			if err != nil {
 				t.Fatal(err)
@@ -40,7 +39,7 @@ func TestReceiverCompositionEntitylessRootExportBothStores(t *testing.T) {
 			if entities != 0 {
 				t.Fatal("root export fabricated receiver state")
 			}
-			requireReceiverConstructedInstance(t, rt, published.RunID, published.RunID, ".", published.RunID, "", "pending", "", "ready", 2, nil)
+			requireReceiverConstructedInstance(t, rt.BundleHash, rt.ReceiverStateReader, published.RunID, published.RunID, ".", published.RunID, "", "pending", "", "ready", 2, nil)
 			requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, published.RunID)
 		})
 	}

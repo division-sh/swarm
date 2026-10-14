@@ -52,7 +52,9 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 				if err != nil {
 					t.Fatal(err)
 				}
-				t.Cleanup(func() { _ = db.Close() })
+				t.Cleanup(func() {
+					_ = db.Close()
+				})
 				backendName = "sqlite"
 			} else {
 				dsn, postgres, _ := testutil.StartEmptyPostgres(t)
@@ -61,9 +63,6 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 				cfg = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 			}
 			temporary := t.TempDir()
-			// SIGKILL deliberately prevents the first child from releasing its
-			// read-only projection. Only this test-owned temp tree is writable
-			// again, after all child cleanup, so testing.TempDir can remove it.
 			t.Cleanup(func() {
 				if err := filepath.WalkDir(temporary, func(path string, entry os.DirEntry, err error) error {
 					if err != nil {
@@ -77,32 +76,26 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 					t.Errorf("release killed child's test-owned projection: %v", err)
 				}
 			})
-			env := []string{"SWARM_TEST_DIAGNOSTIC_PROCESS_HELPER=1", "SWARM_TEST_DIAGNOSTIC_CONFIG=" + cfg,
-				"SWARM_TEST_DIAGNOSTIC_SOURCE=" + source, "SWARM_TEST_DIAGNOSTIC_STORE=" + storeMode, "TMPDIR=" + temporary}
+			env := []string{"SWARM_TEST_DIAGNOSTIC_PROCESS_HELPER=1", "SWARM_TEST_DIAGNOSTIC_CONFIG=" + cfg, "SWARM_TEST_DIAGNOSTIC_SOURCE=" + source, "SWARM_TEST_DIAGNOSTIC_STORE=" + storeMode, "TMPDIR=" + temporary}
 			first := startServedCrashProcess(t, "TestLifecycleDiagnosticServeProcessHelper", append(env, "SWARM_TEST_DIAGNOSTIC_FAIL=1"))
 			inspection, err := storetest.OpenReleaseProcessReadOnlyInspection(backendName, location)
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { _ = inspection.Close() })
+			t.Cleanup(func() {
+				_ = inspection.Close()
+			})
 			reader := requireReceiverProofStateReader(t, inspection)
 			proof := servedControlProofRuntime{Endpoint: first.endpoint(t) + "/v1/rpc", DB: db, Backend: backendName, BundleHash: hash, ReceiverStateReader: reader}
-			initial := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
-				"event_name": "item.received", "bundle_hash": hash,
-				"payload": map[string]any{"item_id": "diagnostic-recovery"}, "idempotency_key": uuid.NewString(),
-			})
+			initial := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{"event_name": "item.received", "bundle_hash": hash, "payload": map[string]any{"item_id": "diagnostic-recovery"}, "idempotency_key": uuid.NewString()})
 			requireServedEventPublishEntityState(t, reader, backendName, initial.RunID, "", "waiting")
-			publishServedLiveAgentHoldEvent(t, proof, initial.RunID, initial.EventID, "before-crash")
+			publishServedLiveAgentHoldEvent(t, proof.Backend, proof.Endpoint, proof.ReceiverStateReader, initial.RunID, initial.EventID, "before-crash")
 			var restarted servedAgentRestartProofResult
-			requireServedJSONRPCResult(t, proof.Endpoint, "agent.restart", map[string]any{
-				"run_id": initial.RunID, "agent_id": "load-agent", "idempotency_key": uuid.NewString(),
-			}, &restarted)
+			requireServedJSONRPCResult(t, proof.Endpoint, "agent.restart", map[string]any{"run_id": initial.RunID, "agent_id": "load-agent", "idempotency_key": uuid.NewString()}, &restarted)
 			if !restarted.OK {
 				t.Fatal("diagnostic outage changed committed restart success")
 			}
-			// Join provider work before crashing: the only intentionally unfinished
-			// operation is diagnostic projection, not an ambiguous provider attempt.
-			publishServedLiveAgentHoldEvent(t, proof, initial.RunID, initial.EventID, "after-restart")
+			publishServedLiveAgentHoldEvent(t, proof.Backend, proof.Endpoint, proof.ReceiverStateReader, initial.RunID, initial.EventID, "after-restart")
 			pending := readServedLifecycleDiagnosticReceipts(t, db, initial.RunID)
 			if len(pending) == 0 {
 				t.Fatal("real lifecycle operations produced no pending diagnostics")
@@ -128,10 +121,7 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 			if response := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params); response.Error != nil {
 				t.Fatalf("served reset: %+v", response.Error)
 			}
-			later := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
-				"event_name": "item.received", "bundle_hash": hash,
-				"payload": map[string]any{"item_id": "after-reset"}, "idempotency_key": uuid.NewString(),
-			})
+			later := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{"event_name": "item.received", "bundle_hash": hash, "payload": map[string]any{"item_id": "after-reset"}, "idempotency_key": uuid.NewString()})
 			requireServedEventPublishEntityState(t, reader, backendName, later.RunID, "", "waiting")
 			if response := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params); response.Error != nil {
 				t.Fatalf("historical reset replay: %+v", response.Error)
@@ -143,7 +133,6 @@ func TestLifecycleDiagnosticServedCrashRecoveryAndResetBothStores(t *testing.T) 
 				}
 				requireServedDiagnosticEventCount(t, db, id, initial.RunID, 0)
 			}
-
 			oldRuns, err := readServedRunPhysicalIdentity(reader, initial.RunID)
 			if err != nil || oldRuns != 0 {
 				t.Fatalf("diagnostic replay resurrected predecessor: count=%d err=%v", oldRuns, err)

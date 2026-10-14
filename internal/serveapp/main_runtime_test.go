@@ -1485,9 +1485,9 @@ type servedControlProofRuntime struct {
 	ReadApplicationSnapshot func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)
 }
 
-func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProofRuntime) context.Context {
+func servedControlProofAuthorActivityContext(t *testing.T, selectedProofBundleHash string, selectedProofRuntime *runtimepkg.Runtime) context.Context {
 	t.Helper()
-	return servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
+	return servedRuntimeProofAuthorActivityContext(t, selectedProofRuntime, selectedProofBundleHash)
 }
 
 func servedRuntimeProofAuthorActivityContext(t *testing.T, rt *runtimepkg.Runtime, bundleHash string) context.Context {
@@ -1803,7 +1803,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 func runServedLiveAgentEventReplayBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
 	rt := startServedLiveAgentProofRuntime(t, backend)
-	runServedLiveAgentEventReplayLifecycleProof(t, rt)
+	runServedLiveAgentEventReplayLifecycleProof(t, rt.Backend, rt.BundleHash, rt.Endpoint, rt.Probe, rt.ReceiverStateReader)
 }
 
 func runServedAgentRestartBackendProof(t *testing.T, backend servedparity.Backend) {
@@ -2236,12 +2236,8 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 	t.Helper()
 	backend := rt.Backend
 	now := time.Now().UTC().Truncate(time.Second)
-	fixture := servedConversationForkSource{
-		RunID: runID, AgentID: "fork-source-agent", SessionID: uuid.NewString(),
-		Turn1ID: uuid.NewString(), Turn2ID: uuid.NewString(), Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), EntityID: uuid.NewString(),
-		Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute),
-	}
-	ctx := servedControlProofAuthorActivityContext(t, rt.servedControlProofRuntime)
+	fixture := servedConversationForkSource{RunID: runID, AgentID: "fork-source-agent", SessionID: uuid.NewString(), Turn1ID: uuid.NewString(), Turn2ID: uuid.NewString(), Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), EntityID: uuid.NewString(), Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute)}
+	ctx := servedControlProofAuthorActivityContext(t, rt.servedControlProofRuntime.BundleHash, rt.servedControlProofRuntime.Runtime)
 	lease, err := rt.Runtime.WorkOccurrence().Begin(ctx)
 	if err != nil {
 		t.Fatalf("admit conversation fixture work: %v", err)
@@ -2291,22 +2287,12 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 	if actorIdentity.IsZero() {
 		t.Fatalf("%s conversation fork source agent was not admitted by startup topology", backend)
 	}
-	history := storetest.SeedConversationForkSource(t, ctx, selected, storetest.ConversationForkSourceFixture{
-		Identity: actorIdentity, RunID: fixture.RunID, SessionID: fixture.SessionID, EntityID: fixture.EntityID,
-		Event1ID: fixture.Event1ID, Event2ID: fixture.Event2ID,
-		CreatedAt: now, Turn1At: fixture.Turn1At, Turn2At: fixture.Turn2At,
-	})
+	history := storetest.SeedConversationForkSource(t, ctx, selected, storetest.ConversationForkSourceFixture{Identity: actorIdentity, RunID: fixture.RunID, SessionID: fixture.SessionID, EntityID: fixture.EntityID, Event1ID: fixture.Event1ID, Event2ID: fixture.Event2ID, CreatedAt: now, Turn1At: fixture.Turn1At, Turn2At: fixture.Turn2At})
 	for i, turn := range []struct {
 		id string
 		at time.Time
-	}{
-		{fixture.Turn1ID, fixture.Turn1At}, {fixture.Turn2ID, fixture.Turn2At},
-	} {
-		storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
-			Store: selectedStore, Selected: selected, Identity: actorIdentity,
-			RunID: fixture.RunID, SessionID: fixture.SessionID, TurnID: turn.id,
-			Memory: runtimeagentmemory.Plan{Enabled: true}, Event: history[i], ParseOK: true, CreatedAt: turn.at,
-		})
+	}{{fixture.Turn1ID, fixture.Turn1At}, {fixture.Turn2ID, fixture.Turn2At}} {
+		storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{Store: selectedStore, Selected: selected, Identity: actorIdentity, RunID: fixture.RunID, SessionID: fixture.SessionID, TurnID: turn.id, Memory: runtimeagentmemory.Plan{Enabled: true}, Event: history[i], ParseOK: true, CreatedAt: turn.at})
 	}
 	return fixture
 }
@@ -2539,7 +2525,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 
 func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
-	runID, initialEventID, entityID := createServedControlWaitingRun(t, rt, "run-control-release-"+uuid.NewString())
+	runID, initialEventID, entityID := createServedControlWaitingRun(t, rt.Backend, rt.BundleHash, rt.Endpoint, rt.Probe, rt.ReceiverStateReader, "run-control-release-"+uuid.NewString())
 	keyPrefix := "issue-1864-" + rt.Backend + "-" + runID
 	var owner runtimepipelineobligation.Store
 	if rt.SQLite != nil {
@@ -2547,7 +2533,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	} else {
 		owner = rt.Postgres.PipelineObligations()
 	}
-	initialCtx, cancelInitial := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 5*time.Second)
+	initialCtx, cancelInitial := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), 5*time.Second)
 	defer cancelInitial()
 	for {
 		summary, err := owner.SummarizeRun(initialCtx, runID)
@@ -2579,7 +2565,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 		t.Fatalf("%s queued event.publish result = %#v, want existing paused run", rt.Backend, queued)
 	}
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.ReceiverStateReader, rt.Backend, runID, queued.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), "pending", 1)
-	waitCtx, cancelWait := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 5*time.Second)
+	waitCtx, cancelWait := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), 5*time.Second)
 	defer cancelWait()
 	requireNoServedDeliveryStatusDuring(t, rt.ReceiverStateReader, rt.Backend, queued.EventID, "node", "item-observer", "delivered", 250*time.Millisecond)
 	work, err := owner.ClaimEvent(waitCtx, queued.EventID, runtimepipelineobligation.PurposePublication)
@@ -3084,7 +3070,7 @@ func jsonScalarInt(value any, want int64) bool {
 
 func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) servedDecisionCardFixture {
 	t.Helper()
-	ctx := servedControlProofAuthorActivityContext(t, rt)
+	ctx := servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime)
 	now := time.Now().UTC().Add(-time.Minute)
 	runID, entityID, sourceEventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	bundleFact := rt.Runtime.Options.SourceArtifactFact
@@ -3102,9 +3088,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		}
 		cards, insertNotice = pg, pg.InsertMailboxItem
 		seedEvent = func(ctx context.Context, evt events.Event) error {
-			storetest.CommitSemanticEventWithInitialFacts(t, ctx, pg, evt, nil,
-				runtimepipelineobligation.ScopeSubscribed,
-				storetest.AcknowledgedPipelineDisposition())
+			storetest.CommitSemanticEventWithInitialFacts(t, ctx, pg, evt, nil, runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition())
 			return nil
 		}
 	case "sqlite":
@@ -3115,31 +3099,21 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		cards = sqlite
 		insertNotice = sqlite.InsertMailboxItem
 		seedEvent = func(ctx context.Context, evt events.Event) error {
-			storetest.CommitSemanticEventWithInitialFacts(t, ctx, sqlite, evt, nil,
-				runtimepipelineobligation.ScopeSubscribed,
-				storetest.AcknowledgedPipelineDisposition())
+			storetest.CommitSemanticEventWithInitialFacts(t, ctx, sqlite, evt, nil, runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition())
 			return nil
 		}
 	default:
 		t.Fatalf("unknown decision-card proof backend %q", rt.Backend)
 	}
-	evt := eventtest.RunCreatingRootIngress(sourceEventID, "item.received", "", "", json.RawMessage(`{"item_id":"review"}`), 0, runID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), runID), now)
+	evt := eventtest.RunCreatingRootIngress(sourceEventID, "item.received", "", "", json.RawMessage(`{"item_id":"review"}`), 0, runID, "", events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), runID), now)
 	if err := seedEvent(ctx, evt); err != nil {
 		t.Fatalf("seed decision-card source event: %v", err)
 	}
-	noticeID, err := insertNotice(ctx, runtimetools.MailboxItem{
-		EventID: sourceEventID, EntityID: entityID, FlowInstance: runID, FromAgent: "review-agent",
-		Type: "notice", Priority: "normal", Status: "pending", Summary: "review queued", Context: []byte(`{"title":"review queued"}`),
-	})
+	noticeID, err := insertNotice(ctx, runtimetools.MailboxItem{EventID: sourceEventID, EntityID: entityID, FlowInstance: runID, FromAgent: "review-agent", Type: "notice", Priority: "normal", Status: "pending", Summary: "review queued", Context: []byte(`{"title":"review queued"}`)})
 	if err != nil {
 		t.Fatalf("seed mailbox notice: %v", err)
 	}
-
-	outcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {Verdict: "approve", AdvancesTo: "done"},
-		"reject":  {Verdict: "reject", AdvancesTo: "rework"},
-	}
+	outcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "done"}, "reject": {Verdict: "reject", AdvancesTo: "rework"}}
 	routes, err := gateruntime.FreezeRoutes(outcomes, servedDecisionCardTransitionFixture(t, rt.Runtime.Pipeline.SemanticSource(), outcomes))
 	if err != nil {
 		t.Fatalf("FreezeRoutes: %v", err)
@@ -3161,11 +3135,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	{
 		construction3123Ctx := materializeCtx
 		construction3123At := now
-		construction3123Instance, construction3123Lifecycle, err := workflow.PrepareInitialEntryLifecycle(construction3123Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(rootFlowID, runID, runID)}, runtimepipeline.WorkflowInstance{
-			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: workflowVersion,
-			CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
-			EntityType: entityType,
-		}, construction3123At)
+		construction3123Instance, construction3123Lifecycle, err := workflow.PrepareInitialEntryLifecycle(construction3123Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(rootFlowID, runID, runID)}, runtimepipeline.WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: workflowVersion, CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(), EntityType: entityType}, construction3123At)
 		if err != nil {
 			t.Fatalf("prepare fixture initial lifecycle: %v", err)
 		}
@@ -3186,10 +3156,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 			}
 		}
 	}
-	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Launch review", map[string]any{"environment": "staging"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {Verdict: "approve", AdvancesTo: "done", Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}}, InputOrder: []string{"score"}},
-		"reject":  {Verdict: "reject", AdvancesTo: "rework", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}, InputOrder: []string{"feedback"}},
-	})
+	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Launch review", map[string]any{"environment": "staging"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "done", Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}}, InputOrder: []string{"score"}}, "reject": {Verdict: "reject", AdvancesTo: "rework", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}, InputOrder: []string{"feedback"}}})
 	if err != nil {
 		t.Fatalf("freeze decision card snapshot: %v", err)
 	}
@@ -3197,23 +3164,11 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	if err != nil {
 		t.Fatalf("admit decision card provenance: %v", err)
 	}
-	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		Route: runtimeflowidentity.RouteForInstancePath(runID), FlowID: ".", EntityID: entityID, Stage: activation.Stage,
-		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
-	})
+	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{Route: runtimeflowidentity.RouteForInstancePath(runID), FlowID: ".", EntityID: entityID, Stage: activation.Stage, StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID)})
 	if err != nil {
 		t.Fatalf("new decision card anchor: %v", err)
 	}
-	card, err := decisioncard.New(decisioncard.Card{
-		CardID:        activation.CardID,
-		RunID:         runID,
-		ExecutionMode: executionmode.Live,
-		Anchor:        anchor,
-		Snapshot:      snapshot,
-		BundleHash:    bundleHash, WorkflowVersion: workflowVersion,
-		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
-		Provenance:       provenance, CreatedAt: now,
-	})
+	card, err := decisioncard.New(decisioncard.Card{CardID: activation.CardID, RunID: runID, ExecutionMode: executionmode.Live, Anchor: anchor, Snapshot: snapshot, BundleHash: bundleHash, WorkflowVersion: workflowVersion, EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"}, Provenance: provenance, CreatedAt: now})
 	if err != nil {
 		t.Fatalf("new decision card: %v", err)
 	}
@@ -3580,20 +3535,15 @@ func requireServedParitySettlementPostconditionsWithDebug(t *testing.T, endpoint
 	)
 }
 
-func createServedControlWaitingRun(t *testing.T, rt servedControlProofRuntime, suffix string) (runID, eventID, entityID string) {
+func createServedControlWaitingRun(t *testing.T, selectedProofBackend string, selectedProofBundleHash string, selectedProofEndpoint string, selectedProofProbe *lifecycletest.Probe, selectedProofReceiverStateReader receiverProofStateReader, suffix string) (runID, eventID, entityID string) {
 	t.Helper()
-	result := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "item.received",
-		"bundle_hash":     rt.BundleHash,
-		"payload":         map[string]any{"item_id": suffix},
-		"idempotency_key": "issue-1864-" + rt.Backend + "-" + suffix,
-	})
+	result := requireServedEventPublishRPCResult(t, selectedProofEndpoint, map[string]any{"event_name": "item.received", "bundle_hash": selectedProofBundleHash, "payload": map[string]any{"item_id": suffix}, "idempotency_key": "issue-1864-" + selectedProofBackend + "-" + suffix})
 	if !result.NewRunCreated || result.RunID == "" || result.EventID == "" {
-		t.Fatalf("%s control seed event.publish result = %#v, want new run", rt.Backend, result)
+		t.Fatalf("%s control seed event.publish result = %#v, want new run", selectedProofBackend, result)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.ReceiverStateReader, rt.Backend, result.RunID, result.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
-	entityID = requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, result.RunID, "", "waiting")
-	requireServedRunStatus(t, rt.Endpoint, result.RunID, "running")
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, selectedProofReceiverStateReader, selectedProofBackend, result.RunID, result.EventID, identitytest.RootNode(t, "item-handler").Key(), selectedProofProbe)
+	entityID = requireServedEventPublishEntityState(t, selectedProofReceiverStateReader, selectedProofBackend, result.RunID, "", "waiting")
+	requireServedRunStatus(t, selectedProofEndpoint, result.RunID, "running")
 	return result.RunID, result.EventID, entityID
 }
 
@@ -3629,8 +3579,8 @@ type servedAgentRestartProofResult struct {
 func runServedAgentRestartLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
 	const agentID = "load-agent"
-	runID, initialEventID, _ := createServedControlWaitingRun(t, rt, "issue-1927-restart-delivery-"+uuid.NewString())
-	beforeRestart := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-before-restart")
+	runID, initialEventID, _ := createServedControlWaitingRun(t, rt.Backend, rt.BundleHash, rt.Endpoint, rt.Probe, rt.ReceiverStateReader, "issue-1927-restart-delivery-"+uuid.NewString())
+	beforeRestart := publishServedLiveAgentHoldEvent(t, rt.Backend, rt.Endpoint, rt.ReceiverStateReader, runID, initialEventID, "agent-before-restart")
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.ReceiverStateReader, rt.Backend, runID, beforeRestart.EventID, "agent", agentID, "delivered", 1)
 	beforeGeneration := servedAgentLifecycleGeneration(t, rt, runID, agentID)
 	key := "issue-1927-" + rt.Backend + "-restart-" + uuid.NewString()
@@ -3656,7 +3606,7 @@ func runServedAgentRestartLifecycleProof(t *testing.T, rt servedControlProofRunt
 	}
 	requireServedAgentRestartEvidence(t, rt, runID, agentID, afterGeneration, 1)
 	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "agent.restart", key, 1)
-	postRestart := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-restart")
+	postRestart := publishServedLiveAgentHoldEvent(t, rt.Backend, rt.Endpoint, rt.ReceiverStateReader, runID, initialEventID, "agent-restart")
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.ReceiverStateReader, rt.Backend, runID, postRestart.EventID, "agent", agentID, "delivered", 1)
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentRestartLifecycle))
 }
@@ -3699,57 +3649,57 @@ func requireServedAgentRestartEvidence(t *testing.T, rt servedControlProofRuntim
 	}
 }
 
-func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
+func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, selectedProofBackend string, selectedProofBundleHash string, selectedProofEndpoint string, selectedProofProbe *lifecycletest.Probe, selectedProofReceiverStateReader receiverProofStateReader) {
 	t.Helper()
-	runID, initialEventID, _ := createServedControlWaitingRun(t, rt, "issue-1910-event-replay-"+uuid.NewString())
-	eventReplayOriginal := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "event-replay")
-	eventReplayKey := "issue-1910-" + rt.Backend + "-" + runID + "-event-replay"
-	beforeHoldEvents := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "item.processed")
-	beforeAuditEvents := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "event.replayed")
+	runID, initialEventID, _ := createServedControlWaitingRun(t, selectedProofBackend, selectedProofBundleHash, selectedProofEndpoint, selectedProofProbe, selectedProofReceiverStateReader, "issue-1910-event-replay-"+uuid.NewString())
+	eventReplayOriginal := publishServedLiveAgentHoldEvent(t, selectedProofBackend, selectedProofEndpoint, selectedProofReceiverStateReader, runID, initialEventID, "event-replay")
+	eventReplayKey := "issue-1910-" + selectedProofBackend + "-" + runID + "-event-replay"
+	beforeHoldEvents := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "item.processed")
+	beforeAuditEvents := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "event.replayed")
 	var eventReplay servedEventReplayProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.replay", map[string]any{"event_id": eventReplayOriginal.EventID, "idempotency_key": eventReplayKey}, &eventReplay)
-	requireServedLiveAgentEventReplayResult(t, rt, eventReplayOriginal.EventID, eventReplay)
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.ReceiverStateReader, rt.Backend, runID, eventReplay.ReplayEventID, "agent", "load-agent", "delivered", 1)
-	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "event.replay", eventReplayKey, 1)
-	if got := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
-		t.Fatalf("%s item.processed events after event.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "event.replay", map[string]any{"event_id": eventReplayOriginal.EventID, "idempotency_key": eventReplayKey}, &eventReplay)
+	requireServedLiveAgentEventReplayResult(t, selectedProofBackend, eventReplayOriginal.EventID, eventReplay)
+	waitServedEventPublishDeliveryStatusCountForRun(t, selectedProofReceiverStateReader, selectedProofBackend, runID, eventReplay.ReplayEventID, "agent", "load-agent", "delivered", 1)
+	requireServedControlAPIIdempotencyRows(t, selectedProofReceiverStateReader, selectedProofBackend, "event.replay", eventReplayKey, 1)
+	if got := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "item.processed"); got != beforeHoldEvents+1 {
+		t.Fatalf("%s item.processed events after event.replay = %d, want %d", selectedProofBackend, got, beforeHoldEvents+1)
 	}
-	if got := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "event.replayed"); got != beforeAuditEvents+1 {
-		t.Fatalf("%s event.replayed events after event.replay = %d, want %d", rt.Backend, got, beforeAuditEvents+1)
+	if got := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "event.replayed"); got != beforeAuditEvents+1 {
+		t.Fatalf("%s event.replayed events after event.replay = %d, want %d", selectedProofBackend, got, beforeAuditEvents+1)
 	}
 	var eventReplayAgain servedEventReplayProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.replay", map[string]any{"event_id": eventReplayOriginal.EventID, "idempotency_key": eventReplayKey}, &eventReplayAgain)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "event.replay", map[string]any{"event_id": eventReplayOriginal.EventID, "idempotency_key": eventReplayKey}, &eventReplayAgain)
 	if eventReplayAgain.ReplayEventID != eventReplay.ReplayEventID || eventReplayAgain.AuditEventID != eventReplay.AuditEventID {
-		t.Fatalf("%s event.replay idempotent result = %#v, want replay=%s audit=%s", rt.Backend, eventReplayAgain, eventReplay.ReplayEventID, eventReplay.AuditEventID)
+		t.Fatalf("%s event.replay idempotent result = %#v, want replay=%s audit=%s", selectedProofBackend, eventReplayAgain, eventReplay.ReplayEventID, eventReplay.AuditEventID)
 	}
-	if got := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
-		t.Fatalf("%s item.processed events after idempotent event.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
+	if got := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "item.processed"); got != beforeHoldEvents+1 {
+		t.Fatalf("%s item.processed events after idempotent event.replay = %d, want %d", selectedProofBackend, got, beforeHoldEvents+1)
 	}
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioEventReplayLiveAgentLifecycle))
-	agentReplayOriginal := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-replay")
-	agentReplayKey := "issue-1910-" + rt.Backend + "-" + runID + "-agent-replay"
-	beforeHoldEvents = servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "item.processed")
-	beforeAuditEvents = servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "event.replayed")
+	requireServedParitySettlementPostconditions(t, selectedProofEndpoint, selectedProofReceiverStateReader, selectedProofBackend, runID, servedparity.MustScenario(servedparity.ScenarioEventReplayLiveAgentLifecycle))
+	agentReplayOriginal := publishServedLiveAgentHoldEvent(t, selectedProofBackend, selectedProofEndpoint, selectedProofReceiverStateReader, runID, initialEventID, "agent-replay")
+	agentReplayKey := "issue-1910-" + selectedProofBackend + "-" + runID + "-agent-replay"
+	beforeHoldEvents = servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "item.processed")
+	beforeAuditEvents = servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "event.replayed")
 	var agentReplay servedAgentReplayProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay", map[string]any{"event_id": agentReplayOriginal.EventID, "run_id": runID, "agent_id": "load-agent", "idempotency_key": agentReplayKey}, &agentReplay)
-	requireServedLiveAgentAgentReplayResult(t, rt, agentReplayOriginal.EventID, agentReplay)
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.ReceiverStateReader, rt.Backend, runID, agentReplay.ReplayEventID, "agent", "load-agent", "delivered", 1)
-	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "agent.replay", agentReplayKey, 1)
-	if got := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
-		t.Fatalf("%s item.processed events after agent.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "agent.replay", map[string]any{"event_id": agentReplayOriginal.EventID, "run_id": runID, "agent_id": "load-agent", "idempotency_key": agentReplayKey}, &agentReplay)
+	requireServedLiveAgentAgentReplayResult(t, selectedProofBackend, agentReplayOriginal.EventID, agentReplay)
+	waitServedEventPublishDeliveryStatusCountForRun(t, selectedProofReceiverStateReader, selectedProofBackend, runID, agentReplay.ReplayEventID, "agent", "load-agent", "delivered", 1)
+	requireServedControlAPIIdempotencyRows(t, selectedProofReceiverStateReader, selectedProofBackend, "agent.replay", agentReplayKey, 1)
+	if got := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "item.processed"); got != beforeHoldEvents+1 {
+		t.Fatalf("%s item.processed events after agent.replay = %d, want %d", selectedProofBackend, got, beforeHoldEvents+1)
 	}
-	if got := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "event.replayed"); got != beforeAuditEvents+1 {
-		t.Fatalf("%s event.replayed events after agent.replay = %d, want %d", rt.Backend, got, beforeAuditEvents+1)
+	if got := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "event.replayed"); got != beforeAuditEvents+1 {
+		t.Fatalf("%s event.replayed events after agent.replay = %d, want %d", selectedProofBackend, got, beforeAuditEvents+1)
 	}
 	var agentReplayAgain servedAgentReplayProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay", map[string]any{"event_id": agentReplayOriginal.EventID, "run_id": runID, "agent_id": "load-agent", "idempotency_key": agentReplayKey}, &agentReplayAgain)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "agent.replay", map[string]any{"event_id": agentReplayOriginal.EventID, "run_id": runID, "agent_id": "load-agent", "idempotency_key": agentReplayKey}, &agentReplayAgain)
 	if agentReplayAgain.ReplayEventID != agentReplay.ReplayEventID || agentReplayAgain.AuditEventID != agentReplay.AuditEventID {
-		t.Fatalf("%s agent.replay idempotent result = %#v, want replay=%s audit=%s", rt.Backend, agentReplayAgain, agentReplay.ReplayEventID, agentReplay.AuditEventID)
+		t.Fatalf("%s agent.replay idempotent result = %#v, want replay=%s audit=%s", selectedProofBackend, agentReplayAgain, agentReplay.ReplayEventID, agentReplay.AuditEventID)
 	}
-	if got := servedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
-		t.Fatalf("%s item.processed events after idempotent agent.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
+	if got := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "item.processed"); got != beforeHoldEvents+1 {
+		t.Fatalf("%s item.processed events after idempotent agent.replay = %d, want %d", selectedProofBackend, got, beforeHoldEvents+1)
 	}
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentReplayLiveAgentLifecycle))
+	requireServedParitySettlementPostconditions(t, selectedProofEndpoint, selectedProofReceiverStateReader, selectedProofBackend, runID, servedparity.MustScenario(servedparity.ScenarioAgentReplayLiveAgentLifecycle))
 }
 
 type servedAgentDirectiveProofResult struct {
@@ -3764,8 +3714,8 @@ type servedAgentDirectiveProofResult struct {
 
 func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControlProofRuntime, effects *atomic.Int32, faults *servedDirectivePersistenceFaults) {
 	t.Helper()
-	runID, initialEventID, _ := createServedControlWaitingRun(t, rt, "agent-directive-"+uuid.NewString())
-	publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-directive-readiness")
+	runID, initialEventID, _ := createServedControlWaitingRun(t, rt.Backend, rt.BundleHash, rt.Endpoint, rt.Probe, rt.ReceiverStateReader, "agent-directive-"+uuid.NewString())
+	publishServedLiveAgentHoldEvent(t, rt.Backend, rt.Endpoint, rt.ReceiverStateReader, runID, initialEventID, "agent-directive-readiness")
 	effects.Store(0)
 	key := "issue-1932-" + rt.Backend + "-directive"
 	params := map[string]any{"run_id": runID, "agent_id": "load-agent", "directive": "perform one durable directive step", "idempotency_key": key}
@@ -4145,42 +4095,42 @@ func requireServedAgentDirectiveOperationCount(t *testing.T, db *sql.DB, backend
 	}
 }
 
-func publishServedLiveAgentHoldEvent(t *testing.T, rt servedControlProofRuntime, runID, sourceEventID, label string) servedEventPublishRPCResult {
+func publishServedLiveAgentHoldEvent(t *testing.T, selectedProofBackend string, selectedProofEndpoint string, selectedProofReceiverStateReader receiverProofStateReader, runID, sourceEventID, label string) servedEventPublishRPCResult {
 	t.Helper()
-	result := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "item.processed", "run_id": runID, "source_event_id": sourceEventID, "payload": map[string]any{"item_id": "hold"}, "idempotency_key": "issue-1910-" + rt.Backend + "-" + runID + "-agent-hold-" + label})
+	result := requireServedEventPublishRPCResult(t, selectedProofEndpoint, map[string]any{"event_name": "item.processed", "run_id": runID, "source_event_id": sourceEventID, "payload": map[string]any{"item_id": "hold"}, "idempotency_key": "issue-1910-" + selectedProofBackend + "-" + runID + "-agent-hold-" + label})
 	if result.RunID != runID || result.OperatorReferenceEventID != sourceEventID || result.NewRunCreated || result.EventID == "" {
-		t.Fatalf("%s live-agent hold event.publish result = %#v, want existing run source=%s", rt.Backend, result, sourceEventID)
+		t.Fatalf("%s live-agent hold event.publish result = %#v, want existing run source=%s", selectedProofBackend, result, sourceEventID)
 	}
 	assertServedEventPublishDeliveriesContainStatus(t, result.Deliveries, "agent", "load-agent", "pending", "in_progress", "delivered")
-	requireServedEventPublishCommittedReplayScope(t, rt.ReceiverStateReader, rt.Backend, runID, result.EventID, "subscribed")
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.ReceiverStateReader, rt.Backend, runID, result.EventID, "agent", "load-agent", "delivered", 1)
-	waitServedDeliveryOutcomeCount(t, rt.ReceiverStateReader, rt.Backend, result.EventID, "agent", "load-agent", "delivered", 1)
+	requireServedEventPublishCommittedReplayScope(t, selectedProofReceiverStateReader, selectedProofBackend, runID, result.EventID, "subscribed")
+	waitServedEventPublishDeliveryStatusCountForRun(t, selectedProofReceiverStateReader, selectedProofBackend, runID, result.EventID, "agent", "load-agent", "delivered", 1)
+	waitServedDeliveryOutcomeCount(t, selectedProofReceiverStateReader, selectedProofBackend, result.EventID, "agent", "load-agent", "delivered", 1)
 	return result
 }
 
-func requireServedLiveAgentEventReplayResult(t *testing.T, rt servedControlProofRuntime, originalEventID string, result servedEventReplayProofResult) {
+func requireServedLiveAgentEventReplayResult(t *testing.T, selectedProofBackend string, originalEventID string, result servedEventReplayProofResult) {
 	t.Helper()
 	if result.EventID != originalEventID || result.ReplayEventID == "" || result.AuditEventID == "" || result.ReplayEventID == originalEventID || result.AuditEventID == originalEventID || result.AuditEventID == result.ReplayEventID {
-		t.Fatalf("%s event.replay result IDs = %#v, want distinct original/replay/audit IDs", rt.Backend, result)
+		t.Fatalf("%s event.replay result IDs = %#v, want distinct original/replay/audit IDs", selectedProofBackend, result)
 	}
 	if len(result.SubscribersReplayed) != 1 || result.SubscribersReplayed[0] != "load-agent" {
-		t.Fatalf("%s event.replay subscribers = %#v, want [load-agent]", rt.Backend, result.SubscribersReplayed)
+		t.Fatalf("%s event.replay subscribers = %#v, want [load-agent]", selectedProofBackend, result.SubscribersReplayed)
 	}
 	if len(result.OriginalDeliveries) != 1 || len(result.NewDeliveries) != 1 {
-		t.Fatalf("%s event.replay deliveries = original %#v new %#v, want one original and one new", rt.Backend, result.OriginalDeliveries, result.NewDeliveries)
+		t.Fatalf("%s event.replay deliveries = original %#v new %#v, want one original and one new", selectedProofBackend, result.OriginalDeliveries, result.NewDeliveries)
 	}
-	requireServedLiveAgentReplayDeliveryPair(t, rt.Backend, result.OriginalDeliveries[0], result.NewDeliveries[0])
+	requireServedLiveAgentReplayDeliveryPair(t, selectedProofBackend, result.OriginalDeliveries[0], result.NewDeliveries[0])
 }
 
-func requireServedLiveAgentAgentReplayResult(t *testing.T, rt servedControlProofRuntime, originalEventID string, result servedAgentReplayProofResult) {
+func requireServedLiveAgentAgentReplayResult(t *testing.T, selectedProofBackend string, originalEventID string, result servedAgentReplayProofResult) {
 	t.Helper()
 	if result.EventID != originalEventID || result.AgentID != "load-agent" || result.ReplayEventID == "" || result.AuditEventID == "" || result.ReplayEventID == originalEventID || result.AuditEventID == originalEventID || result.AuditEventID == result.ReplayEventID {
-		t.Fatalf("%s agent.replay result IDs = %#v, want distinct original/replay/audit IDs for load-agent", rt.Backend, result)
+		t.Fatalf("%s agent.replay result IDs = %#v, want distinct original/replay/audit IDs for load-agent", selectedProofBackend, result)
 	}
 	if len(result.OriginalDeliveries) != 1 || len(result.NewDeliveries) != 1 {
-		t.Fatalf("%s agent.replay deliveries = original %#v new %#v, want one exact pair", rt.Backend, result.OriginalDeliveries, result.NewDeliveries)
+		t.Fatalf("%s agent.replay deliveries = original %#v new %#v, want one exact pair", selectedProofBackend, result.OriginalDeliveries, result.NewDeliveries)
 	}
-	requireServedLiveAgentReplayDeliveryPair(t, rt.Backend, result.OriginalDeliveries[0], result.NewDeliveries[0])
+	requireServedLiveAgentReplayDeliveryPair(t, selectedProofBackend, result.OriginalDeliveries[0], result.NewDeliveries[0])
 }
 
 func requireServedLiveAgentReplayDeliveryPair(t *testing.T, backend string, original, replayed servedReplayProofDelivery) {
@@ -4304,17 +4254,14 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 
 func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime, runID string, now time.Time) (string, string) {
 	t.Helper()
-	ctx := runtimecorrelation.WithRunID(servedControlProofAuthorActivityContext(t, rt), runID)
+	ctx := runtimecorrelation.WithRunID(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), runID)
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	bundleHash := strings.TrimSpace(rt.BundleHash)
 	if bundleHash == "" {
 		bundleHash = "bundle-v2:sha256:" + strings.Repeat("a", 64)
 	}
-	outcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {Verdict: "approve", AdvancesTo: "done"},
-		"reject":  {Verdict: "reject", AdvancesTo: "rework"},
-	}
+	outcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "done"}, "reject": {Verdict: "reject", AdvancesTo: "rework"}}
 	routes, err := gateruntime.FreezeRoutes(outcomes, servedDecisionCardTransitionFixture(t, rt.Runtime.Pipeline.SemanticSource(), outcomes))
 	if err != nil {
 		t.Fatalf("freeze %s run.stop gate routes: %v", rt.Backend, err)
@@ -4352,11 +4299,7 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	{
 		construction4356Ctx := runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 		construction4356At := now
-		construction4356Instance, construction4356Lifecycle, err := workflow.PrepareInitialEntryLifecycle(construction4356Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(rootFlowID, runID, runID)}, runtimepipeline.WorkflowInstance{
-			InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
-			CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
-			EntityType: entityType,
-		}, construction4356At)
+		construction4356Instance, construction4356Lifecycle, err := workflow.PrepareInitialEntryLifecycle(construction4356Ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.StoredRoute(rootFlowID, runID, runID)}, runtimepipeline.WorkflowInstance{InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0", CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(), EntityType: entityType}, construction4356At)
 		if err != nil {
 			t.Fatalf("prepare fixture initial lifecycle: %v", err)
 		}
@@ -4385,19 +4328,11 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	if err != nil {
 		t.Fatalf("admit %s run.stop decision-card provenance: %v", rt.Backend, err)
 	}
-	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		Route: runtimeflowidentity.RouteForInstancePath(runID), FlowID: ".", EntityID: entityID, Stage: activation.Stage,
-		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
-	})
+	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{Route: runtimeflowidentity.RouteForInstancePath(runID), FlowID: ".", EntityID: entityID, Stage: activation.Stage, StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID)})
 	if err != nil {
 		t.Fatalf("new %s run.stop decision-card anchor: %v", rt.Backend, err)
 	}
-	card, err := decisioncard.New(decisioncard.Card{
-		CardID: activation.CardID, RunID: runID, ExecutionMode: executionmode.Live, Anchor: anchor,
-		Snapshot: snapshot, BundleHash: bundleHash, WorkflowVersion: "1.0.0",
-		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
-		Provenance:       provenance, CreatedAt: now,
-	})
+	card, err := decisioncard.New(decisioncard.Card{CardID: activation.CardID, RunID: runID, ExecutionMode: executionmode.Live, Anchor: anchor, Snapshot: snapshot, BundleHash: bundleHash, WorkflowVersion: "1.0.0", EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"}, Provenance: provenance, CreatedAt: now})
 	if err != nil {
 		t.Fatalf("new %s run.stop decision card: %v", rt.Backend, err)
 	}

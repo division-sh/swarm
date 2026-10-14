@@ -41,10 +41,7 @@ func TestIssue2394ServedFanOutSupportedSurfacesBothStores(t *testing.T) {
 			for _, method := range []string{"run.start", "event.publish"} {
 				t.Run(method, func(t *testing.T) {
 					portfolio := "surface-" + uuid.NewString()
-					params := map[string]any{
-						"bundle_hash": rt.BundleHash, "event_name": "portfolio.opened",
-						"payload": map[string]any{"portfolio_id": portfolio, "threshold": 75}, "idempotency_key": uuid.NewString(),
-					}
+					params := map[string]any{"bundle_hash": rt.BundleHash, "event_name": "portfolio.opened", "payload": map[string]any{"portfolio_id": portfolio, "threshold": 75}, "idempotency_key": uuid.NewString()}
 					if method == "run.start" {
 						params["run_id"] = uuid.NewString()
 					}
@@ -61,30 +58,23 @@ func TestIssue2394ServedFanOutSupportedSurfacesBothStores(t *testing.T) {
 					for batch := 0; batch < 2; batch++ {
 						var rows []map[string]any
 						for ordinal := 0; ordinal < 3; ordinal++ {
-							row := map[string]any{
-								"account_id": fmt.Sprintf("account-%d-%d", batch, ordinal), "eng_roles": batch*3 + ordinal,
-								"gem_score": float64(batch*3+ordinal) + 0.25, "external_id": uuid.NewString(),
-							}
+							row := map[string]any{"account_id": fmt.Sprintf("account-%d-%d", batch, ordinal), "eng_roles": batch*3 + ordinal, "gem_score": float64(batch*3+ordinal) + 0.25, "external_id": uuid.NewString()}
 							if ordinal == 1 {
-								// Input admits text; authored emission requires UUID.
 								row["external_id"] = "not-a-uuid"
 							} else {
 								wanted[row["account_id"].(string)] = row
 							}
 							rows = append(rows, row)
 						}
-						requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-							"run_id": opened.RunID, "event_name": "portfolio.accounts.register.requested",
-							"payload": map[string]any{"portfolio_id": portfolio, "account_ids": rows}, "idempotency_key": uuid.NewString(),
-						})
+						requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"run_id": opened.RunID, "event_name": "portfolio.accounts.register.requested", "payload": map[string]any{"portfolio_id": portfolio, "account_ids": rows}, "idempotency_key": uuid.NewString()})
 					}
-					diagnosis := awaitIssue2394SurfaceDiagnosis(t, rt, opened.RunID)
+					diagnosis := awaitIssue2394SurfaceDiagnosis(t, rt.Endpoint, rt.ReceiverStateReader, opened.RunID)
 					before := issue2394SurfaceSnapshot(t, rt.DB, opened.RunID)
 					t.Run("configured_clients", func(t *testing.T) {
-						proveIssue2394SurfacePages(t, rt, opened.RunID, backend)
-						proveIssue2394SurfaceEvents(t, rt, opened.RunID, portfolio, wanted)
-						proveIssue2394SurfaceDiagnostics(t, rt, opened.RunID, diagnosis)
-						proveIssue2394SurfaceRefusals(t, rt, opened.RunID)
+						proveIssue2394SurfacePages(t, rt.BundleHash, rt.Endpoint, opened.RunID, backend)
+						proveIssue2394SurfaceEvents(t, rt.Endpoint, opened.RunID, portfolio, wanted)
+						proveIssue2394SurfaceDiagnostics(t, rt.BundleHash, rt.Endpoint, opened.RunID, diagnosis)
+						proveIssue2394SurfaceRefusals(t, rt.BundleHash, rt.Endpoint, opened.RunID)
 					})
 					t.Run("cli_connection_flags", func(t *testing.T) {
 						stdout, stderr, code := runServedCLICommand(t, rt.Endpoint, []string{"run", "fan-out", "list", opened.RunID, "--json"})
@@ -116,7 +106,11 @@ func TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores(t *testing.T) {
 				reached := make(chan struct{}, 1)
 				released := make(chan struct{})
 				var releaseOnce sync.Once
-				release := func() { releaseOnce.Do(func() { close(released) }) }
+				release := func() {
+					releaseOnce.Do(func() {
+						close(released)
+					})
+				}
 				defer release()
 				opts.TestWorkflowNodeHandlerStartHook = func(ctx context.Context, nodeID string, _ events.Event) error {
 					if nodeID != reporter {
@@ -135,10 +129,7 @@ func TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores(t *testing.T) {
 				}
 				_, rt := start()
 				portfolio := "held-" + uuid.NewString()
-				params := map[string]any{
-					"bundle_hash": rt.BundleHash, "event_name": "portfolio.opened",
-					"payload": map[string]any{"portfolio_id": portfolio, "threshold": 75}, "idempotency_key": uuid.NewString(),
-				}
+				params := map[string]any{"bundle_hash": rt.BundleHash, "event_name": "portfolio.opened", "payload": map[string]any{"portfolio_id": portfolio, "threshold": 75}, "idempotency_key": uuid.NewString()}
 				if method == "run.start" {
 					params["run_id"] = uuid.NewString()
 				}
@@ -147,9 +138,7 @@ func TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores(t *testing.T) {
 				}
 				requireServedJSONRPCResult(t, rt.Endpoint, method, params, &opened)
 				waitPublicationSiteCompletion(t, rt.ReceiverStateReader, opened.RunID)
-				publishIssue2394ReporterBatch(t, rt, opened.RunID, portfolio, []map[string]any{{
-					"account_id": "held-1", "eng_roles": 1, "gem_score": 1.25, "external_id": uuid.NewString(),
-				}})
+				publishIssue2394ReporterBatch(t, rt.Endpoint, opened.RunID, portfolio, []map[string]any{{"account_id": "held-1", "eng_roles": 1, "gem_score": 1.25, "external_id": uuid.NewString()}})
 				select {
 				case <-reached:
 				case <-time.After(servedProofPollDeadline):
@@ -160,14 +149,11 @@ func TestIssue2394HeldReporterConsumerKeepsRunUnreadyBothStores(t *testing.T) {
 				if held.TestQuiescence == nil || cliapp.BoolPointerValue(held.TestQuiescence.Ready) || cliapp.IntPointerValue(held.TestQuiescence.ActiveDeliveries) == 0 || cliapp.IntPointerValue(held.TestQuiescence.FanOutUnsettled) != 1 || held.FanOut.Cursor != 1 || held.FanOut.Unsettled != 1 {
 					t.Fatalf("held reporter must remain unready with one unsettled delivery: %+v", held)
 				}
-				publishIssue2394ReporterBatch(t, rt, opened.RunID, portfolio, []map[string]any{{
-					"account_id": "held-2", "eng_roles": 2, "gem_score": 2.25, "external_id": uuid.NewString(),
-				}})
+				publishIssue2394ReporterBatch(t, rt.Endpoint, opened.RunID, portfolio, []map[string]any{{"account_id": "held-2", "eng_roles": 2, "gem_score": 2.25, "external_id": uuid.NewString()}})
 				advanced := false
 				for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": opened.RunID}, &held)
-					if held.FanOut.Cursor == 2 && held.FanOut.Intents == 2 && held.FanOut.Unsettled == 2 &&
-						held.TestQuiescence != nil && !cliapp.BoolPointerValue(held.TestQuiescence.Ready) && cliapp.IntPointerValue(held.TestQuiescence.FanOutUnsettled) == 2 {
+					if held.FanOut.Cursor == 2 && held.FanOut.Intents == 2 && held.FanOut.Unsettled == 2 && held.TestQuiescence != nil && !cliapp.BoolPointerValue(held.TestQuiescence.Ready) && cliapp.IntPointerValue(held.TestQuiescence.FanOutUnsettled) == 2 {
 						advanced = true
 						break
 					}
@@ -292,19 +278,16 @@ func issue2394SurfaceSnapshot(t *testing.T, db *sql.DB, runID string) [][]sql.Nu
 	return snapshot
 }
 
-func awaitIssue2394SurfaceDiagnosis(t *testing.T, rt servedControlProofRuntime, runID string) cliapp.DiagnosticRunDiagnosisResult {
+func awaitIssue2394SurfaceDiagnosis(t *testing.T, selectedProofEndpoint string, selectedProofReceiverStateReader receiverProofStateReader, runID string) cliapp.DiagnosticRunDiagnosisResult {
 	t.Helper()
 	var result cliapp.DiagnosticRunDiagnosisResult
 	for deadline := time.Now().Add(servedProofPollDeadline); time.Now().Before(deadline); {
-		requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &result)
+		requireServedJSONRPCResult(t, selectedProofEndpoint, "run.diagnose", map[string]any{"run_id": runID}, &result)
 		f := result.FanOut
-		if result.TestQuiescence != nil && cliapp.BoolPointerValue(result.TestQuiescence.Ready) &&
-			(f.Unsettled != 0 || cliapp.IntPointerValue(result.TestQuiescence.FanOutUnsettled) != 0) {
+		if result.TestQuiescence != nil && cliapp.BoolPointerValue(result.TestQuiescence.Ready) && (f.Unsettled != 0 || cliapp.IntPointerValue(result.TestQuiescence.FanOutUnsettled) != 0) {
 			t.Fatalf("run.diagnose claimed readiness with unsettled fan-out delivery: %+v", result)
 		}
-		if result.TestQuiescence != nil && cliapp.BoolPointerValue(result.TestQuiescence.Ready) &&
-			f.Cursor == 6 && f.Intents == 2 && f.Cardinality == 6 && f.Committed == 4 && f.SemanticRejected == 2 &&
-			f.Owed == 0 && f.Open == 0 && f.Blocked == 0 && f.Unsettled == 0 && f.Settled == 4 && f.SemanticRejectionSample != nil {
+		if result.TestQuiescence != nil && cliapp.BoolPointerValue(result.TestQuiescence.Ready) && f.Cursor == 6 && f.Intents == 2 && f.Cardinality == 6 && f.Committed == 4 && f.SemanticRejected == 2 && f.Owed == 0 && f.Open == 0 && f.Blocked == 0 && f.Unsettled == 0 && f.Settled == 4 && f.SemanticRejectionSample != nil {
 			if err := result.FanOut.Validate(); err != nil {
 				t.Fatal(err)
 			}
@@ -315,13 +298,13 @@ func awaitIssue2394SurfaceDiagnosis(t *testing.T, rt servedControlProofRuntime, 
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("served fan-out did not settle: %+v\n%s", result, servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
+	t.Fatalf("served fan-out did not settle: %+v\n%s", result, servedInspectionRunDebugSummary(selectedProofReceiverStateReader, runID))
 	return result
 }
 
-func issue2394SurfaceCLI(t *testing.T, rt servedControlProofRuntime, args ...string) string {
+func issue2394SurfaceCLI(t *testing.T, selectedProofEndpoint string, args ...string) string {
 	t.Helper()
-	config := writeCLIAPIConfigFile(t, map[string]string{"api_server": strings.TrimSuffix(rt.Endpoint, "/v1/rpc")})
+	config := writeCLIAPIConfigFile(t, map[string]string{"api_server": strings.TrimSuffix(selectedProofEndpoint, "/v1/rpc")})
 	var stdout, stderr bytes.Buffer
 	code := executeCLIFrom(context.Background(), t.TempDir(), append(args, "--config", config), &stdout, &stderr, nil)
 	if code != 0 {
@@ -330,21 +313,18 @@ func issue2394SurfaceCLI(t *testing.T, rt servedControlProofRuntime, args ...str
 	return stdout.String()
 }
 
-func proveIssue2394SurfacePages(t *testing.T, rt servedControlProofRuntime, runID, backend string) {
+func proveIssue2394SurfacePages(t *testing.T, selectedProofBundleHash string, selectedProofEndpoint string, runID, backend string) {
 	t.Helper()
 	query := fanoutobligation.ListQuery{RunID: runID, Limit: 1, Filter: fanoutobligation.ListFilter{Status: fanoutobligation.StatusClosed, FlowPath: "portfolio"}}
 	var first fanoutobligation.ListPage
-	requireServedJSONRPCResult(t, rt.Endpoint, "run.fan_out.list", map[string]any{
-		"run_id": runID, "limit": 1, "filter": map[string]any{"status": "closed", "flow_path": "portfolio"},
-	}, &first)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "run.fan_out.list", map[string]any{"run_id": runID, "limit": 1, "filter": map[string]any{"status": "closed", "flow_path": "portfolio"}}, &first)
 	if err := first.Validate(query); err != nil {
 		t.Fatal(err)
 	}
 	if len(first.Intents) != 1 || first.NextCursor == "" {
 		t.Fatalf("first served page must be bounded with continuation: %+v", first)
 	}
-	stdout := issue2394SurfaceCLI(t, rt, "run", "fan-out", "list", runID,
-		"--status", "closed", "--flow-path", "portfolio", "--limit", "1", "--cursor", first.NextCursor, "--json")
+	stdout := issue2394SurfaceCLI(t, selectedProofEndpoint, "run", "fan-out", "list", runID, "--status", "closed", "--flow-path", "portfolio", "--limit", "1", "--cursor", first.NextCursor, "--json")
 	var second fanoutobligation.ListPage
 	if err := json.Unmarshal([]byte(stdout), &second); err != nil {
 		t.Fatal(err)
@@ -361,37 +341,34 @@ func proveIssue2394SurfacePages(t *testing.T, rt servedControlProofRuntime, runI
 		if backend == "postgres" {
 			workers = 4
 		}
-		if row.Key.RunID != runID || row.BundleHash != rt.BundleHash || row.Cardinality != 3 || row.Cursor != 3 || row.Owed != 0 || row.DurableState != "closed" {
+		if row.Key.RunID != runID || row.BundleHash != selectedProofBundleHash || row.Cardinality != 3 || row.Cursor != 3 || row.Owed != 0 || row.DurableState != "closed" {
 			t.Fatalf("served row lost authored durable state: %+v", row)
 		}
-		if row.Runtime.Availability != "available" || row.Runtime.ObservedAt == nil || row.Runtime.Eligible == nil || *row.Runtime.Eligible ||
-			row.Runtime.Workers == nil || *row.Runtime.Workers != workers || row.Runtime.ActiveWorkers == nil || *row.Runtime.ActiveWorkers < 0 || *row.Runtime.ActiveWorkers > workers {
+		if row.Runtime.Availability != "available" || row.Runtime.ObservedAt == nil || row.Runtime.Eligible == nil || *row.Runtime.Eligible || row.Runtime.Workers == nil || *row.Runtime.Workers != workers || row.Runtime.ActiveWorkers == nil || *row.Runtime.ActiveWorkers < 0 || *row.Runtime.ActiveWorkers > workers {
 			t.Fatalf("served process observer unavailable or invented execution eligibility: %+v", row.Runtime)
 		}
 	}
-	human := issue2394SurfaceCLI(t, rt, "run", "fan-out", "list", runID, "--limit", "1")
+	human := issue2394SurfaceCLI(t, selectedProofEndpoint, "run", "fan-out", "list", runID, "--limit", "1")
 	for _, want := range []string{"cursor=3/3", "owed=0", "runtime=available", "eligible=false", "next_cursor="} {
 		if !strings.Contains(human, want) {
 			t.Fatalf("human fan-out output missing %q: %s", want, human)
 		}
 	}
-	quiet := issue2394SurfaceCLI(t, rt, "run", "fan-out", "list", runID, "--quiet")
+	quiet := issue2394SurfaceCLI(t, selectedProofEndpoint, "run", "fan-out", "list", runID, "--quiet")
 	keys := strings.Fields(quiet)
 	if len(keys) != 2 || keys[0] != first.Intents[0].Key.String() || keys[1] != second.Intents[0].Key.String() {
 		t.Fatalf("quiet CLI changed exact keyset order: %q", quiet)
 	}
-	wrongScope := requestServedJSONRPC(t, rt.Endpoint, "run.fan_out.list", map[string]any{
-		"run_id": runID, "cursor": first.NextCursor, "filter": map[string]any{"status": "open", "flow_path": "portfolio"},
-	})
+	wrongScope := requestServedJSONRPC(t, selectedProofEndpoint, "run.fan_out.list", map[string]any{"run_id": runID, "cursor": first.NextCursor, "filter": map[string]any{"status": "open", "flow_path": "portfolio"}})
 	if wrongScope.Error == nil || wrongScope.Error.Code != -32602 {
 		t.Fatalf("served cursor filter mismatch was accepted: %+v", wrongScope)
 	}
 }
 
-func proveIssue2394SurfaceEvents(t *testing.T, rt servedControlProofRuntime, runID, portfolio string, wanted map[string]map[string]any) {
+func proveIssue2394SurfaceEvents(t *testing.T, selectedProofEndpoint string, runID, portfolio string, wanted map[string]map[string]any) {
 	t.Helper()
 	var result operatorread.OperatorEventListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID}, "limit": 1000}, &result)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID}, "limit": 1000}, &result)
 	if result.NextCursor != "" {
 		t.Fatal("small fixture unexpectedly exceeded event read page")
 	}
@@ -402,8 +379,7 @@ func proveIssue2394SurfaceEvents(t *testing.T, rt servedControlProofRuntime, run
 		}
 		id, _ := event.Payload["account_id"].(string)
 		row, exists := wanted[id]
-		if !exists || seen[id] || event.RunID != runID || event.Payload["portfolio_id"] != portfolio || event.Payload["eligible"] != true ||
-			event.Payload["eng_roles"] != float64(row["eng_roles"].(int)) || event.Payload["gem_score"] != row["gem_score"] || event.Payload["external_id"] != row["external_id"] {
+		if !exists || seen[id] || event.RunID != runID || event.Payload["portfolio_id"] != portfolio || event.Payload["eligible"] != true || event.Payload["eng_roles"] != float64(row["eng_roles"].(int)) || event.Payload["gem_score"] != row["gem_score"] || event.Payload["external_id"] != row["external_id"] {
 			t.Fatalf("served emitted payload lost identity/numeric value or published rejected ordinal: %+v", event)
 		}
 		seen[id] = true
@@ -413,10 +389,10 @@ func proveIssue2394SurfaceEvents(t *testing.T, rt servedControlProofRuntime, run
 	}
 }
 
-func proveIssue2394SurfaceDiagnostics(t *testing.T, rt servedControlProofRuntime, runID string, diagnosis cliapp.DiagnosticRunDiagnosisResult) {
+func proveIssue2394SurfaceDiagnostics(t *testing.T, selectedProofBundleHash string, selectedProofEndpoint string, runID string, diagnosis cliapp.DiagnosticRunDiagnosisResult) {
 	t.Helper()
 	var cliDiagnosis cliapp.DiagnosticRunDiagnosisResult
-	if err := json.Unmarshal([]byte(issue2394SurfaceCLI(t, rt, "run", "status", runID, "--json")), &cliDiagnosis); err != nil {
+	if err := json.Unmarshal([]byte(issue2394SurfaceCLI(t, selectedProofEndpoint, "run", "status", runID, "--json")), &cliDiagnosis); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(cliDiagnosis.FanOut, diagnosis.FanOut) {
@@ -425,7 +401,7 @@ func proveIssue2394SurfaceDiagnostics(t *testing.T, rt servedControlProofRuntime
 	if !reflect.DeepEqual(cliDiagnosis.TestQuiescence, diagnosis.TestQuiescence) {
 		t.Fatalf("CLI diagnosis changed quiescence evidence: %+v / %+v", cliDiagnosis.TestQuiescence, diagnosis.TestQuiescence)
 	}
-	human := issue2394SurfaceCLI(t, rt, "run", "status", runID)
+	human := issue2394SurfaceCLI(t, selectedProofEndpoint, "run", "status", runID)
 	for _, want := range []string{"4 committed items", "2 semantic rejections", "0 unsettled items"} {
 		if !strings.Contains(human, want) {
 			t.Fatalf("CLI status missing %q: %s", want, human)
@@ -438,16 +414,16 @@ func proveIssue2394SurfaceDiagnostics(t *testing.T, rt servedControlProofRuntime
 		} `json:"run"`
 	}
 	var header runHeaderResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "run.get", map[string]any{"run_id": runID}, &header)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "run.get", map[string]any{"run_id": runID}, &header)
 	var cliHeader runHeaderResult
-	if err := json.Unmarshal([]byte(issue2394SurfaceCLI(t, rt, "run", "status", runID, "--no-diagnose", "--json")), &cliHeader); err != nil {
+	if err := json.Unmarshal([]byte(issue2394SurfaceCLI(t, selectedProofEndpoint, "run", "status", runID, "--no-diagnose", "--json")), &cliHeader); err != nil {
 		t.Fatal(err)
 	}
 	if header.Run.RunID != runID || cliHeader.Run.RunID != runID || cliHeader.Run.Status != header.Run.Status {
 		t.Fatalf("CLI header differs from served run.get: %+v / %+v", header, cliHeader)
 	}
 	var logs operatorread.OperatorRuntimeLogListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "runtime.logs", map[string]any{"run_id": runID, "limit": 1000}, &logs)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "runtime.logs", map[string]any{"run_id": runID, "limit": 1000}, &logs)
 	if len(logs.Logs) == 0 {
 		t.Fatal("real served execution produced no runtime log evidence")
 	}
@@ -456,23 +432,18 @@ func proveIssue2394SurfaceDiagnostics(t *testing.T, rt servedControlProofRuntime
 			t.Fatalf("served logs lost run isolation: %+v", log)
 		}
 	}
-	logOutput := issue2394SurfaceCLI(t, rt, "logs", "--run-id", runID, "--limit", "1000")
+	logOutput := issue2394SurfaceCLI(t, selectedProofEndpoint, "logs", "--run-id", runID, "--limit", "1000")
 	if !strings.Contains(logOutput, logs.Logs[0].Component) || strings.Contains(logOutput, "No runtime logs") {
 		t.Fatalf("CLI logs did not render real served execution: %s", logOutput)
 	}
-	// A healthy serving journey must not manufacture D3. Do not confuse the
-	// failure envelope's component with the persisted logger's component.
 	var incidents operatorread.OperatorRuntimeIncidentListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "runtime.incidents", map[string]any{
-		"bundle_hash": rt.BundleHash, "component": "workflow-runtime", "level": "warn", "limit": 500,
-	}, &incidents)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "runtime.incidents", map[string]any{"bundle_hash": selectedProofBundleHash, "component": "workflow-runtime", "level": "warn", "limit": 500}, &incidents)
 	if incidents.NextCursor != "" {
 		t.Fatalf("small served journey unexpectedly exceeded incident page: %+v", incidents)
 	}
-	output := issue2394SurfaceCLI(t, rt, "incidents", "--component", "workflow-runtime", "--level", "warn", "--limit", "500")
+	output := issue2394SurfaceCLI(t, selectedProofEndpoint, "incidents", "--component", "workflow-runtime", "--level", "warn", "--limit", "500")
 	for _, incident := range incidents.Incidents {
-		if incident.ErrorCode == "fan_out_claim_opportunity_missed" || incident.Component != "workflow-runtime" || incident.Level != "warn" ||
-			!strings.Contains(output, incident.IncidentID) {
+		if incident.ErrorCode == "fan_out_claim_opportunity_missed" || incident.Component != "workflow-runtime" || incident.Level != "warn" || !strings.Contains(output, incident.IncidentID) {
 			t.Fatalf("served/CLI incident evidence differs or healthy issuance manufactured D3: %+v output=%s", incident, output)
 		}
 	}
@@ -481,10 +452,10 @@ func proveIssue2394SurfaceDiagnostics(t *testing.T, rt servedControlProofRuntime
 	}
 }
 
-func proveIssue2394SurfaceRefusals(t *testing.T, rt servedControlProofRuntime, runID string) {
+func proveIssue2394SurfaceRefusals(t *testing.T, selectedProofBundleHash string, selectedProofEndpoint string, runID string) {
 	t.Helper()
 	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"surface-refusal","method":"run.fan_out.list","params":{"run_id":%q}}`, runID)
-	request, err := http.NewRequest(http.MethodPost, rt.Endpoint, strings.NewReader(body))
+	request, err := http.NewRequest(http.MethodPost, selectedProofEndpoint, strings.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,9 +469,7 @@ func proveIssue2394SurfaceRefusals(t *testing.T, rt servedControlProofRuntime, r
 		t.Fatalf("unauthenticated served list status=%d", response.StatusCode)
 	}
 	for _, method := range []string{"run.start", "event.publish"} {
-		unsupported := semanticNumericRPC(t, rt.Endpoint, "ws", fmt.Sprintf(
-			`{"jsonrpc":"2.0","id":"transport-refusal","method":%q,"params":{"run_id":%q,"bundle_hash":%q,"event_name":"portfolio.accounts.register.requested","payload":{"portfolio_id":"refused","account_ids":[]},"idempotency_key":%q}}`,
-			method, runID, rt.BundleHash, uuid.NewString()))
+		unsupported := semanticNumericRPC(t, selectedProofEndpoint, "ws", fmt.Sprintf(`{"jsonrpc":"2.0","id":"transport-refusal","method":%q,"params":{"run_id":%q,"bundle_hash":%q,"event_name":"portfolio.accounts.register.requested","payload":{"portfolio_id":"refused","account_ids":[]},"idempotency_key":%q}}`, method, runID, selectedProofBundleHash, uuid.NewString()))
 		if unsupported.Error == nil || unsupported.Error.Code != -32601 {
 			t.Fatalf("unsupported served command transport did not refuse at method admission: %+v", unsupported)
 		}

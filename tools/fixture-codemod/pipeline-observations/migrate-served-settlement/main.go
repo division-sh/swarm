@@ -32,9 +32,19 @@ var ownerBody = servedsettlement.OwnerBody
 func main() {
 	write := flag.Bool("write", false, "write the type-checked finite candidate")
 	lookup := flag.Bool("lookup", false, "apply the finite publication lookup extension")
+	scalar := flag.Bool("scalar", false, "apply existing-owner served fixture scalar reads")
+	roles := flag.Bool("roles", false, "remove derivative raw fixture arguments from read-only helpers")
 	flag.Parse()
-	if flag.NArg() != 0 {
-		panic("usage: migrate-served-settlement [-lookup] [-write]")
+	if flag.NArg() != 0 || (*lookup && (*scalar || *roles)) {
+		panic("usage: migrate-served-settlement [-lookup|-scalar|-roles] [-write]")
+	}
+	if *roles {
+		migrateRoles(*write, *scalar)
+		return
+	}
+	if *scalar {
+		migrateScalar(*write)
+		return
 	}
 	if *lookup {
 		changes, sourcePredecessor, manifestPath, ownerBody = servedsettlement.LookupChanges, servedsettlement.LookupPredecessor, servedsettlement.LookupPath, servedsettlement.LookupOwnerBody

@@ -26,7 +26,9 @@ func TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores(t *testi
 			opts, start := lifecycleRestartHarness(t, backend, root)
 			opts.TestLLMRuntime = servedNoopLLMRuntime{}
 			var selected any
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected = p.deps.EventStore })
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+				selected = p.deps.EventStore
+			})
 			process, rt := start()
 			t.Cleanup(func() {
 				if t.Failed() {
@@ -37,17 +39,12 @@ func TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores(t *testi
 			var started struct {
 				RunID string `json:"run_id"`
 			}
-			issue2394ReporterRPC(t, rt, "run.start", map[string]any{
-				"run_id": runID, "bundle_hash": rt.BundleHash, "event_name": "portfolio.opened",
-				"payload": map[string]any{"portfolio_id": portfolio, "threshold": 75}, "idempotency_key": uuid.NewString(),
-			}, &started)
+			issue2394ReporterRPC(t, rt.Endpoint, "run.start", map[string]any{"run_id": runID, "bundle_hash": rt.BundleHash, "event_name": "portfolio.opened", "payload": map[string]any{"portfolio_id": portfolio, "threshold": 75}, "idempotency_key": uuid.NewString()}, &started)
 			if started.RunID != runID {
 				t.Fatalf("HTTP start changed run identity: %+v", started)
 			}
 			waitPublicationSiteCompletion(t, rt.ReceiverStateReader, runID)
-			transactions := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{
-				Delay: time.Second, DelayScope: storetest.DelayAllCommits,
-			})
+			transactions := storetest.CollectTransactions(t, selected, storetest.TransactionProbeOptions{Delay: time.Second, DelayScope: storetest.DelayAllCommits})
 			t.Cleanup(func() {
 				if t.Failed() {
 					t.Logf("failed one-second preservation receipt: %+v", transactions.Snapshot())
@@ -55,14 +52,9 @@ func TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores(t *testi
 			})
 			rows := make([]map[string]any, 64)
 			for ordinal := range rows {
-				rows[ordinal] = map[string]any{
-					"account_id": fmt.Sprintf("preserve-%02d", ordinal), "eng_roles": ordinal,
-					"gem_score": float64(ordinal) + 0.25, "external_id": uuid.NewString(),
-				}
+				rows[ordinal] = map[string]any{"account_id": fmt.Sprintf("preserve-%02d", ordinal), "eng_roles": ordinal, "gem_score": float64(ordinal) + 0.25, "external_id": uuid.NewString()}
 			}
-			publishIssue2394ReporterBatch(t, rt, runID, portfolio, rows)
-			// Read committed headers without changing admission, clocks, leases or
-			// serving. The second real delayed turn leaves the first prefix visible.
+			publishIssue2394ReporterBatch(t, rt.Endpoint, runID, portfolio, rows)
 			seenPrefix := false
 			for deadline := time.Now().Add(5 * time.Minute); ; {
 				var count, cursor, budget int
@@ -91,8 +83,7 @@ func TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores(t *testi
 			if err := f.Validate(); err != nil {
 				t.Fatal(err)
 			}
-			if f.RunID != runID || f.Intents != 1 || f.Cardinality != 64 || f.Cursor != 64 || f.Committed != 64 || f.Settled != 64 ||
-				f.SemanticRejected != 0 || f.SemanticRejectionSample != nil || f.Canceled != 0 || f.Owed != 0 || f.Open != 0 || f.Blocked != 0 || f.Unsettled != 0 || f.BarrierArmed != 0 || f.BarrierPending != 0 {
+			if f.RunID != runID || f.Intents != 1 || f.Cardinality != 64 || f.Cursor != 64 || f.Committed != 64 || f.Settled != 64 || f.SemanticRejected != 0 || f.SemanticRejectionSample != nil || f.Canceled != 0 || f.Owed != 0 || f.Open != 0 || f.Blocked != 0 || f.Unsettled != 0 || f.BarrierArmed != 0 || f.BarrierPending != 0 {
 				t.Fatalf("one-second delayed exact settlement changed: %+v", f)
 			}
 			assertIssue2394TwoFullChunkHistory(t, rt, runID)
@@ -100,7 +91,7 @@ func TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores(t *testi
 			before := issue2394SurfaceSnapshot(t, rt.DB, runID)
 			query := fanoutobligation.ListQuery{RunID: runID, Limit: 100}
 			var page fanoutobligation.ListPage
-			issue2394ReporterRPC(t, rt, "run.fan_out.list", map[string]any{"run_id": runID, "limit": 100}, &page)
+			issue2394ReporterRPC(t, rt.Endpoint, "run.fan_out.list", map[string]any{"run_id": runID, "limit": 100}, &page)
 			if err := page.Validate(query); err != nil {
 				t.Fatal(err)
 			}
@@ -112,7 +103,7 @@ func TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores(t *testi
 				t.Fatalf("one-second preservation lost released cap32 readback: %+v", intent)
 			}
 			var cliPage fanoutobligation.ListPage
-			if err := json.Unmarshal([]byte(issue2394SurfaceCLI(t, rt, "run", "fan-out", "list", runID, "--json")), &cliPage); err != nil {
+			if err := json.Unmarshal([]byte(issue2394SurfaceCLI(t, rt.Endpoint, "run", "fan-out", "list", runID, "--json")), &cliPage); err != nil {
 				t.Fatal(err)
 			}
 			if err := cliPage.Validate(query); err != nil {
@@ -122,7 +113,7 @@ func TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores(t *testi
 				t.Fatalf("CLI lost exact successive-chunk result: %+v", cliPage)
 			}
 			var cliStatus cliapp.DiagnosticRunDiagnosisResult
-			if err := json.Unmarshal([]byte(issue2394SurfaceCLI(t, rt, "run", "status", runID, "--json")), &cliStatus); err != nil || !reflect.DeepEqual(cliStatus.FanOut, f) {
+			if err := json.Unmarshal([]byte(issue2394SurfaceCLI(t, rt.Endpoint, "run", "status", runID, "--json")), &cliStatus); err != nil || !reflect.DeepEqual(cliStatus.FanOut, f) {
 				t.Fatalf("CLI changed settled summary: %+v err=%v", cliStatus.FanOut, err)
 			}
 			if after := issue2394SurfaceSnapshot(t, rt.DB, runID); !reflect.DeepEqual(before, after) {
@@ -130,10 +121,7 @@ func TestIssue2394ServedOneSecondCommitPreservesTwoFullChunksBothStores(t *testi
 				t.Fatal("supported readback changed durable preservation evidence")
 			}
 			receipt := transactions.Snapshot()
-			for operation, want := range map[storetest.TransactionOperation]uint64{
-				storetest.TransactionFanOutClaim: 2, storetest.TransactionFanOutChunk: 2, storetest.TransactionFanOutProducer: 0,
-				storetest.TransactionFanOutRelease: 0, storetest.TransactionFanOutRetry: 0, storetest.TransactionFanOutBlock: 0,
-			} {
+			for operation, want := range map[storetest.TransactionOperation]uint64{storetest.TransactionFanOutClaim: 2, storetest.TransactionFanOutChunk: 2, storetest.TransactionFanOutProducer: 0, storetest.TransactionFanOutRelease: 0, storetest.TransactionFanOutRetry: 0, storetest.TransactionFanOutBlock: 0} {
 				if got := receipt.ByOperation[operation].WriteCommits; got != want {
 					t.Fatalf("%s write commits=%d, want%d: %+v", operation, got, want, receipt)
 				}
@@ -193,7 +181,7 @@ func assertIssue2394TwoFullChunkHistory(t *testing.T, rt servedControlProofRunti
 func assertIssue2394OneSecondPayloads(t *testing.T, rt servedControlProofRuntime, runID, portfolio string, wanted []map[string]any) {
 	t.Helper()
 	var page operatorread.OperatorEventListResult
-	issue2394ReporterRPC(t, rt, "event.list", map[string]any{"filter": map[string]any{"run_id": runID, "event_name": "portfolio/account.registered"}, "limit": 100}, &page)
+	issue2394ReporterRPC(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID, "event_name": "portfolio/account.registered"}, "limit": 100}, &page)
 	if len(page.Events) != 64 || page.NextCursor != "" {
 		t.Fatalf("delayed publication lost exact64 events: %+v", page)
 	}

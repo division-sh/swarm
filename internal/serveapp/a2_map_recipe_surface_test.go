@@ -27,7 +27,9 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 			requireA2PortfolioVerification(t, root)
 			opts, start := lifecycleRestartHarness(t, backend, root)
 			var selected serveRuntimePersistence
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected = p })
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+				selected = p
+			})
 			process, rt := start()
 			rt = a2PortfolioReadbackRuntime(t, process, rt, selected)
 			type retainedBatch struct {
@@ -47,10 +49,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 				items   map[string][]int64
 				members []string
 				results [][]int64
-			}{
-				{"meaningful_values", map[string][]int64{"z": {9}, "A": {1, 1}}, []string{"A", "z"}, [][]int64{{1, 1}, {9}}},
-				{"zero_map", map[string][]int64{}, []string{}, [][]int64{}},
-			} {
+			}{{"meaningful_values", map[string][]int64{"z": {9}, "A": {1, 1}}, []string{"A", "z"}, [][]int64{{1, 1}, {9}}}, {"zero_map", map[string][]int64{}, []string{}, [][]int64{}}} {
 				t.Run(tc.name, func(t *testing.T) {
 					params := map[string]any{"bundle_hash": rt.BundleHash, "event_name": "batch.ready", "payload": map[string]any{"items": tc.items}, "idempotency_key": "a2-map-recipe-" + tc.name}
 					opened := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
@@ -59,7 +58,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 					}
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, opened.RunID)
 					waitA2PortfolioComplete(t, rt, opened.RunID, opened.RunID)
-					entity, arm := requireA2MapRecipeResult(t, rt, opened, tc.items, tc.members, tc.results)
+					entity, arm := requireA2MapRecipeResult(t, rt.Endpoint, opened, tc.items, tc.members, tc.results)
 					var payload map[string]any
 					raw, err := json.Marshal(map[string]any{"items": tc.items})
 					if err != nil {
@@ -89,12 +88,9 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 						for _, value := range tc.items[member] {
 							values = append(values, float64(value))
 						}
-						request := requireA2PortfolioEvent(t, rt.Endpoint, matches[0].EventID, opened.RunID, "item.requested", map[string]any{
-							"member_id": member, "values": values, "index": float64(index), "count": float64(len(tc.members)),
-						})
+						request := requireA2PortfolioEvent(t, rt.Endpoint, matches[0].EventID, opened.RunID, "item.requested", map[string]any{"member_id": member, "values": values, "index": float64(index), "count": float64(len(tc.members))})
 						worker := requireA2PortfolioEntity(t, rt.Endpoint, opened.RunID, request.Deliveries[0].Target.FlowInstance)
-						if worker.Entity.CurrentState != "complete" || worker.Entity.EntityID == entity.Entity.EntityID || worker.Fields["member_id"] != member ||
-							!reflect.DeepEqual(worker.Fields["values"], values) || seen[worker.Entity.EntityID] {
+						if worker.Entity.CurrentState != "complete" || worker.Entity.EntityID == entity.Entity.EntityID || worker.Fields["member_id"] != member || !reflect.DeepEqual(worker.Fields["values"], values) || seen[worker.Entity.EntityID] {
 							t.Fatalf("actual keyed worker construction/state/value isolation: %+v", worker)
 						}
 						seen[worker.Entity.EntityID] = true
@@ -117,7 +113,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 						t.Fatalf("public continuation lost exact map entry/arm: %+v", completions[0])
 					}
 					requireA2PortfolioDelivery(t, a2ReadJoinPublicEvent(t, rt.Endpoint, completions[0].EventID), ".", "collector", entity, "existing_entity")
-					events := requireA2MapRecipeHealthyEvents(t, rt, opened.RunID)
+					events := requireA2MapRecipeHealthyEvents(t, rt.Endpoint, opened.RunID)
 					batches = append(batches, retainedBatch{opened, params, tc.items, tc.members, tc.results, entity, arm, workers, events})
 					t.Logf("root HTTP batch -> post-write map entry -> %d actual keyed workers -> ordinary root reports -> one fired continuation; members=%v ordered_results=%v", len(workers), arm.Members, tc.results)
 				})
@@ -133,7 +129,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 				t.Fatal("same-store reconstruction reused the predecessor runtime")
 			}
 			for _, batch := range batches {
-				entity, arm := requireA2MapRecipeResult(t, rt, batch.opened, batch.items, batch.members, batch.results)
+				entity, arm := requireA2MapRecipeResult(t, rt.Endpoint, batch.opened, batch.items, batch.members, batch.results)
 				if !reflect.DeepEqual(batch.root, entity) || !reflect.DeepEqual(batch.arm, arm) {
 					t.Fatal("normal serve restart changed retained map/result/entry evidence")
 				}
@@ -142,7 +138,7 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 						t.Fatal("normal serve restart changed an actually created keyed worker")
 					}
 				}
-				if !reflect.DeepEqual(batch.events, requireA2MapRecipeHealthyEvents(t, rt, batch.opened.RunID)) {
+				if !reflect.DeepEqual(batch.events, requireA2MapRecipeHealthyEvents(t, rt.Endpoint, batch.opened.RunID)) {
 					t.Fatal("normal serve restart duplicated or changed map publications/settlements")
 				}
 				replay := requireServedEventPublishRPCResult(t, rt.Endpoint, batch.params)
@@ -150,8 +146,8 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 					t.Fatalf("same-idempotency root replay changed identity: first=%+v replay=%+v", batch.opened, replay)
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, batch.opened.RunID)
-				entity, arm = requireA2MapRecipeResult(t, rt, batch.opened, batch.items, batch.members, batch.results)
-				if !reflect.DeepEqual(batch.root, entity) || !reflect.DeepEqual(batch.arm, arm) || !reflect.DeepEqual(batch.events, requireA2MapRecipeHealthyEvents(t, rt, batch.opened.RunID)) {
+				entity, arm = requireA2MapRecipeResult(t, rt.Endpoint, batch.opened, batch.items, batch.members, batch.results)
+				if !reflect.DeepEqual(batch.root, entity) || !reflect.DeepEqual(batch.arm, arm) || !reflect.DeepEqual(batch.events, requireA2MapRecipeHealthyEvents(t, rt.Endpoint, batch.opened.RunID)) {
 					t.Fatal("same-idempotency replay changed map state, arm or event/settlement evidence")
 				}
 			}
@@ -163,10 +159,10 @@ func TestA2MapRecipeSupportedSurfaceBothStores(t *testing.T) {
 	}
 }
 
-func requireA2MapRecipeResult(t *testing.T, rt servedControlProofRuntime, opened servedEventPublishRPCResult, items map[string][]int64, members []string, results [][]int64) (operatorread.OperatorEntityFull, joinruntime.Activation) {
+func requireA2MapRecipeResult(t *testing.T, selectedProofEndpoint string, opened servedEventPublishRPCResult, items map[string][]int64, members []string, results [][]int64) (operatorread.OperatorEntityFull, joinruntime.Activation) {
 	t.Helper()
 	var raw json.RawMessage
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": opened.RunID, "entity_id": opened.RunID}, &raw)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "entity.get", map[string]any{"run_id": opened.RunID, "entity_id": opened.RunID}, &raw)
 	var entity operatorread.OperatorEntityFull
 	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &entity); err != nil {
 		t.Fatal(err)
@@ -180,8 +176,7 @@ func requireA2MapRecipeResult(t *testing.T, rt servedControlProofRuntime, opened
 	if err := json.Unmarshal(raw, &typed); err != nil {
 		t.Fatalf("public map/results do not retain integer-list types: %v", err)
 	}
-	if entity.Entity.RunID != opened.RunID || entity.Entity.EntityID != opened.RunID || entity.Entity.FlowInstance != opened.RunID || entity.Entity.CurrentState != "complete" ||
-		!reflect.DeepEqual(typed.Fields.Items, items) || !reflect.DeepEqual(typed.Fields.OrderedResults, results) || len(entity.Fields) != 2 {
+	if entity.Entity.RunID != opened.RunID || entity.Entity.EntityID != opened.RunID || entity.Entity.FlowInstance != opened.RunID || entity.Entity.CurrentState != "complete" || !reflect.DeepEqual(typed.Fields.Items, items) || !reflect.DeepEqual(typed.Fields.OrderedResults, results) || len(entity.Fields) != 2 {
 		t.Fatalf("public terminal one-map/ordered-result state: entity=%+v fields=%+v want=%v", entity, typed.Fields, results)
 	}
 	carrier, err := engine.StateCarrierFromPersisted(entity.Fields, entity.Bookkeeping, entity.Gates, entity.Accumulated)
@@ -201,8 +196,7 @@ func requireA2MapRecipeResult(t *testing.T, rt servedControlProofRuntime, opened
 	if err := ref.StageEntry().RequireOwner(opened.RunID, ".", opened.RunID, opened.RunID, opened.RunID, "collecting"); err != nil {
 		t.Fatal(err)
 	}
-	if !ref.Declaration().Equal(declaration) || ref.StageEntry().EventID != opened.EventID || !slices.Equal(arm.Members, members) || arm.Expected() != len(members) || arm.Completed() != len(members) ||
-		arm.Status != joinruntime.StatusClosed || arm.CloseReason != joinruntime.CloseReasonComplete || arm.OutcomePending || !arm.OutcomeFired || !arm.TimerCancelled || arm.DeadlineAt.Sub(arm.ArmedAt) != 5*time.Minute {
+	if !ref.Declaration().Equal(declaration) || ref.StageEntry().EventID != opened.EventID || !slices.Equal(arm.Members, members) || arm.Expected() != len(members) || arm.Completed() != len(members) || arm.Status != joinruntime.StatusClosed || arm.CloseReason != joinruntime.CloseReasonComplete || arm.OutcomePending || !arm.OutcomeFired || !arm.TimerCancelled || arm.DeadlineAt.Sub(arm.ArmedAt) != 5*time.Minute {
 		t.Fatalf("exact post-write map membership/entry/deadline/firing: %+v", arm)
 	}
 	want := make([]any, len(results))
@@ -217,10 +211,10 @@ func requireA2MapRecipeResult(t *testing.T, rt servedControlProofRuntime, opened
 	return entity, arm
 }
 
-func requireA2MapRecipeHealthyEvents(t *testing.T, rt servedControlProofRuntime, runID string) []operatorread.OperatorEventFull {
+func requireA2MapRecipeHealthyEvents(t *testing.T, selectedProofEndpoint string, runID string) []operatorread.OperatorEventFull {
 	t.Helper()
 	var result operatorread.OperatorEventListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID}, "limit": 100}, &result)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID}, "limit": 100}, &result)
 	if result.NextCursor != "" || len(result.Events) == 0 {
 		t.Fatalf("bounded public map event readback: %+v", result)
 	}
@@ -229,10 +223,8 @@ func requireA2MapRecipeHealthyEvents(t *testing.T, rt servedControlProofRuntime,
 		if event.RunID != runID || len(event.DeadLetters) != 0 {
 			t.Fatalf("map event lost its run or has a deadletter: %+v", event)
 		}
-		// Diagnostic-direct logs have no recipient; they are not business replay evidence.
 		if event.EventName == "platform.runtime_log" {
-			if event.ProducerType != "platform" || event.Source != "runtime" || event.EntityID != "" || len(event.Deliveries) != 0 ||
-				event.NoDelivery == nil || event.NoDelivery.Reason != events.NoDeliveryNoSubscriberByDesign.Code() {
+			if event.ProducerType != "platform" || event.Source != "runtime" || event.EntityID != "" || len(event.Deliveries) != 0 || event.NoDelivery == nil || event.NoDelivery.Reason != events.NoDeliveryNoSubscriberByDesign.Code() {
 				t.Fatalf("runtime diagnostic lost its explicit no-subscriber disposition: %+v", event)
 			}
 			continue

@@ -104,7 +104,8 @@ func debtServedObservationLiveSources(root string) ([]debtRunIdentitySourceBody,
 				return nil, err
 			}
 		}
-		if files[key[0]][key[1]] != pin.After {
+		current, err := debtServedSetupSourcePrevious(root, key[0], key[1], files[key[0]][key[1]])
+		if err != nil || current != pin.After {
 			return nil, fmt.Errorf("served observation actual final unique body changed: %s: %v", key[1], err)
 		}
 		pins = append(pins, pin)
@@ -143,6 +144,11 @@ func debtServedObservationComposedPin(stages [][]debtRunIdentitySourceBody, key 
 
 // Rulings6161646396/6161771753: 29 finite source-evidence copies at live ingress.
 func debtServedObservationSourcePrevious(root, file, function, current string) (string, error) {
+	var err error
+	current, err = debtServedSetupSourcePrevious(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	keys := append(append([][2]string{}, debtServedObservationResetSourceKeys[:]...), debtServedObservationOlderSourceKeys[:]...)
 	return debtServedObservationPreviousForKeys(root, file, function, current, keys)
 }
@@ -307,6 +313,7 @@ func debtServedObservationCopySourceEvidence(t *testing.T, root, copy string) {
 			debtSourceBlobCopyDeclaration(t, copy, pin.File, pin.Function, pin.After)
 		}
 	}
+	debtServedSetupCopySourceEvidence(t, root, copy)
 }
 
 func TestPersistenceAuthorityDebtServedObservationSourceInversesAreExactAndActualSourceBound(t *testing.T) {

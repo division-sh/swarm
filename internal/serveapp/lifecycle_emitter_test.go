@@ -100,19 +100,13 @@ func TestServedLifecycleEmitterGateJourney(t *testing.T) {
 			for _, tc := range []struct {
 				name, prefix, verdict, result string
 				variant                       canonicalrouting.LifecycleEmitterVariant
-			}{
-				{"root", "", "approve", "approved", canonicalrouting.LifecycleGateLocal},
-				{"shared_verdict", "", "reject", "rejected", canonicalrouting.LifecycleGateSharedEvent},
-				{"nested", "outer/inner/", "approve", "approved", canonicalrouting.LifecycleGateNested},
-			} {
+			}{{"root", "", "approve", "approved", canonicalrouting.LifecycleGateLocal}, {"shared_verdict", "", "reject", "rejected", canonicalrouting.LifecycleGateSharedEvent}, {"nested", "outer/inner/", "approve", "approved", canonicalrouting.LifecycleGateNested}} {
 				t.Run(tc.name, func(t *testing.T) {
 					root := canonicalrouting.CopyLifecycleEmitter(t, tc.variant)
 					rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-					started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-						"event_name": "work.requested", "payload": map[string]any{"seed": true}, "idempotency_key": "gate-start", "bundle_hash": rt.BundleHash,
-					})
+					started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "payload": map[string]any{"seed": true}, "idempotency_key": "gate-start", "bundle_hash": rt.BundleHash})
 					entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, started.RunID, "", "review")
-					cardID := waitLifecycleGateCard(t, rt, started.RunID)
+					cardID := waitLifecycleGateCard(t, rt.Endpoint, rt.ReceiverStateReader, started.RunID)
 					var detail struct {
 						DecisionCard struct {
 							ContentHash string `json:"card_content_hash"`
@@ -148,7 +142,7 @@ func TestServedLifecycleEmitterGateJourney(t *testing.T) {
 	}
 }
 
-func waitLifecycleGateCard(t *testing.T, rt servedControlProofRuntime, runID string) string {
+func waitLifecycleGateCard(t *testing.T, selectedProofEndpoint string, selectedProofReceiverStateReader receiverProofStateReader, runID string) string {
 	t.Helper()
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
 		var result struct {
@@ -158,7 +152,7 @@ func waitLifecycleGateCard(t *testing.T, rt servedControlProofRuntime, runID str
 				} `json:"decision_card"`
 			} `json:"items"`
 		}
-		requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.list", map[string]any{"status": "pending", "run_id": runID}, &result)
+		requireServedJSONRPCResult(t, selectedProofEndpoint, "mailbox.list", map[string]any{"status": "pending", "run_id": runID}, &result)
 		if len(result.Items) == 1 {
 			if result.Items[0].DecisionCard.CardID == "" {
 				t.Fatalf("missing card identity: %#v", result.Items)
@@ -170,7 +164,7 @@ func waitLifecycleGateCard(t *testing.T, rt servedControlProofRuntime, runID str
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("gate card not visible: %s", servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
+	t.Fatalf("gate card not visible: %s", servedInspectionRunDebugSummary(selectedProofReceiverStateReader, runID))
 	return ""
 }
 

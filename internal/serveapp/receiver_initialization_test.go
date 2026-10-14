@@ -28,7 +28,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 	t.Helper()
 	for _, missing := range []string{"account_id", "values"} {
 		t.Run("missing_required_"+missing, func(t *testing.T) {
-			params := receiverInitializationPublishParams(rt, "missing-"+missing, "missing-"+missing, `{}`)
+			params := receiverInitializationPublishParams(rt.BundleHash, "missing-"+missing, "missing-"+missing, `{}`)
 			delete(params["payload"].(map[string]any), missing)
 			before := receiverIngressApplicationSnapshot(t, rt.ReceiverStateReader)
 			refusal := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", params)
@@ -54,7 +54,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 	}{{"zero_false", `{"count":0,"ratio":2.5,"active":false,"label":"kept","attributes":{"nested":[1,2.5]}}`, map[string]any{"count": int64(0), "ratio": 2.5, "active": false, "label": "kept", "attributes": map[string]any{"nested": []any{int64(1), 2.5}}}}, {"optional_fields_omitted", `{"active":true,"label":"kept","attributes":[]}`, map[string]any{"active": true, "label": "kept", "attributes": []any{}}}, {"optional_null_normalized", `{"count":null,"active":true,"label":"kept","attributes":{}}`, map[string]any{"active": true, "label": "kept", "attributes": map[string]any{}}}} {
 		t.Run(tc.name, func(t *testing.T) {
 			account := "account-" + tc.name
-			params := receiverInitializationPublishParams(rt, tc.name, account, tc.values)
+			params := receiverInitializationPublishParams(rt.BundleHash, tc.name, account, tc.values)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 			waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			if tc.name == "optional_null_normalized" {
@@ -77,7 +77,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 				t.Fatal("duplicate creation changed occurrence or execution history")
 			}
 			for index, values := range []string{`{}`, `{"count":99,"ratio":7.5,"active":true,"label":"replacement","attributes":{}}`} {
-				reuseParams := receiverInitializationPublishParams(rt, fmt.Sprintf("%s-reuse-%d", tc.name, index), account, values)
+				reuseParams := receiverInitializationPublishParams(rt.BundleHash, fmt.Sprintf("%s-reuse-%d", tc.name, index), account, values)
 				reuseParams["run_id"] = seed.RunID
 				reuse := requireServedEventPublishRPCResult(t, rt.Endpoint, reuseParams)
 				waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed.RunID)
@@ -89,7 +89,7 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 		})
 	}
 	t.Run("wrong_integer_at_ingress", func(t *testing.T) {
-		params := receiverInitializationPublishParams(rt, "wrong-integer", "wrong-integer", `{"count":"3","active":true,"label":"kept","attributes":{}}`)
+		params := receiverInitializationPublishParams(rt.BundleHash, "wrong-integer", "wrong-integer", `{"count":"3","active":true,"label":"kept","attributes":{}}`)
 		err := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", params)
 		if err.Data["code"] != apiv1.PayloadValidationFailedCode {
 			t.Fatalf("wrong integer admission error=%+v", err)
@@ -104,9 +104,8 @@ func requireTypedReceiverInitializationCases(t *testing.T, rt servedControlProof
 	})
 }
 
-func receiverInitializationPublishParams(rt servedControlProofRuntime, key, account, values string) map[string]any {
-	return map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "idempotency_key": "typed-init-" + key,
-		"payload": map[string]any{"account_id": account, "values": json.RawMessage(values)}}
+func receiverInitializationPublishParams(selectedProofBundleHash string, key, account, values string) map[string]any {
+	return map[string]any{"event_name": "work.requested", "bundle_hash": selectedProofBundleHash, "idempotency_key": "typed-init-" + key, "payload": map[string]any{"account_id": account, "values": json.RawMessage(values)}}
 }
 
 func requireServedReceiverInitialization(t *testing.T, rt servedControlProofRuntime, seed servedEventPublishRPCResult, want map[string]any, executions int) (string, string) {

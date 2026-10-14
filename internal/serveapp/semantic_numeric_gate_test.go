@@ -72,7 +72,7 @@ pins:
 			}
 			rt, restart := startSemanticNumericLiveRuntime(t, backend, root)
 			published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "event_name": "numeric.requested", "idempotency_key": uuid.NewString(), "payload": map[string]any{"value": 7, "nested": map[string]any{"numbers": []any{7}, "fraction": 7.5}}})
-			cardID := waitLifecycleGateCard(t, rt, published.RunID)
+			cardID := waitLifecycleGateCard(t, rt.Endpoint, rt.ReceiverStateReader, published.RunID)
 			var card struct {
 				DecisionCard struct {
 					Snapshot struct {
@@ -88,7 +88,7 @@ pins:
 			if absent, ok := context["absent"]; !ok || absent != nil {
 				t.Fatalf("gate context null changed in frozen card: %#v", context)
 			}
-			params := lifecycleDecisionParamsForCard(t, rt, cardID, "approve")
+			params := lifecycleDecisionParamsForCard(t, rt.Endpoint, cardID, "approve")
 			hash := params["observed_content_hash"].(string)
 			key := uuid.NewString()
 			body := func(number string) string {
@@ -115,7 +115,6 @@ pins:
 				if string(original["idempotency_replayed"]) != "false" || string(repeated["idempotency_replayed"]) != "true" {
 					t.Fatalf("gate replay receipt markers: %s -> %s", first.Result, replayed.Result)
 				}
-				// Mailbox receipts intentionally mark replay; every domain result stays exact.
 				original["idempotency_replayed"] = json.RawMessage("true")
 				want, err := json.Marshal(original)
 				if err != nil {

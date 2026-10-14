@@ -27,13 +27,12 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 					selected = owner
 					return previous(owner)
 				}
-				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+				t.Cleanup(func() {
+					projectRuntimePersistenceForServe = previous
+				})
 				root := canonicalrouting.CopyForkLoopAccumulator(t, clearOnAdmit)
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-				started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-					"event_name": "work.requested", "bundle_hash": rt.BundleHash,
-					"payload": map[string]any{"token": "loop-notice-proof"}, "idempotency_key": "accumulator-start",
-				})
+				started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "loop-notice-proof"}, "idempotency_key": "accumulator-start"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, started.RunID)
 				first := readForkLoopActivation(t, rt, started.RunID)
@@ -45,10 +44,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 				if len(initial) != wantInitial {
 					t.Fatalf("first ordinary admission: %#v", initial)
 				}
-				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-					"event_name": "review.retry", "run_id": started.RunID, "source_event_id": started.EventID,
-					"payload": map[string]any{"revision_id": first.RevisionID, "token": "loop-notice-proof"}, "idempotency_key": "accumulator-repeat",
-				})
+				requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "review.retry", "run_id": started.RunID, "source_event_id": started.EventID, "payload": map[string]any{"revision_id": first.RevisionID, "token": "loop-notice-proof"}, "idempotency_key": "accumulator-repeat"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
 				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, started.RunID)
 				current := readForkLoopActivation(t, rt, started.RunID)
@@ -81,7 +77,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 				if !ok {
 					t.Fatal("missing selected fork owner")
 				}
-				plan, err := family.Plan(servedControlProofAuthorActivityContext(t, rt), runfork.RunForkPlanRequest{SourceRunID: started.RunID, At: frontier})
+				plan, err := family.Plan(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), runfork.RunForkPlanRequest{SourceRunID: started.RunID, At: frontier})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -117,8 +113,6 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 							t.Fatalf("historical bucket contents or identity changed: source=%#v child=%#v", value, child[ref.Key()])
 						}
 					} else {
-						// R precedes this delivery's admission. This bucket is newly
-						// written by child execution, not copied from post-R state.
 						bucket, ok := child[ref.Key()].(map[string]any)
 						if !ok {
 							t.Fatalf("missing child current bucket %q", ref.Key())
@@ -138,8 +132,6 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 						if !reflect.DeepEqual(bucket["received"], map[string]any{"loop-notice-proof": canonicaljson.HashBytes(canonical)}) {
 							t.Fatalf("current child dedup evidence: %#v", bucket)
 						}
-						// Accumulation retains the authored payload, not injected event
-						// metadata. Prove its lineage through the actual delivery/effect.
 						requireForkLoopStateEffect(t, rt, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), want.RevisionID)
 					}
 					if _, exists := child[key]; exists {

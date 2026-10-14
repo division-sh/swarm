@@ -88,15 +88,15 @@ func TestServedSelectionRetryAndRestartBothStores(t *testing.T) {
 					if err := rt.DB.QueryRow("SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name IN ('selected','ack')", seed.RunID).Scan(&count); err != nil || count != 0 {
 						t.Fatalf("prehandler retry published business effects: %d %v", count, err)
 					}
-					assertServedSelectionTrace(t, rt, accepted.EventID, seed.RunID, false)
+					assertServedSelectionTrace(t, rt.Endpoint, accepted.EventID, seed.RunID, false)
 				} else {
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-					assertServedSelectionTrace(t, rt, accepted.EventID, seed.RunID, true)
+					assertServedSelectionTrace(t, rt.Endpoint, accepted.EventID, seed.RunID, true)
 				}
 				resumeOnConstruction.Store(true)
 				rt, _ = restart()
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				assertServedSelectionTrace(t, rt, accepted.EventID, seed.RunID, true)
+				assertServedSelectionTrace(t, rt.Endpoint, accepted.EventID, seed.RunID, true)
 				if faulted {
 					var claim int64
 					var live int
@@ -126,25 +126,25 @@ func TestServedSelectionRetryAndRestartBothStores(t *testing.T) {
 				if err := rt.DB.QueryRow("SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 AND e.event_name='selected' AND d.status='delivered'", seed.RunID).Scan(&count); err != nil || count != 1 {
 					t.Fatalf("final consumer did not settle once: %d %v", count, err)
 				}
-				assertServedSelectionTrace(t, rt, accepted.EventID, seed.RunID, true)
+				assertServedSelectionTrace(t, rt.Endpoint, accepted.EventID, seed.RunID, true)
 			})
 		}
 	}
 }
 
-func assertServedSelectionTrace(t *testing.T, rt servedControlProofRuntime, eventID, runID string, present bool) {
+func assertServedSelectionTrace(t *testing.T, selectedProofEndpoint string, eventID, runID string, present bool) {
 	t.Helper()
 	if present {
 		node, err := identity.ParseExecutableNode(".", "select")
 		if err != nil {
 			t.Fatal(err)
 		}
-		requireServedTraceReadback(t, rt.Endpoint, runID, eventID, "select", node.Key())
+		requireServedTraceReadback(t, selectedProofEndpoint, runID, eventID, "select", node.Key())
 	}
 	var response struct {
 		Trace []operatorread.RunDebugTraceRow `json:"trace"`
 	}
-	requireServedJSONRPCResult(t, rt.Endpoint, "run.trace", map[string]any{"run_id": runID, "limit": 100}, &response)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "run.trace", map[string]any{"run_id": runID, "limit": 100}, &response)
 	for _, row := range response.Trace {
 		if row.EventID != eventID {
 			continue

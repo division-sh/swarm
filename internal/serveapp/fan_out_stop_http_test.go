@@ -41,7 +41,7 @@ func TestIssue2394ServedStopTwentyBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			rig := newIssue2394StopRig(t, backend)
 			rt := rig.start(t)
-			runID, eventID, _ := createServedControlWaitingRun(t, rt, "stop-twenty-"+uuid.NewString())
+			runID, eventID, _ := createServedControlWaitingRun(t, rt.Backend, rt.BundleHash, rt.Endpoint, rt.Probe, rt.ReceiverStateReader, "stop-twenty-"+uuid.NewString())
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID})
 			seedIssue2394StopIntents(t, rt, runID, eventID)
 			before := readIssue2394StopSnapshot(t, rt.ReceiverStateReader, runID)
@@ -145,10 +145,10 @@ func TestIssue2394SelectedStopTwentyBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			rig := newIssue2394StopRig(t, backend)
 			rt := rig.start(t)
-			runID, eventID, _ := createServedControlWaitingRun(t, rt, "selected-stop-twenty-"+uuid.NewString())
+			runID, eventID, _ := createServedControlWaitingRun(t, rt.Backend, rt.BundleHash, rt.Endpoint, rt.Probe, rt.ReceiverStateReader, "selected-stop-twenty-"+uuid.NewString())
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID})
 			seedIssue2394StopIntents(t, rt, runID, eventID)
-			_, err := rt.Runtime.RunControl.Stop(servedControlProofAuthorActivityContext(t, rt), runcontrol.TransitionRequest{RunID: runID})
+			_, err := rt.Runtime.RunControl.Stop(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), runcontrol.TransitionRequest{RunID: runID})
 			if err != nil {
 				t.Fatalf("selected stop twenty: %v", err)
 			}

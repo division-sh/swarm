@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"net/http"
 	"reflect"
 	"strings"
@@ -138,18 +139,18 @@ func TestMailboxPrincipalConcurrentTransportBothStores(t *testing.T) {
 							} else {
 								bad.ResourceID = uuid.NewString()
 							}
-							if _, _, err := mailboxTokenlessMutation(f.ctx, rt, owner, bad, params); err == nil {
+							if _, _, err := mailboxTokenlessMutation(f.ctx, rt.Runtime, owner, bad, params); err == nil {
 								t.Fatalf("replay accepted changed %s identity", change)
 							}
 						}
 						for _, invalid := range []apiidempotency.Actor{apiidempotency.PrincipalActor(""), apiidempotency.PrincipalActor(uuid.NewString()), apiidempotency.BearerActor(principal)} {
 							bad := req
 							bad.Actor = invalid
-							if _, _, err := mailboxTokenlessMutation(f.ctx, rt, owner, bad, params); err == nil {
+							if _, _, err := mailboxTokenlessMutation(f.ctx, rt.Runtime, owner, bad, params); err == nil {
 								t.Fatalf("invalid owner replay admitted: %+v", invalid)
 							}
 						}
-						observed, replayed, err := mailboxTokenlessMutation(f.ctx, rt, owner, req, params)
+						observed, replayed, err := mailboxTokenlessMutation(f.ctx, rt.Runtime, owner, req, params)
 						if err != nil || !replayed {
 							t.Fatalf("tokenless principal replay: %t %v", replayed, err)
 						}
@@ -167,7 +168,7 @@ func TestMailboxPrincipalConcurrentTransportBothStores(t *testing.T) {
 							fresh := mailboxCompletionFixtureInRuntime(t, rt, owner)
 							params := mailboxPrincipalMutationParams(t, fresh, kind, method)
 							req := mailboxPrincipalRequest(t, rt, method, params)
-							response, replayed, err := mailboxTokenlessMutation(fresh.ctx, rt, owner, req, params)
+							response, replayed, err := mailboxTokenlessMutation(fresh.ctx, rt.Runtime, owner, req, params)
 							if err != nil || replayed {
 								t.Fatalf("tokenless first execution: replay=%t err=%v", replayed, err)
 							}
@@ -249,7 +250,7 @@ func TestMailboxUnkeyedMutationsRemainPrincipalOwnedBothStores(t *testing.T) {
 					before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID)
 					bad := req
 					bad.Actor = apiidempotency.PrincipalActor(uuid.NewString())
-					if _, _, err := mailboxTokenlessMutation(f.ctx, rt, owner, bad, params); err == nil {
+					if _, _, err := mailboxTokenlessMutation(f.ctx, rt.Runtime, owner, bad, params); err == nil {
 						t.Fatal("unkeyed request bypassed principal admission")
 					}
 					if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID); !reflect.DeepEqual(before, after) {
@@ -298,7 +299,7 @@ func mailboxPrincipalMutationParams(t *testing.T, f cursorMailboxFixture, kind d
 	return params
 }
 
-func mailboxTokenlessMutation(ctx context.Context, rt servedControlProofRuntime, owner cursorMailboxStore, req apiidempotency.Request, params map[string]any) (json.RawMessage, bool, error) {
+func mailboxTokenlessMutation(ctx context.Context, selectedProofRuntime *runtimepkg.Runtime, owner cursorMailboxStore, req apiidempotency.Request, params map[string]any) (json.RawMessage, bool, error) {
 	if req.Method == "mailbox.acknowledge" {
 		port, ok := owner.(interface {
 			AcknowledgeMailboxNotice(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error)
@@ -313,7 +314,7 @@ func mailboxTokenlessMutation(ctx context.Context, rt servedControlProofRuntime,
 	if err != nil {
 		return nil, false, err
 	}
-	return rt.Runtime.Pipeline.CommitDecisionCardMutation(ctx, req, mutation)
+	return selectedProofRuntime.Pipeline.CommitDecisionCardMutation(ctx, req, mutation)
 }
 
 func mailboxCardMutation(req apiidempotency.Request, params map[string]any) (runtimepipeline.DecisionCardMutation, error) {

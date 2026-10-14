@@ -277,7 +277,9 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		selected = owner
 		return previous(owner)
 	}
-	t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+	t.Cleanup(func() {
+		projectRuntimePersistenceForServe = previous
+	})
 	root := canonicalrouting.CopyForkReceiverOwnership(t, receivers, entitylessProducer)
 	if option.repeated {
 		root = canonicalrouting.CopyForkReceiverRepeatedOwnership(t, receivers)
@@ -303,10 +305,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		}
 	}
 	rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name": seedName, "bundle_hash": rt.BundleHash,
-		"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-seed",
-	})
+	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": seedName, "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-seed"})
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 	waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 	seedRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
@@ -317,8 +316,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			seedCompanions[path] = readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID, path)
 		}
 	}
-	request := map[string]any{"event_name": requestName, "run_id": seed.RunID, "source_event_id": seed.EventID,
-		"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-request"}
+	request := map[string]any{"event_name": requestName, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-request"}
 	started := requireServedEventPublishRPCResult(t, rt.Endpoint, request)
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 	waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
@@ -405,7 +403,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		if !ok {
 			t.Fatal("missing source planner")
 		}
-		plan, err := family.Plan(servedControlProofAuthorActivityContext(t, rt), runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: frontier})
+		plan, err := family.Plan(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: frontier})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -437,12 +435,10 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	}
 	t.Logf("source success reached: run=%s frontier=%s receivers=%d", seed.RunID, frontier, len(receivers))
 	if option.nested {
-		siblingSeed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": seedName, "bundle_hash": rt.BundleHash,
-			"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-seed"})
+		siblingSeed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": seedName, "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-seed"})
 		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, siblingSeed.RunID)
 		waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, siblingSeed.RunID)
-		requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": requestName, "run_id": siblingSeed.RunID, "source_event_id": siblingSeed.EventID,
-			"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-request"})
+		requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": requestName, "run_id": siblingSeed.RunID, "source_event_id": siblingSeed.EventID, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-request"})
 		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, siblingSeed.RunID)
 		waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, siblingSeed.RunID)
 		if siblingSeed.RunID == seed.RunID {
@@ -488,15 +484,8 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		return
 	}
 	if option.selectedMissing {
-		// This is changed-selected execution through the actual owner, not a
-		// mutation of the successful source bundle or a forged route plan. Eager
-		// construction already owns "consumer", even with empty fields; select
-		// a different receiver that was genuinely absent at the fork point.
 		const missingReceiver = "missing"
-		selectedRoot := canonicalrouting.CopyForkReceiverOwnership(t, []canonicalrouting.ForkReceiver{
-			{Path: "consumer", Policy: canonicalrouting.ForkReceiverOptionalAbsent},
-			{Path: missingReceiver, Policy: canonicalrouting.ForkReceiverRequiredMissing},
-		}, false)
+		selectedRoot := canonicalrouting.CopyForkReceiverOwnership(t, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverOptionalAbsent}, {Path: missingReceiver, Policy: canonicalrouting.ForkReceiverRequiredMissing}}, false)
 		bundle := loadWorkflowValidationBundleAt(t, selectedRoot)
 		if selected == nil {
 			t.Fatal("missing selected store owner")
@@ -509,12 +498,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		}
 		beforeRefusal := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 		for attempt := 0; attempt < 2; attempt++ {
-			result, err := family.Execute(servedControlProofAuthorActivityContext(t, rt), runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: seed.RunID, At: frontier, AllowSourceFreeze: true, ExpectedBundleHash: selectedHash,
-				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
-				ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: selectedHash},
-				AgentRuntime:      rt.ForkRuntime,
-			})
+			result, err := family.Execute(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), runforkexecution.SelectedContractExecutionRequest{SourceRunID: seed.RunID, At: frontier, AllowSourceFreeze: true, ExpectedBundleHash: selectedHash, SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()}, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: selectedHash}, AgentRuntime: rt.ForkRuntime})
 			if err == nil || !strings.Contains(err.Error(), "receiver target owner is missing") || !strings.Contains(err.Error(), missingReceiver) || result.ExecutedEventCount != 0 || result.Materialization.ForkRunID != "" {
 				t.Fatalf("required missing receiver must reject before materialization: executions=%d child=%q err=%v", result.ExecutedEventCount, result.Materialization.ForkRunID, err)
 			}
@@ -532,8 +516,6 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 	childRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), fork.ForkRunID)
 	childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, frontier)
-	// This persisted child event has passed backend source-event loading and
-	// container preparation/publication. Compare their composition, not helpers.
 	childProducer := readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), fork.ForkRunID, childEvent)
 	if childProducer != producerEvidence {
 		t.Fatalf("backend/container composition changed immutable non-root producer: source=%+v child=%+v", producerEvidence, childProducer)

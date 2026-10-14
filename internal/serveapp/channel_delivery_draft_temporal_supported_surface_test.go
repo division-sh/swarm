@@ -71,7 +71,7 @@ func TestChannelDraftTerminalRestartPublicJourney(t *testing.T) {
 					intentReader = openChannelAnchorObservation(t, h)
 					draftStatus = "expired"
 				case "external_decision":
-					params := lifecycleDecisionParamsForCard(t, servedControlProofRuntime{Endpoint: h.rpcEndpoint()}, cardID, "approve")
+					params := lifecycleDecisionParamsForCard(t, h.rpcEndpoint(), cardID, "approve")
 					requireServedJSONRPCResult(t, h.rpcEndpoint(), "mailbox.decide", params, &response)
 					cardStatus, decisions = "decided", 1
 				case "run_stop":

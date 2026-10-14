@@ -124,12 +124,11 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 				selected = owner
 				return previous(owner)
 			}
-			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "parent.seeded", "bundle_hash": rt.BundleHash,
-				"payload": map[string]any{"work_id": "fork-recipient-authority"}, "idempotency_key": "recipient-seed",
+			t.Cleanup(func() {
+				projectRuntimePersistenceForServe = previous
 			})
+			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkDeliveryRouteEvidence(t))
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "parent.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"work_id": "fork-recipient-authority"}, "idempotency_key": "recipient-seed"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			if selected == nil {
@@ -139,7 +138,7 @@ func TestServedForkConnectedRecipientAuthorityOnBothStores(t *testing.T) {
 			if !ok {
 				t.Fatal("served runtime has no selected fork owner")
 			}
-			plan, err := planner.Plan(servedControlProofAuthorActivityContext(t, rt), runfork.RunForkPlanRequest{SourceRunID: seed.RunID})
+			plan, err := planner.Plan(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), runfork.RunForkPlanRequest{SourceRunID: seed.RunID})
 			if err != nil {
 				t.Fatal(err)
 			}

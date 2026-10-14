@@ -69,7 +69,7 @@ func TestFamily145PublicA2EndpointWholeRulePreservesAll67CallersAnd16Bodies(t *t
 		if err != nil {
 			t.Fatal(err)
 		}
-		if family145PublicJoinCallerInverse(pin.Function, family145PublicA2CurrentDeclaration(t, raw, pin.Function)) != pin.After {
+		if family145PublicJoinCallerInverse(pin.Function, servedSetupEarlierSource(t, pin.File, pin.Function, family145PublicA2CurrentDeclaration(t, raw, pin.Function))) != pin.After {
 			t.Fatal("current endpoint consumer escaped exact full-body rule:", key)
 		}
 		family145PublicA2EndpointHostiles(t, pin)

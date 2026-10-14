@@ -37,13 +37,10 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 				if gate {
 					prefix = "outer/inner/"
 				}
-				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-					"event_name": "work.requested", "bundle_hash": rt.BundleHash,
-					"payload": map[string]any{"seed": true}, "idempotency_key": "release-seed",
-				})
+				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "release-seed"})
 				if gate {
 					entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "review")
-					params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+					params := lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, "approve")
 					var decision map[string]any
 					requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decision)
 					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "done")
@@ -70,13 +67,9 @@ func TestReleaseCompiledLifecycleJourneysBothStores(t *testing.T) {
 					}
 					return
 				}
-
 				entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, seed.RunID, "waiting")
 				publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
-					return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-						"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID,
-						"payload": payload, "idempotency_key": key,
-					})
+					return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": key})
 				}
 				started := publish("loop.start", "release-start", map[string]any{"seed": true})
 				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "drafting")

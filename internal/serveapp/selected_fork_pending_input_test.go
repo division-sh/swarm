@@ -94,7 +94,7 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 					requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": seed.RunID, "idempotency_key": "input-resume"})
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					requirePendingInputStateCount(t, rt.ReceiverStateReader, seed.RunID, "done", 2)
-					requirePendingInputPublicStates(t, rt, seed.RunID, 2)
+					requirePendingInputPublicStates(t, rt.Endpoint, seed.RunID, 2)
 					return
 				}
 				forkParams := map[string]any{"source_run_id": seed.RunID, "fork_event_id": point.EventID, "allow_source_freeze": true, "idempotency_key": "input-fork"}
@@ -107,7 +107,7 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 						variant = canonicalrouting.PendingInputMissingEndpoint
 					}
 					bundle := loadWorkflowValidationBundleAt(t, canonicalrouting.CopySelectedForkPendingInput(t, variant))
-					fact, err := prepareServeSourceArtifact(servedControlProofAuthorActivityContext(t, rt), selected.SourceArtifactWriter(), bundle)
+					fact, err := prepareServeSourceArtifact(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), selected.SourceArtifactWriter(), bundle)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -117,7 +117,11 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 					forkParams["bundle_hash"] = fact.BundleHash()
 				}
 				var before int
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&before); err != nil {
+				if err := rt.ReceiverStateReader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+					var err error
+					before, err = storetest.CountGlobalRunStorage(ctx, rt.ReceiverStateReader)
+					return err
+				}); err != nil {
 					t.Fatal(err)
 				}
 				response := requestServedJSONRPC(t, rt.Endpoint, "run.fork", forkParams)
@@ -127,10 +131,18 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 					}
 					var after int
 					var status string
-					if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&after); err != nil {
+					if err := rt.ReceiverStateReader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+						var err error
+						after, err = storetest.CountGlobalRunStorage(ctx, rt.ReceiverStateReader)
+						return err
+					}); err != nil {
 						t.Fatal(err)
 					}
-					if err := rt.DB.QueryRow(`SELECT status FROM runs WHERE run_id=$1`, seed.RunID).Scan(&status); err != nil {
+					if err := rt.ReceiverStateReader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+						var err error
+						status, err = storetest.ReadRunStatusStorage(ctx, rt.ReceiverStateReader, seed.RunID)
+						return err
+					}); err != nil {
 						t.Fatal(err)
 					}
 					if after != before || status != "paused" {
@@ -149,7 +161,7 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 				requirePendingInputStateCount(t, rt.ReceiverStateReader, fork.ForkRunID, "done", wantDone)
 				requirePendingInputStateCount(t, rt.ReceiverStateReader, fork.ForkRunID, "ready", 2-wantDone)
-				requirePendingInputPublicStates(t, rt, fork.ForkRunID, wantDone)
+				requirePendingInputPublicStates(t, rt.Endpoint, fork.ForkRunID, wantDone)
 				var copied int
 				{
 					var err error
@@ -232,17 +244,17 @@ func assertNoUnselectedTargetActivation(t *testing.T, rt servedControlProofRunti
 	}
 }
 
-func requirePendingInputPublicStates(t *testing.T, rt servedControlProofRuntime, runID string, wantDone int) {
+func requirePendingInputPublicStates(t *testing.T, selectedProofEndpoint string, runID string, wantDone int) {
 	t.Helper()
 	var list operatorread.OperatorEntityListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.list", map[string]any{"run_id": runID}, &list)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "entity.list", map[string]any{"run_id": runID}, &list)
 	if len(list.Entities) != 2 {
 		t.Fatalf("public entity census: %+v", list)
 	}
 	done := 0
 	for _, entity := range list.Entities {
 		var full operatorread.OperatorEntityFull
-		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entity.EntityID}, &full)
+		requireServedJSONRPCResult(t, selectedProofEndpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entity.EntityID}, &full)
 		if entity.RunID != runID || !reflect.DeepEqual(entity, full.Entity) {
 			t.Fatal("public input result lost exact run/entity identity")
 		}

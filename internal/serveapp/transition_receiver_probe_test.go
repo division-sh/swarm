@@ -1,7 +1,9 @@
 package serveapp
 
 import (
+	"context"
 	"fmt"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -24,9 +26,7 @@ func proveReceiverMaterializationBothStores(t *testing.T, source func(testing.TB
 			t.Run(fmt.Sprintf("%s/existing_parent_%t", backend, existing), func(t *testing.T) {
 				root := source(t, existing)
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-				params := map[string]any{
-					"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "ordinary-cross-flow",
-				}
+				params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "ordinary-cross-flow"}
 				if existing {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "create-seed"})
 					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "active")
@@ -42,7 +42,11 @@ func proveReceiverMaterializationBothStores(t *testing.T, source func(testing.TB
 					t.Fatalf("ordinary producer delivery should execute and settle: %s", status)
 				}
 				var count int
-				if err := rt.DB.QueryRow(`SELECT count(*) FROM entity_state WHERE run_id = $1 AND current_state = 'done'`, started.RunID).Scan(&count); err != nil {
+				if err := rt.ReceiverStateReader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+					var err error
+					count, err = storetest.CountRunStateEntityStorage(ctx, rt.ReceiverStateReader, started.RunID, "done")
+					return err
+				}); err != nil {
 					t.Fatal(err)
 				}
 				if count != 2 {

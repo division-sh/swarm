@@ -75,7 +75,6 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 						route := anchor.Source.Route()
 						agentScope, agentPath := flowID, instance
 						if mode == "root" {
-							// Root agent identity is run-bound without a child route.
 							agentScope, agentPath = "", ""
 						}
 						if route.FlowID != flowID || route.FlowInstance != instance || route.EntityID != expectedEntity {
@@ -97,13 +96,11 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 							requireHumanTaskForeignContinuationRefusal(t, rt, card, method, params)
 						}
 						if method == "expiry_restart" {
-							// Preserve the tool-authored deadline. Startup maintenance,
-							// not an injected expiry event or edited row, expires it.
 							if remaining := time.Until(deadline); remaining > 0 {
 								time.Sleep(remaining)
 							}
 							rt, owner = restart()
-							recovered, err := owner.GetDecisionCard(servedControlProofAuthorActivityContext(t, rt), id)
+							recovered, err := owner.GetDecisionCard(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), id)
 							if err != nil || recovered.Status != decisioncard.StatusExpired || !reflect.DeepEqual(recovered.Anchor, card.Anchor) {
 								t.Fatalf("expiry restart lost canonical card: %+v, %v", recovered, err)
 							}

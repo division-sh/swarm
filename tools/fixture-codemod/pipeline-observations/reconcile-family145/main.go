@@ -43,12 +43,13 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "96e13867c72a97c77597446fe1734fce41ef52338c002b94fbc2eb475c934ab2"
+const targetDigest = "b6e79403d00ca697977fce6c145f67bde4b0c3b2999711de140515cf08fc84b1"
 
 var sourceForkComparison = map[string]string{}
 var runDeliveryComparison = map[string]string{}
 var sourceBlobComparison = map[string]string{}
 var servedBatchComparison = map[string]string{}
+var servedSetupComparison = map[string]runphysical.Pin{}
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -294,6 +295,11 @@ var files = []string{
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "-served-setup" {
+		reconcileServedSetup()
+		return
+	}
+	setupPins := servedSetupHistoryPins()
 	batchPins := servedBatchHistoryPins()
 	includeRunIdentityTargets()
 	includeRunPhysicalTargets()
@@ -357,6 +363,7 @@ func main() {
 	rows, changes = composeRunDeliveryHistory(rows, changes, runDeliveryPins)
 	rows, changes = composeSourceBlobHistory(rows, changes, sourceBlobPins)
 	rows, changes = composeServedBatchHistory(rows, changes, batchPins)
+	rows, changes = composeServedSetupHistory(rows, changes, setupPins)
 	raw, err := json.Marshal(changes)
 	must(err)
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
@@ -410,6 +417,12 @@ func composeServedBatchHistory(rows []recipe, changes []transition, pins []runph
 }
 
 func servedBatchEarlierDeclaration(path, function, current string) string {
+	if pin, ok := servedSetupComparison[path+"/"+function]; ok {
+		if current != pin.After {
+			panic("served setup historical argument is not actual current source: " + function)
+		}
+		current = pin.Before
+	}
 	if previous := servedBatchComparison[path+"/"+function]; previous != "" {
 		return previous
 	}

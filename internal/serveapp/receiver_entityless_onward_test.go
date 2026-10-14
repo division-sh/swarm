@@ -63,8 +63,8 @@ func TestReceiverCompositionEntitylessOnwardBothStores(t *testing.T) {
 				if !child || !grandchild {
 					t.Fatalf("missing nested execution child=%t grandchild=%t", child, grandchild)
 				}
-				requireReceiverConstructedInstance(t, rt, started.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "pending", started.RunID, "ready", 2, map[string]any{})
-				requireReceiverConstructedInstance(t, rt, started.RunID, "sink/tail", "sink/tail", flowidentity.EntityID("sink/tail"), "receipt", "done", "sink", "ready", 2, map[string]any{"result": "emitted"})
+				requireReceiverConstructedInstance(t, rt.BundleHash, rt.ReceiverStateReader, started.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "pending", started.RunID, "ready", 2, map[string]any{})
+				requireReceiverConstructedInstance(t, rt.BundleHash, rt.ReceiverStateReader, started.RunID, "sink/tail", "sink/tail", flowidentity.EntityID("sink/tail"), "receipt", "done", "sink", "ready", 2, map[string]any{"result": "emitted"})
 				var rawFields string
 				if err := rt.DB.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance='sink/tail' AND current_state='done'`, started.RunID).Scan(&rawFields); err != nil {
 					t.Fatal(err)
@@ -85,8 +85,6 @@ func TestReceiverCompositionEntitylessOnwardBothStores(t *testing.T) {
 						continue
 					}
 					onward++
-					// The public singular entity projection is the admitted target,
-					// not the causal source. Check both rather than conflating them.
 					if event.EntityID != flowidentity.EntityID("sink/tail") {
 						t.Fatalf("public target projection changed: %s", event.EntityID)
 					}

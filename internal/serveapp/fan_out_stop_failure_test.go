@@ -26,7 +26,7 @@ func TestIssue2394StopFailureEnvelopeBothStores(t *testing.T) {
 			t.Run(string(backend)+"/"+fault, func(t *testing.T) {
 				rig := newIssue2394StopRig(t, backend)
 				rt := rig.start(t)
-				runID, eventID, _ := createServedControlWaitingRun(t, rt, "stop-failure-"+uuid.NewString())
+				runID, eventID, _ := createServedControlWaitingRun(t, rt.Backend, rt.BundleHash, rt.Endpoint, rt.Probe, rt.ReceiverStateReader, "stop-failure-"+uuid.NewString())
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID})
 				seedIssue2394StopIntents(t, rt, runID, eventID)
 				assertIssue2394StopMatrix(t, readIssue2394StopSnapshot(t, rt.ReceiverStateReader, runID), false)
@@ -62,7 +62,7 @@ func TestIssue2394StopFailureEnvelopeBothStores(t *testing.T) {
 				}
 				assertIssue2394StopUnchanged(t, before, rt.ReceiverStateReader, runID)
 				requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.stop", key, 0)
-				_, ownerErr := rt.Runtime.RunControl.Stop(servedControlProofAuthorActivityContext(t, rt), runcontrol.TransitionRequest{RunID: runID})
+				_, ownerErr := rt.Runtime.RunControl.Stop(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), runcontrol.TransitionRequest{RunID: runID})
 				if ownerErr == nil || !issue2394ErrorChainContains(ownerErr, cause) {
 					t.Errorf("selected stop owner lost %s cause: %v", fault, ownerErr)
 				}
