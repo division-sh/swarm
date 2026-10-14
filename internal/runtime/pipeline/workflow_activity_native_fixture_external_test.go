@@ -13,8 +13,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -26,7 +29,23 @@ func workflowActivityNativeFixture(t *testing.T, backend string) pipeline.Workfl
 
 func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerReplaySelectedStore, reopen func() timerReplaySelectedStore) pipeline.WorkflowActivityNativeFixtureForTest {
 	t.Helper()
-	ctx := testAuthorActivityContext(t, context.Background())
+	return workflowActivityNativeFixtureFromSelectedSource(t, selected, reopen, sourceartifactfixture.Artifact())
+}
+
+func workflowActivityNativeSourceFixture(t *testing.T, backend string, source semanticview.Source) pipeline.WorkflowActivityNativeFixtureForTest {
+	t.Helper()
+	bundle, found := semanticview.Bundle(source)
+	if !found || bundle.SourceArtifact == nil {
+		t.Fatal("native activity source fixture requires its compiled source artifact")
+	}
+	selected, _, reopen := openTimerReplayNativeStore(t, backend)
+	return workflowActivityNativeFixtureFromSelectedSource(t, selected, reopen, bundle.SourceArtifact)
+}
+
+func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected timerReplaySelectedStore, reopen func() timerReplaySelectedStore, artifact *sourceartifact.AdmittedSourceArtifact) pipeline.WorkflowActivityNativeFixtureForTest {
+	t.Helper()
+	fact := sourceartifactfixture.RequireArtifact(t, context.Background(), selected.(sourceartifactfixture.Writer), artifact)
+	ctx := testAuthorActivityContextForSource(t, context.Background(), fact)
 	persistence := pipeline.NewWorkflowPersistence(selected)
 	var buses []*runtimebus.EventBus
 	join := func() error {
@@ -44,17 +63,17 @@ func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerRepla
 			options.ExecutionPosture = executionposture.Live
 		}
 		deliveryBus, err := newScopedTestEventBus(t, selected, runtimebus.EventBusOptions{
-			ContractBundle: options.Module.SemanticSource(), ExecutionPosture: options.ExecutionPosture,
+			ContractBundle: options.Module.SemanticSource(), ExecutionPosture: options.ExecutionPosture, SourceArtifactFact: fact,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		buses = append(buses, deliveryBus)
-		options.WorkOwner = pipelineExternalTestWorkOwner(t)
+		options.WorkOwner = pipelineExternalTestWorkOwnerForSource(t, fact)
 		// The recording bus remains the result-publication oracle. Durable
 		// delivery and obligation ports still belong to the native bus/store.
 		options.ReceiverExecution = eventreceiver.NormalExecution()
-		options.SourceArtifactFact = authorActivityTestSourceArtifactFact
+		options.SourceArtifactFact = fact
 		options.Persistence = workflow
 		options.DeliveryStore, options.DeadLetters = selected, selected
 		options.DecisionCards, options.ProposedEffects = selected, selected
@@ -86,7 +105,7 @@ func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerRepla
 		Runs:        selected,
 		RequireRun: func(ctx context.Context, runID string) error {
 			return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{
-				RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(),
+				RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(), Artifact: artifact,
 			})
 		},
 		NewCoordinator: func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions) *pipeline.PipelineCoordinator {
@@ -133,7 +152,7 @@ func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerRepla
 			if err := selected.Close(); err != nil {
 				t.Fatal(err)
 			}
-			return workflowActivityNativeFixtureFromSelected(t, reopen(), reopen)
+			return workflowActivityNativeFixtureFromSelectedSource(t, reopen(), reopen, artifact)
 		},
 		ReadJournal: func(ctx context.Context, runID string) (pipeline.WorkflowJournalStorageForTest, error) {
 			observed, err := storetest.ReadWorkflowJournalStorage(ctx, selected, runID)
@@ -181,15 +200,15 @@ func TestReceiverConfigAndRuntimeControlsRoundTripBothStores(t *testing.T) {
 }
 
 func TestActivityBoringProofDuplicateRequestReusesRecordedReadResult(t *testing.T) {
-	pipeline.VerifyNativeActivityBoringProofDuplicateRequestReusesRecordedReadResultForTest(t, workflowActivityNativeFixture)
+	pipeline.VerifyNativeActivityBoringProofDuplicateRequestReusesRecordedReadResultForTest(t, workflowActivityNativeSourceFixture)
 }
 
 func TestActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIdentity(t *testing.T) {
-	pipeline.VerifyNativeActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIdentityForTest(t, workflowActivityNativeFixture)
+	pipeline.VerifyNativeActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIdentityForTest(t, workflowActivityNativeSourceFixture)
 }
 
 func TestActivityBoringProofRetryIsBoundedAndTraced(t *testing.T) {
-	pipeline.VerifyNativeActivityBoringProofRetryIsBoundedAndTracedForTest(t, workflowActivityNativeFixture)
+	pipeline.VerifyNativeActivityBoringProofRetryIsBoundedAndTracedForTest(t, workflowActivityNativeSourceFixture)
 }
 
 func TestScenarioExecutionProfileMismatchFencesTerminalReplay(t *testing.T) {
