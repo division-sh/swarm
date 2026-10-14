@@ -2914,15 +2914,15 @@ func TestLoadRuntimeConfigWithOptions_UsesSharedDiscoveryAndBackendPrecedence(t 
 	if err != nil {
 		t.Fatalf("load discovered local-operator config: %v", err)
 	}
-	if result.Config.LLM.Backend != "claude_cli" || result.Source != string(unifiedLayerLocalOperator) {
-		t.Fatalf("local-operator config result = source=%s backend=%s, want local_operator_config claude_cli", result.Source, result.Config.LLM.Backend)
+	if result.Config.LLM.Backend != "claude_cli" || result.Source != unifiedConfigSourceDeployment {
+		t.Fatalf("deployment config result = source=%s backend=%s, want deployment_config claude_cli", result.Source, result.Config.LLM.Backend)
 	}
 
 	result, err = LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: "runtime.yaml", BackendOverride: "openai_compatible"})
 	if err != nil {
 		t.Fatalf("load explicit config with backend override: %v", err)
 	}
-	if result.Config.LLM.Backend != "openai_compatible" || result.Source != string(unifiedLayerExplicit) || filepath.Clean(result.Path) != filepath.Clean(explicitPath) {
+	if result.Config.LLM.Backend != "openai_compatible" || result.Source != unifiedConfigSourceExplicit || filepath.Clean(result.Path) != filepath.Clean(explicitPath) {
 		t.Fatalf("explicit config result = %#v backend=%s", result, result.Config.LLM.Backend)
 	}
 }
@@ -2977,8 +2977,6 @@ func TestLoadRuntimeConfigWithOptions_BackendOverrideSkipsOverriddenProfileValid
 }
 
 func TestLoadRuntimeConfigWithOptions_RejectsRetiredModelEnvForConfiguredPaths(t *testing.T) {
-	originalExecutablePath := runtimeConfigExecutablePath
-	t.Cleanup(func() { runtimeConfigExecutablePath = originalExecutablePath })
 	t.Setenv("SWARM_CLAUDE_DEFAULT_MODEL", "claude-test")
 
 	configBody := strings.Join([]string{
@@ -3007,11 +3005,7 @@ func TestLoadRuntimeConfigWithOptions_RejectsRetiredModelEnvForConfiguredPaths(t
 			name: "executable-adjacent",
 			setup: func(t *testing.T) RuntimeConfigLoadOptions {
 				t.Helper()
-				exeDir := t.TempDir()
-				runtimeConfigExecutablePath = func() (string, error) {
-					return filepath.Join(exeDir, "swarm"), nil
-				}
-				writeRuntimeConfigText(t, filepath.Join(exeDir, "config.yaml"), configBody)
+				writeIgnoredExecutableConfig(t, configBody)
 				return RuntimeConfigLoadOptions{RepoRoot: t.TempDir()}
 			},
 		},
