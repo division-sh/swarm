@@ -197,7 +197,7 @@ func TestCanonicalProjectionConsumesFactKey(t *testing.T) {
 					"event_id": "22222222-2222-4222-8222-222222222222", "run_id": "11111111-1111-4111-8111-111111111111",
 					"route_identity": events.EncodeDeliveryRouteIdentity(id), "subscriber_type": "node", "subscriber_id": route.Recipient.ID(),
 					"delivery_target_ownership": string(target), "delivery_context": `{}`, "delivery_payload_projection": `{}`, "connect_execution_claim": `{}`, "receiver_materialization_plan": `null`,
-					"status": "pending", "retry_count": int64(0), "max_retries": int64(deliverylifecycle.NodeMaxRetries), "claim_version": int64(0),
+					"status": "pending", "retry_count": int64(0), "max_retries": int64(deliverylifecycle.NodeMaxRetries),
 					"next_eligible_at": time.Now().UTC(), "created_at": time.Now().UTC(), "updated_at": time.Now().UTC(),
 				} {
 					body[key] = value
