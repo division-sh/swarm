@@ -3397,3 +3397,23 @@ func ReadChannelBudgetDeliveriesDiagnosticsStorageTx(ctx context.Context, tx *sq
 	}
 	return scanChannelBudgetDiagnosticRows(rows)
 }
+
+type ServedDeliveryStatusReasonStorage struct{ Status, Reason string }
+
+func ReadServedDeliveryStatusReasonStorageTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, recipientType, recipientID string) (ServedDeliveryStatusReasonStorage, error) {
+	query := `SELECT status, COALESCE(reason_code, '') FROM event_deliveries
+		WHERE event_id = ? AND subscriber_type = ? AND subscriber_id = ?`
+	if postgres {
+		query = `SELECT status, COALESCE(reason_code, '') FROM event_deliveries
+			WHERE event_id = $1::uuid AND subscriber_type = $2 AND subscriber_id = $3`
+	}
+	var out ServedDeliveryStatusReasonStorage
+	err := tx.QueryRowContext(ctx, query, eventID, recipientType, recipientID).Scan(&out.Status, &out.Reason)
+	return out, err
+}
+
+func CountUnsettledStandingDeliveriesStorageTx(ctx context.Context, tx *sql.Tx) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE status IN ('pending', 'failed', 'in_progress')`).Scan(&count)
+	return count, err
+}

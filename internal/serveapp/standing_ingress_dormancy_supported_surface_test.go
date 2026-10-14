@@ -3,7 +3,6 @@ package serveapp
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
@@ -109,22 +109,13 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath,
 				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
 				WorkspaceBackend: "host", WorkspaceBackendSet: true, StoreMode: backend, StoreModeSet: true}
-			var db *sql.DB
 			var observationLocation string
 			if backend == "sqlite" {
 				path := filepath.Join(t.TempDir(), "dormant-ingress.sqlite")
 				observationLocation = path
-				var err error
-				db, err = sql.Open("sqlite", path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() { _ = db.Close() })
 				opts.ConfigPath = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, backend, path, channelOnboardingHostWorkspaceFields())
 			} else {
-				dsn, opened, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				db = opened
+				dsn := testutil.StartPostgresDSN(t)
 				observationLocation = dsn
 				opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 			}
@@ -179,29 +170,46 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 					t.Fatalf("secret command %v exit=%d stdout=%s stderr=%s", args, code, out.String(), errOut.String())
 				}
 			}
+			var reader storetest.ReleaseProcessReadOnlyInspection
 			assertCurrent := func(runID string, generation int64, state string) (string, int64) {
 				t.Helper()
-				var gotRun, gotState string
-				var gotGeneration int64
-				if err := db.QueryRow(`SELECT current_run_id, current_generation, effective_state FROM standing_services`).Scan(&gotRun, &gotGeneration, &gotState); err != nil {
+				var out storetest.StandingCurrentStorage
+				if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+					var err error
+					out, err = storetest.ReadUnfilteredStandingCurrentStorage(ctx, reader)
+					return err
+				}); err != nil {
 					t.Fatal(err)
 				}
+				gotRun, gotGeneration, gotState := out.RunID, out.Generation, out.State
 				if gotState != state || gotGeneration != generation || runID != "" && gotRun != runID {
 					t.Fatalf("current identity = %s/%d/%s, want %s/%d/%s", gotRun, gotGeneration, gotState, runID, generation, state)
 				}
 				return gotRun, gotGeneration
 			}
 			process, endpoint := start()
+			reader = openServedStandingInspection(t, backend, observationLocation)
 			nameReader := openChannelAnchorStorageAtLocation(t, backend, observationLocation)
 			assertDormant(process, endpoint)
-			for _, table := range []string{"standing_services", "standing_service_generations", "standing_service_journal"} {
+			for _, cut := range []struct {
+				table string
+				read  func(context.Context, any) (int, error)
+			}{{"standing_services", storetest.CountStandingServicesStorage}, {"standing_service_generations", storetest.CountStandingGenerationsStorage}, {"standing_service_journal", storetest.CountStandingJournalStorage}} {
 				var count int
-				if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 0 {
-					t.Fatalf("fresh dormant %s count=%d err=%v", table, count, err)
+				if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+					var err error
+					count, err = cut.read(ctx, reader)
+					return err
+				}); err != nil || count != 0 {
+					t.Fatalf("fresh dormant %s count=%d err=%v", cut.table, count, err)
 				}
 			}
 			var standingRuns int
-			if err := db.QueryRow(`SELECT COUNT(*) FROM runs WHERE origin_kind = 'standing_generation'`).Scan(&standingRuns); err != nil || standingRuns != 0 {
+			if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+				var err error
+				standingRuns, err = storetest.CountStandingOriginRunsStorage(ctx, reader)
+				return err
+			}); err != nil || standingRuns != 0 {
 				t.Fatalf("fresh dormant standing runs=%d err=%v", standingRuns, err)
 			}
 			secretsCLI([]string{"secrets", "set", "webhook_signing.telegram", "--stdin"}, "telegram-secret\n")
@@ -241,10 +249,18 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 			}
 			var serviceID string
 			var journalCount int
-			if err := db.QueryRow(`SELECT service_id FROM standing_services`).Scan(&serviceID); err != nil {
+			if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+				var err error
+				serviceID, err = storetest.ReadUnfilteredStandingServiceIDStorage(ctx, reader)
+				return err
+			}); err != nil {
 				t.Fatal(err)
 			}
-			if err := db.QueryRow(`SELECT COUNT(*) FROM standing_service_journal`).Scan(&journalCount); err != nil {
+			if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+				var err error
+				journalCount, err = storetest.CountStandingJournalStorage(ctx, reader)
+				return err
+			}); err != nil {
 				t.Fatal(err)
 			}
 			secretsCLI([]string{"secrets", "set", "webhook_signing.telegram", "--stdin"}, "unadmitted-in-process-rotation\n")
@@ -257,7 +273,11 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 				}
 				assertCurrent(runID, generation, "active")
 				var gotJournalCount int
-				if err := db.QueryRow(`SELECT COUNT(*) FROM standing_service_journal`).Scan(&gotJournalCount); err != nil || gotJournalCount != journalCount {
+				if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+					var err error
+					gotJournalCount, err = storetest.CountStandingJournalStorage(ctx, reader)
+					return err
+				}); err != nil || gotJournalCount != journalCount {
 					t.Fatalf("refused standing %s mutated history: %d->%d, %v", command, journalCount, gotJournalCount, err)
 				}
 			}
@@ -278,7 +298,11 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 			if code := process.stop(); code != 0 {
 				t.Fatalf("restored stop=%d", code)
 			}
-			if err := db.QueryRow(`SELECT COUNT(*) FROM standing_service_generations`).Scan(&published); err != nil || published != 1 {
+			if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+				var err error
+				published, err = storetest.CountStandingGenerationsStorage(ctx, reader)
+				return err
+			}); err != nil || published != 1 {
 				t.Fatalf("credential restoration minted a successor: %d, %v", published, err)
 			}
 		})

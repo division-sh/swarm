@@ -165,3 +165,17 @@ func composeDeploymentResourceHistory(rows []recipe, changes []transition) ([]re
 	}
 	return rows, changes
 }
+
+func composeStandingIngressHistory(rows []recipe, changes []transition) ([]recipe, []transition) {
+	for _, input := range []struct {
+		value, out any
+		recipes    bool
+	}{{rows, &rows, true}, {changes, &changes, false}} {
+		candidate, err := json.Marshal(input.value)
+		must(err)
+		raw, err := selectedreadrole.ComposeStandingIngressHistory(".", candidate, input.recipes)
+		must(err)
+		must(json.Unmarshal(raw, input.out))
+	}
+	return rows, changes
+}

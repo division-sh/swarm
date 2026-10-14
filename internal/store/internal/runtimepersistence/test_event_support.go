@@ -32,6 +32,27 @@ import (
 )
 
 type PublicationResultSourceStorage = eventrecord.PublicationResultSourceStorage
+
+type StandingTelegramLineageStorage = eventrecord.StandingTelegramLineageStorage
+
+func ReadEventNameStorageForTest(ctx context.Context, selected any, eventID string) (string, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return eventrecord.ReadEventNameStorageTx(ctx, tx, postgres, eventID)
+	})
+}
+
+func CountInboundNamedEventsStorageForTest(ctx context.Context, selected any) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, nil, eventrecord.CountInboundNamedEventsStorageTx)
+}
+
+func ReadStandingTelegramLineageStorageForTest(ctx context.Context, selected any, runID string) (StandingTelegramLineageStorage, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (StandingTelegramLineageStorage, error) {
+		return eventrecord.ReadStandingTelegramLineageStorageTx(ctx, tx, postgres, runID)
+	})
+}
+
 type ReceiverFinishedEffectStorage = eventrecord.ReceiverFinishedEffectStorage
 type ActivityPublicationSourceStorage = eventrecord.ActivityPublicationSourceStorage
 

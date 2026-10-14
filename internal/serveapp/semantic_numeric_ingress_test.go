@@ -105,7 +105,7 @@ func TestServedSemanticNumericWebSocketCommandRejection(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, semanticNumericIngressFixture(t))
-			before := semanticNumericDomainCounts(t, rt.DB)
+			before := semanticNumericDomainCounts(t, rt.ReceiverStateReader)
 			for _, method := range []string{"event.publish", "run.start"} {
 				t.Run(method, func(t *testing.T) {
 					response := semanticNumericRPC(t, rt.Endpoint, "ws", semanticNumericRequest(rt.BundleHash, method, uuid.NewString(), uuid.NewString(), "7.0"))
@@ -116,7 +116,7 @@ func TestServedSemanticNumericWebSocketCommandRejection(t *testing.T) {
 					if details["method"] != method || details["transport"] != "websocket" {
 						t.Fatalf("transport details = %#v", details)
 					}
-					if got := semanticNumericDomainCounts(t, rt.DB); !reflect.DeepEqual(got, before) {
+					if got := semanticNumericDomainCounts(t, rt.ReceiverStateReader); !reflect.DeepEqual(got, before) {
 						t.Fatalf("wrong-transport mutation: before=%v after=%v", before, got)
 					}
 				})
@@ -129,14 +129,14 @@ func TestServedSemanticIngressRejectsBeforeMutation(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, semanticNumericIngressFixture(t))
-			before := semanticNumericDomainCounts(t, rt.DB)
+			before := semanticNumericDomainCounts(t, rt.ReceiverStateReader)
 			for _, transport := range []string{"http", "ws"} {
 				for _, hostile := range []string{"9007199254740992", "-9007199254740992", "-0", "1e999", "1e-999", "NaN"} {
 					response := semanticNumericRPC(t, rt.Endpoint, transport, semanticNumericRequest(rt.BundleHash, "run.start", uuid.NewString(), uuid.NewString(), hostile))
 					if response.Error == nil || response.Error.Code == -32601 {
 						t.Fatalf("%s/%s did not fail envelope admission: %#v", transport, hostile, response)
 					}
-					if got := semanticNumericDomainCounts(t, rt.DB); !reflect.DeepEqual(got, before) {
+					if got := semanticNumericDomainCounts(t, rt.ReceiverStateReader); !reflect.DeepEqual(got, before) {
 						t.Fatalf("hostile envelope mutation: before=%v after=%v", before, got)
 					}
 				}
@@ -144,7 +144,7 @@ func TestServedSemanticIngressRejectsBeforeMutation(t *testing.T) {
 				if response := semanticNumericRPC(t, rt.Endpoint, transport, duplicate); response.Error == nil || response.Error.Code == -32601 {
 					t.Fatalf("duplicate key admission = %#v", response)
 				}
-				if got := semanticNumericDomainCounts(t, rt.DB); !reflect.DeepEqual(got, before) {
+				if got := semanticNumericDomainCounts(t, rt.ReceiverStateReader); !reflect.DeepEqual(got, before) {
 					t.Fatalf("duplicate key mutation: %v -> %v", before, got)
 				}
 			}
@@ -229,16 +229,18 @@ func TestServedSemanticNumericEventSubscription(t *testing.T) {
 	}
 }
 
-func semanticNumericDomainCounts(t *testing.T, db *sql.DB) map[string]int {
+func semanticNumericDomainCounts(t *testing.T, reader servedEventCountReader) map[string]int {
 	t.Helper()
-	counts := map[string]int{}
-	for _, table := range []string{"runs", "events", "event_deliveries", "entity_state", "api_idempotency"} {
-		var count int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		counts[table] = count
+	counts := lifecycleAdmissionDomainCounts(t, reader)
+	var count int
+	if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.CountPhysicalAPIReceiptsStorage(ctx, reader)
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
+	counts["api_idempotency"] = count
 	return counts
 }
 

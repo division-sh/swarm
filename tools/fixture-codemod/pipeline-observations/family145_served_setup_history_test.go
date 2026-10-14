@@ -80,7 +80,11 @@ func TestFamily145ServedSetupHistoryPreservesAllFieldsOrderAndExactAdvances(t *t
 		if !reflect.DeepEqual(restored, prior) {
 			t.Fatal("setup history lost original bytes, metadata or order")
 		}
-		current, err := selectedreadrole.EarlierDeploymentResourceHistory("../../..", current, recipes)
+		current, err := selectedreadrole.EarlierStandingIngressHistory("../../..", current, recipes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		current, err = selectedreadrole.EarlierDeploymentResourceHistory("../../..", current, recipes)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -196,6 +200,10 @@ func servedSetupPriorHistory(t *testing.T, recipes bool) []byte {
 func servedSetupEarlierHistory(t *testing.T, current []byte, recipes bool) []byte {
 	t.Helper()
 	var err error
+	current, err = selectedreadrole.EarlierStandingIngressHistory("../../..", current, recipes)
+	if err != nil {
+		t.Fatal(err)
+	}
 	current, err = selectedreadrole.EarlierDeploymentResourceHistory("../../..", current, recipes)
 	if err != nil {
 		t.Fatal(err)

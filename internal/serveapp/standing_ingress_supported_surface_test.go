@@ -3,7 +3,6 @@ package serveapp
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,7 +34,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -162,20 +160,12 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
 	configureStandingLifecycleCredentials(t)
 
-	var db *sql.DB
+	var observationBackend, observationLocation string
 	var opts cliapp.ServeOptions
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		sqlitePath := filepath.Join(t.TempDir(), "standing-lifecycle.sqlite")
-		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			stores, err := oldBuildStores(ctx, selection, cfg)
-			if err == nil {
-				db = selectedStoreDatabaseForTest(t, stores)
-			}
-			return stores, err
-		}
-		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
+		observationBackend, observationLocation = "sqlite", sqlitePath
 		opts = cliapp.ServeOptions{
 			ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
 			SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
@@ -185,18 +175,12 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		}
 	case servedparity.BackendExplicitPostgres:
-		dsn, _, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
+		dsn := testutil.StartPostgresDSN(t)
+		observationBackend, observationLocation = "postgres", dsn
 		oldBuildStores := buildStoresForServe
 		oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
-		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			pg, err := store.NewPostgresStore(dsn)
-			if err != nil {
-				return nil, err
-			}
-			storetest.BootstrapPostgresRuntimeStore(t, pg)
-			db = storetest.DatabaseForTest(pg)
-			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(pg), cfg), nil
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+			return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
 		}
 		cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil
@@ -224,11 +208,9 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
 	firstManager := waitForServedStandingContextManager(t, contextsReady, backend)
-	if db == nil {
-		t.Fatal("standing served parity SQLDB is required")
-	}
+	observation := openServedStandingInspection(t, observationBackend, observationLocation)
 	firstEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString()) + "/v1/rpc"
-	serviceID, firstRunID, firstGeneration := loadServedStandingOwner(t, db, string(backend))
+	serviceID, firstRunID, firstGeneration := loadServedStandingOwner(t, observation, string(backend))
 	firstScheduleResult := managerProbe.arm(t, firstManager, firstRunID)
 	firstRouteRelease, firstRouteStarted := telegramGate.blockNext()
 	if binding := sendStandingTelegramUpdate(t, strings.TrimSuffix(firstEndpoint, "/v1/rpc"), 9000, 42); binding.ServiceID != serviceID || binding.RunID != firstRunID || binding.Generation != firstGeneration {
@@ -252,7 +234,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	}
 	assertServedStandingSchedulesRetired(t, firstSchedules, backend, "suspend")
 	requireStandingTelegramUnavailable(t, strings.TrimSuffix(firstEndpoint, "/v1/rpc"), 9001)
-	assertServedStandingState(t, db, string(backend), serviceID, firstRunID, firstGeneration, "suspended", "paused")
+	assertServedStandingState(t, observation, string(backend), serviceID, firstRunID, firstGeneration, "suspended", "paused")
 	if code := first.stop(); code != 0 {
 		t.Fatalf("%s first standing serve exit = %d", backend, code)
 	}
@@ -278,7 +260,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 		return second.outputString() + "\n" + servedInspectionRunDebugSummary(reader, firstRunID)
 	})
 	telegramGate.waitForStart(t, resetRouteStarted, backend, "reset")
-	assertServedStandingState(t, db, string(backend), serviceID, firstRunID, firstGeneration, "active", "running")
+	assertServedStandingState(t, observation, string(backend), serviceID, firstRunID, firstGeneration, "active", "running")
 
 	resetKey := "standing-reset-" + string(backend)
 	resetOutcome := startServedStandingOperation(secondEndpoint, "standing.reset", serviceID, resetKey)
@@ -312,16 +294,16 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	if err := freshUse.Done(); err != nil {
 		t.Fatalf("%s settle reset successor ingress: %v", backend, err)
 	}
-	assertServedStandingState(t, db, string(backend), serviceID, reset.RunID, reset.Generation, "active", "running")
+	assertServedStandingState(t, observation, string(backend), serviceID, reset.RunID, reset.Generation, "active", "running")
 	debugRun := func(runID string) func() string {
 		return func() string { return servedInspectionRunDebugSummary(reader, runID) }
 	}
 	requireServedParitySettlementPostconditionsWithDebug(t, secondEndpoint, reader, string(backend), firstRunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle), debugRun(firstRunID))
 	requireServedParitySettlementPostconditionsWithDebug(t, secondEndpoint, reader, string(backend), reset.RunID, servedparity.MustScenario(servedparity.ScenarioStandingServiceResetLifecycle), debugRun(reset.RunID))
-	assertServedStandingResetAndShutdownJoin(t, backend, second, secondManager, secondEndpoint, db, reset, freshOwner)
+	assertServedStandingResetAndShutdownJoin(t, backend, second, secondManager, secondEndpoint, observation, reset, freshOwner)
 }
 
-func assertServedStandingResetAndShutdownJoin(t *testing.T, backend servedparity.Backend, process *serveRuntimeTestProcess, manager *runtimepkg.RuntimeContextManager, endpoint string, db *sql.DB, current servedStandingOperationResult, predecessor worklifetime.Occurrence) {
+func assertServedStandingResetAndShutdownJoin(t *testing.T, backend servedparity.Backend, process *serveRuntimeTestProcess, manager *runtimepkg.RuntimeContextManager, endpoint string, observation storetest.ReleaseProcessReadOnlyInspection, current servedStandingOperationResult, predecessor worklifetime.Occurrence) {
 	t.Helper()
 	origin, err := runtimerunlifecycle.StandingGenerationRunOrigin(current.ServiceID, current.Generation)
 	if err != nil {
@@ -347,7 +329,7 @@ func assertServedStandingResetAndShutdownJoin(t *testing.T, backend servedparity
 		t.Fatalf("process reset passed unsettled standing mutation: %+v", outcome)
 	default:
 	}
-	assertServedStandingState(t, db, string(backend), current.ServiceID, current.RunID, current.Generation, "active", "running")
+	assertServedStandingState(t, observation, string(backend), current.ServiceID, current.RunID, current.Generation, "active", "running")
 	if err := held.Done(); err != nil {
 		t.Fatal(err)
 	}
@@ -363,11 +345,11 @@ func assertServedStandingResetAndShutdownJoin(t *testing.T, backend servedparity
 	case <-time.After(15 * time.Second):
 		t.Fatal("process reset failed to settle after exact standing child joined")
 	}
-	serviceID, runID, generation := loadServedStandingOwner(t, db, string(backend))
+	serviceID, runID, generation := loadServedStandingOwner(t, observation, string(backend))
 	if serviceID != current.ServiceID || generation != 1 {
 		t.Fatalf("fresh epoch did not reconstruct the declared generation: %s/%s/%d", serviceID, runID, generation)
 	}
-	assertServedStandingState(t, db, string(backend), serviceID, runID, generation, "active", "running")
+	assertServedStandingState(t, observation, string(backend), serviceID, runID, generation, "active", "running")
 	use, lookup, err := manager.AcquireIngress(context.Background(), "chat", "telegram")
 	if err != nil || use == nil || !lookup.Found {
 		t.Fatalf("reconstructed standing ingress unavailable: lookup=%+v err=%v", lookup, err)
@@ -379,14 +361,14 @@ func assertServedStandingResetAndShutdownJoin(t *testing.T, backend servedparity
 	if !found || owner == nil || owner == predecessor {
 		t.Fatal("process reset reused the retired standing child")
 	}
-	assertServedStandingInvalidChildCommands(t, backend, manager, endpoint, db, serviceID)
+	assertServedStandingInvalidChildCommands(t, backend, manager, endpoint, observation, serviceID)
 	resetAgain := requestServedJSONRPCWithTimeout(t, endpoint, "runtime.nuke", map[string]any{
 		"include_source_artifacts": false, "idempotency_key": "process-reset-after-invalid-compositions-" + string(backend),
 	}, 15*time.Second)
 	if resetAgain.Error != nil {
 		t.Fatalf("fresh reset after invalid composition proof: %+v", resetAgain.Error)
 	}
-	serviceID, runID, generation = loadServedStandingOwner(t, db, string(backend))
+	serviceID, runID, generation = loadServedStandingOwner(t, observation, string(backend))
 	use, lookup, err = manager.AcquireIngress(context.Background(), "chat", "telegram")
 	if err != nil || use == nil || !lookup.Loaded() {
 		t.Fatalf("second fresh reconstruction unavailable: lookup=%+v err=%v", lookup, err)
@@ -429,7 +411,7 @@ func assertServedStandingResetAndShutdownJoin(t *testing.T, backend servedparity
 	}
 }
 
-func assertServedStandingInvalidChildCommands(t *testing.T, backend servedparity.Backend, manager *runtimepkg.RuntimeContextManager, endpoint string, db *sql.DB, serviceID string) {
+func assertServedStandingInvalidChildCommands(t *testing.T, backend servedparity.Backend, manager *runtimepkg.RuntimeContextManager, endpoint string, observation storetest.ReleaseProcessReadOnlyInspection, serviceID string) {
 	t.Helper()
 	use, target, err := manager.AcquireStandingService(context.Background(), serviceID)
 	if err != nil || use == nil {
@@ -458,7 +440,7 @@ func assertServedStandingInvalidChildCommands(t *testing.T, backend servedparity
 			if result.Error == nil {
 				t.Fatalf("public %s accepted %s child composition: %+v", command, product, result.Result)
 			}
-			assertServedStandingState(t, db, string(backend), serviceID, expected.RunID, expected.Generation, effective, state)
+			assertServedStandingState(t, observation, string(backend), serviceID, expected.RunID, expected.Generation, effective, state)
 		}
 	}
 	transition, err := manager.BeginStandingServiceOperation(ctx, expected, true)
@@ -819,39 +801,49 @@ func configureStandingLifecycleCredentials(t *testing.T) {
 	}
 }
 
-func loadServedStandingOwner(t *testing.T, db *sql.DB, backend string) (serviceID, runID string, generation int64) {
+func loadServedStandingOwner(t *testing.T, observation storetest.ReleaseProcessReadOnlyInspection, backend string) (serviceID, runID string, generation int64) {
 	t.Helper()
-	query := `SELECT service_id, current_run_id, current_generation FROM standing_services ORDER BY service_id LIMIT 1`
-	if backend == "postgres" || backend == string(servedparity.BackendExplicitPostgres) {
-		query = `SELECT service_id::text, current_run_id::text, current_generation FROM standing_services ORDER BY service_id LIMIT 1`
-	}
-	if err := db.QueryRowContext(context.Background(), query).Scan(&serviceID, &runID, &generation); err != nil {
+	var out storetest.StandingFlowStorage
+	err := observation.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		out, err = storetest.ReadFirstStandingServiceStorage(ctx, observation)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s load standing owner: %v", backend, err)
 	}
-	return serviceID, runID, generation
+	return out.ServiceID, out.RunID, out.Generation
 }
 
-func assertServedStandingState(t *testing.T, db *sql.DB, backend, serviceID, runID string, generation int64, effectiveState, runStatus string) {
+func assertServedStandingState(t *testing.T, observation storetest.ReleaseProcessReadOnlyInspection, backend, serviceID, runID string, generation int64, effectiveState, runStatus string) {
 	t.Helper()
-	query := `
-		SELECT ss.current_run_id, ss.current_generation, ss.effective_state, r.status
-		FROM standing_services ss JOIN runs r ON r.run_id = ss.current_run_id
-		WHERE ss.service_id = ?`
-	args := []any{serviceID}
-	if backend == "postgres" || backend == string(servedparity.BackendExplicitPostgres) {
-		query = `
-			SELECT ss.current_run_id::text, ss.current_generation, ss.effective_state, r.status
-			FROM standing_services ss JOIN runs r ON r.run_id = ss.current_run_id
-			WHERE ss.service_id = $1::uuid`
-	}
-	var gotRunID, gotState, gotRunStatus string
-	var gotGeneration int64
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&gotRunID, &gotGeneration, &gotState, &gotRunStatus); err != nil {
+	var out storetest.StandingServiceRunStorage
+	err := observation.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		out, err = storetest.ReadStandingServiceRunStorage(ctx, observation, serviceID)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s load standing state: %v", backend, err)
 	}
+	gotRunID, gotGeneration, gotState, gotRunStatus := out.RunID, out.Generation, out.State, out.RunStatus
 	if gotRunID != runID || gotGeneration != generation || gotState != effectiveState || gotRunStatus != runStatus {
 		t.Fatalf("%s standing state = run:%s generation:%d state:%s run_status:%s", backend, gotRunID, gotGeneration, gotState, gotRunStatus)
 	}
+}
+
+func openServedStandingInspection(t testing.TB, backend, location string) storetest.ReleaseProcessReadOnlyInspection {
+	t.Helper()
+	reader, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
+	if err != nil {
+		t.Fatalf("open %s standing inspection: %v", backend, err)
+	}
+	t.Cleanup(func() {
+		if err := reader.Close(); err != nil {
+			t.Errorf("close %s standing inspection: %v", backend, err)
+		}
+	})
+	return reader
 }
 
 func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplies(t *testing.T) {
@@ -945,65 +937,71 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		t.Fatalf("second serve exit = %d", code)
 	}
 
-	sqliteStore, err := store.NewSQLiteRuntimeStore(sqlitePath)
-	if err != nil {
-		t.Fatalf("open SQLite runtime store: %v", err)
-	}
-	defer func() {
-		if sqliteStore != nil {
-			_ = sqliteStore.Close()
-		}
-	}()
+	inspection := openServedStandingInspection(t, "sqlite", sqlitePath)
 	var runs, instances, entities int
 	var standingRunID string
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
-		SELECT current_run_id
-		FROM standing_services
-		WHERE flow_path = 'telegram-ingress'
-		  AND declaration_present = TRUE
-		  AND effective_state = 'active'
-	`).Scan(&standingRunID); err != nil || standingRunID != firstBinding.RunID {
+	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		standingRunID, err = storetest.ReadActiveDeclaredStandingFlowRunStorage(ctx, inspection, "telegram-ingress")
+		return err
+	}); err != nil || standingRunID != firstBinding.RunID {
 		t.Fatalf("resolve standing run authority: %v", err)
 	}
-	_, receiver := requireSingleReceiverTargetState(t, requireReceiverProofStateReader(t, sqliteStore), standingRunID, "telegram-ingress")
+	_, receiver := requireSingleReceiverTargetState(t, requireReceiverProofStateReader(t, inspection), standingRunID, "telegram-ingress")
 	standingEntityID := receiver.EntityID
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
-		SELECT COUNT(*)
-		FROM standing_services
-		WHERE flow_path = 'telegram-ingress'
-	`).Scan(&runs); err != nil {
+	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		runs, err = storetest.CountStandingFlowAuthoritiesStorage(ctx, inspection, "telegram-ingress")
+		return err
+	}); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
 	}
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-ingress'`).Scan(&instances); err != nil {
+	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		instances, err = storetest.CountTemplateInstances(ctx, inspection, "telegram-ingress")
+		return err
+	}); err != nil {
 		t.Fatalf("count standing instances: %v", err)
 	}
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM entity_state WHERE entity_id = ?`, standingEntityID).Scan(&entities); err != nil {
+	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		entities, err = storetest.CountStandingEntityStorage(ctx, inspection, standingEntityID)
+		return err
+	}); err != nil {
 		t.Fatalf("count standing entities: %v", err)
 	}
 	if runs != 1 || instances != 1 || entities != 1 {
 		t.Fatalf("standing authority counts = runs:%d instances:%d entities:%d, want 1/1/1", runs, instances, entities)
 	}
 	var chatInstances, normalizedEvents, wrongNormalizedRuns int
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&chatInstances); err != nil {
+	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		chatInstances, err = storetest.CountTemplateInstances(ctx, inspection, "telegram-chat")
+		return err
+	}); err != nil {
 		t.Fatalf("count per-chat instances: %v", err)
 	}
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`
-		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = ? THEN 0 ELSE 1 END), 0)
-		FROM events WHERE event_name = 'inbound.telegram.text_message'
-	`, standingRunID).Scan(&normalizedEvents, &wrongNormalizedRuns); err != nil {
+	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		out, err := storetest.ReadStandingTelegramLineageStorage(ctx, inspection, standingRunID)
+		normalizedEvents, wrongNormalizedRuns = out.Events, out.WrongRun
+		return err
+	}); err != nil {
 		t.Fatalf("inspect normalized event lineage: %v", err)
 	}
 	if chatInstances != 2 || normalizedEvents != 3 || wrongNormalizedRuns != 0 {
 		t.Fatalf("normalized routing = chat_instances:%d events:%d wrong_run:%d, want 2/3/0", chatInstances, normalizedEvents, wrongNormalizedRuns)
 	}
 	var pendingCards int
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = ? AND status = 'pending' AND json_extract(snapshot, '$.decision') = 'retire_service'`, standingEntityID).Scan(&pendingCards); err != nil || pendingCards != 1 {
+	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		pendingCards, err = storetest.CountPendingStandingRetirementCardsStorage(ctx, inspection, standingEntityID)
+		return err
+	}); err != nil || pendingCards != 1 {
 		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
 	}
-	if err := sqliteStore.Close(); err != nil {
+	if err := inspection.Close(); err != nil {
 		t.Fatalf("close SQLite inspection store before restart matrix: %v", err)
 	}
-	sqliteStore = nil
 	disableServeRuntimeRecovery(t, opts.ConfigPath)
 	requireChangedStandingColdStartMatrix(t, opts, sourceRoot, standingRunID, nil)
 }
@@ -1101,17 +1099,14 @@ func TestStandingIngressUnsupportedAliasFailsBeforeServeReadiness(t *testing.T) 
 
 func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndReplies(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	dsn, _, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	runtimePG, err := store.NewPostgresStore(dsn)
-	if err != nil {
-		t.Fatalf("NewPostgresStore: %v", err)
-	}
+	dsn := testutil.StartPostgresDSN(t)
 	oldBuildStores := buildStoresForServe
 	oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
-	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+		if selection.Backend != storebackend.BackendPostgres {
+			return nil, fmt.Errorf("PostgreSQL restart proof requires explicit PostgreSQL selection, got %s", selection.Backend)
+		}
+		return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
 	}
 	cliapp.ConfiguredWorkspaceLifecycleForServe = func(*config.Config, *sourceartifact.RuntimeProjection, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
@@ -1143,7 +1138,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	}
 	opts := cliapp.ServeOptions{
 		ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode: "postgres", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, Verbose: true,
 		TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
@@ -1159,10 +1154,6 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	if code := first.stop(); code != 0 {
 		t.Fatalf("first serve exit = %d", code)
 	}
-	runtimePG, err = store.NewPostgresStore(dsn)
-	if err != nil {
-		t.Fatalf("reopen PostgresStore: %v", err)
-	}
 	enableServeRuntimeRecovery(t, opts.ConfigPath)
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
@@ -1176,72 +1167,73 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		t.Fatalf("second serve exit = %d", code)
 	}
 
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		t.Fatalf("open Postgres: %v", err)
-	}
-	defer db.Close()
+	inspection := openServedStandingInspection(t, "postgres", dsn)
 	var runs, instances, entities int
 	var standingRunID string
-	if err := db.QueryRow(`
-		SELECT current_run_id::text
-		FROM standing_services
-		WHERE flow_path = 'telegram-ingress'
-		  AND declaration_present = TRUE
-		  AND effective_state = 'active'
-	`).Scan(&standingRunID); err != nil || standingRunID != binding.RunID {
+	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		standingRunID, err = storetest.ReadActiveDeclaredStandingFlowRunStorage(ctx, inspection, "telegram-ingress")
+		return err
+	}); err != nil || standingRunID != binding.RunID {
 		t.Fatalf("resolve standing run authority: %v", err)
 	}
-	observer, err := storetest.OpenReleaseProcessReadOnlyInspection("postgres", dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, receiver := requireSingleReceiverTargetState(t, requireReceiverProofStateReader(t, observer), standingRunID, "telegram-ingress")
-	if err := observer.Close(); err != nil {
-		t.Fatal(err)
-	}
+	_, receiver := requireSingleReceiverTargetState(t, requireReceiverProofStateReader(t, inspection), standingRunID, "telegram-ingress")
 	entity := receiver.EntityID
-	if err := db.QueryRow(`
-		SELECT COUNT(*)
-		FROM standing_services
-		WHERE flow_path = 'telegram-ingress'
-	`).Scan(&runs); err != nil {
+	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		runs, err = storetest.CountStandingFlowAuthoritiesStorage(ctx, inspection, "telegram-ingress")
+		return err
+	}); err != nil {
 		t.Fatalf("count standing run authorities: %v", err)
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-ingress'`).Scan(&instances); err != nil {
+	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		instances, err = storetest.CountTemplateInstances(ctx, inspection, "telegram-ingress")
+		return err
+	}); err != nil {
 		t.Fatalf("count standing instances: %v", err)
 	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE entity_id = $1::uuid`, entity).Scan(&entities); err != nil {
+	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		entities, err = storetest.CountStandingEntityStorage(ctx, inspection, entity)
+		return err
+	}); err != nil {
 		t.Fatalf("count standing entities: %v", err)
 	}
 	if runs != 1 || instances != 1 || entities != 1 {
 		t.Fatalf("standing authority counts = runs:%d instances:%d entities:%d, want 1/1/1", runs, instances, entities)
 	}
 	var chatInstances, normalizedEvents, wrongNormalizedRuns int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'`).Scan(&chatInstances); err != nil {
+	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		chatInstances, err = storetest.CountTemplateInstances(ctx, inspection, "telegram-chat")
+		return err
+	}); err != nil {
 		t.Fatalf("count per-chat instances: %v", err)
 	}
-	if err := db.QueryRow(`
-		SELECT COUNT(*), COALESCE(SUM(CASE WHEN run_id = $1::uuid THEN 0 ELSE 1 END), 0)
-		FROM events WHERE event_name = 'inbound.telegram.text_message'
-	`, standingRunID).Scan(&normalizedEvents, &wrongNormalizedRuns); err != nil {
+	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		out, err := storetest.ReadStandingTelegramLineageStorage(ctx, inspection, standingRunID)
+		normalizedEvents, wrongNormalizedRuns = out.Events, out.WrongRun
+		return err
+	}); err != nil {
 		t.Fatalf("inspect normalized event lineage: %v", err)
 	}
 	if chatInstances != 2 || normalizedEvents != 3 || wrongNormalizedRuns != 0 {
 		t.Fatalf("normalized routing = chat_instances:%d events:%d wrong_run:%d, want 2/3/0", chatInstances, normalizedEvents, wrongNormalizedRuns)
 	}
 	var pendingCards int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND anchor->>'entity_id' = $1 AND status = 'pending' AND snapshot->>'decision' = 'retire_service'`, entity).Scan(&pendingCards); err != nil || pendingCards != 1 {
+	if err := inspection.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		pendingCards, err = storetest.CountPendingStandingRetirementCardsStorage(ctx, inspection, entity)
+		return err
+	}); err != nil || pendingCards != 1 {
 		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
 	}
 	disableServeRuntimeRecovery(t, opts.ConfigPath)
-	requireChangedStandingColdStartMatrix(t, opts, sourceRoot, standingRunID, func(t *testing.T) {
-		var reopenErr error
-		runtimePG, reopenErr = store.NewPostgresStore(dsn)
-		if reopenErr != nil {
-			t.Fatalf("reopen PostgresStore for changed-bundle probe: %v", reopenErr)
-		}
-	})
+	if err := inspection.Close(); err != nil {
+		t.Fatalf("close Postgres inspection store before restart matrix: %v", err)
+	}
+	requireChangedStandingColdStartMatrix(t, opts, sourceRoot, standingRunID, nil)
 }
 
 func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
@@ -1262,13 +1254,13 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			t.Cleanup(telegram.Close)
 			sourceRoot := writeMixedStandingTelegramServeFixture(t, telegram.URL)
 			configureStandingLifecycleCredentials(t)
-			var (
-				db            *sql.DB
-				postgresStore *store.PostgresStore
-				sqliteStore   *store.SQLiteRuntimeStore
-			)
+			var terminalOwner runtimerunlifecycle.OperationOwner
 			captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
-				db, postgresStore, sqliteStore = selectedRuntimeStoreForTest(t, persistence)
+				var ok bool
+				terminalOwner, ok = persistence.deps.EventStore.(runtimerunlifecycle.OperationOwner)
+				if !ok {
+					t.Fatalf("%s missing native standing terminalization owner", backend)
+				}
 			})
 			runtimes := make(chan *runtimepkg.Runtime, 2)
 			opts := cliapp.ServeOptions{SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(), TestRuntimeReadyHook: func(rt *runtimepkg.Runtime) {
@@ -1281,8 +1273,7 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 				opts.StoreMode = "sqlite"
 				selectedStore = sqlitePath
 			} else {
-				dsn, _, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
+				dsn := testutil.StartPostgresDSN(t)
 				oldBuildStores := buildStoresForServe
 				oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
 				buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
@@ -1303,9 +1294,10 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			first := startServeRuntimeTestProcess(t, opts)
 			first.waitForReadyLine()
 			firstRuntime := waitForStandingRuntime(t, runtimes, backend, "first boot")
-			if db == nil {
-				t.Fatalf("%s mixed standing database was not captured", backend)
+			if terminalOwner == nil {
+				t.Fatalf("%s mixed standing native owner was not captured", backend)
 			}
+			observation := openServedStandingInspection(t, backend, strings.TrimPrefix(selectedStore, "postgres:"))
 			anchorReader := openChannelAnchorStorageAtLocation(t, backend, strings.TrimPrefix(selectedStore, "postgres:"))
 			healthyService, healthyRun, healthyGeneration := loadServedStandingOwnerByFlow(t, anchorReader, backend, "telegram-ingress")
 			terminalService, terminalRun, terminalGeneration := loadServedStandingOwnerByFlow(t, anchorReader, backend, "telegram-stopped")
@@ -1315,8 +1307,8 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			}
 			requireStandingTelegramCalls(t, calls, selectedStore, 42)
 			waitForStandingDeliveryQuiescence(t, selectedStore)
-			terminalizeStandingRunFromRuntime(t, firstRuntime, postgresStore, sqliteStore, terminalRun)
-			assertServedStandingState(t, db, backend, terminalService, terminalRun, terminalGeneration, "active", "cancelled")
+			terminalizeStandingRunFromRuntime(t, firstRuntime, terminalOwner, terminalRun)
+			assertServedStandingState(t, observation, backend, terminalService, terminalRun, terminalGeneration, "active", "cancelled")
 			if code := first.stop(); code != 0 {
 				t.Fatalf("%s first mixed standing serve exit = %d", backend, code)
 			}
@@ -1337,8 +1329,8 @@ func TestStandingRestartMixedHealthyAndTerminalProcessParity(t *testing.T) {
 			requireStandingTelegramCalls(t, calls, selectedStore, 84)
 			waitForStandingDeliveryQuiescence(t, selectedStore)
 			assertNoStandingTelegramCall(t, calls, backend)
-			assertServedStandingState(t, db, backend, healthyService, healthyRun, healthyGeneration, "active", "running")
-			assertServedStandingState(t, db, backend, terminalService, terminalRun, terminalGeneration, "active", "cancelled")
+			assertServedStandingState(t, observation, backend, healthyService, healthyRun, healthyGeneration, "active", "running")
+			assertServedStandingState(t, observation, backend, terminalService, terminalRun, terminalGeneration, "active", "cancelled")
 			if code := second.stop(); code != 0 {
 				t.Fatalf("%s second mixed standing serve exit = %d", backend, code)
 			}
@@ -1357,7 +1349,7 @@ func waitForStandingRuntime(t testing.TB, runtimes <-chan *runtimepkg.Runtime, b
 	}
 }
 
-func terminalizeStandingRunFromRuntime(t testing.TB, rt *runtimepkg.Runtime, postgresStore *store.PostgresStore, sqliteStore *store.SQLiteRuntimeStore, runID string) {
+func terminalizeStandingRunFromRuntime(t testing.TB, rt *runtimepkg.Runtime, owner runtimerunlifecycle.OperationOwner, runID string) {
 	t.Helper()
 	if rt == nil || rt.WorkOccurrence() == nil {
 		t.Fatal("standing terminalization requires the live runtime occurrence")
@@ -1374,14 +1366,10 @@ func terminalizeStandingRunFromRuntime(t testing.TB, rt *runtimepkg.Runtime, pos
 	request := runtimerunlifecycle.TerminalRequest{
 		RunID: runID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
 	}
-	var err error
-	if postgresStore != nil {
-		_, _, err = postgresStore.MarkTerminalRun(ctx, request)
-	} else if sqliteStore != nil {
-		_, _, err = sqliteStore.MarkTerminalRun(ctx, request)
-	} else {
+	if owner == nil {
 		t.Fatal("standing terminalization requires a selected-store lifecycle owner")
 	}
+	_, _, err := owner.MarkTerminalRun(ctx, request)
 	if err != nil {
 		t.Fatalf("terminalize standing run %s: %v", runID, err)
 	}
@@ -1648,11 +1636,11 @@ func waitForStandingDeliveryQuiescence(t testing.TB, selectedStore string) {
 	if strings.HasPrefix(selectedStore, "postgres:") {
 		driver, dsn = "postgres", strings.TrimPrefix(selectedStore, "postgres:")
 	}
-	db, err := sql.Open(driver, dsn)
+	observation, err := storetest.OpenReleaseProcessReadOnlyInspection(driver, dsn)
 	if err != nil {
 		t.Fatalf("open %s delivery observation: %v", driver, err)
 	}
-	defer db.Close()
+	defer observation.Close()
 
 	deadline := time.NewTimer(30 * time.Second)
 	defer deadline.Stop()
@@ -1660,10 +1648,11 @@ func waitForStandingDeliveryQuiescence(t testing.TB, selectedStore string) {
 	defer ticker.Stop()
 	for {
 		var unfinished int
-		err := db.QueryRow(`
-			SELECT COUNT(*)
-			FROM event_deliveries
-			WHERE status IN ('pending', 'failed', 'in_progress')`).Scan(&unfinished)
+		err := observation.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+			var err error
+			unfinished, err = storetest.CountUnsettledStandingDeliveriesStorage(ctx, observation)
+			return err
+		})
 		if err == nil && unfinished == 0 {
 			return
 		}

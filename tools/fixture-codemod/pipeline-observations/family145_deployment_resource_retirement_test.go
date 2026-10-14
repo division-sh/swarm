@@ -179,6 +179,11 @@ func TestFamily145DeploymentResourceOwnerAdditionsPreserveCompleteSignedPreBatch
 }
 
 func deploymentResourceOwnerAdditionMatches(pin deploymentResourceOwnerAddition, current, previous []byte) error {
+	var err error
+	current, err = earlierStandingIngressOwnerFile("../../..", pin.file, current)
+	if err != nil {
+		return err
+	}
 	if fmt.Sprintf("%x", sha256.Sum256(current)) != pin.digest {
 		return fmt.Errorf("deployment-resource whole owner changed: %s", pin.file)
 	}

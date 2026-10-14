@@ -213,7 +213,7 @@ func seedIssue2394StopIntents(t *testing.T, rt servedControlProofRuntime, runID,
 	t.Helper()
 	// Pausing through the real owner prevents the worker from executing these
 	// fixture rows; cancellation itself still crosses the production HTTP path.
-	requireServedRunControlState(t, rt.DB, rt.Backend, runID, "paused", "paused")
+	requireServedRunControlState(t, rt.ReceiverStateReader, rt.Backend, runID, "paused", "paused")
 	var prefixes []string
 	for i := 0; i < 4; i++ {
 		published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{

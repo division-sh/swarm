@@ -45,7 +45,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "5a2c11510342b8dbc925f08e39c177d65b74d172902df172cb99b461a407605b"
+const targetDigest = "4f5a3432ec038c4730448484f0cf4a7feeec68828103f92745867ea6ac9b4aff"
 
 var sourceForkComparison = map[string]string{}
 var runDeliveryComparison = map[string]string{}
@@ -297,6 +297,10 @@ var files = []string{
 }
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "-standing-ingress-capture" {
+		captureStandingIngress()
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "-deployment-resource-capture" {
 		captureDeploymentResource()
 		return
@@ -377,6 +381,7 @@ func main() {
 	rows, changes = composeReadbackHistory(rows, changes)
 	rows, changes = composeEntityToolHistory(rows, changes)
 	rows, changes = composeDeploymentResourceHistory(rows, changes)
+	rows, changes = composeStandingIngressHistory(rows, changes)
 	raw, err := json.Marshal(changes)
 	must(err)
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))

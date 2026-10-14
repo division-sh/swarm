@@ -2555,7 +2555,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	cancelInitial()
 	pauseKey := keyPrefix + "-run-pause"
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": pauseKey})
-	requireServedRunControlState(t, rt.DB, rt.Backend, runID, "paused", "paused")
+	requireServedRunControlState(t, rt.ReceiverStateReader, rt.Backend, runID, "paused", "paused")
 	requireServedRunStatus(t, rt.Endpoint, runID, "paused")
 	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.pause", pauseKey, 1)
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": pauseKey})
@@ -2593,7 +2593,7 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	requireNoServedDeliveryStatusDuring(t, rt.ReceiverStateReader, rt.Backend, queued.EventID, "node", "item-observer", "delivered", 250*time.Millisecond)
 	continueKey := keyPrefix + "-run-continue"
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": runID, "idempotency_key": continueKey})
-	requireServedRunControlState(t, rt.DB, rt.Backend, runID, "running", "running", "completed")
+	requireServedRunControlState(t, rt.ReceiverStateReader, rt.Backend, runID, "running", "running", "completed")
 	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.continue", continueKey, 1)
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": runID, "idempotency_key": continueKey})
 	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.continue", continueKey, 1)
@@ -2604,8 +2604,8 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	stopRunID, pendingEventID, stopEntityID, stopCardID := seedServedRunControlPendingRunWithAgentDelivery(t, rt)
 	stopKey := "issue-1864-" + rt.Backend + "-" + stopRunID + "-run-stop"
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{"run_id": stopRunID, "idempotency_key": stopKey})
-	requireServedRunControlState(t, rt.DB, rt.Backend, stopRunID, "stopped", "cancelled")
-	requireServedStoppedPendingDelivery(t, rt.DB, rt.ReceiverStateReader, rt.Backend, pendingEventID, "agent-pending")
+	requireServedRunControlState(t, rt.ReceiverStateReader, rt.Backend, stopRunID, "stopped", "cancelled")
+	requireServedStoppedPendingDelivery(t, rt.ReceiverStateReader, rt.Backend, pendingEventID, "agent-pending")
 	requireServedTerminalDecisionCardStateChangeOnly(t, rt, stopRunID, stopEntityID, stopCardID)
 	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.stop", stopKey, 1)
 	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{"run_id": stopRunID, "idempotency_key": stopKey})
@@ -2620,7 +2620,7 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 	keyPrefix := "issue-1864-" + rt.Backend + "-" + uuid.NewString()
 	pauseKey := keyPrefix + "-runtime-pause"
 	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{"idempotency_key": pauseKey})
-	requireServedRuntimeIngressState(t, rt.DB, rt.Backend, "paused", "platform.paused")
+	requireServedRuntimeIngressState(t, rt.ReceiverStateReader, rt.Backend, "paused", "platform.paused")
 	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.pause", pauseKey, 1)
 	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{"idempotency_key": pauseKey})
 	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.pause", pauseKey, 1)
@@ -2636,7 +2636,7 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 	requireNoServedReceiptOutcomeDuring(t, rt.ReceiverStateReader, rt.Backend, queued.EventID, "platform", "pipeline", "success", 250*time.Millisecond)
 	resumeKey := keyPrefix + "-runtime-resume"
 	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{"idempotency_key": resumeKey})
-	requireServedRuntimeIngressState(t, rt.DB, rt.Backend, "running", "platform.resumed")
+	requireServedRuntimeIngressState(t, rt.ReceiverStateReader, rt.Backend, "running", "platform.resumed")
 	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.resume", resumeKey, 1)
 	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{"idempotency_key": resumeKey})
 	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.resume", resumeKey, 1)
@@ -4100,7 +4100,7 @@ func requireServedControlAPIIdempotencyRows(t *testing.T, reader receiverProofSt
 	}
 }
 
-func requireServedRunControlState(t *testing.T, db *sql.DB, backend, runID, wantControlStatus string, allowedRunStatuses ...string) {
+func requireServedRunControlState(t *testing.T, reader receiverProofStateReader, backend, runID, wantControlStatus string, allowedRunStatuses ...string) {
 	t.Helper()
 	allowed := map[string]bool{}
 	for _, status := range allowedRunStatuses {
@@ -4112,7 +4112,7 @@ func requireServedRunControlState(t *testing.T, db *sql.DB, backend, runID, want
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var lastRunStatus, lastControlStatus, lastReason, lastControlledBy string
 	for time.Now().Before(deadline) {
-		runStatus, controlStatus, reason, controlledBy := servedRunControlState(t, db, backend, runID)
+		runStatus, controlStatus, reason, controlledBy := servedRunControlState(t, reader, backend, runID)
 		lastRunStatus, lastControlStatus, lastReason, lastControlledBy = runStatus, controlStatus, reason, controlledBy
 		if controlStatus == wantControlStatus && allowed[runStatus] {
 			return
@@ -4123,33 +4123,23 @@ func requireServedRunControlState(t *testing.T, db *sql.DB, backend, runID, want
 		backend, runID, lastRunStatus, lastControlStatus, lastReason, lastControlledBy, wantControlStatus, allowedRunStatuses)
 }
 
-func servedRunControlState(t *testing.T, db *sql.DB, backend, runID string) (runStatus, controlStatus, reason, controlledBy string) {
+func servedRunControlState(t *testing.T, reader receiverProofStateReader, backend, runID string) (runStatus, controlStatus, reason, controlledBy string) {
 	t.Helper()
-	var query string
-	var args []any
 	switch backend {
-	case "postgres":
-		query = `
-			SELECT r.status, COALESCE(rc.control_status, ''), COALESCE(rc.reason, ''), COALESCE(rc.controlled_by, '')
-			FROM runs r
-			LEFT JOIN run_control_state rc ON rc.run_id = r.run_id
-			WHERE r.run_id = $1::uuid
-		`
-		args = []any{runID}
-	case "sqlite":
-		query = `
-			SELECT r.status, COALESCE(rc.control_status, ''), COALESCE(rc.reason, ''), COALESCE(rc.controlled_by, '')
-			FROM runs r
-			LEFT JOIN run_control_state rc ON rc.run_id = r.run_id
-			WHERE r.run_id = ?
-		`
-		args = []any{runID}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&runStatus, &controlStatus, &reason, &controlledBy); err != nil {
+	var out storetest.ServedRunControlStorage
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		out, err = storetest.ReadServedRunControlStorage(ctx, reader, runID)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s load run control state for %s: %v", backend, runID, err)
 	}
+	runStatus, controlStatus, reason, controlledBy = out.RunStatus, out.ControlStatus, out.Reason, out.ControlledBy
 	return strings.TrimSpace(runStatus), strings.TrimSpace(controlStatus), strings.TrimSpace(reason), strings.TrimSpace(controlledBy)
 }
 
@@ -4389,12 +4379,12 @@ func servedEventNameCountForRun(t *testing.T, reader receiverProofStateReader, b
 	return count
 }
 
-func requireServedStoppedPendingDelivery(t *testing.T, db *sql.DB, reader receiverProofStateReader, backend, eventID, subscriberID string) {
+func requireServedStoppedPendingDelivery(t *testing.T, reader receiverProofStateReader, backend, eventID, subscriberID string) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var lastStatus, lastReason string
 	for time.Now().Before(deadline) {
-		status, reason := servedDeliveryStatusReason(t, db, backend, eventID, "agent", subscriberID)
+		status, reason := servedDeliveryStatusReason(t, reader, backend, eventID, "agent", subscriberID)
 		lastStatus, lastReason = status, reason
 		if status == "dead_letter" && reason == "run_stopped" {
 			waitServedDeliveryOutcomeCount(t, reader, backend, eventID, "agent", subscriberID, "terminalized", 1)
@@ -4406,31 +4396,23 @@ func requireServedStoppedPendingDelivery(t *testing.T, db *sql.DB, reader receiv
 	t.Fatalf("%s stopped pending delivery %s/%s = %s/%s, want dead_letter/run_stopped\n%s", backend, eventID, subscriberID, lastStatus, lastReason, servedEventPublishDebugSummaryForEvent(t, reader, backend, eventID))
 }
 
-func servedDeliveryStatusReason(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID string) (status, reason string) {
+func servedDeliveryStatusReason(t *testing.T, reader receiverProofStateReader, backend, eventID, subscriberType, subscriberID string) (status, reason string) {
 	t.Helper()
-	var query string
-	var args []any
 	switch backend {
-	case "postgres":
-		query = `
-			SELECT status, COALESCE(reason_code, '')
-			FROM event_deliveries
-			WHERE event_id = $1::uuid AND subscriber_type = $2 AND subscriber_id = $3
-		`
-		args = []any{eventID, subscriberType, subscriberID}
-	case "sqlite":
-		query = `
-			SELECT status, COALESCE(reason_code, '')
-			FROM event_deliveries
-			WHERE event_id = ? AND subscriber_type = ? AND subscriber_id = ?
-		`
-		args = []any{eventID, subscriberType, subscriberID}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&status, &reason); err != nil {
+	var out storetest.ServedDeliveryStatusReasonStorage
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		out, err = storetest.ReadServedDeliveryStatusReasonStorage(ctx, reader, eventID, subscriberType, subscriberID)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s load delivery status/reason for %s: %v", backend, eventID, err)
 	}
+	status, reason = out.Status, out.Reason
 	return strings.TrimSpace(status), strings.TrimSpace(reason)
 }
 
@@ -4457,15 +4439,15 @@ func requireNoServedReceiptOutcomeDuring(t *testing.T, reader servedEventCountRe
 	}
 }
 
-func requireServedRuntimeIngressState(t *testing.T, db *sql.DB, backend, wantStatus, wantTransitionEventName string) {
+func requireServedRuntimeIngressState(t *testing.T, reader receiverProofStateReader, backend, wantStatus, wantTransitionEventName string) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var lastStatus, lastEventID, lastEventName string
 	for time.Now().Before(deadline) {
-		status, eventID := servedRuntimeIngressState(t, db, backend)
+		status, eventID := servedRuntimeIngressState(t, reader, backend)
 		lastStatus, lastEventID = status, eventID
 		if eventID != "" {
-			lastEventName = servedEventNameByID(t, db, backend, eventID)
+			lastEventName = servedEventNameByID(t, reader, backend, eventID)
 		}
 		if status == wantStatus && (wantTransitionEventName == "" || lastEventName == wantTransitionEventName) {
 			return
@@ -4476,39 +4458,40 @@ func requireServedRuntimeIngressState(t *testing.T, db *sql.DB, backend, wantSta
 		backend, lastStatus, lastEventID, lastEventName, wantStatus, wantTransitionEventName)
 }
 
-func servedRuntimeIngressState(t *testing.T, db *sql.DB, backend string) (status, transitionEventID string) {
+func servedRuntimeIngressState(t *testing.T, reader receiverProofStateReader, backend string) (status, transitionEventID string) {
 	t.Helper()
-	var query string
 	switch backend {
-	case "postgres":
-		query = `SELECT status, COALESCE(transition_event_id::text, '') FROM runtime_ingress_state WHERE id = 1`
-	case "sqlite":
-		query = `SELECT status, COALESCE(transition_event_id, '') FROM runtime_ingress_state WHERE id = 1`
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	if err := db.QueryRowContext(context.Background(), query).Scan(&status, &transitionEventID); err != nil {
+	var out storetest.ServedIngressStorage
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		out, err = storetest.ReadServedIngressStorage(ctx, reader)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s load runtime ingress state: %v", backend, err)
 	}
+	status, transitionEventID = out.Status, out.TransitionEventID
 	return strings.TrimSpace(status), strings.TrimSpace(transitionEventID)
 }
 
-func servedEventNameByID(t *testing.T, db *sql.DB, backend, eventID string) string {
+func servedEventNameByID(t *testing.T, reader receiverProofStateReader, backend, eventID string) string {
 	t.Helper()
-	var query string
-	var args []any
 	switch backend {
-	case "postgres":
-		query = `SELECT event_name FROM events WHERE event_id = $1::uuid`
-		args = []any{eventID}
-	case "sqlite":
-		query = `SELECT event_name FROM events WHERE event_id = ?`
-		args = []any{eventID}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
 	var name string
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&name); err != nil {
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		name, err = storetest.ReadEventNameStorage(ctx, reader, eventID)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s load event name for %s: %v", backend, eventID, err)
 	}
 	return strings.TrimSpace(name)

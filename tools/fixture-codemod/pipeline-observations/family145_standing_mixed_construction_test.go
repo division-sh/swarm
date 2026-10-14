@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 func family145StandingMixedConstructionProofError(before, after string) error {
@@ -37,7 +39,11 @@ func family145StandingMixedConstructionProofError(before, after string) error {
 
 func TestFamily145StandingMixedConstructorPreservesBothRealLifecyclesAndTerminalSibling(t *testing.T) {
 	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
+	previous, err := selectedreadrole.EarlierStandingIngressHistory("../../..", family145TransitionBytes, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(previous, &rows); err != nil {
 		t.Fatal(err)
 	}
 	matched := 0

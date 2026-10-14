@@ -26,6 +26,10 @@ type SelectedSourceEntityFixture struct {
 	CreatedAt                            time.Time
 }
 
+func CountPhysicalSourceArtifactsStorageForTest(ctx context.Context, selected any) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, nil, sourceadmission.CountPhysicalSourceArtifactsStorageTx)
+}
+
 // Availability is intentionally distinct from artifact decoding. Historical
 // refusal fixtures must reach their original integrity gate without repair.
 func RequireSelectedSourceArtifactPresenceForTest(ctx context.Context, selected any, source correlation.SourceArtifactFact) error {

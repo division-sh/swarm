@@ -3,8 +3,6 @@ package serveapp
 import (
 	"bytes"
 	"context"
-	"database/sql"
-	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -18,6 +16,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestServedLifecycleEmitterDanglingAdmission(t *testing.T) {
@@ -99,20 +98,20 @@ func TestServedLifecycleEmitterPublicInputAdmissionNoMutation(t *testing.T) {
 			}{{"gate", "work.completed", "stages.review.gate.outcomes.approve.emit", "review", canonicalrouting.LifecycleGateLocal, map[string]any{"result": "approved"}}, {"loop", "loop.escaped", "loops.revision.escape.emit", "waiting", canonicalrouting.LifecycleLoopConnected, map[string]any{"revision_id": "not-a-runtime-revision"}}} {
 				t.Run(tc.name, func(t *testing.T) {
 					rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleEmitter(t, tc.variant))
-					before := lifecycleAdmissionDomainCounts(t, rt.DB)
+					before := lifecycleAdmissionDomainCounts(t, rt.ReceiverStateReader)
 					err := requireServedJSONRPCError(t, rt.Endpoint, "run.start", map[string]any{"bundle_hash": rt.BundleHash, "event_name": tc.event, "payload": tc.payload, "idempotency_key": "lifecycle-not-ingress"})
 					details, ok := err.Data["details"].(map[string]any)
 					if err.Data["code"] != apiv1.EventNotDeclaredCode || !ok || details["reason"] != "not_declared_root_input" || details["event_name"] != tc.event {
 						t.Fatalf("wrong non-ingress rejection: %#v", err)
 					}
-					if got := lifecycleAdmissionDomainCounts(t, rt.DB); !reflect.DeepEqual(got, before) {
+					if got := lifecycleAdmissionDomainCounts(t, rt.ReceiverStateReader); !reflect.DeepEqual(got, before) {
 						t.Fatalf("rejected run.start mutated domain: before=%v after=%v", before, got)
 					}
 					err = requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{"bundle_hash": rt.BundleHash, "event_name": tc.site, "payload": tc.payload, "idempotency_key": "lifecycle-site-not-event"})
 					if err.Data["code"] != apiv1.EventNotDeclaredCode {
 						t.Fatalf("wrong lifecycle-site rejection: %#v", err)
 					}
-					if got := lifecycleAdmissionDomainCounts(t, rt.DB); !reflect.DeepEqual(got, before) {
+					if got := lifecycleAdmissionDomainCounts(t, rt.ReceiverStateReader); !reflect.DeepEqual(got, before) {
 						t.Fatalf("rejected event.publish mutated domain: before=%v after=%v", before, got)
 					}
 					for _, key := range []struct{ method, key string }{{"run.start", "lifecycle-not-ingress"}, {"event.publish", "lifecycle-site-not-event"}} {
@@ -128,15 +127,22 @@ func TestServedLifecycleEmitterPublicInputAdmissionNoMutation(t *testing.T) {
 	}
 }
 
-func lifecycleAdmissionDomainCounts(t *testing.T, db *sql.DB) map[string]int {
+func lifecycleAdmissionDomainCounts(t *testing.T, reader servedEventCountReader) map[string]int {
 	t.Helper()
 	counts := map[string]int{}
-	for _, table := range []string{"runs", "events", "event_deliveries", "entity_state"} {
+	for _, cut := range []struct {
+		table string
+		read  func(context.Context, any) (int, error)
+	}{{"runs", storetest.CountPhysicalRuns}, {"events", storetest.CountPhysicalEvents}, {"event_deliveries", storetest.CountPhysicalEventDeliveries}, {"entity_state", storetest.CountPhysicalEntities}} {
 		var count int
-		if err := db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s", table)).Scan(&count); err != nil {
-			t.Fatalf("read %s count: %v", table, err)
+		if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+			var err error
+			count, err = cut.read(ctx, reader)
+			return err
+		}); err != nil {
+			t.Fatalf("read %s count: %v", cut.table, err)
 		}
-		counts[table] = count
+		counts[cut.table] = count
 	}
 	return counts
 }
