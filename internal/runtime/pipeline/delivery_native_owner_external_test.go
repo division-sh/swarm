@@ -146,6 +146,9 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		if err != nil {
 			return pipeline.CommittedWorkflowLifecycleMutation{}, err
 		}
+		if err := commitWorkflowNativeStructuralParent(t, ctx, source, selected, instance); err != nil {
+			return pipeline.CommittedWorkflowLifecycleMutation{}, err
+		}
 		committed, err := selected.(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
 		if err != nil {
 			return pipeline.CommittedWorkflowLifecycleMutation{}, err

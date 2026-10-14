@@ -13,6 +13,8 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -74,6 +76,9 @@ func workflowHandlerNativeFixtureFromSelected(t *testing.T, source semanticview.
 		Construct: func(ctx context.Context, instance pipeline.WorkflowInstance) error {
 			command, err := flowactivationfixture.Command(ctx, instance, pipeline.WorkflowLifecycleMutationPlan{}, instance.CreatedAt)
 			if err != nil {
+				return err
+			}
+			if err := commitWorkflowNativeStructuralParent(t, ctx, source, selected, instance); err != nil {
 				return err
 			}
 			committed, err := selected.(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
@@ -138,6 +143,105 @@ func workflowHandlerNativeFixtureFromSelected(t *testing.T, source semanticview.
 			return json.Marshal(value)
 		},
 	}, selected, reopen, probe
+}
+
+// Explicit component construction supplies ancestors, not an R5 activation
+// tree or evidence that agents/routes/timers have been installed.
+func commitWorkflowNativeStructuralParent(t *testing.T, ctx context.Context, source semanticview.Source, selected timerReplaySelectedStore, child pipeline.WorkflowInstance) error {
+	t.Helper()
+	if child.ParentFlowID == "" && child.ParentFlowInstance == "" && child.ParentEntityID == "" {
+		return nil
+	}
+	runID := correlation.RunIDFromContext(ctx)
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(
+		flowidentity.ScopeKey(source, child.ParentFlowID), flowidentity.LogicalInstanceID(child.ParentFlowInstance), child.ParentFlowInstance,
+	))
+	if err != nil {
+		return err
+	}
+	fact, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		return fmt.Errorf("component parent requires its admitted source")
+	}
+	lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, owner)
+	if err != nil {
+		return err
+	}
+	observed, found, err := pipeline.NewWorkflowPersistence(selected).LookupFlowInstance(ctx, lookup)
+	if err != nil {
+		return err
+	}
+	if found {
+		if err := observed.ValidateSelection(lookup); err != nil {
+			return err
+		}
+		parent := observed.Identity()
+		if parent.TemplateID != child.ParentFlowID || parent.InstancePath != child.ParentFlowInstance || parent.EntityID != child.ParentEntityID {
+			return fmt.Errorf("component parent differs from its admitted identity")
+		}
+		return nil
+	}
+	parent, err := flowidentity.StandingForGeneration(source, child.ParentFlowID, runID)
+	if err != nil {
+		return err
+	}
+	if parent.InstancePath != child.ParentFlowInstance || parent.EntityID != child.ParentEntityID {
+		return fmt.Errorf("component parent contradicts captured child construction")
+	}
+	constructor, err := pipeline.CompileFlowConstructor(source, parent.TemplateID, "")
+	if err != nil {
+		return err
+	}
+	fields, err := constructor.InitialFields(nil, nil)
+	if err != nil {
+		return err
+	}
+	graph, found := semanticview.WorkflowStageTopology(source, parent.TemplateID)
+	if !found {
+		return fmt.Errorf("component parent requires its compiled stage topology")
+	}
+	stage, err := graph.InitialStoredStage()
+	if err != nil {
+		return err
+	}
+	schema, found := source.FlowSchemaByID(parent.TemplateID)
+	if !found {
+		return fmt.Errorf("component parent requires its admitted schema")
+	}
+	entity, _ := entityruntime.ResolveForFlow(source, parent.TemplateID)
+	initial := pipeline.WorkflowInstance{
+		InstanceID: parent.InstanceID, StorageRef: parent.InstancePath, EntityID: parent.EntityID,
+		ParentFlowID: parent.ParentRoute.FlowID, ParentFlowInstance: parent.ParentRoute.FlowInstance, ParentEntityID: parent.ParentEntityID,
+		WorkflowName: parent.TemplateID, WorkflowVersion: source.WorkflowVersion(), Mode: schema.EffectiveMode(),
+		EntityType: entity.EntityType, Fields: fields, InitialFieldValues: fields,
+		CurrentState: stage.ID(), StageDefined: graph.StageCount() != 0, CreatedAt: child.CreatedAt, EnteredStageAt: child.CreatedAt,
+	}
+	if err := commitWorkflowNativeStructuralParent(t, ctx, source, selected, initial); err != nil {
+		return err
+	}
+	nodes, err := pipeline.LoadWorkflowNodes(source)
+	if err != nil {
+		return err
+	}
+	coordinator, _ := workflowHandlerNativeCoordinator(t, selected, pipeline.PipelineCoordinatorOptions{
+		Module: proposedEffectProofModule{source: source, nodes: nodes},
+	}, fact)
+	prepared, lifecycle, err := coordinator.PrepareInitialEntryLifecycle(ctx, owner, initial, child.CreatedAt)
+	if err != nil {
+		return err
+	}
+	command, err := flowactivationfixture.Command(ctx, prepared, lifecycle, child.CreatedAt)
+	if err != nil {
+		return err
+	}
+	committed, err := selected.(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
+	if err != nil {
+		return err
+	}
+	if !committed.Acknowledged || !committed.Created {
+		return fmt.Errorf("component parent did not acknowledge native construction")
+	}
+	return coordinator.FinalizeInitialEntryLifecycle(ctx, committed.Lifecycle)
 }
 
 func TestExecuteNodeContractHandlerUsesTypedEnvelopeIdentityOverPayload(t *testing.T) {
