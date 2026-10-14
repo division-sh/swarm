@@ -15,7 +15,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 const completion2270InvocationFile = "swarm-completion-2270-business.jsonl"
@@ -91,6 +93,40 @@ type completion2270Invocation struct {
 type completion2270InvocationProof struct {
 	mu       sync.Mutex
 	contexts *runtimepkg.RuntimeContextManager
+	retained []completion2270Invocation
+	readErr  error
+}
+
+// Selected workspaces are not published contexts. Capture their physical
+// witness at the existing joined release boundary, without retaining authority.
+type completion2270ObservedWorkspace struct {
+	*workspace.DockerManager
+	proof       *completion2270InvocationProof
+	selected    bool
+	captureOnce sync.Once
+	captureErr  error
+}
+
+func (w *completion2270ObservedWorkspace) RebindSourceProjection(projection *sourceartifact.RuntimeProjection, source semanticview.Source) (workspace.Lifecycle, error) {
+	lifecycle, err := w.DockerManager.RebindSourceProjection(projection, source)
+	if err != nil {
+		return nil, err
+	}
+	return &completion2270ObservedWorkspace{DockerManager: lifecycle.(*workspace.DockerManager), proof: w.proof, selected: true}, nil
+}
+
+func (w *completion2270ObservedWorkspace) ReleaseSourceProjection(ctx context.Context) error {
+	if w.selected {
+		w.captureOnce.Do(func() {
+			rows, err := readCompletion2270WorkspaceInvocations(ctx, w.DockerManager, map[string]bool{})
+			w.captureErr = err
+			w.proof.mu.Lock()
+			defer w.proof.mu.Unlock()
+			w.proof.retained = append(w.proof.retained, rows...)
+			w.proof.readErr = errors.Join(w.proof.readErr, err)
+		})
+	}
+	return errors.Join(w.captureErr, w.DockerManager.ReleaseSourceProjection(ctx))
 }
 
 func (p *completion2270InvocationProof) observe(contexts *runtimepkg.RuntimeContextManager) {
@@ -102,7 +138,12 @@ func (p *completion2270InvocationProof) observe(contexts *runtimepkg.RuntimeCont
 func (p *completion2270InvocationProof) read(ctx context.Context) ([]completion2270Invocation, error) {
 	p.mu.Lock()
 	contexts := p.contexts
+	retained := append([]completion2270Invocation(nil), p.retained...)
+	retainedErr := p.readErr
 	p.mu.Unlock()
+	if retainedErr != nil {
+		return nil, retainedErr
+	}
 	if contexts == nil {
 		return nil, fmt.Errorf("CLI invocation proof has no published runtime context owner")
 	}
@@ -123,11 +164,14 @@ func (p *completion2270InvocationProof) read(ctx context.Context) ([]completion2
 		}
 		evidence = append(evidence, rows...)
 	}
-	return evidence, nil
+	return append(evidence, retained...), nil
 }
 
 func readCompletion2270WorkspaceInvocations(ctx context.Context, lifecycle workspace.Lifecycle, seen map[string]bool) ([]completion2270Invocation, error) {
 	manager, ok := lifecycle.(*workspace.DockerManager)
+	if observed, wrapped := lifecycle.(*completion2270ObservedWorkspace); wrapped && observed != nil {
+		manager, ok = observed.DockerManager, true
+	}
 	if !ok || manager == nil {
 		return nil, fmt.Errorf("CLI invocation proof requires the acquired Docker workspace owner")
 	}
