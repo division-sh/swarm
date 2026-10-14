@@ -50,6 +50,9 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 						}
 					}
 					construction := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)
+					if !root {
+						construction.constructKeylessRoot(t)
+					}
 					f := snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, ctx: construction.ctx, runID: correlation.RunIDFromContext(construction.ctx)}
 					at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 					instanceID := "one"
