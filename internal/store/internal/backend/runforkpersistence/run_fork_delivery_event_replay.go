@@ -289,19 +289,7 @@ func projectRunForkReplayInitializedReceiver(snapshot *runForkRevisionSnapshot, 
 		return events.DeliveryRoute{}, err
 	}
 	target.EntityID, target.FlowInstance = projection.Fork.EntityID, projection.Fork.FlowInstance
-	if source.Target.EntitylessReceiver() {
-		actor := source.Target.Route()
-		actor.FlowInstance = target.FlowInstance
-		source.Target, err = events.NewEntitylessReceiverTarget(actor)
-	} else {
-		actor := source.Target.Route()
-		actorProjection, projectionErr := runfork.ProjectEntityOwnership(snapshot.RunID, forkRunID, actor.EntityID, actor.FlowInstance)
-		if projectionErr != nil {
-			return events.DeliveryRoute{}, projectionErr
-		}
-		actor.EntityID, actor.FlowInstance = actorProjection.Fork.EntityID, actorProjection.Fork.FlowInstance
-		source.Target, err = events.NewExistingEntityTarget(actor)
-	}
+	source.Target, err = projectRunForkReplayActorTarget(snapshot.RunID, forkRunID, source.Target, target.FlowInstance)
 	if err != nil {
 		return events.DeliveryRoute{}, err
 	}
@@ -319,6 +307,20 @@ func projectRunForkReplayInitializedReceiver(snapshot *runForkRevisionSnapshot, 
 		return events.DeliveryRoute{}, err
 	}
 	return projected, nil
+}
+
+func projectRunForkReplayActorTarget(sourceRunID, forkRunID string, target events.DeliveryTargetOwnership, constructedPath string) (events.DeliveryTargetOwnership, error) {
+	actor := target.Route()
+	if target.EntitylessReceiver() {
+		actor.FlowInstance = constructedPath
+		return events.NewEntitylessReceiverTarget(actor)
+	}
+	projection, err := runfork.ProjectEntityOwnership(sourceRunID, forkRunID, actor.EntityID, actor.FlowInstance)
+	if err != nil {
+		return events.DeliveryTargetOwnership{}, err
+	}
+	actor.EntityID, actor.FlowInstance = projection.Fork.EntityID, projection.Fork.FlowInstance
+	return events.NewExistingEntityTarget(actor)
 }
 
 func projectRunForkReplayDeliveryRoute(source events.DeliveryRoute, sourceRunID, forkRunID string) (events.DeliveryRoute, error) {
