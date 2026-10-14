@@ -19,8 +19,7 @@ validator:
             fields:
               proof: policy.business.description
               limit: policy.business.value
-        - default: true
-          emit:
+        - emit:
             event: work.rejected
             fields:
               proof: "invalid validation result"

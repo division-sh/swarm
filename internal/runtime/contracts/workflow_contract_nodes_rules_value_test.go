@@ -13,7 +13,7 @@ func TestProjectNodeRuleRowsValuePreservesOrderAndContext(t *testing.T) {
     task.ready:
       rules:
         - {when: payload.ready, emit: task.accepted}
-        - {else: true, advances_to: stopped}
+        - {advances_to: stopped}
       on_complete:
         - {condition: payload.done, emit: task.done}
 `))
