@@ -1,10 +1,9 @@
-# swarm.yaml - Swarm's config file; copy keys into ./swarm.yaml, .swarm/swarm.yaml, or --config <file>.
-# Everything is commented out; uncomment to override a default. Run `swarm doctor --target` to inspect the active source.
+# swarm.yaml - Swarm's config file; use .swarm/swarm.yaml or --config <file> (SWARM_CONFIG selects the same file).
+# No other config files are read. Uncomment needed keys; omitted keys use defaults. Run `swarm doctor --target`.
 # Inline secret values are absent; use secret keys, token files, secret files, or explicit env delegation.
 # Contributors: generated file - edit the generator metadata, not this file; see drift test.
 
-# Project-safe keys: safe in checked-in ./swarm.yaml
-# These keys express portable runtime behavior.
+# Deployment keys
 # budget:
 #   global_monthly_cap: 0 # Global monthly budget cap; zero leaves enforcement disabled.
 #   human_tasks:
@@ -14,14 +13,33 @@
 #     max_tasks_per_week: 0 # Human task weekly cap; zero leaves enforcement disabled.
 #   per_entity_monthly_cap: 0 # Per-entity monthly budget cap; zero leaves enforcement disabled.
 #   system_monthly_cap: 0 # System actor monthly budget cap; zero leaves enforcement disabled.
+# channels:
+#   bindings:
+#     hitl:
+#       destination: "-1001234567890" # Deployment-owned opaque destination for the HITL outbound binding.
+#       pack: provider.telegram.hitl_channel # Channel pack selected for the HITL outbound binding.
+# connection:
+#   api_server: http://127.0.0.1:8081 # CLI API target for this deployment.
+# database:
+#   host: 127.0.0.1 # Postgres host for postgres store deployments.
+#   name: swarm # Postgres database name.
+#   pool_size: 5 # Postgres connection pool size.
+#   port: 5432 # Postgres port for postgres store deployments.
+#   sslmode: disable # Postgres SSL mode.
+#   user: postgres # Postgres user.
 # llm:
 #   backend: anthropic # Active LLM backend profile.
 #   claude_cli:
+#     command: claude # Claude CLI executable path/name.
 #     output_format: stream-json # Claude CLI output format.
 #     timeout: 1h # Claude CLI request timeout.
 #   models:
 #     regular:
 #       anthropic: claude-sonnet-4-5 # Anthropic model to use for the regular alias.
+#   openai_compatible:
+#     base_url: https://api.example.com/v1 # OpenAI-compatible endpoint base URL.
+#   openai_responses:
+#     base_url: https://api.openai.com/v1 # OpenAI Responses endpoint base URL.
 #   provider_limits:
 #     anthropic:
 #       max_concurrency: 2 # Provider-wide concurrency limit.
@@ -36,6 +54,16 @@
 #     lock_ttl: 10s # How long a session lock can be held before it expires.
 #     rotate_after_turns: 40 # Rotate an LLM session after this many turns.
 #     rotate_on_parse_failures: 3 # Rotate an LLM session after repeated parse failures.
+# paths:
+#   agent_config_map_file: ./agent-config-map.yaml # Agent config map file.
+#   monitor_dir: .swarm/monitor # Runtime monitor artifact directory.
+#   platform_spec_path: platform-spec.yaml # Platform spec path override.
+#   swarm_dir: .swarm # Swarm state directory.
+#   tooling_lock_file: ./tooling.lock # Tooling lock file.
+#   verification_gates_file: ./verification-gates.yaml # Verification gates file.
+# platform:
+#   packs:
+#     platform_dirs: ["/path/to/complete/dev-pack/provider.telegram.trigger", "/path/to/complete/dev-pack/provider.telegram.connector", "/path/to/complete/dev-pack/provider.telegram.channel"] # Complete replacement for the embedded platform pack inventory during platform development.
 # runtime:
 #   decision_card_first_reminder: 4h # Delay before the first pending decision-card reminder.
 #   decision_card_input_draft_ttl: 15m # Lifetime of an incomplete actor-scoped decision input draft.
@@ -44,68 +72,26 @@
 #   fan_out_workers: 1 # Optional process-wide fan-out workers; defaults PostgreSQL 4 / SQLite 1. SQLite requires 1; PostgreSQL requires pool headroom.
 #   recovery_on_startup: true # Recover retained runtime state on startup; explicit false disables replay.
 # serve:
-#   api_listen_addr: "127.0.0.1:8081" # Loopback API listener. Public or wildcard binds require local/operator config or a flag.
-#   mcp_listen_addr: "127.0.0.1:8082" # Loopback MCP listener. Public or wildcard binds require local/operator config or a flag.
-# workspace:
-#   backend: docker # Workspace backend preference; actual isolation still follows capability policy.
-
-# Project-contained paths: relative paths under the project when used in ./swarm.yaml
-# Project config may use these only as relative paths that stay inside the project root.
-# paths:
-#   agent_config_map_file: ./agent-config-map.yaml # Project-contained agent config map file.
-#   platform_spec_path: platform-spec.yaml # Project-contained platform spec path override.
-#   tooling_lock_file: ./tooling.lock # Project-contained tooling lock file.
-#   verification_gates_file: ./verification-gates.yaml # Project-contained verification gates file.
-
-# Connection and auth settings: use user-global config, --config, or flags
-# These keys can redirect clients or name auth material, so keep them in user-global config, an explicit --config file, or invocation flags.
-# connection:
-#   api_server: http://127.0.0.1:8081 # CLI API target. Keep out of shared project config and this-machine config.
-#   api_token_file: .swarm/api-token # CLI API bearer-token file reference; never inline the token.
-# serve:
-#   api_token_file: .swarm/serve-api-token # Serve API bearer-token file reference; never inline the token.
-
-# Settings for this machine only: put these in .swarm/swarm.yaml
-# These keys are machine-specific or unsafe if committed to a shared project file.
-# channels:
-#   bindings:
-#     hitl:
-#       destination: "-1001234567890" # Deployment-owned opaque destination for the HITL outbound binding.
-#       pack: provider.telegram.hitl_channel # Channel pack selected for the HITL outbound binding.
-# database:
-#   host: 127.0.0.1 # Postgres host for postgres store deployments.
-#   name: swarm # Postgres database name.
-#   pool_size: 5 # Postgres connection pool size.
-#   port: 5432 # Postgres port for postgres store deployments.
-#   sslmode: disable # Postgres SSL mode.
-#   user: postgres # Postgres user.
-# llm:
-#   claude_cli:
-#     command: claude # Claude CLI executable path/name.
-#   openai_compatible:
-#     base_url: https://api.example.com/v1 # OpenAI-compatible endpoint base URL.
-#   openai_responses:
-#     base_url: https://api.openai.com/v1 # OpenAI Responses endpoint base URL.
-# paths:
-#   monitor_dir: .swarm/monitor # Runtime monitor artifact directory.
-#   swarm_dir: .swarm # Swarm state directory.
-# platform:
-#   packs:
-#     platform_dirs: ["/path/to/complete/dev-pack/provider.telegram.trigger", "/path/to/complete/dev-pack/provider.telegram.connector", "/path/to/complete/dev-pack/provider.telegram.channel"] # Complete replacement for the embedded platform pack inventory during platform development; machine/operator config only.
+#   api_listen_addr: "127.0.0.1:8081" # API listener address; defaults to loopback.
+#   mcp_listen_addr: "127.0.0.1:8082" # MCP listener address; defaults to loopback.
 # store:
 #   backend: sqlite # Runtime store backend.
 #   sqlite:
 #     path: .swarm/stores/dev.db # SQLite runtime store path.
 # workspace:
-#   allow_exec_on_host: false # Unsafe host execution opt-in; requires local/operator config or a flag.
+#   allow_exec_on_host: false # Unsafe host execution opt-in; disabled by default.
+#   backend: docker # Workspace backend preference; actual isolation still follows capability policy.
 #   docker_bin: docker # Docker executable path/name.
-#   host_root: ~/.swarm/workspaces # Host workspace root for local/operator use.
+#   host_root: ~/.swarm/workspaces # Host workspace root.
 #   image: swarm-workspace:latest # Workspace image for Docker-backed execution.
 #   network: swarm # Docker network for workspaces.
 
 # Secret references: never store plaintext secrets in config
-# These keys point at secret material; the secret value itself belongs in the secrets store, a token file, a mounted secret file, or an explicitly delegated env var.
+# connection:
+#   api_token_file: .swarm/api-token # CLI API bearer-token file reference; never inline the token.
 # database:
 #   password_env: DB_PASSWORD # Explicit env delegation for orchestrator-injected database password.
 #   password_file: /run/secrets/postgres-password # Database password file for orchestrator-mounted secrets.
 #   password_secret_key: postgres_password # Database password key in the Swarm secrets store.
+# serve:
+#   api_token_file: .swarm/serve-api-token # Serve API bearer-token file reference; never inline the token.
