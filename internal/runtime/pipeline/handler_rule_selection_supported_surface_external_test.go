@@ -12,7 +12,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -45,9 +44,9 @@ func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBo
 		t.Run(storeCase.name, func(t *testing.T) {
 			selected := storeCase.open(t)
 			runID := uuid.NewString()
-			insertGateRecoveryRun(t, selected.events, runID)
-			ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-			source := handlerRuleSelectionSupportedSource(t)
+			bundle := handlerRuleSelectionSupportedBundle(t)
+			source := semanticview.Wrap(bundle)
+			ctx, sourceFact := workflowLifecycleSourceContext(t, selected, bundle, runID)
 			node := externalPipelineSourceNode(t, source, ".", "selection-node")
 			subscriptions := make([]events.EventType, 0, len(tests))
 			for _, tc := range tests {
@@ -60,7 +59,7 @@ func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBo
 					Node: node, Subscriptions: subscriptions, ExecutionType: runtimecontracts.SystemNodeExecutionType,
 				}},
 			}
-			eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
+			eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: sourceFact})
 			if err != nil {
 				t.Fatalf("new handler-rule EventBus: %v", err)
 			}
@@ -106,7 +105,7 @@ func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBo
 	}
 }
 
-func handlerRuleSelectionSupportedSource(t *testing.T) semanticview.Source {
+func handlerRuleSelectionSupportedBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	root := canonicalrouting.CopyHandlerRuleSelectionProof(t)
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
@@ -114,7 +113,7 @@ func handlerRuleSelectionSupportedSource(t *testing.T) semanticview.Source {
 	if err != nil {
 		t.Fatalf("load supported handler-rule bundle: %v", err)
 	}
-	return semanticview.Wrap(bundle)
+	return bundle
 }
 
 func assertPersistedHandlerRuleSelection(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, eventID string, wantContext handlerselection.Context, wantDisposition handlerselection.Disposition, wantSemanticPath, wantLabel string) {
