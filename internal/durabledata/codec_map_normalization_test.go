@@ -17,19 +17,20 @@ func TestResourceCodecMapValueOptionalFieldsUseCompiledCatalog(t *testing.T) {
 	for _, cell := range []struct {
 		name, field, input, want string
 		refuse                   bool
+		wantMessage              string
 	}{
-		{"record_control", "records: CodecProfile", `{"records":{"note":null}}`, `{"records":{}}`, false},
-		{"list_control", "records: [CodecProfile]", `{"records":[{"note":null}]}`, `{"records":[{}]}`, false},
-		{"map_record", "records: map[text]CodecProfile", `{"records":{"primary":{"note":null}}}`, `{"records":{"primary":{}}}`, false},
-		{"map_list_record", "records: map[text][CodecProfile]", `{"records":{"primary":[{"note":null}]}}`, `{"records":{"primary":[{}]}}`, false},
-		{"list_map_record", "records:\n    - map[text]CodecProfile", `{"records":[{"primary":{"note":null}}]}`, `{"records":[{"primary":{}}]}`, false},
-		{"nested_map_record", "records: map[text]map[text]CodecProfile", `{"records":{"outer":{"primary":{"note":null}}}}`, `{"records":{"outer":{"primary":{}}}}`, false},
-		{"required_null", "records: map[text]CodecRequiredProfile", `{"records":{"primary":{"note":null}}}`, `{"records":{"primary":{"note":1}}}`, true},
-		{"map_value_null", "records: map[text]CodecProfile", `{"records":{"primary":null}}`, `{"records":{"primary":{}}}`, true},
-		{"undeclared_null", "records: map[text]CodecProfile", `{"records":{"primary":{"other":null}}}`, `{"records":{"primary":{}}}`, true},
-		{"map_list_null", "records: map[text][CodecProfile]", `{"records":{"primary":[null]}}`, `{"records":{"primary":[{}]}}`, true},
-		{"list_map_null", "records:\n    - map[text]CodecProfile", `{"records":[{"primary":null}]}`, `{"records":[{"primary":{}}]}`, true},
-		{"nested_map_null", "records: map[text]map[text]CodecProfile", `{"records":{"outer":{"primary":null}}}`, `{"records":{"outer":{"primary":{}}}}`, true},
+		{"record_control", "records: CodecProfile", `{"records":{"note":null}}`, `{"records":{}}`, false, ""},
+		{"list_control", "records: [CodecProfile]", `{"records":[{"note":null}]}`, `{"records":[{}]}`, false, ""},
+		{"map_record", "records: map[text]CodecProfile", `{"records":{"primary":{"note":null}}}`, `{"records":{"primary":{}}}`, false, ""},
+		{"map_list_record", "records: map[text][CodecProfile]", `{"records":{"primary":[{"note":null}]}}`, `{"records":{"primary":[{}]}}`, false, ""},
+		{"list_map_record", "records:\n    - map[text]CodecProfile", `{"records":[{"primary":{"note":null}}]}`, `{"records":[{"primary":{}}]}`, false, ""},
+		{"nested_map_record", "records: map[text]map[text]CodecProfile", `{"records":{"outer":{"primary":{"note":null}}}}`, `{"records":{"outer":{"primary":{}}}}`, false, ""},
+		{"required_null", "records: map[text]CodecRequiredProfile", `{"records":{"primary":{"note":null}}}`, `{"records":{"primary":{"note":1}}}`, true, "schema validation failed: $.records.primary.note must be integer"},
+		{"map_value_null", "records: map[text]CodecProfile", `{"records":{"primary":null}}`, `{"records":{"primary":{}}}`, true, "schema validation failed: $.records.primary must be object"},
+		{"undeclared_null", "records: map[text]CodecProfile", `{"records":{"primary":{"other":null}}}`, `{"records":{"primary":{}}}`, true, "schema validation failed: $.records.primary.other is not allowed"},
+		{"map_list_null", "records: map[text][CodecProfile]", `{"records":{"primary":[null]}}`, `{"records":{"primary":[{}]}}`, true, "schema validation failed: $.records.primary[0] must be object"},
+		{"list_map_null", "records:\n    - map[text]CodecProfile", `{"records":[{"primary":null}]}`, `{"records":[{"primary":{}}]}`, true, "schema validation failed: $.records[0].primary must be object"},
+		{"nested_map_null", "records: map[text]map[text]CodecProfile", `{"records":{"outer":{"primary":null}}}`, `{"records":{"outer":{"primary":{}}}}`, true, "schema validation failed: $.records.outer.primary must be object"},
 	} {
 		t.Run(cell.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -89,8 +90,9 @@ func TestResourceCodecMapValueOptionalFieldsUseCompiledCatalog(t *testing.T) {
 					}
 					compiled, defects := compile(declaration.Ref, schema, declaration.BusinessKey, []byte(cell.input))
 					if cell.refuse {
-						if len(defects) == 0 || !reflect.DeepEqual(compiled, durabledata.CompiledVersion{}) {
-							t.Fatalf("invalid null produced candidate=%+v defects=%+v", compiled, defects)
+						want := []durabledata.ValidationDefect{{Row: 1, Path: "$", Code: "schema_rejected", Message: cell.wantMessage}}
+						if !reflect.DeepEqual(defects, want) || !reflect.DeepEqual(compiled, durabledata.CompiledVersion{}) {
+							t.Fatalf("invalid null produced candidate=%+v defects=%+v, want=%+v", compiled, defects, want)
 						}
 						return
 					}
@@ -111,18 +113,19 @@ func TestResourceCodecMapDescentRequiresTypedChildAndPreservesPropertyPrecedence
 	optional := map[string]any{"type": "object", "properties": map[string]any{"note": map[string]any{"type": "integer"}}, "additionalProperties": false}
 	required := map[string]any{"type": "object", "properties": map[string]any{"note": map[string]any{"type": "integer"}}, "required": []string{"note"}, "additionalProperties": false}
 	for _, cell := range []struct {
-		name       string
-		additional any
-		property   map[string]any
-		want       string
-		refuse     bool
+		name        string
+		additional  any
+		property    map[string]any
+		want        string
+		refuse      bool
+		wantMessage string
 	}{
-		{"open", true, nil, `{"records":{"primary":{"note":null}}}`, false},
-		{"absent", nil, nil, `{"records":{"primary":{"note":null}}}`, false},
-		{"untyped_child", map[string]any{}, nil, `{"records":{"primary":{"note":null}}}`, false},
-		{"closed", false, nil, "", true},
-		{"required_property_wins", optional, required, "", true},
-		{"optional_property_wins", required, optional, `{"records":{"primary":{}}}`, false},
+		{"open", true, nil, `{"records":{"primary":{"note":null}}}`, false, ""},
+		{"absent", nil, nil, `{"records":{"primary":{"note":null}}}`, false, ""},
+		{"untyped_child", map[string]any{}, nil, `{"records":{"primary":{"note":null}}}`, false, ""},
+		{"closed", false, nil, "", true, "schema validation failed: $.records.primary is not allowed"},
+		{"required_property_wins", optional, required, "", true, "schema validation failed: $.records.primary.note must be integer"},
+		{"optional_property_wins", required, optional, `{"records":{"primary":{}}}`, false, ""},
 	} {
 		t.Run(cell.name, func(t *testing.T) {
 			mapSchema := map[string]any{"type": "object"}
@@ -139,8 +142,9 @@ func TestResourceCodecMapDescentRequiresTypedChildAndPreservesPropertyPrecedence
 				t.Run(name, func(t *testing.T) {
 					compiled, defects := compile(ref, schema, "", []byte(`{"records":{"primary":{"note":null}}}`))
 					if cell.refuse {
-						if len(defects) == 0 || !reflect.DeepEqual(compiled, durabledata.CompiledVersion{}) {
-							t.Fatalf("expected refusal, got=%+v defects=%+v", compiled, defects)
+						want := []durabledata.ValidationDefect{{Row: 1, Path: "$", Code: "schema_rejected", Message: cell.wantMessage}}
+						if !reflect.DeepEqual(defects, want) || !reflect.DeepEqual(compiled, durabledata.CompiledVersion{}) {
+							t.Fatalf("expected refusal, got=%+v defects=%+v, want=%+v", compiled, defects, want)
 						}
 						return
 					}
