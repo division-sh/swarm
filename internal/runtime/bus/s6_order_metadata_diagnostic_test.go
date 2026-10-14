@@ -30,7 +30,7 @@ func TestS6CreationReferenceOrderMetadataDiagnostic(t *testing.T) {
 		story authoractivity.StoryDisposition
 	}{
 		{local: "worker.inspect", story: authoractivity.StoryAuthored},
-		{local: schema.AutoEmitOnCreate.Event, story: authoractivity.StoryDifferent},
+		{local: schema.AutoEmitOnCreate.Event, story: authoractivity.StoryAuthored},
 	} {
 		t.Run(row.local, func(t *testing.T) {
 			name := "worker-flow/worker-001/" + row.local
