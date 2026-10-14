@@ -203,9 +203,8 @@ func TestServedReceiverCompletionSnapshotBoundaryBothStores(t *testing.T) {
 				if provider {
 					root, event = canonicalrouting.CopyProviderReceiverInitialization(t), "inbound.telegram.text_message"
 				}
-				_, start := lifecycleRestartHarness(t, backend, root)
 				completion := installReceiverCompletionBoundary(t)
-				process, rt := start()
+				process, rt := startServedBoundaryFixture(t, backend, root)
 				ctx, cancel := context.WithTimeout(t.Context(), servedEventPublishLifecycleProbeWaitTimeout)
 				defer cancel()
 				if _, err := completion.wait(ctx, rt.BundleHash); err != nil {
@@ -217,12 +216,13 @@ func TestServedReceiverCompletionSnapshotBoundaryBothStores(t *testing.T) {
 				runtime := servedTestProcessRuntime(t, process)
 				hold := &exactOriginDiagnosticHold{logger: runtime.Logger, eventType: event, entered: make(chan string, 1), release: originRelease}
 				runtime.Bus.SetLoggerHook(hold)
-				params := receiverInitializationPublishParams(rt, "completion-boundary", "boundary-account", `{"active":true,"label":"kept","attributes":{}}`)
+				params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "idempotency_key": "typed-init-completion-boundary",
+					"payload": map[string]any{"account_id": "boundary-account", "values": json.RawMessage(`{"active":true,"label":"kept","attributes":{}}`)}}
 				if provider {
 					params = map[string]any{"bundle_hash": rt.BundleHash, "event_name": event, "idempotency_key": "completion-boundary", "payload": map[string]any{"conversation_reference": "2307", "conversation_scope": "direct", "external_account_reference": "2307", "provider_message_reference": 7, "text": "direct initialization"}}
 				}
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-				waitPublicationSiteCompletion(t, rt, seed.RunID)
+				waitServedBoundaryPublicationCompletion(t, rt, seed.RunID)
 				var candidate runlifecycle.Candidate
 				select {
 				case candidate = <-completion.entered:
