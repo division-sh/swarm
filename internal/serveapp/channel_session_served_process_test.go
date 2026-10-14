@@ -185,13 +185,7 @@ func TestServedWhatsAppUnpairedSDKProcessRestartBothStores(t *testing.T) {
 			operationID := result.Operation.OperationID
 			for iteration := range 2 {
 				deadline := time.Now().Add(5 * time.Second)
-				for result.Pairing == nil || result.Pairing.Code == "" {
-					if time.Now().After(deadline) {
-						t.Fatal("real SDK subprocess did not disclose original authorized pairing", result)
-					}
-					time.Sleep(10 * time.Millisecond)
-					requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": operationID}, &result)
-				}
+				result = requireServedNativePairingProgress(t, endpoint, result, deadline)
 				if result.Operation.OperationID != operationID || result.Operation.Coordinate.TargetGeneration != 0 || result.Operation.SessionAccount.AccountRef != "" {
 					t.Fatal("pairing minted business/account authority or replaced the original operation", result.Operation)
 				}

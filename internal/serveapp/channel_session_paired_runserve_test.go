@@ -134,13 +134,7 @@ func testRunServeWhatsAppSignedPairing(t *testing.T, proof servedNativeJourneyPr
 				"provider": "whatsapp", "verb": "connect", "save_proof": false, "idempotency_key": "native-pairing"}, &result)
 			id := result.Operation.OperationID
 			deadline := time.Now().Add(5 * time.Second)
-			for result.Pairing == nil || result.Pairing.Code == "" {
-				if time.Now().After(deadline) {
-					t.Fatal("served owner did not disclose authorized QR", result.Operation.Phase, result.Pairing)
-				}
-				time.Sleep(10 * time.Millisecond)
-				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{"operation_id": id}, &result)
-			}
+			result = requireServedNativePairingProgress(t, endpoint, result, deadline)
 			peer.pair(result.Pairing.Code)
 			_, initialPrekeyUploads := peer.awaitPostLogin()
 			result = channelonboarding.Result{}
