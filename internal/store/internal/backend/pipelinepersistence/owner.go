@@ -38,6 +38,7 @@ import (
 )
 
 type EventCommitOwner interface {
+	LoadPreparedPublishEventTx(context.Context, *sql.Tx, string) (runtimebus.PreparedPublishEvent, bool, error)
 	CommitFanOutPublicationTx(context.Context, *mutationprotocol.Attempt, runtimebus.PublicationCommand, fanoutobligation.OrdinalEmission) (runtimebus.CommittedPublication, error)
 	AppendAdmittedEventTxOutcome(context.Context, *mutationprotocol.Attempt, events.AdmittedEvent, events.RouteSettlement) (runtimebus.EventAppendOutcome, error)
 	CommitPublicationTx(context.Context, *mutationprotocol.Attempt, runtimebus.PublicationCommand) (runtimebus.CommittedPublication, error)

@@ -396,7 +396,7 @@ func allowedTransitionBoundaryUses() map[string]int {
 	return map[string]int{
 		// Existing typed-event context producers/readers. These exact diagnostic,
 		// lineage and dispatch uses do not grant transition selection authority.
-		"internal/runtime/bus.EventBus.activeAgentDescriptors::call internal/runtime/correlation.InboundEventFromContext":                             1,
+		"internal/runtime/bus.EventBus.activeAgentDescriptorsWithReader::call internal/runtime/correlation.InboundEventFromContext":                   1, // Same exact inbound-run check; scoped reader composition (2617:6179711140).
 		"internal/runtime/bus.EventBus.activeTargetDescriptors::call internal/runtime/correlation.InboundEventFromContext":                            1,
 		"internal/runtime/bus.EventBus.planSubscribedRoutePlanWithPlanner::call internal/runtime/correlation.WithInboundEvent":                        1,
 		"internal/runtime/bus.EventBus.withPublicationInstancePlanning::call internal/runtime/correlation.WithInboundEvent":                           1, // Admitted publication for the pre-index agent projection (2617:6177396109).

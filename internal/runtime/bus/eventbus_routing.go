@@ -331,13 +331,16 @@ func settleBufferedLocalDelivery(ctx context.Context, store EventStore, delivery
 }
 
 func (eb *EventBus) activeAgentDescriptors(ctx context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+	return eb.activeAgentDescriptorsWithReader(ctx, eb.durable.ActiveAgents)
+}
+
+func (eb *EventBus) activeAgentDescriptorsWithReader(ctx context.Context, lister ActiveAgentDescriptorLister) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
 	inbound, ok := runtimecorrelation.InboundEventFromContext(ctx)
 	if !ok || strings.TrimSpace(inbound.RunID()) == "" {
 		return nil, false, errors.New("active agent descriptors require exact inbound run identity")
 	}
 	runID := inbound.RunID()
 	ephemeral := eb.runtimeActiveAgentDescriptors()
-	lister := eb.durable.ActiveAgents
 	if lister == nil {
 		if len(ephemeral) > 0 {
 			return ephemeral, true, nil

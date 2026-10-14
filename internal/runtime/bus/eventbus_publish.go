@@ -684,7 +684,11 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		return releaseFailure(descriptorErr)
 	}
 	authorScope, hasAuthorScope := runtimeauthoractivity.ScopeFromContext(ctx)
-	if reader := eb.durable.PreparedEvents; reader != nil {
+	reader := eb.durable.PreparedEvents
+	if publication.fanOutMember != nil && publication.fanOutMember.reads != nil {
+		reader = publication.fanOutMember.reads
+	}
+	if reader != nil {
 		durable, found, err := loadValidatedPreparedPublishEvent(ctx, reader, admitted.ID())
 		if err != nil {
 			return releaseFailure(fmt.Errorf("load durable event identity: %w", err))
@@ -800,6 +804,16 @@ func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.
 	if publication.instances != nil {
 		planner.connectPlanner.lifecycle.index = publication.instances
 		planner.routeResolver.resolveRoutedSubscribers = planner.connectPlanner.resolvePubsubSubscribers
+		if publication.fanOutMember == nil || publication.fanOutMember.reads == nil {
+			return closedPublicationRoutes{}, errors.New("native group planning requires its scoped metadata readers")
+		}
+		loadAgents := func(ctx context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+			return eb.activeAgentDescriptorsWithReader(ctx, publication.fanOutMember.reads)
+		}
+		planner.recipientPolicy.loadActiveAgentDescriptors = loadAgents
+		if planner.connectPlanner.loadAgents != nil {
+			planner.connectPlanner.loadAgents = loadAgents
+		}
 	}
 	owners := &publicationTargetOwnerEvidence{event: evt, planner: planner}
 	planner.preparedOwners = owners
@@ -844,11 +858,15 @@ func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.
 }
 
 func (eb *EventBus) prepareClosedPublicationDispatch(ctx context.Context, evt events.Event, publication eventBusCommitPublishPlan, recoveringTimeout bool, prepared *PreparedPublish) error {
-	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
-		return err
-	} else if reason != "" {
-		prepared.dispatchQueued = true
-		prepared.queueReason = reason
+	if publication.fanOutMember == nil || publication.fanOutMember.instances == nil {
+		if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
+			return err
+		} else if reason != "" {
+			prepared.dispatchQueued = true
+			prepared.queueReason = reason
+		}
+	} else {
+		publication.fanOutMember.dispatchGateDeferred = true
 	}
 	if publication.dynamicFlowCreation != nil && publication.dynamicFlowCreation.DispatchMode == runtimepipeline.DynamicFlowRuntimeCreationDispatchStartupRecovery {
 		prepared.dispatchQueued = true

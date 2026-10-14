@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"sync"
 
+	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 )
 
 type flowInstancePlanningRead struct {
@@ -23,18 +26,24 @@ type flowInstancePlanningRead struct {
 // Only detached requests/results survive preparation. The committing owner
 // repeats these canonical reads under its existing mutation-order fence.
 type flowInstancePlanningReadSet struct {
-	source semanticview.Source
-	fact   correlation.SourceArtifactFact
-	runID  string
-	reads  []flowInstancePlanningRead
+	source     semanticview.Source
+	fact       correlation.SourceArtifactFact
+	runID      string
+	reads      []flowInstancePlanningRead
+	agents     []bus.ActiveAgentDescriptor
+	agentsRead bool
 }
 
 type groupInstancePlanningReader struct {
+	mu       sync.Mutex
+	group    *publicationGroup
 	snapshot *flowInstanceIndexSnapshot
 	readSet  *flowInstancePlanningReadSet
 }
 
 func (r *groupInstancePlanningReader) LookupFlowInstance(ctx context.Context, request pipeline.FlowInstanceLookupRequest) (pipeline.FlowInstanceObservation, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.requireScope(ctx, request.SourceFact(), request.RunID()); err != nil {
 		return pipeline.FlowInstanceObservation{}, false, err
 	}
@@ -53,6 +62,8 @@ func (r *groupInstancePlanningReader) LookupFlowInstance(ctx context.Context, re
 }
 
 func (r *groupInstancePlanningReader) ListFlowInstances(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.requireScope(ctx, scope.SourceFact(), scope.RunID()); err != nil {
 		return nil, err
 	}
@@ -77,6 +88,76 @@ func (r *groupInstancePlanningReader) requireScope(ctx context.Context, fact cor
 		return errors.New("group instance planning crosses its admitted source or run")
 	}
 	return nil
+}
+
+func (r *groupInstancePlanningReader) close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.snapshot, r.readSet, r.group = nil, nil, nil
+}
+
+func (r *groupInstancePlanningReader) requirePreparation(ctx context.Context, runID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	fact, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		return errors.New("group preparation metadata requires its admitted source")
+	}
+	if err := r.requireScope(ctx, fact, runID); err != nil {
+		return err
+	}
+	if correlation.RunIDFromContext(ctx) != runID || r.group == nil {
+		return errors.New("group preparation metadata crosses its exact run")
+	}
+	return nil
+}
+
+func (r *groupInstancePlanningReader) LoadPreparedPublishEvent(ctx context.Context, eventID string) (bus.PreparedPublishEvent, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return bus.PreparedPublishEvent{}, false, err
+	}
+	if r.readSet == nil {
+		return bus.PreparedPublishEvent{}, false, errors.New("group preparation metadata lifetime has ended")
+	}
+	if err := r.requirePreparation(ctx, r.readSet.runID); err != nil {
+		return bus.PreparedPublishEvent{}, false, err
+	}
+	var value bus.PreparedPublishEvent
+	var found bool
+	var err error
+	if r.group.postgres != nil {
+		value, found, err = r.group.postgres.events.LoadPreparedPublishEventTx(ctx, r.snapshot.tx, eventID)
+	} else {
+		value, found, err = r.group.sqlite.events.LoadPreparedPublishEventTx(ctx, r.snapshot.tx, eventID)
+	}
+	if err == nil && found && (value.Event.ID() != eventID || value.Event.Event().RunID() != r.readSet.runID) {
+		return bus.PreparedPublishEvent{}, false, errors.New("group prepared publication escaped its exact event or run")
+	}
+	return value, found, err
+}
+
+func (r *groupInstancePlanningReader) ListActiveAgentDescriptors(ctx context.Context, runID string) ([]bus.ActiveAgentDescriptor, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.requirePreparation(ctx, runID); err != nil {
+		return nil, err
+	}
+	values, err := operatorsurface.ReadActiveAgentDescriptorsTx(ctx, r.snapshot.tx, runID, r.snapshot.postgres)
+	if err != nil {
+		return nil, err
+	}
+	for _, v := range values {
+		if v.Identity.RunID != runID {
+			return nil, errors.New("group agent descriptor escaped its exact run")
+		}
+	}
+	if !r.readSet.agentsRead {
+		r.readSet.agents, r.readSet.agentsRead = slices.Clone(values), true
+	}
+	return values, nil
 }
 
 func (s *flowInstancePlanningReadSet) record(read flowInstancePlanningRead) {
@@ -212,8 +293,8 @@ func (g *publicationGroup) WithFlowInstancePlanningSnapshot(ctx context.Context,
 	reads.fact = fact
 	operation := func(ctx context.Context, tx *sql.Tx) error {
 		return g.withInstancePlanningSnapshot(ctx, tx, reads, func(snapshot *flowInstanceIndexSnapshot) error {
-			reader := &groupInstancePlanningReader{snapshot: snapshot, readSet: reads}
-			defer func() { reader.snapshot, reader.readSet = nil, nil }()
+			reader := &groupInstancePlanningReader{snapshot: snapshot, readSet: reads, group: g}
+			defer reader.close()
 			return prepare(ctx, reader)
 		})
 	}
@@ -277,6 +358,13 @@ func (g *publicationGroup) reobservePlanningReadSets(ctx context.Context, snapsh
 			return err
 		}
 		changed = changed || stale
+		if reads.agentsRead {
+			current, err := operatorsurface.ReadActiveAgentDescriptorsTx(ctx, snapshot.tx, reads.runID, snapshot.postgres)
+			if err != nil {
+				return err
+			}
+			changed = changed || !slices.Equal(reads.agents, current)
+		}
 	}
 	// Retry only after every preparation's dependencies were read successfully.
 	if changed {

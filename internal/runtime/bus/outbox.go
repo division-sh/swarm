@@ -240,7 +240,7 @@ func (eb *EventBus) prepareEnginePublicationsWithMember(ctx context.Context, int
 			release()
 			return nil, err
 		}
-		if member != nil {
+		if member != nil && member.instances == nil {
 			if err := member.group.RecordPrepared(preparedCtx, prepared.publicationClaim.Claim(), plan); err != nil {
 				err = errors.Join(err, prepared.publicationClaim.Release(context.WithoutCancel(preparedCtx)))
 				release()

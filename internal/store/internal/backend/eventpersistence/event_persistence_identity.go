@@ -146,6 +146,30 @@ func (s *EventSQLiteOwner) VerifyPreparedPublishEventIdentity(candidate events.A
 	return verifyPreparedPublishEventIdentity(candidate, durable)
 }
 
+func (s *EventPostgresOwner) LoadPreparedPublishEventTx(ctx context.Context, tx *sql.Tx, eventID string) (runtimebus.PreparedPublishEvent, bool, error) {
+	admitted, settlement, found, err := eventrecordpostgres.LoadAdmitted(ctx, tx, eventID)
+	if err != nil || !found {
+		return runtimebus.PreparedPublishEvent{}, found, err
+	}
+	snapshots, err := s.DeliverySnapshotsForEventTx(ctx, tx, eventID)
+	if err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, err
+	}
+	return preparedPublishEvent(admitted, settlement, deliveryRoutesFromSnapshots(snapshots))
+}
+
+func (s *EventSQLiteOwner) LoadPreparedPublishEventTx(ctx context.Context, tx *sql.Tx, eventID string) (runtimebus.PreparedPublishEvent, bool, error) {
+	admitted, settlement, found, err := eventrecordsqlite.LoadAdmitted(ctx, tx, eventID)
+	if err != nil || !found {
+		return runtimebus.PreparedPublishEvent{}, found, err
+	}
+	snapshots, err := s.DeliverySnapshotsForEventTx(ctx, tx, eventID)
+	if err != nil {
+		return runtimebus.PreparedPublishEvent{}, false, err
+	}
+	return preparedPublishEvent(admitted, settlement, deliveryRoutesFromSnapshots(snapshots))
+}
+
 func verifyPreparedPublishEventIdentity(candidate events.AdmittedEvent, durable runtimebus.PreparedPublishEvent) error {
 	if err := durable.Validate(); err != nil {
 		return err
