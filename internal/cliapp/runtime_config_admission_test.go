@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-func TestRuntimeConfigDeploymentIntentUsesAdmittedLayerFacts(t *testing.T) {
-	for _, name := range []string{"defaults", "user global", "project", "local operator", "explicit", "delegated locator"} {
+func TestRuntimeConfigDeploymentIntentUsesSelectedFileFacts(t *testing.T) {
+	for _, name := range []string{"defaults", "user global", "project", "deployment", "explicit", "delegated locator"} {
 		t.Run(name, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			repo := t.TempDir()
@@ -16,10 +16,10 @@ func TestRuntimeConfigDeploymentIntentUsesAdmittedLayerFacts(t *testing.T) {
 			path := ""
 			switch name {
 			case "user global":
-				path = userGlobalUnifiedConfigPath()
+				path = ignoredUserGlobalConfigPath(t)
 			case "project":
 				path = filepath.Join(repo, "swarm.yaml")
-			case "local operator":
+			case "deployment":
 				path = filepath.Join(repo, ".swarm", "swarm.yaml")
 			case "explicit":
 				path = filepath.Join(t.TempDir(), "operator.yaml")
@@ -38,9 +38,12 @@ func TestRuntimeConfigDeploymentIntentUsesAdmittedLayerFacts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := name != "defaults" && name != "user global"
+			want := name != "defaults" && name != "user global" && name != "project"
 			if loaded.DeploymentConfigured() != want {
-				t.Fatalf("deployment intent = %t, layers %+v, want %t", loaded.DeploymentConfigured(), loaded.Layers, want)
+				t.Fatalf("deployment intent = %t, selected path %q, want %t", loaded.DeploymentConfigured(), loaded.Path, want)
+			}
+			if (loaded.Path != "") != want || (loaded.cli.Serve.APIListenAddr != "") != want {
+				t.Fatalf("ignored files affected selected path or listener: %q / %q", loaded.Path, loaded.cli.Serve.APIListenAddr)
 			}
 		})
 	}
