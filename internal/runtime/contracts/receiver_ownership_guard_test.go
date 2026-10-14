@@ -37,6 +37,8 @@ func receiverOwnerConstructorBudget() map[string]int {
 		// Ordinary agent replay consumes the fixed-revision initializer proof
 		// and reconstructed receiver; it cannot request future initialization.
 		"store/internal/backend/runforkpersistence::projectRunForkReplayInitializedReceiver": 1,
+		// Fixed-cut replay projects captured actor ownership separately from construction (2617:6177786309).
+		"store/internal/backend/runforkpersistence::projectRunForkReplayActorTarget": 2,
 	}
 }
 
@@ -157,6 +159,24 @@ func TestReceiverCompositionOwnershipGuardHostileFanOutProjection(t *testing.T) 
 	violations := receiverOwnerConstructorViolations(t, map[string][]byte{path: []byte(hostile)})
 	if len(violations) != 1 || !strings.Contains(violations[0], "projectRunForkFanOutExecutionOwnership has 4 constructors; audited 3") {
 		t.Fatalf("approved fan-out projection admitted another interpretation: %v", violations)
+	}
+}
+
+func TestReceiverCompositionOwnershipGuardHostileReplayActorProjection(t *testing.T) {
+	root := handlerRuleIdentityGuardRepoRoot(t)
+	path := filepath.Join(root, "internal/store/internal/backend/runforkpersistence/run_fork_delivery_event_replay.go")
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from := "return events.NewEntitylessReceiverTarget(actor)"
+	if strings.Count(string(original), from) != 1 {
+		t.Fatal("exact replay actor projection probe site moved")
+	}
+	hostile := strings.Replace(string(original), from, "_, _ = events.NewExistingEntityTarget(actor)\n"+from, 1)
+	violations := receiverOwnerConstructorViolations(t, map[string][]byte{path: []byte(hostile)})
+	if len(violations) != 1 || !strings.Contains(violations[0], "projectRunForkReplayActorTarget has 3 constructors; audited 2") {
+		t.Fatalf("approved replay actor projection admitted another interpretation: %v", violations)
 	}
 }
 
