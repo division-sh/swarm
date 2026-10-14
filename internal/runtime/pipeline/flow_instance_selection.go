@@ -181,7 +181,27 @@ func readFlowInstanceSelection(ctx context.Context, reader FlowInstanceIndexRead
 		}
 		selected = observation
 	}
-	return selected, selected.Valid(), nil
+	if !selected.Valid() {
+		return FlowInstanceObservation{}, false, nil
+	}
+	exact, err := NewExactFlowInstanceLookup(lookup.Source(), lookup.SourceFact(), selected.Owner())
+	if err != nil {
+		return FlowInstanceObservation{}, false, err
+	}
+	current, found, err := reader.LookupFlowInstance(ctx, exact)
+	if err != nil {
+		return FlowInstanceObservation{}, false, err
+	}
+	if !found || current.Identity() != selected.Identity() {
+		return FlowInstanceObservation{}, false, &FlowInstanceConstructionCorruption{
+			RunID: lookup.RunID(), FlowID: lookup.FlowID(), InstancePath: exact.ExactPath(),
+			Cause: fmt.Errorf("inventory receiver lacks its exact stored identity"),
+		}
+	}
+	if err := current.ValidateSelection(lookup); err != nil {
+		return FlowInstanceObservation{}, false, err
+	}
+	return current, true, nil
 }
 
 func prepareMissingFlowInstance(ctx context.Context, planner FlowInstanceActivationPlanner, request FlowInstanceSelectionRequest) (FlowInstanceSelection, error) {
