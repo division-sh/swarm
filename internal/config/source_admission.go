@@ -36,12 +36,9 @@ type CLISourceConfig struct {
 		APITokenFile  string `yaml:"api_token_file"`
 	} `yaml:"serve"`
 	Paths struct {
-		SwarmDir              string `yaml:"swarm_dir"`
-		PlatformSpecPath      string `yaml:"platform_spec_path"`
-		MonitorDir            string `yaml:"monitor_dir"`
-		AgentConfigMapFile    string `yaml:"agent_config_map_file"`
-		VerificationGatesFile string `yaml:"verification_gates_file"`
-		ToolingLockFile       string `yaml:"tooling_lock_file"`
+		SwarmDir         string `yaml:"swarm_dir"`
+		PlatformSpecPath string `yaml:"platform_spec_path"`
+		MonitorDir       string `yaml:"monitor_dir"`
 	} `yaml:"paths"`
 }
 
