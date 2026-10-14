@@ -1,10 +1,13 @@
 package runtimepersistence
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -43,13 +46,29 @@ func TestFlowConstructorReadinessKeepsExactRunOwnershipBothStores(t *testing.T) 
 			nextID := uuid.NewString()
 			nextCtx := correlation.WithRunID(f.ctx, nextID)
 			requireRunFixtureForTest(t, nextCtx, f.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: nextID, Artifact: f.bundle.SourceArtifact, BundleHash: fact.BundleHash()})
-			root := flowidentity.Stored(semanticview.Wrap(f.bundle), ".", nextID, nextID, nextID, "")
-			child, err := flowidentity.KeylessChild(semanticview.Wrap(f.bundle), root, "review")
+			source := semanticview.Wrap(f.bundle)
+			rootRequest := sqliteFlowActivationRequest(f.bundle, ".", nextID, "", nextID)
+			rootRequest.Instance = flowidentity.Stored(source, ".", nextID, nextID, nextID, "")
+			rootPlan, err := f.manager.PrepareFlowInstanceActivation(nextCtx, rootRequest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			root, err := committer.CommitFlowInstanceActivation(nextCtx, rootPlan)
+			if err != nil || !root.Acknowledged || !root.Created {
+				t.Fatalf("construct successor parent: %+v %v", root, err)
+			}
+			child, err := flowidentity.KeyedChild(source, root.Plan.Identity, "review", plan.Identity.InstanceID)
 			if err != nil {
 				t.Fatal(err)
 			}
 			nextRequest := sqliteFlowActivationRequest(f.bundle, "review", "review", "", "review")
 			nextRequest.Instance = child
+			nextRequest.ConstructorInput, nextRequest.ResolvedKey = plan.CreatingInput.Input, plan.Instance.Fields["account_id"]
+			payload, err := json.Marshal(map[string]any{"account_id": nextRequest.ResolvedKey})
+			if err != nil {
+				t.Fatal(err)
+			}
+			nextRequest.TriggerEvent = eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(nextRequest.ConstructorInput), "constructor-fixture", "", payload, 0, nextID, events.EventEnvelope{}, nextRequest.OccurredAt)
 			nextPlan, err := f.manager.PrepareFlowInstanceActivation(nextCtx, nextRequest)
 			if err != nil {
 				t.Fatal(err)
