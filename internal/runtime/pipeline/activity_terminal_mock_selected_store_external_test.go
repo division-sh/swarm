@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -45,6 +46,7 @@ func TestActivityMockTerminalTimestampReplayDoesNotRequireCurrentResponsePlan(t 
 			intent.Tool = "telegram.send_message"
 			intent.ActivityID = "telegram_send_message"
 			intent.ExecutionMode = executionmode.Mock
+			ctx = effects.WithExecutionMode(ctx, intent.ExecutionMode)
 			intent.Input = runtimepipeline.ActivityInputForTest(map[string]any{"chat_id": "42", "text": "hello"})
 
 			firstBus := newActivityJournalProofBus(t, selected, source)
