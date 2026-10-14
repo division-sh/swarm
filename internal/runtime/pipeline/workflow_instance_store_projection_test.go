@@ -186,6 +186,16 @@ func VerifyWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalStateForTe
 	entityID := uuid.NewString()
 	now := time.Now().UTC().Round(time.Microsecond)
 
+	// This codec component owns explicit captured parent facts, not an
+	// executable attachment or a parent inferred from the child's path.
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+		InstanceID: "root", StorageRef: parentFlowInstance, EntityID: parentID,
+		WorkflowName: parentFlowID, WorkflowVersion: "1.0.0", CurrentState: "active",
+		CreatedAt: now, EnteredStageAt: now,
+	})); err != nil {
+		t.Fatalf("construct exact projection parent: %v", err)
+	}
+
 	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID:         "inst-1",
 		StorageRef:         storageRef,
