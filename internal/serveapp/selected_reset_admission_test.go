@@ -54,7 +54,7 @@ func TestSelectedResetPreparationAdmissionOrderBothStores(t *testing.T) {
 						"event_name": "item.received", "bundle_hash": rt.BundleHash,
 						"payload": map[string]any{"item_id": "reset-preparation"}, "idempotency_key": "seed",
 					})
-					waitForServedEventPublishNodeDeliveryLifecycle(t, rt.DB, rt.ReceiverStateReader, rt.Backend, seed.RunID, seed.EventID, rt.Probe)
+					waitForServedEventPublishNodeDeliveryLifecycle(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, seed.EventID, rt.Probe)
 					forkDone := make(chan error, 1)
 					if first == "admission" {
 						go func() {

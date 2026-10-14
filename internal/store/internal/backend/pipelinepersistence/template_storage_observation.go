@@ -108,3 +108,17 @@ func CountPhysicalRoutingRulesTx(ctx context.Context, tx *sql.Tx) (int, error) {
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM routing_rules`).Scan(&count)
 	return count, err
 }
+
+func CountSubscriberEventReceiptOutcomeStorageTx(ctx context.Context, tx *sql.Tx, eventID, subscriberType, subscriberID, outcome string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts
+		WHERE event_id=$1 AND subscriber_type=$2 AND subscriber_id=$3 AND outcome=$4`, eventID, subscriberType, subscriberID, outcome).Scan(&count)
+	return count, err
+}
+
+func CountExactRunEventReplayScopeStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID, scope string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM committed_replay_scopes
+		WHERE run_id=$1 AND event_id=$2 AND scope=$3`, runID, eventID, scope).Scan(&count)
+	return count, err
+}

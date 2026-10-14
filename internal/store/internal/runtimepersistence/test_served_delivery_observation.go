@@ -27,6 +27,30 @@ func CountExactRunEventDeliveryStorageForTest(ctx context.Context, selected any,
 	})
 }
 
+func CountExactRunNodeEventDeliveryStorageForTest(ctx context.Context, selected any, runID, eventID, nodeID string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID, eventID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountExactRunNodeEventDeliveryStorageTx(ctx, tx, runID, eventID, nodeID)
+	})
+}
+
+func CountCurrentEventDeliveryOutcomeStorageForTest(ctx context.Context, selected any, eventID, subscriberType, subscriberID, outcome string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountCurrentEventDeliveryOutcomeStorageTx(ctx, tx, eventID, subscriberType, subscriberID, outcome)
+	})
+}
+
+func CountSubscriberEventReceiptOutcomeStorageForTest(ctx context.Context, selected any, eventID, subscriberType, subscriberID, outcome string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountSubscriberEventReceiptOutcomeStorageTx(ctx, tx, eventID, subscriberType, subscriberID, outcome)
+	})
+}
+
+func CountExactRunEventReplayScopeStorageForTest(ctx context.Context, selected any, runID, eventID, scope string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID, eventID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return pipelinepersistence.CountExactRunEventReplayScopeStorageTx(ctx, tx, runID, eventID, scope)
+	})
+}
+
 func ReadTemplateEventDeliveryDiagnosticsForTest(ctx context.Context, selected any, event string) ([]TemplateDeliveryDiagnosticStorage, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{event}, func(ctx context.Context, tx *sql.Tx) ([]TemplateDeliveryDiagnosticStorage, error) {
 		return delivery.ReadTemplateEventDeliveryDiagnosticsTx(ctx, tx, event)

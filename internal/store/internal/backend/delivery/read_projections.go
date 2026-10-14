@@ -407,6 +407,22 @@ func CountTemplateNodeDeliveryTx(ctx context.Context, tx *sql.Tx, event, node st
 	return count, err
 }
 
+func CountExactRunNodeEventDeliveryStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID, nodeID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries
+		WHERE run_id=$1 AND event_id=$2 AND subscriber_type='node' AND subscriber_id=$3`, runID, eventID, nodeID).Scan(&count)
+	return count, err
+}
+
+func CountCurrentEventDeliveryOutcomeStorageTx(ctx context.Context, tx *sql.Tx, eventID, subscriberType, subscriberID, outcome string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries d
+		JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id AND a.claim_version=d.claim_version
+		WHERE a.closure_kind='settled' AND d.event_id=$1 AND d.subscriber_type=$2
+		AND d.subscriber_id=$3 AND a.outcome=$4`, eventID, subscriberType, subscriberID, outcome).Scan(&count)
+	return count, err
+}
+
 func ReadGateNodeDeliveryStatusTx(ctx context.Context, tx *sql.Tx, event, node string) (string, error) {
 	var out string
 	err := tx.QueryRowContext(ctx, `SELECT status FROM event_deliveries WHERE event_id = $1 AND subscriber_type = 'node' AND subscriber_id = $2`, event, node).Scan(&out)

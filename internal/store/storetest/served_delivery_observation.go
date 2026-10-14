@@ -89,3 +89,19 @@ func ReadServedRunDebugSummary(ctx context.Context, selected any, runID string) 
 func ReadServedRuntimeLogDebugSummary(ctx context.Context, selected any, runID string) (string, error) {
 	return private.ReadServedRuntimeLogDebugSummaryForTest(ctx, selected, runID)
 }
+
+func CountExactRunNodeEventDeliveryStorage(ctx context.Context, selected any, runID, eventID, nodeID string) (int, error) {
+	return private.CountExactRunNodeEventDeliveryStorageForTest(ctx, selected, runID, eventID, nodeID)
+}
+
+func CountCurrentEventDeliveryOutcomeStorage(ctx context.Context, selected any, eventID, subscriberType, subscriberID, outcome string) (int, error) {
+	return private.CountCurrentEventDeliveryOutcomeStorageForTest(ctx, selected, eventID, subscriberType, subscriberID, outcome)
+}
+
+func CountSubscriberEventReceiptOutcomeStorage(ctx context.Context, selected any, eventID, subscriberType, subscriberID, outcome string) (int, error) {
+	return private.CountSubscriberEventReceiptOutcomeStorageForTest(ctx, selected, eventID, subscriberType, subscriberID, outcome)
+}
+
+func CountExactRunEventReplayScopeStorage(ctx context.Context, selected any, runID, eventID, scope string) (int, error) {
+	return private.CountExactRunEventReplayScopeStorageForTest(ctx, selected, runID, eventID, scope)
+}

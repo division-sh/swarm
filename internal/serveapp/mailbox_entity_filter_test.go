@@ -39,7 +39,7 @@ func startServedMailboxEntityFilterProof(t *testing.T, backend servedparity.Back
 		if !published.NewRunCreated || published.RunID == "" || published.EventID == "" {
 			t.Fatalf("event.publish = %+v, want new run", published)
 		}
-		waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.ReceiverStateReader, rt.Backend, published.RunID, published.EventID, identitytest.RootNode(t, "reviewer").Key(), rt.Probe)
+		waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.ReceiverStateReader, rt.Backend, published.RunID, published.EventID, identitytest.RootNode(t, "reviewer").Key(), rt.Probe)
 		entities = append(entities, requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, published.RunID, "", "waiting"))
 		runs = append(runs, published.RunID)
 		events = append(events, published.EventID)

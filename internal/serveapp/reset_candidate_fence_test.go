@@ -419,7 +419,7 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 					"event_name": "item.received", "bundle_hash": candidates[1].sourceArtifactFact.BundleHash(),
 					"payload": map[string]any{"item_id": "after-convergence"}, "idempotency_key": uuid.NewString(),
 				})
-				waitForServedEventPublishNodeDeliveryLifecycle(t, selectedStoreDatabaseForTest(t, stores), requireReceiverProofStateReader(t, candidates[1].runtime.Bus.Store()), backend, published.RunID, published.EventID, probe)
+				waitForServedEventPublishNodeDeliveryLifecycle(t, requireReceiverProofStateReader(t, candidates[1].runtime.Bus.Store()), backend, published.RunID, published.EventID, probe)
 				for _, candidate := range candidates {
 					grant, err := candidate.runtime.CurrentStartupGrantEvidence()
 					if err != nil || grant.State != startupownership.GrantAdmitted {

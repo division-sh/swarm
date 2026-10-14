@@ -70,9 +70,9 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			waitServedDeliveryOutcomeCount(t, rt.DB, rt.ReceiverStateReader, rt.Backend, input.EventID, "node", completedNode.Key(), "delivered", 1)
+			waitServedDeliveryOutcomeCount(t, rt.ReceiverStateReader, rt.Backend, input.EventID, "node", completedNode.Key(), "delivered", 1)
 			marker := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.marked", "run_id": seed.RunID, "payload": map[string]any{"token": "proof"}, "idempotency_key": "marker"})
-			waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.ReceiverStateReader, rt.Backend, marker.EventID, "platform", "pipeline", "success", 1)
+			waitServedEventPublishReceiptOutcomeCount(t, rt.ReceiverStateReader, rt.Backend, marker.EventID, "platform", "pipeline", "success", 1)
 			waitMixedForkSourceCheckpoint(t, selected, rt.BundleHash, seed.RunID, input.EventID, marker.EventID, completedNode.Key())
 			family, ok := selected.RunFork()
 			if !ok {

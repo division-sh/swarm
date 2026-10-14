@@ -739,12 +739,12 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 		t.Fatalf("join failure initial run = %#v", initial)
 	}
 	waitServedEventPublishDeliveryStatusCountForRun(t, reader, "postgres", initial.RunID, initial.EventID, "node", identitytest.RootNode(t, "starter").Key(), "delivered", 1)
-	waitServedEventPublishReceiptOutcomeCount(t, db, reader, "postgres", initial.EventID, "platform", "pipeline", "success", 1)
+	waitServedEventPublishReceiptOutcomeCount(t, reader, "postgres", initial.EventID, "platform", "pipeline", "success", 1)
 	entityID := servedJoinTarget(t, db, reader, initial.RunID)
 	arrival := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.completed", "run_id": initial.RunID, "source_event_id": initial.EventID, "payload": map[string]any{"dispatch_id": "dispatch-1", "member_id": "a", "result": map[string]any{"ok": true}}, "idempotency_key": "join-failure-arrival-" + uuid.NewString()})
 	waitServedEventPublishDeliveryStatusCountForRun(t, reader, "postgres", initial.RunID, arrival.EventID, "node", identitytest.RootNode(t, "join-node").Key(), "dead_letter", 1)
 	joinNode := identitytest.RootNode(t, "join-node").Key()
-	waitServedDeliveryOutcomeCount(t, db, reader, "postgres", arrival.EventID, "node", joinNode, "dead_letter", 1)
+	waitServedDeliveryOutcomeCount(t, reader, "postgres", arrival.EventID, "node", joinNode, "dead_letter", 1)
 	type failureReadback struct {
 		EntityID   string `json:"entity_id"`
 		Deliveries []struct {
@@ -797,10 +797,10 @@ func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t 
 	entityID := servedJoinTarget(t, db, reader, initial.RunID)
 	dispatched := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "order.dispatched", "run_id": initial.RunID, "source_event_id": initial.EventID, "payload": map[string]any{}, "idempotency_key": "join-fork-dispatch-" + uuid.NewString()})
 	waitServedEventPublishDeliveryStatusCountForRun(t, reader, "postgres", initial.RunID, dispatched.EventID, "node", identitytest.RootNode(t, "dispatcher").Key(), "delivered", 1)
-	waitServedEventPublishReceiptOutcomeCount(t, db, reader, "postgres", dispatched.EventID, "platform", "pipeline", "success", 1)
+	waitServedEventPublishReceiptOutcomeCount(t, reader, "postgres", dispatched.EventID, "platform", "pipeline", "success", 1)
 	arrival := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.completed", "run_id": initial.RunID, "source_event_id": dispatched.EventID, "payload": map[string]any{"dispatch_id": "dispatch-1", "member_id": "a", "result": map[string]any{"ok": true}}, "idempotency_key": "join-fork-arrival-" + uuid.NewString()})
 	waitServedEventPublishDeliveryStatusCountForRun(t, reader, "postgres", initial.RunID, arrival.EventID, "node", identitytest.RootNode(t, "join-node").Key(), "delivered", 1)
-	waitServedEventPublishReceiptOutcomeCount(t, db, reader, "postgres", arrival.EventID, "platform", "pipeline", "success", 1)
+	waitServedEventPublishReceiptOutcomeCount(t, reader, "postgres", arrival.EventID, "platform", "pipeline", "success", 1)
 	waitServedJoinSourceTimer(t, db, reader, initial.RunID)
 	waitServedRunDeliveryQuiescence(t, deliveryReader, initial.RunID)
 	forkEventID := seedServedJoinForkFrontier(t, db, initial.RunID, entityID, arrival.EventID)
@@ -963,7 +963,7 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 	if servedDB == nil {
 		t.Fatal("served sqlite SQLDB is required for event.publish proof")
 	}
-	runServedEventPublishFollowUpProof(t, endpoint, servedDB, reader, "sqlite", bundleHash, probe)
+	runServedEventPublishFollowUpProof(t, endpoint, reader, "sqlite", bundleHash, probe)
 }
 
 func requireServedRunForkStoppedReplay(t *testing.T, db *sql.DB, forkRunID string) {
@@ -1177,7 +1177,7 @@ func TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres(t *testin
 	if postReset.RunID == "" || postReset.RunID == proof.RunID {
 		t.Fatalf("post-reset admission did not create fresh work: %+v", postReset)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, proof.ReceiverStateReader, "postgres", postReset.RunID, postReset.EventID, proof.Probe)
+	waitForServedEventPublishNodeDeliveryLifecycle(t, proof.ReceiverStateReader, "postgres", postReset.RunID, postReset.EventID, proof.Probe)
 	if replay := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params); replay.Error != nil {
 		t.Fatalf("completed reset replay failed: %+v", replay.Error)
 	}
@@ -1294,7 +1294,7 @@ func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 		t.Fatal("timed out waiting for served runtime context manager")
 	}
 	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.received", "bundle_hash": bundleHash, "payload": map[string]any{"item_id": "cleanup"}, "idempotency_key": "issue-1927-cleanup-initial-" + uuid.NewString()})
-	waitForServedEventPublishNodeDeliveryLifecycle(t, db, reader, "postgres", initial.RunID, initial.EventID, probe)
+	waitForServedEventPublishNodeDeliveryLifecycle(t, reader, "postgres", initial.RunID, initial.EventID, probe)
 	hold := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.agent_hold", "run_id": initial.RunID, "source_event_id": initial.EventID, "payload": map[string]any{"note": "hold session writer"}, "idempotency_key": "issue-1927-cleanup-hold-" + uuid.NewString()})
 	var sessionID string
 	select {
@@ -1681,7 +1681,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if !started.NewRunCreated || strings.TrimSpace(started.RunID) == "" || strings.TrimSpace(started.EventID) == "" {
 		t.Fatalf("initial event.publish result = %#v, want a new run and event", started)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.ReceiverStateReader, rt.Backend, started.RunID, started.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.ReceiverStateReader, rt.Backend, started.RunID, started.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
 	var published struct {
 		EventID string `json:"event_id"`
 		RunID   string `json:"run_id"`
@@ -1696,7 +1696,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if published.RunID != started.RunID || strings.TrimSpace(published.EventID) == "" {
 		t.Fatalf("fork-point event.publish result = %#v", published)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.ReceiverStateReader, rt.Backend, started.RunID, published.EventID, identitytest.RootNode(t, "item-observer").Key(), rt.Probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.ReceiverStateReader, rt.Backend, started.RunID, published.EventID, identitytest.RootNode(t, "item-observer").Key(), rt.Probe)
 	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, started.RunID, "running")
 
 	forkParams := map[string]any{
@@ -2647,7 +2647,7 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 	if !queued.NewRunCreated || queued.RunID == "" || queued.EventID == "" {
 		t.Fatalf("%s runtime-paused event.publish result = %#v, want new queued run", rt.Backend, queued)
 	}
-	requireNoServedReceiptOutcomeDuring(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 250*time.Millisecond)
+	requireNoServedReceiptOutcomeDuring(t, rt.ReceiverStateReader, rt.Backend, queued.EventID, "platform", "pipeline", "success", 250*time.Millisecond)
 	resumeKey := keyPrefix + "-runtime-resume"
 	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{"idempotency_key": resumeKey})
 	requireServedRuntimeIngressState(t, rt.DB, rt.Backend, "running", "platform.resumed")
@@ -2659,7 +2659,7 @@ func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControl
 	if duplicateResume.Data["code"] != apiv1.RuntimeNotPausedCode {
 		t.Fatalf("%s duplicate runtime.resume data = %#v, want %s", rt.Backend, duplicateResume.Data, apiv1.RuntimeNotPausedCode)
 	}
-	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.ReceiverStateReader, rt.Backend, queued.EventID, "platform", "pipeline", "success", 1)
+	waitServedEventPublishReceiptOutcomeCount(t, rt.ReceiverStateReader, rt.Backend, queued.EventID, "platform", "pipeline", "success", 1)
 	requireServedRunStatus(t, rt.Endpoint, queued.RunID, "running")
 	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, queued.RunID, servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle))
 }
@@ -3424,7 +3424,7 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 					hookMu.Unlock()
 					return fmt.Errorf("served sqlite SQLDB is required for dynamic event.publish proof")
 				}
-				hook = servedEventPublishBlockingHandlerAuthorityHook(servedDB, "sqlite", identitytest.RootNode(t, "portfolio-node").Key(), "opco.spinup_requested", blocked, release)
+				hook = servedEventPublishBlockingHandlerAuthorityHook(&reader, "sqlite", identitytest.RootNode(t, "portfolio-node").Key(), "opco.spinup_requested", blocked, release)
 			}
 			h := hook
 			hookMu.Unlock()
@@ -3460,7 +3460,7 @@ func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
 		MCPListenAddr:                    "127.0.0.1:0",
 		SelfCheck:                        true,
 		Verbose:                          true,
-		TestWorkflowNodeHandlerStartHook: servedEventPublishBlockingHandlerAuthorityHook(db, "postgres", identitytest.RootNode(t, "portfolio-node").Key(), "opco.spinup_requested", blocked, release),
+		TestWorkflowNodeHandlerStartHook: servedEventPublishBlockingHandlerAuthorityHook(&reader, "postgres", identitytest.RootNode(t, "portfolio-node").Key(), "opco.spinup_requested", blocked, release),
 		TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
 	})
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
@@ -3498,7 +3498,7 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, re
 	if got := servedEventPublishDeliveryStatusCount(t, reader, backend, spinup.EventID, "node", portfolioNode, "in_progress"); got != 1 {
 		t.Fatalf("%s parent delivery in_progress count = %d, want 1\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-	requireServedEventPublishCommittedReplayScope(t, db, reader, backend, runID, spinup.EventID, "subscribed")
+	requireServedEventPublishCommittedReplayScope(t, reader, backend, runID, spinup.EventID, "subscribed")
 	if got := servedEventPublishDeliveryStatusCount(t, reader, backend, spinup.EventID, "", "workflow-runtime"); got != 0 {
 		t.Fatalf("%s parent workflow-runtime delivery count = %d, want 0\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
@@ -3508,7 +3508,7 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, re
 		close(release)
 	})
 	waitServedEventPublishDeliveryStatusCount(t, reader, backend, spinup.EventID, "node", identitytest.RootNode(t, "portfolio-node").Key(), "delivered", 1)
-	waitServedDeliveryOutcomeCount(t, db, reader, backend, spinup.EventID, "node", portfolioNode, "delivered", 1)
+	waitServedDeliveryOutcomeCount(t, reader, backend, spinup.EventID, "node", portfolioNode, "delivered", 1)
 	requireServedEventReadback(t, endpoint, spinup.EventID, runID, parentEntityID, "opco.spinup_requested", portfolioNode)
 	requireServedTraceReadback(t, endpoint, runID, spinup.EventID, "opco.spinup_requested", portfolioNode)
 	autoEventName := servedTypedCreationInstancePath + "/opco.product_initialization_requested"
@@ -3518,8 +3518,8 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, re
 	lifecycleNode := identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key()
 	requireServedEventReadback(t, endpoint, autoEventID, runID, autoEntityID, autoEventName, lifecycleNode)
 	requireServedTraceReadback(t, endpoint, runID, autoEventID, autoEventName, lifecycleNode)
-	waitServedDeliveryOutcomeCount(t, db, reader, backend, autoEventID, "node", lifecycleNode, "delivered", 1)
-	requireServedEventPublishCommittedReplayScope(t, db, reader, backend, runID, autoEventID, "subscribed")
+	waitServedDeliveryOutcomeCount(t, reader, backend, autoEventID, "node", lifecycleNode, "delivered", 1)
+	requireServedEventPublishCommittedReplayScope(t, reader, backend, runID, autoEventID, "subscribed")
 	if got := servedEventPublishDeliveryStatusCount(t, reader, backend, autoEventID, "", "workflow-runtime"); got != 0 {
 		t.Fatalf("%s child workflow-runtime delivery count = %d, want 0\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
@@ -3596,7 +3596,7 @@ func createServedControlWaitingRun(t *testing.T, rt servedControlProofRuntime, s
 	if !result.NewRunCreated || result.RunID == "" || result.EventID == "" {
 		t.Fatalf("%s control seed event.publish result = %#v, want new run", rt.Backend, result)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.ReceiverStateReader, rt.Backend, result.RunID, result.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.ReceiverStateReader, rt.Backend, result.RunID, result.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
 	entityID = requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, result.RunID, "", "waiting")
 	requireServedRunStatus(t, rt.Endpoint, result.RunID, "running")
 	return result.RunID, result.EventID, entityID
@@ -4150,9 +4150,9 @@ func publishServedLiveAgentHoldEvent(t *testing.T, rt servedControlProofRuntime,
 		t.Fatalf("%s live-agent hold event.publish result = %#v, want existing run source=%s", rt.Backend, result, sourceEventID)
 	}
 	assertServedEventPublishDeliveriesContainStatus(t, result.Deliveries, "agent", "load-agent", "pending", "in_progress", "delivered")
-	requireServedEventPublishCommittedReplayScope(t, rt.DB, rt.ReceiverStateReader, rt.Backend, runID, result.EventID, "subscribed")
+	requireServedEventPublishCommittedReplayScope(t, rt.ReceiverStateReader, rt.Backend, runID, result.EventID, "subscribed")
 	waitServedEventPublishDeliveryStatusCountForRun(t, rt.ReceiverStateReader, rt.Backend, runID, result.EventID, "agent", "load-agent", "delivered", 1)
-	waitServedDeliveryOutcomeCount(t, rt.DB, rt.ReceiverStateReader, rt.Backend, result.EventID, "agent", "load-agent", "delivered", 1)
+	waitServedDeliveryOutcomeCount(t, rt.ReceiverStateReader, rt.Backend, result.EventID, "agent", "load-agent", "delivered", 1)
 	return result
 }
 
@@ -4262,7 +4262,7 @@ func servedRunControlState(t *testing.T, db *sql.DB, backend, runID string) (run
 
 func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedControlProofRuntime) (string, string, string, string) {
 	t.Helper()
-	db := rt.DB
+
 	backend := rt.Backend
 	ctx := context.Background()
 	runID := uuid.NewString()
@@ -4293,7 +4293,7 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("agent-pending"), AgentIdentity: agentidentitytest.RootRuntimeForRun(t, runID, "agent-pending", "serveapp-test")}},
 		runtimepipelineobligation.ScopeSubscribed,
 		storetest.AcknowledgedPipelineDisposition())
-	if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success"); got != 1 {
+	if got := servedEventPublishReceiptOutcomeCount(t, rt.ReceiverStateReader, backend, eventID, "platform", "pipeline", "success"); got != 1 {
 		t.Fatalf("%s seeded pipeline receipt count for event=%s = %d, want 1\n%s", backend, eventID, got, servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 	}
 	entityID, cardID := seedServedRunControlDecisionCard(t, rt, runID, now)
@@ -4519,8 +4519,8 @@ func requireServedStoppedPendingDelivery(t *testing.T, db *sql.DB, reader receiv
 		status, reason := servedDeliveryStatusReason(t, db, backend, eventID, "agent", subscriberID)
 		lastStatus, lastReason = status, reason
 		if status == "dead_letter" && reason == "run_stopped" {
-			waitServedDeliveryOutcomeCount(t, db, reader, backend, eventID, "agent", subscriberID, "terminalized", 1)
-			waitServedEventPublishReceiptOutcomeCount(t, db, reader, backend, eventID, "platform", "pipeline", "success", 1)
+			waitServedDeliveryOutcomeCount(t, reader, backend, eventID, "agent", subscriberID, "terminalized", 1)
+			waitServedEventPublishReceiptOutcomeCount(t, reader, backend, eventID, "platform", "pipeline", "success", 1)
 			return
 		}
 		time.Sleep(25 * time.Millisecond)
@@ -4567,11 +4567,11 @@ func requireNoServedDeliveryStatusDuring(t *testing.T, reader receiverProofState
 	}
 }
 
-func requireNoServedReceiptOutcomeDuring(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, outcome string, duration time.Duration) {
+func requireNoServedReceiptOutcomeDuring(t *testing.T, reader servedEventCountReader, backend, eventID, subscriberType, subscriberID, outcome string, duration time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(duration)
 	for time.Now().Before(deadline) {
-		if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, subscriberType, subscriberID, outcome); got != 0 {
+		if got := servedEventPublishReceiptOutcomeCount(t, reader, backend, eventID, subscriberType, subscriberID, outcome); got != 0 {
 			t.Fatalf("%s receipt count for event=%s subscriber=%s/%s outcome=%q = %d during blocked interval, want 0",
 				backend, eventID, subscriberType, subscriberID, outcome, got)
 		}
@@ -4826,7 +4826,7 @@ type servedEventPublishPreHandlerProof struct {
 }
 
 func servedEventPublishBlockingHandlerAuthorityHook(
-	db *sql.DB,
+	reader *receiverProofStateReader,
 	backend string,
 	wantNodeID string,
 	wantEventSuffix string,
@@ -4841,12 +4841,16 @@ func servedEventPublishBlockingHandlerAuthorityHook(
 			return nil
 		}
 		once.Do(func() {
+			var currentReader receiverProofStateReader
+			if reader != nil {
+				currentReader = *reader
+			}
 			runID := strings.TrimSpace(evt.RunID())
 			if runID == "" {
 				runID = runtimecorrelation.RunIDFromContext(ctx)
 			}
 			eventID := strings.TrimSpace(evt.ID())
-			count, err := servedEventPublishNodeDeliveryCountValue(ctx, db, backend, runID, eventID, wantNodeID)
+			count, err := servedEventPublishNodeDeliveryCountValue(ctx, currentReader, backend, runID, eventID, wantNodeID)
 			proof := servedEventPublishPreHandlerProof{
 				RunID:   runID,
 				EventID: eventID,
@@ -4929,7 +4933,7 @@ func assertServedEventPublishDeliveriesContainStatus(t *testing.T, deliveries []
 	t.Fatalf("event.publish deliveries = %#v, want %s/%s status in %v", deliveries, subscriberType, subscriberID, statuses)
 }
 
-func waitForServedEventPublishNodeDeliveryLifecycleForNode(t *testing.T, db *sql.DB, reader receiverProofStateReader, backend, runID, eventID, nodeID string, probe *lifecycletest.Probe) {
+func waitForServedEventPublishNodeDeliveryLifecycleForNode(t *testing.T, reader receiverProofStateReader, backend, runID, eventID, nodeID string, probe *lifecycletest.Probe) {
 	t.Helper()
 	if probe == nil {
 		t.Fatalf("%s lifecycle probe is required for event %s", backend, eventID)
@@ -4949,14 +4953,14 @@ func waitForServedEventPublishNodeDeliveryLifecycleForNode(t *testing.T, db *sql
 		t.Fatal("node delivery consumed the complete lifecycle proof deadline")
 	}
 	probe.Expect(eventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(remaining)
-	if count := servedEventPublishNodeDeliveryCount(t, db, backend, runID, eventID, nodeID); count != 1 {
+	if count := servedEventPublishNodeDeliveryCount(t, reader, backend, runID, eventID, nodeID); count != 1 {
 		t.Fatalf("%s node/%s delivery count for event %s = %d, want 1\n%s", backend, nodeID, eventID, count, servedInspectionRunDebugSummary(reader, runID))
 	}
 }
 
-func waitForServedEventPublishNodeDeliveryLifecycle(t *testing.T, db *sql.DB, reader receiverProofStateReader, backend, runID, eventID string, probe *lifecycletest.Probe) {
+func waitForServedEventPublishNodeDeliveryLifecycle(t *testing.T, reader receiverProofStateReader, backend, runID, eventID string, probe *lifecycletest.Probe) {
 	t.Helper()
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, reader, backend, runID, eventID, identitytest.RootNode(t, "item-handler").Key(), probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, reader, backend, runID, eventID, identitytest.RootNode(t, "item-handler").Key(), probe)
 }
 
 const (
@@ -4974,7 +4978,7 @@ type servedEventPublishFollowUpProof struct {
 	FollowUpEventID string
 }
 
-func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, reader receiverProofStateReader, backend, bundleHash string, probe *lifecycletest.Probe) servedEventPublishFollowUpProof {
+func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, reader receiverProofStateReader, backend, bundleHash string, probe *lifecycletest.Probe) servedEventPublishFollowUpProof {
 	t.Helper()
 	initialStdout, initialStderr, code := runServedCLICommand(t, endpoint, []string{"event", "publish", "item.received", "--payload-json", `{"item_id":"item-1"}`, "--idempotency-key", "issue-1255-" + backend + "-initial"})
 	if code != 0 {
@@ -4989,10 +4993,10 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if got := servedEventPublishScalarCount(t, reader, backend, "runs", runID, ""); got != 1 {
 		t.Fatalf("%s runs for initial run = %d, want 1", backend, got)
 	}
-	if got := servedEventPublishNodeDeliveryCount(t, db, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key()); got == 0 {
+	if got := servedEventPublishNodeDeliveryCount(t, reader, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key()); got == 0 {
 		t.Fatalf("%s initial root-input node deliveries = %d, want persisted node/item-handler authority", backend, got)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, reader, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, reader, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
 	entityID := requireServedEventPublishEntityState(t, reader, backend, runID, "", "waiting")
 	requireServedEventReadback(t, endpoint, initialEventID, runID, entityID, "item.received", identitytest.RootNode(t, "item-handler").Key())
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
@@ -5014,7 +5018,7 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if got := servedEventPublishScalarCount(t, reader, backend, "event_deliveries", runID, followUpEventID); got == 0 {
 		t.Fatalf("%s follow-up deliveries = %d, want non-empty persisted evidence", backend, got)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, reader, backend, runID, followUpEventID, identitytest.RootNode(t, "item-observer").Key(), probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, reader, backend, runID, followUpEventID, identitytest.RootNode(t, "item-observer").Key(), probe)
 	requireServedEventPublishEntityState(t, reader, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
 	requireServedRunStatusWithDebug(t, endpoint, reader, backend, runID, "completed")
@@ -5125,7 +5129,7 @@ func runServedEventPublishActiveLoadProof(t *testing.T, endpoint string, db *sql
 	if !initial.NewRunCreated || runID == "" || initialEventID == "" {
 		t.Fatalf("%s initial event.publish result = %#v, want new run", backend, initial)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, reader, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, reader, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
 	entityID := requireServedEventPublishEntityState(t, reader, backend, runID, "", "waiting")
 	holdStart := time.Now()
 	holdEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{"event_name": "item.processed", "run_id": runID, "source_event_id": initialEventID, "payload": map[string]any{"item_id": "hold"}, "idempotency_key": "issue-1434-" + backend + "-agent-hold"})
@@ -5146,7 +5150,7 @@ func runServedEventPublishActiveLoadProof(t *testing.T, endpoint string, db *sql
 	if got := servedEventPublishScalarCount(t, reader, backend, "event_deliveries", runID, hold.EventID); got == 0 {
 		t.Fatalf("%s agent-hold deliveries = %d, want persisted delivery authority\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-	requireServedEventPublishCommittedReplayScope(t, db, reader, backend, runID, hold.EventID, "subscribed")
+	requireServedEventPublishCommittedReplayScope(t, reader, backend, runID, hold.EventID, "subscribed")
 	assertServedEventPublishDeliveriesContainStatus(t, hold.Deliveries, "agent", "load-agent", "pending", "in_progress")
 	select {
 	case <-agentStarted:
@@ -5197,7 +5201,7 @@ func runServedEventPublishActiveLoadProof(t *testing.T, endpoint string, db *sql
 	if got := servedEventPublishScalarCount(t, reader, backend, "event_deliveries", runID, followUp.EventID); got == 0 {
 		t.Fatalf("%s follow-up deliveries = %d, want persisted delivery authority\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-	requireServedEventPublishCommittedReplayScope(t, db, reader, backend, runID, followUp.EventID, "subscribed")
+	requireServedEventPublishCommittedReplayScope(t, reader, backend, runID, followUp.EventID, "subscribed")
 	itemObserver := identitytest.RootNode(t, "item-observer").Key()
 	assertServedEventPublishDeliveriesContainStatus(t, followUp.Deliveries, "node", itemObserver, "pending", "in_progress", "delivered")
 	if got := servedEventPublishDeliveryStatusCount(t, reader, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
@@ -5209,7 +5213,7 @@ func runServedEventPublishActiveLoadProof(t *testing.T, endpoint string, db *sql
 		close(release)
 	})
 	waitServedEventPublishDeliveryStatusCount(t, reader, backend, hold.EventID, "agent", "load-agent", "delivered", 1)
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, reader, backend, runID, followUp.EventID, identitytest.RootNode(t, "item-observer").Key(), probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, reader, backend, runID, followUp.EventID, identitytest.RootNode(t, "item-observer").Key(), probe)
 	requireServedEventPublishEntityState(t, reader, backend, runID, entityID, "done")
 	requireServedRunStatusWithDebug(t, endpoint, reader, backend, runID, "completed")
 	requireServedTraceReadback(t, endpoint, runID, followUp.EventID, "item.processed", itemObserver)
@@ -5718,49 +5722,26 @@ func servedEventPublishDeliveryStatusCount(t *testing.T, reader receiverProofSta
 	return count
 }
 
-func requireServedEventPublishCommittedReplayScope(t *testing.T, db *sql.DB, reader receiverProofStateReader, backend, runID, eventID, wantScope string) {
+func requireServedEventPublishCommittedReplayScope(t *testing.T, reader receiverProofStateReader, backend, runID, eventID, wantScope string) {
 	t.Helper()
-	var (
-		query string
-		args  []any
-	)
-	switch backend {
-	case "postgres":
-		query = `
-			SELECT COUNT(*)
-			FROM committed_replay_scopes
-			WHERE run_id = $1::uuid
-			  AND event_id = $2::uuid
-			  AND scope = $3
-		`
-		args = []any{runID, eventID, strings.TrimSpace(wantScope)}
-	case "sqlite":
-		query = `
-			SELECT COUNT(*)
-			FROM committed_replay_scopes
-			WHERE run_id = ?
-			  AND event_id = ?
-			  AND scope = ?
-		`
-		args = []any{runID, eventID, strings.TrimSpace(wantScope)}
-	default:
+	if backend != "postgres" && backend != "sqlite" {
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
-		t.Fatalf("%s committed replay scope query failed: %v\n%s", backend, err, query)
+	count, err := readServedExactReplayScopeCount(context.Background(), reader, runID, eventID, strings.TrimSpace(wantScope))
+	if err != nil {
+		t.Fatalf("%s committed replay scope query failed: %v", backend, err)
 	}
 	if count != 1 {
 		t.Fatalf("%s committed replay scope rows for run=%s event=%s scope=%q = %d, want 1\n%s", backend, runID, eventID, wantScope, count, servedInspectionRunDebugSummary(reader, runID))
 	}
 }
 
-func waitServedEventPublishReceiptOutcomeCount(t *testing.T, db *sql.DB, reader receiverProofStateReader, backend, eventID, subscriberType, subscriberID, outcome string, want int) {
+func waitServedEventPublishReceiptOutcomeCount(t *testing.T, reader receiverProofStateReader, backend, eventID, subscriberType, subscriberID, outcome string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var got int
 	for time.Now().Before(deadline) {
-		got = servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, subscriberType, subscriberID, outcome)
+		got = servedEventPublishReceiptOutcomeCount(t, reader, backend, eventID, subscriberType, subscriberID, outcome)
 		if got == want {
 			return
 		}
@@ -5769,43 +5750,18 @@ func waitServedEventPublishReceiptOutcomeCount(t *testing.T, db *sql.DB, reader 
 	t.Fatalf("%s receipt count for event=%s subscriber=%s/%s outcome=%q = %d, want %d\n%s", backend, eventID, subscriberType, subscriberID, outcome, got, want, servedEventPublishDebugSummaryForEvent(t, reader, backend, eventID))
 }
 
-func waitServedDeliveryOutcomeCount(t *testing.T, db *sql.DB, reader receiverProofStateReader, backend, eventID, subscriberType, subscriberID, outcome string, want int) {
+func waitServedDeliveryOutcomeCount(t *testing.T, reader receiverProofStateReader, backend, eventID, subscriberType, subscriberID, outcome string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var got int
 	for time.Now().Before(deadline) {
-		var query string
-		var args []any
-		switch backend {
-		case "postgres":
-			query = `
-				SELECT COUNT(*)
-				FROM event_deliveries d
-				JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
-				  ON o.delivery_id = d.delivery_id
-				 AND o.claim_version = d.claim_version
-				WHERE d.event_id = $1::uuid
-				  AND d.subscriber_type = $2
-				  AND d.subscriber_id = $3
-				  AND o.outcome = $4`
-			args = []any{eventID, subscriberType, subscriberID, outcome}
-		case "sqlite":
-			query = `
-				SELECT COUNT(*)
-				FROM event_deliveries d
-				JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
-				  ON o.delivery_id = d.delivery_id
-				 AND o.claim_version = d.claim_version
-				WHERE d.event_id = ?
-				  AND d.subscriber_type = ?
-				  AND d.subscriber_id = ?
-				  AND o.outcome = ?`
-			args = []any{eventID, subscriberType, subscriberID, outcome}
-		default:
+		if backend != "postgres" && backend != "sqlite" {
 			t.Fatalf("unknown proof backend %q", backend)
 		}
-		if err := db.QueryRowContext(context.Background(), query, args...).Scan(&got); err != nil {
-			t.Fatalf("%s delivery outcome count query failed: %v\n%s", backend, err, query)
+		var err error
+		got, err = readServedCurrentDeliveryOutcomeCount(context.Background(), reader, eventID, subscriberType, subscriberID, outcome)
+		if err != nil {
+			t.Fatalf("%s delivery outcome count query failed: %v", backend, err)
 		}
 		if got == want {
 			return
@@ -5829,23 +5785,14 @@ func servedEventPublishDebugSummaryForEvent(t *testing.T, reader receiverProofSt
 	return servedInspectionRunDebugSummary(reader, runID)
 }
 
-func servedEventPublishReceiptOutcomeCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, outcome string) int {
+func servedEventPublishReceiptOutcomeCount(t *testing.T, reader servedEventCountReader, backend, eventID, subscriberType, subscriberID, outcome string) int {
 	t.Helper()
-	var query string
-	var args []any
-	switch backend {
-	case "postgres":
-		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = $2 AND subscriber_id = $3 AND outcome = $4`
-		args = []any{eventID, subscriberType, subscriberID, outcome}
-	case "sqlite":
-		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = ? AND subscriber_id = ? AND outcome = ?`
-		args = []any{eventID, subscriberType, subscriberID, outcome}
-	default:
+	if backend != "postgres" && backend != "sqlite" {
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
-		t.Fatalf("%s receipt count query failed: %v\n%s", backend, err, query)
+	count, err := readServedSubscriberReceiptOutcomeCount(context.Background(), reader, eventID, subscriberType, subscriberID, outcome)
+	if err != nil {
+		t.Fatalf("%s receipt count query failed: %v", backend, err)
 	}
 	return count
 }
@@ -6034,47 +5981,20 @@ func servedEventPublishSourcedEventCount(t *testing.T, reader receiverProofState
 	return count
 }
 
-func servedEventPublishNodeDeliveryCount(t *testing.T, db *sql.DB, backend, runID, eventID, subscriberID string) int {
+func servedEventPublishNodeDeliveryCount(t *testing.T, reader servedEventCountReader, backend, runID, eventID, subscriberID string) int {
 	t.Helper()
-	count, err := servedEventPublishNodeDeliveryCountValue(context.Background(), db, backend, runID, eventID, subscriberID)
+	count, err := servedEventPublishNodeDeliveryCountValue(context.Background(), reader, backend, runID, eventID, subscriberID)
 	if err != nil {
 		t.Fatalf("%s count node delivery %s/%s: %v", backend, eventID, subscriberID, err)
 	}
 	return count
 }
 
-func servedEventPublishNodeDeliveryCountValue(ctx context.Context, db *sql.DB, backend, runID, eventID, subscriberID string) (int, error) {
-	var sqlText string
-	var args []any
-	switch backend {
-	case "postgres":
-		sqlText = `
-			SELECT COUNT(*)
-			FROM event_deliveries
-			WHERE run_id = $1::uuid
-			  AND event_id = $2::uuid
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = $3
-		`
-		args = []any{runID, eventID, subscriberID}
-	case "sqlite":
-		sqlText = `
-			SELECT COUNT(*)
-			FROM event_deliveries
-			WHERE run_id = ?
-			  AND event_id = ?
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = ?
-		`
-		args = []any{runID, eventID, subscriberID}
-	default:
+func servedEventPublishNodeDeliveryCountValue(ctx context.Context, reader servedEventCountReader, backend, runID, eventID, subscriberID string) (int, error) {
+	if backend != "postgres" && backend != "sqlite" {
 		return 0, fmt.Errorf("unknown proof backend %q", backend)
 	}
-	var count int
-	if err := db.QueryRowContext(ctx, sqlText, args...).Scan(&count); err != nil {
-		return 0, err
-	}
-	return count, nil
+	return readServedExactRunNodeDeliveryCount(ctx, reader, runID, eventID, subscriberID)
 }
 
 func TestRunServeRuntimePassesNoAmbientDataSourceToWorkspaceLifecycle(t *testing.T) {
