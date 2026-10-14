@@ -11733,22 +11733,29 @@ tool_model:
       session_explicit_logout_reservation: >
         Logout is a distinct destructive channel responsibility, not unbind or a message capability. Its selected-store
         reservation freezes the retained onboarding operation and revision, paired account admission, complete source
-        coordinate and original SDK occurrence. Reservation atomically retires every executable consumer of that exact
+        coordinate, original SDK occurrence and that occurrence's exact admitted normal generation-grant binding.
+        Under the canonical mutation fence, the reservation owner verifies the binding against its selected-store
+        grant and freezes the canonical original process lease stamp; a caller's attribution is not authority.
+        Reservation atomically retires every executable consumer of that exact
         connection while retaining pairing evidence and transport possession. Contradictory or other-principal consumers
         refuse with rollback. A pending logout conflicts with any overlapping identity or source teardown; unrelated
         connections remain independent. Exact request replay returns the original immutable responsibility, not a new
-        target. This private evidence is not an SDK execution permit and is omitted from public teardown serialization.
+        target, and never adopts a successor stamp. The strict private target codec rejects missing, malformed or
+        contradictory grant/stamp evidence without migration or backfill. This private evidence is not an SDK
+        execution permit and is omitted from public teardown serialization.
       session_explicit_logout_effect: >
         The existing selected effect journal owns one channel_logout operation deterministically derived from the
         exact teardown UUID, never the caller key, account or successor occurrence. Its closed live authority binds
         teardown revision, principal, source, runtime and the fingerprint of the complete frozen private target.
-        Authorization and launch consume the strict teardown owner and require the retired original admission,
+        Authorization and launch consume the strict teardown owner, require its exact original process stamp to
+        remain current under the canonical mutation fence, and require the retired original admission,
         without a live business activation. The original RuntimeConnection separately admits its exact paired SDK
         occurrence. Production unlink has no unjournaled convenience path: callback, send and SDK-store drains
         precede the durable launch marker, which precedes unlink. Caller cancellation releases the bounded wait;
         counted process-owned work retains journal/history settlement and cleanup. That tail is reserved before
         authorization and does not reacquire execution or completion admission from a retired runtime; SDK dispatch
-        remains separately fenced by its original runtime, source and private occurrence. Complete success requires
+        remains separately fenced by its original runtime, source, private occurrence and selected-store stamp
+        readback before and after journal launch. Complete success requires
         SDK unlink, original device deletion and the original callback/socket/private-store join. Failure after launch
         is uncertain, even if remote unlink may have succeeded. Journal settlement and teardown result commit
         atomically. Startup recovery consumes the
@@ -11756,10 +11763,14 @@ tool_model:
         reconnect, deletion, success fabrication or redispatch. Terminal exact replay cannot create another attempt.
         Destructive startup recovery preserves the logout responsibility without SDK dispatch; it cannot require
         or reconstruct the dead process's occurrence before effect-journal recovery. A never-authorized reservation
-        closes as failed/not-launched only after the existing durable process-authority owner proves that the exact
-        original runtime authority is irreversibly released or superseded. That proof, the absence of journal evidence
-        and terminal teardown settlement share the generation/authorization transaction fences. Missing observations,
-        temporary cache absence and a still-live authorizer cannot justify settlement. Existing journal evidence stays
+        closes as failed/not-launched only after the canonical selected-store process-generation owner proves a
+        strictly newer valid native stamp with a different lease ID than the frozen original. Genuine reacquisition
+        may reuse runtime, owner and boot inputs; multiple successors remain valid proof. Physical release alone
+        does not change the stamp and cannot prove withdrawal. Equal/lower generations, a reused lease ID, missing,
+        zero, malformed or wrong-backend evidence refuse. That proof, exact journal absence and terminal teardown
+        settlement share one generation/authorization-fenced transaction. Missing observations,
+        temporary cache absence and a still-current original stamp cannot justify settlement. Historical journal
+        settlement does not require the original process to remain live. Existing journal evidence stays
         with its effect recovery owner. Exact failed replay preserves the target and pairing, emits no unlink and no
         new attempt, and cannot leave an orphan blocking subsequent context retirement.
         A later explicit reconnect is a new authenticated responsibility with a new connection identity,
