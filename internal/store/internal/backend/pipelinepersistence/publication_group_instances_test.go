@@ -72,18 +72,18 @@ func TestGroupInstancePlanningKeepsScopesIsolatedAndReobservesOnce(t *testing.T)
 	}
 	current := flowInstanceIndexSnapshot{tx: currentTx, source: source, run: runlifecycle.Snapshot{RunID: runID}}
 	mock.ExpectQuery(query).WithArgs(runID, "worker").WillReturnRows(sqlmock.NewRows([]string{"instance_path"})).RowsWillBeClosed()
-	if err := reads.reobserve(ctx, &current); err != nil {
-		t.Fatal(err)
+	if changed, err := reads.reobserve(ctx, &current); err != nil || changed {
+		t.Fatalf("unchanged read set: changed=%v err=%v", changed, err)
 	}
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	if err := reads.reobserve(cancelled, &current); !errors.Is(err, context.Canceled) {
+	if _, err := reads.reobserve(cancelled, &current); !errors.Is(err, context.Canceled) {
 		t.Fatalf("memo hid cancellation: %v", err)
 	}
 	// A fresh commit snapshot never borrows the previous snapshot's memo.
 	mock.ExpectQuery(query).WithArgs(runID, "worker").WillReturnError(want)
 	failed := flowInstanceIndexSnapshot{tx: currentTx, source: source, run: runlifecycle.Snapshot{RunID: runID}}
-	if err := reads.reobserve(ctx, &failed); err != want {
+	if _, err := reads.reobserve(ctx, &failed); err != want {
 		t.Fatalf("malformed current evidence became retryable staleness: %v", err)
 	}
 	mock.ExpectRollback()
@@ -92,5 +92,95 @@ func TestGroupInstancePlanningKeepsScopesIsolatedAndReobservesOnce(t *testing.T)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGroupInstancePlanningStalenessPreservesIndependentReadFailures(t *testing.T) {
+	for _, separateBatches := range []bool{false, true} {
+		batch := "same_preparation"
+		if separateBatches {
+			batch = "separate_preparations"
+		}
+		t.Run(batch, func(t *testing.T) {
+			for _, staleFirst := range []bool{false, true} {
+				order := "error_first"
+				if staleFirst {
+					order = "stale_first"
+				}
+				t.Run(order, func(t *testing.T) {
+					for name, want := range map[string]error{
+						"store":      errors.New("independent declaration read failure"),
+						"corruption": &pipeline.FlowInstanceConstructionCorruption{Cause: errors.New("malformed declaration")},
+						"cancelled":  context.Canceled,
+					} {
+						t.Run(name, func(t *testing.T) {
+							assertGroupInstancePlanningReadFailure(t, separateBatches, staleFirst, want)
+						})
+					}
+				})
+			}
+		})
+	}
+}
+
+func assertGroupInstancePlanningReadFailure(t *testing.T, separateBatches, staleFirst bool, want error) {
+	t.Helper()
+	ctx := context.Background()
+	artifact := sourceartifactfixture.Artifact()
+	source := semanticview.Wrap(&contracts.WorkflowContractBundle{
+		SourceArtifact: artifact, Semantics: contracts.WorkflowSemanticView{Version: "original"},
+		FlowSchemas: map[string]contracts.FlowSchemaDocument{"changed": {}, "failure": {}},
+	})
+	fact := sourceartifactfixture.FactFor(artifact)
+	runID := "11111111-1111-1111-1111-111111111111"
+	read := func(flow string) flowInstancePlanningRead {
+		t.Helper()
+		scope, err := pipeline.NewFlowInstanceLookupScope(source, fact, runID, []string{flow}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return flowInstancePlanningRead{scope: &scope}
+	}
+	changed, failed := read("changed"), read("failure")
+	// The old membership was nonempty; a successfully read empty declaration
+	// is stale, independently of the other declaration's read failure.
+	changed.observations = []pipeline.FlowInstanceObservation{{}}
+	ordered := []flowInstancePlanningRead{failed, changed}
+	if staleFirst {
+		ordered[0], ordered[1] = ordered[1], ordered[0]
+	}
+	group := publicationGroup{}
+	if separateBatches {
+		for _, request := range ordered {
+			group.planningReads = append(group.planningReads, &flowInstancePlanningReadSet{runID: runID, reads: []flowInstancePlanningRead{request}})
+		}
+	} else {
+		group.planningReads = []*flowInstancePlanningReadSet{{runID: runID, reads: ordered}}
+	}
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherEqual))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := sqliteWorkflowInstanceSelect + ` WHERE fi.run_id=$1 AND fi.flow_template=$2 ORDER BY fi.instance_path`
+	if staleFirst {
+		mock.ExpectQuery(query).WithArgs(runID, "changed").WillReturnRows(sqlmock.NewRows([]string{"instance_path"})).RowsWillBeClosed()
+	}
+	mock.ExpectQuery(query).WithArgs(runID, "failure").WillReturnError(want)
+	snapshot := flowInstanceIndexSnapshot{tx: tx, source: source, run: runlifecycle.Snapshot{RunID: runID}}
+	if err := group.reobservePlanningReadSets(ctx, &snapshot); !errors.Is(err, want) {
+		t.Errorf("staleness hid independent read failure: got %v, want %v", err, want)
+	}
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Error(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Error(err)
 	}
 }
