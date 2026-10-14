@@ -267,6 +267,7 @@ func debtServedObservationNativeCut(path string) (string, string, map[string]boo
 func debtServedObservationCopySourceEvidence(t *testing.T, root, copy string) {
 	t.Helper()
 	for _, path := range []string{debtServedSettlementManifest, debtServedGlobalNameManifest,
+		"internal/store/testdata/persistence_authority_served_observation_retirements.json",
 		"tools/fixture-codemod/pipeline-observations/family145-served-publication-lookup-preimages.json",
 		"tools/fixture-codemod/pipeline-observations/family145-delivery-status-preimages.json",
 		"tools/fixture-codemod/pipeline-observations/family145-event-name-preimages.json",
@@ -292,6 +293,19 @@ func debtServedObservationCopySourceEvidence(t *testing.T, root, copy string) {
 	}
 	for _, pin := range pins {
 		debtSourceBlobCopyDeclaration(t, copy, pin.File, pin.Function, pin.After)
+	}
+	stages, err := debtServedObservationManifests(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stage := range stages {
+		for _, body := range stage {
+			pin, err := debtServedObservationComposedPin(stages, [2]string{body.File, body.Function})
+			if err != nil {
+				t.Fatal(err)
+			}
+			debtSourceBlobCopyDeclaration(t, copy, pin.File, pin.Function, pin.After)
+		}
 	}
 }
 

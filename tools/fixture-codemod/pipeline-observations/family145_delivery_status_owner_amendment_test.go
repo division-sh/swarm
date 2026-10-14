@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"fmt"
 	"go/ast"
 	"go/format"
 	"go/parser"
 	"go/token"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -67,7 +71,7 @@ func deliveryStatusEarlierOwnerSource(t *testing.T, path string, current, origin
 }
 
 // Tool-only correspondence for the reviewed additive reader chain. This does
-// does not add a collector inverse, occurrence transfer or accounting allowance.
+// not add a collector inverse, occurrence transfer or accounting allowance.
 func servedObservationEarlierToolOwnerSource(t *testing.T, path string, current []byte) []byte {
 	t.Helper()
 	prior, err := servedObservationToolOwnerPrevious(path, current)
@@ -116,6 +120,37 @@ func servedObservationToolOwnerPrevious(path string, current []byte) ([]byte, er
 		return nil, fmt.Errorf("reviewed additive native reader changed retained bytes: %s: %v", path, err)
 	}
 	return previous, nil
+}
+
+func TestFamily145ServedObservationEventOwnerIsNonWorseningFromSignedPreBatch(t *testing.T) {
+	const path = "internal/store/internal/runtimepersistence/test_event_support.go"
+	root, err := filepath.Abs("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := os.ReadFile(root + "/" + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, err := servedObservationToolOwnerPrevious(path, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "show", "2ad21b4f19fb1c5bc04d34fe73f94d15ad0244f8:"+path)
+	cmd.Dir = root
+	signed, err := cmd.Output()
+	if err != nil || !bytes.Equal(previous, signed) {
+		t.Fatal("exact additive event reader did not preserve the signed pre-batch owner:", err)
+	}
+	for _, cut := range []string{"ReadPhysicalPublicationEntityIdentityStorageForTest", "ReadAgentSettledAttemptCountForTest"} {
+		if !bytes.Contains(current, []byte(cut)) {
+			t.Fatal("non-worsening counterexample missing:", cut)
+		}
+		mutant := bytes.Replace(current, []byte(cut), []byte("foreignOwner"), 1)
+		if _, err := servedObservationToolOwnerPrevious(path, mutant); err == nil {
+			t.Fatal("event owner accepted altered added or retained declaration:", cut)
+		}
+	}
 }
 
 func removePublicRollbackDeclaration(raw []byte, name, expected string) ([]byte, error) {

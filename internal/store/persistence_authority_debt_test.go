@@ -261,6 +261,10 @@ func debtDeliveryRetirementCollectorTransition(base, current string, trusted, he
 
 func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDebtSite, retirement ...debtDeliveryRetirementProof) []string {
 	var retirementFailures []string
+	head, base, baseActual, retirementFailures = debtServedObservationRetirementComparisons(actual, head, base, baseActual, retirement...)
+	if len(retirementFailures) != 0 {
+		return retirementFailures
+	}
 	head, base, baseActual, retirementFailures = debtDeliveryRetirementComparisons(actual, head, base, baseActual, retirement...)
 	if len(retirementFailures) != 0 {
 		return retirementFailures
@@ -1148,6 +1152,10 @@ func debtWriterStageSourcePins(root string, forward bool) error {
 		source := body.String()
 		if forward {
 			source, err = debtServedObservationSourcePrevious(root, "internal/serveapp/main_runtime_test.go", fn.Name.Name, source)
+			if err != nil {
+				return err
+			}
+			source, err = debtServedObservationWriterRetirementSourcePrevious(root, fn.Name.Name, source)
 			if err != nil {
 				return err
 			}

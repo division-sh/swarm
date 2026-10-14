@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-const debtServedObservationCollectorTo = "51f998119a27523e0d4ae44aae8184a844745af6d8d0f66219c0d847978513f5"
+const debtServedObservationCollectorTo = "b5bdd1d92df22693c570dab217a46c8a184f37085f496653d59b732c12399a4d"
 
 // Ruling6161771753: source-entry placement only, never additional debt credit.
 func debtServedObservationCollectorTransition(base, current string, trusted, head authorityDebtBaseline, proofs ...debtDeliveryRetirementProof) bool {

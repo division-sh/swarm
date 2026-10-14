@@ -40,7 +40,7 @@ func TestFamily145SourceForkCardinalityWholeRuleKeepsIdentityAssertionsAndCuts(t
 			t.Fatal("source fork count predecessor is not complete signed source:", pin.Function, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, current, pin.Function) != pin.After {
+		if err != nil || servedObservationEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("source fork count output escaped its whole body:", pin.Function, err)
 		}
 		after, err := runphysical.Transform(sourcefork.Rules[index], pin.Before)

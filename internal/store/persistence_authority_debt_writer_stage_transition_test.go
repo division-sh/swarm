@@ -241,6 +241,7 @@ func TestPersistenceAuthorityDebtWriterStageUnrefreshedMetadataIsScopedAndFailCl
 		}
 		debtWriteModuleSource(t, copy, path, string(data))
 	}
+	debtServedObservationCopySourceEvidence(t, root, copy)
 	old, _ := debtWriterStageTransitionStates()
 	baseline := authorityDebtBaseline{BootstrapSource: strings.Repeat("a", 40), Collector: debtCacheCollectorFrom, Sites: old}
 	data := marshalAuthorityDebtBaseline(baseline)
