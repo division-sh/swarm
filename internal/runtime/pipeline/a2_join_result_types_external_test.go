@@ -13,7 +13,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
@@ -49,10 +48,9 @@ func TestA2JoinResultTypesRealExecutionAndRestartOnBothStores(t *testing.T) {
 			t.Run(backend.name+"/"+result.name, func(t *testing.T) {
 				selected := backend.open(t)
 				runID := uuid.NewString()
-				insertGateRecoveryRun(t, selected.events, runID)
-				ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				bundle := loadPipelineLifecycleFixtureBundle(t, a2JoinResultTypeFiles(result.typeName))
 				source := semanticview.Wrap(bundle)
+				ctx, fact := nativeConstructionContextFixture(t, selected.events, source, runID)
 				node := externalPipelineSourceNode(t, source, ".", "collector")
 				plans := bundle.WorkflowJoins()
 				if len(plans) != 1 || !plans[0].Node.Equal(node) || plans[0].ResultType.Type != result.typeName {
@@ -73,7 +71,7 @@ func TestA2JoinResultTypesRealExecutionAndRestartOnBothStores(t *testing.T) {
 				logger := &exactJoinRuntimeLogger{}
 				newBus := func() *runtimebus.EventBus {
 					t.Helper()
-					bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, TestLifecycleProbe: probe, Logger: logger},
+					bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact, TestLifecycleProbe: probe, Logger: logger},
 						"platform.join_complete", "platform.join_timeout")
 					if err != nil {
 						t.Fatal(err)
@@ -82,7 +80,7 @@ func TestA2JoinResultTypesRealExecutionAndRestartOnBothStores(t *testing.T) {
 				}
 				bus := newBus()
 				schedules, _ := newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
-				pc := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe})
+				pc := newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe})
 				bus.SetInterceptors(pc)
 				owner := testRunScopedWorkflowInstanceForRun(runID, runID)
 				commitA2FixtureConstruction(t, pc, selected.events, ctx, owner, pipeline.WorkflowInstance{
@@ -182,7 +180,7 @@ func TestA2JoinResultTypesRealExecutionAndRestartOnBothStores(t *testing.T) {
 				bus = newBus()
 				var driver *exactJoinScheduleDriver
 				schedules, driver = newExactJoinScheduleLifecycleForTest(t, ctx, selected, bus)
-				pc = newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module, GenericSchedules: schedules, TestLifecycleProbe: probe})
+				pc = newGateRecoveryCoordinator(bus, selected, pipeline.PipelineCoordinatorOptions{Module: module, SourceArtifactFact: fact, GenericSchedules: schedules, TestLifecycleProbe: probe})
 				bus.SetInterceptors(pc)
 				if restored, err := schedules.Restore(ctx); err != nil || restored != 1 {
 					t.Fatalf("restore typed result continuation: count=%d err=%v", restored, err)
