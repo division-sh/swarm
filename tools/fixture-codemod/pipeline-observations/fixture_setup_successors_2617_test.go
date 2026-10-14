@@ -11,7 +11,8 @@ import (
 )
 
 // Append-only fixture evidence under reviewer-c6160153832; prior source
-// Source checkpoint daea24400 retains the eleven reviewed fixture endpoints.
+// Source checkpoint daea24400 retains eleven reviewed fixture endpoints;
+// checkpoint211293506 adds the exact admitted-parent barrier setup.
 //
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
@@ -23,7 +24,7 @@ type fixtureSetupSuccessor2617 struct {
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "6aea6811e0edafc806ac8af7f0b300c59931ea4608920183aa009d0893ebc4c6" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "962fada772164aa08739cf5fbfe8c09ce716452f2b1ba4dceb723669ea321b7c" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -34,7 +35,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 11 {
+	if len(pins) != 12 {
 		t.Fatal("fixture successor row count changed")
 	}
 	for _, pin := range pins {
