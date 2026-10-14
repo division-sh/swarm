@@ -5,12 +5,21 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/spf13/cobra"
 )
 
 type doctorConfigSource struct {
 	Source  string `json:"source"`
 	Path    string `json:"path,omitempty"`
 	Present *bool  `json:"present"`
+}
+
+func returnDoctorPreflightResult(cmd *cobra.Command, report LocalPreflightReport, asJSON bool) error {
+	if !asJSON {
+		writeDoctorConfigSourceText(cmd.OutOrStdout(), report.ConfigSource)
+	}
+	return returnLocalPreflightResult(cmd, report, asJSON)
 }
 
 func addDoctorConfigReadback(report *LocalPreflightReport, repo string, loaded RuntimeConfigLoadResult) {
