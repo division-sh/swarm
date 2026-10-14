@@ -38,9 +38,11 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	// #2577's non-executable progress and its startup/CLI consumers are mapped
 	// in testdata/issue_2577_session_progress_admission_accounting.md.
 	{"internal/channelonboarding/service.go", "A10,A27", "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress"},
+	{"internal/channelonboarding/start_selection.go", "A10,A27", "P08,P10,P21,2577-native-cli-progress"},
 	{"internal/channelonboarding/session_progress.go", "A10,A27", "P08,P10,P21,2577-native-pending,2577-native-startup-wait"},
 	{"internal/channelonboarding/result_progress.go", "A10,A27", "P08,P10,P21,2577-native-pending,2577-native-cli-progress"},
 	{"internal/cliapp/channel_onboarding_progress.go", "A10,A27", "P08,P10,P21,2577-native-cli-progress"},
+	{"internal/cliapp/channel_onboarding_selection.go", "A10,A27", "P08,P10,P21,2577-native-cli-progress"},
 	{"internal/runtime/pipeline/channel_session_activity.go", "A10,A27", "2577-authored-session-activity,P08,P10,P21"},
 	{"internal/runtime/activity_validation.go", "A10,A27", "2577-authored-session-activity,P08,P10,P21"},
 	{"internal/runtime/tools/validation.go", "A10,A27", "2577-authored-session-activity,P08,P10,P21"},

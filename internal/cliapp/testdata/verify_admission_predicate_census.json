@@ -258,10 +258,22 @@
     "body_sha256": "f557da6eaf4dc765f1d8b0353e33471afc54ef33a1e2d2fd752709126950f18d"
   },
   {
+    "owner": "internal/channelonboarding/result_progress.go::Result.SessionPairingPending",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-pending,2577-native-cli-progress",
+    "body_sha256": "69fc0089af42098c132d237d1cf6d74add616d81c67d8e32cc010a2e55b0bdc5"
+  },
+  {
     "owner": "internal/channelonboarding/result_progress.go::Result.SessionPreparationPending",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-cli-progress",
     "body_sha256": "e0b8ed1ee850532759243b51da333ac79eb8ebdb46f9cb567daddea17344c016"
+  },
+  {
+    "owner": "internal/channelonboarding/result_progress.go::unsafePairingCharacter",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-pending,2577-native-cli-progress",
+    "body_sha256": "8038b225f4ad52430c71fb60efb7fc81e0bc277cd2b1ddaa62f16c5efdf7ccf3"
   },
   {
     "owner": "internal/channelonboarding/retained_inspection.go::InspectPendingTeardowns",
@@ -339,7 +351,7 @@
     "owner": "internal/channelonboarding/service.go::*Service.Start",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
-    "body_sha256": "3123df97ff7671ba9a7870f612028e726748c66ddba783dd597ad217867161ac"
+    "body_sha256": "5c8104df5849e99050fdd3fdc2bd01abd23cffbb51de6dc45448485fc5a94e3e"
   },
   {
     "owner": "internal/channelonboarding/service.go::*Service.activationRecovery",
@@ -768,6 +780,30 @@
     "body_sha256": "ae4e68529d780c641e4b3cbcb2dad3c1ef91718d42c21f84d2f0e6fd9e19d860"
   },
   {
+    "owner": "internal/channelonboarding/start_selection.go::*Service.Select",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-cli-progress",
+    "body_sha256": "5fc49fb58ed667169fa6729410122d550e1d16acbf737b11c4c0cb25459a00fc"
+  },
+  {
+    "owner": "internal/channelonboarding/start_selection.go::*Service.resolveStartCandidate",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-cli-progress",
+    "body_sha256": "b6e14de058c23a6084325f37a4b2e6fdf938ab69e16bd62cc468a4376be4333b"
+  },
+  {
+    "owner": "internal/channelonboarding/start_selection.go::StartSelection.ProviderCredentialRequirement",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-cli-progress",
+    "body_sha256": "d44a06c95d5cf2e021495de5a9dd10d4687df728e459f0709f597e9de8b45563"
+  },
+  {
+    "owner": "internal/channelonboarding/start_selection.go::selectedStartRequirement",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-cli-progress",
+    "body_sha256": "aeb28ad50bfd261102a9444676934d7c100014729b7b265d3b152e8a70f11398"
+  },
+  {
     "owner": "internal/channelonboarding/teardown.go::*DestructiveService.Recover",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-logout-reservation-recovery",
@@ -885,19 +921,19 @@
     "owner": "internal/cliapp/channel_onboarding_progress.go::renderChannelOnboardingResult",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-cli-progress",
-    "body_sha256": "421acf7b3feb7a49c8e740582aa2a02366639fd4fb372a0d7e5096a297c7c217"
+    "body_sha256": "6259d5c9bd8c6f7b8658107072b47d6f845103e584e7ed40f55880d7d7d8eb36"
   },
   {
     "owner": "internal/cliapp/channel_onboarding_progress.go::selectedChannelCredentialReadback",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-cli-progress",
-    "body_sha256": "2cdc33cf02ed06e36c716b37a2df049295d2e2e40862ad0e7ca2463a737ed157"
+    "body_sha256": "e165d979a139019bca93d0f4a90c0113ceeb3b3ae1fda83e0a24a8035f0f8f76"
   },
   {
     "owner": "internal/cliapp/channel_onboarding_progress.go::startCLIChannelOnboarding",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-cli-progress",
-    "body_sha256": "54e9d0d7693d3de06124e64d487dfc8fa669c00e6398b0200544c6e8e05f6dca"
+    "body_sha256": "e0bd2c0f0b282ed9103b723b59b20087f3286501ebe0a70e4e69ccd8afc21e7a"
   },
   {
     "owner": "internal/cliapp/channel_onboarding_progress.go::validateCLIChannelContinuation",
@@ -909,7 +945,19 @@
     "owner": "internal/cliapp/channel_onboarding_progress.go::validateCLIChannelProgress",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-cli-progress",
-    "body_sha256": "b37461b552d8f5897c10d9ff2d5315b756a60f7518338feba189be15bfb2c286"
+    "body_sha256": "6625bb61745698f9f7849b5384f7c1a25c10befe63af0ce9ab839bedcbb57141"
+  },
+  {
+    "owner": "internal/cliapp/channel_onboarding_selection.go::channelSelectionParam",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-cli-progress",
+    "body_sha256": "074759c955ff10462cde535e71363ceb2da416fef5a34466c8e721ceccdc67cc"
+  },
+  {
+    "owner": "internal/cliapp/channel_onboarding_selection.go::startCLIChannelWithReplacement",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-cli-progress",
+    "body_sha256": "77e640e8baecb0958b71866079c7a79e6e7494083b775015e79e2fc498f98d1e"
   },
   {
     "owner": "internal/cliapp/local_preflight.go::*LocalPreflightReport.add",
