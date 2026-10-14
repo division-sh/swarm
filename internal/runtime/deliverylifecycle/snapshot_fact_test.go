@@ -46,6 +46,9 @@ func TestDecodeHistoricalSnapshotCompleteRouteRoundTrip(t *testing.T) {
 					if !decoded.ClaimExpiresAt.IsZero() {
 						t.Fatal("historical evidence retained live lease expiry")
 					}
+					if !decoded.UpdatedAt.IsZero() || decoded.CreatedAt.IsZero() {
+						t.Fatal("historical evidence must retain admission time, not the physical update clock")
+					}
 				})
 			}
 		})
@@ -342,7 +345,7 @@ func TestDecodeHistoricalSnapshotRejectsUnknownFieldsAndLiveTokens(t *testing.T)
 			if bytes.Contains(historicalJSON(t, decoded), []byte("claim_token")) || decoded.Authority.Validate() == nil {
 				t.Fatal("historical snapshot exposed a live capability")
 			}
-			for _, field := range []string{"unexpected", "claim_token", "lease_token", "execution_authority", "claim_expires_at", "continuation_handoff_at"} {
+			for _, field := range []string{"unexpected", "claim_token", "lease_token", "execution_authority", "claim_expires_at", "continuation_handoff_at", "updated_at"} {
 				t.Run(field, func(t *testing.T) {
 					fact := historicalRouteFact(t, fixture.route, deliverylifecycle.StatusInProgress)
 					fact[field] = "f03e9ff9-7a7f-45dc-89d3-a15ed401388a"
@@ -450,7 +453,7 @@ func historicalRouteFact(t testing.TB, route events.DeliveryRoute, status delive
 	now := time.Date(2026, 9, 8, 1, 0, 0, 0, time.UTC)
 	fact["delivery_id"], fact["event_id"], fact["run_id"] = id, eventID, "d34a7a1b-f738-42b2-8758-9e4ad5417ad0"
 	fact["route_identity"], fact["status"], fact["max_retries"] = events.EncodeDeliveryRouteIdentity(identity), status, class.MaxRetries()
-	fact["created_at"], fact["updated_at"] = now, now
+	fact["created_at"] = now
 	switch status {
 	case deliverylifecycle.StatusPending:
 		fact["next_eligible_at"] = now
