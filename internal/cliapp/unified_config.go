@@ -3,7 +3,6 @@ package cliapp
 import (
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,9 +57,7 @@ type unifiedConfigDiagnosticKind string
 const (
 	unifiedConfigDiagnosticLoaded            unifiedConfigDiagnosticKind = "loaded"
 	unifiedConfigDiagnosticUnknownKey        unifiedConfigDiagnosticKind = "unknown_key"
-	unifiedConfigDiagnosticTrustRejected     unifiedConfigDiagnosticKind = "trust_rejected"
 	unifiedConfigDiagnosticSplitUnsupported  unifiedConfigDiagnosticKind = "split_unsupported"
-	unifiedConfigDiagnosticPathViolation     unifiedConfigDiagnosticKind = "path_violation"
 	unifiedConfigDiagnosticReadFailed        unifiedConfigDiagnosticKind = "read_failed"
 	unifiedConfigDiagnosticParseFailed       unifiedConfigDiagnosticKind = "parse_failed"
 	unifiedConfigDiagnosticUnsupportedSource unifiedConfigDiagnosticKind = "unsupported_source"
@@ -122,7 +119,8 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 		return unifiedConfigLoadResult{}, err
 	}
 	layers, diagnostics := discoverUnifiedConfigLayers(RepoRoot, opts.ExplicitPath)
-	merged, keyOrigins, layerDiagnostics := composeUnifiedConfigLayers(layers, RepoRoot)
+	merged, keyOrigins, layerDiagnostics := composeUnifiedConfigLayers(layers)
+	source, path := unifiedConfigPrimarySource(layers)
 	diagnostics = append(diagnostics, layerDiagnostics...)
 	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: RepoRoot, RuntimeConfigPath: opts.ExplicitPath, DelegatedSources: unifiedConfigDelegation(&merged)}); err != nil {
 		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticValidationFailed, Message: err.Error()})
@@ -133,11 +131,7 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 	}
 	if len(merged.Content) > 0 {
 		if err := config.DecodeSource(yamlsource.ValueFromNode(&merged), cfg); err != nil {
-			diagnostics = append(diagnostics, unifiedConfigDiagnostic{
-				Kind:        unifiedConfigDiagnosticParseFailed,
-				Message:     fmt.Sprintf("decode swarm.yaml config: %v", err),
-				Remediation: "fix value types in swarm.yaml",
-			})
+			diagnostics = append(diagnostics, unifiedConfigProjectionDiagnostic(err, path))
 		}
 	}
 	backendOverride := strings.TrimSpace(opts.BackendOverride)
@@ -170,7 +164,6 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 			Remediation: "fix connection, serve, or paths value types in swarm.yaml",
 		})
 	}
-	source, path := unifiedConfigPrimarySource(layers)
 	result := unifiedConfigLoadResult{
 		Config:      cfg,
 		CLI:         cli,
@@ -186,7 +179,28 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 	return result, nil
 }
 
-func composeUnifiedConfigLayers(layers []unifiedConfigLayer, RepoRoot string) (yaml.Node, map[string]unifiedConfigKeyOrigin, []unifiedConfigDiagnostic) {
+func unifiedConfigProjectionDiagnostic(err error, path string) unifiedConfigDiagnostic {
+	diagnostic := unifiedConfigDiagnostic{
+		Kind: unifiedConfigDiagnosticParseFailed, Path: path,
+		Message:     fmt.Sprintf("decode swarm.yaml config %s: %v", path, err),
+		Remediation: "fix value types in swarm.yaml",
+	}
+	if typed, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
+		located := *typed
+		located.Location.File = path
+		diagnostic.Key = strings.TrimPrefix(located.Location.YAMLPath, "config.")
+		diagnostic.Line, diagnostic.Column = located.Location.Line, located.Location.Column
+		diagnostic.ValidOptions = located.ValidOptions
+		diagnostic.Message = fmt.Sprintf("decode swarm.yaml config %s: %v", path, &located)
+		if located.Location.Line > 0 && located.Code != "contract_loader.undefined_field" {
+			diagnostic.Message += fmt.Sprintf(" (line %d, column %d)", located.Location.Line, located.Location.Column)
+		}
+		diagnostic.Remediation = located.Remediation
+	}
+	return diagnostic
+}
+
+func composeUnifiedConfigLayers(layers []unifiedConfigLayer) (yaml.Node, map[string]unifiedConfigKeyOrigin, []unifiedConfigDiagnostic) {
 	keyOrigins := map[string]unifiedConfigKeyOrigin{}
 	var diagnostics []unifiedConfigDiagnostic
 	merged := yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
@@ -228,7 +242,7 @@ func composeUnifiedConfigLayers(layers []unifiedConfigLayer, RepoRoot string) (y
 			})
 			continue
 		}
-		layerDiagnostics := validateUnifiedConfigNode(root, layer, RepoRoot)
+		layerDiagnostics := validateUnifiedConfigNode(root, layer)
 		diagnostics = append(diagnostics, layerDiagnostics...)
 		if len(unifiedConfigBlockers(layerDiagnostics)) != 0 {
 			continue
@@ -282,7 +296,7 @@ func discoverUnifiedConfigLayers(RepoRoot, explicitPath string) ([]unifiedConfig
 		return []unifiedConfigLayer{{Name: unifiedLayerExplicit, Path: ResolvePath(RepoRoot, path), Explicit: true}}, nil
 	}
 	path = filepath.Join(RepoRoot, ".swarm", "swarm.yaml")
-	if _, err := os.Stat(path); os.IsNotExist(err) {
+	if _, err := os.Lstat(path); os.IsNotExist(err) {
 		return nil, []unifiedConfigDiagnostic{{Kind: unifiedConfigDiagnosticLoaded, Message: "using built-in defaults"}}
 	} else if err != nil {
 		return nil, []unifiedConfigDiagnostic{{
@@ -524,7 +538,7 @@ func yamlPathExists(node *yaml.Node, path ...string) bool {
 	return true
 }
 
-func validateUnifiedConfigNode(root *yaml.Node, layer unifiedConfigLayer, RepoRoot string) []unifiedConfigDiagnostic {
+func validateUnifiedConfigNode(root *yaml.Node, layer unifiedConfigLayer) []unifiedConfigDiagnostic {
 	var diagnostics []unifiedConfigDiagnostic
 	value := yamlsource.ValueFromNode(root)
 	if err := value.ValidateExpansion(); err != nil {
@@ -533,11 +547,11 @@ func validateUnifiedConfigNode(root *yaml.Node, layer unifiedConfigLayer, RepoRo
 	if err := value.ValidateUniqueMappings(); err != nil {
 		return []unifiedConfigDiagnostic{{Kind: unifiedConfigDiagnosticUnknownKey, Layer: layer.Name, Path: layer.Path, Message: err.Error()}}
 	}
-	walkUnifiedMapping(value, nil, layer, RepoRoot, &diagnostics)
+	walkUnifiedMapping(value, nil, layer, &diagnostics)
 	return diagnostics
 }
 
-func walkUnifiedMapping(value yamlsource.Value, prefix []string, layer unifiedConfigLayer, RepoRoot string, diagnostics *[]unifiedConfigDiagnostic) {
+func walkUnifiedMapping(value yamlsource.Value, prefix []string, layer unifiedConfigLayer, diagnostics *[]unifiedConfigDiagnostic) {
 	entries, err := value.Mapping()
 	if err != nil {
 		*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticParseFailed, Layer: layer.Name, Path: layer.Path, Message: err.Error()})
@@ -572,7 +586,7 @@ func walkUnifiedMapping(value yamlsource.Value, prefix []string, layer unifiedCo
 		}
 		if rule.InlineSecret && strings.TrimSpace(scalar.Value) != "" {
 			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{
-				Kind:        unifiedConfigDiagnosticTrustRejected,
+				Kind:        unifiedConfigDiagnosticValidationFailed,
 				Layer:       layer.Name,
 				Path:        layer.Path,
 				Key:         path,
@@ -580,11 +594,8 @@ func walkUnifiedMapping(value yamlsource.Value, prefix []string, layer unifiedCo
 				Remediation: "declare a file, secret key, or explicit env delegation field instead",
 			})
 		}
-		if rule.ProjectContainedPath && layer.Name == unifiedLayerProject {
-			*diagnostics = append(*diagnostics, validateProjectContainedConfigPath(path, entry.Value, layer, RepoRoot)...)
-		}
 		if rule.Container && (entry.Value.Presence() == yamlsource.PresenceMapping || entry.Value.Presence() == yamlsource.PresenceEmptyMapping) {
-			walkUnifiedMapping(entry.Value, pathParts, layer, RepoRoot, diagnostics)
+			walkUnifiedMapping(entry.Value, pathParts, layer, diagnostics)
 		}
 	}
 }
@@ -616,14 +627,14 @@ func unifiedConfigChannelRule(pathParts []string) (unifiedConfigKeyRule, bool) {
 	if len(pathParts) < 3 || pathParts[0] != "channels" || pathParts[1] != "bindings" {
 		return unifiedConfigKeyRule{}, false
 	}
-	elevatedSection := unifiedConfigKeyRule{Container: true, Elevated: true}
+	section := unifiedConfigKeyRule{Container: true}
 	switch len(pathParts) {
 	case 3:
-		return elevatedSection, true
+		return section, true
 	case 4:
 		switch pathParts[3] {
 		case "pack", "destination":
-			return unifiedConfigKeyRule{Elevated: true}, true
+			return unifiedConfigKeyRule{}, true
 		}
 	}
 	return unifiedConfigKeyRule{}, false
@@ -665,123 +676,6 @@ func unifiedConfigProviderLimitPolicyLeaves() map[string]struct{} {
 		"max_concurrency":          {},
 		"max_concurrency_max_wait": {},
 	}
-}
-
-func trustViolationRemediation(path string, rule unifiedConfigKeyRule, value string, layer unifiedConfigLayer) string {
-	switch layer.Name {
-	case unifiedLayerProject:
-		if rule.Elevated || rule.SecretReference {
-			return "move this key to .swarm/swarm.yaml, user-global swarm.yaml, explicit --config, or a flag"
-		}
-		if (path == "serve.api_listen_addr" || path == "serve.mcp_listen_addr") && !listenAddrIsProjectSafe(value) {
-			return "project config may only set loopback listener addresses; move public/wildcard binds to local-operator, user-global, explicit --config, or flags"
-		}
-	case unifiedLayerLocalOperator:
-		if path == "connection" || strings.HasPrefix(path, "connection.") || path == "serve.api_token_file" {
-			return "connection/auth keys require user-global config, explicit --config, or flags"
-		}
-	}
-	return ""
-}
-
-func listenAddrIsProjectSafe(raw string) bool {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return true
-	}
-	host, _, err := net.SplitHostPort(raw)
-	if err != nil {
-		return false
-	}
-	host = strings.Trim(host, "[]")
-	return host == "127.0.0.1" || host == "::1" || strings.HasPrefix(host, "127.")
-}
-
-func validateProjectContainedConfigPath(path string, value yamlsource.Value, layer unifiedConfigLayer, RepoRoot string) []unifiedConfigDiagnostic {
-	if value.Presence() == yamlsource.PresenceSequence || value.Presence() == yamlsource.PresenceEmptySequence {
-		var diagnostics []unifiedConfigDiagnostic
-		items, err := value.Sequence()
-		if err != nil {
-			return []unifiedConfigDiagnostic{{Kind: unifiedConfigDiagnosticParseFailed, Layer: layer.Name, Path: layer.Path, Key: path, Message: err.Error()}}
-		}
-		for i, item := range items {
-			scalar, _ := item.Scalar()
-			diagnostics = append(diagnostics, validateProjectContainedPathValue(fmt.Sprintf("%s[%d]", path, i), scalar.Value, layer, RepoRoot)...)
-		}
-		return diagnostics
-	}
-	scalar, _ := value.Scalar()
-	return validateProjectContainedPathValue(path, scalar.Value, layer, RepoRoot)
-}
-
-func validateProjectContainedPathValue(path, raw string, layer unifiedConfigLayer, RepoRoot string) []unifiedConfigDiagnostic {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	if filepath.IsAbs(raw) {
-		return []unifiedConfigDiagnostic{projectPathDiagnostic(path, raw, layer, "absolute paths are not allowed in project config")}
-	}
-	clean := filepath.Clean(raw)
-	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return []unifiedConfigDiagnostic{projectPathDiagnostic(path, raw, layer, "parent-directory escapes are not allowed in project config")}
-	}
-	root := strings.TrimSpace(RepoRoot)
-	if root == "" {
-		return nil
-	}
-	candidate := filepath.Join(root, clean)
-	canonicalRoot, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		canonicalRoot = filepath.Clean(root)
-	}
-	checkPath := nearestExistingPath(candidate)
-	canonicalCandidate, err := filepath.EvalSymlinks(checkPath)
-	if err != nil {
-		canonicalCandidate = filepath.Clean(checkPath)
-	}
-	if !unifiedConfigPathWithin(canonicalCandidate, canonicalRoot) {
-		return []unifiedConfigDiagnostic{projectPathDiagnostic(path, raw, layer, fmt.Sprintf("path escapes project root %s", canonicalRoot))}
-	}
-	return nil
-}
-
-func projectPathDiagnostic(path, raw string, layer unifiedConfigLayer, message string) unifiedConfigDiagnostic {
-	return unifiedConfigDiagnostic{
-		Kind:        unifiedConfigDiagnosticPathViolation,
-		Layer:       layer.Name,
-		Path:        layer.Path,
-		Key:         path,
-		Message:     fmt.Sprintf("config key %q value %q violates project-contained path rule: %s", path, raw, message),
-		Remediation: "use a relative path under the project or move this setting to .swarm/swarm.yaml, user-global config, explicit --config, or a flag",
-	}
-}
-
-func nearestExistingPath(path string) string {
-	path = filepath.Clean(path)
-	for {
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
-		parent := filepath.Dir(path)
-		if parent == path {
-			return path
-		}
-		path = parent
-	}
-}
-
-func unifiedConfigPathWithin(path, root string) bool {
-	path = filepath.Clean(path)
-	root = filepath.Clean(root)
-	if path == root {
-		return true
-	}
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-	return rel != "." && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel)
 }
 
 func unknownUnifiedConfigDiagnostic(path string, layer unifiedConfigLayer, location yamlsource.Location) unifiedConfigDiagnostic {
@@ -842,7 +736,7 @@ func unifiedConfigDelegatedSwarmEnvSources(RepoRoot, explicitPath string) map[st
 		return map[string]string{}
 	}
 	layers, _ := discoverUnifiedConfigLayers(RepoRoot, explicitPath)
-	merged, _, _ := composeUnifiedConfigLayers(layers, RepoRoot)
+	merged, _, _ := composeUnifiedConfigLayers(layers)
 	return unifiedConfigDelegation(&merged)
 }
 
