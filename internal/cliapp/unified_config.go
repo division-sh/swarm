@@ -127,12 +127,6 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 	if err := validateSwarmEnvSources(swarmEnvGuardContext{RepoRoot: RepoRoot, RuntimeConfigPath: opts.ExplicitPath, DelegatedSources: unifiedConfigDelegation(&merged)}); err != nil {
 		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticValidationFailed, Message: err.Error()})
 	}
-	if unsupported := executableAdjacentRuntimeConfigDiagnostic(); unsupported != nil {
-		diagnostics = append(diagnostics, *unsupported)
-	}
-	if unsupported := userGlobalUnsupportedConfigDiagnostic(); unsupported != nil {
-		diagnostics = append(diagnostics, *unsupported)
-	}
 	cfg, err := defaultRuntimeConfig()
 	if err != nil {
 		return unifiedConfigLoadResult{}, err
@@ -280,33 +274,23 @@ func unifiedConfigBlockers(diagnostics []unifiedConfigDiagnostic) []unifiedConfi
 }
 
 func discoverUnifiedConfigLayers(RepoRoot, explicitPath string) ([]unifiedConfigLayer, []unifiedConfigDiagnostic) {
-	layers := []unifiedConfigLayer{}
-	diagnostics := []unifiedConfigDiagnostic{}
-	userPath := userGlobalUnifiedConfigPath()
-	if fileExists(userPath) {
-		layers = append(layers, unifiedConfigLayer{Name: unifiedLayerUserGlobal, Path: userPath})
+	path := strings.TrimSpace(explicitPath)
+	if path == "" {
+		path = strings.TrimSpace(os.Getenv("SWARM_CONFIG"))
 	}
-	projectPath := filepath.Join(RepoRoot, "swarm.yaml")
-	if fileExists(projectPath) {
-		layers = append(layers, unifiedConfigLayer{Name: unifiedLayerProject, Path: projectPath})
+	if path != "" {
+		return []unifiedConfigLayer{{Name: unifiedLayerExplicit, Path: ResolvePath(RepoRoot, path), Explicit: true}}, nil
 	}
-	localPath := filepath.Join(RepoRoot, ".swarm", "swarm.yaml")
-	if fileExists(localPath) {
-		layers = append(layers, unifiedConfigLayer{Name: unifiedLayerLocalOperator, Path: localPath})
+	path = filepath.Join(RepoRoot, ".swarm", "swarm.yaml")
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return nil, []unifiedConfigDiagnostic{{Kind: unifiedConfigDiagnosticLoaded, Message: "using built-in defaults"}}
+	} else if err != nil {
+		return nil, []unifiedConfigDiagnostic{{
+			Kind: unifiedConfigDiagnosticReadFailed, Path: path,
+			Message: fmt.Sprintf("inspect deployment config %s: %v", path, err),
+		}}
 	}
-	if path := strings.TrimSpace(explicitPath); path != "" {
-		explicit := ResolvePath(RepoRoot, path)
-		layers = removeUnifiedConfigLayerPath(layers, explicit)
-		layers = append(layers, unifiedConfigLayer{Name: unifiedLayerExplicit, Path: explicit, Explicit: true})
-	} else if raw, ok := os.LookupEnv("SWARM_CONFIG"); ok && strings.TrimSpace(raw) != "" {
-		explicit := ResolvePath(RepoRoot, raw)
-		layers = removeUnifiedConfigLayerPath(layers, explicit)
-		layers = append(layers, unifiedConfigLayer{Name: unifiedLayerExplicit, Path: explicit, Explicit: true})
-	}
-	if len(layers) == 0 {
-		diagnostics = append(diagnostics, unifiedConfigDiagnostic{Kind: unifiedConfigDiagnosticLoaded, Message: "no swarm.yaml config files loaded; using built-in defaults"})
-	}
-	return layers, diagnostics
+	return []unifiedConfigLayer{{Name: unifiedLayerLocalOperator, Path: path}}, nil
 }
 
 func removeUnifiedConfigLayerPath(layers []unifiedConfigLayer, path string) []unifiedConfigLayer {
@@ -595,17 +579,6 @@ func walkUnifiedMapping(value yamlsource.Value, prefix []string, layer unifiedCo
 				Message:     fmt.Sprintf("config key %q stores unsupported plaintext secret material", path),
 				Remediation: "declare a file, secret key, or explicit env delegation field instead",
 			})
-		}
-		if remediation := trustViolationRemediation(path, rule, scalar.Value, layer); remediation != "" {
-			*diagnostics = append(*diagnostics, unifiedConfigDiagnostic{
-				Kind:        unifiedConfigDiagnosticTrustRejected,
-				Layer:       layer.Name,
-				Path:        layer.Path,
-				Key:         path,
-				Message:     fmt.Sprintf("config key %q is not allowed in %s", path, layer.Name),
-				Remediation: remediation,
-			})
-			continue
 		}
 		if rule.ProjectContainedPath && layer.Name == unifiedLayerProject {
 			*diagnostics = append(*diagnostics, validateProjectContainedConfigPath(path, entry.Value, layer, RepoRoot)...)
