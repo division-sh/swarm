@@ -79,7 +79,7 @@ func TestFamily145ForkCompanionWholeChainRetainsAll22CallsAndOriginalPhysicalWit
 		if err != nil {
 			t.Fatal(err)
 		}
-		current := family145RequestKeyCallerInverse(pin.Function, family145PublicA2CurrentDeclaration(t, raw, pin.Function))
+		current := family145RequestKeyCallerInverse(pin.Function, servedSetupEarlierSource(t, pin.File, pin.Function, family145PublicA2CurrentDeclaration(t, raw, pin.Function)))
 		if family145ForkNoticeCallerInverse(pin.Function, current) != pin.After {
 			t.Fatal("current companion body escaped its whole rule:", key)
 		}

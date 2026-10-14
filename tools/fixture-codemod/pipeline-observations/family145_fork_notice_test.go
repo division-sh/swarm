@@ -75,7 +75,7 @@ func TestFamily145ForkNoticeWholeChainRetainsAll16CallsAndOriginalPhysicalWitnes
 		if err != nil {
 			t.Fatal(err)
 		}
-		if family145PublicA2CurrentDeclaration(t, raw, pin.Function) != pin.After {
+		if servedSetupEarlierSource(t, pin.File, pin.Function, family145PublicA2CurrentDeclaration(t, raw, pin.Function)) != pin.After {
 			t.Fatal("current notice body escaped its whole rule:", key)
 		}
 		forkNoticeHostiles(t, pin)

@@ -149,7 +149,7 @@ func family145ForkSourceDomainQueries(source string) (map[string]string, error) 
 func TestFamily145ForkSourceDomainConsumesExactSevenTableOwnerAndAll42Calls(t *testing.T) {
 	family145ForkSourceDomainCheckReleaseInspection(t)
 	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
+	if err := json.Unmarshal(servedSetupEarlierHistory(t, family145TransitionBytes, false), &rows); err != nil {
 		t.Fatal(err)
 	}
 	seen, helpers := map[string]bool{}, 0

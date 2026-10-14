@@ -82,7 +82,7 @@ func TestFamily145PublicJoinWholeChainPreserves31CallsSevenHelpersAndAllPublicOr
 		if err != nil {
 			t.Fatal(err)
 		}
-		if family145PublicA2CurrentDeclaration(t, raw, pin.Function) != pin.After {
+		if servedSetupEarlierSource(t, pin.File, pin.Function, family145PublicA2CurrentDeclaration(t, raw, pin.Function)) != pin.After {
 			t.Fatal("current public join escaped complete source conservation:", key)
 		}
 		publicJoinHostiles(t, pin)

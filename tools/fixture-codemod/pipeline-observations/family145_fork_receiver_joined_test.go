@@ -80,7 +80,7 @@ func TestFamily145ForkReceiverJoinedInventoryRetiresWholeDuplicateOwnerAndCaller
 		File, Function, Before, After string
 		Removed                       bool
 	}
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
+	if err := json.Unmarshal(servedSetupEarlierHistory(t, family145TransitionBytes, false), &rows); err != nil {
 		t.Fatal(err)
 	}
 	seen, retired := map[string]bool{}, 0

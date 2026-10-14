@@ -388,19 +388,7 @@ func servedRoleDeclarationEdits(path string, set *token.FileSet, fn *ast.FuncDec
 	role, owner := roles[fn.Name.Name]
 	param := ""
 	if owner {
-		index := 0
-		for _, field := range fn.Type.Params.List {
-			if index == role.Index {
-				param = field.Names[0].Name
-				var parameters []string
-				for _, name := range role.Fields {
-					parameters = append(parameters, roleParameter(name)+" "+servedRoleTypes[name])
-				}
-				edits = append(edits, servedsettlement.Splice{Start: set.Position(field.Pos()).Offset, End: set.Position(field.End()).Offset, After: strings.Join(parameters, ",")})
-				break
-			}
-			index += len(field.Names)
-		}
+		param, edits = servedRoleParameterEdits(set, fn, role)
 	}
 	calls := 0
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
@@ -436,6 +424,22 @@ func servedRoleDeclarationEdits(path string, set *token.FileSet, fn *ast.FuncDec
 		return true
 	})
 	return edits, calls
+}
+
+func servedRoleParameterEdits(set *token.FileSet, fn *ast.FuncDecl, role servedRole) (string, []servedsettlement.Splice) {
+	index := 0
+	for _, field := range fn.Type.Params.List {
+		if index == role.Index {
+			var parameters []string
+			for _, name := range role.Fields {
+				parameters = append(parameters, roleParameter(name)+" "+servedRoleTypes[name])
+			}
+			edit := servedsettlement.Splice{Start: set.Position(field.Pos()).Offset, End: set.Position(field.End()).Offset, After: strings.Join(parameters, ",")}
+			return field.Names[0].Name, []servedsettlement.Splice{edit}
+		}
+		index += len(field.Names)
+	}
+	return "", nil
 }
 
 func roleParameter(field string) string { return "selectedProof" + field }

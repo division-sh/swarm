@@ -38,6 +38,23 @@ func servedSetupComparisonDeclaration(t *testing.T, pins []runphysical.Pin, path
 	return previous
 }
 
+func TestFamily145ServedSetupEveryComparisonHasItsExactSignedPredecessor(t *testing.T) {
+	files := map[string][]byte{}
+	for _, pin := range servedSetupPins(t) {
+		if files[pin.File] == nil {
+			raw, err := exec.Command("git", "show", servedsettlement.SetupPredecessor+":"+pin.File).Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			files[pin.File] = raw
+		}
+		before, err := servedsettlement.UniqueBody(files[pin.File], pin.Function)
+		if err != nil || before != pin.Before {
+			t.Fatal("setup comparison does not restore its complete signed source:", pin.Function, err)
+		}
+	}
+}
+
 func TestFamily145ServedSetupHistoryPreservesAllFieldsOrderAndExactAdvances(t *testing.T) {
 	pins := servedSetupPins(t)
 	for _, recipes := range []bool{false, true} {

@@ -64,7 +64,7 @@ func family145MailboxCompletionWaitInverse(after string) string {
 
 func TestFamily145MailboxEffectsWholeDependencyRetainsEveryCallerBodyAndCompletionCut(t *testing.T) {
 	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
+	if err := json.Unmarshal(servedSetupEarlierHistory(t, family145TransitionBytes, false), &rows); err != nil {
 		t.Fatal(err)
 	}
 	matched, waits, helpers := 0, 0, 0

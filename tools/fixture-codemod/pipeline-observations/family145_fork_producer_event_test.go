@@ -67,7 +67,7 @@ func family145ForkProducerCallerProofError(function, before, after string) error
 
 func TestFamily145ForkProducerEvidenceUsesCanonicalRecordAndPreservesRequestedRun(t *testing.T) {
 	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
+	if err := json.Unmarshal(servedSetupEarlierHistory(t, family145TransitionBytes, false), &rows); err != nil {
 		t.Fatal(err)
 	}
 	seen, helpers := map[string]bool{}, 0
