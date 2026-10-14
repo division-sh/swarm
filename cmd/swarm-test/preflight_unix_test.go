@@ -46,32 +46,110 @@ func TestPreflightCurrentSourceUsesAllFiniteOwners(t *testing.T) {
 		}
 	}()
 	t.Setenv("GITHUB_EVENT_PATH", "")
-	head, err := exec.Command("git", "rev-parse", "HEAD").Output()
-	if err != nil {
-		t.Fatal(err)
+	metadata, _ := completionRepo(t)
+	t.Setenv("GIT_DIR", filepath.Join(metadata, ".git"))
+	t.Setenv("GIT_WORK_TREE", repo)
+	if count := completionGit(t, repo, "rev-list", "--all", "--count"); count != "1" {
+		t.Fatalf("membership fixture has more than HEAD-only history: %s", count)
 	}
-	base, err := exec.Command("git", "rev-parse", "origin/master").Output()
-	if err != nil {
-		t.Fatal(err)
+	if out, err := exec.Command("git", "rev-parse", "origin/master^{commit}").CombinedOutput(); err == nil {
+		t.Fatalf("membership fixture unexpectedly has origin/master: %s", out)
 	}
-	plan, err := loadPreflightPlan(context.Background(), strings.TrimSpace(string(head)), strings.TrimSpace(string(base)))
-	if err != nil {
-		t.Fatal(err)
+	head := completionGit(t, repo, "rev-parse", "HEAD")
+	inventory, native := currentSourcePreflightNativeFixture(t, repo, head)
+	debtRoots := preflightDebtFixtureRoots(native)
+	if len(debtRoots) != 2 {
+		t.Fatalf("native debt fixture requires both canonical owners: %+v", debtRoots)
 	}
 	structural, err := testplanning.StaticAuthorityGuardRoots(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validatePreflightStructuralCompleteness(plan, structural); err != nil {
+	for _, mode := range []string{"docs-only", "debt-required"} {
+		t.Run(mode, func(t *testing.T) {
+			comparison := testplanning.PreflightComparison{OriginMasterSHA: strings.Repeat("b", 40), DiffSHA256: strings.Repeat("c", 64), DebtRequired: mode == "debt-required"}
+			plan, err := testplanning.BuildPreflightPlan(repo, comparison.OriginMasterSHA, inventory, native, comparison)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := validatePreflightStructuralCompleteness(plan, structural); err != nil {
+				t.Fatal(err)
+			}
+			if err := validatePreflightEscapeCompleteness(plan); err != nil {
+				t.Fatal(err)
+			}
+			assertPreflightFrozenSelectionRefusals(t, plan, structural)
+			if err := validatePreflightSchedule(plan, preflightPhases(plan)); err != nil {
+				t.Fatal(err)
+			}
+			for _, root := range debtRoots {
+				var selected []testplanning.RequiredTest
+				for _, pkg := range plan.Packages {
+					for _, candidate := range pkg.Required {
+						if candidate.TestRoot == root.TestRoot {
+							selected = append(selected, candidate)
+						}
+					}
+				}
+				if comparison.DebtRequired && !reflect.DeepEqual(selected, []testplanning.RequiredTest{root}) || !comparison.DebtRequired && len(selected) != 0 {
+					t.Fatalf("conditional debt root/child obligations differ: canonical=%+v selected=%+v", root, selected)
+				}
+			}
+		})
+	}
+}
+
+func currentSourcePreflightNativeFixture(t *testing.T, repo, head string) (testplanning.RootInventory, testplanning.RunPlan) {
+	t.Helper()
+	inventory, err := testplanning.DiscoverRootInventory(context.Background(), repo)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := validatePreflightEscapeCompleteness(plan); err != nil {
+	raw, err := os.ReadFile(filepath.Join(repo, ".github/test-proof-plan.yaml"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	assertPreflightFrozenSelectionRefusals(t, plan, structural)
-	if err := validatePreflightSchedule(plan, preflightPhases(plan)); err != nil {
+	policy, err := testplanning.LoadPolicy(bytes.NewReader(raw))
+	if err != nil {
 		t.Fatal(err)
 	}
+	raw, err = os.ReadFile(filepath.Join(repo, testplanning.GeneratedWeightModelPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := testplanning.LoadWeightModel(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proofs, err := testplanning.LoadParityProofs(filepath.Join(repo, "internal/apiv1/testdata/public_surface_backend_matrix.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var packages []string
+	for pkg := range inventory.Packages {
+		packages = append(packages, pkg)
+	}
+	slices.Sort(packages)
+	native, err := testplanning.BuildPlan(policy, model, packages, testplanning.ProfileFull, "current source membership fixture", head, testplanning.BuildOptions{Venue: testplanning.VenueLocal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := testplanning.BindExecution(&native, inventory, proofs, policy); err != nil {
+		t.Fatal(err)
+	}
+	return inventory, native
+}
+
+func preflightDebtFixtureRoots(native testplanning.RunPlan) []testplanning.RequiredTest {
+	var roots []testplanning.RequiredTest
+	for _, unit := range native.Units {
+		for _, root := range unit.RequiredTests {
+			if root.Package == "github.com/division-sh/swarm/internal/store" && slices.Contains([]string{"TestPersistenceAuthorityDebtRatchet", "TestNativeFixtureFamiliesDoNotReceiveRawAuthority"}, root.Name) {
+				roots = append(roots, root)
+			}
+		}
+	}
+	return roots
 }
 
 // Independent frozen oracle: package discovery does not admit new candidates.
