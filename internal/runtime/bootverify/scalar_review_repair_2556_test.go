@@ -94,17 +94,17 @@ func TestScalar2556RuleDiagnosticCoordinatesUsePositions(t *testing.T) {
 
 func TestScalar2556NestedDiagnosticSourceOwnership(t *testing.T) {
 	for _, tc := range []struct{ name, handler string }{
-		{"rule activity escaped key", "      rules:\n        - id: '1'\n          else: true\n          activity:\n            id: worker_proof_requested_1_send\n            tool: send\n            input:\n              'value.part': missing_root\n"},
-		{"rule write", "      rules:\n        - id: named\n          else: true\n          data_accumulation:\n            writes:\n              - target_field: note\n                value: missing_root\n"},
-		{"completion write", "      on_complete:\n        - id: '1'\n          data_accumulation:\n            writes:\n              - target_field: note\n                value: missing_root\n"},
-		{"rule emit escaped key", "      rules:\n        - id: '1'\n          else: true\n          emit:\n            event: proof.done\n            fields:\n              'value.part': missing_root\n"},
-		{"completion emit", "      on_complete:\n        - id: named\n          emit:\n            event: proof.done\n            fields:\n              value: missing_root\n"},
-		{"template specialized", "      emit:\n        event: proof.done\n        fields:\n          inherited: 'text'\n      rules:\n        - id: '1'\n          else: true\n          emit:\n            fields:\n              value: missing_root\n"},
-		{"template inherited", "      emit:\n        event: proof.done\n        fields:\n          inherited: missing_root\n      rules:\n        - id: named\n          else: true\n          emit:\n            fields:\n              value: 'text'\n"},
-		{"keyed rule", "      rules:\n        chosen:\n          when: missing_root\n        fallback:\n          else: true\n"},
-		{"singleton rule write", "      rules:\n        else: true\n        data_accumulation:\n          writes:\n            - target_field: note\n              value: missing_root\n"},
-		{"rule fanout identity", "      rules:\n        - id: '1'\n          else: true\n          fan_out:\n            items_from: payload.items\n            as: element\n            identity: missing_root\n            emit:\n              event: proof.done\n              fields:\n                value: element\n"},
-		{"completion fanout emit", "      on_complete:\n        - id: named\n          fan_out:\n            items_from: payload.items\n            as: element\n            identity: element\n            emit:\n              event: proof.done\n              fields:\n                value: missing_root\n"},
+		{"rule activity escaped key", "      rules:\n        - else: true\n          activity:\n            id: worker_proof_requested_1_send\n            tool: send\n            input:\n              'value.part': missing_root\n"},
+		{"rule write", "      rules:\n        - else: true\n          data_accumulation:\n            writes:\n              - target_field: note\n                value: missing_root\n"},
+		{"completion write", "      on_complete:\n        - data_accumulation:\n            writes:\n              - target_field: note\n                value: missing_root\n"},
+		{"rule emit escaped key", "      rules:\n        - else: true\n          emit:\n            event: proof.done\n            fields:\n              'value.part': missing_root\n"},
+		{"completion emit", "      on_complete:\n        - emit:\n            event: proof.done\n            fields:\n              value: missing_root\n"},
+		{"template specialized", "      emit:\n        event: proof.done\n        fields:\n          inherited: 'text'\n      rules:\n        - else: true\n          emit:\n            fields:\n              value: missing_root\n"},
+		{"template inherited", "      emit:\n        event: proof.done\n        fields:\n          inherited: missing_root\n      rules:\n        - else: true\n          emit:\n            fields:\n              value: 'text'\n"},
+		{"formerly keyed rule", "      rules:\n        - when: missing_root\n        - else: true\n"},
+		{"formerly singleton rule write", "      rules:\n        - else: true\n          data_accumulation:\n            writes:\n              - target_field: note\n                value: missing_root\n"},
+		{"rule fanout identity", "      rules:\n        - else: true\n          fan_out:\n            items_from: payload.items\n            as: element\n            identity: missing_root\n            emit:\n              event: proof.done\n              fields:\n                value: element\n"},
+		{"completion fanout emit", "      on_complete:\n        - fan_out:\n            items_from: payload.items\n            as: element\n            identity: element\n            emit:\n              event: proof.done\n              fields:\n                value: missing_root\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, record, source := scalar2556LoadedSource(t, tc.handler)
@@ -131,7 +131,7 @@ func TestScalar2556DiagnosticPreservesAuthoredFieldNames(t *testing.T) {
 				if owner == "emit" {
 					body = "          emit:\n            event: proof.done\n            fields:\n              '" + key + "': missing_root\n"
 				}
-				ctx, record, source := scalar2556LoadedSource(t, "      rules:\n        - id: '1'\n          else: true\n"+body)
+				ctx, record, source := scalar2556LoadedSource(t, "      rules:\n        - else: true\n"+body)
 				node, _ := record.Identity()
 				matched := false
 				for _, reader := range handlerExecutableReaderExpressionsForSource(ctx.source, node, "proof.requested", record.Entry.EventHandlers["proof.requested"]) {
