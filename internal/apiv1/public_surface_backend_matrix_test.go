@@ -1162,6 +1162,10 @@ func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelect
 			Backends: []string{"default_sqlite", "explicit_postgres"},
 			Methods:  []string{"channel.onboarding_get"},
 		},
+		"TestChannelOnboardingSelectionReadOnlyHTTPBothStores": {
+			Backends: []string{"default_sqlite", "explicit_postgres"},
+			Methods:  []string{"channel.onboarding_select"},
+		},
 		"TestServedParityHarnessOperatorChannelLifecycle": {
 			Backends: []string{"default_sqlite", "explicit_postgres"},
 			Methods:  []string{"channel.list"},
