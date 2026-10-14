@@ -187,8 +187,7 @@ worker:
   event_handlers:
     task.assigned:
       on_complete:
-        - id: early
-          condition: entity.base_score > 0
+        - condition: entity.base_score > 0
           advances_to: done
       data_accumulation:
         writes:
