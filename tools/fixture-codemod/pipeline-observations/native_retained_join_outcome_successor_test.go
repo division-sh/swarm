@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -77,8 +78,20 @@ func proveRetainedJoinTypedReaderSource(t *testing.T) {
 	}
 }
 
+//go:embed testdata/retained_join_r7_reviewed.go.txt
+var retainedJoinR7Reviewed string
+
 func validateRetainedJoinSuccessor(row recipe, candidate string) error {
-	expected, restored := row.After, candidate
+	predecessor := strings.TrimSuffix(retainedJoinR7Reviewed, "\n")
+	if fmt.Sprintf("%x", sha256.Sum256([]byte(predecessor))) != "9fe6d8918d3fc2716ec8db18d7415b6445afa8da23014a4b20965f6a85155867" {
+		return fmt.Errorf("reviewed R7 predecessor changed")
+	}
+	expected, restored := predecessor, candidate
+	const superseded = "\n\t\t\twaitForServeStory(t, func() bool {\n\t\t\t\tcurrent, sourceJoins = readRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)\n\t\t\t\treturn len(sourceJoins) == 2 && sourceJoins[0].OutcomeFired && sourceJoins[1].OutcomeFired\n\t\t\t})\n\t\t\twaitRetainedJoinPipelineHandoff(t, rt.ReceiverStateReader, started.RunID)\n"
+	if strings.Count(expected, superseded) != 1 {
+		return fmt.Errorf("reviewed R7 wait changed")
+	}
+	expected = strings.Replace(expected, superseded, "", 1)
 	for _, edit := range retainedJoinSuccessorEdits {
 		if strings.Count(expected, edit.before) != 1 || strings.Count(candidate, edit.before+edit.block) != 1 {
 			return fmt.Errorf("exact join checkpoint/wait block missing, duplicated or moved")
@@ -88,7 +101,9 @@ func validateRetainedJoinSuccessor(row recipe, candidate string) error {
 	}
 	actual, actualErr := canonicalFunction(candidate)
 	want, wantErr := canonicalFunction(expected)
-	original, originalErr := canonicalFunction(row.After)
+	checkpoint := "\t\t\tif current.Attempt != 2 || current.ActivationID != first.ActivationID || len(sourceJoins) != 2 {"
+	restored = strings.Replace(restored, checkpoint, superseded+checkpoint, 1)
+	original, originalErr := canonicalFunction(predecessor)
 	reversed, reversedErr := canonicalFunction(restored)
 	if actualErr != nil || wantErr != nil || originalErr != nil || reversedErr != nil || actual != want || reversed != original {
 		return fmt.Errorf("join successor changed work beyond exact outcome composition")

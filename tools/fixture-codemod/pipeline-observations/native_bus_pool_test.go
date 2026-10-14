@@ -50,7 +50,7 @@ func TestNativeBusPoolPreservesEverySaturationSurfaceAndTemporalCut(t *testing.T
 		if before != normalizedNativePoolCleanup(row.After) {
 			t.Fatal("pool forms, claim alignment, real replay, exact receipt or timeout changed")
 		}
-		if selectedCausalObservationBody(t, row.File, row.Function) != row.After {
+		if !residualComparatorCurrent2617(t, row, selectedCausalObservationBody(t, row.File, row.Function)) {
 			t.Fatal("native pool caller diverged from finite migration")
 		}
 	}

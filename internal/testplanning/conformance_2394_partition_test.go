@@ -245,13 +245,14 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	// #2438 2c adds the receiver-configuration carrier restoration guard.
 	// #2438 A9 adds the exact-owner construction-receipt fixture control.
 	// #2655 adds fixed-point handoff and original-selector correspondence proofs.
+	// #2594 keeps the nested-portfolio proof in the default build with its own guard.
 	admittedPointRoots := []string{
 		"TestIssue2655EventSelectorsKeepPreparedRevisionBothStores",
 		"TestIssue2655ServedDeploymentKeepsAdmittedRevisionBothStores",
 		"TestIssue2655StagedRevisionRefusalAndRetryBothStores",
 		"TestIssue2655EventOperationSelectorCorrespondenceBothStores",
 	}
-	want := []int{168 + len(admittedPointRoots), 14, 5, 1, 1}
+	want := []int{169 + len(admittedPointRoots), 14, 5, 1, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -269,6 +270,10 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	const emptyReporterProof = "TestEmptyReporterSettlesWithoutConstructedHeaderMutationBothStores"
 	const receiverRetirementProof = "TestCanonicalFormsReceiverConfigurationRetirement"
 	const constructionReceiptProof = "TestConformanceConstructionReceiptsRequireExactOwner"
+	const nestedPortfolioProof = "TestR7NestedPortfolioProofRemainsInDefaultBuild"
+	if i := sort.SearchStrings(groups[0], nestedPortfolioProof); i == len(groups[0]) || groups[0][i] != nestedPortfolioProof {
+		t.Fatalf("#2594 nested-portfolio default-build proof missing from %s", conformance2394Units[0])
+	}
 	if i := sort.SearchStrings(groups[0], constructionReceiptProof); i == len(groups[0]) || groups[0][i] != constructionReceiptProof {
 		t.Fatalf("#2438 exact-owner construction receipt proof missing from %s", conformance2394Units[0])
 	}
