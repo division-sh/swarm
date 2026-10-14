@@ -125,9 +125,14 @@ type SessionBootstrapOwner interface {
 	QualifySessionPlan(Candidate) error
 	BootstrapSession(context.Context, Operation, Candidate) error
 	ResumeSession(context.Context, Operation, Candidate) error
+	AwaitSessionBootstrap(context.Context, Operation) error
 	CheckpointSessionPairing(context.Context, Operation) (Operation, bool, error)
 	ReadSessionPairing(context.Context, Operation, operatorchannel.Principal) (PairingReadback, error)
 }
+
+// ErrSessionPending describes owned non-executable preparation, not successful
+// bootstrap, pairing, an admitted account or permission to publish business input.
+var ErrSessionPending = errors.New("channel session preparation is pending")
 
 type CredentialRequiredError struct {
 	OperationID string
@@ -573,6 +578,9 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 		}
 	}
 	if err := s.resumeSession(ctx, rebound, candidate); err != nil {
+		if errors.Is(err, ErrSessionPending) {
+			return s.result(ctx, rebound, &candidate)
+		}
 		return Result{Operation: rebound, Candidate: &candidate}, fmt.Errorf("restore onboarding session: %w", err)
 	}
 	result, err := s.driveLocked(ctx, rebound, candidate, input.ProviderCredential)
@@ -867,7 +875,12 @@ func (s *Service) recoverOperation(ctx context.Context, id string, restoreOnly b
 	}
 	op = rebound
 	if err := s.resumeSession(ctx, op, candidate); err != nil {
-		return fmt.Errorf("restore channel onboarding %s: %w", op.OperationID, err)
+		if !errors.Is(err, ErrSessionPending) {
+			return fmt.Errorf("restore channel onboarding %s: %w", op.OperationID, err)
+		}
+		if err := s.sessions.AwaitSessionBootstrap(ctx, op); err != nil {
+			return fmt.Errorf("await restored channel onboarding %s: %w", op.OperationID, err)
+		}
 	}
 	if restoreOnly || recoveryNeedsFreshTargetAdmission(op, candidate) {
 		// Restoring paired control work does not admit a replacement target or
@@ -1025,10 +1038,7 @@ func (s *Service) driveLocked(ctx context.Context, op Operation, candidate Candi
 			op = next
 		case PhaseActivatingProvider:
 			if op.Posture == ActivationSessionConnection {
-				if err := s.sessions.BootstrapSession(caller, op, candidate); err != nil {
-					return s.blockedResult(readback, op, candidate, err)
-				}
-				next, paired, err := s.sessions.CheckpointSessionPairing(caller, op)
+				next, paired, err := s.prepareSessionPairing(caller, op, candidate)
 				if err != nil {
 					return s.blockedResult(readback, op, candidate, err)
 				}
@@ -2089,10 +2099,14 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 			return result, err
 		}
 		pairing, err := s.sessions.ReadSessionPairing(ctx, op, principal)
-		if err != nil {
+		if err != nil && !errors.Is(err, ErrSessionPending) {
 			return result, err
 		}
-		result.Pairing = &pairing
+		if err == nil {
+			result.Pairing = &pairing
+		} else {
+			result.Pairing = &PairingReadback{Status: PairingStatusPreparing}
+		}
 	}
 	if op.IdentityOperationID != "" {
 		identityOp, err := s.identities.GetOperation(ctx, op.IdentityOperationID)
