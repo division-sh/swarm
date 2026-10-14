@@ -28,7 +28,7 @@ func publicRollbackPins(t *testing.T) []publicrollback.Pin {
 	return pins
 }
 
-func restorePublicRollbackHistory(rows []map[string]any, recipes bool) {
+func restorePublicRollbackHistory(t *testing.T, rows []map[string]any, recipes bool) []map[string]any {
 	pins, err := publicrollback.Decode(publicRollbackBytes)
 	if err != nil {
 		panic(err)
@@ -45,6 +45,7 @@ func restorePublicRollbackHistory(rows []map[string]any, recipes bool) {
 			}
 		}
 	}
+	return rows
 }
 
 func TestFamily145PublicRollbackPreservesHistoricalRecordsAndOrder(t *testing.T) {
@@ -64,8 +65,9 @@ func TestFamily145PublicRollbackPreservesHistoricalRecordsAndOrder(t *testing.T)
 		if err := json.Unmarshal(current, &after); err != nil {
 			t.Fatal(err)
 		}
+		after = restoreSourceForkHistory(t, after, strings.HasSuffix(path, "recipes.json"))
 		restored := cloneRollbackHistory(t, after)
-		restorePublicRollbackHistory(restored, strings.HasSuffix(path, "recipes.json"))
+		restored = restorePublicRollbackHistory(t, restored, strings.HasSuffix(path, "recipes.json"))
 		if !reflect.DeepEqual(before, restored) {
 			t.Fatal("rollback changed historical records, metadata or order:", path)
 		}
@@ -76,7 +78,7 @@ func TestFamily145PublicRollbackPreservesHistoricalRecordsAndOrder(t *testing.T)
 			for _, key := range []string{"File", "Function", "Before", "Mechanical", "Removed", "Family"} {
 				mutant := cloneRollbackHistory(t, after)
 				mutant[i][key] = "unreviewedHistory"
-				restorePublicRollbackHistory(mutant, strings.HasSuffix(path, "recipes.json"))
+				mutant = restorePublicRollbackHistory(t, mutant, strings.HasSuffix(path, "recipes.json"))
 				if reflect.DeepEqual(before, mutant) {
 					t.Fatal("history inverse erased changed metadata:", key)
 				}

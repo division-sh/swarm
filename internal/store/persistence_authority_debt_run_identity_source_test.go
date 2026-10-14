@@ -179,6 +179,7 @@ func debtRunIdentityHostileRows(t *testing.T, bodies []debtRunIdentitySourceBody
 
 func debtRunIdentityCopySourceEvidence(t *testing.T, root, copy string) {
 	t.Helper()
+	debtSourceForkCopySourceEvidence(t, root, copy)
 	for _, path := range []string{
 		"tools/fixture-codemod/pipeline-observations/family145-run-identity-preimages.json",
 		"internal/store/storetest/api_event_storage.go",

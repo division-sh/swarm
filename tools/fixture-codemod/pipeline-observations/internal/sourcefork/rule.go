@@ -9,6 +9,7 @@ import (
 )
 
 const Predecessor = "0396a9b746ae7a4c2d901e19be8858f4dfa3f553"
+const HistoryPredecessor = "64eda6291965b8fb8d764b91b347c1c8185fa1a2"
 const Path = "tools/fixture-codemod/pipeline-observations/family145-source-fork-cardinality-preimages.json"
 const Digest = "46e028ffb16b29264fe757efb4bb67aa2e98cdda9236fb3398e589dfc96740e8"
 

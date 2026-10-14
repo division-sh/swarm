@@ -265,6 +265,10 @@ func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDeb
 	if len(retirementFailures) != 0 {
 		return retirementFailures
 	}
+	head, base, baseActual, retirementFailures = debtPublicRollbackRetirementComparisons(actual, head, base, baseActual, retirement...)
+	if len(retirementFailures) != 0 {
+		return retirementFailures
+	}
 	head, base, baseActual, failures := debtStageCompletionComparisons(actual, head, base, baseActual)
 	if len(failures) != 0 {
 		return failures
@@ -307,6 +311,42 @@ func authorityDebtRatchet(actual, head, base, baseActual map[string]authorityDeb
 	failures = append(failures, authorityDebtSubset(head, base, "head -> trusted baseline")...)
 	failures = append(failures, authorityDebtSubset(actual, baseActual, "actual -> trusted source (resurrection)")...)
 	return failures
+}
+
+// Ruling6158639937 permits retirement only of the two already-recorded raw
+// rollback caller identities. These are comparison copies, never new debt rows.
+func debtPublicRollbackRetirementComparisons(actual, head, base, source map[string]authorityDebtSite, proofs ...debtDeliveryRetirementProof) (map[string]authorityDebtSite, map[string]authorityDebtSite, map[string]authorityDebtSite, []string) {
+	if !debtPublicRollbackHasRetirement(actual, head, base, source) {
+		return head, base, source, nil
+	}
+	if len(proofs) != 1 || proofs[0].Root == "" || !debtSitesEqual(actual, proofs[0].Actual) {
+		return head, base, source, []string{"rollback retirement lacks its exact current source/census proof"}
+	}
+	if err := debtPublicRollbackNativePins(proofs[0].Root); err != nil {
+		return head, base, source, []string{err.Error()}
+	}
+	if err := debtRequestKeySourcePins(proofs[0].Root); err != nil {
+		return head, base, source, []string{err.Error()}
+	}
+	for _, pair := range debtRequestKeySignatureTransitions() {
+		if err := debtDeliveryRetirementState(pair, actual, head, base, source); err != nil {
+			return head, base, source, []string{err.Error()}
+		}
+		if base[pair[0].identity()] == pair[0] {
+			base = debtForwardQuiescenceUncertainty(base, pair[0], pair[1])
+			source = debtForwardQuiescenceUncertainty(source, pair[0], pair[1])
+		}
+	}
+	return head, base, source, nil
+}
+
+func debtPublicRollbackHasRetirement(actual, head, base, source map[string]authorityDebtSite) bool {
+	for _, pair := range debtRequestKeySignatureTransitions() {
+		if debtDeliveryRetirementPairAbsent(pair, actual) && (base[pair[0].identity()].Multiplicity != 0 || source[pair[0].identity()].Multiplicity != 0) {
+			return true
+		}
+	}
+	return false
 }
 
 // Ruling 6112778624 authorizes one declaration relocation, not a debt removal.
@@ -464,6 +504,10 @@ func debtDeliveryStatusBodies(root string) ([]debtRequestKeyBody, error) {
 
 func debtDeliveryStatusSourcePrevious(root, file, function, current string) (string, error) {
 	var err error
+	current, err = debtSourceForkSourcePrevious(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	current, err = debtEventNameSourcePrevious(root, file, function, current)
 	if err != nil {
 		return "", err
@@ -581,7 +625,11 @@ func debtDeliveryStatusSourcePins(root string) error {
 				return err
 			}
 		}
-		previous, err := debtEventNameSourcePrevious(root, body.File, body.Function, files[body.File][body.Function])
+		previous, err := debtSourceForkSourcePrevious(root, body.File, body.Function, files[body.File][body.Function])
+		if err != nil {
+			return err
+		}
+		previous, err = debtEventNameSourcePrevious(root, body.File, body.Function, previous)
 		if err != nil || previous != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
 			return fmt.Errorf("delivery status owner/assertion/polling cut changed: %s/%s: %v", body.File, body.Function, err)
 		}
@@ -1275,7 +1323,11 @@ func debtServedDebugSourcePins(root string) error {
 				return err
 			}
 		}
-		previous, err := debtRunIdentitySourcePrevious(root, body.File, body.Function, loaded[body.File][body.Function])
+		previous, err := debtSourceForkSourcePrevious(root, body.File, body.Function, loaded[body.File][body.Function])
+		if err != nil {
+			return err
+		}
+		previous, err = debtRunIdentitySourcePrevious(root, body.File, body.Function, previous)
 		if err != nil {
 			return err
 		}

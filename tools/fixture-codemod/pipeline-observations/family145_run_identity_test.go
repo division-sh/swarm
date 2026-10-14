@@ -235,7 +235,7 @@ func runIdentityEarlierHistory(t *testing.T, raw []byte, recipes bool) []byte {
 	if err := json.Unmarshal(raw, &rows); err != nil {
 		t.Fatal(err)
 	}
-	prior, _ := restoreRunIdentityHistory(rows, recipes)
+	prior, _ := restoreRunIdentityHistory(t, rows, recipes)
 	result, err := json.Marshal(prior)
 	if err != nil {
 		t.Fatal(err)
@@ -260,15 +260,16 @@ func TestFamily145RunIdentityPreservesHistoricalRecordsAndOrder(t *testing.T) {
 		if err := json.Unmarshal(current, &after); err != nil {
 			t.Fatal(err)
 		}
-		retained, additions := restoreRunIdentityHistory(after, strings.HasSuffix(path, "recipes.json"))
+		retained, additions := restoreRunIdentityHistory(t, after, strings.HasSuffix(path, "recipes.json"))
 		if additions != 1 || !reflect.DeepEqual(before, retained) {
 			t.Fatal("run identity changed immutable history/relative order outside five exact records:", path)
 		}
 	}
 }
 
-func restoreRunIdentityHistory(rows []map[string]any, recipes bool) ([]map[string]any, int) {
-	restorePublicRollbackHistory(rows, recipes)
+func restoreRunIdentityHistory(t *testing.T, rows []map[string]any, recipes bool) ([]map[string]any, int) {
+	rows = restoreSourceForkHistory(t, rows, recipes)
+	rows = restorePublicRollbackHistory(t, rows, recipes)
 	retained, additions := []map[string]any{}, 0
 	for _, row := range rows {
 		for _, pin := range runIdentityPins {

@@ -233,6 +233,7 @@ func debtWriterStageCheckPriorComposition(t *testing.T) {
 func TestPersistenceAuthorityDebtWriterStageUnrefreshedMetadataIsScopedAndFailClosed(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	copy := t.TempDir()
+	debtSourceForkCopySourceEvidence(t, root, copy)
 	for _, path := range []string{"internal/serveapp/main_runtime_test.go", ".github/audit-artifacts/issue-2542-writer-stage-signature-transition-request.json", "tools/fixture-codemod/pipeline-observations/family145-served-debug-preimages.json", "tools/fixture-codemod/pipeline-observations/family145-request-key-preimages.json", "tools/fixture-codemod/pipeline-observations/family145-run-scalar-preimages.json", "tools/fixture-codemod/pipeline-observations/family145-delivery-status-preimages.json", "tools/fixture-codemod/pipeline-observations/family145-event-name-preimages.json"} {
 		data, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {

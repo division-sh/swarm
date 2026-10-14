@@ -83,6 +83,7 @@ func TestPersistenceAuthorityDebtDeliveryStatusSourcePinsAndCompositionFailClose
 		}
 	}
 	copy := t.TempDir()
+	debtSourceForkCopySourceEvidence(t, root, copy)
 	for _, path := range []string{"internal/serveapp/main_runtime_test.go", "tools/fixture-codemod/pipeline-observations/family145-delivery-status-preimages.json", "tools/fixture-codemod/pipeline-observations/family145-event-name-preimages.json"} {
 		raw, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {

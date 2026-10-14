@@ -134,8 +134,8 @@ func TestServedDeliveryQuiescenceCallerInventoryConsumesOnlyDomainReadPorts(t *t
 	for _, count := range counts {
 		total += count
 	}
-	if len(counts) != 81 || total != 150 || counts["TestServedRunDeliveryQuiescenceReaderPreservesStableStatusCut"] != 1 {
-		t.Fatalf("delivery family inventory functions=%d,calls=%d,want80/149 plus one unit witness", len(counts), total)
+	if len(counts) != 82 || total != 152 || counts["TestServedRunDeliveryQuiescenceReaderPreservesStableStatusCut"] != 1 || counts["TestStandingDiagnosticsReadOnlyWholeChainBothStores"] != 2 {
+		t.Fatalf("delivery family inventory functions=%d,calls=%d,want80/149 plus one unit witness and two exact standing diagnostic cuts", len(counts), total)
 	}
 }
 

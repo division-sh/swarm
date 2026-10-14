@@ -1,5 +1,9 @@
 # Public Input Rollback: Authorized Composition Repair
 
+The later two-pair disposition6158639937 supersedes the original no-retirement
+condition described below. See issue-2542-rollback-retirement-source-fork-composition.md
+for the exact repair and genuine census delta; this audit preserves its initial RED.
+
 Binding ruling: #2542 comment6158073939. Signed semantic checkpoint0396a9b74
 and its predecessorcb71e60b7 remain immutable. This repair is local only.
 

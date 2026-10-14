@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"go/token"
 	"os"
 	"os/exec"
+	"reflect"
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
@@ -17,6 +19,10 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "-compose-history" {
+		composeHistory()
+		return
+	}
 	write := len(os.Args) == 2 && os.Args[1] == "-write"
 	if !write && len(os.Args) != 1 {
 		panic("usage: migrate-source-fork-cardinality [-write]")
@@ -60,6 +66,42 @@ func main() {
 		}
 		must(os.WriteFile(sourcefork.Path, raw, 0644))
 	}
+}
+
+func composeHistory() {
+	raw, err := os.ReadFile(sourcefork.Path)
+	must(err)
+	pins, err := sourcefork.Decode(raw)
+	must(err)
+	for _, pin := range pins {
+		current, err := os.ReadFile(pin.File)
+		must(err)
+		_, body := declaration(current, pin.Function)
+		if body != pin.After {
+			panic("source fork current history endpoint changed")
+		}
+	}
+	for _, path := range []string{"tools/fixture-codemod/pipeline-observations/recipes.json", "tools/fixture-codemod/pipeline-observations/family145-transitions.json"} {
+		prior, err := exec.Command("git", "show", sourcefork.HistoryPredecessor+":"+path).Output()
+		must(err)
+		out, err := sourcefork.ComposeHistory(prior, pins, path == "tools/fixture-codemod/pipeline-observations/recipes.json")
+		must(err)
+		out = append(out, '\n')
+		current, err := os.ReadFile(path)
+		must(err)
+		if !bytes.Equal(current, prior) && !sameHistory(current, out) {
+			panic("unreviewed source fork history outside finite endpoints")
+		}
+		must(os.WriteFile(path, out, 0644))
+		fmt.Printf("composed six finite source fork endpoints: %s\n", path)
+	}
+}
+
+func sameHistory(left, right []byte) bool {
+	var a, b []map[string]any
+	must(json.Unmarshal(left, &a))
+	must(json.Unmarshal(right, &b))
+	return reflect.DeepEqual(a, b)
 }
 
 func declaration(raw []byte, name string) (string, string) {

@@ -142,6 +142,7 @@ func deliveryRetirementMutation(t *testing.T, root string, pair [2]authorityDebt
 func TestPersistenceAuthorityDebtDeliveryRetirementRefusesChangedNativeSource(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	copy := t.TempDir()
+	debtSourceForkCopySourceEvidence(t, root, copy)
 	const file = "internal/serveapp/main_runtime_test.go"
 	const manifest = "tools/fixture-codemod/pipeline-observations/family145-delivery-status-preimages.json"
 	for _, path := range []string{file, manifest, "tools/fixture-codemod/pipeline-observations/family145-event-name-preimages.json"} {
@@ -269,6 +270,7 @@ func TestPersistenceAuthorityDebtDeliveryRetirementCollectorPreservesExactChain(
 
 func TestPersistenceAuthorityDebtDeliveryRetirementMetadataIsLocalAndSourceBound(t *testing.T) {
 	root, copy := persistenceAuthorityRepoRoot(t), t.TempDir()
+	debtSourceForkCopySourceEvidence(t, root, copy)
 	for _, path := range []string{"internal/serveapp/main_runtime_test.go", "tools/fixture-codemod/pipeline-observations/family145-delivery-status-preimages.json", "tools/fixture-codemod/pipeline-observations/family145-event-name-preimages.json"} {
 		raw, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {

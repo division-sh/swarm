@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runscalar"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedeventcount"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/sourcefork"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/standingdiagnostic"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/workflowstate"
 )
@@ -39,7 +40,9 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "92dcc48a8773818a8528541fe6011aefe7e7f06677ebd531de848e5667a55ac6"
+const targetDigest = "bb95872035794c2d9425adbfc2f5530b08e17010156d554a99ccb8bc2427cefe"
+
+var sourceForkComparison = map[string]string{}
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -305,6 +308,7 @@ func main() {
 	includeChannelEventCountTargets()
 	includeServedEventCountTargets()
 	includeStopWitnessTargets()
+	sourceForkPins := sourceForkHistoryPins()
 	var rows []recipe
 	must(json.Unmarshal(commit(ledger), &rows))
 	var changes []transition
@@ -340,6 +344,7 @@ func main() {
 	changes = restoreGeneratedPublicRollbackTransitions(changes, rollbackPins)
 	rows = composePublicRollbackRecipes(preserveRunIdentityRecipes(rows), rollbackPins)
 	changes = composePublicRollbackTransitions(preserveRunIdentityTransitions(changes), rollbackPins)
+	rows, changes = composeSourceForkHistory(rows, changes, sourceForkPins)
 	raw, err := json.Marshal(changes)
 	must(err)
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
@@ -356,6 +361,42 @@ func main() {
 	} else if len(os.Args) != 1 {
 		panic("usage: reconcile-family145 [-write]")
 	}
+}
+
+func sourceForkHistoryPins() []sourcefork.Pin {
+	raw, err := os.ReadFile(sourcefork.Path)
+	must(err)
+	pins, err := sourcefork.Decode(raw)
+	must(err)
+	for _, pin := range pins {
+		current, err := os.ReadFile(pin.File)
+		must(err)
+		if functions(current)[pin.Function] != pin.After || functions(commitSourceFork(pin.File))[pin.Function] != pin.Before {
+			panic("source fork exact live/predecessor endpoint changed: " + pin.Function)
+		}
+		sourceForkComparison[pin.File+"/"+pin.Function] = pin.Before
+	}
+	return pins
+}
+
+func commitSourceFork(path string) []byte {
+	raw, err := exec.Command("git", "show", sourcefork.Predecessor+":"+path).Output()
+	must(err)
+	return raw
+}
+
+func composeSourceForkHistory(rows []recipe, changes []transition, pins []sourcefork.Pin) ([]recipe, []transition) {
+	raw, err := json.Marshal(rows)
+	must(err)
+	raw, err = sourcefork.ComposeHistory(raw, pins, true)
+	must(err)
+	must(json.Unmarshal(raw, &rows))
+	raw, err = json.Marshal(changes)
+	must(err)
+	raw, err = sourcefork.ComposeHistory(raw, pins, false)
+	must(err)
+	must(json.Unmarshal(raw, &changes))
+	return rows, changes
 }
 
 func publicRollbackHistoryPins() []publicrollback.Pin {
@@ -1119,6 +1160,9 @@ func currentReplacement(path, key string, after map[string]string) (string, bool
 		return "", true
 	}
 	if replacement := after[key]; replacement != "" {
+		if previous := sourceForkComparison[path+"/"+key]; previous != "" {
+			return previous, false
+		}
 		return replacement, false
 	}
 	if replacement := after[renamedHelpers[path][key]]; replacement != "" {

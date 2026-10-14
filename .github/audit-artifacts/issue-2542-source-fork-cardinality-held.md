@@ -1,5 +1,9 @@
 # Source Fork Cardinality: Local Whole-Family Checkpoint
 
+The named source/history hold below is resolved by the subsequent finite repair
+in issue-2542-rollback-retirement-source-fork-composition.md. Original RED evidence
+and the signed semantic checkpoint remain immutable; parent closure stays open.
+
 Semantic transform follows the existing bulk rule gate6134544118. Signed source
 predecessor0396a9b746ae7a4c2d901e19be8858f4dfa3f553. Stacked after the separate
 public-rollback composition repair, with its accounting hold preserved.
