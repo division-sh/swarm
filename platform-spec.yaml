@@ -42314,6 +42314,8 @@ llm_completion_execution_authority:
       full contributor collection. A terminal model or exactly one contributor supplies resolved_model; multiple contributors
       without a terminal label or missing observations leave it absent. Sorting never chooses the first model. Labels are
       observations, not certification of a pinned concrete model. Mock work never manufactures provider labels or billing.
+      A valid CLI terminal with neither terminal-model nor contributor observations records an explicit absent-model
+      problem; invalid labels retain their invalid classification instead. Valid token and price dimensions remain independent.
       CLI JSON and stream-json evidence frame complete top-level documents before terminal selection; document-internal
       newlines or nested objects never create stream frames. Evidence follows the last exact type=result candidate,
       independently of dimension validation. A malformed or contradictory later result never certifies an earlier
