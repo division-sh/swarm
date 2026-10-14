@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -88,7 +89,11 @@ func TestDeclaredClockFiniteAndPublicReadbackBothStores(t *testing.T) {
 			source := filepath.Join(root, "contracts")
 			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal/runtime/testfixtures/canonicalrouting/testdata/clock-deployment/finite"), source)
 			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
-			writeReleaseFile(t, filepath.Join(root, "home", ".config", "swarm", "swarm.yaml"),
+			selectedConfig, err := os.ReadFile(config)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeReleaseFile(t, config, string(selectedConfig)+
 				fmt.Sprintf("serve:\n  api_token_file: %q\nconnection:\n  api_token_file: %q\n",
 					filepath.Join(root, "api-token"), filepath.Join(root, "api-token")))
 			writeReleaseFile(t, filepath.Join(root, "payload.json"), "{}\n")
