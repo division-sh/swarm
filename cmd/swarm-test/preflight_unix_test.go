@@ -45,7 +45,16 @@ func TestPreflightCurrentSourceUsesAllFiniteOwners(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	plan, err := loadPreflightPlan(context.Background(), strings.Repeat("a", 40), strings.Repeat("b", 40))
+	t.Setenv("GITHUB_EVENT_PATH", "")
+	head, err := exec.Command("git", "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, err := exec.Command("git", "rev-parse", "origin/master").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := loadPreflightPlan(context.Background(), strings.TrimSpace(string(head)), strings.TrimSpace(string(base)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,8 +145,21 @@ func validatePreflightStructuralCompleteness(plan testplanning.PreflightPlan, st
 			count++
 		}
 	}
-	if count != 31+11+len(structural) {
-		return fmt.Errorf("finite native-owner projection changed: %d roots, want %d", count, 31+11+len(structural))
+	want := 31 + 11 + len(structural)
+	debtRequired := plan.Comparison != nil && plan.Comparison.DebtRequired
+	for _, name := range []string{"TestPersistenceAuthorityDebtRatchet", "TestNativeFixtureFamiliesDoNotReceiveRawAuthority"} {
+		root := testplanning.TestRoot{Package: "github.com/division-sh/swarm/internal/store", Name: name}
+		expected := 0
+		if debtRequired {
+			expected = 1
+			want++
+		}
+		if selected[root] != expected {
+			return fmt.Errorf("conditional debt root %s has %d selected owners, want %d", name, selected[root], expected)
+		}
+	}
+	if count != want {
+		return fmt.Errorf("finite native-owner projection changed: %d roots, want %d", count, want)
 	}
 	for _, root := range structural {
 		if selected[root] != 1 {
@@ -191,7 +213,7 @@ func TestPreflightFiniteCandidatesPreserveUnselectedNativePackageGrowth(t *testi
 	if err := testplanning.BindExecution(&native, inventory, proofs, policy); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := testplanning.BuildPreflightPlan(repo, strings.Repeat("b", 40), inventory, native)
+	plan, err := testplanning.BuildPreflightPlan(repo, strings.Repeat("b", 40), inventory, native, testplanning.PreflightComparison{OriginMasterSHA: strings.Repeat("b", 40), DiffSHA256: strings.Repeat("c", 64)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,6 +225,33 @@ func TestPreflightFiniteCandidatesPreserveUnselectedNativePackageGrowth(t *testi
 		t.Fatal(err)
 	}
 	if err := validatePreflightStructuralCompleteness(plan, structural); err != nil {
+		t.Fatal(err)
+	}
+	debtPlan, err := testplanning.BuildPreflightPlan(repo, strings.Repeat("b", 40), inventory, native, testplanning.PreflightComparison{OriginMasterSHA: strings.Repeat("b", 40), DiffSHA256: strings.Repeat("d", 64), DebtRequired: true})
+	if err != nil || debtPlan.Digest == plan.Digest {
+		t.Fatalf("same-head debt plan did not bind its exact selection: %v", err)
+	}
+	for _, name := range []string{"TestPersistenceAuthorityDebtRatchet", "TestNativeFixtureFamiliesDoNotReceiveRawAuthority"} {
+		var canonical, selected []testplanning.RequiredTest
+		for _, unit := range native.Units {
+			for _, root := range unit.RequiredTests {
+				if root.Name == name && root.Package == "github.com/division-sh/swarm/internal/store" {
+					canonical = append(canonical, root)
+				}
+			}
+		}
+		for _, pkg := range debtPlan.Packages {
+			for _, root := range pkg.Required {
+				if root.Name == name {
+					selected = append(selected, root)
+				}
+			}
+		}
+		if len(canonical) != 1 || !reflect.DeepEqual(canonical, selected) {
+			t.Fatalf("debt root/child obligations differ: %s canonical=%+v selected=%+v", name, canonical, selected)
+		}
+	}
+	if err := validatePreflightSchedule(debtPlan, preflightPhases(debtPlan)); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range extras {
