@@ -747,8 +747,12 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 							t.Fatal(err)
 						}
 					}
-					if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`, result.ForkRunID).Scan(&intentCount); err != nil {
-						t.Fatal(err)
+					{
+						var err error
+						intentCount, err = storetest.CountRunFanOutIntentStorage(f.ctx, f.selected, result.ForkRunID)
+						if err != nil {
+							t.Fatal(err)
+						}
 					}
 					if childCount != 1 || intentCount != 1 {
 						t.Fatalf("lost-response retry duplicated child/feed: children=%d intents=%d", childCount, intentCount)
@@ -765,8 +769,12 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					if len(rpcErr) == 0 {
 						t.Fatal("same keyed fork with changed pin was accepted")
 					}
-					if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`, result.ForkRunID).Scan(&intentCount); err != nil {
-						t.Fatal(err)
+					{
+						var err error
+						intentCount, err = storetest.CountRunFanOutIntentStorage(f.ctx, f.selected, result.ForkRunID)
+						if err != nil {
+							t.Fatal(err)
+						}
 					}
 					if intentCount != 1 {
 						t.Fatalf("hash conflict mutated feed count=%d", intentCount)
@@ -775,8 +783,8 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 						t.Fatalf("keyed replay changed durable activated operation: before=%+v after=%+v", operationBefore, after)
 					}
 
-					var generationsBefore int
-					if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, result.ForkRunID).Scan(&generationsBefore); err != nil {
+					generationsBefore, err := storetest.CountSelectedRuntimeExecutionStorage(f.ctx, f.selected, result.ForkRunID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					if generationsBefore != 1 {
@@ -809,8 +817,8 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					if after := selectedDeploymentForkOperationSnapshot(t, f, result.ForkRunID); after != operationBefore {
 						t.Fatalf("restart replay changed durable activated operation: before=%+v after=%+v", operationBefore, after)
 					}
-					var generationsAfter int
-					if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, result.ForkRunID).Scan(&generationsAfter); err != nil {
+					generationsAfter, err := storetest.CountSelectedRuntimeExecutionStorage(f.ctx, f.selected, result.ForkRunID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					if generationsAfter != generationsBefore {
@@ -841,8 +849,8 @@ func TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation(t *te
 			}
 			sourceRunID := start("source", "source")
 			changedRunID := start("changed", "changed")
-			var changedVersion string
-			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, changedRunID).Scan(&changedVersion); err != nil {
+			changedVersion, err := storetest.ReadRootReadyResourcePinStorage(f.ctx, f.selected, changedRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			owner, _ := deploymentForkOwner(t, f)
@@ -868,14 +876,18 @@ func TestDeploymentSourceDynamicReceiverSelectedForkRefusesWithoutMutation(t *te
 					t.Fatal(err)
 				}
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE source_run_id=$1`, sourceRunID).Scan(&selectedExecutions); err != nil {
-				t.Fatal(err)
+			{
+				var err error
+				selectedExecutions, err = storetest.CountSelectedSourceRuntimeExecutionsStorage(f.ctx, f.selected, sourceRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
 			if children != 0 || selectedExecutions != 0 {
 				t.Fatalf("unsupported dynamic receiver fork mutated domain: children=%d selected_executions=%d", children, selectedExecutions)
 			}
-			var sourceCursor int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT cursor FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, sourceRunID).Scan(&sourceCursor); err != nil {
+			sourceCursor, err := storetest.ReadDeploymentIntentCursorStorage(f.ctx, f.selected, sourceRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if sourceCursor != 0 {

@@ -74,6 +74,10 @@ func ReadDeploymentIntentVersionStorageForTest(ctx context.Context, selected any
 	return readDeploymentStorageForTest(ctx, selected, runID, pipelinepersistence.ReadDeploymentIntentVersionStorageTx)
 }
 
+func ReadDeploymentIntentCursorStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
+	return readDeploymentStorageForTest(ctx, selected, runID, pipelinepersistence.ReadDeploymentIntentCursorStorageTx)
+}
+
 func ReadDeploymentIntentProgressStorageForTest(ctx context.Context, selected any, runID string) (DeploymentIntentProgressStorage, error) {
 	return readDeploymentStorageForTest(ctx, selected, runID, pipelinepersistence.ReadDeploymentIntentProgressStorageTx)
 }

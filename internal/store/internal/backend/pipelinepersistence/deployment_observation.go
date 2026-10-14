@@ -41,6 +41,12 @@ func ReadDeploymentIntentVersionStorageTx(ctx context.Context, tx *sql.Tx, runID
 	return version, err
 }
 
+func ReadDeploymentIntentCursorStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var cursor int
+	err := tx.QueryRowContext(ctx, `SELECT cursor FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, runID).Scan(&cursor)
+	return cursor, err
+}
+
 func ReadDeploymentIntentProgressStorageTx(ctx context.Context, tx *sql.Tx, runID string) (DeploymentIntentProgressStorage, error) {
 	var out DeploymentIntentProgressStorage
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(cursor),0) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&out.Intents, &out.Cursor)

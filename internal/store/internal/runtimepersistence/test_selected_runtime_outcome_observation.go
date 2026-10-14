@@ -197,6 +197,10 @@ func CountSelectedRuntimeExecutionStorageForTest(ctx context.Context, selected a
 	return out, nil
 }
 
+func CountSelectedSourceRuntimeExecutionsStorageForTest(ctx context.Context, selected any, sourceRunID string) (int, error) {
+	return readDeploymentStorageForTest(ctx, selected, sourceRunID, runforkpersistence.CountSelectedSourceRuntimeExecutionsStorageTx)
+}
+
 func CountRunFlowInstanceStorageForTest(ctx context.Context, selected any, runID string) (int, error) {
 	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
 		return 0, err

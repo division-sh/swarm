@@ -50,6 +50,10 @@ func CountSelectedRuntimeExecutionStorage(ctx context.Context, selected any, for
 	return private.CountSelectedRuntimeExecutionStorageForTest(ctx, selected, forkRunID)
 }
 
+func CountSelectedSourceRuntimeExecutionsStorage(ctx context.Context, selected any, sourceRunID string) (int, error) {
+	return private.CountSelectedSourceRuntimeExecutionsStorageForTest(ctx, selected, sourceRunID)
+}
+
 func ReadSelectedRuntimeExecutionStateStorage(ctx context.Context, selected any, forkRunID string) (string, error) {
 	return private.ReadSelectedRuntimeExecutionStateStorageForTest(ctx, selected, forkRunID)
 }

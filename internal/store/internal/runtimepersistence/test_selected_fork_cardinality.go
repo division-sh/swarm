@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 )
 
 // Fixed physical witnesses retain the predecessor/fork/global scopes of the
@@ -86,7 +87,6 @@ func ReadSelectedForkDescendantCardinalityForTest(ctx context.Context, selected 
 		"route recoveries":   `SELECT COUNT(*) FROM run_fork_selected_contract_route_recoveries WHERE source_run_id=$1`,
 		"branch divergences": `SELECT COUNT(*) FROM run_fork_selected_contract_branch_divergences WHERE source_run_id=$1`,
 		"execution lineage":  `SELECT COUNT(*) FROM run_fork_selected_contract_executions WHERE source_run_id=$1`,
-		"runtime executions": `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE source_run_id=$1`,
 		"events":             `SELECT COUNT(*) FROM events WHERE run_id IN (SELECT run_id FROM runs WHERE forked_from_run_id=$1)`,
 		"timers":             `SELECT COUNT(*) FROM timers WHERE forked_from_run_id=$1`,
 	}
@@ -99,6 +99,11 @@ func ReadSelectedForkDescendantCardinalityForTest(ctx context.Context, selected 
 			}
 			result[name] = count
 		}
+		runtimeExecutions, err := runforkpersistence.CountSelectedSourceRuntimeExecutionsStorageTx(ctx, tx, sourceRunID)
+		if err != nil {
+			return err
+		}
+		result["runtime executions"] = runtimeExecutions
 		count, err := delivery.CountSelectedForkDescendantDeliveryStorageTx(ctx, tx, sourceRunID)
 		result["deliveries"] = count
 		return err

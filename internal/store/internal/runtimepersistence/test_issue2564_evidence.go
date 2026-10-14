@@ -230,7 +230,11 @@ func RetirePlannedReadinessForTest(ctx context.Context, selected any, plan pipel
 	}
 }
 
-type SelectedPoolEvidence struct{ InUse, Idle, OpenConnections, MaxOpenConnections int }
+type SelectedPoolEvidence struct {
+	InUse, Idle, OpenConnections, MaxOpenConnections int
+	WaitCount                                        int64
+	WaitDuration                                     time.Duration
+}
 
 // ObserveSelectedPoolForTest observes only the original construction's pool.
 // Neither the handle nor connection admission escapes this owner.
@@ -239,13 +243,21 @@ func ObserveSelectedPoolForTest(selected any) (SelectedPoolEvidence, error) {
 	case *PostgresStore:
 		if owner != nil && owner.backend != nil {
 			stats := owner.backend.ConstructionHandle().Stats()
-			return SelectedPoolEvidence{stats.InUse, stats.Idle, stats.OpenConnections, stats.MaxOpenConnections}, nil
+			return selectedPoolEvidence(stats), nil
 		}
 	case *SQLiteRuntimeStore:
 		if owner != nil && owner.backend != nil {
 			stats := owner.backend.ConstructionHandle().Stats()
-			return SelectedPoolEvidence{stats.InUse, stats.Idle, stats.OpenConnections, stats.MaxOpenConnections}, nil
+			return selectedPoolEvidence(stats), nil
 		}
 	}
 	return SelectedPoolEvidence{}, fmt.Errorf("pool evidence requires original selected construction, got %T", selected)
+}
+
+func selectedPoolEvidence(stats sql.DBStats) SelectedPoolEvidence {
+	return SelectedPoolEvidence{
+		InUse: stats.InUse, Idle: stats.Idle, OpenConnections: stats.OpenConnections,
+		MaxOpenConnections: stats.MaxOpenConnections,
+		WaitCount:          stats.WaitCount, WaitDuration: stats.WaitDuration,
+	}
 }

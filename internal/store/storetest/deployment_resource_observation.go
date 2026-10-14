@@ -50,6 +50,10 @@ func ReadDeploymentIntentVersionStorage(ctx context.Context, selected any, runID
 	return private.ReadDeploymentIntentVersionStorageForTest(ctx, selected, runID)
 }
 
+func ReadDeploymentIntentCursorStorage(ctx context.Context, selected any, runID string) (int, error) {
+	return private.ReadDeploymentIntentCursorStorageForTest(ctx, selected, runID)
+}
+
 func ReadDeploymentIntentProgressStorage(ctx context.Context, selected any, runID string) (DeploymentIntentProgressStorage, error) {
 	return private.ReadDeploymentIntentProgressStorageForTest(ctx, selected, runID)
 }
