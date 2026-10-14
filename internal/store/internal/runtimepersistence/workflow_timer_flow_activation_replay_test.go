@@ -26,6 +26,7 @@ func TestWorkflowTimerCauseReplayFlowActivationGateBothStores(t *testing.T) {
 			t.Run(backend+"/"+state, func(t *testing.T) {
 				recurring := state == "advanced" || state == "advanced_cancelled"
 				f := newReceiverConfigActivationFixtureWithTimer(t, backend, false, false, true, recurring)
+				f.constructKeylessRoot(t)
 				req := f.request("timer-business-key", "ti-timer-replay", "committed")
 				req.OccurredAt = time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Microsecond)
 				plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)
