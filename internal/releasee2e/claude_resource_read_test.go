@@ -42,7 +42,8 @@ func TestClaudeResourceReadSupportedServeRestart(t *testing.T) {
 				store = goldenPostgresStore(t, dsn)
 			}
 			configPath := filepath.Join(root, ".swarm/swarm.yaml")
-			writeReleaseFile(t, configPath, "runtime:\n  recovery_on_startup: true\nworkspace:\n  backend: docker\n"+store.configYAML)
+			writeReleaseFile(t, configPath, "runtime:\n  recovery_on_startup: true\nworkspace:\n  backend: docker\n"+store.configYAML+
+				fmt.Sprintf("connection:\n  api_token_file: %q\n", filepath.Join(root, "api-token")))
 			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
 			home, fakeRoot, fakeBin := filepath.Join(root, "home"), filepath.Join(root, "docker-state"), filepath.Join(root, "bin")
 			for _, dir := range []string{fakeRoot, fakeBin} {
@@ -59,7 +60,6 @@ func TestClaudeResourceReadSupportedServeRestart(t *testing.T) {
 			if store.passwordEnv != "" {
 				env = append(env, goldenPostgresPass+"="+store.passwordEnv)
 			}
-			writeReleaseFile(t, filepath.Join(home, ".config/swarm/swarm.yaml"), "connection:\n  api_token_file: "+filepath.Join(root, "api-token")+"\n")
 			for _, args := range [][]string{{"verify", contracts, "--config", configPath, "--portable"}, {"secrets", "set", "CLAUDE_CODE_OAUTH_TOKEN", "--stdin", "--config", configPath}} {
 				result := runReleaseCommand(t, goldenStartupTimeout, root, env, releaseE2EOAuthToken+"\n", binary, args...)
 				if result.err != nil {
