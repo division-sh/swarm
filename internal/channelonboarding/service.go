@@ -874,13 +874,8 @@ func (s *Service) recoverOperation(ctx context.Context, id string, restoreOnly b
 		return err
 	}
 	op = rebound
-	if err := s.resumeSession(ctx, op, candidate); err != nil {
-		if !errors.Is(err, ErrSessionPending) {
-			return fmt.Errorf("restore channel onboarding %s: %w", op.OperationID, err)
-		}
-		if err := s.sessions.AwaitSessionBootstrap(ctx, op); err != nil {
-			return fmt.Errorf("await restored channel onboarding %s: %w", op.OperationID, err)
-		}
+	if err := s.restoreSessionProgress(ctx, op, candidate); err != nil {
+		return err
 	}
 	if restoreOnly || recoveryNeedsFreshTargetAdmission(op, candidate) {
 		// Restoring paired control work does not admit a replacement target or
