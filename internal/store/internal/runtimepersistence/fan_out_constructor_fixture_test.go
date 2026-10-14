@@ -9,14 +9,16 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func newFanOutConstructorFixture(t *testing.T, backend string) receiverConfigActivationFixture {
 	t.Helper()
-	files := map[string]string{"schema.yaml": "name: fan-out-store-fixture\n"}
+	files := map[string]string{"schema.yaml": "name: fan-out-store-fixture\nstages:\n  work: {}\n"}
 	for _, flow := range []string{"completion_one", "completion_two"} {
 		files[flow+"/schema.yaml"] = "name: " + flow + "\nstages:\n  pending: {}\n"
 		files[flow+"/events.yaml"] = "items.child:\n  ordinal: integer\n"
@@ -130,4 +132,24 @@ func constructFanOutCompletionReceiver(t *testing.T, ctx context.Context, f rece
 		t.Fatal(err)
 	}
 	return route, state
+}
+
+func seedConstructedFanOutBarrierLoopForTest(t *testing.T, ctx context.Context, f receiverConfigActivationFixture, fixture fanOutOwnerFixture, at time.Time) (timeridentity.TimerHandle, string, loopruntime.Activation) {
+	t.Helper()
+	rootIdentity := flowidentity.Stored(semanticview.Wrap(f.bundle), ".", fixture.runID, fixture.runID, fixture.runID, "")
+	owner, err := flowidentity.NewRunScopedFlowInstance(fixture.runID, rootIdentity.Route())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, found, err := f.workflows.Load(ctx, owner)
+	if err != nil || !found || root.EntityID != rootIdentity.EntityID || root.CurrentState != "work" || !root.StageDefined {
+		t.Fatalf("constructed barrier loop owner: instance=%+v found=%t err=%v", root, found, err)
+	}
+	activation, err := loopruntime.New(fixture.runID, root.EntityID, ".", "retry", "revision_id", fixture.eventID, "work", 3, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle := seedFanOutDeliveryBarrierRecord(t, ctx, f.db, fixture, root.EntityID, activation.Generation(), at, owner.Route)
+	updateFanOutBarrierLoopState(t, ctx, f.db, fixture.runID, root.EntityID, activation, at)
+	return handle, root.EntityID, activation
 }
