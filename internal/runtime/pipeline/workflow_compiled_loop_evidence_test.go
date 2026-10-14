@@ -48,16 +48,14 @@ reviewer:
     loop.rule:
       loop: {admit: revision, from: drafting}
       rules:
-        review:
-          else: true
+        - else: true
           advances_to: review
 collector:
   event_handlers:
     loop.complete:
       loop: {admit: revision, from: drafting}
       on_complete:
-        - id: review
-          advances_to: review
+        - advances_to: review
 repeater:
   event_handlers:
     loop.repeat:
