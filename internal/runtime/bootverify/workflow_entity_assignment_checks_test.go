@@ -38,7 +38,7 @@ func TestEntityProgressivePresenceSourceLoadedFullVerify(t *testing.T) {
 						contents = strings.ReplaceAll(contents, "_entity.current_state", "_entity.stage")
 					case "naive optional without decision", "naive optional fallback":
 						contents = strings.Replace(contents, "          - business_brief\n", "", 1)
-						contents = strings.Replace(contents, "    work.assessed:\n", "    work.assessed:\n      rules:\n        - when: payload.business_brief != ''\n          data_accumulation:\n            writes: [business_brief]\n          advances_to: consume\n          emit: {event: work.consume}\n        - else: true\n          advances_to: consume\n          emit: {event: work.consume}\n", 1)
+						contents = strings.Replace(contents, "    work.assessed:\n", "    work.assessed:\n      rules:\n        - when: payload.business_brief != ''\n          data_accumulation:\n            writes: [business_brief]\n          advances_to: consume\n          emit: {event: work.consume}\n        - advances_to: consume\n          emit: {event: work.consume}\n", 1)
 						contents = strings.Replace(contents, "      advances_to: consume\n      emit:\n        event: work.consume\n", "", 1)
 						if variant == "naive optional fallback" {
 							contents = strings.ReplaceAll(contents, "entity.business_brief", "entity.?business_brief.orValue('fallback')")
@@ -277,8 +277,7 @@ work.result:
           data_accumulation:
             writes: [score]
           advances_to: consume
-        - else: true
-          advances_to: consume`
+        - advances_to: consume`
 				if variant == "on_complete outcomes" {
 					replacement = `      on_complete:
         - condition: payload.score >= 0
