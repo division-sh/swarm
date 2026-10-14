@@ -806,6 +806,7 @@ seam_families:
       - internal/runtime/bus/semantic_source_injection_test.go
       - internal/runtime/bus/delivery_planner.go
       - internal/runtime/bus/eventbus_publish.go
+      - internal/runtime/bus/publication_instance_planning.go
       - internal/runtime/bus/eventbus_target_routes_test.go
       - internal/runtime/bus/route_template_admission_test.go
       - internal/runtime/bus/routing_derivation_operation_test.go
@@ -833,7 +834,10 @@ seam_families:
       recipients come from admitted EventBus recipient actuals, not a second
       local connect evaluation. EventBus lowered-connect planning and template
       lifecycle do not use either API as connect authority; they consume the
-      compiled typed recipient evaluator instead.
+      compiled typed recipient evaluator instead. Ordinary per-pass instance
+      planning rebinds that same compiled resolver to a finite canonical index
+      reader; it cannot add routing permission, borrow group authority, or retain
+      the reader across preview, final preparation, or committed dispatch.
   - id: compiled_connect_recipient_evaluation
     layer: route_plan_authority
     classification: canonical_owner
