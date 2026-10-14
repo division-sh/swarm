@@ -411,7 +411,7 @@ func CopyLifecycleEmitterRuleActivityOutcomes(t testing.TB, nested bool) string 
 	end += start
 	activity := strings.TrimSuffix(nodes[start:end], "\n")
 	activity = "    " + strings.ReplaceAll(activity, "\n", "\n    ") + "\n"
-	nodes = nodes[:start] + "      rules:\n        send_rule:\n          else: true\n" + activity + nodes[end:]
+	nodes = nodes[:start] + "      rules:\n        - else: true\n" + activity + nodes[end:]
 	writeClosedVariantFile(t, root, prefix+"nodes.yaml", nodes)
 	return root
 }
