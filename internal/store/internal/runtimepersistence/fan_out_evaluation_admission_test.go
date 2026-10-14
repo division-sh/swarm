@@ -41,7 +41,8 @@ func TestFanOutEvaluationSingleAdmissionRealConsumersBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			old := collector.Snapshot()
-			if old.Total.ReadCommits != 2 || old.Total.WriteCommits != 0 || old.Total.DelayedCommits != 2 || old.Total.InjectedDelay != 600*time.Millisecond || old.Active != 0 {
+			oldAdmission := old.ByOperation[transactiontest.FanOutLoad]
+			if oldAdmission.ReadCommits != 2 || old.Total.WriteCommits != 0 || oldAdmission.DelayedCommits != 2 || oldAdmission.InjectedDelay != 600*time.Millisecond || oldAdmission.Failed != 0 {
 				t.Fatalf("original adjacent boundaries did not commit two reads: %+v", old)
 			}
 			input, group, err := f.owner.BeginFanOutEvaluation(f.ctx, f.claim, func(input pipeline.FanOutEvaluationInput) error {
@@ -55,11 +56,20 @@ func TestFanOutEvaluationSingleAdmissionRealConsumersBothStores(t *testing.T) {
 			}
 			f.group = group
 			current := collector.Snapshot()
-			if current.Total.ReadCommits != old.Total.ReadCommits+1 || current.Total.WriteCommits != 0 || current.Total.DelayedCommits != old.Total.DelayedCommits+1 || current.Total.InjectedDelay != old.Total.InjectedDelay+300*time.Millisecond || current.Total.Failed != 0 || current.Active != 0 {
+			currentAdmission := current.ByOperation[transactiontest.FanOutLoad]
+			if currentAdmission.ReadCommits != oldAdmission.ReadCommits+1 || current.Total.WriteCommits != 0 || currentAdmission.DelayedCommits != oldAdmission.DelayedCommits+1 || currentAdmission.InjectedDelay != oldAdmission.InjectedDelay+300*time.Millisecond || currentAdmission.Failed != 0 {
 				t.Fatalf("composition did not remove exactly one delayed read: before=%+v after=%+v", old, current)
+			}
+			for class, active := range current.ActiveByClass {
+				if class.Operation == transactiontest.FanOutLoad && active != 0 {
+					t.Fatalf("returned admission retained its transaction: %+v", current)
+				}
 			}
 			if err := collector.StopAndJoin(f.ctx); err != nil {
 				t.Fatal(err)
+			}
+			if joined := collector.Snapshot(); joined.Active != 0 || joined.Total.CommitFailures != 0 || joined.Total.CleanupFailures != 0 || joined.Total.Failed != 0 {
+				t.Fatalf("independent background reads did not join cleanly: %+v", joined)
 			}
 			f.unchanged(t, before)
 			f.prepare(t)
