@@ -6,143 +6,123 @@ import (
 	"strings"
 )
 
-type unifiedConfigExampleTier string
-
-const (
-	unifiedConfigExampleTierProjectSafe          unifiedConfigExampleTier = "project_safe"
-	unifiedConfigExampleTierProjectContainedPath unifiedConfigExampleTier = "project_contained_path"
-	unifiedConfigExampleTierFullTrust            unifiedConfigExampleTier = "full_trust"
-	unifiedConfigExampleTierElevated             unifiedConfigExampleTier = "elevated"
-	unifiedConfigExampleTierSecretReference      unifiedConfigExampleTier = "secret_reference"
-)
-
 type unifiedConfigExampleEntry struct {
 	Path               string
 	Value              string
 	Description        string
-	Tier               unifiedConfigExampleTier
 	ValidateInSample   bool
 	RequiresRuleLookup bool
 }
 
 func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
-	e := func(path, value, description string, tier unifiedConfigExampleTier) unifiedConfigExampleEntry {
-		return unifiedConfigExampleEntry{Path: path, Value: value, Description: description, Tier: tier, ValidateInSample: true, RequiresRuleLookup: true}
+	e := func(path, value, description string) unifiedConfigExampleEntry {
+		return unifiedConfigExampleEntry{Path: path, Value: value, Description: description, ValidateInSample: true, RequiresRuleLookup: true}
 	}
-	dynamic := func(path, value, description string, tier unifiedConfigExampleTier) unifiedConfigExampleEntry {
-		return unifiedConfigExampleEntry{Path: path, Value: value, Description: description, Tier: tier, ValidateInSample: true, RequiresRuleLookup: true}
-	}
-	skippedValidation := func(path, value, description string, tier unifiedConfigExampleTier) unifiedConfigExampleEntry {
-		entry := e(path, value, description, tier)
+	skippedValidation := func(path, value, description string) unifiedConfigExampleEntry {
+		entry := e(path, value, description)
 		entry.ValidateInSample = false
 		return entry
 	}
 	return []unifiedConfigExampleEntry{
-		e("runtime.recovery_on_startup", "true", "Recover retained runtime state on startup; explicit false disables replay.", unifiedConfigExampleTierProjectSafe),
-		e("runtime.fan_out_workers", "1", "Optional process-wide fan-out workers; defaults PostgreSQL 4 / SQLite 1. SQLite requires 1; PostgreSQL requires pool headroom.", unifiedConfigExampleTierProjectSafe),
-		e("runtime.decision_card_first_reminder", "4h", "Delay before the first pending decision-card reminder.", unifiedConfigExampleTierProjectSafe),
-		e("runtime.decision_card_urgency", "24h", "Delay before a pending decision card becomes urgent.", unifiedConfigExampleTierProjectSafe),
-		e("runtime.decision_card_reminder_interval", "24h", "Cadence for later pending decision-card reminders.", unifiedConfigExampleTierProjectSafe),
-		e("runtime.decision_card_input_draft_ttl", "15m", "Lifetime of an incomplete actor-scoped decision input draft.", unifiedConfigExampleTierProjectSafe),
-		e("serve.api_listen_addr", `"127.0.0.1:8081"`, "Loopback API listener. Public or wildcard binds require local/operator config or a flag.", unifiedConfigExampleTierProjectSafe),
-		e("serve.mcp_listen_addr", `"127.0.0.1:8082"`, "Loopback MCP listener. Public or wildcard binds require local/operator config or a flag.", unifiedConfigExampleTierProjectSafe),
-		e("workspace.backend", "docker", "Workspace backend preference; actual isolation still follows capability policy.", unifiedConfigExampleTierProjectSafe),
-		e("llm.backend", "anthropic", "Active LLM backend profile.", unifiedConfigExampleTierProjectSafe),
-		dynamic("llm.models.regular.anthropic", "claude-sonnet-4-5", "Anthropic model to use for the regular alias.", unifiedConfigExampleTierProjectSafe),
-		e("llm.session.lock_ttl", "10s", "How long a session lock can be held before it expires.", unifiedConfigExampleTierProjectSafe),
-		e("llm.session.rotate_after_turns", "40", "Rotate an LLM session after this many turns.", unifiedConfigExampleTierProjectSafe),
-		e("llm.session.rotate_on_parse_failures", "3", "Rotate an LLM session after repeated parse failures.", unifiedConfigExampleTierProjectSafe),
-		dynamic("llm.provider_limits.anthropic.rate_limit", "30/m", "Provider-wide request rate limit.", unifiedConfigExampleTierProjectSafe),
-		dynamic("llm.provider_limits.anthropic.rate_limit_max_wait", "30s", "Maximum wait for provider-wide rate limiting.", unifiedConfigExampleTierProjectSafe),
-		dynamic("llm.provider_limits.anthropic.max_concurrency", "2", "Provider-wide concurrency limit.", unifiedConfigExampleTierProjectSafe),
-		dynamic("llm.provider_limits.anthropic.max_concurrency_max_wait", "30s", "Maximum wait for provider-wide concurrency limiting.", unifiedConfigExampleTierProjectSafe),
-		dynamic("llm.provider_limits.anthropic.models.claude-sonnet-4-5.rate_limit", "10/m", "Model-specific request rate limit.", unifiedConfigExampleTierProjectSafe),
-		dynamic("llm.provider_limits.anthropic.models.claude-sonnet-4-5.rate_limit_max_wait", "30s", "Maximum wait for model-specific rate limiting.", unifiedConfigExampleTierProjectSafe),
-		e("llm.claude_cli.timeout", "1h", "Claude CLI request timeout.", unifiedConfigExampleTierProjectSafe),
-		e("llm.claude_cli.output_format", "stream-json", "Claude CLI output format.", unifiedConfigExampleTierProjectSafe),
-		e("budget.global_monthly_cap", "0", "Global monthly budget cap; zero leaves enforcement disabled.", unifiedConfigExampleTierProjectSafe),
-		e("budget.per_entity_monthly_cap", "0", "Per-entity monthly budget cap; zero leaves enforcement disabled.", unifiedConfigExampleTierProjectSafe),
-		e("budget.system_monthly_cap", "0", "System actor monthly budget cap; zero leaves enforcement disabled.", unifiedConfigExampleTierProjectSafe),
-		e("budget.human_tasks.max_tasks_per_week", "0", "Human task weekly cap; zero leaves enforcement disabled.", unifiedConfigExampleTierProjectSafe),
-		e("budget.human_tasks.budget_reset", "monday", "Weekly human-task budget reset day.", unifiedConfigExampleTierProjectSafe),
-		e("budget.human_tasks.auto_expire_hours", "168", "Human task auto-expiration window in hours.", unifiedConfigExampleTierProjectSafe),
-		e("budget.human_tasks.categories_enabled", `["ops"]`, "Human task categories covered by the budget.", unifiedConfigExampleTierProjectSafe),
+		e("runtime.recovery_on_startup", "true", "Recover retained runtime state on startup; explicit false disables replay."),
+		e("runtime.fan_out_workers", "1", "Optional process-wide fan-out workers; defaults PostgreSQL 4 / SQLite 1. SQLite requires 1; PostgreSQL requires pool headroom."),
+		e("runtime.decision_card_first_reminder", "4h", "Delay before the first pending decision-card reminder."),
+		e("runtime.decision_card_urgency", "24h", "Delay before a pending decision card becomes urgent."),
+		e("runtime.decision_card_reminder_interval", "24h", "Cadence for later pending decision-card reminders."),
+		e("runtime.decision_card_input_draft_ttl", "15m", "Lifetime of an incomplete actor-scoped decision input draft."),
+		e("serve.api_listen_addr", `"127.0.0.1:8081"`, "API listener address; defaults to loopback."),
+		e("serve.mcp_listen_addr", `"127.0.0.1:8082"`, "MCP listener address; defaults to loopback."),
+		e("workspace.backend", "docker", "Workspace backend preference; actual isolation still follows capability policy."),
+		e("llm.backend", "anthropic", "Active LLM backend profile."),
+		e("llm.models.regular.anthropic", "claude-sonnet-4-5", "Anthropic model to use for the regular alias."),
+		e("llm.session.lock_ttl", "10s", "How long a session lock can be held before it expires."),
+		e("llm.session.rotate_after_turns", "40", "Rotate an LLM session after this many turns."),
+		e("llm.session.rotate_on_parse_failures", "3", "Rotate an LLM session after repeated parse failures."),
+		e("llm.provider_limits.anthropic.rate_limit", "30/m", "Provider-wide request rate limit."),
+		e("llm.provider_limits.anthropic.rate_limit_max_wait", "30s", "Maximum wait for provider-wide rate limiting."),
+		e("llm.provider_limits.anthropic.max_concurrency", "2", "Provider-wide concurrency limit."),
+		e("llm.provider_limits.anthropic.max_concurrency_max_wait", "30s", "Maximum wait for provider-wide concurrency limiting."),
+		e("llm.provider_limits.anthropic.models.claude-sonnet-4-5.rate_limit", "10/m", "Model-specific request rate limit."),
+		e("llm.provider_limits.anthropic.models.claude-sonnet-4-5.rate_limit_max_wait", "30s", "Maximum wait for model-specific rate limiting."),
+		e("llm.claude_cli.timeout", "1h", "Claude CLI request timeout."),
+		e("llm.claude_cli.output_format", "stream-json", "Claude CLI output format."),
+		e("budget.global_monthly_cap", "0", "Global monthly budget cap; zero leaves enforcement disabled."),
+		e("budget.per_entity_monthly_cap", "0", "Per-entity monthly budget cap; zero leaves enforcement disabled."),
+		e("budget.system_monthly_cap", "0", "System actor monthly budget cap; zero leaves enforcement disabled."),
+		e("budget.human_tasks.max_tasks_per_week", "0", "Human task weekly cap; zero leaves enforcement disabled."),
+		e("budget.human_tasks.budget_reset", "monday", "Weekly human-task budget reset day."),
+		e("budget.human_tasks.auto_expire_hours", "168", "Human task auto-expiration window in hours."),
+		e("budget.human_tasks.categories_enabled", `["ops"]`, "Human task categories covered by the budget."),
 
-		e("paths.platform_spec_path", "platform-spec.yaml", "Project-contained platform spec path override.", unifiedConfigExampleTierProjectContainedPath),
-		e("paths.agent_config_map_file", "./agent-config-map.yaml", "Project-contained agent config map file.", unifiedConfigExampleTierProjectContainedPath),
-		e("paths.verification_gates_file", "./verification-gates.yaml", "Project-contained verification gates file.", unifiedConfigExampleTierProjectContainedPath),
-		e("paths.tooling_lock_file", "./tooling.lock", "Project-contained tooling lock file.", unifiedConfigExampleTierProjectContainedPath),
+		e("paths.platform_spec_path", "platform-spec.yaml", "Platform spec path override."),
+		e("paths.agent_config_map_file", "./agent-config-map.yaml", "Agent config map file."),
+		e("paths.verification_gates_file", "./verification-gates.yaml", "Verification gates file."),
+		e("paths.tooling_lock_file", "./tooling.lock", "Tooling lock file."),
 
-		e("connection.api_server", "http://127.0.0.1:8081", "CLI API target. Keep out of shared project config and this-machine config.", unifiedConfigExampleTierFullTrust),
-		e("connection.api_token_file", ".swarm/api-token", "CLI API bearer-token file reference; never inline the token.", unifiedConfigExampleTierFullTrust),
-		e("serve.api_token_file", ".swarm/serve-api-token", "Serve API bearer-token file reference; never inline the token.", unifiedConfigExampleTierFullTrust),
+		e("connection.api_server", "http://127.0.0.1:8081", "CLI API target for this deployment."),
+		e("connection.api_token_file", ".swarm/api-token", "CLI API bearer-token file reference; never inline the token."),
+		e("serve.api_token_file", ".swarm/serve-api-token", "Serve API bearer-token file reference; never inline the token."),
 
-		e("store.backend", "sqlite", "Runtime store backend.", unifiedConfigExampleTierElevated),
-		e("store.sqlite.path", ".swarm/stores/dev.db", "SQLite runtime store path.", unifiedConfigExampleTierElevated),
-		e("database.host", "127.0.0.1", "Postgres host for postgres store deployments.", unifiedConfigExampleTierElevated),
-		e("database.port", "5432", "Postgres port for postgres store deployments.", unifiedConfigExampleTierElevated),
-		e("database.name", "swarm", "Postgres database name.", unifiedConfigExampleTierElevated),
-		e("database.user", "postgres", "Postgres user.", unifiedConfigExampleTierElevated),
-		e("database.sslmode", "disable", "Postgres SSL mode.", unifiedConfigExampleTierElevated),
-		e("database.pool_size", "5", "Postgres connection pool size.", unifiedConfigExampleTierElevated),
-		e("workspace.allow_exec_on_host", "false", "Unsafe host execution opt-in; requires local/operator config or a flag.", unifiedConfigExampleTierElevated),
-		e("workspace.image", "swarm-workspace:latest", "Workspace image for Docker-backed execution.", unifiedConfigExampleTierElevated),
-		e("workspace.docker_bin", "docker", "Docker executable path/name.", unifiedConfigExampleTierElevated),
-		e("workspace.host_root", "~/.swarm/workspaces", "Host workspace root for local/operator use.", unifiedConfigExampleTierElevated),
-		e("workspace.network", "swarm", "Docker network for workspaces.", unifiedConfigExampleTierElevated),
-		e("llm.claude_cli.command", "claude", "Claude CLI executable path/name.", unifiedConfigExampleTierElevated),
-		e("llm.openai_compatible.base_url", "https://api.example.com/v1", "OpenAI-compatible endpoint base URL.", unifiedConfigExampleTierElevated),
-		e("llm.openai_responses.base_url", "https://api.openai.com/v1", "OpenAI Responses endpoint base URL.", unifiedConfigExampleTierElevated),
-		e("platform.packs.platform_dirs", `["/path/to/complete/dev-pack/provider.telegram.trigger", "/path/to/complete/dev-pack/provider.telegram.connector", "/path/to/complete/dev-pack/provider.telegram.channel"]`, "Complete replacement for the embedded platform pack inventory during platform development; machine/operator config only.", unifiedConfigExampleTierElevated),
-		dynamic("channels.bindings.hitl.pack", "provider.telegram.hitl_channel", "Channel pack selected for the HITL outbound binding.", unifiedConfigExampleTierElevated),
-		dynamic("channels.bindings.hitl.destination", `"-1001234567890"`, "Deployment-owned opaque destination for the HITL outbound binding.", unifiedConfigExampleTierElevated),
-		e("paths.swarm_dir", ".swarm", "Swarm state directory.", unifiedConfigExampleTierElevated),
-		e("paths.monitor_dir", ".swarm/monitor", "Runtime monitor artifact directory.", unifiedConfigExampleTierElevated),
+		e("store.backend", "sqlite", "Runtime store backend."),
+		e("store.sqlite.path", ".swarm/stores/dev.db", "SQLite runtime store path."),
+		e("database.host", "127.0.0.1", "Postgres host for postgres store deployments."),
+		e("database.port", "5432", "Postgres port for postgres store deployments."),
+		e("database.name", "swarm", "Postgres database name."),
+		e("database.user", "postgres", "Postgres user."),
+		e("database.sslmode", "disable", "Postgres SSL mode."),
+		e("database.pool_size", "5", "Postgres connection pool size."),
+		e("workspace.allow_exec_on_host", "false", "Unsafe host execution opt-in; disabled by default."),
+		e("workspace.image", "swarm-workspace:latest", "Workspace image for Docker-backed execution."),
+		e("workspace.docker_bin", "docker", "Docker executable path/name."),
+		e("workspace.host_root", "~/.swarm/workspaces", "Host workspace root."),
+		e("workspace.network", "swarm", "Docker network for workspaces."),
+		e("llm.claude_cli.command", "claude", "Claude CLI executable path/name."),
+		e("llm.openai_compatible.base_url", "https://api.example.com/v1", "OpenAI-compatible endpoint base URL."),
+		e("llm.openai_responses.base_url", "https://api.openai.com/v1", "OpenAI Responses endpoint base URL."),
+		e("platform.packs.platform_dirs", `["/path/to/complete/dev-pack/provider.telegram.trigger", "/path/to/complete/dev-pack/provider.telegram.connector", "/path/to/complete/dev-pack/provider.telegram.channel"]`, "Complete replacement for the embedded platform pack inventory during platform development."),
+		e("channels.bindings.hitl.pack", "provider.telegram.hitl_channel", "Channel pack selected for the HITL outbound binding."),
+		e("channels.bindings.hitl.destination", `"-1001234567890"`, "Deployment-owned opaque destination for the HITL outbound binding."),
+		e("paths.swarm_dir", ".swarm", "Swarm state directory."),
+		e("paths.monitor_dir", ".swarm/monitor", "Runtime monitor artifact directory."),
 
-		e("database.password_secret_key", "postgres_password", "Database password key in the Swarm secrets store.", unifiedConfigExampleTierSecretReference),
-		skippedValidation("database.password_file", "/run/secrets/postgres-password", "Database password file for orchestrator-mounted secrets.", unifiedConfigExampleTierSecretReference),
-		skippedValidation("database.password_env", "DB_PASSWORD", "Explicit env delegation for orchestrator-injected database password.", unifiedConfigExampleTierSecretReference),
+		e("database.password_secret_key", "postgres_password", "Database password key in the Swarm secrets store."),
+		skippedValidation("database.password_file", "/run/secrets/postgres-password", "Database password file for orchestrator-mounted secrets."),
+		skippedValidation("database.password_env", "DB_PASSWORD", "Explicit env delegation for orchestrator-injected database password."),
 	}
 }
 
 func generatedUnifiedConfigExample() string {
 	var b strings.Builder
-	b.WriteString("# swarm.yaml - Swarm's config file; copy keys into ./swarm.yaml, .swarm/swarm.yaml, or --config <file>.\n")
-	b.WriteString("# Everything is commented out; uncomment to override a default. Run `swarm doctor --target` to inspect the active source.\n")
+	b.WriteString("# swarm.yaml - Swarm's config file; use .swarm/swarm.yaml or --config <file> (SWARM_CONFIG selects the same file).\n")
+	b.WriteString("# No other config files are read. Uncomment needed keys; omitted keys use defaults. Run `swarm doctor --target`.\n")
 	b.WriteString("# Inline secret values are absent; use secret keys, token files, secret files, or explicit env delegation.\n")
 	b.WriteString("# Contributors: generated file - edit the generator metadata, not this file; see drift test.\n\n")
 
-	tiers := []unifiedConfigExampleTier{
-		unifiedConfigExampleTierProjectSafe,
-		unifiedConfigExampleTierProjectContainedPath,
-		unifiedConfigExampleTierFullTrust,
-		unifiedConfigExampleTierElevated,
-		unifiedConfigExampleTierSecretReference,
-	}
-	for i, tier := range tiers {
-		b.WriteString("# " + unifiedConfigExampleTierTitle(tier) + "\n")
-		b.WriteString("# " + unifiedConfigExampleTierDescription(tier) + "\n")
-		writeCommentedYAMLTree(&b, entriesForUnifiedConfigExampleTier(tier, false))
-		if i < len(tiers)-1 {
-			b.WriteString("\n")
+	var deployment, secrets []unifiedConfigExampleEntry
+	for _, entry := range sortedUnifiedConfigExampleEntries(false) {
+		rule, _ := unifiedConfigRule(strings.Split(entry.Path, "."))
+		if rule.SecretReference {
+			secrets = append(secrets, entry)
+		} else {
+			deployment = append(deployment, entry)
 		}
 	}
-
+	b.WriteString("# Deployment keys\n")
+	writeCommentedYAMLTree(&b, deployment)
+	b.WriteString("\n# Secret references: never store plaintext secrets in config\n")
+	writeCommentedYAMLTree(&b, secrets)
 	return b.String()
 }
 
 func generatedUnifiedConfigValidationSample() string {
 	var b strings.Builder
-	writeActiveYAMLTree(&b, entriesForUnifiedConfigExampleTier("", true))
+	writeActiveYAMLTree(&b, sortedUnifiedConfigExampleEntries(true))
 	return b.String()
 }
 
-func entriesForUnifiedConfigExampleTier(tier unifiedConfigExampleTier, validationSample bool) []unifiedConfigExampleEntry {
+func sortedUnifiedConfigExampleEntries(validationSample bool) []unifiedConfigExampleEntry {
 	var entries []unifiedConfigExampleEntry
 	for _, entry := range unifiedConfigExampleEntries() {
-		if tier != "" && entry.Tier != tier {
-			continue
-		}
 		if validationSample && !entry.ValidateInSample {
 			continue
 		}
@@ -152,40 +132,6 @@ func entriesForUnifiedConfigExampleTier(tier unifiedConfigExampleTier, validatio
 		return entries[i].Path < entries[j].Path
 	})
 	return entries
-}
-
-func unifiedConfigExampleTierTitle(tier unifiedConfigExampleTier) string {
-	switch tier {
-	case unifiedConfigExampleTierProjectSafe:
-		return "Project-safe keys: safe in checked-in ./swarm.yaml"
-	case unifiedConfigExampleTierProjectContainedPath:
-		return "Project-contained paths: relative paths under the project when used in ./swarm.yaml"
-	case unifiedConfigExampleTierFullTrust:
-		return "Connection and auth settings: use user-global config, --config, or flags"
-	case unifiedConfigExampleTierElevated:
-		return "Settings for this machine only: put these in .swarm/swarm.yaml"
-	case unifiedConfigExampleTierSecretReference:
-		return "Secret references: never store plaintext secrets in config"
-	default:
-		return "Config keys"
-	}
-}
-
-func unifiedConfigExampleTierDescription(tier unifiedConfigExampleTier) string {
-	switch tier {
-	case unifiedConfigExampleTierProjectSafe:
-		return "These keys express portable runtime behavior."
-	case unifiedConfigExampleTierProjectContainedPath:
-		return "Project config may use these only as relative paths that stay inside the project root."
-	case unifiedConfigExampleTierFullTrust:
-		return "These keys can redirect clients or name auth material, so keep them in user-global config, an explicit --config file, or invocation flags."
-	case unifiedConfigExampleTierElevated:
-		return "These keys are machine-specific or unsafe if committed to a shared project file."
-	case unifiedConfigExampleTierSecretReference:
-		return "These keys point at secret material; the secret value itself belongs in the secrets store, a token file, a mounted secret file, or an explicitly delegated env var."
-	default:
-		return ""
-	}
 }
 
 type unifiedConfigExampleNode struct {
