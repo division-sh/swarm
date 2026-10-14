@@ -16,7 +16,7 @@ import (
 func TestCITierCheckRecordsSameRunSelectionAndOutcome(t *testing.T) {
 	workflow := loadAdmissionWorkflow(t)
 	job := workflow.Jobs["ci-tier"]
-	if job.Name != "${{ needs.ci-plan.outputs.selection_check }}" || !slices.Equal(job.Needs, []string{"ci-plan", "required-tests"}) {
+	if job.Name != "${{ needs.ci-plan.outputs.selection_check }}" || !slices.Equal(job.Needs, []string{"ci-preflight", "ci-plan", "required-tests"}) {
 		t.Fatalf("tier has another authority or does not await completion: %+v", job)
 	}
 	for _, plan := range []string{"success", "failure", "cancelled", "skipped"} {
