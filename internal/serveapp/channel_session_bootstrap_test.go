@@ -64,6 +64,20 @@ type serveBootstrapTestFixture struct {
 	binding    processbinding.Binding
 }
 
+// Fixtures needing a completed SDK occurrence use the startup wait, while
+// public request-progress proofs call the service directly.
+func awaitServeSessionBootstrapFixture(ctx context.Context, owner *serveSessionBootstrap, op channelonboarding.Operation, candidate channelonboarding.Candidate, resume bool) error {
+	start := owner.BootstrapSession
+	if resume {
+		start = owner.ResumeSession
+	}
+	err := start(ctx, op, candidate)
+	if errors.Is(err, channelonboarding.ErrSessionPending) {
+		return owner.AwaitSessionBootstrap(ctx, op)
+	}
+	return err
+}
+
 func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapTestFixture {
 	t.Helper()
 	var selected serveBootstrapTestStore
@@ -315,7 +329,7 @@ func TestServeSessionBootstrapCanceledAttemptCacheBothStores(t *testing.T) {
 				cancel()
 				return owned, incoming, binding, release, err
 			}
-			if err := f.adapter.BootstrapSession(caller, f.op, f.candidate); !errors.Is(err, context.Canceled) {
+			if err := awaitServeSessionBootstrapFixture(caller, f.adapter, f.op, f.candidate, false); !errors.Is(err, context.Canceled) {
 				t.Fatal("canceled handoff succeeded", err)
 			}
 			if f.adapter.connection(f.op.OperationID) != nil {
@@ -325,7 +339,7 @@ func TestServeSessionBootstrapCanceledAttemptCacheBothStores(t *testing.T) {
 				t.Fatal("canceled construction opened provider files", entries, err)
 			}
 			for index := 0; index < 2; index++ {
-				if err := f.adapter.BootstrapSession(f.ctx, f.op, f.candidate); !errors.Is(err, context.Canceled) {
+				if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false); !errors.Is(err, context.Canceled) {
 					t.Fatal("failed cached attempt became success or a retry", err)
 				}
 			}
@@ -382,7 +396,7 @@ func TestServeSessionBootstrapInstallsIncomingOwnersBothStores(t *testing.T) {
 				}
 				if mode == "installed" {
 					serveBootstrapWireFixture(t, "healthy", f.owner)
-					if err := f.adapter.BootstrapSession(f.ctx, f.op, f.candidate); err != nil {
+					if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false); err != nil {
 						t.Fatal("concrete adapter did not install runtime incoming", err)
 					}
 					connection := f.adapter.connection(f.op.OperationID)
@@ -398,7 +412,7 @@ func TestServeSessionBootstrapInstallsIncomingOwnersBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 				} else {
-					if err := f.adapter.BootstrapSession(f.ctx, f.op, f.candidate); err == nil {
+					if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false); err == nil {
 						t.Fatal("incomplete/foreign incoming owners installed")
 					}
 					if f.adapter.connection(f.op.OperationID) != nil {
@@ -422,7 +436,7 @@ func TestServeSessionBootstrapAttemptOutcomesBothStores(t *testing.T) {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
 				f := newServeBootstrapTestFixture(t, backend)
 				serveBootstrapWireFixture(t, mode, f.owner)
-				first := f.adapter.BootstrapSession(f.ctx, f.op, f.candidate)
+				first := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false)
 				connection := f.adapter.connection(f.op.OperationID)
 				if connection == nil {
 					t.Fatal("actual adapter did not retain its concrete lifetime")
@@ -436,7 +450,7 @@ func TestServeSessionBootstrapAttemptOutcomesBothStores(t *testing.T) {
 						t.Fatal("genuine authenticated bootstrap failed", first)
 					}
 					for index := 0; index < 3; index++ {
-						if err := f.adapter.BootstrapSession(f.ctx, f.op, f.candidate); err != nil || f.selections.Load() != 1 {
+						if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false); err != nil || f.selections.Load() != 1 {
 							t.Fatal("healthy idempotent reuse lost its original attempt", err)
 						}
 					}
@@ -449,7 +463,7 @@ func TestServeSessionBootstrapAttemptOutcomesBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				for index := 0; index < 2; index++ {
-					if err := f.adapter.BootstrapSession(f.ctx, f.op, f.candidate); err == nil {
+					if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false); err == nil {
 						t.Fatal("failed or closed cached pointer reported success")
 					}
 				}
@@ -475,14 +489,14 @@ func TestServeSessionBootstrapPendingAttemptRetainsOwnershipBothStores(t *testin
 			caller, cancel := context.WithCancel(f.ctx)
 			defer cancel()
 			finished := make(chan error, 1)
-			go func() { finished <- f.adapter.BootstrapSession(caller, f.op, f.candidate) }()
+			go func() { finished <- awaitServeSessionBootstrapFixture(caller, f.adapter, f.op, f.candidate, false) }()
 			select {
 			case <-entered:
 			case err := <-finished:
 				t.Fatal("SDK did not reach its pending handshake", err)
 			}
 			cancel()
-			if err := f.adapter.BootstrapSession(caller, f.op, f.candidate); !errors.Is(err, context.Canceled) {
+			if err := awaitServeSessionBootstrapFixture(caller, f.adapter, f.op, f.candidate, false); !errors.Is(err, context.Canceled) {
 				t.Fatal("canceled overlapping waiter became successful bootstrap", err)
 			}
 			if err := f.owner.WaitForQuiescence(caller); !errors.Is(err, context.Canceled) {
@@ -508,7 +522,7 @@ func TestServeSessionBootstrapPendingAttemptRetainsOwnershipBothStores(t *testin
 			case <-time.After(30 * time.Second):
 				t.Fatal("SDK attempt failed to complete its bounded join")
 			}
-			if err := f.adapter.BootstrapSession(f.ctx, f.op, f.candidate); err == nil || f.selections.Load() != 1 {
+			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false); err == nil || f.selections.Load() != 1 {
 				t.Fatal("joined failed attempt silently retried", err)
 			}
 			if err := f.owner.WaitForQuiescence(f.ctx); err != nil {
