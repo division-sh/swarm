@@ -398,7 +398,7 @@ func TestFanOutEvaluatorAndPlannerFailuresConsumeClosedPrecommitOwner(t *testing
 			return true
 		})
 	}
-	if len(arguments) != 4 || arguments["evalErr"] != 1 || arguments["prepareErr"] != 1 || arguments["err"] != 1 || arguments["acquisitionErr"] != 1 {
+	if len(arguments) != 4 || arguments["evalErr"] != 1 || arguments["prepareErr"] != 1 || arguments["groupErr"] != 1 || arguments["acquisitionErr"] != 1 {
 		t.Fatalf("precommit failure callsites = %#v, want exact group admission, claim acquisition, evaluator and planner consumers", arguments)
 	}
 }
