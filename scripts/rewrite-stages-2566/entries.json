@@ -1029,7 +1029,12 @@
       "done"
     ],
     "function": "TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrites",
-    "literal": 4
+    "literal": 4,
+    "current_selector": {
+      "file": "internal/runtime/conformance/persisted_surfaces_test.go",
+      "function": "constructTrackedWorkflowMutationFixture",
+      "literal": 4
+    }
   },
   {
     "file": "internal/runtime/conformance/persisted_surfaces_test.go",
@@ -2442,7 +2447,7 @@
     "current_selector": {
       "file": "internal/runtime/pipeline/workflow_compiled_lifecycle_evidence_test.go",
       "function": "VerifyAcceptedLifecycleConsumerRejectsUnownedTransitionOnBothStoresForTest",
-      "literal": 43
+      "literal": 41
     }
   },
   {
