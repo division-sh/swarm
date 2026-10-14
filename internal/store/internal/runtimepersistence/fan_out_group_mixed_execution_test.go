@@ -286,12 +286,8 @@ func TestFanOutGroupMixedRecoveryQuarantineBothStores(t *testing.T) {
 			if receipts != 0 {
 				t.Fatal("released member fabricated terminal receipt")
 			}
-			deleted, err := f.db.ExecContext(f.ctx, `DELETE FROM committed_replay_scopes WHERE event_id=$1`, last)
-			if err != nil {
+			if err := DeleteCommittedReplayScopeForTest(f.ctx, f.raw, last); err != nil {
 				t.Fatal(err)
-			}
-			if n, err := deleted.RowsAffected(); err != nil || n != 1 {
-				t.Fatalf("exact corruption seam deleted=%d err=%v", n, err)
 			}
 			// Inspect the owner's classification without settling it in the test.
 			work, err := f.store().ClaimEvent(f.ctx, last, pipelineobligation.PurposeRecovery)
