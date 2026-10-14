@@ -51,7 +51,7 @@ The 40 functions are an audit ceiling, not a mandate to move all small support.
 | validateEqualityValue | Presence then exact equality | Both equality validators | V7 missing source/target/mismatch |
 | resolvedStructuralField | Exact peer declaration lookup | validateStructuralFieldEqualities | V7 optional peer; unchanged required equality |
 | FieldNames | Sorted nonempty declaration projection | InitialValues; normalizeAssignedFields; external schemas/query/boot readers | V8 order and V1/V2 omission |
-| DeclaredValues | Detached selected entity projection | workflowentityquery.count; pipeline.workflowEntityStateSnapshotFromStateRow | V8 undeclared filter and nested alias |
+| DeclaredValues | Detached selected entity projection | workflowentityquery.count; pipelineEngineEntityCollectionReader.QueryEntityCollection | V8 undeclared filter and nested alias |
 | FieldDecl | Exact trimmed declaration lookup | ResolveFieldPath; MP.ValidateClearTarget/apply; CO.resolveMapScopedOperationTarget; external schemas/tools | V8 missing declaration; V5 real contained consumer |
 | resolveStructuralType | Canonical type resolver delegation | ResolveFieldPath; NV; CO.resolveTypePath/normalizePartialObjectValue | V4 required/extra record; unchanged unresolved/path roots |
 | fieldTypeError | Existing field-path error wrapping | NV; normalizeJSONFieldValue; VF; validateEqualityValue; CO.normalizePartialObjectValue | V2/V3/V6 exact single-field errors |
