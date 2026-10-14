@@ -4642,8 +4642,8 @@ handler_specification:
           payload maps remain unsupported.
         matching: Rules keep ordered first-match semantics. Threshold-style overlapping rules are valid when ordered from
           most specific to least specific; the platform does not fail closed merely because multiple conditions could be true.
-        required_else: Every rules emit template specialization must include an `else` rule so every successful rules-handler
-          execution has a defined specialization branch.
+        required_default: Every rules emit template specialization must end with an effectful predicate-less default row
+          so every successful rules-handler execution has a defined specialization branch.
         effective_emit: The selected rule's eventless `emit.fields` fill-merge with the handler template. The result is exactly
           one effective emit. Runtime evaluates that merged effective emit's fields, then emits its inherited `emit.event`.
         fill_only: Rule specialization fields are fill-only. A rule field that redefines a handler template field is invalid

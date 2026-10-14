@@ -32,7 +32,7 @@ func TestAuthoredTerminateRequiresAnActualTransition(t *testing.T) {
 				if carrier != "handler" {
 					switch carrier {
 					case "rule":
-						body = "rules:\n  - else: true\n" + indentTerminateFixture(body, "    ")
+						body = "rules:\n  - when: true\n" + indentTerminateFixture(body, "    ")
 					case "on_complete":
 						body = "on_complete:\n  - condition: true\n" + indentTerminateFixture(body, "    ")
 					case "join.on_complete":

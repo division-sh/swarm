@@ -16,8 +16,7 @@ func TestProjectNodePolicySelectionValues(t *testing.T) {
           emit: task.eu
         - range: {value: payload.score, gte: 10, lt: 20}
           emit: task.mid
-        - emit: fallback
-          emit: task.other
+        - emit: task.other
 `))
 	if err != nil {
 		t.Fatal(err)

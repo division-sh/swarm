@@ -25,7 +25,7 @@ func TestRuleDisplayWriteAndPayloadConsumersPreserveExactSites(t *testing.T) {
 		t.Run(tc.context, func(t *testing.T) {
 			rows := []runtimecontracts.HandlerRuleEntry{
 				{Condition: "payload.ready", DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: writes}},
-				{Condition: "else", DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: writes}},
+				{DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: writes}},
 			}
 			handler := runtimecontracts.SystemNodeEventHandler{}
 			if tc.context == "rules" {

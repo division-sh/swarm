@@ -47,6 +47,10 @@ func TestRuleDefaultRejectsUnreachableAndEmptyRows(t *testing.T) {
 		{"empty emit", "rules: [{emit: null}]", "is empty"},
 		{"empty writes", "rules: [{data_accumulation: {writes: []}}]", "is empty"},
 		{"empty advance", "rules: [{advances_to: ''}]", "is empty"},
+		{"blank advance", "rules: [{advances_to: '  '}]", "is empty"},
+		{"empty compute", "rules: [{compute: {}}]", "is empty"},
+		{"compute metadata only", "rules: [{compute: {description: inert}}]", "is empty"},
+		{"activity name only", "rules: [{activity: {id: explicit_but_inert}}]", "is empty"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ruleTestHandler(tc.source)

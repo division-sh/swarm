@@ -74,7 +74,7 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 			for _, choice := range []struct {
 				condition string
 				value     int
-			}{{"payload.choice > 0", 10}, {"else", 20}} {
+			}{{"payload.choice > 0", 10}, {"", 20}} {
 				literal := strconv.Itoa(choice.value)
 				if textValues {
 					literal = strconv.Quote(literal)
@@ -84,10 +84,11 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 					selected = fmt.Sprintf("{fields: {value: %s}}", literal)
 				}
 				predicate := publicationChoicePredicate(placement, choice.condition)
-				body += "        - " + strings.TrimPrefix(predicate, "          ") + fmt.Sprintf("          emit: %s\n", selected)
+				row := predicate + fmt.Sprintf("          emit: %s\n", selected)
+				body += "        - " + strings.TrimPrefix(row, "          ")
 			}
 		case "success":
-			body = "      rules:\n        - {else: true}\n      on_success:\n        emit: " + emit + "\n"
+			body = "      rules:\n        - {when: true}\n      on_success:\n        emit: " + emit + "\n"
 		case "fanout", "rulefanout", "completefanout":
 			indent := "      "
 			body = ""
@@ -97,13 +98,10 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 					placement = "on_complete"
 				}
 				body = "      " + placement + ":\n"
-				if placement == "rules" {
-					body += "        - else: true\n"
-				}
 				indent = "          "
 			}
 			fanOut := indent + "fan_out:\n"
-			if family == "completefanout" {
+			if family == "completefanout" || family == "rulefanout" {
 				fanOut = "        - fan_out:\n"
 			}
 			body += fanOut + indent + "  items_from: payload.items\n" + indent + "  as: element\n" + indent + "  identity: element\n" + indent + "  emit: " + strings.Replace(emit, "value: "+valueExpr, `value: element`, 1) + "\n"
@@ -172,14 +170,11 @@ func copyPublicationSites(t testing.TB, mode string, textValues bool, selectedFa
 }
 
 func publicationChoicePredicate(placement, condition string) string {
-	if placement == "rules" {
-		if condition == "else" {
-			return "          else: true\n"
-		}
-		return fmt.Sprintf("          when: %s\n", condition)
-	}
-	if condition == "else" {
+	if condition == "" {
 		return ""
+	}
+	if placement == "rules" {
+		return fmt.Sprintf("          when: %s\n", condition)
 	}
 	return fmt.Sprintf("          condition: %s\n", condition)
 }

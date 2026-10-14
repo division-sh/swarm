@@ -288,8 +288,8 @@ func TestExecutorCompiledLoopOperationsRetainExactCarrier(t *testing.T) {
 	}
 	handlers := map[string]runtimecontracts.SystemNodeEventHandler{
 		"work.start":    {Loop: &runtimecontracts.LoopOperationSpec{Start: "revision", From: "queued"}, AdvancesTo: "drafting"},
-		"work.rule":     {Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "drafting"}, Rules: []runtimecontracts.HandlerRuleEntry{{Condition: "else", AdvancesTo: "review"}}},
-		"work.complete": {Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "drafting"}, OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "else", AdvancesTo: "review"}}},
+		"work.rule":     {Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "drafting"}, Rules: []runtimecontracts.HandlerRuleEntry{{AdvancesTo: "review"}}},
+		"work.complete": {Loop: &runtimecontracts.LoopOperationSpec{Admit: "revision", From: "drafting"}, OnComplete: []runtimecontracts.HandlerRuleEntry{{AdvancesTo: "review"}}},
 		"work.repeat":   {Loop: &runtimecontracts.LoopOperationSpec{Repeat: "revision", From: "review"}, AdvancesTo: "drafting", Emit: runtimecontracts.EmitSpec{Event: "draft.requested"}},
 		"work.close":    {Loop: &runtimecontracts.LoopOperationSpec{Close: "revision", From: "review"}, AdvancesTo: "done"},
 	}

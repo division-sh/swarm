@@ -15,7 +15,7 @@ func TestRuleEmitPresentationKeepsAuthoredSpellingAndExactSite(t *testing.T) {
 		context, predicate, fallback string
 		labels                       [2]string
 	}{
-		{"rules", "when: TRUE", "else: true\n    ", [2]string{"rules[0]: when TRUE", "rules[1]: else"}},
+		{"rules", "when: TRUE", "", [2]string{"rules[0]: when TRUE", "rules[1]: default"}},
 		{"on_complete", "condition: TRUE", "", [2]string{"on_complete[0]: condition TRUE", "on_complete[1]"}},
 	} {
 		t.Run(tc.context, func(t *testing.T) {
@@ -57,8 +57,7 @@ emit:
 rules:
   - when: TRUE
     emit: {fields: {score: payload.score}}
-  - else: true
-    emit: {fields: {score: 0}}
+  - emit: {fields: {score: 0}}
 `), &handler); err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +69,7 @@ rules:
 	if len(sites) != 2 {
 		t.Fatalf("template sites = %#v, want both effective branches", sites)
 	}
-	for i, wantDisplay := range []string{"rules[0]: when TRUE", "rules[1]: else"} {
+	for i, wantDisplay := range []string{"rules[0]: when TRUE", "rules[1]: default"} {
 		ref, _ := qualified.Rules[i].DeclarationIdentity()
 		wantFields := map[string]ExpressionValue{"request": handler.Emit.Fields["request"], "score": handler.Rules[i].Emit.Fields["score"]}
 		if site := sites[i]; site.RuleDisplay != wantDisplay || site.Source != "handler.rules.emit_template" || site.SiteKey != fmt.Sprintf("handler.rules[%d].emit_template", i) || site.RuleIndex != i || site.RuleRef != ref || site.Spec.EventType() != "chosen" || !reflect.DeepEqual(site.Spec.Fields, wantFields) {
@@ -102,9 +101,6 @@ func TestRuleFanOutPresentationKeepsCompiledSiteAndOperands(t *testing.T) {
       identity: row_item.id
       emit: {event: item.requested, fields: {id: row_item.id}}
 `, tc.context, predicate)
-			if tc.context == "rules" {
-				source += "  - else: true\n"
-			}
 			if err := decodeNodeTestYAML([]byte(source), &handler); err != nil {
 				t.Fatal(err)
 			}
