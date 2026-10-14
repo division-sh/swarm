@@ -9,6 +9,8 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -41,7 +43,7 @@ func TestOrdinaryPlanningMemoKeepsLaterReadFailuresAndCancellation(t *testing.T)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	mock.ExpectBegin()
-	ctx := context.Background()
+	ctx := correlation.WithSourceArtifactFact(context.Background(), fact)
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -62,6 +64,13 @@ func TestOrdinaryPlanningMemoKeepsLaterReadFailuresAndCancellation(t *testing.T)
 	mock.ExpectQuery(query).WithArgs(runID, "failure").WillReturnError(want)
 	if members, err := reader.ListFlowInstances(ctx, failed); !errors.Is(err, want) || len(members) != 0 {
 		t.Fatalf("earlier successful memo hid a later read failure: %+v err=%v", members, err)
+	}
+	owner := flowidentity.RunScopedFlowInstance{RunID: runID, Route: flowidentity.StoredRoute(flowidentity.ScopeKey(source, "empty"), "receiver", "empty/receiver")}
+	timerFailure := errors.New("independent initial timer read failure")
+	query = workflowTimerActivationSelect(true, true) + " AND t.status = 'active' ORDER BY t.created_at, t.timer_id"
+	mock.ExpectQuery(query).WithArgs(runID, runID, "entity", "entity", "running", "paused").WillReturnError(timerFailure)
+	if timers, err := reader.ListFlowInstancePlanningInitialTimers(ctx, owner, "entity"); !errors.Is(err, timerFailure) || len(timers) != 0 {
+		t.Fatalf("index memo hid the independent timer-owner refusal: %+v err=%v", timers, err)
 	}
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
@@ -17,7 +18,7 @@ func (eb *EventBus) withPublicationInstancePlanning(ctx context.Context, event e
 	if events.DeliveryContextFromContext(ctx).ReplyContextID() != "" {
 		return prepare(ctx, planner)
 	}
-	if planner.connectPlanner.lifecycle.runProposal.Present() || eb.semanticSource == nil || event.RunID() == "" {
+	if planner.connectPlanner.lifecycle.runProposal.Present() || eb.semanticSource == nil || event.RunID() == "" || event.Type() == "platform.runtime_log" {
 		return prepare(ctx, planner)
 	}
 	owner, native := planner.connectPlanner.lifecycle.index.(pipeline.FlowInstancePlanningSnapshotOwner)
@@ -32,6 +33,20 @@ func (eb *EventBus) withPublicationInstancePlanning(ctx context.Context, event e
 	scope, err := pipeline.NewFlowInstanceLookupScope(eb.semanticSource, fact, event.RunID(), nil, nil)
 	if err != nil {
 		return err
+	}
+	// Agent projection has its own durable reader. Resolve it before the index
+	// transaction, and reuse the same evidence for policy and connect planning.
+	ctx = correlation.WithInboundEvent(ctx, event)
+	if planner.recipientPolicy.loadActiveAgentDescriptors != nil {
+		agents, available, err := planner.recipientPolicy.loadActiveAgentDescriptors(ctx)
+		if err != nil {
+			return err
+		}
+		loadAgents := func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+			return agents, available, nil
+		}
+		planner.recipientPolicy.loadActiveAgentDescriptors = loadAgents
+		planner.connectPlanner.loadAgents = loadAgents
 	}
 	return owner.WithFlowInstancePlanningSnapshot(ctx, scope, func(ctx context.Context, reader pipeline.FlowInstanceIndexReader) error {
 		bounded := planner

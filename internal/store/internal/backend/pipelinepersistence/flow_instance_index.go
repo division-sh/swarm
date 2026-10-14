@@ -197,7 +197,30 @@ func (s *flowInstanceIndexSnapshot) withPlanningReader(ctx context.Context, scop
 		defer reader.mu.Unlock()
 		reader.snapshot = nil
 	}()
-	return prepare(ctx, reader)
+	bounded, err := pipeline.WithFlowInstancePlanningInitialTimerReader(ctx, reader)
+	if err != nil {
+		return err
+	}
+	return prepare(bounded, reader)
+}
+
+func (r *flowInstanceIndexPlanningReader) ListFlowInstancePlanningInitialTimers(ctx context.Context, owner flowidentity.RunScopedFlowInstance, entityID string) ([]pipeline.WorkflowTimerActivation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	fact, present := correlation.SourceArtifactFactFromContext(ctx)
+	if !present {
+		return nil, fmt.Errorf("initial-entry timer planning requires its admitted source")
+	}
+	if err := r.requireScope(ctx, fact, owner.RunID); err != nil {
+		return nil, err
+	}
+	if entityID == "" || strings.TrimSpace(entityID) != entityID {
+		return nil, fmt.Errorf("initial-entry timer planning requires an exact entity")
+	}
+	if _, err := pipeline.NewExactFlowInstanceLookup(r.scope.Source(), fact, owner); err != nil {
+		return nil, err
+	}
+	return listWorkflowTimerActivations(ctx, r.snapshot.tx, !r.snapshot.postgres, owner.RunID, entityID, true)
 }
 
 func (r *flowInstanceIndexPlanningReader) requireScope(ctx context.Context, fact correlation.SourceArtifactFact, runID string) error {

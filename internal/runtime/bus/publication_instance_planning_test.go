@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
@@ -14,6 +15,7 @@ type publicationPlanningBoundaryReader struct {
 	constructionIndexTestReader
 	passes int
 	fault  error
+	inside bool
 }
 
 func (r *publicationPlanningBoundaryReader) WithFlowInstancePlanningSnapshot(ctx context.Context, _ pipeline.FlowInstanceLookupScope, prepare func(context.Context, pipeline.FlowInstanceIndexReader) error) error {
@@ -21,7 +23,53 @@ func (r *publicationPlanningBoundaryReader) WithFlowInstancePlanningSnapshot(ctx
 	if r.fault != nil {
 		return r.fault
 	}
+	r.inside = true
+	defer func() { r.inside = false }()
 	return prepare(ctx, &r.constructionIndexTestReader)
+}
+
+func TestPublicationPlanningReadsDurableAgentsBeforeIndexCut(t *testing.T) {
+	source := connectRoutePlanCarriedKeyResolutionSource(t, contracts.FlowInputResolutionModeSelect)
+	event := admitRunProposalEvent(t, false).Event()
+	reader := &publicationPlanningBoundaryReader{}
+	reads := 0
+	planner := deliveryPlanner{
+		connectPlanner: connectRoutePlanResolver{lifecycle: connectInstanceSelector{index: reader}},
+		recipientPolicy: deliveryRecipientPolicy{loadActiveAgentDescriptors: func(ctx context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+			reads++
+			if reader.inside {
+				return nil, false, errors.New("durable agents require a second pool connection")
+			}
+			return nil, true, ctx.Err()
+		}},
+	}
+	bus := &EventBus{semanticSource: source}
+	if err := bus.withPublicationInstancePlanning(constructionIndexContext(t, source), event, planner, func(ctx context.Context, bounded deliveryPlanner) error {
+		if !reader.inside {
+			t.Fatal("index planning escaped its finite cut")
+		}
+		for read := 0; read < 3; read++ {
+			if _, available, err := bounded.recipientPolicy.loadActiveAgentDescriptors(ctx); err != nil || !available {
+				return errors.New("policy lost exact active-agent projection")
+			}
+			if _, available, err := bounded.connectPlanner.loadAgents(ctx); err != nil || !available {
+				return errors.New("connect planner lost exact active-agent projection")
+			}
+		}
+		return nil
+	}); err != nil || reads != 1 || reader.passes != 1 {
+		t.Fatalf("agent reads crossed the index cut: reads=%d passes=%d err=%v", reads, reader.passes, err)
+	}
+	fault := errors.New("durable active-agent refusal")
+	planner.recipientPolicy.loadActiveAgentDescriptors = func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+		return nil, true, fault
+	}
+	if err := bus.withPublicationInstancePlanning(constructionIndexContext(t, source), event, planner, func(context.Context, deliveryPlanner) error {
+		t.Fatal("failed active-agent read admitted planning")
+		return nil
+	}); !errors.Is(err, fault) || reader.passes != 1 {
+		t.Fatalf("independent active-agent refusal was suppressed: passes=%d err=%v", reader.passes, err)
+	}
 }
 
 func TestPublicationPlanningKeepsNestedReplyReadOutsideIndexCut(t *testing.T) {
