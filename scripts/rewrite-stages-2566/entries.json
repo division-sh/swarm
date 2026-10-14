@@ -1049,7 +1049,12 @@
       "done"
     ],
     "function": "newEntityToolConformanceHarness",
-    "literal": 2
+    "literal": 2,
+    "current_selector": {
+      "file": "internal/runtime/conformance/persisted_surfaces_test.go",
+      "function": "newEntityToolConformanceHarness",
+      "literal": 5
+    }
   },
   {
     "file": "internal/runtime/conformance/primary_entity_conformance_test.go",
