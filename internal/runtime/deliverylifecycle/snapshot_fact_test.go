@@ -40,8 +40,11 @@ func TestDecodeHistoricalSnapshotCompleteRouteRoundTrip(t *testing.T) {
 					if decoded.Authority.Validate() == nil {
 						t.Fatal("historical evidence unexpectedly grants live execution authority")
 					}
-					if status == deliverylifecycle.StatusInProgress && (decoded.ClaimVersion != 2 || decoded.ClaimExpiresAt.IsZero()) {
-						t.Fatal("historical lease evidence was lost while excluding its token")
+					if status == deliverylifecycle.StatusInProgress && decoded.ClaimVersion != 2 {
+						t.Fatal("historical attempt coordinate changed")
+					}
+					if !decoded.ClaimExpiresAt.IsZero() {
+						t.Fatal("historical evidence retained live lease expiry")
 					}
 				})
 			}
@@ -340,7 +343,7 @@ func TestDecodeHistoricalSnapshotRejectsUnknownFieldsAndLiveTokens(t *testing.T)
 			if bytes.Contains(historicalJSON(t, decoded), []byte("claim_token")) || decoded.Authority.Validate() == nil {
 				t.Fatal("historical snapshot exposed a live capability")
 			}
-			for _, field := range []string{"unexpected", "claim_token", "lease_token", "execution_authority"} {
+			for _, field := range []string{"unexpected", "claim_token", "lease_token", "execution_authority", "claim_expires_at"} {
 				t.Run(field, func(t *testing.T) {
 					fact := historicalRouteFact(t, fixture.route, deliverylifecycle.StatusInProgress)
 					fact[field] = "f03e9ff9-7a7f-45dc-89d3-a15ed401388a"
@@ -453,7 +456,7 @@ func historicalRouteFact(t testing.TB, route events.DeliveryRoute, status delive
 	case deliverylifecycle.StatusPending:
 		fact["next_eligible_at"] = now
 	case deliverylifecycle.StatusInProgress:
-		fact["claim_version"], fact["started_at"], fact["claim_expires_at"] = 2, now, now.Add(time.Minute)
+		fact["claim_version"], fact["started_at"] = 2, now
 	case deliverylifecycle.StatusFailed:
 		fact["retry_count"], fact["next_eligible_at"] = 1, now.Add(time.Second)
 		fallthrough

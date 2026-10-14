@@ -15,7 +15,8 @@ import (
 
 // DecodeHistoricalSnapshot validates the canonical persisted delivery fact
 // captured by run-fork revisioning, including persisted connect-route evidence.
-// It excludes live worker claim tokens; historical readback is never a capability.
+// It excludes live worker claim tokens and lease expiry; historical readback is
+// never a capability or proof of current ownership.
 func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	var fact struct {
 		DeliveryID                string                           `json:"delivery_id"`
@@ -36,7 +37,6 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		MaxRetries                int                              `json:"max_retries"`
 		NextEligibleAt            *time.Time                       `json:"next_eligible_at"`
 		ClaimVersion              int64                            `json:"claim_version"`
-		ClaimExpiresAt            *time.Time                       `json:"claim_expires_at"`
 		ActiveSessionID           string                           `json:"active_session_id"`
 		ReasonCode                string                           `json:"reason_code"`
 		Failure                   *runtimefailures.Envelope        `json:"failure"`
@@ -117,9 +117,6 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	if fact.NextEligibleAt != nil {
 		snapshot.NextEligibleAt = fact.NextEligibleAt.UTC()
 	}
-	if fact.ClaimExpiresAt != nil {
-		snapshot.ClaimExpiresAt = fact.ClaimExpiresAt.UTC()
-	}
 	if fact.StartedAt != nil {
 		snapshot.StartedAt = fact.StartedAt.UTC()
 	}
@@ -153,19 +150,19 @@ func validateHistoricalSnapshot(snapshot Snapshot) error {
 func validateHistoricalLifecycleShape(snapshot Snapshot) error {
 	switch snapshot.Status {
 	case StatusPending:
-		if snapshot.RetryCount != 0 || snapshot.NextEligibleAt.IsZero() || !snapshot.SettledAt.IsZero() || !snapshot.ClaimExpiresAt.IsZero() {
+		if snapshot.RetryCount != 0 || snapshot.NextEligibleAt.IsZero() || !snapshot.SettledAt.IsZero() {
 			return fmt.Errorf("%w: historical pending delivery has conflicting lifecycle facts", ErrConflict)
 		}
 	case StatusInProgress:
-		if snapshot.ClaimVersion == 0 || snapshot.ClaimExpiresAt.IsZero() || snapshot.StartedAt.IsZero() || !snapshot.NextEligibleAt.IsZero() || !snapshot.SettledAt.IsZero() {
+		if snapshot.ClaimVersion == 0 || snapshot.StartedAt.IsZero() || !snapshot.NextEligibleAt.IsZero() || !snapshot.SettledAt.IsZero() {
 			return fmt.Errorf("%w: historical in-progress delivery has conflicting lifecycle facts", ErrConflict)
 		}
 	case StatusFailed:
-		if snapshot.RetryCount == 0 || snapshot.NextEligibleAt.IsZero() || !snapshot.ClaimExpiresAt.IsZero() || !snapshot.SettledAt.IsZero() {
+		if snapshot.RetryCount == 0 || snapshot.NextEligibleAt.IsZero() || !snapshot.SettledAt.IsZero() {
 			return fmt.Errorf("%w: historical failed delivery has conflicting lifecycle facts", ErrConflict)
 		}
 	case StatusDelivered, StatusDeadLetter, StatusCanceled:
-		if snapshot.SettledAt.IsZero() || !snapshot.NextEligibleAt.IsZero() || !snapshot.ClaimExpiresAt.IsZero() {
+		if snapshot.SettledAt.IsZero() || !snapshot.NextEligibleAt.IsZero() {
 			return fmt.Errorf("%w: historical terminal delivery has conflicting lifecycle facts", ErrConflict)
 		}
 	default:
