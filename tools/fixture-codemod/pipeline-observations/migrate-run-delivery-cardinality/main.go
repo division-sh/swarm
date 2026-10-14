@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/rundelivery"
@@ -21,6 +22,10 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "-compose-history" {
+		composeHistory()
+		return
+	}
 	write := len(os.Args) == 2 && os.Args[1] == "-write"
 	if !write && len(os.Args) != 1 {
 		panic("usage: migrate-run-delivery-cardinality [-write]")
@@ -59,6 +64,35 @@ func main() {
 			must(os.WriteFile(path, out, 0644))
 		}
 		must(os.WriteFile(rundelivery.Path, raw, 0644))
+	}
+}
+
+func composeHistory() {
+	raw, err := os.ReadFile(rundelivery.Path)
+	must(err)
+	pins, err := rundelivery.Decode(raw)
+	must(err)
+	for _, pin := range pins {
+		current, err := os.ReadFile(pin.File)
+		must(err)
+		must(rundelivery.ValidateCurrentSource(pin, current))
+	}
+	for _, path := range []string{"tools/fixture-codemod/pipeline-observations/recipes.json", "tools/fixture-codemod/pipeline-observations/family145-transitions.json"} {
+		prior, err := exec.Command("git", "show", rundelivery.HistoryPredecessor+":"+path).Output()
+		must(err)
+		out, err := rundelivery.ComposeHistory(prior, pins, path == "tools/fixture-codemod/pipeline-observations/recipes.json")
+		must(err)
+		out = append(out, '\n')
+		current, err := os.ReadFile(path)
+		must(err)
+		var a, b []map[string]any
+		must(json.Unmarshal(current, &a))
+		must(json.Unmarshal(out, &b))
+		if !bytes.Equal(current, prior) && !reflect.DeepEqual(a, b) {
+			panic("unreviewed history outside four run delivery endpoints")
+		}
+		must(os.WriteFile(path, out, 0644))
+		fmt.Printf("composed four finite run delivery endpoints: %s\n", path)
 	}
 }
 

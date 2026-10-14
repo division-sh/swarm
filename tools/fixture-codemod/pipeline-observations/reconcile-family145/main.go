@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicjoin"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicrollback"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/rundelivery"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runidentity"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runscalar"
@@ -40,9 +41,10 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "bb95872035794c2d9425adbfc2f5530b08e17010156d554a99ccb8bc2427cefe"
+const targetDigest = "99d12e2b73efc3ae9ba2318bfbc320349cfce5d28deefd3f87e56e32b003cf26"
 
 var sourceForkComparison = map[string]string{}
+var runDeliveryComparison = map[string]string{}
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -309,6 +311,7 @@ func main() {
 	includeServedEventCountTargets()
 	includeStopWitnessTargets()
 	sourceForkPins := sourceForkHistoryPins()
+	runDeliveryPins := runDeliveryHistoryPins()
 	var rows []recipe
 	must(json.Unmarshal(commit(ledger), &rows))
 	var changes []transition
@@ -345,6 +348,7 @@ func main() {
 	rows = composePublicRollbackRecipes(preserveRunIdentityRecipes(rows), rollbackPins)
 	changes = composePublicRollbackTransitions(preserveRunIdentityTransitions(changes), rollbackPins)
 	rows, changes = composeSourceForkHistory(rows, changes, sourceForkPins)
+	rows, changes = composeRunDeliveryHistory(rows, changes, runDeliveryPins)
 	raw, err := json.Marshal(changes)
 	must(err)
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
@@ -361,6 +365,38 @@ func main() {
 	} else if len(os.Args) != 1 {
 		panic("usage: reconcile-family145 [-write]")
 	}
+}
+
+func runDeliveryHistoryPins() []rundelivery.Pin {
+	raw, err := os.ReadFile(rundelivery.Path)
+	must(err)
+	pins, err := rundelivery.Decode(raw)
+	must(err)
+	for _, pin := range pins {
+		current, err := os.ReadFile(pin.File)
+		must(err)
+		old, err := exec.Command("git", "show", rundelivery.Predecessor+":"+pin.File).Output()
+		must(err)
+		if functions(current)[pin.Function] != pin.After || functions(old)[pin.Function] != pin.Before {
+			panic("run delivery exact live/predecessor endpoint changed: " + pin.Function)
+		}
+		runDeliveryComparison[pin.File+"/"+pin.Function] = pin.Before
+	}
+	return pins
+}
+
+func composeRunDeliveryHistory(rows []recipe, changes []transition, pins []rundelivery.Pin) ([]recipe, []transition) {
+	raw, err := json.Marshal(rows)
+	must(err)
+	raw, err = rundelivery.ComposeHistory(raw, pins, true)
+	must(err)
+	must(json.Unmarshal(raw, &rows))
+	raw, err = json.Marshal(changes)
+	must(err)
+	raw, err = rundelivery.ComposeHistory(raw, pins, false)
+	must(err)
+	must(json.Unmarshal(raw, &changes))
+	return rows, changes
 }
 
 func sourceForkHistoryPins() []sourcefork.Pin {
@@ -1160,10 +1196,7 @@ func currentReplacement(path, key string, after map[string]string) (string, bool
 		return "", true
 	}
 	if replacement := after[key]; replacement != "" {
-		if previous := sourceForkComparison[path+"/"+key]; previous != "" {
-			return previous, false
-		}
-		return replacement, false
+		return currentHistoryComparison(path, key, replacement), false
 	}
 	if replacement := after[renamedHelpers[path][key]]; replacement != "" {
 		return replacement, false
@@ -1204,6 +1237,16 @@ func currentReplacement(path, key string, after map[string]string) (string, bool
 		return "", true
 	}
 	panic("unreviewed retirement: " + path + "/" + key)
+}
+
+func currentHistoryComparison(path, key, current string) string {
+	if previous := runDeliveryComparison[path+"/"+key]; previous != "" {
+		return previous
+	}
+	if previous := sourceForkComparison[path+"/"+key]; previous != "" {
+		return previous
+	}
+	return current
 }
 
 func extend(rows []recipe, change transition) []recipe {

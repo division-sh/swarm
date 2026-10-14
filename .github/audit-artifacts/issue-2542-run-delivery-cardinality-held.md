@@ -1,5 +1,9 @@
 # Run Delivery Cardinality: Local Whole-Rule Checkpoint
 
+The finite history hold below is resolved by the subsequent authorized repair in
+issue-2542-run-delivery-history-repair.md. Original RED receipts remain recorded;
+the standalone rule still does not close the broader run-delivery concept.
+
 Six standalone query/Scan expressions in four complete declarations, three
 served/conformance files, consume existing native run/status owners. Binding bulk
 gate6134544118; signed source predecessor64eda6291. Exact manifest

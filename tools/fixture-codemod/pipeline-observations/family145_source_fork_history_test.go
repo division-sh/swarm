@@ -42,6 +42,7 @@ func restoreSourceForkHistory(t *testing.T, rows []map[string]any, recipes bool)
 	if err != nil {
 		t.Fatal(err)
 	}
+	raw = runDeliveryEarlierHistory(t, raw, recipes)
 	raw, err = sourcefork.RestoreHistory(raw, sourceForkPriorHistory(t, recipes), sourceForkLivePins(t), recipes)
 	if err != nil {
 		t.Fatal(err)
@@ -80,6 +81,7 @@ func TestFamily145SourceForkHistoryRestoresCompletePriorLedgersAndTimerSuccessor
 		if recipes {
 			current, wantCount = recipeBytes, 1517
 		}
+		current = runDeliveryEarlierHistory(t, current, recipes)
 		var before, after, composed []map[string]any
 		for _, input := range []struct {
 			raw  []byte
@@ -92,7 +94,14 @@ func TestFamily145SourceForkHistoryRestoresCompletePriorLedgersAndTimerSuccessor
 		if len(after) != wantCount || !reflect.DeepEqual(after, composed) {
 			t.Fatal("source fork composition changed records/count/order")
 		}
-		restored := restoreSourceForkHistory(t, cloneRollbackHistory(t, after), recipes)
+		restoredBytes, err := sourcefork.RestoreHistory(current, prior, pins, recipes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var restored []map[string]any
+		if err := json.Unmarshal(restoredBytes, &restored); err != nil {
+			t.Fatal(err)
+		}
 		if !reflect.DeepEqual(before, restored) {
 			t.Fatal("source fork lost complete immutable history or prior timer Successor")
 		}

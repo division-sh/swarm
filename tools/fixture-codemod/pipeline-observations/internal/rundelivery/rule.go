@@ -4,11 +4,16 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 )
 
 const Predecessor = "64eda6291965b8fb8d764b91b347c1c8185fa1a2"
+const HistoryPredecessor = "88109a5c62c51c9787dbcad483dbd635e0f54f49"
 const Path = "tools/fixture-codemod/pipeline-observations/family145-run-delivery-cardinality-preimages.json"
 const Digest = "eabe5cadc2c89e898bc2af87cf5972e3acee641d954fd102dc22b37de9d55919"
 
@@ -26,6 +31,43 @@ func Decode(raw []byte) ([]Pin, error) {
 		return nil, fmt.Errorf("run delivery cardinality complete declaration inventory changed")
 	}
 	return pins, nil
+}
+
+func ValidateCurrentSource(pin Pin, raw []byte) error {
+	if err := validatePinRule(pin); err != nil {
+		return err
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), pin.File, raw, parser.AllErrors)
+	if err != nil {
+		return err
+	}
+	count := 0
+	for _, declaration := range file.Decls {
+		if fn, ok := declaration.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Name.Name == pin.Function {
+			count++
+			if requestkey.Node(fn) != pin.After {
+				return fmt.Errorf("run delivery current complete body changed: %s", pin.Function)
+			}
+		}
+	}
+	if count != 1 {
+		return fmt.Errorf("run delivery current declaration count=%d want1: %s", count, pin.Function)
+	}
+	return nil
+}
+
+func validatePinRule(pin Pin) error {
+	for _, rule := range Rules {
+		if rule.File != pin.File || rule.Function != pin.Function {
+			continue
+		}
+		after, err := runphysical.Transform(rule, pin.Before)
+		if err != nil || after != pin.After || pin.Calls != rule.Calls || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
+			return fmt.Errorf("run delivery complete pin/six substitutions changed: %s", pin.Function)
+		}
+		return nil
+	}
+	return fmt.Errorf("foreign run delivery pin: %s/%s", pin.File, pin.Function)
 }
 
 var Rules = []runphysical.Rule{
