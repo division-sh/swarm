@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -21,6 +22,32 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
 )
+
+func TestRuntimeConnectionProcessBindingRejectsForeignAttribution(t *testing.T) {
+	op := channelonboarding.Operation{Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
+		BundleHash: "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", RuntimeInstanceID: uuid.NewString()}}
+	binding := processbinding.Binding{ProcessAuthorityID: uuid.NewString(), ProcessOwnerID: "original-owner", ProcessBootID: uuid.NewString(),
+		GenerationGrantID: uuid.NewString(), BundleHash: op.Coordinate.BundleHash, RuntimeInstanceID: op.Coordinate.RuntimeInstanceID, RuntimeGeneration: 1}
+	if err := validateRuntimeConnectionProcessBinding(binding, op); err != nil {
+		t.Fatal(err)
+	}
+	for _, cell := range []string{"malformed", "source", "runtime"} {
+		t.Run(cell, func(t *testing.T) {
+			changed := binding
+			switch cell {
+			case "malformed":
+				changed.GenerationGrantID = "invalid"
+			case "source":
+				changed.BundleHash = "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			case "runtime":
+				changed.RuntimeInstanceID = uuid.NewString()
+			}
+			if err := validateRuntimeConnectionProcessBinding(changed, op); err == nil {
+				t.Fatal("foreign process attribution admitted before private state open")
+			}
+		})
+	}
+}
 
 func openRuntimeConnectionFixture(t *testing.T, f *activeInputFixture, binding ...processbinding.Binding) *RuntimeConnection {
 	t.Helper()
