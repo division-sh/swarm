@@ -25,7 +25,7 @@ type sharedCoordinatorCompositionPin2617 struct {
 
 func sharedCoordinatorComposition2617(row recipe) (sharedCoordinatorCompositionPin2617, bool, error) {
 	var pins []sharedCoordinatorCompositionPin2617
-	if fmt.Sprintf("%x", sha256.Sum256(sharedCoordinatorCompositionBytes2617)) != "270b47e07e6b2c666a2e6ec08c11adef4e8f2c4c99e7932b42f773aebda1ff2a" {
+	if fmt.Sprintf("%x", sha256.Sum256(sharedCoordinatorCompositionBytes2617)) != "5b0d2cb6a802d3d5ff6f1bd9c408f523ccbbca354529ff41b1943bb6b17fc53f" {
 		return sharedCoordinatorCompositionPin2617{}, false, fmt.Errorf("combined coordinator evidence changed")
 	}
 	if err := json.Unmarshal(sharedCoordinatorCompositionBytes2617, &pins); err != nil {
