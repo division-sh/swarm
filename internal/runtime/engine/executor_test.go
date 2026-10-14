@@ -4487,13 +4487,11 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 func TestExecutor_PolicySheetRowsExecuteThroughRules(t *testing.T) {
 	handler, err := loadNodeHandlerFixture(`
 rules:
-  - id: deep_scan
-    case:
+  - case:
       selector: payload.mode
       equals: deep
     advances_to: deep_scan
-  - id: fallback
-    default: true
+  - default: true
     advances_to: fallback
 `)
 	if err != nil {
