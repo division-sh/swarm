@@ -35,7 +35,7 @@ func TestFamily145SourceBlobWholeRulePreservesCaptureAndEveryByteComparison(t *t
 			t.Fatal("source blob exact predecessor changed:", pin.Function, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, current, pin.Function) != pin.After {
+		if err != nil || servedObservationEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("source blob current endpoint changed:", pin.Function, err)
 		}
 		after, err := runphysical.Transform(sourceblob.Rules[index], pin.Before)

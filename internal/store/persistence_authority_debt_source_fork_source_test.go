@@ -75,7 +75,11 @@ func TestPersistenceAuthorityDebtSourceForkCompositionPreservesExactHistory(t *t
 		t.Fatal(err)
 	}
 	current := decls[debtSourceForkPin.Function]
-	previous, err := debtSourceForkSourcePrevious(root, debtSourceForkPin.File, debtSourceForkPin.Function, current)
+	entry, err := debtServedObservationSourcePrevious(root, debtSourceForkPin.File, debtSourceForkPin.Function, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, err := debtSourceForkSourcePrevious(root, debtSourceForkPin.File, debtSourceForkPin.Function, entry)
 	if err != nil || debtBaselineChecksum([]byte(previous)) != debtSourceForkPin.BeforeSHA256 {
 		t.Fatal("exact source fork inverse refused:", err)
 	}
@@ -88,6 +92,9 @@ func TestPersistenceAuthorityDebtSourceForkCompositionPreservesExactHistory(t *t
 		mutant := strings.Replace(current, cut, "foreignSourceForkCut", 1)
 		if mutant == current {
 			t.Fatal("missing source fork hostile cut:", cut)
+		}
+		if _, err := debtServedObservationSourcePrevious(root, debtSourceForkPin.File, debtSourceForkPin.Function, mutant); err == nil {
+			t.Fatal("changed actual current body entered the historical comparison:", cut)
 		}
 		if got, err := debtSourceForkSourcePrevious(root, debtSourceForkPin.File, debtSourceForkPin.Function, mutant); err != nil || got != mutant {
 			t.Fatal("changed current body received historical inverse:", cut, err)

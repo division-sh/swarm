@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/globalname"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedsettlement"
 )
 
 //go:embed family145-global-event-name-preimages.json
@@ -36,7 +37,7 @@ func TestFamily145GlobalEventNameWholeRulePreservesEveryNameScopeAssertionAndCut
 			t.Fatal("global name signed complete predecessor changed:", pin.Function, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, current, pin.Function) != pin.After {
+		if err != nil || globalNameEarlierCurrentDeclaration(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("global name current declaration changed:", pin.Function, err)
 		}
 		after, err := runphysical.Transform(globalname.Rules[index], pin.Before)
@@ -65,6 +66,24 @@ func TestFamily145GlobalEventNameWholeRulePreservesEveryNameScopeAssertionAndCut
 	if reads != 8 {
 		t.Fatal("global name physical read inventory changed:", reads)
 	}
+}
+
+func globalNameEarlierCurrentDeclaration(t *testing.T, file, function, current string) string {
+	t.Helper()
+	pins, err := servedsettlement.Decode(servedSettlementBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pin := range pins {
+		if pin.File == file && pin.Function == function {
+			actual := servedSettlementEarlierDeclaration(t, file, function, current)
+			if actual != pin.After {
+				t.Fatal("global-name comparison lost the exact later settlement stage:", function)
+			}
+			return pin.Before
+		}
+	}
+	return current
 }
 
 func TestFamily145GlobalEventNameReusesOriginalNativeOwnerAndAddsOnlyClosedObservationRole(t *testing.T) {

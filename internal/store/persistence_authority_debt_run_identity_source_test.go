@@ -138,14 +138,18 @@ func TestPersistenceAuthorityDebtRunIdentitySourceCompositionIsFinite(t *testing
 			t.Fatal(err)
 		}
 		current := decls[pin.Function]
-		previous, err := debtRunIdentitySourcePrevious(root, pin.File, pin.Function, current)
+		entry, err := debtServedObservationSourcePrevious(root, pin.File, pin.Function, current)
+		if err != nil {
+			t.Fatal(err)
+		}
+		previous, err := debtRunIdentitySourcePrevious(root, pin.File, pin.Function, entry)
 		if err != nil || debtBaselineChecksum([]byte(previous)) != pin.BeforeSHA256 {
 			t.Fatal("run identity finite source composition refused:", pin.Function, err)
 		}
 		for _, cut := range []string{"readServedRunPhysicalIdentity", "ReceiverStateReader", "initial.RunID", "later.RunID", "seed.RunID", "context.Background()", "err != nil", " != ", "lease.Done()", "release.Do"} {
 			if strings.Contains(current, cut) {
 				mutant := strings.Replace(current, cut, "foreignRunIdentityCut", 1)
-				if _, err := debtRunIdentitySourcePrevious(root, pin.File, pin.Function, mutant); err == nil {
+				if _, err := debtServedObservationSourcePrevious(root, pin.File, pin.Function, mutant); err == nil {
 					t.Fatal("run identity accepted changed owner/identity/context/assertion/cut:", cut)
 				}
 			}
@@ -203,7 +207,11 @@ func debtRunIdentityCopySourceEvidence(t *testing.T, root, copy string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		previous, err := debtRunIdentitySourcePrevious(root, pin.File, pin.Function, current[pin.Function])
+		entry, err := debtServedObservationSourcePrevious(root, pin.File, pin.Function, current[pin.Function])
+		if err != nil {
+			t.Fatal(err)
+		}
+		previous, err := debtRunIdentitySourcePrevious(root, pin.File, pin.Function, entry)
 		if err != nil {
 			t.Fatal(err)
 		}

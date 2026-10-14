@@ -33,6 +33,7 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runscalar"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedeventcount"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedsettlement"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/sourceblob"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/sourcefork"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/standingdiagnostic"
@@ -42,11 +43,12 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "5d4c0576e11418663842a2d83c8c8eabfdfbff57a40b9b580d65b1a4da3449e3"
+const targetDigest = "96e13867c72a97c77597446fe1734fce41ef52338c002b94fbc2eb475c934ab2"
 
 var sourceForkComparison = map[string]string{}
 var runDeliveryComparison = map[string]string{}
 var sourceBlobComparison = map[string]string{}
+var servedBatchComparison = map[string]string{}
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -292,6 +294,7 @@ var files = []string{
 }
 
 func main() {
+	batchPins := servedBatchHistoryPins()
 	includeRunIdentityTargets()
 	includeRunPhysicalTargets()
 	includeStandingDiagnosticTargets()
@@ -353,6 +356,7 @@ func main() {
 	rows, changes = composeSourceForkHistory(rows, changes, sourceForkPins)
 	rows, changes = composeRunDeliveryHistory(rows, changes, runDeliveryPins)
 	rows, changes = composeSourceBlobHistory(rows, changes, sourceBlobPins)
+	rows, changes = composeServedBatchHistory(rows, changes, batchPins)
 	raw, err := json.Marshal(changes)
 	must(err)
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
@@ -371,6 +375,47 @@ func main() {
 	}
 }
 
+func servedBatchHistoryPins() []runphysical.Pin {
+	pins, err := servedsettlement.ReadBatchPins(".")
+	must(err)
+	must(servedsettlement.ValidateBatchCurrentSource(".", pins))
+	for _, pin := range pins {
+		servedBatchComparison[pin.File+"/"+pin.Function] = pin.Before
+	}
+	return pins
+}
+
+func composeServedBatchHistory(rows []recipe, changes []transition, pins []runphysical.Pin) ([]recipe, []transition) {
+	for _, input := range []struct {
+		path    string
+		value   any
+		recipes bool
+		out     any
+	}{{ledger, rows, true, &rows}, {transitionLedger, changes, false, &changes}} {
+		prior, err := exec.Command("git", "show", servedsettlement.BatchPredecessor+":"+input.path).Output()
+		must(err)
+		candidate, err := json.Marshal(input.value)
+		must(err)
+		var expected, generated []map[string]any
+		must(json.Unmarshal(prior, &expected))
+		must(json.Unmarshal(candidate, &generated))
+		if !reflect.DeepEqual(expected, generated) {
+			panic("served batch earlier reconciliation changed the complete approved prior ledger: " + input.path)
+		}
+		candidate, err = servedsettlement.ComposeBatchHistory(prior, pins, input.recipes)
+		must(err)
+		must(json.Unmarshal(candidate, input.out))
+	}
+	return rows, changes
+}
+
+func servedBatchEarlierDeclaration(path, function, current string) string {
+	if previous := servedBatchComparison[path+"/"+function]; previous != "" {
+		return previous
+	}
+	return current
+}
+
 func sourceBlobHistoryPins() []sourceblob.Pin {
 	raw, err := os.ReadFile(sourceblob.Path)
 	must(err)
@@ -379,7 +424,8 @@ func sourceBlobHistoryPins() []sourceblob.Pin {
 	for _, pin := range pins {
 		current, err := os.ReadFile(pin.File)
 		must(err)
-		must(sourceblob.ValidateCurrentSource(pin, current))
+		currentBody := servedBatchEarlierDeclaration(pin.File, pin.Function, functions(current)[pin.Function])
+		must(sourceblob.ValidateCurrentSource(pin, []byte("package proof\n"+currentBody)))
 		old, err := exec.Command("git", "show", sourceblob.Predecessor+":"+pin.File).Output()
 		must(err)
 		if functions(old)[pin.Function] != pin.Before {
@@ -417,7 +463,7 @@ func runDeliveryHistoryPins() []rundelivery.Pin {
 		must(err)
 		old, err := exec.Command("git", "show", rundelivery.Predecessor+":"+pin.File).Output()
 		must(err)
-		if functions(current)[pin.Function] != pin.After || functions(old)[pin.Function] != pin.Before {
+		if servedBatchEarlierDeclaration(pin.File, pin.Function, functions(current)[pin.Function]) != pin.After || functions(old)[pin.Function] != pin.Before {
 			panic("run delivery exact live/predecessor endpoint changed: " + pin.Function)
 		}
 		runDeliveryComparison[pin.File+"/"+pin.Function] = pin.Before
@@ -447,7 +493,7 @@ func sourceForkHistoryPins() []sourcefork.Pin {
 	for _, pin := range pins {
 		current, err := os.ReadFile(pin.File)
 		must(err)
-		if functions(current)[pin.Function] != pin.After || functions(commitSourceFork(pin.File))[pin.Function] != pin.Before {
+		if servedBatchEarlierDeclaration(pin.File, pin.Function, functions(current)[pin.Function]) != pin.After || functions(commitSourceFork(pin.File))[pin.Function] != pin.Before {
 			panic("source fork exact live/predecessor endpoint changed: " + pin.Function)
 		}
 		sourceForkComparison[pin.File+"/"+pin.Function] = pin.Before
@@ -1280,6 +1326,7 @@ func currentReplacement(path, key string, after map[string]string) (string, bool
 }
 
 func currentHistoryComparison(path, key, current string) string {
+	current = servedBatchEarlierDeclaration(path, key, current)
 	if previous := sourceBlobComparison[path+"/"+key]; previous != "" {
 		return previous
 	}

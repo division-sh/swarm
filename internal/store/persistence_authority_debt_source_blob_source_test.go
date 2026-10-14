@@ -65,7 +65,11 @@ func debtSourceBlobLiveSources(root string) ([]debtRunIdentitySourceBody, error)
 		if err != nil {
 			return nil, err
 		}
-		if _, err := debtRunIdentityUniqueBodyInverse(bodies, pin, declarations[pin.Function]); err != nil {
+		current, err := debtServedObservationSourcePrevious(root, pin.File, pin.Function, declarations[pin.Function])
+		if err != nil {
+			return nil, err
+		}
+		if _, err := debtRunIdentityUniqueBodyInverse(bodies, pin, current); err != nil {
 			return nil, err
 		}
 	}
@@ -154,6 +158,7 @@ func debtSourceBlobCopySourceEvidence(t *testing.T, root, copy string) {
 			}
 		}
 	}
+	debtServedObservationCopySourceEvidence(t, root, copy)
 }
 
 // Synthetic history controls retain every unrelated older declaration; copying

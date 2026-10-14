@@ -16,7 +16,7 @@ func sourceForkLivePins(t *testing.T) []sourcefork.Pin {
 	pins := sourceForkPins(t)
 	for _, pin := range pins {
 		raw, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, raw, pin.Function) != pin.After {
+		if err != nil || servedObservationEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, raw, pin.Function)) != pin.After {
 			t.Fatal("source fork live endpoint changed:", pin.Function, err)
 		}
 	}

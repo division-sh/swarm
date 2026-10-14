@@ -482,7 +482,11 @@ func debtRunScalarSourcePins(root string) error {
 		if err != nil {
 			return err
 		}
-		previous, err := debtDeliveryStatusSourcePrevious(root, body.File, body.Function, declarations[body.Function])
+		entry, err := debtServedObservationSourcePrevious(root, body.File, body.Function, declarations[body.Function])
+		if err != nil {
+			return err
+		}
+		previous, err := debtDeliveryStatusSourcePrevious(root, body.File, body.Function, entry)
 		if err != nil || previous != body.After || debtBaselineChecksum([]byte(body.Before)) != body.SHA256 {
 			return fmt.Errorf("run scalar source owner/assertion/cut changed: %s/%s: %v", body.File, body.Function, err)
 		}
@@ -625,7 +629,11 @@ func debtDeliveryStatusSourcePins(root string) error {
 				return err
 			}
 		}
-		previous, err := debtSourceForkSourcePrevious(root, body.File, body.Function, files[body.File][body.Function])
+		entry, err := debtServedObservationSourcePrevious(root, body.File, body.Function, files[body.File][body.Function])
+		if err != nil {
+			return err
+		}
+		previous, err := debtSourceForkSourcePrevious(root, body.File, body.Function, entry)
 		if err != nil {
 			return err
 		}
@@ -1138,6 +1146,10 @@ func debtWriterStageSourcePins(root string, forward bool) error {
 		}
 		source := body.String()
 		if forward {
+			source, err = debtServedObservationSourcePrevious(root, "internal/serveapp/main_runtime_test.go", fn.Name.Name, source)
+			if err != nil {
+				return err
+			}
 			source, err = debtRequestKeySourcePrevious(root, "internal/serveapp/main_runtime_test.go", fn.Name.Name, source)
 			if err != nil {
 				return err
@@ -1323,7 +1335,11 @@ func debtServedDebugSourcePins(root string) error {
 				return err
 			}
 		}
-		previous, err := debtSourceForkSourcePrevious(root, body.File, body.Function, loaded[body.File][body.Function])
+		entry, err := debtServedObservationSourcePrevious(root, body.File, body.Function, loaded[body.File][body.Function])
+		if err != nil {
+			return err
+		}
+		previous, err := debtSourceForkSourcePrevious(root, body.File, body.Function, entry)
 		if err != nil {
 			return err
 		}
@@ -1420,7 +1436,11 @@ func debtWorkflowStateSourcePins(root string) error {
 		return err
 	}
 	declarations, err := debtServedDebugDeclarations(filepath.Join(root, debtWorkflowStateFile))
-	if err != nil || declarations[debtWorkflowStateFunction] != body.After {
+	if err != nil {
+		return err
+	}
+	entry, err := debtServedObservationSourcePrevious(root, debtWorkflowStateFile, debtWorkflowStateFunction, declarations[debtWorkflowStateFunction])
+	if err != nil || entry != body.After {
 		return fmt.Errorf("workflow-state mixed-completion current source changed: %v", err)
 	}
 	return debtWorkflowStateNativePins(root)
@@ -2121,6 +2141,9 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return fmt.Errorf("debt baseline bootstrap source changed")
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
+		return nil
+	}
+	if debtServedObservationCollectorTransition(base, current, trusted, head, retirement...) {
 		return nil
 	}
 	if debtPublicRollbackCollectorTransition(base, current, trusted, head, retirement...) || debtRunIdentityCollectorTransition(base, current, trusted, head, retirement...) || debtReviewedCollectorTransition(base, current, trusted, head) || debtDeliveryRetirementCollectorTransition(base, current, trusted, head, retirement...) || debtEventNameCollectorTransition(base, current, trusted, head, retirement...) || debtWorkflowStateCollectorTransition(base, current, trusted, head, retirement...) {

@@ -58,6 +58,9 @@ func debtPublicRollbackNativePins(root string) error {
 		{"internal/store/storetest/template_delivery_storage.go", "2c9f647c25d159eaf7a8a7a4827e49fcc0dea4c00bd5222649fafdfec7fdca42"},
 	} {
 		raw, err := os.ReadFile(filepath.Join(root, pin[0]))
+		if err == nil && pin[0] != "internal/store/storetest/template_delivery_storage.go" {
+			raw, err = debtServedObservationNativePrevious(pin[0], raw)
+		}
 		if err != nil || debtBaselineChecksum(raw) != pin[1] {
 			return fmt.Errorf("rollback native endpoint changed: %s: %v", pin[0], err)
 		}

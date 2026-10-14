@@ -91,6 +91,7 @@ func TestPersistenceAuthorityDebtDeliveryStatusSourcePinsAndCompositionFailClose
 		}
 		debtWriteModuleSource(t, copy, path, string(raw))
 	}
+	debtServedObservationCopySourceEvidence(t, root, copy)
 	if err := debtDeliveryStatusSourcePins(copy); err != nil {
 		t.Fatal(err)
 	}

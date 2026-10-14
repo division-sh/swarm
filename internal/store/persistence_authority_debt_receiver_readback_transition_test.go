@@ -9,7 +9,7 @@ import (
 )
 
 const debtReceiverReadbackCollectorTo = "84f9fb91bc1ec1d9f0da71ddd541905b995ada9cf6bae14960c642dca9d5596a"
-const debtActiveCollectorTo = debtPublicRollbackCollectorTo
+const debtActiveCollectorTo = debtServedObservationCollectorTo
 const debtReceiverReadbackManifest = "tools/fixture-codemod/pipeline-observations/family145-receiver-public-readback-preimages.json"
 
 func TestPersistenceAuthorityDebtReceiverReadbackCompositionPreservesOriginalSource(t *testing.T) {
@@ -24,7 +24,7 @@ func TestPersistenceAuthorityDebtReceiverReadbackCompositionPreservesOriginalSou
 		t.Fatal(err)
 	}
 	current := bodies[function]
-	previous, err := debtReceiverReadbackSourcePrevious(root, file, function, current)
+	previous, err := debtReceiverReadbackLatestSourcePrevious(root, file, function, current)
 	if err != nil || debtBaselineChecksum([]byte(previous)) != "2f7cfdc7e2c181c70f1eea10c631613f3dcb6b63d9d3ba3b8b9e79e58461d27c" {
 		t.Fatal("exact new body did not preserve its original served-debug receipt:", err)
 	}
@@ -36,12 +36,12 @@ func TestPersistenceAuthorityDebtReceiverReadbackCompositionPreservesOriginalSou
 			continue
 		}
 		mutant := strings.Replace(current, cut, "foreignReceiverSource", 1)
-		if _, err := debtReceiverReadbackSourcePrevious(root, file, function, mutant); err == nil {
+		if _, err := debtReceiverReadbackLatestSourcePrevious(root, file, function, mutant); err == nil {
 			t.Fatal("changed owner/identity/assertion/wait body normalized:", cut)
 		}
 	}
 	for _, location := range [][2]string{{file + ".foreign", function}, {file, function + "Foreign"}} {
-		if same, err := debtReceiverReadbackSourcePrevious(root, location[0], location[1], current); err != nil || same != current {
+		if same, err := debtReceiverReadbackLatestSourcePrevious(root, location[0], location[1], current); err != nil || same != current {
 			t.Fatal("foreign file/declaration entered the one-body inverse")
 		}
 	}
@@ -51,13 +51,13 @@ func TestPersistenceAuthorityDebtReceiverReadbackCompositionPreservesOriginalSou
 		t.Fatal(err)
 	}
 	debtWriteModuleSource(t, copy, debtReceiverReadbackManifest, string(manifest)+" ")
-	if _, err := debtReceiverReadbackSourcePrevious(copy, file, function, current); err == nil {
+	if _, err := debtReceiverReadbackLatestSourcePrevious(copy, file, function, current); err == nil {
 		t.Fatal("changed manifest admitted")
 	}
 	if err := os.Remove(filepath.Join(copy, debtReceiverReadbackManifest)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := debtReceiverReadbackSourcePrevious(copy, file, function, current); err == nil {
+	if _, err := debtReceiverReadbackLatestSourcePrevious(copy, file, function, current); err == nil {
 		t.Fatal("missing source manifest admitted")
 	}
 	if err := os.Remove(filepath.Join(copy, file)); err != nil {
@@ -66,6 +66,14 @@ func TestPersistenceAuthorityDebtReceiverReadbackCompositionPreservesOriginalSou
 	if err := debtServedDebugSourcePins(copy); err == nil {
 		t.Fatal("missing current source admitted")
 	}
+}
+
+func debtReceiverReadbackLatestSourcePrevious(root, file, function, current string) (string, error) {
+	previous, err := debtServedObservationPreviousForKeys(root, file, function, current, debtServedObservationOlderSourceKeys[:])
+	if err != nil {
+		return "", err
+	}
+	return debtReceiverReadbackSourcePrevious(root, file, function, previous)
 }
 
 func debtReceiverReadbackSourceCopy(t *testing.T, root, file string) string {

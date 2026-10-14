@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedsettlement"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/sourceblob"
 )
 
@@ -23,7 +25,8 @@ func sourceBlobLivePins(t *testing.T) []sourceblob.Pin {
 		if err != nil {
 			t.Fatal("source blob live endpoint changed:", pin.Function, err)
 		}
-		if err := sourceblob.ValidateCurrentSource(pin, raw); err != nil {
+		current := servedObservationEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, raw, pin.Function))
+		if err := sourceblob.ValidateCurrentSource(pin, []byte("package proof\n"+current)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -80,6 +83,7 @@ func sourceBlobPriorHistory(t *testing.T, recipes bool) []byte {
 
 func sourceBlobEarlierHistory(t *testing.T, current []byte, recipes bool) []byte {
 	t.Helper()
+	current = servedObservationEarlierHistory(t, current, recipes)
 	raw, err := sourceblob.RestoreHistory(current, sourceBlobPriorHistory(t, recipes), sourceBlobLivePins(t), recipes)
 	if err != nil {
 		t.Fatal(err)
@@ -107,6 +111,7 @@ func family145CheckSourceBlobWholeRule(t *testing.T, file, function, current str
 
 func sourceBlobPreviousDeclaration(t *testing.T, file, function, current string) string {
 	t.Helper()
+	current = servedObservationEarlierSource(t, file, function, current)
 	for _, pin := range sourceBlobLivePins(t) {
 		if pin.File == file && pin.Function == function {
 			if current != pin.After {
@@ -128,7 +133,22 @@ func sourceBlobPinnedInventory() []sourceblob.Pin {
 
 var sourceBlobInventoryPins = sourceBlobPinnedInventory()
 
+var servedObservationInventoryPins = servedObservationPinnedInventory()
+
+func servedObservationPinnedInventory() []runphysical.Pin {
+	pins, err := servedsettlement.ReadBatchPins("../../..")
+	if err != nil {
+		panic(err)
+	}
+	return pins
+}
+
 func sourceBlobEarlierInventoryEndpoint(file, function, current string) string {
+	var err error
+	current, err = servedsettlement.EarlierSource(servedObservationInventoryPins, file, function, current)
+	if err != nil {
+		panic(err)
+	}
 	for _, pin := range sourceBlobInventoryPins {
 		if pin.File == file && pin.Function == function && pin.After == current {
 			return pin.Before
@@ -149,11 +169,13 @@ func TestFamily145SourceBlobHistoryRestoresCompletePriorLedgersAndAllThreePriorS
 		if recipes {
 			current, wantCount = recipeBytes, 1520
 		}
+		live := current
+		current = servedObservationEarlierHistory(t, current, recipes)
 		var before, after, composed, restored []map[string]any
 		for _, input := range []struct {
 			raw  []byte
 			rows *[]map[string]any
-		}{{prior, &before}, {current, &after}, {expected, &composed}, {sourceBlobEarlierHistory(t, current, recipes), &restored}} {
+		}{{prior, &before}, {current, &after}, {expected, &composed}, {sourceBlobEarlierHistory(t, live, recipes), &restored}} {
 			if err := json.Unmarshal(input.raw, input.rows); err != nil {
 				t.Fatal(err)
 			}
