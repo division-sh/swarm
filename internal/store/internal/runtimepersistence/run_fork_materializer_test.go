@@ -1048,6 +1048,7 @@ func newRunForkReplaySettlementFixture(t *testing.T) runForkReplaySettlementFixt
 	entityID := uuid.NewString()
 	rootEventID := uuid.NewString()
 	at := time.Unix(1700000840, 0).UTC()
+	commitPreparedWorkflowAggregateFixture(t, ctx, store, sourceRunID, activationReadySourceInstance(entityID, at), at)
 	seedActivationReadySourceState(t, ctx, db, sourceRunID, entityID, rootEventID, at)
 
 	sourceID := uuid.NewString()
@@ -1205,6 +1206,7 @@ func TestRunForkActivation_ReplaysSafePendingDeliveryWithForkLocalLineage(t *tes
 	entityID := uuid.NewString()
 	rootEventID := uuid.NewString()
 	at := time.Unix(1700000850, 0).UTC()
+	commitPreparedWorkflowAggregateFixture(t, ctx, pg, sourceRunID, activationReadySourceInstance(entityID, at), at)
 	seedActivationReadySourceState(t, ctx, db, sourceRunID, entityID, rootEventID, at)
 	eventID := uuid.NewString()
 	// Route-bearing replay is gated by historical route proof; this fixture isolates direct pending-delivery replay.
@@ -2122,18 +2124,23 @@ func (n *sqlNullTime) Scan(value any) error {
 func seedActivationReadySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
+	selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
+	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
+	commitPreparedWorkflowAggregateFixture(t, ctx, selected, sourceRunID, activationReadySourceInstance(entityID, at), at)
 	seedActivationReadySourceState(t, ctx, db, sourceRunID, entityID, eventID, at)
 }
 
-func seedActivationReadySourceState(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
-	t.Helper()
-	commitPreparedWorkflowAggregateFixture(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), sourceRunID, runtimepipeline.WorkflowInstance{
+func activationReadySourceInstance(entityID string, at time.Time) runtimepipeline.WorkflowInstance {
+	return runtimepipeline.WorkflowInstance{
 		InstanceID: "1", StorageRef: "flow-a/1", EntityID: entityID, EntityType: "fork_entity",
 		WorkflowName: "flow-a", WorkflowVersion: "1", Mode: "static", StageDefined: true,
 		Name: "Activation Entity", CurrentState: "ready", Fields: map[string]any{"name": "Activation Entity"},
 		CreatedAt: at, EnteredStageAt: at,
-	}, at)
+	}
+}
+
+func seedActivationReadySourceState(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
+	t.Helper()
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.ready", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
