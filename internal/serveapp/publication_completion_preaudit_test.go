@@ -390,7 +390,6 @@ type publicationAuditStore interface {
 	runtimemanager.SelectedContractRouteRecoveryReader
 	pipeline.WorkflowTargetPersistenceReader
 	pipeline.WorkflowPersistenceOwner
-	RequirePublicationRunActive(context.Context, string) error
 }
 
 type publicationAuditPublication struct {
