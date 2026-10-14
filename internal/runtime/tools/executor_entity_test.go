@@ -577,11 +577,28 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 func TestRoleScopedEntityTools_EntitylessDeliveryPreservesTriggerEligibility(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator"}
 	bundle := loadRoleScopedEntityToolBundle(t, actor)
-	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	var selected sparseEntityToolStore = storetest.StartPostgresRuntimeStore(t)
+	ctx := seedEntityToolSourceRun(t, selected, bundle)
+	fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
+	if contract, found := entityruntime.ResolveForActor(fixture.source, actor); found {
+		actor = entityToolFixtureActor(t, fixture.source, actor, entityToolTestRunID, contract.FlowID, contract.FlowID+"/inst-1")
+	}
+	ctx = runtimetools.WithActor(ctx, actor)
+	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
+		EntityStore: selected, EntityWriter: fixture.pipeline, WorkflowSource: semanticview.Wrap(bundle),
+		AllowInternalLegacyEntityTools: false,
+	})
 	currentID := uuid.NewString()
-	seedEntityStateRow(t, db, currentID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
-		"status": "open", "business_brief": map[string]any{"summary": "trigger-owned", "confidence": 1},
-	}, time.Now().UTC())
+	imported, err := fixture.owner.SetupScenarioEntities(ctx, runtimepipeline.ScenarioSetupRequest{
+		RunID: entityToolTestRunID, CreatedAt: time.Now().UTC(),
+		Entities: []runtimepipeline.ScenarioSetupEntityRequest{{
+			Alias: currentID, EntityID: currentID, FlowInstance: "validation/inst-1", EntityType: "validation_case", CurrentState: "queued",
+			Fields: map[string]any{"status": "open", "business_brief": map[string]any{"summary": "trigger-owned", "confidence": 1}},
+		}},
+	})
+	if err != nil || !imported.Acknowledged || len(imported.Entities) != 1 || imported.Entities[0].EntityID != currentID {
+		t.Fatalf("import exact triggering entity: result=%+v err=%v", imported, err)
+	}
 	currentActor, found := runtimetools.ActorFromContext(ctx)
 	if !found || currentActor.EffectiveEntityID() != "" {
 		t.Fatal("eligibility proof requires an exactly entityless actor")
@@ -616,7 +633,16 @@ func TestRoleScopedEntityTools_EntitylessDeliveryPreservesTriggerEligibility(t *
 		})
 	}
 	foreignID := uuid.NewString()
-	seedEntityStateRow(t, db, foreignID, "", "run-root", "default", "queued", map[string]any{"status": "foreign"}, time.Now().UTC())
+	imported, err = fixture.owner.SetupScenarioEntities(ctx, runtimepipeline.ScenarioSetupRequest{
+		RunID: entityToolTestRunID, CreatedAt: time.Now().UTC(),
+		Entities: []runtimepipeline.ScenarioSetupEntityRequest{{
+			Alias: foreignID, EntityID: foreignID, FlowInstance: "run-root", EntityType: "default", CurrentState: "queued",
+			Fields: map[string]any{"status": "foreign"},
+		}},
+	})
+	if err != nil || !imported.Acknowledged || len(imported.Entities) != 1 || imported.Entities[0].EntityID != foreignID {
+		t.Fatalf("import exact foreign entity: result=%+v err=%v", imported, err)
+	}
 	for _, denied := range []struct {
 		name   string
 		source events.RoutingSource

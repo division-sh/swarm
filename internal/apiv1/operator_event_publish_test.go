@@ -1265,7 +1265,21 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDD
 		t.Fatalf("event row = name:%q entity:%q flow:%q, want mixed root-receiver projection despite payload entity_id %s/%s", gotEventName, gotEntityID, gotFlowInstance, entityID, flowInstance)
 	}
 	wantRootTarget := events.RouteIdentity{FlowID: root.Identity().TemplateID, FlowInstance: root.Identity().InstancePath}
-	deliveryTargets := postgresEventDeliveryTargetRoutes(t, db, eventID)
+	deliveryRows, err := storetest.ReadReceiverDeliveryStorage(ctx, pg, runID)
+	if err != nil {
+		t.Fatalf("load committed root/template collision delivery targets: %v", err)
+	}
+	var deliveryTargets []events.RouteIdentity
+	for _, row := range deliveryRows {
+		if row.EventID != eventID {
+			continue
+		}
+		var ownership events.DeliveryTargetOwnership
+		if err := json.Unmarshal([]byte(row.Target), &ownership); err != nil {
+			t.Fatalf("decode delivery target %s: %v", row.Target, err)
+		}
+		deliveryTargets = append(deliveryTargets, ownership.Route())
+	}
 	rootTargets, targetlessTargets := 0, 0
 	for _, target := range deliveryTargets {
 		switch target {
