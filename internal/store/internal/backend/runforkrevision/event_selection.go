@@ -4,8 +4,6 @@ import "github.com/division-sh/swarm/internal/events"
 
 const excludedEventName = string(events.EventTypePlatformRuntimeLog)
 
-const eventProjectionSource = "(SELECT * FROM events WHERE event_name <> '" + excludedEventName + "') e"
-
 // CapturesEvent selects fork evidence from an already-validated event record.
 // Runtime logs remain physical diagnostics, including their event-count delta.
 func CapturesEvent(eventName string) bool {
