@@ -103,3 +103,25 @@ func renderChannelOnboardingResult(out, errOut io.Writer, output cliOutputOption
 		writeChannelNativeQualification(w, result)
 	}, func() ([]string, error) { return []string{result.Operation.OperationID}, nil })
 }
+
+func validateCLIChannelProgress(result channelOnboardingResult) (bool, error) {
+	pending, err := result.SessionPreparationPending()
+	if err != nil || result.Operation.OperationID == "" || result.Operation.Revision < 1 || !result.Operation.Phase.Valid() {
+		return false, errors.New("channel onboarding response has invalid progress evidence")
+	}
+	return pending, nil
+}
+
+func validateCLIChannelContinuation(previous, next channelOnboardingResult) (bool, error) {
+	if next.Operation.OperationID != previous.Operation.OperationID {
+		return false, errors.New("channel retry changed the retained operation")
+	}
+	pending, err := validateCLIChannelProgress(next)
+	if err != nil || pending {
+		return pending, err
+	}
+	if next.Operation.Revision == previous.Operation.Revision && next.Operation.Phase == previous.Operation.Phase {
+		return false, fmt.Errorf("channel onboarding is blocked in %s; retry after resolving the reported prerequisite", next.Operation.Phase)
+	}
+	return false, nil
+}
