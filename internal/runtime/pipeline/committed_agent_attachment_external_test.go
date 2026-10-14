@@ -260,6 +260,61 @@ func provePartialAttachmentContinuation(t *testing.T, ctx context.Context, selec
 	}
 	t.Logf("partial continuation: exact delivery before Start=%+v", before)
 	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(am.FinalizeCommittedAgentReadiness))
+	proof, err := selected.events.ProveHandoff(ctx, event.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	componentOwner := bus.DeliveryContinuationOwner()
+	if err := componentOwner.AcceptCommitted([]deliverylifecycle.DurableHandoffProof{proof}); err != nil {
+		t.Fatal(err)
+	}
+	// This component call closes its carrier before the coordinator is created.
+	result := bus.DispatchDeliveryContinuation(ctx, event, route)
+	if result.Disposition() != deliverycontinuation.DispatchDeferred || result.WakeAuthority() != deliverycontinuation.DispatchWakeAgentRouteLifecycle {
+		t.Fatalf("accepted partial continuation: disposition=%v failure=%v", result.Disposition(), result.Failure())
+	}
+	partial, err := selected.events.Snapshot(ctx, id)
+	if err != nil || !reflect.DeepEqual(before, partial) {
+		t.Fatalf("deferral acquired or mutated missing actor's delivery: %+v err=%v", partial, err)
+	}
+	if err := componentOwner.Release(id); err != nil {
+		t.Fatal(err)
+	}
+	matched := 0
+	var cursor deliverylifecycle.ContinuationCursor
+	for {
+		page, err := selected.events.ScanDeliveryContinuations(ctx, authority, cursor, 32)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range page.Items {
+			if item.DeliveryID != id {
+				continue
+			}
+			matched++
+			_, timer := item.Wake.After()
+			if matched != 1 || item.Disposition != deliverylifecycle.ClaimDeferred || timer || item.Invariant != nil ||
+				!item.Snapshot.Authority.Equal(authority) || item.Event.ID() != event.ID() ||
+				item.Snapshot.Status != deliverylifecycle.StatusPending || item.Snapshot.ClaimVersion != 0 {
+				t.Fatalf("native partial continuation must defer this exact unclaimed delivery without a timer: %+v matches=%d", item, matched)
+			}
+			t.Logf("partial continuation: native scan delivery=%s disposition=%v timer=%t claim_version=%d", item.DeliveryID, item.Disposition, timer, item.Snapshot.ClaimVersion)
+		}
+		if page.Exhausted {
+			break
+		}
+		if page.Next == cursor {
+			t.Fatal("partial continuation scan did not advance to exhaustion")
+		}
+		cursor = page.Next
+	}
+	if matched != 1 {
+		t.Fatalf("native partial continuation scan lost its exact delivery: matches=%d", matched)
+	}
+	partial, err = selected.events.Snapshot(ctx, id)
+	if err != nil || !reflect.DeepEqual(before, partial) {
+		t.Fatalf("native scan acquired or mutated missing actor's delivery: %+v err=%v", partial, err)
+	}
 	dispatch := &partialAttachmentDispatch{bus: bus, results: make(chan deliverycontinuation.DispatchResult, 8)}
 	coordinator, err := deliverycontinuation.New(selected.events, selected.events, authority, pipelineExternalTestWorkOwnerForSource(t, fact), dispatch, nil)
 	if err != nil {
@@ -283,17 +338,13 @@ func provePartialAttachmentContinuation(t *testing.T, ctx context.Context, selec
 	if err := coordinator.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	t.Log("partial continuation: Start returned; first DispatchResult wait entered")
+	t.Log("partial continuation: Start returned with held actor; native deferral precedes dispatch")
 	select {
 	case result := <-dispatch.results:
-		t.Logf("partial continuation: first DispatchResult disposition=%v wake=%v failure=%v", result.Disposition(), result.WakeAuthority(), result.Failure())
-		if result.Disposition() != deliverycontinuation.DispatchDeferred || result.WakeAuthority() != deliverycontinuation.DispatchWakeAgentRouteLifecycle {
-			t.Fatalf("accepted partial continuation: disposition=%v failure=%v", result.Disposition(), result.Failure())
-		}
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
+		t.Fatalf("coordinator dispatched before native readiness: disposition=%v failure=%v", result.Disposition(), result.Failure())
+	default:
 	}
-	partial, err := selected.events.Snapshot(ctx, id)
+	partial, err = selected.events.Snapshot(ctx, id)
 	if err != nil || !reflect.DeepEqual(before, partial) {
 		t.Fatalf("deferral acquired or mutated missing actor's delivery: %+v err=%v", partial, err)
 	}
