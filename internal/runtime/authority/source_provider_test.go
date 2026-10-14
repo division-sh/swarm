@@ -91,6 +91,27 @@ func TestNewSourceProvider_UsesEffectiveSystemNodeProduces(t *testing.T) {
 	}
 }
 
+func TestNewSourceProvider_UsesCanonicalGuardEscalationProducer(t *testing.T) {
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"worker": {EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
+				"work.started": {
+					Guard: &runtimecontracts.GuardSpec{Check: "payload.score > 0", OnFail: "escalate:work.escalated"},
+					Emit:  runtimecontracts.EmitSpec{Event: "work.completed"},
+				},
+			}},
+		},
+	}
+	provider := NewSourceProvider(semanticview.Wrap(bundle))
+	got := provider.ProducerEventsForRole("worker")
+	if len(got) != 2 || got[0] != "work.completed" || got[1] != "work.escalated" {
+		t.Fatalf("ProducerEventsForRole(worker) = %#v, want exactly the handler and guard events", got)
+	}
+	if got := provider.ProducerEventsForRole("unbound"); len(got) != 0 {
+		t.Fatalf("foreign role gained guard production authority: %#v", got)
+	}
+}
+
 func TestNewSourceProvider_AuthorizeNotifyHuman(t *testing.T) {
 	provider := NewSourceProvider(authorityTestSource(&runtimecontracts.WorkflowContractBundle{
 		Agents: map[string]runtimecontracts.AgentRegistryEntry{

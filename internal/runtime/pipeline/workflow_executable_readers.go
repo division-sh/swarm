@@ -8,7 +8,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -624,7 +623,11 @@ func WorkflowHandlerEmitExpressions(source semanticview.Source, node runtimeiden
 	}
 	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler, plans) {
 		before := len(out)
-		appendSpec(site.Source, site.SiteKey, site.Spec, WorkflowEntityFieldLifecycleEmitFields, site.ItemAlias)
+		kind, phase := site.Source, WorkflowEntityFieldLifecycleEmitFields
+		if site.Source == "handler.guard.on_fail.escalate" {
+			kind, phase = "guard escalation", WorkflowEntityFieldLifecycleGuardEscalation
+		}
+		appendSpec(kind, site.SiteKey, site.Spec, phase, site.ItemAlias)
 		for index := before; index < len(out); index++ {
 			out[index].EmitSite = &site
 			if strings.HasSuffix(site.SiteKey, ".emit_template") {
@@ -644,13 +647,6 @@ func WorkflowHandlerEmitExpressions(source semanticview.Source, node runtimeiden
 			for index := before; index < len(out); index++ {
 				out[index].ItemType = plan.ItemType.Clone()
 				out[index].HasItemType = true
-			}
-		}
-	}
-	if handler.Guard != nil {
-		if failureSpec, err := handler.Guard.FailureSpec(); err == nil {
-			if parsed, err := runtimeengine.GuardFailureFromSpec(failureSpec); err == nil && parsed.Action == runtimeengine.GuardFailureEscalate {
-				appendSpec("guard escalation", "guard.on_fail.escalate", failureSpec.EscalationEmitSpec(), WorkflowEntityFieldLifecycleGuardEscalation, "")
 			}
 		}
 	}

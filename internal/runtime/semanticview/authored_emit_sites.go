@@ -116,11 +116,6 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler, b.source.FanOutPlansForHandler(node, handlerEvent)) {
 		add(site.Source, site.SiteKey, site.RuleID, site.RuleRef, site.Spec)
 	}
-	if handler.Guard != nil {
-		if emitSpec := authoredGuardEscalationEmitSpec(handler.Guard); !emitSpec.Empty() {
-			add("handler.guard.on_fail.escalate", "handler.guard.on_fail.escalate", handler.Guard.ID, runtimeidentity.DeclarationIdentity{}, emitSpec)
-		}
-	}
 }
 
 func executableNodeFlowPath(source Source, node runtimeidentity.ExecutableNode) string {
@@ -152,15 +147,4 @@ func authoredEmitSiteIdentity(flowID, scopeKey, nodeKey, handlerEvent, siteKey s
 		strings.TrimSpace(handlerEvent),
 		strings.TrimSpace(siteKey),
 	}, "\x1f")
-}
-
-func authoredGuardEscalationEmitSpec(guard *runtimecontracts.GuardSpec) runtimecontracts.EmitSpec {
-	if guard == nil {
-		return runtimecontracts.EmitSpec{}
-	}
-	failureSpec, err := guard.FailureSpec()
-	if err != nil || failureSpec.Action != runtimecontracts.GuardFailureActionEscalate {
-		return runtimecontracts.EmitSpec{}
-	}
-	return failureSpec.EscalationEmitSpec()
 }

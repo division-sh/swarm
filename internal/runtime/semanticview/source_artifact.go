@@ -340,10 +340,7 @@ func (s bundleSource) ExecutableNodeEffectiveProduces(node runtimeidentity.Execu
 	if !ok {
 		return nil
 	}
-	return append(
-		runtimecontracts.EffectiveSystemNodeProduces(s.bundle, node, record.Entry),
-		s.bundle.GeneratedActivityEventsForExecutableNode(node)...,
-	)
+	return runtimecontracts.EffectiveSystemNodeProduces(s.bundle, node, record.Entry)
 }
 func (s bundleSource) AuthoredEventEntries() map[string]runtimecontracts.EventCatalogEntry {
 	return s.bundle.AuthoredEventEntries()

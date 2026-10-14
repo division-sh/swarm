@@ -82,6 +82,8 @@ func entityAssignmentReaderPoint(handler c.SystemNodeEventHandler, reader Workfl
 		point.RuleIndex = site.RuleIndex
 		point.RuleRef = site.RuleRef
 		switch site.Source {
+		case "handler.guard.on_fail.escalate":
+			point.Step = engine.StepGuard
 		case "handler.emit", "handler.on_success":
 		case "handler.rules.emit":
 			point.RuleKind = c.HandlerAdvanceCarrierRules

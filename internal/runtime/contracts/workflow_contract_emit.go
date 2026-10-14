@@ -99,6 +99,11 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler, plans []FanOutC
 			out = append(out, site)
 		}
 	}
+	if handler.Guard != nil {
+		if failure, err := handler.Guard.FailureSpec(); err == nil && failure.Action == GuardFailureActionEscalate {
+			add("handler.guard.on_fail.escalate", "handler.guard.on_fail.escalate", handler.Guard.ID, runtimeidentity.DeclarationIdentity{}, -1, failure.EscalationEmitSpec())
+		}
+	}
 	return out
 }
 

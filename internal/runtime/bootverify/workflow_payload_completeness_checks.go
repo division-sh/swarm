@@ -7,7 +7,6 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -181,13 +180,6 @@ func payloadCompletenessEmitSites(source semanticview.Source, node runtimeidenti
 	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler, source.FanOutPlansForHandler(node, triggerEventType)) {
 		add(payloadCompletenessDeclarativeSiteLabel(site), site.Spec, nil)
 	}
-	if handler.Guard != nil {
-		if failureSpec, err := handler.Guard.FailureSpec(); err == nil {
-			if parsed, err := runtimeengine.GuardFailureFromSpec(failureSpec); err == nil && parsed.Action == runtimeengine.GuardFailureEscalate {
-				add("guard.on_fail.escalate", failureSpec.EscalationEmitSpec(), nil)
-			}
-		}
-	}
 	return out
 }
 
@@ -276,6 +268,8 @@ func payloadCompletenessEntitySchemaState(entityFields map[string]struct{}, fiel
 
 func payloadCompletenessDeclarativeSiteLabel(site runtimecontracts.HandlerDeclarativeEmitSite) string {
 	switch strings.TrimSpace(site.Source) {
+	case "handler.guard.on_fail.escalate":
+		return "guard.on_fail.escalate"
 	case "handler.rules.emit":
 		return payloadCompletenessRuleLabel("rules", site.RuleIndex, site.RuleID, "emit")
 	case "handler.rules.fan_out.emit":

@@ -273,18 +273,21 @@ func EffectiveSystemNodeSubscriptions(node SystemNodeContract) []string {
 func EffectiveSystemNodeProduces(bundle *WorkflowContractBundle, owner runtimeidentity.ExecutableNode, node SystemNodeContract) []string {
 	seen := make(map[string]struct{})
 	out := make([]string, 0, len(node.EventHandlers))
+	var candidates []string
 	for _, eventType := range sortedContractKeys(node.EventHandlers) {
-		for _, emitted := range HandlerEmitEvents(node.EventHandlers[eventType], bundle.FanOutPlansForHandler(owner, eventType)) {
-			emitted = strings.TrimSpace(emitted)
-			if emitted == "" {
-				continue
-			}
-			if _, ok := seen[emitted]; ok {
-				continue
-			}
-			seen[emitted] = struct{}{}
-			out = append(out, emitted)
+		candidates = append(candidates, HandlerEmitEvents(node.EventHandlers[eventType], bundle.FanOutPlansForHandler(owner, eventType))...)
+	}
+	candidates = append(candidates, bundle.GeneratedActivityEventsForExecutableNode(owner)...)
+	for _, emitted := range candidates {
+		emitted = strings.TrimSpace(emitted)
+		if emitted == "" {
+			continue
 		}
+		if _, ok := seen[emitted]; ok {
+			continue
+		}
+		seen[emitted] = struct{}{}
+		out = append(out, emitted)
 	}
 	sort.Strings(out)
 	return out
