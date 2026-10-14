@@ -55,16 +55,16 @@ additive_document_families:
     denominator_rule: "additive to the historical 45-row/11-decoder/67-site/24-root receipt; no reset or closure claim for #2300/#2287/#2293, #2486 or #2487"
 
 inventory:
-  custom_unmarshal_total: 11
+  custom_unmarshal_total: 12
   custom_unmarshal_reachable: 9
   custom_unmarshal_retired: 0
-  custom_unmarshal_excluded: 2
+  custom_unmarshal_excluded: 3
   custom_unmarshal_breakdown:
     contracts: 9
     flowmodel_policy: 0
     agentintent: 0
     channel_pack: 0
-    deployment_config_excluded: 2
+    deployment_config_excluded: 3
   yaml_node_functions_in_contracts: 215
   yaml_tagged_fields_in_contracts_flowmodel_agentintent: 926
   yaml_tagged_fields_in_reachable_pack_layers: 167
@@ -730,7 +730,10 @@ decoder_retired: {}
 
 decoder_exclusions:
   internal/config/config.go:
-    deployment.swarm_yaml: [WorkspaceConfig, RuntimeConfig]
+    # S6 #2269:6161191417; user profile-only rulings6159811720/6159864124.
+    # Reject retired policy keys before projection, including direct YAML use.
+    # Not a bundle-loader decoder; covered by TestS6ProviderLimits*.
+    deployment.swarm_yaml: [WorkspaceConfig, RuntimeConfig, LLMProviderLimitPolicy]
 
 decode_bypasses:
   # Counts are production source lines containing yaml.Node selectors outside internal/yamlsource.
