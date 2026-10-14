@@ -17,8 +17,10 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
@@ -1516,6 +1518,20 @@ func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettl
 	}
 	actor.ID, actor.Identity, actor.Role, actor.Type = agentID, identity, "worker", "managed"
 	actor.Model, actor.Memory, actor.FlowID, actor.FlowPath = "regular", memory, "global", flowInstance
+	if len(actor.Config) == 0 {
+		actor.Config = json.RawMessage(`{}`)
+	}
+	if actor.ExecutionMode == "live" {
+		profile, err := selection.ResolveActiveBackend(actor.ResolvedLLMBackend)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolved, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, nil, actor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		actor = resolved.Actor
+	}
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, actor),
 		Status: "active", StartedAt: now,
@@ -1577,9 +1593,21 @@ func claimCompletionOriginEventForTest(t testing.TB, ctx context.Context, store 
 		Recipient:     events.MustAgentDeliveryRecipient(authority.Normal.Identity.AgentID()),
 		AgentIdentity: authority.Normal.Identity,
 	}
-	if err := commitSemanticEventFixtureWithRoutes(ctx, store, originEvent, []events.DeliveryRoute{route}); err != nil {
-		t.Fatalf("commit completion origin delivery: %v", err)
+	ctx = runtimecorrelation.WithRunID(ctx, originEvent.RunID())
+	source, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("completion origin fixture requires its exact source")
 	}
+	selected, ok := store.(agentFixtureFlowStore)
+	if !ok {
+		t.Fatalf("completion origin fixture requires native lifecycle roles: %T", store)
+	}
+	deliveryAuthority := admitAgentClaimProfileAuthority(t, ctx, selected, source)
+	originEvent, err := bindSemanticEventFixturePayload(originEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitSelectedReceiverClaimEvent(t, ctx, selected, originEvent, route, deliveryAuthority)
 	claimed, err := claimDeliveryFixture(ctx, store.(deliveryFixtureStore), originEvent, route)
 	if err != nil {
 		t.Fatalf("claim completion origin delivery: %v", err)
