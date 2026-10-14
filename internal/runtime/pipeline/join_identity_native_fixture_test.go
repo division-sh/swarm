@@ -67,6 +67,14 @@ func newNativeExactWorkflowJoinHarness(t *testing.T, backend, flowID, initial st
 	flow := pipelineDeclarationFlowPath(flowID)
 	fields := map[string]any{"expected": append([]any{}, members...)}
 	if flowID != "" {
+		root := correlation.RunIDFromContext(h.ctx)
+		// A caller-supplied component prerequisite, without root entry effects.
+		if err := h.fixture.Construct(h.ctx, materializedWorkflowInstanceForSource(t, source, h.ctx, WorkflowInstance{
+			InstanceID: root, StorageRef: root, EntityID: root, WorkflowName: ".", WorkflowVersion: bundle.WorkflowVersion(),
+			CurrentState: "dispatching", Fields: map[string]any{"expected": []any{"a", "b"}}, EntityType: "test_entity",
+		})); err != nil {
+			t.Fatalf("construct explicit parent component: %v", err)
+		}
 		key := uuid.NewString()
 		h.path = flowID + "/" + key
 		fields["instance_key"] = key
