@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"sort"
@@ -1525,7 +1526,11 @@ func (m *DockerManager) RunDocker(ctx context.Context, args ...string) (string, 
 		return m.RunDockerFn(ctx, args...)
 	}
 	cmd := exec.CommandContext(ctx, m.cfg.DockerBin, args...)
+	started := time.Now()
+	deadline, hasDeadline := ctx.Deadline()
+	fmt.Fprintf(os.Stderr, "DIAG2659 docker-start at=%s bin=%q args=%q ctx_err=%v has_deadline=%t deadline=%s\n", started.UTC().Format(time.RFC3339Nano), m.cfg.DockerBin, args, ctx.Err(), hasDeadline, deadline.UTC().Format(time.RFC3339Nano))
 	raw, err := cmd.CombinedOutput()
+	fmt.Fprintf(os.Stderr, "DIAG2659 docker-return started=%s at=%s elapsed=%s bin=%q args=%q err=%v ctx_err=%v bytes=%d\n", started.UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano), time.Since(started), m.cfg.DockerBin, args, err, ctx.Err(), len(raw))
 	out := strings.TrimSpace(string(raw))
 	if err != nil {
 		if out == "" {

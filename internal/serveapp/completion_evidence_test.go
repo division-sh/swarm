@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
@@ -48,7 +49,9 @@ type completion2270Transport struct {
 func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 	image := ""
 	if os.Getenv("SWARM_TEST_WORKSPACE_MCP_DOCKER") == "1" {
+		t.Logf("DIAG2659 image-build-start at=%s", time.Now().UTC().Format(time.RFC3339Nano))
 		image = buildCompletion2270CLIImage(t)
+		t.Logf("DIAG2659 image-build-return at=%s", time.Now().UTC().Format(time.RFC3339Nano))
 	}
 	for _, backend := range servedparity.RequiredBackends {
 		for _, profileID := range []string{llmselection.BackendAnthropic, llmselection.BackendOpenAICompatible, llmselection.BackendOpenAIResponses, llmselection.BackendClaudeCLI} {
@@ -154,15 +157,19 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 					previous := http.DefaultTransport
 					http.DefaultTransport = completion2270Transport{t: t, profile: profileID, requests: &requests, base: previous}
 					t.Cleanup(func() { http.DefaultTransport = previous })
+					t.Logf("DIAG2659 serve-start at=%s", time.Now().UTC().Format(time.RFC3339Nano))
 					rt.Endpoint, rt.Runtime = startServedEventPublishFollowUpRuntime(t, opts)
+					t.Logf("DIAG2659 serve-ready-return at=%s", time.Now().UTC().Format(time.RFC3339Nano))
 					if profileID == llmselection.BackendClaudeCLI {
 						requireCompletion2270NoBusinessStartup(t, rt, &invocationProof)
+						t.Logf("DIAG2659 startup-business-exclusion-complete at=%s", time.Now().UTC().Format(time.RFC3339Nano))
 					}
 					if kind == "selected" {
 						proveCompletion2270ServedSelected(t, rt, selected, profileID, &requests, &invocationProof)
 						return
 					}
 					proveCompletion2270ServedOrdinary(t, rt, profileID, wantObserved, &requests, &invocationProof)
+					t.Logf("DIAG2659 ordinary-business-readback-complete at=%s", time.Now().UTC().Format(time.RFC3339Nano))
 				})
 			}
 		}

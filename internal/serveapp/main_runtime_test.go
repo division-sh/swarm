@@ -5010,9 +5010,12 @@ func startServedEventPublishFollowUpRuntime(t *testing.T, opts cliapp.ServeOptio
 		if stopped {
 			return
 		}
+		t.Logf("DIAG2659 before-join at=%s transcript:\n%s", time.Now().UTC().Format(time.RFC3339Nano), out.String())
 		cancelServe()
+		t.Logf("DIAG2659 cancellation-issued at=%s", time.Now().UTC().Format(time.RFC3339Nano))
 		select {
 		case code := <-done:
+			t.Logf("DIAG2659 join-return at=%s code=%d", time.Now().UTC().Format(time.RFC3339Nano), code)
 			t.Logf("stock-pq investigation served exit=%d transcript:\n%s", code, out.String())
 			if code != 0 {
 				t.Errorf("Run exit code = %d\noutput:\n%s", code, out.String())
