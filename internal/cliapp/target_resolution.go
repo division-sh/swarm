@@ -73,19 +73,19 @@ type doctorTargetReport struct {
 	Owner           string                     `json:"owner"`
 	Mode            string                     `json:"mode"`
 	OK              bool                       `json:"ok"`
-	SwarmDir        doctorTargetPath           `json:"swarm_dir"`
-	Project         doctorTargetProject        `json:"project"`
-	API             doctorTargetAPI            `json:"api"`
-	Context         doctorTargetContext        `json:"context"`
-	ProjectOwner    doctorTargetPendingFact    `json:"project_owner"`
-	RuntimeIdentity doctorTargetPendingFact    `json:"runtime_identity"`
-	Store           doctorTargetPath           `json:"store"`
-	Data            doctorTargetPath           `json:"data"`
+	SwarmDir        *doctorTargetPath          `json:"swarm_dir,omitempty"`
+	Project         *doctorTargetProject       `json:"project,omitempty"`
+	API             *doctorTargetAPI           `json:"api,omitempty"`
+	Context         *doctorTargetContext       `json:"context,omitempty"`
+	ProjectOwner    *doctorTargetPendingFact   `json:"project_owner,omitempty"`
+	RuntimeIdentity *doctorTargetPendingFact   `json:"runtime_identity,omitempty"`
+	Store           *doctorTargetPath          `json:"store,omitempty"`
+	Data            *doctorTargetPath          `json:"data,omitempty"`
 	Env             []localPreflightFinding    `json:"env,omitempty"`
 	Config          []localPreflightFinding    `json:"config,omitempty"`
 	ConfigSource    *doctorConfigSource        `json:"config_source,omitempty"`
-	CommandClasses  []doctorTargetCommandClass `json:"command_classes"`
-	SplitSiblings   []string                   `json:"split_siblings"`
+	CommandClasses  []doctorTargetCommandClass `json:"command_classes,omitempty"`
+	SplitSiblings   []string                   `json:"split_siblings,omitempty"`
 }
 
 type doctorTargetPath struct {
@@ -209,14 +209,15 @@ func buildDoctorTargetReport(ctx context.Context, repo string, cmd *cobra.Comman
 	}
 	projectOwner := doctorTargetProjectOwner(ctx, repo, cmd, opts, store)
 	data := resolveDoctorTargetData(repo, opts, localStateProject, runtimeCfg)
+	runtimeIdentity := doctorTargetRuntimeIdentityFact(registryReport)
 	return doctorTargetReport{
 		Owner:    localTargetOwner,
 		Mode:     "target",
 		OK:       true,
-		SwarmDir: doctorTargetPath{Path: swarmDir.Path, Source: swarmDir.Source, Status: "resolved"},
-		Project:  project,
-		API:      api,
-		Context: doctorTargetContext{
+		SwarmDir: &doctorTargetPath{Path: swarmDir.Path, Source: swarmDir.Source, Status: "resolved"},
+		Project:  &project,
+		API:      &api,
+		Context: &doctorTargetContext{
 			ProjectScoped: doctorTargetProjectContextFact(ctx, newLocalContextRegistry(swarmDir.Path), project),
 			SelectedGlobal: doctorTargetPendingFact{
 				Status: registryReport.Status,
@@ -225,10 +226,10 @@ func buildDoctorTargetReport(ctx context.Context, repo string, cmd *cobra.Comman
 			},
 			Registry: registryReport,
 		},
-		ProjectOwner:    projectOwner,
-		RuntimeIdentity: doctorTargetRuntimeIdentityFact(registryReport),
-		Store:           store,
-		Data:            data,
+		ProjectOwner:    &projectOwner,
+		RuntimeIdentity: &runtimeIdentity,
+		Store:           &store,
+		Data:            &data,
 		CommandClasses:  doctorTargetCommandClasses(),
 		SplitSiblings:   doctorTargetSplitSiblings(),
 	}, nil
@@ -649,6 +650,9 @@ func writeDoctorTargetText(out io.Writer, report doctorTargetReport) {
 		for _, finding := range report.Config {
 			fmt.Fprintln(out, formatLocalPreflightFinding(report.Mode, finding))
 		}
+	}
+	if report.SwarmDir == nil {
+		return // Selected config was refused before target inspection.
 	}
 	fmt.Fprintf(out, "swarm_dir: %s (source: %s)\n", report.SwarmDir.Path, report.SwarmDir.Source)
 	if report.Project.Status == "resolved" {

@@ -308,6 +308,95 @@ func TestSingleDeploymentConfigDoctorRetainsCapturedAdmission(t *testing.T) {
 	}
 }
 
+func TestSingleDeploymentConfigDoctorTargetOmitsUninspectedFacts(t *testing.T) {
+	for _, format := range []string{"text", "json"} {
+		for _, selection := range []string{"missing", "malformed", "runtime_invalid", "shape_invalid", "null_container", "broken_link", "inspection_loop", "valid_with_env_blocker"} {
+			t.Run(selection+"/"+format, func(t *testing.T) {
+				isolateCLIAPIConfigEnv(t)
+				setDoctorEmptyProviderSecrets(t)
+				t.Setenv("SWARM_MONITOR_DR", "unread-env-value-canary")
+				root := t.TempDir()
+				selected := filepath.Join(t.TempDir(), "operator.yaml")
+				swarmDir := filepath.Join(t.TempDir(), "uninspected-state")
+				body := "{}\n"
+				switch selection {
+				case "malformed":
+					body = "llm: [\n"
+				case "runtime_invalid":
+					body = "llm:\n  session:\n    rotate_after_turns: 0\n"
+				case "shape_invalid":
+					body = "connection:\n  api_server: [not, text]\n"
+				case "null_container":
+					body = "runtime: null\n"
+				case "broken_link":
+					if err := os.Symlink(filepath.Join(root, "missing.yaml"), selected); err != nil {
+						t.Fatal(err)
+					}
+				case "inspection_loop":
+					loop := filepath.Join(root, "loop")
+					if err := os.Symlink("loop", loop); err != nil {
+						t.Fatal(err)
+					}
+					selected = filepath.Join(loop, "operator.yaml")
+				}
+				if selection != "missing" && selection != "broken_link" && selection != "inspection_loop" {
+					writeSingleDeploymentConfig(t, selected, body)
+				}
+				args := []string{"--config", selected, "--swarm-dir", swarmDir, "doctor", "--target"}
+				if format == "json" {
+					args = append(args, "--json")
+				}
+				code, stdout, stderr := executeRootCommandWithInput(context.Background(), root, args, "")
+				if code != CLIExitRuntime || stderr != "" || strings.Contains(stdout, "unread-env-value-canary") {
+					t.Fatalf("structured refusal changed: code=%d stdout=%s stderr=%s", code, stdout, stderr)
+				}
+				if !strings.Contains(stdout, selected) || !strings.Contains(stdout, "SWARM_MONITOR_DR") {
+					t.Fatalf("source/env findings missing: %s", stdout)
+				}
+				inspected := selection == "valid_with_env_blocker"
+				if format == "json" {
+					var report map[string]json.RawMessage
+					if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+						t.Fatalf("decode target refusal: %v; %s", err, stdout)
+					}
+					for _, key := range []string{"owner", "mode", "ok", "env", "config", "config_source"} {
+						if _, exists := report[key]; !exists {
+							t.Fatalf("missing refusal field %q: %s", key, stdout)
+						}
+					}
+					for _, key := range []string{"swarm_dir", "project", "api", "context", "project_owner", "runtime_identity", "store", "data", "command_classes", "split_siblings"} {
+						if _, exists := report[key]; exists != inspected {
+							t.Fatalf("target fact %q present=%t, inspected=%t: %s", key, exists, inspected, stdout)
+						}
+					}
+					var typed doctorTargetReport
+					if err := json.Unmarshal([]byte(stdout), &typed); err != nil || typed.OK || typed.Owner != localTargetOwner || typed.Mode != "target" || typed.ConfigSource == nil {
+						t.Fatalf("target report identity/refusal changed: %+v; %v", typed, err)
+					}
+					configReport := LocalPreflightReport{Findings: typed.Config}
+					if !inspected && !configReport.HasBlockers() {
+						t.Fatalf("config refusal lost its blocker: %s", stdout)
+					}
+				} else {
+					for _, label := range []string{"swarm_dir:", "project_root:", "api_server:", "rpc_endpoint:", "api_auth:", "target_reason:", "project_context:", "Project owner:", "selected_global_context:", "descriptor_registry:", "runtime_identity:", "store_path:", "data_dir:", "command_classes:", "split_siblings:"} {
+						if strings.Contains(stdout, label) != inspected {
+							t.Fatalf("target fact %q rendered, inspected=%t: %s", label, inspected, stdout)
+						}
+					}
+					if !strings.Contains(stdout, "swarm target diagnostics: failed") || !strings.Contains(stdout, "env:\n") || !strings.Contains(stdout, "config:\n") {
+						t.Fatalf("structured source/env refusal lost: %s", stdout)
+					}
+				}
+				if !inspected {
+					if _, err := os.Stat(swarmDir); !os.IsNotExist(err) {
+						t.Fatalf("refused config touched target state: %v", err)
+					}
+				}
+			})
+		}
+	}
+}
+
 func boolCount(value bool) int {
 	if value {
 		return 1
