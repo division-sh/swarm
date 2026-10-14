@@ -106,6 +106,20 @@ func seedDeliveryStateFixture(
 	if err := commitDeliveryObligationFixture(ctx, store, event, route); err != nil {
 		t.Fatalf("commit delivery fixture %s/%s: %v", event.ID(), route.Recipient.ID(), err)
 	}
+	return settleDeliveryStateFixture(t, ctx, store, event, route, state, failure)
+}
+
+func settleDeliveryStateFixture(
+	t testing.TB,
+	ctx context.Context,
+	store deliveryFixtureStore,
+	event events.Event,
+	route events.DeliveryRoute,
+	state runtimedelivery.State,
+	failure *runtimefailures.Envelope,
+) runtimedelivery.Snapshot {
+	t.Helper()
+	route = canonicalDeliveryFixtureRoute(t, event.RunID(), route)
 	if state == runtimedelivery.StateQueued {
 		return loadDeliverySnapshotFixture(t, ctx, store, event.ID(), route)
 	}

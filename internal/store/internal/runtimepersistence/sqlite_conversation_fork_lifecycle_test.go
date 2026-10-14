@@ -279,7 +279,7 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 	if err != nil {
 		t.Fatalf("conversation fork source identity: %v", err)
 	}
-	seedTestAgentRow(t, ctx, s.backend.ConstructionHandle(), false, identity, "active")
+	seedConversationForkSourceAgent(t, ctx, s, identity)
 	statements := []struct {
 		query string
 		args  []any
