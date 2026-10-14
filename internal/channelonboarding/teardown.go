@@ -85,7 +85,7 @@ type ReserveTeardownRequest struct {
 	ExpectedBindingRevision int64
 	ExpectedProofRevision   int64
 	RequestedAt             time.Time
-	Logout                  *SessionLogoutTarget
+	Logout                  *SessionLogoutPreparation
 }
 
 func (r ReserveTeardownRequest) Validate() error {
