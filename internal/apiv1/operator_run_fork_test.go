@@ -478,7 +478,7 @@ func (o *recordingRunForkOperations) LoadForkOperationByID(_ context.Context, id
 }
 
 func (o *recordingRunForkOperations) activate(request runfork.ForkOperationRequest, result RunForkExecutionResult) error {
-	point := runfork.RunForkPoint{Kind: runfork.RunForkPointKind(result.ForkPointKind), Revision: result.ForkRevision, EventID: result.ForkEventID}
+	point := runfork.RunForkPoint{Kind: runfork.RunForkPointKind(result.ForkPointKind), Input: request.ForkEventID, Revision: result.ForkRevision, EventID: result.ForkEventID}
 	request.ResolvedPoint = &point
 	canonical, hash, err := request.Canonical()
 	if err != nil {

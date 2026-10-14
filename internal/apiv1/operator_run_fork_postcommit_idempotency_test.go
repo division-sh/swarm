@@ -24,11 +24,11 @@ func TestOperatorRunForkActivatedPostCommitErrorReplaysWithoutReexecution(t *tes
 				Owner: runfork.RunForkSelectedContractExecutionOwner,
 				Materialization: runfork.RunForkMaterialization{
 					SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID,
-					ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: runForkTestEventID, Revision: 1},
+					ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Input: req.At, EventID: runForkTestEventID, Revision: 1},
 				},
 				Activation: runfork.RunForkActivation{
 					SourceRunID: runForkTestSourceRunID, ForkRunID: runForkTestForkRunID,
-					ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: runForkTestEventID, Revision: 1},
+					ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Input: req.At, EventID: runForkTestEventID, Revision: 1},
 					Activated: true, ForkRunStatus: runfork.RunForkActivatedStatus,
 					SourceRunStatus: runfork.RunForkSourceFrozenStatus, SourceFrozen: true,
 				},
@@ -58,6 +58,45 @@ func TestOperatorRunForkActivatedPostCommitErrorReplaysWithoutReexecution(t *tes
 	result, ok := replay.(RunForkExecutionResult)
 	if !ok || result.ForkRunID != runForkTestForkRunID || result.ExecutedEventCount != 2 || !result.activationAcknowledged {
 		t.Fatalf("durable replay lost acknowledged activation: %#v", replay)
+	}
+}
+
+func TestOperatorRunForkRecordingKeepsOriginalSelector(t *testing.T) {
+	for _, selector := range []string{"", runForkTestEventID} {
+		name := "omitted"
+		if selector != "" {
+			name = "explicit"
+		}
+		t.Run(name, func(t *testing.T) {
+			operations := newRecordingRunForkOperations()
+			executor := &recordingRunForkExecutor{operations: operations, result: runForkActivatedTestResult()}
+			opts := RunForkHandlerOptions{
+				Availability: &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
+					runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+				}},
+				Operations: operations, Executor: executor,
+			}
+			request := runForkOperationTestRequest("original-selector", name)
+			if selector == "" {
+				delete(request.Params, "fork_event_id")
+			}
+			first, err := invokeRunForkOperation(opts, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original := executor.last.ForkOperation
+			record, found := operations.byID[original.OperationID]
+			_, hash, err := original.Canonical()
+			if err != nil || !found || record.Validate() != nil || original.ResolvedPoint != nil || record.SemanticHash != hash ||
+				record.Request.ForkEventID != selector || record.Request.ResolvedPoint == nil || record.Request.ResolvedPoint.Input != selector ||
+				record.Result == nil || record.Result.ForkPoint.Input != selector || record.Result.ForkPoint.EventID != runForkTestEventID {
+				t.Fatalf("recording changed the original selector/hash: original=%+v record=%+v found=%v err=%v", original, record, found, err)
+			}
+			replayed, err := invokeRunForkOperation(opts, request)
+			if err != nil || !reflect.DeepEqual(replayed, first) || executor.calls != 1 || len(operations.byID) != 1 {
+				t.Fatalf("exact selector replay changed the operation: first=%+v replay=%+v calls=%d err=%v", first, replayed, executor.calls, err)
+			}
+		})
 	}
 }
 
