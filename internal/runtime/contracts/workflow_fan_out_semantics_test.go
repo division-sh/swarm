@@ -343,7 +343,7 @@ func TestFanOutCompiledPlanRegistryOwnsEverySiteAndReturnsImmutableCopies(t *tes
 	handler := SystemNodeEventHandler{
 		FanOut:     newSpec(),
 		Rules:      []HandlerRuleEntry{{Condition: "payload.ready", FanOut: newSpec()}},
-		OnComplete: []HandlerRuleEntry{{Condition: "else", FanOut: newSpec()}},
+		OnComplete: []HandlerRuleEntry{{FanOut: newSpec()}},
 	}
 	bundle := fanOutPlanRegistryTestBundle(t, handler)
 	if failures := bundle.PrepareFanOutPlans(); len(failures) != 0 {
