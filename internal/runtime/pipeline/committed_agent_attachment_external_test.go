@@ -119,6 +119,9 @@ func TestCommittedAgentReadinessPartialAttachmentBothStores(t *testing.T) {
 				if err != nil || !committed.Acknowledged {
 					t.Fatalf("native construction: acknowledged=%t err=%v", committed.Acknowledged, err)
 				}
+				if committed.Plan.CreatingInput.EventID != event.ID() {
+					t.Fatal("native construction lost its original creating input")
+				}
 				requireIndexedConstructionFixture(t, ctx, selected.persistence, source, runID, instance)
 				finished := make(chan error, 1)
 				go func() { finished <- am.FinalizeCommittedFlowInstanceActivation(ctx, committed) }()
@@ -141,6 +144,17 @@ func TestCommittedAgentReadinessPartialAttachmentBothStores(t *testing.T) {
 				for _, agent := range row.Plan.Agents {
 					if agent.Identity.AgentID() == missing {
 						route = events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(missing), AgentIdentity: agent.Identity}
+						actor := events.RouteIdentity{FlowID: instance.TemplateID, FlowInstance: instance.InstancePath, EntityID: agent.EntityID}
+						if agent.EntityID == "" {
+							route.Target = events.MustEntitylessReceiverTarget(actor)
+						} else {
+							route.Target = events.MustExistingEntityTarget(actor)
+						}
+						construction := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: instance.TemplateID, FlowInstance: instance.InstancePath, EntityID: instance.EntityID})
+						route.Initialization, err = events.AdmitStoredFlowReceiverInitialization(runID, committed.Plan.CreatingInput.EventID, construction, agent.Identity.Route)
+						if err != nil {
+							t.Fatal(err)
+						}
 					}
 				}
 				if route.AgentIdentity.IsZero() {
@@ -228,14 +242,21 @@ func provePartialAttachmentContinuation(t *testing.T, ctx context.Context, selec
 	if !authority.SourceArtifact().Matches(fact) {
 		t.Fatal("partial continuation bus source disagrees with its context")
 	}
+	lifecycle, found, err := selected.events.(manager.AgentLifecycleStateReader).LoadAgentLifecycleState(ctx, configs[0].Identity)
+	if err != nil || !found || lifecycle.Phase != manager.AgentLifecycleRunning || lifecycle.RunMode != manager.AgentRunModeStandard ||
+		lifecycle.ProcessBinding.GenerationGrantID != authority.ExecutionID() || lifecycle.ProcessBinding.RuntimeGeneration != authority.Generation() {
+		t.Fatalf("partial continuation requires its exact normal admitted sibling: state=%+v found=%t err=%v", lifecycle, found, err)
+	}
+	if err := route.Initialization.ValidateRoute(route); err != nil {
+		t.Fatal(err)
+	}
 	t.Log("partial continuation: native authority activation started")
 	if err := selected.events.ActivateDeliveryAuthority(ctx, authority); err != nil {
 		t.Fatal(err)
 	}
 	t.Log("partial continuation: native authority activation returned")
-	route.Target = events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "orders", FlowInstance: "orders/one"})
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.requested", "operator", "", []byte(`{"order_id":"one"}`), 0, route.AgentIdentity.RunID,
-		events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: "orders", FlowInstance: "orders/one"}), time.Now().UTC())
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, route.Target.Route()), time.Now().UTC())
 	ack := pipelineobligation.Acknowledged("pipeline_persisted")
 	t.Log("partial continuation: native publication started")
 	storetest.CommitNativeDeliveryPublication(t, ctx, selected.events.(storetest.DeliveryPublicationFixtureStore), storetest.AdmitNativeDeliveryEvent(t, event), []events.DeliveryRoute{route}, authority, nil)
@@ -447,6 +468,18 @@ func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gat
 	if _, err := grant.AdmitExecution(ctx); err != nil {
 		t.Fatal(err)
 	}
+	evidence, err := grant.Evidence()
+	if err != nil || evidence.State != startupownership.GrantAdmitted || evidence.SelectedFork != nil ||
+		evidence.BundleHash != fact.BundleHash() || evidence.SourceSetRevision != set.Revision {
+		t.Fatalf("partial attachment requires its exact admitted live grant: %+v err=%v", evidence, err)
+	}
+	authority, err := deliverylifecycle.NewNormalExecutionAuthority(fact, evidence.GrantID, evidence.RuntimeGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bus.SetDeliveryAuthority(authority); err != nil {
+		t.Fatal(err)
+	}
 	admission, err := agenttopology.StaticAdmission(set.Revision, fact.BundleHash(), agenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatal(err)
@@ -468,11 +501,11 @@ func newPartialAttachmentManager(t *testing.T, ctx context.Context, selected gat
 			t.Error(err)
 		}
 	})
-	execution, err := managedexecution.New(managedexecution.KindNormalRuntime, "partial-attachment", 1, "", "partial-attachment", fact.BundleHash(), nil)
+	execution, err := managedexecution.New(managedexecution.KindNormalRuntime, evidence.GrantID, evidence.RuntimeGeneration, "", "partial-attachment", fact.BundleHash(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := am.RunAuthoritativeDeliveryOnly(managedexecution.WithAdmission(ctx, execution)); err != nil {
+	if err := am.Run(managedexecution.WithAdmission(ctx, execution)); err != nil {
 		t.Fatal(err)
 	}
 	return am, grant, releaseProcess
