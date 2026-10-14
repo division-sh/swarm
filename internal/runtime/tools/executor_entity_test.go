@@ -2,7 +2,6 @@ package tools_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -19,7 +18,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -31,7 +29,6 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -512,14 +509,14 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 		"query_entities",
 	}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor)
-	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	currentID := uuid.NewString()
 	foreignID := uuid.NewString()
-	seedEntityStateRow(t, db, currentID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
+	seedEntityStateRow(t, ctx, currentID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "valid", "confidence": 1},
 	}, time.Now().UTC())
-	seedEntityStateRow(t, db, foreignID, "", "run-root", "default", "queued", map[string]any{
+	seedEntityStateRow(t, ctx, foreignID, "", "run-root", "default", "queued", map[string]any{
 		"status": "root",
 	}, time.Now().UTC())
 
@@ -581,7 +578,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 	if errs := runtimetools.ValidateGeneratedToolSchemaClosureForSource(source); len(errs) > 0 {
 		t.Fatalf("ValidateGeneratedToolSchemaClosureForSource errors = %#v", errs)
 	}
-	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	ctx, exec, selected := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	names := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActor(actor))
 	saveSchema := names["save_validation_case_business_brief"].Schema.(map[string]any)
 	if err := runtimetools.ValidatePayloadAgainstSchema(saveSchema, map[string]any{
@@ -595,7 +592,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 	}
 
 	entityID := uuid.NewString()
-	seedEntityStateRow(t, db, entityID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
+	seedEntityStateRow(t, ctx, entityID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "before", "confidence": 1},
 	}, time.Now().UTC())
@@ -620,7 +617,7 @@ func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(
 	}); err == nil {
 		t.Fatal("runtime execution accepted undeclared nested key")
 	}
-	if got := persistedEntityField(t, db, entityID, "business_brief"); strings.Contains(got, "after") || strings.Contains(got, "runtime bypass") {
+	if got := persistedEntityField(t, ctx, selected, entityID, "business_brief"); strings.Contains(got, "after") || strings.Contains(got, "runtime bypass") {
 		t.Fatalf("runtime validation failure still mutated entity: %s", got)
 	}
 }
@@ -649,7 +646,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 		"query_entities",
 	}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor)
-	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	ctx, exec, selected := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	currentID := uuid.NewString()
 	siblingID := uuid.NewString()
 	foreignID := uuid.NewString()
@@ -658,14 +655,16 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "before", "confidence": 1},
 	}, time.Now().UTC())
-	seedEntityStateRow(t, db, siblingID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
+	if err := storetest.InsertEntityToolSiblingAliasFault(ctx, fixture.selected, entityToolTestRunID, currentID, siblingID, map[string]any{
 		"status":         "open",
 		"business_brief": map[string]any{"summary": "sibling", "confidence": 2},
-	}, time.Now().UTC())
-	seedEntityStateRow(t, db, foreignID, "", "other/inst-1", "other_case", "queued", map[string]any{
+	}, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	seedEntityStateRow(t, ctx, foreignID, "", "other/inst-1", "other_case", "queued", map[string]any{
 		"status": "foreign",
 	}, time.Now().UTC())
-	if _, err := db.Exec(`UPDATE entity_state SET bookkeeping = '{"private_fact":"must-not-leak"}'::jsonb WHERE entity_id = $1::uuid`, currentID); err != nil {
+	if err := storetest.SetEntityToolPrivateBookkeepingFault(ctx, selected, currentID); err != nil {
 		t.Fatalf("inject role-scoped hostile bookkeeping: %v", err)
 	}
 	currentCtx := runtimebus.WithInboundEvent(ctx, eventtest.RunCreatingRootIngress(
@@ -701,7 +700,7 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 	if !ok || strings.TrimSpace(asString(brief["summary"])) != "after" {
 		t.Fatalf("read current business_brief = %#v, want updated current entity", got)
 	}
-	if got := persistedEntityField(t, db, siblingID, "business_brief"); strings.Contains(got, "after") {
+	if got := persistedEntityField(t, ctx, selected, siblingID, "business_brief"); strings.Contains(got, "after") {
 		t.Fatalf("generated save touched sibling entity: %s", got)
 	}
 
@@ -736,12 +735,12 @@ func TestRoleScopedEntityTools_CurrentEntityBindingAndBypassRejection(t *testing
 func TestRoleScopedEntityTools_ReadsLargeValidationCaseWithoutLoss(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator"}
 	bundle := loadRoleScopedEntityToolBundle(t, actor)
-	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
 	entityID := uuid.NewString()
 	brief := strings.Repeat("business brief ", 1800)
 	specProblem := strings.Repeat("problem statement ", 900)
 	specApproach := strings.Repeat("technical approach ", 900)
-	seedEntityStateRow(t, db, entityID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
+	seedEntityStateRow(t, ctx, entityID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
 		"status": "open",
 		"business_brief": map[string]any{
 			"summary":    brief,
@@ -954,7 +953,7 @@ func TestEntityTools_SaveEntityFieldAllowsNestedListWritePath(t *testing.T) {
 }
 
 func TestEntityTools_SaveEntityFieldRejectsInvalidDottedPathsBeforePersistence(t *testing.T) {
-	ctx, exec, db := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
+	ctx, exec, selected := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "tester",
 		Role:          "operator",
@@ -988,12 +987,8 @@ func TestEntityTools_SaveEntityFieldRejectsInvalidDottedPathsBeforePersistence(t
 				t.Fatalf("expected invalid_tool_input, got %v", err)
 			}
 
-			var mutationCount int
-			if err := db.QueryRowContext(ctx, `
-				SELECT COUNT(*)
-				FROM entity_mutations
-					WHERE entity_id = $1::uuid AND domain = 'authored_field' AND path = $2
-			`, entityID, tc.field).Scan(&mutationCount); err != nil {
+			mutationCount, err := storetest.CountEntityToolAuthoredPathMutations(ctx, selected, entityID, tc.field)
+			if err != nil {
 				t.Fatalf("count entity mutations: %v", err)
 			}
 			if mutationCount != 0 {
@@ -1063,7 +1058,7 @@ accounts:
 }
 
 func TestEntityTools_ReadsRejectUndeclaredStoredFields(t *testing.T) {
-	ctx, exec, db := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
+	ctx, exec, selected := newEntityToolTestHarnessWithActor(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "tester",
 		Role:          "operator",
@@ -1076,12 +1071,7 @@ func TestEntityTools_ReadsRejectUndeclaredStoredFields(t *testing.T) {
 			"score":  10.0,
 		},
 	})
-	if _, err := db.Exec(`
-		UPDATE entity_state
-		SET fields = jsonb_set(COALESCE(fields, '{}'::jsonb), '{legacy_flag}', 'true'::jsonb, true),
-		    bookkeeping = '{"private_fact":"must-not-leak"}'::jsonb
-		WHERE entity_id = $1::uuid
-	`, entityID); err != nil {
+	if err := storetest.SetEntityToolUndeclaredFieldFault(ctx, selected, entityID); err != nil {
 		t.Fatalf("inject legacy field: %v", err)
 	}
 
@@ -1219,7 +1209,7 @@ func TestEntityTools_SaveEntityField_LogsNestedMutationRow(t *testing.T) {
 }
 
 func TestEntityTools_ImportedFixtureLogsInitialMutationRows(t *testing.T) {
-	ctx, _, db := newEntityToolTestHarness(t)
+	ctx, _, selected := newEntityToolTestHarness(t)
 	entityID := seedReadOnlyImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -1228,33 +1218,13 @@ func TestEntityTools_ImportedFixtureLogsInitialMutationRows(t *testing.T) {
 		},
 	})
 
-	rows, err := db.QueryContext(ctx, `
-		SELECT domain, path, COALESCE(writer_type, ''), COALESCE(writer_id, ''), COALESCE(handler_step, '')
-		FROM entity_mutations
-		WHERE entity_id = $1::uuid
-		ORDER BY created_at ASC, mutation_id ASC
-	`, entityID)
+	rows, err := storetest.ReadEntityToolInitialMutationAuthorities(ctx, selected, entityID)
 	if err != nil {
 		t.Fatalf("query entity mutations: %v", err)
 	}
-	defer rows.Close()
-
 	fields := map[string][3]string{}
-	for rows.Next() {
-		var (
-			domain      string
-			path        string
-			writerType  string
-			writerID    string
-			handlerStep string
-		)
-		if err := rows.Scan(&domain, &path, &writerType, &writerID, &handlerStep); err != nil {
-			t.Fatalf("scan entity mutation: %v", err)
-		}
-		fields[strings.TrimSpace(domain)+":"+strings.TrimSpace(path)] = [3]string{writerType, writerID, handlerStep}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read entity mutations: %v", err)
+	for _, row := range rows {
+		fields[strings.TrimSpace(row.Domain)+":"+strings.TrimSpace(row.Path)] = [3]string{row.WriterType, row.WriterID, row.Step}
 	}
 
 	for _, want := range []string{"lifecycle_state:", "authored_field:score", "authored_field:status"} {
@@ -1269,7 +1239,7 @@ func TestEntityTools_ImportedFixtureLogsInitialMutationRows(t *testing.T) {
 }
 
 func TestEntityTools_GetEntityReturnsStoredCurrentState(t *testing.T) {
-	ctx, exec, db := newEntityToolTestHarness(t)
+	ctx, exec, selected := newEntityToolTestHarness(t)
 	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -1278,11 +1248,7 @@ func TestEntityTools_GetEntityReturnsStoredCurrentState(t *testing.T) {
 			"active": true,
 		},
 	})
-	if _, err := db.ExecContext(ctx, `
-		UPDATE entity_state
-		SET current_state = 'marginal_review'
-		WHERE entity_id = $1::uuid
-	`, entityID); err != nil {
+	if err := storetest.SetEntityToolMarginalStateFault(ctx, selected, entityID); err != nil {
 		t.Fatalf("seed current_state: %v", err)
 	}
 
@@ -1314,62 +1280,38 @@ func TestEntityTools_GetEntityReturnsForkLocalMaterializedRevision(t *testing.T)
 accounts:
   status: text
 `)
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	stateEventID := uuid.NewString()
 	forkEventID := uuid.NewString()
 	at := time.Unix(1700000710, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
-	ctx := unmanagedToolTestContext()
-	if _, err := pg.EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
-		t.Fatalf("EnsureSourceArtifact: %v", err)
-	}
 	bundleHash := bundle.SourceArtifact.BundleHash()
-	storetest.RequireDurableDataCatalog(t, ctx, pg, bundleHash)
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(unmanagedToolTestContext(), sourceRunID), fact)
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), Artifact: bundle.SourceArtifact})
 	storetest.InsertNativeCanonicalEventRecord(t, ctx, pg, eventtest.PersistedProjectionForProducer(
 		stateEventID, "fork.state_entry", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, at,
 	))
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'revision-test', 'seed', $4),
-			($1::uuid, $2::uuid, 'authored_field', 'status', 'null'::jsonb, '"open"'::jsonb, $3::uuid, 'platform', 'revision-test', 'seed', $4)
-	`, sourceRunID, entityID, stateEventID, at); err != nil {
-		t.Fatalf("seed mutations: %v", err)
+	if err := storetest.SeedEntityToolHistoricalReadOnlyImport(ctx, pg, sourceRunID, entityID, stateEventID, at); err != nil {
+		t.Fatalf("seed exact read-only source history: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'review/inst-1', 'accounts', 'queued',
-			'{}'::jsonb, '{"status":"open"}'::jsonb, '{}'::jsonb, 1, $3, $3, $3
-		)
-	`, sourceRunID, entityID, at); err != nil {
-		t.Fatalf("seed source entity_state: %v", err)
-	}
-	captureEntityToolRunForkRevision(t, db, sourceRunID)
+	storetest.CaptureSelectedRunForkRevision(t, ctx, pg, sourceRunID, runforkrevision.AllFamilies()...)
 	storetest.InsertNativeCanonicalEventRecord(t, ctx, pg, eventtest.PersistedProjectionForProducer(
 		forkEventID, "fork.field_only", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, forkAt,
 	))
-	if _, err := db.ExecContext(ctx, `
-		UPDATE entity_state
-		SET current_state = 'done', fields = '{"status":"closed"}'::jsonb, revision = 7, updated_at = $3
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
+	if err := storetest.AdvanceEntityToolForkSourceFault(ctx, pg, sourceRunID, entityID, at.Add(time.Minute)); err != nil {
 		t.Fatalf("advance live source entity_state: %v", err)
 	}
-	captureEntityToolRunForkRevision(t, db, sourceRunID)
+	storetest.CaptureSelectedRunForkRevision(t, ctx, pg, sourceRunID, runforkrevision.AllFamilies()...)
 	result, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: forkEventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork: %v", err)
@@ -1419,75 +1361,29 @@ func TestEntityTools_SaveEntityFieldAfterForkActivationUsesForkRunID(t *testing.
 accounts:
   status: text
 `)
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	sourceRunID := uuid.NewString()
 	entityID := uuid.NewString()
 	stateEventID := uuid.NewString()
 	forkEventID := uuid.NewString()
 	at := time.Unix(1700000720, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
-	ctx := unmanagedToolTestContext()
-	if _, err := pg.EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
-		t.Fatalf("EnsureSourceArtifact: %v", err)
-	}
 	bundleHash := bundle.SourceArtifact.BundleHash()
-	storetest.RequireDurableDataCatalog(t, ctx, pg, bundleHash)
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
+	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(unmanagedToolTestContext(), sourceRunID), fact)
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), Artifact: bundle.SourceArtifact})
 	storetest.InsertNativeCanonicalEventRecord(t, ctx, pg, eventtest.PersistedProjectionForProducer(
 		stateEventID, "fork.state_entry", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
 		events.EventEnvelope{EntityID: entityID, Scope: events.EventScopeEntity}, at,
 	))
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'activation-tool-test', 'seed', $4),
-			($1::uuid, $2::uuid, 'authored_field', 'status', 'null'::jsonb, '"open"'::jsonb, $3::uuid, 'platform', 'activation-tool-test', 'seed', $4)
-	`, sourceRunID, entityID, stateEventID, at); err != nil {
-		t.Fatalf("seed mutations: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'review/inst-1', 'accounts', 'queued',
-			'{}'::jsonb, '{"status":"open"}'::jsonb, '{}'::jsonb, 1, $3, $4, $4
-		)
-	`, sourceRunID, entityID, at, at); err != nil {
-		t.Fatalf("seed source entity_state: %v", err)
-	}
 	source := semanticview.Wrap(bundle)
-	parent, err := flowidentity.StandingForGeneration(source, ".", sourceRunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	instance, err := flowidentity.KeyedChild(source, parent, "review", "inst-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	instance.EntityID = entityID
-	configPayload, err := runtimepipeline.WorkflowInstanceHeaderPayloadForIdentity(instance, bundle.Semantics.Version)
-	if err != nil {
-		t.Fatal(err)
-	}
-	headerConfig, err := json.Marshal(configPayload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO flow_instances
-		(run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined,
-		 current_state, config, status, gates, bookkeeping, accumulator, revision,
-		 entered_state_at, created_at, updated_at)
-		VALUES ($1::uuid, 'review/inst-1', $2::uuid, 'accounts', 'review', 'template', TRUE,
-		 'queued', $4::jsonb, 'active', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $3, $3, $3)`, sourceRunID, entityID, at, string(headerConfig)); err != nil {
-		t.Fatalf("seed exact native fork source header: %v", err)
-	}
-	captureEntityToolRunForkRevision(t, db, sourceRunID)
+	pc := newEntityToolPipeline(t, pg, source)
+	constructEntityToolFixture(t, ctx, pg, pc, source, "review", "review/inst-1", entityID, "queued", map[string]any{"status": "open"}, at)
+	storetest.CaptureSelectedRunForkRevision(t, ctx, pg, sourceRunID, runforkrevision.AllFamilies()...)
 	storetest.InsertNativeCanonicalEventRecord(t, ctx, pg, eventtest.PersistedProjectionForProducer(
 		forkEventID, "fork.field_only", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
@@ -1507,7 +1403,7 @@ accounts:
 
 	exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
-		EntityWriter:                   newEntityToolPipeline(t, pg, semanticview.Wrap(bundle)),
+		EntityWriter:                   pc,
 		WorkflowSource:                 semanticview.Wrap(bundle),
 		AllowInternalLegacyEntityTools: true,
 	})
@@ -1527,41 +1423,26 @@ accounts:
 		t.Fatalf("save_entity_field on activated fork: %v", err)
 	}
 
-	var sourceStatus, forkStatus string
-	var forkRevision int
-	if err := db.QueryRowContext(ctx, `
-		SELECT fields->>'status'
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, sourceRunID, entityID).Scan(&sourceStatus); err != nil {
+	sourceStatus, err := storetest.ReadEntityToolStatus(ctx, pg, sourceRunID, entityID)
+	if err != nil {
 		t.Fatalf("load source entity_state: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `
-		SELECT fields->>'status', revision
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, materialized.ForkRunID, entityID).Scan(&forkStatus, &forkRevision); err != nil {
+	forkRow, err := storetest.ReadEntityToolStatusRevision(ctx, pg, materialized.ForkRunID, entityID)
+	if err != nil {
 		t.Fatalf("load fork entity_state: %v", err)
 	}
-	if sourceStatus != "open" || forkStatus != "fork-active" {
-		t.Fatalf("source/fork status = %s/%s, want open/fork-active", sourceStatus, forkStatus)
+	if sourceStatus != "open" || forkRow.Status != "fork-active" {
+		t.Fatalf("source/fork status = %s/%s, want open/fork-active", sourceStatus, forkRow.Status)
 	}
-	if forkRevision != 2 {
-		t.Fatalf("fork revision = %d, want 2 after fork-local write", forkRevision)
+	if forkRow.Revision != 2 {
+		t.Fatalf("fork revision = %d, want 2 after fork-local write", forkRow.Revision)
 	}
-	var forkMutationCount, sourceMutationCount int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM entity_mutations
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid AND domain = 'authored_field' AND path = 'status' AND writer_type = 'agent' AND handler_step = 'save_entity_field'
-	`, materialized.ForkRunID, entityID).Scan(&forkMutationCount); err != nil {
+	forkMutationCount, err := storetest.CountEntityToolAgentStatusMutations(ctx, pg, materialized.ForkRunID, entityID)
+	if err != nil {
 		t.Fatalf("count fork status mutation: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM entity_mutations
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid AND domain = 'authored_field' AND path = 'status' AND writer_type = 'agent' AND handler_step = 'save_entity_field'
-	`, sourceRunID, entityID).Scan(&sourceMutationCount); err != nil {
+	sourceMutationCount, err := storetest.CountEntityToolAgentStatusMutations(ctx, pg, sourceRunID, entityID)
+	if err != nil {
 		t.Fatalf("count source status mutation: %v", err)
 	}
 	if forkMutationCount != 1 || sourceMutationCount != 0 {
@@ -1569,23 +1450,8 @@ accounts:
 	}
 }
 
-func captureEntityToolRunForkRevision(t *testing.T, db *sql.DB, runID string) {
-	t.Helper()
-	tx, err := db.BeginTx(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("begin entity-tool run-fork revision: %v", err)
-	}
-	defer tx.Rollback()
-	if _, err := runforkrevision.Capture(context.Background(), tx, runID, runforkrevision.AllFamilies()...); err != nil {
-		t.Fatalf("capture entity-tool run-fork revision: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit entity-tool run-fork revision: %v", err)
-	}
-}
-
 func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
-	ctx, exec, db := newEntityToolTestHarness(t)
+	ctx, exec, selected := newEntityToolTestHarness(t)
 	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "review/inst-1",
 		"fields": map[string]any{
@@ -1594,11 +1460,7 @@ func TestEntityTools_SearchAndQueryUseStoredCurrentState(t *testing.T) {
 			"active": true,
 		},
 	})
-	if _, err := db.ExecContext(ctx, `
-		UPDATE entity_state
-		SET current_state = 'marginal_review'
-		WHERE entity_id = $1::uuid
-	`, entityID); err != nil {
+	if err := storetest.SetEntityToolMarginalStateFault(ctx, selected, entityID); err != nil {
 		t.Fatalf("seed current_state: %v", err)
 	}
 
@@ -1740,15 +1602,15 @@ signal:
 `,
 		},
 	})
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "researcher",
 		Role:          "researcher",
 		Tools:         []string{"query_entities", "query_metrics", "search_entities"},
 	}, bundle)
 	subjectID := uuid.NewString()
-	seedEntityStateRow(t, db, uuid.NewString(), subjectID, "discovery/run-1", "campaign", "active", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
-	seedEntityStateRow(t, db, uuid.NewString(), subjectID, "signal-search/run-1", "signal", "active", map[string]any{
+	seedEntityStateRow(t, ctx, uuid.NewString(), subjectID, "discovery/run-1", "campaign", "active", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, ctx, uuid.NewString(), subjectID, "signal-search/run-1", "signal", "active", map[string]any{
 		"signal_strength": 80,
 		"processed":       false,
 		"status":          "new",
@@ -1853,14 +1715,14 @@ child_subject:
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", root, err)
 	}
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
 	rootID := uuid.NewString()
 	childID := uuid.NewString()
-	seedEntityStateRow(t, db, rootID, rootID, ".", "root_subject", "active", map[string]any{
+	seedEntityStateRow(t, ctx, rootID, rootID, ".", "root_subject", "active", map[string]any{
 		"status": "root",
 		"score":  7,
 	}, time.Now().UTC().Truncate(time.Second))
-	seedEntityStateRow(t, db, childID, childID, "child/run-1", "child_subject", "active", map[string]any{
+	seedEntityStateRow(t, ctx, childID, childID, "child/run-1", "child_subject", "active", map[string]any{
 		"status": "child",
 		"score":  99,
 	}, time.Now().UTC().Truncate(time.Second))
@@ -2192,14 +2054,14 @@ foreign:
 `,
 		},
 	})
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analyzer",
 		Role:          "analyzer",
 		Tools:         []string{"save_entity_field", "get_entity"},
 	}, bundle)
 	entityID := uuid.NewString()
-	seedEntityStateRow(t, db, entityID, entityID, "other-flow/inst-1", "foreign", "queued", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, ctx, entityID, entityID, "other-flow/inst-1", "foreign", "queued", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
 
 	_, err := exec.Execute(ctx, "save_entity_field", map[string]any{
 		"entity_id": entityID,
@@ -2236,18 +2098,18 @@ foreign:
 		Role:          "analyzer",
 		Tools:         []string{"save_entity_field", "get_entity"},
 	}
-	_, db, _ := testutil.StartPostgres(t)
 	bus := &entityToolRuntimeLogBus{}
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	ensureEntityToolTestRun(t, pg)
+	pg := storetest.StartPostgresRuntimeStore(t)
+	ctx := seedEntityToolSourceRun(t, pg, bundle)
+	fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
 	exec := runtimetools.NewExecutorWithOptions(bus, runtimetools.ExecutorOptions{
 		EntityStore:                    pg,
-		EntityWriter:                   newEntityToolPipeline(t, pg, semanticview.Wrap(bundle)),
+		EntityWriter:                   fixture.pipeline,
 		WorkflowSource:                 semanticview.Wrap(bundle),
 		AllowInternalLegacyEntityTools: true,
 	})
 	entityID := uuid.NewString()
-	seedEntityStateRow(t, db, entityID, entityID, "other-flow/inst-1", "foreign", "queued", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, ctx, entityID, entityID, "other-flow/inst-1", "foreign", "queued", map[string]any{"status": "open"}, time.Now().UTC().Truncate(time.Second))
 
 	actor = entityToolFixtureActor(t, semanticview.Wrap(bundle), actor, entityToolTestRunID, "analyzer-flow", "analyzer-flow/inst-1")
 	_, err := exec.Execute(selectedForkEntityToolRuntimeContext(actor), "save_entity_field", map[string]any{
@@ -2353,14 +2215,14 @@ foreign:
 `,
 		},
 	})
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analyzer",
 		Role:          "analyzer",
 		Tools:         []string{"get_entity"},
 	}, bundle)
 	entityID := uuid.NewString()
-	seedEntityStateRow(t, db, entityID, entityID, "other-flow/inst-1", "foreign", "open", map[string]any{"status": "foreign"}, time.Now().UTC().Truncate(time.Second))
+	seedEntityStateRow(t, ctx, entityID, entityID, "other-flow/inst-1", "foreign", "open", map[string]any{"status": "foreign"}, time.Now().UTC().Truncate(time.Second))
 
 	_, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
 	re, ok := runtimefailures.As(err)
@@ -2395,7 +2257,7 @@ operating_case:
 `,
 		},
 	})
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, actor, bundle)
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, actor, bundle)
 	firstID := seedImportedEntityForToolTest(t, ctx, map[string]any{
 		"flow_instance": "validation/case-1",
 		"fields": map[string]any{
@@ -2412,7 +2274,7 @@ operating_case:
 		},
 	})
 	deepID := uuid.NewString()
-	seedEntityStateRow(t, db, deepID, deepID, "validation/nested/case-3", "validation_case", "queued", map[string]any{
+	seedEntityStateRow(t, ctx, deepID, deepID, "validation/nested/case-3", "validation_case", "queued", map[string]any{
 		"status": "open",
 		"score":  30,
 	}, time.Now().UTC().Truncate(time.Second))
@@ -2601,7 +2463,7 @@ foreign:
 `,
 		},
 	})
-	ctx, exec, db := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
+	ctx, exec, _ := newEntityToolTestHarnessWithBundle(t, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "analyzer",
 		Role:          "analyzer",
@@ -2610,7 +2472,7 @@ foreign:
 
 	scoringID := uuid.NewString()
 	subjectID := uuid.NewString()
-	seedEntityStateRow(t, db, scoringID, subjectID, "other-flow/score-1", "foreign", "shortlisted", map[string]any{
+	seedEntityStateRow(t, ctx, scoringID, subjectID, "other-flow/score-1", "foreign", "shortlisted", map[string]any{
 		"name":            "Example Vertical",
 		"composite_score": 72,
 	}, time.Now().UTC().Truncate(time.Second))
@@ -2719,7 +2581,7 @@ validation:
 `))
 }
 
-func newEntityToolTestHarness(t *testing.T) (context.Context, *runtimetools.Executor, *sql.DB) {
+func newEntityToolTestHarness(t *testing.T) (context.Context, *runtimetools.Executor, any) {
 	t.Helper()
 	return newEntityToolTestHarnessWithActor(t, models.AgentConfig{
 		ExecutionMode: "live",
@@ -2729,7 +2591,7 @@ func newEntityToolTestHarness(t *testing.T) (context.Context, *runtimetools.Exec
 	})
 }
 
-func newEntityToolTestHarnessWithActor(t *testing.T, actor models.AgentConfig) (context.Context, *runtimetools.Executor, *sql.DB) {
+func newEntityToolTestHarnessWithActor(t *testing.T, actor models.AgentConfig) (context.Context, *runtimetools.Executor, any) {
 	t.Helper()
 	if strings.TrimSpace(actor.Type) == "" {
 		actor.Type = "internal"
@@ -2762,15 +2624,14 @@ accounts:
 	return newEntityToolTestHarnessWithBundle(t, actor, bundle)
 }
 
-func newEntityToolTestHarnessWithBundle(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle) (context.Context, *runtimetools.Executor, *sql.DB) {
+func newEntityToolTestHarnessWithBundle(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle) (context.Context, *runtimetools.Executor, any) {
 	t.Helper()
 	return newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, true)
 }
 
-func newEntityToolTestHarnessWithBundleAndLegacyAccess(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle, allowInternalLegacy bool) (context.Context, *runtimetools.Executor, *sql.DB) {
+func newEntityToolTestHarnessWithBundleAndLegacyAccess(t *testing.T, actor models.AgentConfig, bundle *runtimecontracts.WorkflowContractBundle, allowInternalLegacy bool) (context.Context, *runtimetools.Executor, any) {
 	t.Helper()
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := seedEntityToolSourceRun(t, pg, bundle)
 	fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
 	contract, ok := entityruntime.ResolveForActor(fixture.source, actor)
@@ -2783,15 +2644,10 @@ func newEntityToolTestHarnessWithBundleAndLegacyAccess(t *testing.T, actor model
 		WorkflowSource:                 semanticview.Wrap(bundle),
 		AllowInternalLegacyEntityTools: allowInternalLegacy,
 	})
-	return runtimetools.WithActor(ctx, actor), exec, db
+	return runtimetools.WithActor(ctx, actor), exec, pg
 }
 
 const entityToolTestRunID = "11111111-1111-1111-1111-111111111111"
-
-func ensureEntityToolTestRun(t *testing.T, selected storetest.RunFixtureStore) {
-	t.Helper()
-	storetest.RequireRun(t, unmanagedToolTestContext(), selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: entityToolTestRunID, BundleHash: authorActivityTestBundleHash})
-}
 
 func asString(v any) string {
 	switch t := v.(type) {
@@ -3114,39 +2970,29 @@ func entityToolKeyedFixtureYAML(entities string) string {
 	return entities
 }
 
-func seedEntityStateRow(t *testing.T, db *sql.DB, entityID, _ string, flowInstance, entityType, currentState string, fields map[string]any, enteredAt time.Time) {
+func seedEntityStateRow(t *testing.T, ctx context.Context, entityID, _ string, flowInstance, entityType, currentState string, fields map[string]any, enteredAt time.Time) {
 	t.Helper()
 	if enteredAt.IsZero() {
 		enteredAt = time.Now().UTC()
 	}
-	fieldsJSON, err := json.Marshal(fields)
-	if err != nil {
-		t.Fatalf("json.Marshal(fields): %v", err)
+	fixture, ok := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
+	if !ok {
+		t.Fatal("entity state fixture requires the original selected source/import owner")
 	}
-	if _, err := db.Exec(`
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, $3, $4, '',
-			$5, '{}'::jsonb, $6::jsonb, '{}'::jsonb, 1,
-			$7, $7, $7
-		)
-	`, entityToolTestRunID, entityID, flowInstance, entityType, currentState, string(fieldsJSON), enteredAt); err != nil {
+	// Deliberately headerless import evidence stays distinct from the valid
+	// constructed fixture used to execute writes. No readiness is manufactured.
+	if _, err := fixture.owner.SetupScenarioEntities(ctx, runtimepipeline.ScenarioSetupRequest{
+		RunID: entityToolTestRunID, CreatedAt: enteredAt,
+		Entities: []runtimepipeline.ScenarioSetupEntityRequest{{Alias: entityID, EntityID: entityID, FlowInstance: flowInstance, EntityType: entityType, CurrentState: currentState, Fields: fields}},
+	}); err != nil {
 		t.Fatalf("seed entity_state(%s): %v", entityID, err)
 	}
 }
 
-func persistedEntityField(t *testing.T, db *sql.DB, entityID, field string) string {
+func persistedEntityField(t *testing.T, ctx context.Context, selected any, entityID, field string) string {
 	t.Helper()
-	var raw []byte
-	if err := db.QueryRow(`
-		SELECT COALESCE(fields -> $2, 'null'::jsonb)
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $3::uuid
-	`, entityToolTestRunID, field, entityID).Scan(&raw); err != nil {
+	raw, err := storetest.ReadEntityToolFieldWire(ctx, selected, entityToolTestRunID, entityID, field)
+	if err != nil {
 		t.Fatalf("read persisted entity field %s.%s: %v", entityID, field, err)
 	}
 	return strings.TrimSpace(string(raw))

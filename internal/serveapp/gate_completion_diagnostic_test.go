@@ -53,8 +53,8 @@ func TestServedGateCompletionInterruptionDiagnosticOnBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				params := map[string]any{"card_id": cardID, "verdict": "approve", "observed_content_hash": hash, "idempotency_key": "gate-completion"}
-				domain := gateCompletionRequestDomain(t, rt.DB, params)
-				initial := gateCompletionRead(t, rt, "before_domain_commit", seed.RunID, cardID, domain)
+				domain := gateCompletionRequestDomain(t, rt.ReceiverStateReader, params)
+				initial := gateCompletionRead(t, rt.ReceiverStateReader, "before_domain_commit", seed.RunID, cardID, domain)
 				if initial.Status != "pending" || initial.State != "review" || initial.DecisionEvents != 0 || len(initial.API) != 0 {
 					t.Fatalf("invalid initial cut: %#v", initial)
 				}
@@ -75,7 +75,7 @@ func TestServedGateCompletionInterruptionDiagnosticOnBothStores(t *testing.T) {
 						t.Fatalf("HTTP completed before semantic cut: %#v", reply)
 					default:
 					}
-					committed := gateCompletionRead(t, rt, "domain_committed_before_dispatch_completion", seed.RunID, cardID, domain)
+					committed := gateCompletionRead(t, rt.ReceiverStateReader, "domain_committed_before_dispatch_completion", seed.RunID, cardID, domain)
 					if committed.Status != "decided" || committed.State != "approved" || committed.DecisionEventID == "" || committed.DecisionEvents != 1 || committed.OutcomeEvents != 2 {
 						t.Fatalf("barrier lacks durable decision: %#v", committed)
 					}
@@ -92,7 +92,7 @@ func TestServedGateCompletionInterruptionDiagnosticOnBothStores(t *testing.T) {
 					}
 					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "done")
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-					ack := gateCompletionRead(t, rt, "acknowledged_success", seed.RunID, cardID, domain)
+					ack := gateCompletionRead(t, rt.ReceiverStateReader, "acknowledged_success", seed.RunID, cardID, domain)
 					gateCompletionAssertResponse(t, firstReply, ack, false)
 				}
 				if code := first.stop(); code != 0 {
@@ -111,9 +111,9 @@ func TestServedGateCompletionInterruptionDiagnosticOnBothStores(t *testing.T) {
 				second, rt := start()
 				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "done")
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				after := gateCompletionRead(t, rt, "after_restart_before_retry", seed.RunID, cardID, domain)
+				after := gateCompletionRead(t, rt.ReceiverStateReader, "after_restart_before_retry", seed.RunID, cardID, domain)
 				retry := gateCompletionHTTP(ctx, rt.Endpoint, params)
-				final := gateCompletionRead(t, rt, "after_same_key_retry", seed.RunID, cardID, domain)
+				final := gateCompletionRead(t, rt.ReceiverStateReader, "after_same_key_retry", seed.RunID, cardID, domain)
 				gateCompletionAssertResponse(t, retry, final, true)
 				if after.Status != final.Status || after.DecisionEventID != final.DecisionEventID || after.History != final.History || after.Accumulator != final.Accumulator || !reflect.DeepEqual(after.Changes, final.Changes) || final.DecisionEvents != 1 || final.OutcomeEvents != 2 {
 					t.Error("same-key retry mutated durable decision/outcome/history")
@@ -121,7 +121,7 @@ func TestServedGateCompletionInterruptionDiagnosticOnBothStores(t *testing.T) {
 				if !cut {
 					conflict := map[string]any{"card_id": cardID, "verdict": "reject", "observed_content_hash": hash, "idempotency_key": "gate-completion"}
 					reply := gateCompletionHTTP(ctx, rt.Endpoint, conflict)
-					t.Logf("ACK_CONTROL same-key-conflict domain=%#v reply=%#v", gateCompletionRequestDomain(t, rt.DB, conflict), reply)
+					t.Logf("ACK_CONTROL same-key-conflict domain=%#v reply=%#v", gateCompletionRequestDomain(t, rt.ReceiverStateReader, conflict), reply)
 					if reply.Err != nil || reply.Envelope.Error == nil || reply.Envelope.Error.Data["code"] != "IDEMPOTENCY_CONFLICT" {
 						t.Errorf("same-key conflict=%#v", reply)
 					}

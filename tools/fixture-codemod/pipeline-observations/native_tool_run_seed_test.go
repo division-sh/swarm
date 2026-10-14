@@ -126,14 +126,15 @@ func TestNativeToolRunSeedCallerInventoryIsComplete(t *testing.T) {
 		}
 	}
 	for name, want := range map[string]int{
-		"TestRetiredCreateEntityCannotMutateEitherStore":                               1,
-		"TestEntityTools_SQLiteBackendNeutralEntityPersistence":                        1,
-		"TestEntityTools_ReadImportedCanonicalEntityContractOnBothStores":              1,
-		"TestSQLiteEntityPersistence_MarshalsStructuredFilterValues":                   1,
-		"TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence":                     1,
-		"TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStores": 2,
-		"newEntityToolTestHarnessWithBundleAndLegacyAccess":                            1,
-		"TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores":                    1,
+		"TestRetiredCreateEntityCannotMutateEitherStore":                                    1,
+		"TestEntityTools_SQLiteBackendNeutralEntityPersistence":                             1,
+		"TestEntityTools_ReadImportedCanonicalEntityContractOnBothStores":                   1,
+		"TestSQLiteEntityPersistence_MarshalsStructuredFilterValues":                        1,
+		"TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence":                          1,
+		"TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStores":      2,
+		"newEntityToolTestHarnessWithBundleAndLegacyAccess":                                 1,
+		"TestEntityTools_SaveEntityFieldCrossFlowDenialPreservesSelectedForkRuntimeLineage": 1,
+		"TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores":                         1,
 	} {
 		if counts[name] != want {
 			t.Fatalf("run setup caller %s=%d, want%d", name, counts[name], want)

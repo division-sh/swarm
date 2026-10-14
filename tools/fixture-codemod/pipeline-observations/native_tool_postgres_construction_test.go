@@ -71,6 +71,7 @@ func TestNativeToolPostgresConstructionCallerInventoryIsComplete(t *testing.T) {
 		t.Fatal(err)
 	}
 	counts := map[string]int{}
+	native := map[string]int{}
 	for _, path := range paths {
 		source, err := os.ReadFile(path)
 		if err != nil {
@@ -86,8 +87,13 @@ func TestNativeToolPostgresConstructionCallerInventoryIsComplete(t *testing.T) {
 				continue
 			}
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
-				if call, ok := node.(*ast.CallExpr); ok && formattedNativeReadNode(call.Fun) == "newPostgresHumanTaskToolStoreForTest" {
-					counts[fn.Name.Name]++
+				if call, ok := node.(*ast.CallExpr); ok {
+					if formattedNativeReadNode(call.Fun) == "newPostgresHumanTaskToolStoreForTest" {
+						counts[fn.Name.Name]++
+					}
+					if formattedNativeReadNode(call) == "storetest.StartPostgresRuntimeStore(t)" {
+						native[fn.Name.Name]++
+					}
 				}
 				return true
 			})
@@ -101,8 +107,8 @@ func TestNativeToolPostgresConstructionCallerInventoryIsComplete(t *testing.T) {
 		"TestRetiredCreateEntityCannotMutateEitherStore",
 		"TestAskHumanAcknowledgedPostCommitErrorKeepsCardWithoutDuplicateBothStores",
 	} {
-		if counts[name] != 1 {
-			t.Fatalf("constructor caller %s=%d, want1", name, counts[name])
+		if counts[name] != 0 || native[name] != 1 {
+			t.Fatalf("constructor caller %s: retired=%d native=%d, want0/1", name, counts[name], native[name])
 		}
 		delete(counts, name)
 	}

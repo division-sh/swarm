@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -46,10 +47,14 @@ type gateCompletionHTTPResult struct {
 	Err      error
 }
 
-func gateCompletionRequestDomain(t *testing.T, db *sql.DB, params map[string]any) gateCompletionDomain {
+func gateCompletionRequestDomain(t *testing.T, reader receiverProofStateReader, params map[string]any) gateCompletionDomain {
 	t.Helper()
 	var principal string
-	if err := db.QueryRow(`SELECT principal_id FROM operator_principals`).Scan(&principal); err != nil {
+	if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		principal, err = storetest.ReadGateCompletionPrincipalStorage(ctx, reader)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := canonicaljson.Bytes(map[string]any{"method": "mailbox.decide", "params": params})
@@ -85,76 +90,79 @@ func gateCompletionHTTP(ctx context.Context, endpoint string, params map[string]
 	return result
 }
 
-func gateCompletionRead(t *testing.T, rt servedControlProofRuntime, phase, runID, cardID string, domain gateCompletionDomain) gateCompletionSnapshot {
+func gateCompletionRead(t *testing.T, reader receiverProofStateReader, phase, runID, cardID string, domain gateCompletionDomain) gateCompletionSnapshot {
 	t.Helper()
 	out := gateCompletionSnapshot{Phase: phase, Domain: domain, CardID: cardID}
-	err := rt.DB.QueryRow(`SELECT status, COALESCE(verdict,''), COALESCE(decided_by,''), COALESCE(CAST(decision_event_id AS TEXT),''), CAST(anchor AS TEXT) FROM decision_cards WHERE card_id=$1`, cardID).Scan(&out.Status, &out.Verdict, &out.DecidedBy, &out.DecisionEventID, &out.Anchor)
+	var card storetest.GateCompletionCardStorage
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		card, err = storetest.ReadGateCompletionCardStorage(ctx, reader, cardID)
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = rt.DB.QueryRow(`SELECT e.current_state, CAST(e.accumulator AS TEXT), CAST(f.config AS TEXT) FROM entity_state e JOIN flow_instances f ON e.run_id=f.run_id AND e.flow_instance=f.instance_path WHERE e.run_id=$1`, runID).Scan(&out.State, &out.Accumulator, &out.History)
+	out.Status, out.Verdict, out.DecidedBy, out.DecisionEventID, out.Anchor = card.Status, card.Verdict, card.DecidedBy, card.DecisionEventID, card.Anchor
+	var flow storetest.GateCompletionFlowStorage
+	err = reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		flow, err = storetest.ReadGateCompletionFlowStorage(ctx, reader, runID)
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	out.State, out.Accumulator, out.History = flow.State, flow.Accumulator, flow.Config
 	{
 		var err error
-		out.DecisionEvents, err = readServedEventNameCountForRun(context.Background(), rt.ReceiverStateReader, runID, "mailbox.card_decided")
+		out.DecisionEvents, err = readServedEventNameCountForRun(context.Background(), reader, runID, "mailbox.card_decided")
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 	{
 		var err error
-		out.OutcomeEvents, err = readServedEventNameCountForRun(context.Background(), rt.ReceiverStateReader, runID, "work.completed")
+		out.OutcomeEvents, err = readServedEventNameCountForRun(context.Background(), reader, runID, "work.completed")
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	rows, err := rt.DB.Query(`SELECT CAST(change_id AS TEXT), change_type, CAST(payload AS TEXT) FROM decision_card_changes WHERE card_id=$1 ORDER BY change_id`, cardID)
+	var changes [][3]string
+	err = reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		changes, err = storetest.ReadGateCompletionChangesStorage(ctx, reader, cardID)
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for rows.Next() {
-		var id, kind, payload string
-		if err := rows.Scan(&id, &kind, &payload); err != nil {
-			t.Fatal(err)
-		}
-		out.Changes = append(out.Changes, id+" "+kind+" "+payload)
+	for _, row := range changes {
+		out.Changes = append(out.Changes, row[0]+" "+row[1]+" "+row[2])
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
-	rows, err = rt.DB.Query(`SELECT event_id, subscriber_type, subscriber_id, outcome, reason_code FROM event_receipts WHERE event_id IN (SELECT event_id FROM events WHERE run_id=$1) ORDER BY event_id, subscriber_id`, runID)
+	var receipts [][5]string
+	err = reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		receipts, err = storetest.ReadGateCompletionReceiptsStorage(ctx, reader, runID)
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for rows.Next() {
-		var id, kind, subscriber, outcome, reason string
-		if err := rows.Scan(&id, &kind, &subscriber, &outcome, &reason); err != nil {
-			t.Fatal(err)
-		}
-		out.Receipts = append(out.Receipts, id+" "+kind+" "+subscriber+" "+outcome+" "+reason)
+	for _, row := range receipts {
+		out.Receipts = append(out.Receipts, row[0]+" "+row[1]+" "+row[2]+" "+row[3]+" "+row[4])
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
-	rows, err = rt.DB.Query(`SELECT method, actor_kind, actor_id, idempotency_key, request_hash, COALESCE(resource_id,''), CAST(response AS TEXT) FROM api_idempotency WHERE resource_id=$1 OR (method=$2 AND idempotency_key=$3) ORDER BY method, actor_kind, actor_id, idempotency_key`, cardID, domain.Method, domain.Key)
+	var api []storetest.GateCompletionAPIStorage
+	err = reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		api, err = storetest.ReadGateCompletionAPIStorage(ctx, reader, cardID, domain.Method, domain.Key)
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for rows.Next() {
-		var row gateCompletionRow
-		if err := rows.Scan(&row.Method, &row.ActorKind, &row.Actor, &row.Key, &row.Hash, &row.ResourceID, &row.Response); err != nil {
-			t.Fatal(err)
-		}
-		out.API = append(out.API, row)
+	for _, row := range api {
+		out.API = append(out.API, gateCompletionRow(row))
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
 	raw, err := json.Marshal(out)
 	if err != nil {
 		t.Fatal(err)
@@ -246,15 +254,15 @@ func TestServedMailboxCompletionInsertRollbackAndRestartBothStores(t *testing.T)
 				t.Fatal(err)
 			}
 			params := map[string]any{"card_id": cardID, "verdict": "approve", "observed_content_hash": hash, "idempotency_key": "completion-insert"}
-			domain := gateCompletionRequestDomain(t, rt.DB, params)
-			before := gateCompletionRead(t, rt, "before_insert_failure", seed.RunID, cardID, domain)
+			domain := gateCompletionRequestDomain(t, rt.ReceiverStateReader, params)
+			before := gateCompletionRead(t, rt.ReceiverStateReader, "before_insert_failure", seed.RunID, cardID, domain)
 			assertCut, remove := installMailboxCompletionFaultWitness(t, rt, "completion-insert")
 			response := gateCompletionHTTP(context.Background(), rt.Endpoint, params)
 			if response.Err != nil || response.Envelope.Error == nil {
 				t.Fatalf("completion INSERT failure must return an application error: %#v", response)
 			}
 			assertCut()
-			after := gateCompletionRead(t, rt, "after_failed_completion_insert", seed.RunID, cardID, domain)
+			after := gateCompletionRead(t, rt.ReceiverStateReader, "after_failed_completion_insert", seed.RunID, cardID, domain)
 			if after.Status != before.Status || after.DecisionEventID != before.DecisionEventID || after.State != before.State || after.History != before.History || after.Accumulator != before.Accumulator || !reflect.DeepEqual(after.Changes, before.Changes) || after.DecisionEvents != 0 || after.OutcomeEvents != 1 || len(after.API) != 0 {
 				t.Errorf("completion INSERT failure left partial domain or response state: before=%#v after=%#v", before, after)
 			}
@@ -270,10 +278,10 @@ func TestServedMailboxCompletionInsertRollbackAndRestartBothStores(t *testing.T)
 			}
 			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "done")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			committed := gateCompletionRead(t, rt, "first_success_after_restart", seed.RunID, cardID, domain)
+			committed := gateCompletionRead(t, rt.ReceiverStateReader, "first_success_after_restart", seed.RunID, cardID, domain)
 			gateCompletionAssertResponse(t, firstSuccess, committed, false)
 			replay := gateCompletionHTTP(context.Background(), rt.Endpoint, params)
-			final := gateCompletionRead(t, rt, "exact_replay", seed.RunID, cardID, domain)
+			final := gateCompletionRead(t, rt.ReceiverStateReader, "exact_replay", seed.RunID, cardID, domain)
 			gateCompletionAssertResponse(t, replay, final, true)
 			if committed.History != final.History || committed.Accumulator != final.Accumulator || !reflect.DeepEqual(committed.Changes, final.Changes) || final.DecisionEvents != 1 || final.OutcomeEvents != 2 {
 				t.Error("exact replay mutated committed domain")
