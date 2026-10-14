@@ -42,3 +42,18 @@ func TestSingleDeploymentConfigPublicSetupDocs(t *testing.T) {
 		})
 	}
 }
+
+func TestSingleDeploymentConfigPackGuidance(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join(RepoRoot(), "examples", "routing", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"embedded inventory by default", "one file", ".swarm/swarm.yaml", "--config", "SWARM_CONFIG", "complete replacement", "relative to the selected config file"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("routing config guidance missing %q", want)
+		}
+	}
+	if strings.Contains(string(body), "elevated local operator") {
+		t.Error("routing guidance retains a deleted config trust class")
+	}
+}
