@@ -52,7 +52,9 @@ jobs:
             pull_request)
               [[ "$GITHUB_REF" =~ ^refs/pull/[1-9][0-9]*/(merge|head)$ ]]
               jq -e '.action | IN("opened", "synchronize", "reopened", "ready_for_review", "converted_to_draft")' "$GITHUB_EVENT_PATH" >/dev/null
-              readarray -t coordinates < <(jq -er '[.pull_request.head.repo.full_name, .pull_request.head.sha, .pull_request.head.ref] | .[] | select(type == "string" and length > 0)' "$GITHUB_EVENT_PATH")
+              jq -e '[.pull_request.head.repo.full_name, .pull_request.head.sha, .pull_request.head.ref] |
+                all(.[]; type == "string" and length > 0 and all(explode[]; . >= 32 and . != 127))' "$GITHUB_EVENT_PATH" >/dev/null
+              readarray -t coordinates < <(jq -er '[.pull_request.head.repo.full_name, .pull_request.head.sha, .pull_request.head.ref] | .[]' "$GITHUB_EVENT_PATH")
               test "${#coordinates[@]}" = 3
               repository="${coordinates[0]}"; head="${coordinates[1]}"; branch="${coordinates[2]}"
               [[ "$repository" =~ $repository_pattern ]]
@@ -102,7 +104,7 @@ jobs:
             ($latest.id | type == "number" and . == floor) and ($start.id | type == "number" and . == floor) and
             all(range(1; $history | length); . as $i | $history[$i-1].id > $history[$i].id) and
             $completion_identity == $start_identity
-          ' "$RUNNER_TEMP/local-preflight-statuses.json" >/dev/null || {
+          ' "$RUNNER_TEMP/local-preflight-statuses.json" >/dev/null 2>&1 || {
             echo "Missing, failed, interrupted or superseded preflight/local on $repository@$head; run the complete local preflight on this exact uploaded SHA." >&2
             exit 1
           }
