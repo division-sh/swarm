@@ -21,7 +21,7 @@ func TestEventHistoryExcludesOnlyRuntimeLog(t *testing.T) {
 		t.Fatal("runtime log selected as fork evidence")
 	}
 	spec, ok := canonicalProjectionSpec(FamilyEvents)
-	if !ok || spec.source != eventProjectionSource || !strings.Contains(spec.query, eventProjectionSource) {
+	if !ok || spec.source != "events e" || !strings.Contains(spec.query, "e.event_name <> '"+excludedEventName+"'") {
 		t.Fatal("broad and exact event projections do not consume the canonical exclusion")
 	}
 }
