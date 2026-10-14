@@ -30,6 +30,7 @@ var executableDeliverySQLOwners = map[string]string{
 	"internal/store/internal/adminpersistence/destructive_reset_cleanup.go":                          "named destructive-reset physical cleanup",
 	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go": "selected-fork physical cleanup after typed terminalization",
 	"internal/store/internal/backend/pipelinepersistence/standing_service.go":                        "standing-service pre-mutation execution-posture inspection",
+	"internal/store/internal/backend/pipelinepersistence/test_creation_completion_fault.go":          "named exact native-delivery witness for the authorized completion-mark rollback fault (#2542 6176953400)",
 	"internal/store/internal/backend/effectpersistence/canceled_turn_recovery.go":                    "read-only cancellation inventory excluding selected possession from normal recovery",
 	"internal/store/testsql/event.go":                                                                "named hostile rollback injection used only by tests",
 }
@@ -117,9 +118,10 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 		}
 	}
 	for path, want := range map[string]int{
-		"internal/store/internal/backend/delivery/queued_cancellation.go":             5,
-		"internal/store/internal/backend/delivery/test_issue2564_evidence.go":         0,
-		"internal/store/internal/backend/effectpersistence/canceled_turn_recovery.go": 1,
+		"internal/store/internal/backend/delivery/queued_cancellation.go":                       5,
+		"internal/store/internal/backend/delivery/test_issue2564_evidence.go":                   0,
+		"internal/store/internal/backend/effectpersistence/canceled_turn_recovery.go":           1,
+		"internal/store/internal/backend/pipelinepersistence/test_creation_completion_fault.go": 1,
 	} {
 		if got := found[path]; got != want {
 			t.Errorf("closed executable-delivery SQL owner %s has %d queries, want %d", path, got, want)
