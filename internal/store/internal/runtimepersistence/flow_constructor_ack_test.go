@@ -292,22 +292,65 @@ func TestFieldlessFlowConstructionKeepsLifecycleWithoutStateRowBothStores(t *tes
 					receipts.owner = owner
 					return receipts
 				})
-				req := sqliteFlowActivationRequest(f.bundle, "review", "review", "", "review")
-				rootIdentity := flowidentity.Stored(semanticview.Wrap(f.bundle), ".", correlation.RunIDFromContext(f.ctx), correlation.RunIDFromContext(f.ctx), correlation.RunIDFromContext(f.ctx), "")
-				childIdentity, err := flowidentity.KeylessChild(semanticview.Wrap(f.bundle), rootIdentity, "review")
+				runID := correlation.RunIDFromContext(f.ctx)
+				req := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
+				req.Instance = flowidentity.Stored(req.ContractBundle, ".", runID, runID, runID, "")
+				childIdentity, err := flowidentity.KeylessChild(req.ContractBundle, req.Instance, "review")
 				if err != nil {
 					t.Fatal(err)
 				}
-				req.Instance = childIdentity
 				if err := f.manager.ActivateFlowInstance(f.ctx, req); err != nil {
 					t.Fatalf("fieldless canonical constructor: %v", err)
 				}
-				owner, err := flowidentity.NewRunScopedFlowInstance(correlation.RunIDFromContext(f.ctx), req.Instance.Route())
+				if len(receipts.results) != 1 || receipts.writes != 1 {
+					t.Fatalf("fieldless aggregate construction lost one commit: results=%+v writes=%d", receipts.results, receipts.writes)
+				}
+				selectChild := func(result pipeline.CommittedFlowInstanceActivation) pipeline.CommittedFlowInstanceActivation {
+					t.Helper()
+					if len(result.Children) != 1 || len(result.Plan.ConstructionPlans()) != 2 {
+						t.Fatalf("fieldless aggregate lost its exact root/child tree: %+v", result)
+					}
+					var child pipeline.CommittedFlowInstanceActivation
+					matches := 0
+					for _, candidate := range result.Children {
+						if candidate.Plan.Identity == childIdentity {
+							child, matches = candidate, matches+1
+						}
+					}
+					if matches != 1 {
+						t.Fatalf("fieldless aggregate lacks its unique review receipt: %+v", result)
+					}
+					return child
+				}
+				aggregate := receipts.results[0]
+				child := selectChild(aggregate)
+				fact := mustStoreTestSourceArtifactFact(f.bundle.SourceArtifact.BundleHash())
+				if aggregate.Plan.Identity != req.Instance || childIdentity.ParentEntityID != req.Instance.EntityID || childIdentity.ParentRoute != (flowidentity.ParentRoute{FlowID: ".", FlowInstance: runID, EntityID: runID}) {
+					t.Fatalf("fieldless construction changed structural ancestry: root=%+v child=%+v", aggregate.Plan.Identity, childIdentity)
+				}
+				assertExactConstruction := func() {
+					t.Helper()
+					for _, committed := range []pipeline.CommittedFlowInstanceActivation{aggregate, child} {
+						if !committed.Acknowledged || !committed.Created || committed.Validate() != nil || committed.Plan.Readiness.RunID != runID || committed.Plan.Readiness.BundleHash != fact.BundleHash() || committed.Plan.Readiness.WorkflowVersion != req.ContractBundle.WorkflowVersion() {
+							t.Fatalf("fieldless construction lost acknowledged source/identity: %+v", committed)
+						}
+						lookup, err := pipeline.NewExactFlowInstanceLookup(req.ContractBundle, fact, flowidentity.RunScopedFlowInstance{RunID: runID, Route: committed.Plan.Identity.Route()})
+						if err != nil {
+							t.Fatal(err)
+						}
+						observed, found, err := f.store.(pipeline.FlowInstanceIndexReader).LookupFlowInstance(f.ctx, lookup)
+						if err != nil || !found || observed.Identity() != committed.Plan.Identity || !observed.SourceFact().Matches(fact) {
+							t.Fatalf("fieldless native index lost exact construction: observed=%+v found=%t err=%v", observed, found, err)
+						}
+					}
+				}
+				assertExactConstruction()
+				owner, err := flowidentity.NewRunScopedFlowInstance(runID, childIdentity.Route())
 				if err != nil {
 					t.Fatal(err)
 				}
 				instance, found, err := f.workflows.Load(f.ctx, owner)
-				if err != nil || !found || instance.EntityID != req.Instance.EntityID || len(instance.Fields) != 0 {
+				if err != nil || !found || instance.EntityID != childIdentity.EntityID || len(instance.Fields) != 0 {
 					t.Fatalf("fieldless header readback: found=%t instance=%+v err=%v", found, instance, err)
 				}
 				if instance.CurrentState != "pending" || instance.StageDefined != staged || instance.Revision != 1 {
@@ -338,9 +381,12 @@ func TestFieldlessFlowConstructionKeepsLifecycleWithoutStateRowBothStores(t *tes
 				if err != nil || summary.Total != wantTotal || summary.Nonterminal != wantTotal {
 					t.Fatalf("fieldless staged lifecycle summary=%+v err=%v, want total %d", summary, err, wantTotal)
 				}
-				record, err := receipts.results[0].Plan.PersistenceRecord()
+				record, err := child.Plan.PersistenceRecord()
 				if err != nil {
 					t.Fatal(err)
+				}
+				if record.Identity != owner || record.EntityID != instance.EntityID || record.State.Identity != owner || record.State.EntityID != instance.EntityID {
+					t.Fatalf("fieldless progress mutation changed its child owner: record=%+v owner=%+v instance=%+v", record, owner, instance)
 				}
 				mutation := record.State
 				mutation.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
@@ -354,16 +400,24 @@ func TestFieldlessFlowConstructionKeepsLifecycleWithoutStateRowBothStores(t *tes
 				if err := f.manager.ActivateFlowInstance(f.ctx, req); err != nil {
 					t.Fatalf("constructor replay after lifecycle progress: %v", err)
 				}
+				if len(receipts.results) != 2 || !receipts.results[1].Acknowledged || receipts.results[1].Created || receipts.results[1].Plan.Identity != req.Instance {
+					t.Fatalf("fieldless aggregate replay repeated creation: %+v", receipts.results)
+				}
+				replayedChild := selectChild(receipts.results[1])
+				if !replayedChild.Acknowledged || replayedChild.Created || receipts.results[1].Validate() != nil {
+					t.Fatalf("fieldless aggregate replay repeated child construction: %+v", replayedChild)
+				}
 				instance, found, err = f.workflows.Load(f.ctx, owner)
 				if err != nil || !found || instance.Revision != 2 || instance.Bookkeeping["construction_progress_control"] != true || receipts.writes != 1 {
 					t.Fatalf("constructor replay replaced mutable progress: instance=%+v writes=%d err=%v", instance, receipts.writes, err)
 				}
+				assertExactConstruction()
 				for _, table := range []string{"flow_instances", "entity_state"} {
 					query := "SELECT COUNT(*) FROM " + table + " WHERE run_id = ?"
 					if backend == "postgres" {
 						query = "SELECT COUNT(*) FROM " + table + " WHERE run_id = $1::uuid"
 					}
-					want := 1
+					want := 2
 					if table == "entity_state" {
 						want = 0
 					}
