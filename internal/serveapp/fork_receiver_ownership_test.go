@@ -798,6 +798,7 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 					t.Fatalf("wrong exact capability set: %s error=%v", raw, err)
 				}
 				if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {
+					t.Logf("capability refusal snapshot delta:\n%s", forkReceiverCapabilityRefusalSnapshotDelta(before, after))
 					t.Fatalf("capability refusal attempt %d changed application tables", attempt)
 				}
 			}
