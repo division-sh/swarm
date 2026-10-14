@@ -42,6 +42,7 @@ func TestRequestBindingCompiledRetryBothStores(t *testing.T) {
 			rows := strings.Split(strings.TrimSpace(string(raw)), "\n")
 			writeReleaseFile(t, filepath.Join(project, "input.jsonl"), rows[0]+"\n")
 			writeReleaseFile(t, filepath.Join(project, "different.jsonl"), rows[1]+"\n")
+			writeReleaseFile(t, filepath.Join(project, "event.json"), "{}\n")
 			writeReleaseFile(t, filepath.Join(project, ".swarm/swarm.yaml"), goldenRuntimeConfig(selected))
 			writeReleaseFile(t, filepath.Join(project, "api-token"), goldenAPIToken+"\n")
 			writeReleaseFile(t, filepath.Join(root, "home/.config/swarm/swarm.yaml"), "connection:\n  api_token_file: api-token\n")
@@ -87,7 +88,7 @@ func TestRequestBindingCompiledRetryBothStores(t *testing.T) {
 				args []string
 				want string
 			}{
-				{"intent", importID, []string{"--data", "item.registered=input.jsonl", "--event", "item.registered"}, "event initiation contradicts its permanent request"},
+				{"intent", importID, []string{"--data", "item.registered=input.jsonl", "--event", "item.registered", "--payload", "event.json"}, "event initiation contradicts its permanent request"},
 				{"payload", importID, []string{"--data", "item.registered=different.jsonl"}, "conflict"},
 				{"explicit_head", pinID, []string{"--pin", "item.registered@" + advanced.Candidate.VersionID}, "explicit pin 0 contradicts its permanent request"},
 			} {
