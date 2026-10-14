@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -58,15 +59,7 @@ func admitAgentClaimProfileIdentity(t *testing.T, ctx context.Context, selected 
 		t.Fatal("profile fixture admission requires the exact run context")
 	}
 	record := agentFixtureStaticRecord(t, identity)
-	profile, err := selection.ResolveActiveBackend(selection.BackendAnthropic)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resolved, err := llm.ResolveAgentExecution(executionposture.Live, profile, nil, record.Config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	record.Config = resolved.Actor
+	record.Config = resolveNativeClaimFixtureActor(t, record.Config)
 	if err := agentfixture.UpsertStaticForSource(t, ctx, selected, record, fact); err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +68,19 @@ func admitAgentClaimProfileIdentity(t *testing.T, ctx context.Context, selected 
 		Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity,
 		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "global", FlowInstance: identity.FlowInstance()}),
 	}}
+}
+
+func resolveNativeClaimFixtureActor(t testing.TB, actor actors.AgentConfig) actors.AgentConfig {
+	t.Helper()
+	profile, err := selection.ResolveActiveBackend(actor.ResolvedLLMBackend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := llm.ResolveAgentExecution(executionposture.Live, profile, nil, actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved.Actor
 }
 
 func admitAgentClaimProfileAuthority(t testing.TB, ctx context.Context, selected agentfixture.Store, fact correlation.SourceArtifactFact) deliverylifecycle.ExecutionAuthority {
