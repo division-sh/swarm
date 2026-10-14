@@ -43,6 +43,20 @@ func ReadFirstAgentClaimProfileTx(ctx context.Context, tx *sql.Tx, dialect Diale
 		expected.Authority.Kind() != deliverylifecycle.ExecutionAuthorityNormalRuntime || expected.ClaimVersion < 1 {
 		return absent, fmt.Errorf("first agent profile requires exact ordinary claimed delivery evidence")
 	}
+	actual, err := ReadExactClaimedAgentSnapshotTx(ctx, tx, dialect, expected)
+	if err != nil {
+		return absent, err
+	}
+	return readFirstAgentClaimProfileTx(ctx, tx, actual)
+}
+
+// ReadExactClaimedAgentSnapshotTx admits historical evidence, not a live claim.
+// The selected preparation reader composes it under the same read transaction.
+func ReadExactClaimedAgentSnapshotTx(ctx context.Context, tx *sql.Tx, dialect Dialect, expected deliverylifecycle.Snapshot) (deliverylifecycle.Snapshot, error) {
+	var absent deliverylifecycle.Snapshot
+	if tx == nil || expected.Authority.Validate() != nil || !expected.Route.Recipient.IsAgent() || expected.ClaimVersion < 1 {
+		return absent, fmt.Errorf("agent evidence requires exact claimed delivery identity")
+	}
 	adapter, err := NewAdapter(dialect)
 	if err != nil {
 		return absent, err
@@ -52,10 +66,10 @@ func ReadFirstAgentClaimProfileTx(ctx context.Context, tx *sql.Tx, dialect Diale
 		return absent, err
 	}
 	if actual.EventID != expected.EventID || actual.RunID != expected.RunID ||
-		!events.SameDeliveryRouteIdentity(actual.Route, expected.Route) || !actual.Authority.Equal(expected.Authority) {
+		!events.SameDeliveryRouteIdentity(actual.Route, expected.Route) || !actual.Authority.Equal(expected.Authority) || actual.ClaimVersion < 1 {
 		return absent, fmt.Errorf("first agent profile differs from exact delivery/source authority")
 	}
-	return readFirstAgentClaimProfileTx(ctx, tx, actual.Snapshot)
+	return actual.Snapshot, nil
 }
 
 func readFirstAgentClaimProfileTx(ctx context.Context, tx *sql.Tx, snapshot deliverylifecycle.Snapshot) (deliverylifecycle.AgentClaimProfile, error) {
