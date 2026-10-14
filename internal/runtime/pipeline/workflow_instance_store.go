@@ -789,6 +789,21 @@ func (p WorkflowPersistence) ListFlowInstances(ctx context.Context, scope FlowIn
 	return p.store.instanceIndex.ListFlowInstances(ctx, scope)
 }
 
+func (p WorkflowPersistence) WithFlowInstancePlanningSnapshot(ctx context.Context, scope FlowInstanceLookupScope, prepare func(context.Context, FlowInstanceIndexReader) error) error {
+	if p.empty() || p.store.instanceIndex == nil || !scope.Valid() || prepare == nil {
+		return errors.New("workflow instance planning requires its admitted scope and index owner")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if owner, native := p.store.instanceIndex.(FlowInstancePlanningSnapshotOwner); native {
+		return owner.WithFlowInstancePlanningSnapshot(ctx, scope, prepare)
+	}
+	// Non-native readers retain their original operation semantics; this wrapper
+	// neither opens a transaction nor upgrades their evidence into native state.
+	return prepare(ctx, p.store.instanceIndex)
+}
+
 // LoadDynamicFlowRuntimeReadiness returns the exact durable readiness owner for
 // one run-scoped flow. Recovery consumers use this instead of reconstructing
 // topology authority from current process state.

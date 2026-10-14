@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
@@ -26,7 +28,8 @@ func TestOrdinaryInstancePlanningOwnsOneFiniteReadCutBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			index := f.store.(pipeline.FlowInstanceIndexReader)
+			// Serve injects this canonical wrapper, not the selected facade itself.
+			index := pipeline.FlowInstanceIndexReader(pipeline.NewWorkflowPersistence(f.store.(pipeline.WorkflowPersistenceOwner)))
 			collector, restore, err := InstallTransactionProbeForTest(f.store, transactiontest.Options{})
 			if err != nil {
 				t.Fatal(err)
@@ -86,6 +89,38 @@ func TestOrdinaryInstancePlanningOwnsOneFiniteReadCutBothStores(t *testing.T) {
 				t.Fatalf("forty six-read planning cuts did not own exactly forty read transactions: %+v", counts)
 			}
 			t.Logf("composed: total_reads=%d retained_authority_reads=%d index_reads=40", counts.Total.ReadCommits, counts.Retained.ReadCommits)
+			// Leave only one connection available beyond any retained authority.
+			capacity := f.db.Stats().MaxOpenConnections
+			f.db.SetMaxOpenConns(f.db.Stats().InUse + 1)
+			t.Cleanup(func() { f.db.SetMaxOpenConns(capacity) })
+			bounded, release := context.WithTimeout(ctx, 5*time.Second)
+			defer release()
+			if err := planning.WithFlowInstancePlanningSnapshot(bounded, scope, readSix); err != nil {
+				t.Fatalf("nested index calls require a second free connection: %v", err)
+			}
+			owner := flowidentity.RunScopedFlowInstance{RunID: request.RunID(), Route: root.Identity.Route()}
+			restoreHeader, err := FaultFlowConstructorHeaderForTest(ctx, f.store, owner, pipelinepersistence.FlowConstructorHeaderFaultField("revision"), int64(11))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := restoreHeader(ctx); err != nil {
+					t.Error(err)
+				}
+			})
+			if err := planning.WithFlowInstancePlanningSnapshot(bounded, scope, func(ctx context.Context, reader pipeline.FlowInstanceIndexReader) error {
+				observed, found, err := reader.LookupFlowInstance(ctx, request)
+				if err != nil || !found || observed.HeaderRevision() != 11 {
+					t.Fatalf("later planning pass reused the earlier header: revision=%d found=%t err=%v", observed.HeaderRevision(), found, err)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if _, found, err := index.LookupFlowInstance(bounded, request); err != nil || !found {
+				t.Fatalf("completed planning retained the only free connection: found=%t err=%v", found, err)
+			}
+			f.db.SetMaxOpenConns(capacity)
 			cancelled, cancel := context.WithCancel(ctx)
 			cancel()
 			called := false

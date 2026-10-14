@@ -12,6 +12,11 @@ import (
 // A group supplies its own finite reader. Ordinary preview and final planning
 // each open a fresh canonical read cut, outside publication claim/settlement.
 func (eb *EventBus) withPublicationInstancePlanning(ctx context.Context, event events.Event, planner deliveryPlanner, prepare func(context.Context, deliveryPlanner) error) error {
+	// Reply planning owns an independent reply-context read. Keep that original
+	// path outside this index-only transaction, including on one-connection pools.
+	if events.DeliveryContextFromContext(ctx).ReplyContextID() != "" {
+		return prepare(ctx, planner)
+	}
 	if planner.connectPlanner.lifecycle.runProposal.Present() || eb.semanticSource == nil || event.RunID() == "" {
 		return prepare(ctx, planner)
 	}
