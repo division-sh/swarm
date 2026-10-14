@@ -1,8 +1,10 @@
 package main
 
 import (
+	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
@@ -12,7 +14,7 @@ import (
 var completionEvidenceSuccessorBytes []byte
 
 func TestNativeCompletionEvidenceSuccessorPreservesHistoryAndRefusals(t *testing.T) {
-	var history struct{ SourceCommit, Gate, File, Function, Before, After string }
+	var history struct{ SourceCommit, Gate, File, Function, BeforeSHA256, AfterSHA256 string }
 	if err := json.Unmarshal(completionEvidenceSuccessorBytes, &history); err != nil {
 		t.Fatal(err)
 	}
@@ -40,14 +42,14 @@ func TestNativeCompletionEvidenceSuccessorPreservesHistoryAndRefusals(t *testing
 		}
 		found++
 		prior := before[i]
-		if prior.Before != row.Before || prior.After != row.After || prior.Successor != history.Before || row.Successor != history.After {
+		if prior.Before != row.Before || prior.After != row.After || fmt.Sprintf("%x", sha256.Sum256([]byte(prior.Successor))) != history.BeforeSHA256 || fmt.Sprintf("%x", sha256.Sum256([]byte(row.Successor))) != history.AfterSHA256 {
 			t.Fatal("completion successor overwrote prior transformation history")
 		}
-		if _, changed, err := rewriteFunction(row.File, []byte("package proof\n"+history.After), recipe{File: row.File, Function: row.Function, Before: history.Before, After: history.After}); err != nil || changed {
+		if _, changed, err := rewriteFunction(row.File, []byte("package proof\n"+row.Successor), recipe{File: row.File, Function: row.Function, Before: prior.Successor, After: row.Successor}); err != nil || changed {
 			t.Fatalf("current completion successor is not inert: changed=%v err=%v", changed, err)
 		}
-		hostile := strings.Replace(history.After, "{", "{ unreviewedAuthority();", 1)
-		if _, _, err := rewriteFunction(row.File, []byte("package proof\n"+hostile), recipe{File: row.File, Function: row.Function, Before: history.Before, After: history.After}); err == nil {
+		hostile := strings.Replace(row.Successor, "{", "{ unreviewedAuthority();", 1)
+		if _, _, err := rewriteFunction(row.File, []byte("package proof\n"+hostile), recipe{File: row.File, Function: row.Function, Before: prior.Successor, After: row.Successor}); err == nil {
 			t.Fatal("completion successor admitted unreviewed authority")
 		}
 	}
