@@ -45,12 +45,16 @@ func (e *selectedDeploymentSettlementExecutor) ServeFanOutCandidate(ctx context.
 type selectedDeploymentSettlementOwner struct {
 	pipeline.FanOutObligationOwner
 	committed chan string
+	evaluated chan string
 }
 
 func (o selectedDeploymentSettlementOwner) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(pipeline.FanOutEvaluationInput) error) (pipeline.FanOutEvaluationInput, runtimepipelineobligation.PublicationGroup, error) {
 	input, group, err := o.FanOutObligationOwner.BeginFanOutEvaluation(ctx, claim, validate)
 	if group == nil || err != nil {
 		return input, group, err
+	}
+	if o.evaluated != nil {
+		o.evaluated <- claim.Key.RunID
 	}
 	return input, selectedDeploymentSettlementGroup{PublicationGroup: group, committed: o.committed}, nil
 }
