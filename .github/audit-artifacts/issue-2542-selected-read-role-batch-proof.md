@@ -116,7 +116,15 @@ zero added;67 excluded occurrences unchanged. Actual all-source extraction
 collector remains b5bdd1d92df22693c570dab217a46c8a184f37085f496653d59b732c12399a4d
 and trusted ancestor26701e7b187579220dffe72e01debd2e89cd2675. No policy/baseline
 increase or extra transition was used. Accepted credit remains pending review.
-The signed read-only ratchet, final complexity/unused receipts are recorded in
+The first signed-head read-only verification timed out at the unchanged600s
+limit, repeatedly decoding the same authenticated340KB manifest inside nested
+historical-source comparisons. The bounded repair memoizes only successfully
+decoded immutable pins after rereading and hashing the actual manifest on every
+call. It returns independent slices and still rereads all actual source files.
+Warm-cache controls reject changed/missing manifests, stale actual sibling
+source, and mutation of a returned pin. No source digest, historical record,
+collector policy, debt identity, timeout or assertion was changed. The repaired
+signed read-only ratchet and final complexity/unused receipts are recorded in
 the checkpoint comment. Limited vet uses -composites=false;
 the known default-vet composite warnings are not called a default-vet pass.
 

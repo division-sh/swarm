@@ -5,15 +5,24 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sync"
 	"testing"
 )
 
 const debtSelectedReadRoleManifest = "tools/fixture-codemod/pipeline-observations/family145-selected-read-role-preimages.json"
 
+var debtSelectedReadRolePinCache sync.Map
+
 func debtSelectedReadRolePins(root string) ([]debtRunIdentitySourceBody, error) {
 	raw, err := os.ReadFile(filepath.Join(root, debtSelectedReadRoleManifest))
-	if err != nil || debtBaselineChecksum(raw) != "dd9421b12197694434ac1134f95ce1d28e4ab9fad9e5530e830ae9a0393aa5be" {
+	checksum := debtBaselineChecksum(raw)
+	if err != nil || checksum != "dd9421b12197694434ac1134f95ce1d28e4ab9fad9e5530e830ae9a0393aa5be" {
 		return nil, fmt.Errorf("selected read-role immutable source inventory changed: %v", err)
+	}
+	// Reread and authenticate actual bytes before reusing decoded immutable pins.
+	if cached, ok := debtSelectedReadRolePinCache.Load(checksum); ok {
+		return slices.Clone(cached.([]debtRunIdentitySourceBody)), nil
 	}
 	var pins []debtRunIdentitySourceBody
 	if err := json.Unmarshal(raw, &pins); err != nil || len(pins) != 43 {
@@ -27,6 +36,7 @@ func debtSelectedReadRolePins(root string) ([]debtRunIdentitySourceBody, error) 
 		}
 		seen[key] = true
 	}
+	debtSelectedReadRolePinCache.Store(checksum, slices.Clone(pins))
 	return pins, nil
 }
 
@@ -113,5 +123,39 @@ func TestPersistenceAuthorityDebtSelectedReadRoleSourceRefusesHistoricalForeignA
 	}
 	if _, err := debtSelectedReadRoleLiveSources(t.TempDir()); err == nil {
 		t.Fatal("missing evidence accepted")
+	}
+}
+
+func TestPersistenceAuthorityDebtSelectedReadRoleCacheRequiresActualImmutableEvidence(t *testing.T) {
+	root := persistenceAuthorityRepoRoot(t)
+	pins, err := debtSelectedReadRolePins(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := pins[0]
+	pins[0].Before = "changed returned pin"
+	actual, err := debtSelectedReadRolePins(root)
+	if err != nil || actual[0] != want {
+		t.Fatal("returned pin mutation poisoned authenticated cache:", err)
+	}
+	copy := t.TempDir()
+	debtSelectedReadRoleCopySources(t, root, copy)
+	if _, err := debtSelectedReadRoleLiveSources(copy); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(copy, debtSelectedReadRoleManifest)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	debtWriteModuleSource(t, copy, debtSelectedReadRoleManifest, string(raw)+"\n")
+	if _, err := debtSelectedReadRolePins(copy); err == nil {
+		t.Fatal("warm cache hid changed actual manifest bytes")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := debtSelectedReadRolePins(copy); err == nil {
+		t.Fatal("warm cache hid missing actual manifest")
 	}
 }
