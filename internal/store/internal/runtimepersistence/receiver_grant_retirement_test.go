@@ -48,6 +48,10 @@ type receiverGrantClaimBarrier struct {
 	once    sync.Once
 }
 
+func (b *receiverGrantClaimBarrier) ReadReceiverClaimProfileTx(ctx context.Context, tx *sql.Tx, event events.Event, route events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) (deliverylifecycle.AgentClaimProfile, error) {
+	return b.owner.ReadReceiverClaimProfileTx(ctx, tx, event, route, authority)
+}
+
 func (b *receiverGrantClaimBarrier) ReceiverExecutionReadyTx(ctx context.Context, tx *sql.Tx, route events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority, claim bool) (bool, error) {
 	ready, err := b.owner.ReceiverExecutionReadyTx(ctx, tx, route, authority, claim)
 	if err != nil || !ready || !claim {
@@ -418,8 +422,20 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 				if _, acquired := outcome.result.Acquired(); !acquired || after.ClaimVersion != 1 || attempts != 1 {
 					t.Fatalf("live fenced claim failed: %+v attempts=%d", outcome.result, attempts)
 				}
+				if !selectedFork {
+					captured, err := ReadFirstAgentClaimProfileForTest(ctx, selected, after)
+					if err != nil || captured != barrier.profile {
+						t.Fatalf("native claim did not retain its original admitted profile: captured=%+v want=%+v err=%v", captured, barrier.profile, err)
+					}
+				}
 				if err := grant.Retire(ctx); err != nil {
 					t.Fatalf("retire after claim commit: %v", err)
+				}
+				if !selectedFork {
+					captured, err := ReadFirstAgentClaimProfileForTest(ctx, selected, after)
+					if err != nil || captured != barrier.profile {
+						t.Fatalf("grant retirement replaced immutable claim evidence: captured=%+v err=%v", captured, err)
+					}
 				}
 			})
 		}
