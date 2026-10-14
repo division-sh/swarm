@@ -57,7 +57,7 @@ func VerifyNativeAuthoredSelectionRetryReloadsCurrentStateBothStoresForTest(t *t
       rules:
         - {when: entity.marker == 'first', advances_to: done}
         - {when: entity.marker == 'second', advances_to: done}
-        - {else: true}
+        - {when: true}
 `
 				if first == "evaluation_failed" {
 					nodes = strings.Replace(nodes, "entity.marker == 'first'", "query_entities(marker == 'first').count == 1", 1)
@@ -126,7 +126,7 @@ func VerifyNativeAuthoredSelectionRetryReloadsCurrentStateBothStoresForTest(t *t
 				attempt, err := observed.failures[0].ResolvedFact()
 				firstIndex, firstLabel := 0, "rules[0]: when entity.marker == 'first'"
 				if first == "fallback" {
-					firstIndex, firstLabel = 2, "rules[2]: else"
+					firstIndex, firstLabel = 2, "rules[2]: when true"
 				} else if first == "evaluation_failed" {
 					firstLabel = "rules[0]: when query_entities(marker == 'first').count == 1"
 				}

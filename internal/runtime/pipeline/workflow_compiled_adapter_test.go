@@ -46,7 +46,7 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
     inherited:
       advances_to: done
       rules:
-        - else: true
+        - when: true
     rule:
       rules:
         - when: |-
@@ -55,8 +55,7 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
         - when: |-
             true
           advances_to: done
-        - else: true
-          advances_to: done
+        - advances_to: done
     complete:
       data_accumulation:
         writes:
@@ -78,7 +77,7 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
         - when: |-
             false
           advances_to: done
-        - else: true
+        - when: true
     emit_only:
       emit: observed
     guarded:
@@ -102,7 +101,6 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
             event: guard_observed
             fields:
               marker: "guard-output"
-        - else: true
     kill:
       guard:
         id: kill-check
@@ -161,7 +159,6 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
             event: guard_observed
             fields:
               marker: "guard-output"
-        - else: true
 `,
 	}
 	if len(initialTimer) > 0 && initialTimer[0] {
@@ -429,7 +426,7 @@ func VerifyNativePipelineCompiledTransitionNoOpOnBothStoresForTest(t *testing.T,
 				if event == "emit_only" && f.bus.publishedCount() != 1 {
 					t.Fatal("emit-only effect was lost")
 				}
-				if event == "fallback" && requireResolvedSelection(t, result.RuleSelection).DisplayLabel() != "rules[1]: else" {
+				if event == "fallback" && requireResolvedSelection(t, result.RuleSelection).DisplayLabel() != "rules[1]: when true" {
 					t.Fatalf("fallback selection = %#v", result.RuleSelection)
 				}
 			})
@@ -824,7 +821,7 @@ func VerifyNativeFallbackClaimSettlesWithoutBusinessTransitionBothStoresForTest(
 				t.Fatalf("fallback did not settle exact delivery: snapshot=%#v err=%v", snapshot, err)
 			}
 			selection, err := snapshot.FinalSelection.Fact()
-			if err != nil || selection.Disposition() != handlerselection.DispositionSelected || selection.DisplayLabel() != "rules[1]: else" {
+			if err != nil || selection.Disposition() != handlerselection.DispositionSelected || selection.DisplayLabel() != "rules[1]: when true" {
 				t.Fatalf("fallback selection=%#v err=%v", selection, err)
 			}
 			outcomes, err := owner.Outcomes(f.ctx, id)

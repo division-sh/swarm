@@ -28,7 +28,7 @@ stages:
       guard: {id: admitted-check, check: true, on_fail: reject}
       rules:
         - {when: false, advances_to: waiting}
-        - {else: true, advances_to: waiting}
+        - {advances_to: waiting}
 `,
 	})
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -46,7 +46,7 @@ stages:
 			record := before.TransitionHistory[0]
 			if record.TriggerEventID != event.ID() || record.From != "ready" || record.To != "waiting" ||
 				!reflect.DeepEqual(record.GuardsEvaluated, []string{"admitted-check"}) ||
-				!record.Evidence.RuleSelection().Ref().Equal(requireResolvedSelection(t, result.RuleSelection).Ref()) || requireResolvedSelection(t, result.RuleSelection).DisplayLabel() != "rules[1]: else" {
+				!record.Evidence.RuleSelection().Ref().Equal(requireResolvedSelection(t, result.RuleSelection).Ref()) || requireResolvedSelection(t, result.RuleSelection).DisplayLabel() != "rules[1]: default" {
 				t.Fatalf("lost executed rule/guard/event coordinates: %#v", record)
 			}
 			timers := f.persistedTimers(true)
