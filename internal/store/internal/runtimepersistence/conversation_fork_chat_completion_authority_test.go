@@ -91,6 +91,11 @@ type forkChatCompletionAuthorityFixture struct {
 	now    time.Time
 	source conversationForkSourceFixture
 	fork   runfork.OperatorConversationForkSession
+	reopen func() forkChatHistoryReader
+}
+
+type forkChatHistoryReader interface {
+	LoadOperatorConversationFork(context.Context, string) (runfork.OperatorConversationForkSession, error)
 }
 
 func TestForkChatCompletionGroupLifecycle(t *testing.T) {
@@ -309,16 +314,47 @@ func newForkChatCompletionAuthorityFixture(t *testing.T, sqlite bool) forkChatCo
 	var store forkChatCompletionAuthorityStore
 	var db *sql.DB
 	var source conversationForkSourceFixture
+	var reopen func() forkChatHistoryReader
+	var readers []interface{ Close() error }
 	if sqlite {
 		s := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		store, db = s, s.backend.ConstructionHandle()
 		source = seedSQLiteConversationForkSource(t, s, now)
+		location := s.Path()
+		reopen = func() forkChatHistoryReader {
+			reader, err := NewSQLiteRuntimeStore(location)
+			if err != nil {
+				t.Fatalf("reopen forkchat sqlite history: %v", err)
+			}
+			readers = append(readers, reader)
+			if err := reader.BootstrapSchema(testAuthorActivityContext(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
+				t.Fatal(err)
+			}
+			return reader
+		}
 	} else {
-		_, pgDB, _ := testutil.StartPostgres(t)
+		location, pgDB, _ := testutil.StartPostgres(t)
 		s := admitTestPostgresStore(t, pgDB)
 		store, db = s, pgDB
 		source = seedConversationForkSource(t, db, now)
+		reopen = func() forkChatHistoryReader {
+			reader, err := NewPostgresStore(location)
+			if err != nil {
+				t.Fatalf("reopen forkchat postgres history: %v", err)
+			}
+			readers = append(readers, reader)
+			bootstrapTestPostgresStore(t, reader)
+			return reader
+		}
 	}
+	// Register after construction and before consumers, not at each later reopen.
+	t.Cleanup(func() {
+		for i := len(readers) - 1; i >= 0; i-- {
+			if err := readers[i].Close(); err != nil {
+				t.Errorf("close forkchat historical reader: %v", err)
+			}
+		}
+	})
 	fork, err := store.CreateOperatorConversationFork(testAuthorActivityContext(), runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID, ForkPoint: runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
 		CreatedBy: "actor-token", Now: now,
@@ -326,7 +362,7 @@ func newForkChatCompletionAuthorityFixture(t *testing.T, sqlite bool) forkChatCo
 	if err != nil {
 		t.Fatalf("create forkchat authority fixture: %v", err)
 	}
-	return forkChatCompletionAuthorityFixture{store: store, db: db, sqlite: sqlite, now: now, source: source, fork: fork}
+	return forkChatCompletionAuthorityFixture{store: store, db: db, sqlite: sqlite, now: now, source: source, fork: fork, reopen: reopen}
 }
 
 func prepareForkChatCompletionGroup(t *testing.T, fixture forkChatCompletionAuthorityFixture, key, message string) runfork.ConversationForkChatPrepared {

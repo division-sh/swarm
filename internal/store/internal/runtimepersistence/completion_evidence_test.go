@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/google/uuid"
 )
 
 type completion2270ReadStore interface {
@@ -26,6 +28,7 @@ func TestCompletion2270ForkChatReadbackBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := newForkChatCompletionAuthorityFixture(t, backend == "sqlite")
+			requireCompletionObservationRefusals(t, fixture.store)
 			prepared := prepareForkChatCompletionGroup(t, fixture, "2270-rounds", "inspect independent model evidence")
 			want := make([]operatorread.OperatorConversationCompletion, 0, 2)
 			for ordinal := 1; ordinal <= 2; ordinal++ {
@@ -49,6 +52,26 @@ func TestCompletion2270ForkChatReadbackBothStores(t *testing.T) {
 				}
 				want = append(want, operatorread.OperatorConversationCompletion{AttemptID: handle.Attempt().AttemptID, Ordinal: ordinal, ExecutionMode: string(handle.Attempt().Authority.ExecutionMode), Usage: settlement.Usage.Clone()})
 			}
+			physical, err := ReadCompletionAttemptStorageForTest(testAuthorActivityContext(), fixture.store, "anthropic_api", "")
+			children := 0
+			for _, row := range physical {
+				if row.TargetKind == string(runtimeeffects.UsageTargetConversationForkCompletion) && row.TargetID == prepared.ForkTurnID {
+					children++
+				}
+			}
+			if err != nil || children != 2 {
+				t.Fatalf("forkchat native attempt multiplicity: %+v err=%v", physical, err)
+			}
+			for _, completion := range want {
+				exact, err := ReadCompletionAttemptStorageForTest(testAuthorActivityContext(), fixture.store, "anthropic_api", completion.AttemptID)
+				if err != nil || len(exact) != 1 {
+					t.Fatalf("forkchat exact native attempt: %+v err=%v", exact, err)
+				}
+				row := exact[0]
+				if row.OperationID == "" || row.TargetID != prepared.ForkTurnID || row.TargetOrdinal != completion.Ordinal || len(row.Targets) != 1 || row.Targets[0].TargetID != prepared.ForkTurnID || row.Targets[0].Ordinal != completion.Ordinal || row.Targets[0].AttemptID != completion.AttemptID || len(row.Spend) != 1 || row.Spend[0].AttemptID != completion.AttemptID || !reflect.DeepEqual(row.Spend[0].Evidence, completion.Usage.Evidence) {
+					t.Fatalf("forkchat native target/spend identity: %+v", row)
+				}
+			}
 			result, err := fixture.store.RecordOperatorConversationForkChat(testAuthorActivityContext(), runfork.ConversationForkChatRecordRequest{
 				ForkID: fixture.fork.ForkID, Prepared: prepared, Message: "inspect independent model evidence", ActorTokenID: prepared.ActorTokenID,
 				Execution: runfork.ConversationForkChatExecution{AssistantMessage: "completed", ExecutionOwner: prepared.ExecutionOwner, FenceGeneration: prepared.FenceGeneration}, Now: fixture.now.Add(4 * time.Second),
@@ -56,13 +79,19 @@ func TestCompletion2270ForkChatReadbackBothStores(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(result.Turn.Completions, want) {
 				t.Fatalf("immediate fork result lost ordered child evidence: %+v, %v", result.Turn.Completions, err)
 			}
-			reads := fixture.store.(interface {
-				LoadOperatorConversationFork(context.Context, string) (runfork.OperatorConversationForkSession, error)
+			var reads forkChatHistoryReader
+			t.Cleanup(func() {
+				if reads == nil {
+					return
+				}
+				got, err := reads.LoadOperatorConversationFork(testAuthorActivityContext(), fixture.fork.ForkID)
+				if err != nil || len(got.Turns) != 1 || !reflect.DeepEqual(got.Turns[0].Completions, want) {
+					t.Fatalf("reopened history closed ahead of its consumer: %+v err=%v", got.Turns, err)
+				}
 			})
-			if fixture.sqlite {
-				reads = newBootstrappedSQLiteRuntimeStoreForPath(t, fixture.store.(*SQLiteRuntimeStore).Path())
-			} else {
-				reads = admitTestPostgresStore(t, fixture.db)
+			reads = fixture.reopen()
+			if reads == fixture.store.(forkChatHistoryReader) {
+				t.Fatal("historical readback reused the live owner instead of reopening its location")
 			}
 			for repeat := 0; repeat < 2; repeat++ {
 				reloaded, err := reads.LoadOperatorConversationFork(testAuthorActivityContext(), fixture.fork.ForkID)
@@ -80,10 +109,8 @@ func TestCompletion2270SettlementBothStores(t *testing.T) {
 		t.Run(shape, func(t *testing.T) {
 			eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
 				store := selected.selected.(completionSettlementTestStore)
-				if selected.postgres {
-					store = admitTestPostgresStore(t, selected.db)
-				}
 				fixture := newCompletionSettlementFixture(t, store, selected.db, !selected.postgres)
+				requireCompletionObservationRefusals(t, store)
 				ctx := fixture.context
 				handle := beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "completion-2270:"+shape)
 				settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "", "")
@@ -151,9 +178,49 @@ func TestCompletion2270SettlementBothStores(t *testing.T) {
 					t.Fatalf("settle completion: %+v, %v", result, err)
 				}
 				requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 1, 1, 0)
+				physical, err := ReadCompletionAttemptStorageForTest(ctx, store, "claude_cli", handle.Attempt().AttemptID)
+				if err != nil || len(physical) != 1 {
+					t.Fatalf("exact native completion read: %+v err=%v", physical, err)
+				}
+				row := physical[0]
+				if row.OperationID != handle.Attempt().OperationID || row.TargetID != frozen.AgentTurn.TurnID || row.TargetKind != string(runtimeeffects.UsageTargetAgentTurn) || len(row.Targets) != 1 || row.Targets[0].TargetID != row.TargetID || row.Targets[0].AttemptID != row.AttemptID || len(row.Spend) != 1 || row.Spend[0].AttemptID != row.AttemptID || !reflect.DeepEqual(row.Spend[0].Evidence, frozen.Usage.Evidence.Canonical()) {
+					t.Fatalf("native completion target/spend differs: %+v", row)
+				}
+				if len(row.Spend[0].Evidence.Models) > 0 {
+					row.Spend[0].Evidence.Models[0].Model = "detached-observation"
+				}
+				again, err := ReadCompletionAttemptStorageForTest(ctx, store, "claude_cli", row.AttemptID)
+				if err != nil || len(again) != 1 || len(again[0].Spend) != 1 || !reflect.DeepEqual(again[0].Spend[0].Evidence, frozen.Usage.Evidence.Canonical()) {
+					t.Fatalf("native completion observation aliases evidence: %+v err=%v", again, err)
+				}
 				proveCompletion2270Readback(t, ctx, store.(completion2270ReadStore), fixture, frozen)
 			})
 		})
+	}
+}
+
+type completionObservationStoreWrapper struct{ runtimeeffects.Store }
+
+func requireCompletionObservationRefusals(t *testing.T, selected runtimeeffects.Store) {
+	t.Helper()
+	ctx := testAuthorActivityContext()
+	for _, coordinate := range []struct{ adapter, attempt string }{
+		{"", ""}, {" claude_cli", ""}, {"claude_cli", "bad-identity"},
+		{"claude_cli", uuid.NewString()}, {"foreign-adapter", uuid.NewString()},
+	} {
+		if got, err := ReadCompletionAttemptStorageForTest(ctx, selected, coordinate.adapter, coordinate.attempt); err == nil || got != nil {
+			t.Fatalf("invalid/absent observation coordinate accepted: %+v got=%+v err=%v", coordinate, got, err)
+		}
+	}
+	for _, foreign := range []runtimeeffects.Store{nil, &PostgresStore{}, &SQLiteRuntimeStore{}, completionObservationStoreWrapper{selected}} {
+		if got, err := ReadCompletionAttemptStorageForTest(ctx, foreign, "claude_cli", ""); err == nil || got != nil {
+			t.Fatalf("foreign effect observation owner accepted: %T got=%+v err=%v", foreign, got, err)
+		}
+	}
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if got, err := ReadCompletionAttemptStorageForTest(canceled, selected, "claude_cli", ""); !errors.Is(err, context.Canceled) || got != nil {
+		t.Fatalf("canceled completion observation: %+v err=%v", got, err)
 	}
 }
 
