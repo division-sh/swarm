@@ -1122,7 +1122,7 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutation
 	token := uuid.NewString()
 	version := record.ClaimVersion + 1
 	expiresAt := now.Add(leaseTTL)
-	if err := a.insertAttempt(ctx, tx, attempt, record.RunID, record.DeliveryID, version, token, now, expiresAt); err != nil {
+	if err := a.insertAttempt(ctx, tx, record.DeliveryID, version, token, now, expiresAt); err != nil {
 		return ClaimedObligation{}, err
 	}
 	query := `
@@ -1152,7 +1152,7 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutation
 		return ClaimedObligation{}, fmt.Errorf("%w: delivery claim lost compare-and-set", ErrConflict)
 	}
 	if record.Status == StatusInProgress {
-		if err := a.expireAttempt(ctx, tx, attempt, record, now); err != nil {
+		if err := a.expireAttempt(ctx, tx, record, now); err != nil {
 			return ClaimedObligation{}, err
 		}
 	}
@@ -1172,11 +1172,11 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutation
 
 func (a *Adapter) BindAgentSession(ctx context.Context, attempt *mutationprotocol.Attempt, claim Claim, sessionID string) (Snapshot, error) {
 	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (Snapshot, error) {
-		return a.bindAgentSessionTx(ctx, tx, attempt, claim, sessionID)
+		return a.bindAgentSessionTx(ctx, tx, claim, sessionID)
 	})
 }
 
-func (a *Adapter) bindAgentSessionTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, sessionID string) (Snapshot, error) {
+func (a *Adapter) bindAgentSessionTx(ctx context.Context, tx *sql.Tx, claim Claim, sessionID string) (Snapshot, error) {
 	if tx == nil || claim.Validate() != nil {
 		return Snapshot{}, fmt.Errorf("delivery session binding requires a current claim")
 	}
@@ -1261,7 +1261,7 @@ func (a *Adapter) renewClaimTx(ctx context.Context, tx *sql.Tx, attempt *mutatio
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if _, err := a.renewClaimWrite(ctx, tx, attempt, claim, now, leaseTTL); err != nil {
+	if _, err := a.renewClaimWrite(ctx, tx, claim, now, leaseTTL); err != nil {
 		return Snapshot{}, err
 	}
 	updated, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
@@ -1286,7 +1286,7 @@ func (a *Adapter) renewAcquiredClaim(ctx context.Context, tx *sql.Tx, attempt *m
 	if !snapshot.ClaimExpiresAt.After(now) {
 		return Snapshot{}, fmt.Errorf("%w: newly acquired delivery claim expired before renewal", ErrConflict)
 	}
-	expiresAt, err := a.renewClaimWrite(ctx, tx, attempt, claim, now, leaseTTL)
+	expiresAt, err := a.renewClaimWrite(ctx, tx, claim, now, leaseTTL)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -1296,7 +1296,7 @@ func (a *Adapter) renewAcquiredClaim(ctx context.Context, tx *sql.Tx, attempt *m
 	return snapshot, nil
 }
 
-func (a *Adapter) renewClaimWrite(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, now time.Time, leaseTTL time.Duration) (time.Time, error) {
+func (a *Adapter) renewClaimWrite(ctx context.Context, tx *sql.Tx, claim Claim, now time.Time, leaseTTL time.Duration) (time.Time, error) {
 	if leaseTTL <= 0 {
 		leaseTTL = DefaultLeaseTTL
 	}
@@ -1477,7 +1477,7 @@ func (a *Adapter) readProviderOriginRecoveryDisposition(ctx context.Context, tx 
 	return providerOriginRecoveryAlreadyTerminal, nil
 }
 
-func (a *Adapter) prepareProviderOriginRecovery(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim) (bool, error) {
+func (a *Adapter) prepareProviderOriginRecovery(ctx context.Context, tx *sql.Tx, claim Claim) (bool, error) {
 	disposition, err := a.providerOriginRecoveryDisposition(ctx, tx, claim)
 	if err != nil {
 		return false, err
@@ -2931,7 +2931,7 @@ func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cla
 	return record, now, nil
 }
 
-func (a *Adapter) insertAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runID, deliveryID string, version int64, token string, startedAt, expiresAt time.Time) error {
+func (a *Adapter) insertAttempt(ctx context.Context, tx *sql.Tx, deliveryID string, version int64, token string, startedAt, expiresAt time.Time) error {
 	query := `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker, closure_kind) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $1::uuid, TRUE, 'open')`
 	args := []any{deliveryID, version, token, startedAt, expiresAt}
 	if a.dialect == DialectSQLite {
@@ -2943,7 +2943,7 @@ func (a *Adapter) insertAttempt(ctx context.Context, tx *sql.Tx, attempt *mutati
 	return nil
 }
 
-func (a *Adapter) expireAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, record deliveryRecord, now time.Time) error {
+func (a *Adapter) expireAttempt(ctx context.Context, tx *sql.Tx, record deliveryRecord, now time.Time) error {
 	if record.claimToken == "" || record.ClaimVersion <= 0 {
 		return fmt.Errorf("%w: expired in-progress delivery has no current claim", ErrConflict)
 	}
