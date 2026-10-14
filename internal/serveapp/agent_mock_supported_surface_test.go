@@ -3,7 +3,6 @@ package serveapp
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -31,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -287,11 +287,16 @@ func waitForMockAgentTurns(t testing.TB, backend, location string, want int) {
 	defer db.Close()
 	deadline := time.Now().Add(45 * time.Second)
 	for time.Now().Before(deadline) {
-		var turns, unfinished int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM agent_turns WHERE execution_mode = 'mock' AND (agent_id LIKE 'phrase-bot%' OR agent_id = 'memory-bot')`).Scan(&turns); err != nil {
+		turns, err := readServedSelectedRole(context.Background(), db, func(ctx context.Context) (int, error) {
+			return storetest.CountMockConversationTurnsStorage(ctx, db)
+		})
+		if err != nil {
 			t.Fatalf("query %s mock turns: %v", backend, err)
 		}
-		if err := db.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE subscriber_type = 'agent' AND (subscriber_id LIKE 'phrase-bot%' OR subscriber_id = 'memory-bot') AND status <> 'delivered'`).Scan(&unfinished); err != nil {
+		unfinished, err := readServedSelectedRole(context.Background(), db, func(ctx context.Context) (int, error) {
+			return storetest.CountUnfinishedMockAgentDeliveriesStorage(ctx, db)
+		})
+		if err != nil {
 			t.Fatalf("query %s mock deliveries: %v", backend, err)
 		}
 		if turns >= want && unfinished == 0 {
@@ -299,58 +304,30 @@ func waitForMockAgentTurns(t testing.TB, backend, location string, want int) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	type turnFact struct {
-		AgentID       string
-		ExecutionMode string
-		ParseOK       bool
-		Request       string
-		Response      string
-		Failure       string
-	}
-	turnRows, err := db.Query(`SELECT agent_id, execution_mode, parse_ok, CAST(COALESCE(request_payload, '{}') AS TEXT), CAST(COALESCE(response_payload, '{}') AS TEXT), CAST(COALESCE(failure, '{}') AS TEXT) FROM agent_turns ORDER BY created_at`)
+	turns, err := readServedSelectedRole(context.Background(), db, func(ctx context.Context) (storetest.MockConversationTurnDiagnosticsStorage, error) {
+		return storetest.ReadMockConversationTurnDiagnosticsStorage(ctx, db)
+	})
 	if err != nil {
 		t.Fatalf("%s mock path did not reach %d turns; inspect turns: %v", backend, want, err)
 	}
-	var turns []turnFact
-	for turnRows.Next() {
-		var fact turnFact
-		if scanErr := turnRows.Scan(&fact.AgentID, &fact.ExecutionMode, &fact.ParseOK, &fact.Request, &fact.Response, &fact.Failure); scanErr != nil {
-			_ = turnRows.Close()
-			t.Fatalf("%s mock path did not reach %d turns; scan turns: %v", backend, want, scanErr)
-		}
-		turns = append(turns, fact)
+	if turns.ScanError != nil {
+		t.Fatalf("%s mock path did not reach %d turns; scan turns: %v", backend, want, turns.ScanError)
 	}
-	_ = turnRows.Close()
-	type deliveryFact struct {
-		SubscriberID string
-		Status       string
-		ReasonCode   sql.NullString
-		Failure      sql.NullString
-	}
-	deliveryRows, err := db.Query(`SELECT subscriber_id, status, reason_code, CAST(failure AS TEXT) FROM event_deliveries WHERE subscriber_type = 'agent' ORDER BY created_at`)
+	deliveries, err := readServedSelectedRole(context.Background(), db, func(ctx context.Context) (storetest.MockAgentDeliveryDiagnosticsStorage, error) {
+		return storetest.ReadMockAgentDeliveryDiagnosticsStorage(ctx, db)
+	})
 	if err != nil {
-		t.Fatalf("%s mock path did not reach %d turns; turns=%#v inspect deliveries: %v", backend, want, turns, err)
+		t.Fatalf("%s mock path did not reach %d turns; turns=%#v inspect deliveries: %v", backend, want, turns.Rows, err)
 	}
-	var deliveries []deliveryFact
-	for deliveryRows.Next() {
-		var fact deliveryFact
-		if scanErr := deliveryRows.Scan(&fact.SubscriberID, &fact.Status, &fact.ReasonCode, &fact.Failure); scanErr != nil {
-			_ = deliveryRows.Close()
-			t.Fatalf("%s mock path did not reach %d turns; turns=%#v scan deliveries: %v", backend, want, turns, scanErr)
-		}
-		deliveries = append(deliveries, fact)
+	if deliveries.ScanError != nil {
+		t.Fatalf("%s mock path did not reach %d turns; turns=%#v scan deliveries: %v", backend, want, turns.Rows, deliveries.ScanError)
 	}
-	_ = deliveryRows.Close()
-	t.Fatalf("%s mock path did not reach %d turns; turns=%#v deliveries=%#v", backend, want, turns, deliveries)
+	t.Fatalf("%s mock path did not reach %d turns; turns=%#v deliveries=%#v", backend, want, turns.Rows, deliveries.Rows)
 }
 
-func openMockProofDB(t testing.TB, backend, location string) *sql.DB {
+func openMockProofDB(t testing.TB, backend, location string) storetest.ReleaseProcessReadOnlyInspection {
 	t.Helper()
-	driver := "sqlite"
-	if backend == "postgres" {
-		driver = "postgres"
-	}
-	db, err := sql.Open(driver, location)
+	db, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
 	if err != nil {
 		t.Fatalf("open %s mock proof store: %v", backend, err)
 	}
@@ -373,34 +350,28 @@ func waitForMockConnectorDecisionCard(t testing.TB, backend, location string, wa
 	return ""
 }
 
-func mockConnectorDecisionCardState(t testing.TB, db *sql.DB, backend string) (int, string) {
+func mockConnectorDecisionCardState(t testing.TB, db storetest.ReleaseProcessReadOnlyInspection, backend string) (int, string) {
 	t.Helper()
-	rows, err := db.Query(`SELECT card_id, CAST(snapshot AS TEXT), status FROM decision_cards WHERE execution_mode = 'mock' ORDER BY created_at`)
+	rows, err := readServedSelectedRole(context.Background(), db, func(ctx context.Context) ([]storetest.MockDecisionCardStorage, error) {
+		return storetest.ReadMockDecisionCardsStorage(ctx, db)
+	})
 	if err != nil {
 		t.Fatalf("query %s mock decision cards: %v", backend, err)
 	}
-	defer rows.Close()
 	count := 0
 	pendingCardID := ""
-	for rows.Next() {
-		var cardID, rawSnapshot, status string
-		if err := rows.Scan(&cardID, &rawSnapshot, &status); err != nil {
-			t.Fatalf("scan %s mock decision card: %v", backend, err)
-		}
+	for _, row := range rows {
 		var snapshot map[string]any
-		if err := json.Unmarshal([]byte(rawSnapshot), &snapshot); err != nil {
-			t.Fatalf("decode %s mock decision card %s snapshot: %v", backend, cardID, err)
+		if err := json.Unmarshal([]byte(row.Snapshot), &snapshot); err != nil {
+			t.Fatalf("decode %s mock decision card %s snapshot: %v", backend, row.CardID, err)
 		}
 		if strings.TrimSpace(fmt.Sprint(snapshot["decision"])) != "send_telegram_message" {
 			continue
 		}
 		count++
-		if status == decisioncard.StatusPending {
-			pendingCardID = cardID
+		if row.Status == decisioncard.StatusPending {
+			pendingCardID = row.CardID
 		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate %s mock decision cards: %v", backend, err)
 	}
 	return count, pendingCardID
 }
@@ -433,8 +404,10 @@ func waitForMockConnectorAttempts(t testing.TB, backend, location string, want i
 	defer db.Close()
 	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		var count int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = 'mock' AND status = 'succeeded'`).Scan(&count); err != nil {
+		count, err := readServedSelectedRole(context.Background(), db, func(ctx context.Context) (int, error) {
+			return storetest.CountSucceededTelegramModeAttemptsStorage(ctx, db, "mock")
+		})
+		if err != nil {
 			t.Fatalf("query %s mock connector attempts: %v", backend, err)
 		}
 		if count == want {
@@ -445,56 +418,25 @@ func waitForMockConnectorAttempts(t testing.TB, backend, location string, want i
 	t.Fatalf("%s mock connector attempts did not reach %d; %s", backend, want, mockConnectorFailureEvidence(t, db))
 }
 
-func mockConnectorFailureEvidence(t testing.TB, db *sql.DB) string {
+func mockConnectorFailureEvidence(t testing.TB, db storetest.ReleaseProcessReadOnlyInspection) string {
 	t.Helper()
 	parts := []string{}
-	eventRows, err := db.Query(`SELECT event_name, execution_mode, CAST(payload AS TEXT) FROM events WHERE event_name LIKE '%telegram%' OR event_name LIKE '%activity%' ORDER BY created_at`)
-	if err != nil {
-		parts = append(parts, "events_error="+err.Error())
-	} else {
-		events := []string{}
-		for eventRows.Next() {
-			var name, mode, payload string
-			if scanErr := eventRows.Scan(&name, &mode, &payload); scanErr != nil {
-				events = append(events, "scan_error="+scanErr.Error())
-				break
-			}
-			events = append(events, fmt.Sprintf("%s/%s=%s", name, mode, payload))
+	for _, read := range []struct {
+		label string
+		read  func(context.Context, any) ([]string, error)
+	}{
+		{"events", storetest.ReadMockConnectorEventDiagnosticsStorage},
+		{"attempts", storetest.ReadMockConnectorAttemptDiagnosticsStorage},
+		{"deliveries", storetest.ReadMockConnectorDeliveryDiagnosticsStorage},
+	} {
+		rows, err := readServedSelectedRole(context.Background(), db, func(ctx context.Context) ([]string, error) {
+			return read.read(ctx, db)
+		})
+		if err != nil {
+			parts = append(parts, read.label+"_error="+err.Error())
+		} else {
+			parts = append(parts, read.label+"=["+strings.Join(rows, "; ")+"]")
 		}
-		_ = eventRows.Close()
-		parts = append(parts, "events=["+strings.Join(events, "; ")+"]")
-	}
-	attemptRows, err := db.Query(`SELECT tool, execution_mode, status, CAST(COALESCE(failure, '{}') AS TEXT) FROM activity_attempts ORDER BY started_at`)
-	if err != nil {
-		parts = append(parts, "attempts_error="+err.Error())
-	} else {
-		attempts := []string{}
-		for attemptRows.Next() {
-			var tool, mode, status, failure string
-			if scanErr := attemptRows.Scan(&tool, &mode, &status, &failure); scanErr != nil {
-				attempts = append(attempts, "scan_error="+scanErr.Error())
-				break
-			}
-			attempts = append(attempts, fmt.Sprintf("%s/%s/%s=%s", tool, mode, status, failure))
-		}
-		_ = attemptRows.Close()
-		parts = append(parts, "attempts=["+strings.Join(attempts, "; ")+"]")
-	}
-	deliveryRows, err := db.Query(`SELECT subscriber_id, status, COALESCE(reason_code, ''), CAST(COALESCE(failure, '{}') AS TEXT) FROM event_deliveries WHERE subscriber_id LIKE '%telegram%' ORDER BY created_at`)
-	if err != nil {
-		parts = append(parts, "deliveries_error="+err.Error())
-	} else {
-		deliveries := []string{}
-		for deliveryRows.Next() {
-			var subscriber, status, reason, failure string
-			if scanErr := deliveryRows.Scan(&subscriber, &status, &reason, &failure); scanErr != nil {
-				deliveries = append(deliveries, "scan_error="+scanErr.Error())
-				break
-			}
-			deliveries = append(deliveries, fmt.Sprintf("%s/%s/%s=%s", subscriber, status, reason, failure))
-		}
-		_ = deliveryRows.Close()
-		parts = append(parts, "deliveries=["+strings.Join(deliveries, "; ")+"]")
 	}
 	return strings.Join(parts, " ")
 }
@@ -525,29 +467,74 @@ func assertMockSupportedEvidence(t testing.TB, backend, location, entityID strin
 	t.Helper()
 	db := openMockProofDB(t, backend, location)
 	defer db.Close()
-	assertMockCount(t, db, "turns", 2, `SELECT COUNT(*) FROM agent_turns WHERE execution_mode = 'mock' AND agent_id LIKE 'phrase-bot%'`)
-	assertMockCount(t, db, "mock attempts", 2, `SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE adapter = 'mock_python' AND execution_mode = 'mock' AND state = 'settled'`)
-	assertMockCount(t, db, "non-mock attempts", 0, `SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE execution_mode <> 'mock'`)
-	assertMockCount(t, db, "Telegram mock activity attempts", 2, `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = 'mock' AND status = 'succeeded'`)
-	assertMockCount(t, db, "Telegram live activity attempts", 0, `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = 'live'`)
-	assertMockCount(t, db, "mock reply events", 2, `SELECT COUNT(*) FROM events WHERE event_name LIKE '%telegram.reply_requested' AND execution_mode = 'mock'`)
-	assertMockCount(t, db, "mock connector decision cards", 2, `SELECT COUNT(*) FROM decision_cards WHERE execution_mode = 'mock' AND CAST(snapshot AS TEXT) LIKE '%send_telegram_message%'`)
-	assertMockCount(t, db, "mock spend rows", 2, `SELECT COUNT(*) FROM spend_ledger WHERE execution_mode = 'mock'`)
-	assertMockCount(t, db, "live spend rows", 0, `SELECT COUNT(*) FROM spend_ledger WHERE execution_mode = 'live'`)
-	assertMockAtLeast(t, db, "mock author activity", 1, `SELECT COUNT(*) FROM author_activity_occurrences WHERE `+mockJSONTextExpression(backend, "projection", "execution_mode")+` = 'mock'`)
-	var persistedEntityID string
-	query := `SELECT entity_id FROM entity_state WHERE entity_id = ` + mockPlaceholder(backend, 1)
-	if err := db.QueryRow(query, entityID).Scan(&persistedEntityID); err != nil || persistedEntityID != entityID {
+	for _, check := range []struct {
+		label string
+		want  int
+		read  func(context.Context, any) (int, error)
+	}{
+		{"turns", 2, storetest.CountMockPhraseTurnsStorage},
+		{"mock attempts", 2, storetest.CountMockPythonSettledAttemptsStorage},
+		{"non-mock attempts", 0, storetest.CountNonMockExternalAttemptsStorage},
+		{"Telegram mock activity attempts", 2, func(ctx context.Context, selected any) (int, error) {
+			return storetest.CountSucceededTelegramModeAttemptsStorage(ctx, selected, "mock")
+		}},
+		{"Telegram live activity attempts", 0, storetest.CountLiveTelegramAttemptsStorage},
+		{"mock reply events", 2, storetest.CountMockTelegramReplyStorage},
+		{"mock connector decision cards", 2, storetest.CountMockTelegramDecisionCardsStorage},
+		{"mock spend rows", 2, func(ctx context.Context, selected any) (int, error) {
+			return storetest.CountExecutionModeSpendStorage(ctx, selected, "mock")
+		}},
+		{"live spend rows", 0, func(ctx context.Context, selected any) (int, error) {
+			return storetest.CountExecutionModeSpendStorage(ctx, selected, "live")
+		}},
+	} {
+		got, err := readServedSelectedRole(context.Background(), db, func(ctx context.Context) (int, error) {
+			return check.read(ctx, db)
+		})
+		if err != nil {
+			t.Fatalf("query %s: %v", check.label, err)
+		}
+		assertMockCount(t, check.label, check.want, got)
+	}
+	authorActivity, err := readServedSelectedRole(context.Background(), db, func(ctx context.Context) (int, error) {
+		return storetest.CountMockAuthorActivityStorage(ctx, db)
+	})
+	if err != nil {
+		t.Fatalf("query mock author activity: %v", err)
+	}
+	assertMockAtLeast(t, "mock author activity", 1, authorActivity)
+	persistedEntityID, err := readServedSelectedRole(context.Background(), db, func(ctx context.Context) (string, error) {
+		return storetest.ReadMockEntityIdentityStorage(ctx, db, entityID)
+	})
+	if err != nil || persistedEntityID != entityID {
 		t.Fatalf("read %s mock entity identity = %q err=%v, want %q", backend, persistedEntityID, err, entityID)
 	}
-	var requestPayload string
-	if err := db.QueryRow(`SELECT CAST(request_payload AS TEXT) FROM agent_turns WHERE agent_id LIKE 'phrase-bot%' ORDER BY created_at DESC LIMIT 1`).Scan(&requestPayload); err != nil {
+	requestPayload, err := readServedSelectedRole(context.Background(), db, func(ctx context.Context) (string, error) {
+		return storetest.ReadLatestMockPhraseRequestStorage(ctx, db)
+	})
+	if err != nil {
 		t.Fatalf("read %s mock memory request: %v", backend, err)
 	}
 	for _, want := range []string{"hello 301", "hello 302"} {
 		if !strings.Contains(requestPayload, want) {
 			t.Fatalf("mock memory request missing %q: %s", want, requestPayload)
 		}
+	}
+	evidence := mockConnectorFailureEvidence(t, db)
+	for _, section := range []string{"events", "attempts", "deliveries"} {
+		if strings.Contains(evidence, section+"_error=") || !strings.Contains(evidence, section+"=[") {
+			t.Fatalf("successful mock connector lost %s failure diagnostics: %s", section, evidence)
+		}
+	}
+	// Production delivery subscriber identities need not contain the tool name.
+	// The original LIKE '%telegram%' diagnostic can therefore legitimately be empty.
+	for _, section := range []string{"events", "attempts"} {
+		if strings.Contains(evidence, section+"=[]") {
+			t.Fatalf("successful mock connector lost positive %s diagnostics: %s", section, evidence)
+		}
+	}
+	if !strings.Contains(evidence, "telegram.send_message/mock/succeeded=") {
+		t.Fatalf("mock connector diagnostics lost exact tool/mode/status: %s", evidence)
 	}
 }
 
@@ -593,38 +580,16 @@ func assertMockUsageReadback(t *testing.T, endpoint, runID, agentID string) {
 	t.Fatalf("mock agent.usage = %#v, want visibly labelled mock estimate", result)
 }
 
-func assertMockCount(t testing.TB, db *sql.DB, label string, want int, query string) {
+func assertMockCount(t testing.TB, label string, want, got int) {
 	t.Helper()
-	var got int
-	if err := db.QueryRow(query).Scan(&got); err != nil {
-		t.Fatalf("query %s: %v", label, err)
-	}
 	if got != want {
 		t.Fatalf("%s = %d, want %d", label, got, want)
 	}
 }
 
-func assertMockAtLeast(t testing.TB, db *sql.DB, label string, want int, query string) {
+func assertMockAtLeast(t testing.TB, label string, want, got int) {
 	t.Helper()
-	var got int
-	if err := db.QueryRow(query).Scan(&got); err != nil {
-		t.Fatalf("query %s: %v", label, err)
-	}
 	if got < want {
 		t.Fatalf("%s = %d, want at least %d", label, got, want)
 	}
-}
-
-func mockPlaceholder(backend string, ordinal int) string {
-	if backend == "postgres" {
-		return fmt.Sprintf("$%d::uuid", ordinal)
-	}
-	return "?"
-}
-
-func mockJSONTextExpression(backend, column, field string) string {
-	if backend == "postgres" {
-		return fmt.Sprintf("%s->>'%s'", column, field)
-	}
-	return fmt.Sprintf("json_extract(%s, '$.%s')", column, field)
 }

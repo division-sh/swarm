@@ -3,7 +3,6 @@ package serveapp
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -599,30 +599,36 @@ func requireStandingTelegramEvidenceCounts(t testing.TB, backend, location strin
 
 func loadStandingTelegramEvidenceCounts(t testing.TB, backend, location string) standingTelegramEvidenceCounts {
 	t.Helper()
-	driver, dsn := "sqlite", location
-	if backend == "postgres" {
-		driver, dsn = "postgres", location
-	}
-	db, err := sql.Open(driver, dsn)
+	reader, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
 	if err != nil {
 		t.Fatalf("open %s Telegram evidence store: %v", backend, err)
 	}
-	defer db.Close()
+	defer reader.Close()
 	var counts standingTelegramEvidenceCounts
 	queries := []struct {
 		label string
-		query string
+		read  func(context.Context) (int, error)
 		out   *int
 	}{
-		{label: "raw events", query: `SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram'`, out: &counts.Raw},
-		{label: "normalized events", query: `SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram.text_message'`, out: &counts.Normalized},
-		{label: "reply events", query: `SELECT COUNT(*) FROM events WHERE event_name = 'telegram.reply_requested' OR event_name LIKE '%/telegram.reply_requested'`, out: &counts.Replies},
-		{label: "Telegram activities", query: `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message'`, out: &counts.Activities},
+		{label: "raw events", read: func(ctx context.Context) (int, error) {
+			return storetest.CountEventNameStorage(ctx, reader, "inbound.telegram")
+		}, out: &counts.Raw},
+		{label: "normalized events", read: func(ctx context.Context) (int, error) {
+			return storetest.CountEventNameStorage(ctx, reader, "inbound.telegram.text_message")
+		}, out: &counts.Normalized},
+		{label: "reply events", read: func(ctx context.Context) (int, error) {
+			return storetest.CountTelegramRequestedReplyStorage(ctx, reader)
+		}, out: &counts.Replies},
+		{label: "Telegram activities", read: func(ctx context.Context) (int, error) {
+			return storetest.CountTelegramToolAttemptsStorage(ctx, reader)
+		}, out: &counts.Activities},
 	}
 	for _, query := range queries {
-		if err := db.QueryRow(query.query).Scan(query.out); err != nil {
+		count, err := readServedSelectedRole(context.Background(), reader, query.read)
+		if err != nil {
 			t.Fatalf("query %s %s: %v", backend, query.label, err)
 		}
+		*query.out = count
 	}
 	return counts
 }
@@ -805,64 +811,43 @@ type standingMemorySession struct {
 
 func loadStandingMemorySessions(t testing.TB, backend, location string) map[string]standingMemorySession {
 	t.Helper()
-	driver, dsn, query := "sqlite", location, `
-		SELECT s.session_id, s.run_id, s.agent_id, s.flow_instance, COALESCE(fi.flow_template, ''), s.turn_count
-		FROM agent_sessions s
-		LEFT JOIN flow_instances fi ON fi.run_id = s.run_id AND fi.instance_path = s.flow_instance
-		WHERE s.memory_enabled = 1
-		ORDER BY s.flow_instance`
-	if backend == "postgres" {
-		driver, dsn, query = "postgres", location, `
-			SELECT s.session_id::text, s.run_id::text, s.agent_id, s.flow_instance, COALESCE(fi.flow_template, ''), s.turn_count
-			FROM agent_sessions s
-			LEFT JOIN flow_instances fi ON fi.run_id = s.run_id AND fi.instance_path = s.flow_instance
-			WHERE s.memory_enabled
-			ORDER BY s.flow_instance`
-	}
-	db, err := sql.Open(driver, dsn)
+	reader, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
 	if err != nil {
 		t.Fatalf("open %s memory store: %v", backend, err)
 	}
-	defer db.Close()
-	rows, err := db.Query(query)
+	defer reader.Close()
+	rows, err := readServedSelectedRole(context.Background(), reader, func(ctx context.Context) ([]storetest.MemoryEnabledSessionStorage, error) {
+		return storetest.ReadMemoryEnabledSessionsStorage(ctx, reader)
+	})
 	if err != nil {
 		t.Fatalf("query %s memory sessions: %v", backend, err)
 	}
-	defer rows.Close()
 	out := map[string]standingMemorySession{}
-	for rows.Next() {
-		var row standingMemorySession
-		if err := rows.Scan(&row.SessionID, &row.RunID, &row.AgentID, &row.FlowInstance, &row.FlowTemplate, &row.TurnCount); err != nil {
-			t.Fatalf("scan %s memory session: %v", backend, err)
-		}
-		out[row.FlowInstance] = row
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read %s memory sessions: %v", backend, err)
+	for _, row := range rows {
+		out[row.FlowInstance] = standingMemorySession(row)
 	}
 	return out
 }
 
 func waitForStandingMemoryCompletion(t testing.TB, backend, location, executionMode string, wantAttempts int) {
 	t.Helper()
-	driver, dsn := "sqlite", location
-	modeQuery := `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = ? AND status = 'succeeded'`
-	if backend == "postgres" {
-		driver, dsn = "postgres", location
-		modeQuery = `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = $1 AND status = 'succeeded'`
-	}
-	db, err := sql.Open(driver, dsn)
+	reader, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
 	if err != nil {
 		t.Fatalf("open %s completion store: %v", backend, err)
 	}
-	defer db.Close()
+	defer reader.Close()
 	deadline := time.Now().Add(standingMemoryAsyncProofTimeout)
 	for time.Now().Before(deadline) {
-		var succeeded, unfinishedDeliveries int
-		if err := db.QueryRow(modeQuery, executionMode).Scan(&succeeded); err != nil {
+		succeeded, err := readServedSelectedRole(context.Background(), reader, func(ctx context.Context) (int, error) {
+			return storetest.CountSucceededTelegramModeAttemptsStorage(ctx, reader, executionMode)
+		})
+		if err != nil {
 			t.Fatalf("query %s completed Telegram attempts: %v", backend, err)
 		}
-		if err := db.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE (subscriber_id LIKE 'phrase-bot%' OR subscriber_id = 'memory-bot') AND status <> 'delivered'`).Scan(&unfinishedDeliveries); err != nil {
+		unfinishedDeliveries, err := readServedSelectedRole(context.Background(), reader, func(ctx context.Context) (int, error) {
+			return storetest.CountUnfinishedMemoryAgentDeliveriesStorage(ctx, reader)
+		})
+		if err != nil {
 			t.Fatalf("query %s unfinished agent deliveries: %v", backend, err)
 		}
 		if succeeded == wantAttempts && unfinishedDeliveries == 0 {
@@ -876,19 +861,15 @@ func waitForStandingMemoryCompletion(t testing.TB, backend, location, executionM
 func requireStandingMemoryAttemptCount(t testing.TB, backend, location, executionMode string, want int, label string) {
 	t.Helper()
 	time.Sleep(250 * time.Millisecond)
-	driver, dsn := "sqlite", location
-	query := `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = ? AND status = 'succeeded'`
-	if backend == "postgres" {
-		driver, dsn = "postgres", location
-		query = `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = $1 AND status = 'succeeded'`
-	}
-	db, err := sql.Open(driver, dsn)
+	reader, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
 	if err != nil {
 		t.Fatalf("open %s activity store: %v", backend, err)
 	}
-	defer db.Close()
-	var got int
-	if err := db.QueryRow(query, executionMode).Scan(&got); err != nil {
+	defer reader.Close()
+	got, err := readServedSelectedRole(context.Background(), reader, func(ctx context.Context) (int, error) {
+		return storetest.CountSucceededTelegramModeAttemptsStorage(ctx, reader, executionMode)
+	})
+	if err != nil {
 		t.Fatalf("query %s %s activity attempts: %v", backend, label, err)
 	}
 	if got != want {

@@ -31,6 +31,31 @@ import (
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
+func ReadDirectivePayloadOperationIDStorageForTest(ctx context.Context, selected any, eventID string) (string, error) {
+	_, postgres := selected.(*PostgresStore)
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return eventrecord.ReadDirectivePayloadOperationIDStorageTx(ctx, tx, postgres, eventID)
+	})
+}
+
+func CountMockTelegramReplyStorageForTest(ctx context.Context, selected any) (int, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountMockTelegramReplyStorageTx(ctx, tx)
+	})
+}
+
+func ReadMockConnectorEventDiagnosticsStorageForTest(ctx context.Context, selected any) ([]string, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) ([]string, error) {
+		return eventrecord.ReadMockConnectorEventDiagnosticsStorageTx(ctx, tx)
+	})
+}
+
+func CountTelegramRequestedReplyStorageForTest(ctx context.Context, selected any) (int, error) {
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountTelegramRequestedReplyStorageTx(ctx, tx)
+	})
+}
+
 func CountSourceNonDiagnosticEventsStorageForTest(ctx context.Context, selected any, runID, sourceEventID, diagnosticClass, diagnosticName string) (int, error) {
 	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (int, error) {
 		return eventrecord.CountSourceNonDiagnosticEventsStorageTx(ctx, tx, runID, sourceEventID, diagnosticClass, diagnosticName)

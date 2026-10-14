@@ -45,7 +45,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "202e95e047cbe01ebcf2f123c6ccd35ca2a45ec37632ded7502815323af52061"
+const targetDigest = "6fe8fd0f30dc94f3acf4dd9172d9a42677399f6b0ae815406738823e73151ba6"
 
 var sourceForkComparison = map[string]string{}
 var runDeliveryComparison = map[string]string{}
@@ -369,6 +369,7 @@ func main() {
 	rows, changes = composeChannelSettlementHistory(rows, changes)
 	rows, changes = composeBudgetDiagnosticHistory(rows, changes)
 	rows, changes = composeSelectedReadRoleHistory(rows, changes)
+	rows, changes = composeProcessReadHistory(rows, changes)
 	raw, err := json.Marshal(changes)
 	must(err)
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
@@ -1303,6 +1304,11 @@ func retiredFixtureReplacement(path, key string, after map[string]string) bool {
 }
 
 func currentReplacement(path, key string, after map[string]string) (string, bool) {
+	if selectedreadrole.ProcessFunction(path, key) {
+		previous, err := selectedreadrole.EarlierProcessSource(".", path, key, after[key])
+		must(err)
+		return currentHistoryComparison(path, key, previous), false
+	}
 	if retiredFixtureReplacement(path, key, after) {
 		return "", true
 	}

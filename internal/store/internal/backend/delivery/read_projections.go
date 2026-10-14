@@ -18,6 +18,75 @@ import (
 	"github.com/google/uuid"
 )
 
+func CountSuccessfulDirectivePipelineReceiptsStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1 AND subscriber_type = 'platform' AND subscriber_id = 'pipeline' AND outcome = 'success'`, eventID).Scan(&count)
+	return count, err
+}
+
+func ReadDirectivePipelineFailureStorageTx(ctx context.Context, tx *sql.Tx, key string) ([]byte, error) {
+	var failure []byte
+	err := tx.QueryRowContext(ctx, `SELECT er.failure FROM event_receipts er JOIN agent_directive_operations op ON op.directive_event_id = er.event_id WHERE op.method = 'agent.send_directive' AND op.idempotency_key = $1 AND er.subscriber_type = 'platform' AND er.subscriber_id = 'pipeline'`, key).Scan(&failure)
+	return failure, err
+}
+
+func CountUnfinishedMockAgentDeliveriesStorageTx(ctx context.Context, tx *sql.Tx) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE subscriber_type = 'agent' AND (subscriber_id LIKE 'phrase-bot%' OR subscriber_id = 'memory-bot') AND status <> 'delivered'`).Scan(&count)
+	return count, err
+}
+
+type MockAgentDeliveryDiagnosticStorage struct {
+	SubscriberID, Status string
+	ReasonCode, Failure  sql.NullString
+}
+
+type MockAgentDeliveryDiagnosticsStorage struct {
+	Rows      []MockAgentDeliveryDiagnosticStorage
+	ScanError error
+}
+
+func ReadMockAgentDeliveryDiagnosticsStorageTx(ctx context.Context, tx *sql.Tx) (MockAgentDeliveryDiagnosticsStorage, error) {
+	var out MockAgentDeliveryDiagnosticsStorage
+	rows, err := tx.QueryContext(ctx, `SELECT subscriber_id, status, reason_code, CAST(failure AS TEXT) FROM event_deliveries WHERE subscriber_type = 'agent' ORDER BY created_at`)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row MockAgentDeliveryDiagnosticStorage
+		if out.ScanError = rows.Scan(&row.SubscriberID, &row.Status, &row.ReasonCode, &row.Failure); out.ScanError != nil {
+			break
+		}
+		out.Rows = append(out.Rows, row)
+	}
+	return out, nil
+}
+
+func ReadMockConnectorDeliveryDiagnosticsStorageTx(ctx context.Context, tx *sql.Tx) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT subscriber_id, status, COALESCE(reason_code, ''), CAST(COALESCE(failure, '{}') AS TEXT) FROM event_deliveries WHERE subscriber_id LIKE '%telegram%' ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var subscriber, status, reason, failure string
+		if err := rows.Scan(&subscriber, &status, &reason, &failure); err != nil {
+			out = append(out, "scan_error="+err.Error())
+			break
+		}
+		out = append(out, fmt.Sprintf("%s/%s/%s=%s", subscriber, status, reason, failure))
+	}
+	return out, nil
+}
+
+func CountUnfinishedMemoryAgentDeliveriesStorageTx(ctx context.Context, tx *sql.Tx) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE (subscriber_id LIKE 'phrase-bot%' OR subscriber_id = 'memory-bot') AND status <> 'delivered'`).Scan(&count)
+	return count, err
+}
+
 type ServedDeliveryRouteEvidenceStorage struct {
 	ID, EventID, Identity, Kind, Recipient, Target, Context, Projection, Claim, Initialization string
 }

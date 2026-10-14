@@ -35,9 +35,18 @@ func main() {
 	scalar := flag.Bool("scalar", false, "apply existing-owner served fixture scalar reads")
 	roles := flag.Bool("roles", false, "remove derivative raw fixture arguments from read-only helpers")
 	readRoles := flag.Bool("read-roles", false, "migrate the finite selected read-role continuation")
+	processRead := flag.Bool("process-read", false, "replay the finite independent process-read observer repair")
+	captureProcessRead := flag.Bool("capture-process-read", false, "capture the finite repaired process-read declarations from their signed predecessor")
 	flag.Parse()
 	if flag.NArg() != 0 || (*lookup && (*scalar || *roles)) {
 		panic("usage: migrate-served-settlement [-lookup|-scalar|-roles] [-write]")
+	}
+	if *processRead || *captureProcessRead {
+		if *lookup || *scalar || *roles || *readRoles || (*processRead && *captureProcessRead) {
+			panic("process-read repair cannot replay another migration stage")
+		}
+		migrateProcessRead(*write, *captureProcessRead)
+		return
 	}
 	if *readRoles {
 		if *lookup || *scalar || *roles {

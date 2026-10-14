@@ -87,3 +87,28 @@ func composeSelectedReadRoleHistory(rows []recipe, changes []transition) ([]reci
 	}
 	return rows, changes
 }
+
+func composeProcessReadHistory(rows []recipe, changes []transition) ([]recipe, []transition) {
+	pins, err := selectedreadrole.ReadProcessPins(".")
+	must(err)
+	must(selectedreadrole.ValidateProcessCurrent(".", pins))
+	for _, input := range []struct {
+		value, out any
+		recipes    bool
+	}{{rows, &rows, true}, {changes, &changes, false}} {
+		prior, err := selectedreadrole.PriorProcessHistory(".", input.recipes)
+		must(err)
+		candidate, err := json.Marshal(input.value)
+		must(err)
+		var old, current []map[string]any
+		must(json.Unmarshal(prior, &old))
+		must(json.Unmarshal(candidate, &current))
+		if !reflect.DeepEqual(old, current) {
+			panic("process-read reconciliation changed its complete signed predecessor")
+		}
+		raw, err := selectedreadrole.ComposeProcessHistory(".", prior, input.recipes)
+		must(err)
+		must(json.Unmarshal(raw, input.out))
+	}
+	return rows, changes
+}

@@ -2908,28 +2908,23 @@ func requireServedScenarioRunOriginSurfaces(t *testing.T, endpoint, runID string
 
 func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntime, runID, entityID string) {
 	t.Helper()
-	db := rt.DB
 	backend := rt.Backend
 	bundleHash := rt.Runtime.Options.SourceArtifactFact.BundleHash()
 	if bundleHash == "" || bundleHash != rt.BundleHash {
 		t.Fatalf("%s served runtime source artifact = %q, want exact hash %q", backend, bundleHash, rt.BundleHash)
 	}
-	var status, originKind, trigger, gotHash string
-	var runQuery string
-	var runArgs []any
 	switch backend {
-	case "postgres":
-		runQuery = `SELECT status, origin_kind, COALESCE(trigger_event_type, ''), COALESCE(bundle_hash, '') FROM runs WHERE run_id = $1::uuid`
-		runArgs = []any{runID}
-	case "sqlite":
-		runQuery = `SELECT status, origin_kind, COALESCE(trigger_event_type, ''), COALESCE(bundle_hash, '') FROM runs WHERE run_id = ?`
-		runArgs = []any{runID}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown test.setup_entities proof backend %q", backend)
 	}
-	if err := db.QueryRowContext(context.Background(), runQuery, runArgs...).Scan(&status, &originKind, &trigger, &gotHash); err != nil {
+	run, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) (storetest.ServedSetupRunStorage, error) {
+		return storetest.ReadServedSetupRunStorage(ctx, rt.ReceiverStateReader, runID)
+	})
+	if err != nil {
 		t.Fatalf("%s load test.setup_entities run %s: %v", backend, runID, err)
 	}
+	status, originKind, trigger, gotHash := run.Status, run.OriginKind, run.Trigger, run.BundleHash
 	if status != "running" || originKind != string(storerunlifecycle.OriginScenarioSetup) ||
 		trigger != "" || gotHash != bundleHash {
 		t.Fatalf(
@@ -2938,89 +2933,44 @@ func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntim
 		)
 	}
 
-	var flow, typ, state string
-	var score any
-	var entityQuery string
-	var entityArgs []any
-	switch backend {
-	case "postgres":
-		entityQuery = `
-			SELECT flow_instance, entity_type, current_state, fields->>'score'
-			FROM entity_state
-			WHERE run_id = $1::uuid AND entity_id = $2::uuid
-		`
-		entityArgs = []any{runID, entityID}
-	case "sqlite":
-		entityQuery = `
-			SELECT flow_instance, entity_type, current_state, json_extract(fields, '$.score')
-			FROM entity_state
-			WHERE run_id = ? AND entity_id = ?
-		`
-		entityArgs = []any{runID, entityID}
-	}
-	if err := db.QueryRowContext(context.Background(), entityQuery, entityArgs...).Scan(&flow, &typ, &state, &score); err != nil {
+	entity, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) (storetest.ServedSetupEntityStorage, error) {
+		return storetest.ReadServedSetupEntityStorage(ctx, rt.ReceiverStateReader, runID, entityID)
+	})
+	if err != nil {
 		t.Fatalf("%s load setup entity %s: %v", backend, entityID, err)
 	}
+	flow, typ, state, score := entity.FlowInstance, entity.EntityType, entity.State, entity.Score
 	if flow != runID || typ != "widget" || state != "waiting" || !jsonScalarInt(score, 5) {
 		t.Fatalf("%s setup entity row = flow:%q type:%q state:%q score:%#v", backend, flow, typ, state, score)
 	}
 
-	var mutations int
-	var mutationQuery string
-	var mutationArgs []any
-	switch backend {
-	case "postgres":
-		mutationQuery = `
-			SELECT COUNT(*)
-			FROM entity_mutations
-			WHERE run_id = $1::uuid
-			  AND entity_id = $2::uuid
-		`
-		mutationArgs = []any{runID, entityID}
-	case "sqlite":
-		mutationQuery = `
-			SELECT COUNT(*)
-			FROM entity_mutations
-			WHERE run_id = ?
-			  AND entity_id = ?
-		`
-		mutationArgs = []any{runID, entityID}
-	}
-	if err := db.QueryRowContext(context.Background(), mutationQuery, mutationArgs...).Scan(&mutations); err != nil {
+	mutations, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) (int, error) {
+		return storetest.CountAllRunEntityMutationsStorage(ctx, rt.ReceiverStateReader, runID, entityID)
+	})
+	if err != nil {
 		t.Fatalf("%s count setup entity mutations: %v", backend, err)
 	}
 	if mutations != 3 {
-		rows, err := db.QueryContext(context.Background(), `SELECT writer_type, writer_id, handler_step, domain, path, count(*) FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 GROUP BY writer_type, writer_id, handler_step, domain, path ORDER BY writer_type, writer_id, handler_step, domain, path`, runID, entityID)
+		rows, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) ([]storetest.ServedSetupMutationAuthorityStorage, error) {
+			return storetest.ReadServedSetupMutationAuthoritiesStorage(ctx, rt.ReceiverStateReader, runID, entityID)
+		})
 		if err != nil {
 			t.Fatalf("%s inspect setup mutation ownership: %v", backend, err)
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var writerType, writerID, domain, path string
-			var step sql.NullString
-			var count int
-			if err := rows.Scan(&writerType, &writerID, &step, &domain, &path, &count); err != nil {
-				t.Fatal(err)
-			}
-			t.Logf("setup mutation authority: type=%s writer=%s step=%s domain=%s path=%s count=%d", writerType, writerID, step.String, domain, path, count)
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
+		for _, row := range rows {
+			t.Logf("setup mutation authority: type=%s writer=%s step=%s domain=%s path=%s count=%d", row.WriterType, row.WriterID, row.Step.String, row.Domain, row.Path, row.Count)
 		}
 		t.Fatalf("%s setup constructor mutation rows = %d, want 3", backend, mutations)
 	}
-	rows, err := db.QueryContext(context.Background(), `SELECT domain, path, old_value, new_value FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND writer_type='platform' AND writer_id='workflow_engine' AND handler_step='create' ORDER BY domain, path`, runID, entityID)
+	rows, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) ([]storetest.ServedSetupConstructorMutationStorage, error) {
+		return storetest.ReadServedSetupConstructorMutationsStorage(ctx, rt.ReceiverStateReader, runID, entityID)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	var actual []string
-	for rows.Next() {
-		var domain, path, after string
-		var before sql.NullString
-		if err := rows.Scan(&domain, &path, &before, &after); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range rows {
+		domain, path, after, before := row.Domain, row.Path, row.After, row.Before
 		if before.Valid {
 			t.Fatalf("setup constructor mutation overwrote existing %s/%s: %s", domain, path, before.String)
 		}
@@ -3040,9 +2990,6 @@ func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntim
 				t.Fatalf("setup constructor stage-entry mutation = %s, err=%v", after, err)
 			}
 		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	if want := []string{"authored_field/score", "bookkeeping/stage_entry", "lifecycle_state/"}; !reflect.DeepEqual(actual, want) {
 		t.Fatalf("setup constructor mutation identities = %v, want %v", actual, want)
@@ -3868,26 +3815,24 @@ func requireServedDirectiveFailureEnvelope(t *testing.T, rt servedControlProofRu
 		t.Fatalf("%s API failure = %#v, want %s/%s", rt.Backend, apiFailure, class, detail)
 	}
 
-	var state string
-	var operationFailure, receiptFailure []byte
 	switch rt.Backend {
-	case "postgres":
-		if err := rt.DB.QueryRow(`SELECT state, failure FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = $1`, key).Scan(&state, &operationFailure); err != nil {
-			t.Fatalf("load Postgres directive failure: %v", err)
-		}
-		if err := rt.DB.QueryRow(`SELECT er.failure FROM event_receipts er JOIN agent_directive_operations op ON op.directive_event_id = er.event_id WHERE op.method = 'agent.send_directive' AND op.idempotency_key = $1 AND er.subscriber_type = 'platform' AND er.subscriber_id = 'pipeline'`, key).Scan(&receiptFailure); err != nil {
-			t.Fatalf("load Postgres directive receipt failure: %v", err)
-		}
-	case "sqlite":
-		if err := rt.DB.QueryRow(`SELECT state, failure FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = ?`, key).Scan(&state, &operationFailure); err != nil {
-			t.Fatalf("load SQLite directive failure: %v", err)
-		}
-		if err := rt.DB.QueryRow(`SELECT er.failure FROM event_receipts er JOIN agent_directive_operations op ON op.directive_event_id = er.event_id WHERE op.method = 'agent.send_directive' AND op.idempotency_key = ? AND er.subscriber_type = 'platform' AND er.subscriber_id = 'pipeline'`, key).Scan(&receiptFailure); err != nil {
-			t.Fatalf("load SQLite directive receipt failure: %v", err)
-		}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown directive proof backend %q", rt.Backend)
 	}
+	operation, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) (storetest.DirectiveFailureStorage, error) {
+		return storetest.ReadDirectiveFailureStorage(ctx, rt.ReceiverStateReader, key)
+	})
+	if err != nil {
+		t.Fatalf("load %s directive failure: %v", rt.Backend, err)
+	}
+	receiptFailure, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) ([]byte, error) {
+		return storetest.ReadDirectivePipelineFailureStorage(ctx, rt.ReceiverStateReader, key)
+	})
+	if err != nil {
+		t.Fatalf("load %s directive receipt failure: %v", rt.Backend, err)
+	}
+	state, operationFailure := operation.State, operation.Failure
 	if state != "failed" {
 		t.Fatalf("%s directive failure state = %s, want failed", rt.Backend, state)
 	}
@@ -3930,21 +3875,19 @@ func servedDirectiveErrorFailure(t *testing.T, backend string, rpcErr *servedJSO
 
 func loadServedDirectiveOperationByKey(t *testing.T, rt servedControlProofRuntime, key string) runtimeagentcontrol.DirectiveOperation {
 	t.Helper()
-	var op runtimeagentcontrol.DirectiveOperation
-	var state string
-	var response, failure sql.NullString
 	switch rt.Backend {
-	case "postgres":
-		if err := rt.DB.QueryRow(`SELECT operation_id::text, directive_event_id::text, state, response, failure FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = $1`, key).Scan(&op.OperationID, &op.DirectiveEventID, &state, &response, &failure); err != nil {
-			t.Fatalf("load Postgres directive operation: %v", err)
-		}
-	case "sqlite":
-		if err := rt.DB.QueryRow(`SELECT operation_id, directive_event_id, state, response, failure FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = ?`, key).Scan(&op.OperationID, &op.DirectiveEventID, &state, &response, &failure); err != nil {
-			t.Fatalf("load SQLite directive operation: %v", err)
-		}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown directive proof backend %q", rt.Backend)
 	}
+	stored, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) (storetest.DirectiveReplayStorage, error) {
+		return storetest.ReadDirectiveReplayStorage(ctx, rt.ReceiverStateReader, key)
+	})
+	if err != nil {
+		t.Fatalf("load %s directive operation: %v", rt.Backend, err)
+	}
+	op := runtimeagentcontrol.DirectiveOperation{OperationID: stored.OperationID, DirectiveEventID: stored.EventID}
+	state, response, failure := stored.State, stored.Response, stored.Failure
 	op.State = runtimeagentcontrol.DirectiveOperationState(state)
 	if response.Valid {
 		op.Response = json.RawMessage(response.String)
@@ -4041,43 +3984,41 @@ func requireServedAgentDirectiveResult(t *testing.T, backend string, result serv
 func requireServedAgentDirectivePersistence(t *testing.T, rt servedControlProofRuntime, result servedAgentDirectiveProofResult, key string, wantOperations int) {
 	t.Helper()
 	ctx := context.Background()
-	var operationID, eventID, runID, state, projectionResource, payloadOperationID string
-	var operationCount, receiptCount int
 	switch rt.Backend {
-	case "postgres":
-		if err := rt.DB.QueryRowContext(ctx, `SELECT operation_id::text, directive_event_id::text, resolved_run_id::text, state FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = $1`, key).Scan(&operationID, &eventID, &runID, &state); err != nil {
-			t.Fatalf("postgres load directive operation: %v", err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = $1`, key).Scan(&operationCount); err != nil {
-			t.Fatal(err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT payload->>'operation_id' FROM events WHERE event_id = $1::uuid`, result.DirectiveEventID).Scan(&payloadOperationID); err != nil {
-			t.Fatal(err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline' AND outcome = 'success'`, result.DirectiveEventID).Scan(&receiptCount); err != nil {
-			t.Fatal(err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT resource_id FROM api_idempotency WHERE method = 'agent.send_directive' AND idempotency_key = $1`, key).Scan(&projectionResource); err != nil {
-			t.Fatal(err)
-		}
-	case "sqlite":
-		if err := rt.DB.QueryRowContext(ctx, `SELECT operation_id, directive_event_id, resolved_run_id, state FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = ?`, key).Scan(&operationID, &eventID, &runID, &state); err != nil {
-			t.Fatalf("sqlite load directive operation: %v", err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = ?`, key).Scan(&operationCount); err != nil {
-			t.Fatal(err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT json_extract(payload, '$.operation_id') FROM events WHERE event_id = ?`, result.DirectiveEventID).Scan(&payloadOperationID); err != nil {
-			t.Fatal(err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline' AND outcome = 'success'`, result.DirectiveEventID).Scan(&receiptCount); err != nil {
-			t.Fatal(err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT resource_id FROM api_idempotency WHERE method = 'agent.send_directive' AND idempotency_key = ?`, key).Scan(&projectionResource); err != nil {
-			t.Fatal(err)
-		}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown directive proof backend %q", rt.Backend)
+	}
+	identity, err := readServedSelectedRole(ctx, rt.ReceiverStateReader, func(ctx context.Context) (storetest.DirectiveIdentityStorage, error) {
+		return storetest.ReadDirectiveIdentityStorage(ctx, rt.ReceiverStateReader, key)
+	})
+	if err != nil {
+		t.Fatalf("%s load directive operation: %v", rt.Backend, err)
+	}
+	operationID, eventID, runID, state := identity.OperationID, identity.EventID, identity.RunID, identity.State
+	operationCount, err := readServedSelectedRole(ctx, rt.ReceiverStateReader, func(ctx context.Context) (int, error) {
+		return storetest.CountKeyedDirectiveOperationsStorage(ctx, rt.ReceiverStateReader, key)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payloadOperationID, err := readServedSelectedRole(ctx, rt.ReceiverStateReader, func(ctx context.Context) (string, error) {
+		return storetest.ReadDirectivePayloadOperationIDStorage(ctx, rt.ReceiverStateReader, result.DirectiveEventID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptCount, err := readServedSelectedRole(ctx, rt.ReceiverStateReader, func(ctx context.Context) (int, error) {
+		return storetest.CountSuccessfulDirectivePipelineReceiptsStorage(ctx, rt.ReceiverStateReader, result.DirectiveEventID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectionResource, err := readServedSelectedRole(ctx, rt.ReceiverStateReader, func(ctx context.Context) (string, error) {
+		return storetest.ReadDirectiveProjectionResourceStorage(ctx, rt.ReceiverStateReader, key)
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	if operationCount != wantOperations || operationID != result.OperationID || eventID != result.DirectiveEventID || runID != result.RunID || state != "succeeded" || projectionResource != result.OperationID || payloadOperationID != result.OperationID || receiptCount != 1 {
 		t.Fatalf("%s directive persistence count=%d operation=%s event=%s run=%s state=%s projection=%s payload_operation=%s receipts=%d result=%#v", rt.Backend, operationCount, operationID, eventID, runID, state, projectionResource, payloadOperationID, receiptCount, result)

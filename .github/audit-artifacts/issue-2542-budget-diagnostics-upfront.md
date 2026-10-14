@@ -62,4 +62,3 @@ controls and affected source ingress controls are green. Ten findings/eight raw
 sites are forecast, not yet credited. Per the orchestrator's batching directive,
 no additional per-wave census/history pass is run; its single append composes
 with the next selected-reader batch at the combined checkpoint.
-
