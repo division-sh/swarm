@@ -616,6 +616,8 @@ type AdvanceRequest struct {
 	Now                          time.Time
 }
 
+const PairingStatusPreparing = "preparing"
+
 // PairingReadback is authenticated control-plane material, never READY or a
 // principal/account admission. QR contents must not enter logs or durable DTOs.
 type PairingReadback struct {
