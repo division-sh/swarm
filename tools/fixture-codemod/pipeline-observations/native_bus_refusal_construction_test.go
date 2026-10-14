@@ -28,7 +28,7 @@ func TestNativeBusRefusalConstructionPreservesAllFiveCompleteWorkloads(t *testin
 		if before != row.After {
 			t.Fatal("terminal/diagnostic refusal, duplicate no-op, zero-route or fork rollback assertion changed")
 		}
-		if selectedCausalObservationBody(t, row.File, row.Function) != row.After {
+		if !residualComparatorCurrent2617(t, row, selectedCausalObservationBody(t, row.File, row.Function)) {
 			t.Fatal("native refusal fixture diverged from finite migration")
 		}
 	}

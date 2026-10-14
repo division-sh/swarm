@@ -44,7 +44,7 @@ func TestNativeBusPausedExpiryRetainsRealClaimAndEveryParkingContinuationAsserti
 		default:
 			t.Fatal("unknown paused expiry consumer")
 		}
-		if selectedCausalObservationBody(t, row.File, row.Function) != row.After {
+		if !residualComparatorCurrent2617(t, row, selectedCausalObservationBody(t, row.File, row.Function)) {
 			t.Fatal("paused expiry diverged from finite migration")
 		}
 	}

@@ -29,7 +29,7 @@ func TestNativeBusTargetConstructionPreservesSourceAndEveryRoundTripAssertion(t 
 		if before != row.After {
 			t.Fatal("target identity, run/source/clock, flow construction, route, readback or duplicate workload changed")
 		}
-		if selectedCausalObservationBody(t, row.File, row.Function) != row.After {
+		if !residualComparatorCurrent2617(t, row, selectedCausalObservationBody(t, row.File, row.Function)) {
 			t.Fatal("target construction diverged from finite migration")
 		}
 	}
