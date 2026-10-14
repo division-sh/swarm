@@ -100,8 +100,8 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			}
 			fault := &selectionCASPersistence{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner), db: selected.db}
 			handler, found := source.ExecutableNodeEventHandler(externalPipelineSourceNode(t, source, ".", "select"), "select")
-			if !found || len(handler.Rules) != 3 {
-				t.Fatal("CAS proof requires both admitted selection rows and its fallback")
+			if !found || len(handler.Rules) != 2 || handler.Rules[0].Condition != "entity.marker == 'first'" || handler.Rules[1].Condition != "entity.marker == 'second'" || handler.Rules[0].PolicyRow.Kind != contracts.PolicySheetRowKindWhen || handler.Rules[1].PolicyRow.Kind != contracts.PolicySheetRowKindWhen {
+				t.Fatal("CAS proof requires both exact admitted selection predicates without an empty default")
 			}
 			for index := range fault.rules {
 				ref, admitted := handler.Rules[index].DeclarationIdentity()
