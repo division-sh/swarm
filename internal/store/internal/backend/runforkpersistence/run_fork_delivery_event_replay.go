@@ -144,12 +144,19 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 		if err != nil {
 			return result, fmt.Errorf("project source delivery %s into fork ownership: %w", sourceDeliveryID, err)
 		}
-		if forkRoute.Target.ExistingEntity() {
-			state, err := loadRunForkConstructedEntityState(snapshot, sourceDelivery.Route.Target.Route().EntityID)
+		receiverTarget, sourceTarget := forkRoute.Target, sourceDelivery.Route.Target
+		if !forkRoute.Initialization.Empty() {
+			receiverTarget = forkRoute.Initialization.ConstructionTarget()
+		}
+		if !sourceDelivery.Route.Initialization.Empty() {
+			sourceTarget = sourceDelivery.Route.Initialization.ConstructionTarget()
+		}
+		if receiverTarget.ExistingEntity() {
+			state, err := loadRunForkConstructedEntityState(snapshot, sourceTarget.Route().EntityID)
 			if err != nil {
 				return result, fmt.Errorf("load reconstructed replay receiver authority: %w", err)
 			}
-			target := forkRoute.Target.Route()
+			target := receiverTarget.Route()
 			expected, err := projectRunForkHistoricalHeader(lineage.SourceRunID, lineage.ForkRunID, target.EntityID, target.FlowInstance, lineage.ForkBundleHash, state)
 			if err != nil {
 				return result, fmt.Errorf("project reconstructed replay receiver: %w", err)
@@ -189,10 +196,8 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 			}
 			preparedEvents[forkEventID] = admitted
 		}
-		if err := (runtimebus.PreparedPublishEvent{Event: admitted, Settlement: settlement, DeliveryRoutes: routes}).Validate(); err != nil {
-			return result, fmt.Errorf("validate fork replay event %s aggregate: %w", forkEventID, err)
-		}
-		outcome, err := store.events.AppendAdmittedEventTxOutcome(ctx, attempt, preparedEvents[forkEventID], settlement)
+		outcome, _, err := store.deliveries.CommitHistoricalReplayInitialPublication(ctx, attempt, store.events,
+			runtimebus.PreparedPublishEvent{Event: admitted, Settlement: settlement, DeliveryRoutes: routes}, deliveryAuthority)
 		if err != nil {
 			return result, err
 		}
@@ -204,7 +209,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 		}
 	}
 	for _, prepared := range preparedDeliveries {
-		inserted, err := insertRunForkReplayDeliveryWithAdapter(ctx, tx, attempt, store.deliveries, lineage, prepared.item, prepared.sourceEventID, prepared.forkEventID, prepared.obligation, now)
+		inserted, err := insertRunForkReplayDeliveryLineage(ctx, tx, lineage, prepared.item, prepared.sourceEventID, prepared.forkEventID, prepared.obligation, now)
 		if err != nil {
 			return result, err
 		}
@@ -215,9 +220,8 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 	return result, nil
 }
 
-// Initialization belongs to the source publication, not to the copied receiver.
-// Agent-only replay consumes a reconstructed receiver; it never runs a constructor
-// or borrows source-run attachment authority.
+// Replay consumes fixed-cut construction independently of the actor's entity.
+// It never runs a constructor or borrows source-run attachment authority.
 func projectRunForkReplayInitializedReceiver(snapshot *runForkRevisionSnapshot, event events.Event, delivery runtimedelivery.Snapshot, forkRunID string) (events.DeliveryRoute, error) {
 	source := delivery.Route.Normalized()
 	if !source.Recipient.IsAgent() {
@@ -261,12 +265,17 @@ func projectRunForkReplayInitializedReceiver(snapshot *runForkRevisionSnapshot, 
 	if source.Target.Empty() {
 		return projectRunForkReplayDeliveryRoute(source, snapshot.RunID, forkRunID)
 	}
+	construction := source.Target
 	if !source.Initialization.Empty() {
 		if err := source.Initialization.ValidateEvent(event); err != nil {
 			return events.DeliveryRoute{}, err
 		}
+		construction = source.Initialization.ConstructionTarget()
 	}
-	target := source.Target.Route()
+	if !construction.ExistingEntity() && !construction.MaterializingEntity() {
+		return events.DeliveryRoute{}, fmt.Errorf("agent replay requires exact flow construction independent of actor ownership")
+	}
+	target := construction.Route()
 	state, err := loadRunForkConstructedEntityState(snapshot, target.EntityID)
 	if err != nil {
 		return events.DeliveryRoute{}, fmt.Errorf("agent-only replay requires a reconstructed receiver, not future initialization: %w", err)
@@ -280,12 +289,36 @@ func projectRunForkReplayInitializedReceiver(snapshot *runForkRevisionSnapshot, 
 		return events.DeliveryRoute{}, err
 	}
 	target.EntityID, target.FlowInstance = projection.Fork.EntityID, projection.Fork.FlowInstance
-	source.Target, err = events.NewExistingEntityTarget(target)
+	if source.Target.EntitylessReceiver() {
+		actor := source.Target.Route()
+		actor.FlowInstance = target.FlowInstance
+		source.Target, err = events.NewEntitylessReceiverTarget(actor)
+	} else {
+		actor := source.Target.Route()
+		actorProjection, projectionErr := runfork.ProjectEntityOwnership(snapshot.RunID, forkRunID, actor.EntityID, actor.FlowInstance)
+		if projectionErr != nil {
+			return events.DeliveryRoute{}, projectionErr
+		}
+		actor.EntityID, actor.FlowInstance = actorProjection.Fork.EntityID, actorProjection.Fork.FlowInstance
+		source.Target, err = events.NewExistingEntityTarget(actor)
+	}
 	if err != nil {
 		return events.DeliveryRoute{}, err
 	}
-	source.Initialization = events.ReceiverInitialization{}
-	return projectRunForkReplayDeliveryRoute(source, snapshot.RunID, forkRunID)
+	projected, err := projectRunForkReplayDeliveryRoute(source, snapshot.RunID, forkRunID)
+	if err != nil {
+		return events.DeliveryRoute{}, err
+	}
+	constructed, err := events.NewExistingEntityTarget(target)
+	if err != nil {
+		return events.DeliveryRoute{}, err
+	}
+	projected.Initialization, err = events.AdmitHistoricalFlowReceiverInitialization(forkRunID, constructed, projected.AgentIdentity.Route,
+		events.HistoricalReceiverConstruction{SourceRunID: snapshot.RunID, SourceRevision: snapshot.Revision, SourceReceiver: source.AgentIdentity.Route})
+	if err != nil {
+		return events.DeliveryRoute{}, err
+	}
+	return projected, nil
 }
 
 func projectRunForkReplayDeliveryRoute(source events.DeliveryRoute, sourceRunID, forkRunID string) (events.DeliveryRoute, error) {
@@ -449,13 +482,7 @@ func projectRunForkReplayEvent(ctx context.Context, tx *sql.Tx, story runtimeaut
 	return admitted, nil
 }
 
-func insertRunForkReplayDeliveryWithAdapter(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, deliveries *storedelivery.Adapter, lineage runForkActivationLineage, item runfork.RunForkHistoricalReplayExecutableWork, sourceEventID, forkEventID string, obligation runtimedelivery.Obligation, now time.Time) (bool, error) {
-	if deliveries == nil {
-		return false, fmt.Errorf("fork replay delivery adapter is required")
-	}
-	if _, err := deliveries.CommitInitial(ctx, attempt, forkEventID, lineage.ForkRunID, []events.DeliveryRoute{obligation.Route()}, obligation.Authority()); err != nil {
-		return false, fmt.Errorf("insert fork replay delivery %s from source delivery %s: %w", obligation.DeliveryID(), item.SourceDeliveryID, err)
-	}
+func insertRunForkReplayDeliveryLineage(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage, item runfork.RunForkHistoricalReplayExecutableWork, sourceEventID, forkEventID string, obligation runtimedelivery.Obligation, now time.Time) (bool, error) {
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO run_fork_delivery_event_replays (
 			replay_id, fork_run_id, source_run_id, source_event_id, source_delivery_id,
@@ -480,10 +507,13 @@ func InsertRunForkReplayDelivery(ctx context.Context, attempt *mutationprotocol.
 	if attempt == nil {
 		return false, fmt.Errorf("fork replay delivery requires a mutation attempt")
 	}
+	if _, err := postgresDeliveryAdapter.CommitInitial(ctx, attempt, forkEventID, lineage.ForkRunID, []events.DeliveryRoute{obligation.Route()}, obligation.Authority()); err != nil {
+		return false, fmt.Errorf("insert fork replay delivery %s from source delivery %s: %w", obligation.DeliveryID(), item.SourceDeliveryID, err)
+	}
 	var inserted bool
 	err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		inserted, err = insertRunForkReplayDeliveryWithAdapter(ctx, tx, attempt, postgresDeliveryAdapter, lineage, item, sourceEventID, forkEventID, obligation, now)
+		inserted, err = insertRunForkReplayDeliveryLineage(ctx, tx, lineage, item, sourceEventID, forkEventID, obligation, now)
 		return err
 	})
 	return inserted, err

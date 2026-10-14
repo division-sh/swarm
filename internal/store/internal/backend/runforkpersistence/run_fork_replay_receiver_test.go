@@ -68,7 +68,12 @@ func TestReplayReceiverRequiresFixedPublicationAndInitializedState(t *testing.T)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !child.Target.ExistingEntity() || !child.Initialization.Empty() || child.AgentIdentity.RunID != childRun {
+				wantInitialization, err := events.AdmitHistoricalFlowReceiverInitialization(childRun, child.Target, child.AgentIdentity.Route,
+					events.HistoricalReceiverConstruction{SourceRunID: snapshot.RunID, SourceRevision: snapshot.Revision, SourceReceiver: source.Route.AgentIdentity.Route})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !child.Target.ExistingEntity() || child.Initialization != wantInitialization || child.AgentIdentity.RunID != childRun {
 					t.Fatalf("replay retained source permission: %+v", child)
 				}
 				if !reflect.DeepEqual(before, source.Route) || child.Target.Route() != source.Route.Target.Route() || child.ConnectClaim != source.Route.ConnectClaim {
@@ -169,6 +174,67 @@ func TestReplayExistingRootReceiverProjectsCanonicalChildOwnership(t *testing.T)
 	}
 	if got := child.Target.Route(); got.EntityID != childRun || got.FlowInstance != childRun || !child.Target.ExistingEntity() {
 		t.Fatalf("replay retained source root ownership: %+v", child)
+	}
+}
+
+func TestReplayEntitylessReceiverKeepsFixedConstructionDependency(t *testing.T) {
+	for _, root := range []bool{false, true} {
+		t.Run(map[bool]string{false: "flow", true: "root"}[root], func(t *testing.T) {
+			snapshot, event, delivery := replayReceiverProjectionFixture(t, "agent_only")
+			construction := delivery.Route.Initialization.ConstructionTarget()
+			if root {
+				name, err := agentidentity.DeclaredName("worker", "agents.yaml")
+				if err != nil {
+					t.Fatal(err)
+				}
+				delivery.Route.AgentIdentity, err = agentidentity.New(snapshot.RunID, name, agentidentity.RootRoute())
+				if err != nil {
+					t.Fatal(err)
+				}
+				construction = events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: snapshot.RunID, EntityID: snapshot.RunID})
+				delivery.Route.Initialization, err = events.AdmitStoredFlowReceiverInitialization(snapshot.RunID, event.ID(), construction, delivery.Route.AgentIdentity.Route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				setReplayReceiverConstructedHistory(t, snapshot, snapshot.RunID, snapshot.RunID, ".", event.CreatedAt())
+			}
+			actor := construction.Route()
+			actor.EntityID = ""
+			var err error
+			delivery.Route.Target, err = events.NewEntitylessReceiverTarget(actor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			delivery.DeliveryID, err = deliverylifecycle.DeliveryID(event.ID(), delivery.Route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot.Deliveries = []runForkRevisionDelivery{{Snapshot: delivery}}
+			before := delivery.Route
+			childRun := eventtest.UUID("entityless-replay-child")
+			child, err := projectRunForkReplayInitializedReceiver(snapshot, event, delivery, childRun)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantConstruction := construction.Route()
+			if root {
+				wantConstruction.EntityID, wantConstruction.FlowInstance = childRun, childRun
+			}
+			wantActor := wantConstruction
+			wantActor.EntityID = ""
+			if !child.Target.EntitylessReceiver() || child.Target.Route() != wantActor ||
+				!child.Initialization.ConstructionTarget().ExistingEntity() || child.Initialization.ConstructionTarget().Route() != wantConstruction {
+				t.Fatalf("replay crossed actor and construction ownership: %+v", child)
+			}
+			want, err := events.AdmitHistoricalFlowReceiverInitialization(childRun, child.Initialization.ConstructionTarget(), child.AgentIdentity.Route,
+				events.HistoricalReceiverConstruction{SourceRunID: snapshot.RunID, SourceRevision: snapshot.Revision, SourceReceiver: before.AgentIdentity.Route})
+			if err != nil || want != child.Initialization || child.Initialization.ValidateRoute(child) != nil {
+				t.Fatalf("replay lost exact fixed-cut dependency: %+v err=%v", child, err)
+			}
+			if !reflect.DeepEqual(before, delivery.Route) {
+				t.Fatal("replay changed the immutable source route")
+			}
+		})
 	}
 }
 
