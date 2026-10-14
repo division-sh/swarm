@@ -22,8 +22,15 @@ func staticAuthorityGuardRoots(t *testing.T, repo string) []TestRoot {
 	if !slices.Contains(roots, absentCutGuard) {
 		t.Fatal("static authority census lost the DC-6 exact-origin absent-cut fault guard")
 	}
-	if len(roots) != 81 {
-		t.Fatalf("static authority source census changed: %d roots, want 81", len(roots))
+	// #2577 adds a complete-responsibility projection guard to the same
+	// mandatory source inventory, not a new tier or a deferred selection.
+	activationProjectionGuard := TestRoot{Package: "github.com/division-sh/swarm/internal/runtime",
+		Name: "TestLearnedActivationConsumersKeepCompleteResponsibilityProjection"}
+	if !slices.Contains(roots, activationProjectionGuard) {
+		t.Fatal("static authority census lost the complete activation responsibility guard")
+	}
+	if len(roots) != 82 {
+		t.Fatalf("static authority source census changed: %d roots, want 82", len(roots))
 	}
 	return roots
 }
