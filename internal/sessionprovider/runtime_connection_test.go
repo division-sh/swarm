@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/packs"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	effects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/google/uuid"
@@ -21,13 +22,16 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func openRuntimeConnectionFixture(t *testing.T, f *activeInputFixture) *RuntimeConnection {
+func openRuntimeConnectionFixture(t *testing.T, f *activeInputFixture, binding ...processbinding.Binding) *RuntimeConnection {
 	t.Helper()
 	if err := f.state.close(f.ctx); err != nil {
 		t.Fatal(err)
 	}
-	c, err := OpenRuntimeConnection(f.ctx, RuntimeConnectionOptions{Directory: f.basePath,
-		Store: f.selected, OperationID: f.operation.OperationID, Plan: f.channel})
+	options := RuntimeConnectionOptions{Directory: f.basePath, Store: f.selected, OperationID: f.operation.OperationID, Plan: f.channel}
+	if len(binding) == 1 {
+		options.ProcessBinding = binding[0]
+	}
+	c, err := OpenRuntimeConnection(f.ctx, options)
 	if err != nil {
 		t.Fatal(err)
 	}

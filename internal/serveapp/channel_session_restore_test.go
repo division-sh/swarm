@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/sessionprovider"
 	"github.com/division-sh/swarm/internal/store/sessionstate"
 	"github.com/division-sh/swarm/internal/testutil/whatsappfixture"
@@ -220,14 +221,14 @@ func TestServeSessionPendingResumeSharesFailedAttemptBothStores(t *testing.T) {
 			entered, release := make(chan struct{}), make(chan struct{})
 			var enteredOnce sync.Once
 			cause := errors.New("original runtime selection failed")
-			f.adapter.selectRuntime = func(ctx context.Context, _ channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error) {
+			f.adapter.selectRuntime = func(ctx context.Context, _ channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error) {
 				f.selections.Add(1)
 				enteredOnce.Do(func() { close(entered) })
 				select {
 				case <-release:
-					return nil, nil, nil, cause
+					return nil, nil, processbinding.Binding{}, nil, cause
 				case <-ctx.Done():
-					return nil, nil, nil, context.Cause(ctx)
+					return nil, nil, processbinding.Binding{}, nil, context.Cause(ctx)
 				}
 			}
 			first := make(chan error, 1)
@@ -300,7 +301,7 @@ func TestServeSessionResumeCancellationRetainsJoinAndPossessionBothStores(t *tes
 			defer cancel()
 			f.adapter.store = &serveSessionReadFaultStore{Store: f.adapter.store}
 			selectRuntime := f.adapter.selectRuntime
-			f.adapter.selectRuntime = func(ctx context.Context, candidate channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, func() error, error) {
+			f.adapter.selectRuntime = func(ctx context.Context, candidate channelonboarding.Candidate) (context.Context, *sessionprovider.RuntimeIncomingOptions, processbinding.Binding, func() error, error) {
 				region := trace.StartRegion(ctx, "whatsapp.test.resume-selection")
 				defer region.End()
 				return selectRuntime(ctx, candidate)

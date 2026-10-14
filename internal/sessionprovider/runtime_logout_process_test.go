@@ -22,7 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -192,20 +191,8 @@ func runNativeLogoutDeathChild(t *testing.T, config logoutProcessFixture) {
 		t.Fatal(err)
 	}
 	f.ctx = worklifetime.WithOccurrence(f.ctx, f.workOwner)
-	if config.Phase == "reserved" {
-		owner, err := f.selected.(startupownership.Store).AcquireProcessCapability(f.ctx, startupownership.AcquireRequest{
-			OwnerID: "logout-death-child", BootID: uuid.NewString(), RuntimeInstanceID: f.operation.Coordinate.RuntimeInstanceID})
-		if err != nil {
-			t.Fatal("child lacked canonical process possession", err)
-		}
-		t.Cleanup(func() {
-			if err := owner.Release(context.Background()); err != nil {
-				t.Error(err)
-			}
-		})
-	}
 	f.state = sessionStateFixture(t, f.basePath, f.operation.SessionConnectionID, f.operation.SessionAccount.AccountRef)
-	c := openRuntimeConnectionFixture(t, f)
+	c := openRuntimeLogoutConnectionFixture(t, f)
 	connectRuntimeConnectionFixture(t, f, c)
 	op := reserveRuntimeLogoutFixture(t, f, c)
 	if config.Phase == "reserved" {

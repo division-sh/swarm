@@ -19,7 +19,6 @@ import (
 )
 
 var errSessionPossession = errors.New("WhatsApp session directory is not exclusively possessed")
-var errSessionProtection = errors.New("WhatsApp session directory requires exact private ownership and v1 state")
 
 type sessionDirectory struct {
 	mu           sync.Mutex

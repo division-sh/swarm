@@ -10,10 +10,10 @@ import (
 	"github.com/division-sh/swarm/internal/sessionprovider"
 )
 
-func (s *serveSessionBootstrap) PrepareSessionLogout(ctx context.Context, op channelonboarding.Operation) (channelonboarding.SessionLogoutTarget, error) {
+func (s *serveSessionBootstrap) PrepareSessionLogout(ctx context.Context, op channelonboarding.Operation) (channelonboarding.SessionLogoutPreparation, error) {
 	connection, err := s.currentConnection(ctx, op.OperationID)
 	if err != nil {
-		return channelonboarding.SessionLogoutTarget{}, err
+		return channelonboarding.SessionLogoutPreparation{}, err
 	}
 	return connection.PrepareSessionLogout(ctx, op)
 }
