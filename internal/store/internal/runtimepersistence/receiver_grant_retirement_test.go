@@ -22,6 +22,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -39,6 +41,8 @@ import (
 // receiver before this barrier leaves the outer claim transaction open.
 type receiverGrantClaimBarrier struct {
 	owner   deliveryowner.ReceiverExecutionAdmission
+	event   events.Event
+	profile deliverylifecycle.AgentClaimProfile
 	ready   chan struct{}
 	release chan struct{}
 	once    sync.Once
@@ -48,6 +52,18 @@ func (b *receiverGrantClaimBarrier) ReceiverExecutionReadyTx(ctx context.Context
 	ready, err := b.owner.ReceiverExecutionReadyTx(ctx, tx, route, authority, claim)
 	if err != nil || !ready || !claim {
 		return ready, err
+	}
+	if authority.Kind() == deliverylifecycle.ExecutionAuthorityNormalRuntime {
+		profiles, ok := b.owner.(interface {
+			ReadReceiverClaimProfileTx(context.Context, *sql.Tx, events.Event, events.DeliveryRoute, deliverylifecycle.ExecutionAuthority) (deliverylifecycle.AgentClaimProfile, error)
+		})
+		if !ok {
+			return false, errors.New("native receiver owner has no exact profile reader")
+		}
+		b.profile, err = profiles.ReadReceiverClaimProfileTx(ctx, tx, b.event, route, authority)
+		if err != nil {
+			return false, err
+		}
 	}
 	b.once.Do(func() { close(b.ready) })
 	select {
@@ -161,14 +177,23 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 					ctx = correlation.WithSourceArtifactFact(ctx, fact)
 					ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
 				} else {
-					if err := agentfixture.UpsertStaticForSource(t, ctx, selected, agentFixtureStaticRecord(t, identity), mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())); err != nil {
+					record := agentFixtureStaticRecord(t, identity)
+					profile, err := selection.ResolveActiveBackend(selection.BackendAnthropic)
+					if err != nil {
+						t.Fatal(err)
+					}
+					resolved, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, nil, record.Config)
+					if err != nil {
+						t.Fatal(err)
+					}
+					record.Config = resolved.Actor
+					if err := agentfixture.UpsertStaticForSource(t, ctx, selected, record, mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash())); err != nil {
 						t.Fatal(err)
 					}
 					plan := currentAgentFixtureSourceSet(t, ctx, selected)
 					if len(plan.Sources) != 1 {
 						t.Fatalf("fixture source census: %+v", plan.Sources)
 					}
-					var err error
 					grant, err = agentfixture.AdmitGeneration(t, ctx, selected, plan, plan.Sources[0])
 					if err != nil {
 						t.Fatal(err)
@@ -290,7 +315,7 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 					}
 					return
 				}
-				barrier := &receiverGrantClaimBarrier{ready: make(chan struct{}), release: make(chan struct{})}
+				barrier := &receiverGrantClaimBarrier{event: event, ready: make(chan struct{}), release: make(chan struct{})}
 				var releaseOnce sync.Once
 				release := func() { releaseOnce.Do(func() { close(barrier.release) }) }
 				defer release()
@@ -333,6 +358,11 @@ func proveReceiverGrantRetirementFencesClaimBothStores(t *testing.T, selectedFor
 				}()
 				select {
 				case <-barrier.ready:
+					if !selectedFork && (!barrier.profile.MatchesFirstAdmission(event, route, authority) ||
+						barrier.profile.ConfigurationRevision != state.ConfigRevision ||
+						barrier.profile.AgentGeneration != state.Generation || barrier.profile.AgentRuntimeEpoch != state.RuntimeEpoch) {
+						t.Fatalf("original claim transaction lost exact profile/config/source/generation: profile=%+v state=%+v", barrier.profile, state)
+					}
 				case result := <-claimed:
 					t.Fatalf("claim did not reach real authorized receiver barrier: %+v err=%v", result.result, result.err)
 				case <-ctx.Done():
