@@ -18,6 +18,7 @@ import (
 type selectedDeploymentForkSettlementProbe struct {
 	runforkexecution.SelectedContractForkLifecycle
 	committed chan string
+	evaluated chan string
 }
 
 func (p selectedDeploymentForkSettlementProbe) BindSelectedDeploymentFanOutGrant(grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
@@ -25,7 +26,7 @@ func (p selectedDeploymentForkSettlementProbe) BindSelectedDeploymentFanOutGrant
 	if owner == nil || err != nil {
 		return owner, err
 	}
-	return selectedDeploymentSettlementOwner{FanOutObligationOwner: owner, committed: p.committed}, nil
+	return selectedDeploymentSettlementOwner{FanOutObligationOwner: owner, committed: p.committed, evaluated: p.evaluated}, nil
 }
 
 // R6a: a committed final ordinal cannot make a selected fork quiescent while
@@ -54,11 +55,12 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 			t.Cleanup(func() { gate.held.Store(false) })
 			gate.Store = f.selected
 			settled := make(chan string, 16)
+			evaluated := make(chan string, 16)
 			selectedFork, ok := f.selected.(runforkexecution.SelectedContractForkLifecycle)
 			if !ok {
 				t.Fatalf("selected store lacks selected-fork lifecycle: %T", f.selected)
 			}
-			forkStore := selectedDeploymentForkSettlementProbe{SelectedContractForkLifecycle: selectedFork, committed: settled}
+			forkStore := selectedDeploymentForkSettlementProbe{SelectedContractForkLifecycle: selectedFork, committed: settled, evaluated: evaluated}
 			owner, recovered := deploymentForkOwnerWithOverrides(t, f, gate, forkStore)
 			defer func() { _ = owner.FenceSelectedContexts() }()
 			if len(recovered) != 0 {
@@ -109,6 +111,14 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 			var handoff bool
 			if err := f.db.QueryRowContext(ctx, `SELECT CAST(fork_run_id AS TEXT),state FROM run_fork_operations WHERE idempotency_key=$1`, key).Scan(&childID, &operationState); err != nil {
 				t.Fatal(err)
+			}
+			select {
+			case runID := <-evaluated:
+				if runID != childID {
+					t.Fatalf("selected composite evaluation used run %q, want exact fork %q", runID, childID)
+				}
+			default:
+				t.Fatal("selected fork publication did not pass through BeginFanOutEvaluation")
 			}
 			if err := f.db.QueryRowContext(ctx, `SELECT state FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, childID).Scan(&executionState); err != nil {
 				t.Fatal(err)
