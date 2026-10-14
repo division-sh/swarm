@@ -31,7 +31,7 @@ func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeC
 			}
 			if strings.TrimSpace(row.AdvancesTo) == "" && row.Emit.EventType() == "" && !row.Emit.HasFields() && row.Activity.Tool == "" && !row.DataAccumulation.HasWrites() &&
 				(row.Compute == nil || row.Compute.Operation == ComputeOpUnknown) && row.FanOut == nil {
-				return nil, nodeValueError(item, fmt.Errorf("DIALECT-RULES-DEFAULT: rules[%d] at %s is empty; a default row must advance, emit, set data or gates. A block that matches nothing already succeeds and records no_match.", index, item.Location()))
+				return nil, nodeValueError(item, fmt.Errorf("DIALECT-RULES-DEFAULT: rules[%d] at %s is empty; a default row must contain an authored effect. A block that matches nothing already succeeds and records no_match.", index, item.Location()))
 			}
 			row.PolicyRow = PolicySheetRowMetadata{Kind: PolicySheetRowKindDefault}
 		}
@@ -73,7 +73,7 @@ func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecode
 	}
 	if len(fields) == 0 {
 		if context == handlerRuleDecodeContextRules {
-			return HandlerRuleEntry{}, nodeValueError(value, fmt.Errorf("DIALECT-RULES-DEFAULT: %s at %s is empty; a default row must advance, emit, set data or gates. A block that matches nothing already succeeds and records no_match.", value.SemanticPath(), value.Location()))
+			return HandlerRuleEntry{}, nodeValueError(value, fmt.Errorf("DIALECT-RULES-DEFAULT: %s at %s is empty; a default row must contain an authored effect. A block that matches nothing already succeeds and records no_match.", value.SemanticPath(), value.Location()))
 		}
 		return HandlerRuleEntry{}, fmt.Errorf("EMPTY-AUTHORED-RULE: rule at %s must not be empty", value.Location())
 	}

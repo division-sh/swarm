@@ -1615,14 +1615,14 @@ func TestExecutor_AccumulatorProjectionMaterializesWithoutOnComplete(t *testing.
 }
 
 func TestExecutor_AuthoredEmptyRuleCannotReachSelection(t *testing.T) {
-	for _, raw := range []string{
-		"rules:\n  - {}\n",
-		"rules:\n  selected: {}\n",
-		"on_complete:\n  - {}\n",
+	for _, tc := range []struct{ raw, code string }{
+		{"rules:\n  - {}\n", "DIALECT-RULES-DEFAULT"},
+		{"rules:\n  selected: {}\n", "DIALECT-RULES-ORDER"},
+		{"on_complete:\n  - {}\n", "EMPTY-AUTHORED-RULE"},
 	} {
-		handler, err := loadNodeHandlerFixture(raw)
-		if err == nil || !strings.Contains(err.Error(), "EMPTY-AUTHORED-RULE") {
-			t.Fatalf("source admission error = %v, want pre-execution authored-row rejection for %s", err, raw)
+		handler, err := loadNodeHandlerFixture(tc.raw)
+		if err == nil || !strings.Contains(err.Error(), tc.code) {
+			t.Fatalf("source admission error = %v, want exact %s pre-execution rejection for %s", err, tc.code, tc.raw)
 		}
 		if len(handler.Rules) != 0 || len(handler.OnComplete) != 0 {
 			t.Fatalf("rejected authored row reached executable handler: %#v", handler)
