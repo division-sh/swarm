@@ -66,7 +66,7 @@ func TestServeSessionRuntimeSelectionRejectsUndeclaredCandidate(t *testing.T) {
 	if err != nil || len(candidates) != 1 {
 		t.Fatal(candidates, err)
 	}
-	owned, incoming, release, err := serveSessionBootstrapRuntimeSelector(manager)(context.Background(), candidates[0])
+	owned, incoming, _, release, err := serveSessionBootstrapRuntimeSelector(manager)(context.Background(), candidates[0])
 	if release != nil {
 		if err := release(); err != nil {
 			t.Fatal(err)
@@ -80,10 +80,10 @@ func TestServeSessionRuntimeSelectionRejectsUndeclaredCandidate(t *testing.T) {
 	}
 	caller, cancel := context.WithCancel(context.Background())
 	cancel()
-	if owned, incoming, release, err := serveSessionBootstrapRuntimeSelector(manager)(caller, candidates[0]); !errors.Is(err, context.Canceled) || owned != nil || incoming != nil || release != nil {
+	if owned, incoming, _, release, err := serveSessionBootstrapRuntimeSelector(manager)(caller, candidates[0]); !errors.Is(err, context.Canceled) || owned != nil || incoming != nil || release != nil {
 		t.Fatal("canceled caller acquired session ownership", err)
 	}
-	if owned, incoming, release, err := serveSessionBootstrapRuntimeSelector(manager)(nil, candidates[0]); !errors.Is(err, channelonboarding.ErrInvalidRequest) || owned != nil || incoming != nil || release != nil {
+	if owned, incoming, _, release, err := serveSessionBootstrapRuntimeSelector(manager)(nil, candidates[0]); !errors.Is(err, channelonboarding.ErrInvalidRequest) || owned != nil || incoming != nil || release != nil {
 		t.Fatal("nil caller acquired session ownership", err)
 	}
 	join, stop := context.WithTimeout(context.Background(), time.Second)

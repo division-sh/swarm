@@ -38,6 +38,7 @@ func (s *InvocationState) directory(ctx context.Context) (string, error) {
 		return "", err
 	}
 	s.parent = os.NewFile(uintptr(fd), parentPath)
+	s.retireFiles = retireNativeInvocationFiles
 	s.name = "swarm-native-" + uuid.NewString()
 	s.path = filepath.Join(parentPath, s.name)
 	if err := unix.Mkdirat(fd, s.name, 0o700); err != nil {
@@ -83,18 +84,7 @@ func (s *InvocationState) validateBase() error {
 	return errors.Join(closeErr, parentCloseErr)
 }
 
-// Retire accepts only this invocation's complete process join. Serve calls it
-// after selected-store retirement; a deadline or connection Close is not enough.
-func (s *InvocationState) Retire(receipt *worklifetime.ProcessJoinReceipt) error {
-	if s == nil || s.process == nil {
-		return errSessionProtection
-	}
-	if err := s.process.ValidateJoinReceipt(receipt); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.retired = true
+func retireNativeInvocationFiles(s *InvocationState) error {
 	if s.parent == nil {
 		return nil
 	}
