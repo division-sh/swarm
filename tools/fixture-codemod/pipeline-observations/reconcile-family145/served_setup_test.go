@@ -22,7 +22,7 @@ func TestServedSetupGeneratedTransitionDigestMatchesFiniteOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	digest := fmt.Sprintf("%x", sha256.Sum256(encoded))
-	if len(rows) != 886 || digest != targetDigest {
+	if len(rows) != 887 || digest != targetDigest {
 		t.Fatalf("finite generated transition inventory=%d digest=%s", len(rows), digest)
 	}
 }

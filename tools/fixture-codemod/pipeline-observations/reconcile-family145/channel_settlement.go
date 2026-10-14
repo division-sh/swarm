@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/budgetdiagnostic"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelsettlement"
 )
 
@@ -30,4 +31,33 @@ func composeChannelSettlementHistory(rows []recipe, changes []transition) ([]rec
 		must(json.Unmarshal(raw, input.out))
 	}
 	return rows, changes
+}
+
+func composeBudgetDiagnosticHistory(rows []recipe, changes []transition) ([]recipe, []transition) {
+	pins, err := budgetdiagnostic.ReadPins(".")
+	must(err)
+	must(budgetdiagnostic.ValidateCurrent(".", pins))
+	for _, input := range []struct {
+		value, out any
+		recipes    bool
+	}{{rows, &rows, true}, {changes, &changes, false}} {
+		prior, err := budgetdiagnostic.PriorHistory(".", input.recipes)
+		must(err)
+		candidate, err := json.Marshal(input.value)
+		must(err)
+		var old, current []map[string]any
+		must(json.Unmarshal(prior, &old))
+		must(json.Unmarshal(candidate, &current))
+		if !reflect.DeepEqual(old, current) {
+			panic("budget earlier reconciliation changed its exact signed predecessor")
+		}
+		raw, err := budgetdiagnostic.ComposeHistory(".", prior, input.recipes)
+		must(err)
+		must(json.Unmarshal(raw, input.out))
+	}
+	return rows, changes
+}
+
+func budgetEarlierDeclaration(path, function, current string) (string, error) {
+	return budgetdiagnostic.EarlierSource(".", path, function, current)
 }

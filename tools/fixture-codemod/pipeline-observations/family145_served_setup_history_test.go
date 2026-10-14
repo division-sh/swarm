@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/budgetdiagnostic"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelsettlement"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
@@ -196,6 +197,10 @@ func servedSetupEarlierHistory(t *testing.T, current []byte, recipes bool) []byt
 func servedSetupEarlierSource(t *testing.T, file, function, current string) string {
 	t.Helper()
 	var err error
+	current, err = budgetdiagnostic.EarlierSource("../../..", file, function, current)
+	if err != nil {
+		t.Fatal(err)
+	}
 	current, err = channelsettlement.EarlierSource("../../..", file, function, current)
 	if err != nil {
 		t.Fatal(err)

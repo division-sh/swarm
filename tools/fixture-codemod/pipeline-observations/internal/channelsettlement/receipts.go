@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"sync"
 
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/budgetdiagnostic"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 )
@@ -225,6 +226,10 @@ func RestoreHistory(current, prior []byte, pins []runphysical.Pin, recipes bool)
 }
 
 func EarlierHistory(root string, current []byte, recipes bool) ([]byte, error) {
+	current, err := budgetdiagnostic.EarlierHistory(root, current, recipes)
+	if err != nil {
+		return nil, err
+	}
 	pins, err := ReadPins(root)
 	if err != nil {
 		return nil, err

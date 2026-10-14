@@ -2025,3 +2025,24 @@ func RestoreReplayEventTargetRouteForTest(ctx context.Context, selected any, ori
 		})
 	})
 }
+
+func ReadChannelBudgetBudgetEventsDiagnosticsStorageForTest(ctx context.Context, selected any) ([]map[string]string, error) {
+	var out []map[string]string
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return out, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = eventrecord.ReadChannelBudgetBudgetEventsDiagnosticsStorageTx(ctx, tx)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return out, err
+}

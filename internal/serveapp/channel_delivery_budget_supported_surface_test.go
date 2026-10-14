@@ -17,6 +17,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestChannelDeliveryBudgetNoticePublicJourney(t *testing.T) {
@@ -65,26 +66,20 @@ func TestChannelDeliveryBudgetNoticePublicJourney(t *testing.T) {
 			runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider, "connect", "budget-token", 1001, "private", 0)
 			callback, signing, _ := h.provider.Registration()
 			postChannelTelegramUpdate(t, callback, signing, map[string]any{"update_id": 839001, "message": map[string]any{"message_id": 839001, "from": map[string]any{"id": 2001}, "chat": map[string]any{"id": 2001, "type": "private"}, "text": "Observe budget evidence"}})
-			driver := "sqlite"
-			if backend == servedparity.BackendExplicitPostgres {
-				driver = "postgres"
-			}
-			db, err := sql.Open(driver, h.storeDSN)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
+			reader := channelBudgetStorageObservation(t, h)
 			deadline := time.Now().Add(20 * time.Second)
 			var noticeID, entity, priority, producer, summary, eventName string
 			for {
-				err := db.QueryRow(`SELECT m.item_id,COALESCE(CAST(m.entity_id AS TEXT),''),m.severity,m.from_agent,m.summary,e.event_name
-					FROM mailbox m JOIN events e ON e.event_id=m.source_event_id
-					WHERE m.item_type='alert' AND m.summary LIKE 'Budget emergency:%'`).Scan(&noticeID, &entity, &priority, &producer, &summary, &eventName)
+				err := func() error {
+					out, err := reader.ReadChannelBudgetEmergencyNoticeStorage(context.Background())
+					noticeID, entity, priority, producer, summary, eventName = out.ItemID, out.EntityID, out.Severity, out.FromAgent, out.Summary, out.EventName
+					return err
+				}()
 				if err == nil {
 					break
 				}
 				if err != sql.ErrNoRows || time.Now().After(deadline) {
-					logBudgetNoticeFailure(t, db, providerCalls.Load())
+					logBudgetNoticeFailure(t, reader, providerCalls.Load())
 					t.Fatalf("actual managed spend did not produce an emergency notice: %v", err)
 				}
 				time.Sleep(20 * time.Millisecond)
@@ -98,29 +93,30 @@ func TestChannelDeliveryBudgetNoticePublicJourney(t *testing.T) {
 				t.Fatalf("actual budget notice did not reach the selected operator: %v", message)
 			}
 			var completions int
-			if err := db.QueryRow(`SELECT COUNT(*) FROM spend_ledger WHERE cost_usd >= 3 AND execution_mode='live'`).Scan(&completions); err != nil || completions != 1 {
+			if err := func() error {
+				value, err := reader.CountChannelBudgetLiveCompletionsStorage(context.Background())
+				completions = value
+				return err
+			}(); err != nil || completions != 1 {
 				t.Fatalf("budget notice lacks committed live completion spend: count=%d err=%v", completions, err)
 			}
+			requireChannelBudgetDiagnosticManagedEvidence(t, reader)
 		})
 	}
 }
 
 // Only scalar lifecycle/accounting evidence is logged, never requests,
 // responses, credentials, provider references or authority blobs.
-func logBudgetNoticeFailure(t *testing.T, db *sql.DB, providerCalls int32) {
+func logBudgetNoticeFailure(t *testing.T, reader storetest.ChannelBudgetObservation, providerCalls int32) {
 	t.Helper()
 	t.Logf("budget notice diagnostic provider_calls=%d", providerCalls)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	for _, query := range []struct{ name, sql string }{
-		{"spend", `SELECT execution_mode, CAST(cost_usd AS TEXT) AS cost_usd, agent_id, transport FROM spend_ledger LIMIT 20`},
-		{"effects", `SELECT effect_kind, state, COUNT(*) AS count FROM runtime_external_effect_operations GROUP BY effect_kind,state`},
-		{"agents", `SELECT agent_id,lifecycle_phase,lifecycle_run_mode,turn_count FROM agents LIMIT 20`},
-		{"deliveries", `SELECT subscriber_type,subscriber_id,status,reason_code,retry_count FROM event_deliveries ORDER BY created_at DESC LIMIT 20`},
-		{"budget_events", `SELECT event_name,COUNT(*) AS count FROM events WHERE event_name='platform.budget_threshold_crossed' GROUP BY event_name`},
-		{"notices", `SELECT item_type,status,severity,COUNT(*) AS count FROM mailbox GROUP BY item_type,status,severity`},
-	} {
-		rows, err := readChannelDeliveryDiagnosticRows(ctx, db, query.sql)
+	for _, query := range []struct {
+		name string
+		read func(context.Context) ([]map[string]string, error)
+	}{{"spend", reader.ReadChannelBudgetSpendDiagnosticsStorage}, {"effects", reader.ReadChannelBudgetEffectsDiagnosticsStorage}, {"agents", reader.ReadChannelBudgetAgentsDiagnosticsStorage}, {"deliveries", reader.ReadChannelBudgetDeliveriesDiagnosticsStorage}, {"budget_events", reader.ReadChannelBudgetBudgetEventsDiagnosticsStorage}, {"notices", reader.ReadChannelBudgetNoticesDiagnosticsStorage}} {
+		rows, err := query.read(ctx)
 		t.Logf("budget notice diagnostic %s=%v err=%v", query.name, rows, err)
 	}
 }

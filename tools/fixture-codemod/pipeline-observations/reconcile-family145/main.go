@@ -44,7 +44,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "3fe00f04e3c8eb85f84c398547f68e87c49144639346d3a33a3677e6081c034f"
+const targetDigest = "567321752839b36421fe4b1a7bf551ef025412273a69a6a61c7e8598b18fb03d"
 
 var sourceForkComparison = map[string]string{}
 var runDeliveryComparison = map[string]string{}
@@ -366,6 +366,7 @@ func main() {
 	rows, changes = composeServedBatchHistory(rows, changes, batchPins)
 	rows, changes = composeServedSetupHistory(rows, changes, setupPins)
 	rows, changes = composeChannelSettlementHistory(rows, changes)
+	rows, changes = composeBudgetDiagnosticHistory(rows, changes)
 	raw, err := json.Marshal(changes)
 	must(err)
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
@@ -420,6 +421,8 @@ func composeServedBatchHistory(rows []recipe, changes []transition, pins []runph
 
 func servedBatchEarlierDeclaration(path, function, current string) string {
 	var err error
+	current, err = budgetEarlierDeclaration(path, function, current)
+	must(err)
 	current, err = channelsettlement.EarlierSource(".", path, function, current)
 	must(err)
 	if pin, ok := servedSetupComparison[path+"/"+function]; ok {

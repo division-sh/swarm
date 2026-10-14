@@ -7113,8 +7113,23 @@ engine:
                 arbitrary query, table, pool, transaction or callback capability crosses the detached observation ports.
                 Successful absence preserves the original polling sentinel without masking cancellation or failed
                 cleanup. Existing process-restart, receipt/replay and parent-owned joined cleanup cuts are unchanged.
-                The isolated-schema responsibility control and six-domain budget diagnostic scanner remain explicit
-                migration debt; these storage observations grant no send, admission, recovery or writer authority.
+                The isolated-schema responsibility control remains explicit migration debt; these storage observations
+                grant no send, admission, recovery or writer authority.
+              channel_budget_notice_storage_observation: >-
+                The budget-notice journey borrows a narrow named-read facet from its original harness-owned channel
+                inspector without opening another pool, reconstructing a coordinator or obtaining parent-close authority.
+                Its emergency-notice witness preserves the mailbox/source-event join, alert kind, emergency-summary
+                prefix, six physical values and empty default for NULL entity identity. Its committed live completion
+                count retains the global cost_usd>=3 and execution_mode=live predicates and exact multiplicity. Budget
+                failure evidence uses six independent original-owner reads: budget spend, external effects, agent
+                lifecycle, closed delivery projections, canonical event records and mailbox. They retain their exact
+                columns, textual cost encoding, original grouping, global scopes, LIMIT20 bounds where originally
+                present, delivery chronology, NULL-key omission and privacy boundary. Each diagnostic section reports
+                its own error without suppressing subsequent sections under the original shared context deadline.
+                No arbitrary SQL, table, predicate, scanner, raw pool, transaction or callback capability crosses these
+                observation ports. Original managed-provider, threshold, provenance, polling and actual channel-delivery
+                assertions remain consumer obligations; absence cannot hide cancellation or failed inspector cleanup.
+                The retained isolated-schema channel responsibility diagnostic remains separate visible authority debt.
               channel_run_named_event_observation: >-
                 Channel journey run/name cardinality witnesses consume the existing eventrecord physical count through
                 the original selected read-only inspector. They retain every event row in the exact issued run and exact

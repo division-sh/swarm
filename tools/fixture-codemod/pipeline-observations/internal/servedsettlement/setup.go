@@ -10,6 +10,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/budgetdiagnostic"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelsettlement"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
@@ -108,6 +109,10 @@ func ValidateSetupCurrentSource(root string, pins []runphysical.Pin) error {
 
 func SetupEarlierSource(root, file, function, current string) (string, error) {
 	var err error
+	current, err = budgetdiagnostic.EarlierSource(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	current, err = channelsettlement.EarlierSource(root, file, function, current)
 	if err != nil {
 		return "", err

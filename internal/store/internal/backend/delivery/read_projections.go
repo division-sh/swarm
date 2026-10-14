@@ -2975,3 +2975,37 @@ func ReadClosedReceiverAgentRouteStorageTx(ctx context.Context, tx *sql.Tx, post
 	}
 	return out, nil
 }
+
+// Fixed channel budget failure evidence; no executable-delivery interpretation.
+func scanChannelBudgetDiagnosticRows(rows *sql.Rows) ([]map[string]string, error) {
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	var result []map[string]string
+	for rows.Next() {
+		values, targets := make([]sql.NullString, len(columns)), make([]any, len(columns))
+		for index := range values {
+			targets[index] = &values[index]
+		}
+		if err := rows.Scan(targets...); err != nil {
+			return nil, err
+		}
+		row := map[string]string{}
+		for index, column := range columns {
+			if values[index].Valid {
+				row[column] = values[index].String
+			}
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
+}
+func ReadChannelBudgetDeliveriesDiagnosticsStorageTx(ctx context.Context, tx *sql.Tx) ([]map[string]string, error) {
+	rows, err := tx.QueryContext(ctx, "SELECT subscriber_type,subscriber_id,status,reason_code,retry_count FROM event_deliveries ORDER BY created_at DESC LIMIT 20")
+	if err != nil {
+		return nil, err
+	}
+	return scanChannelBudgetDiagnosticRows(rows)
+}
