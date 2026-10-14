@@ -403,14 +403,14 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.PipelineCoordinator.notifyTestFlowTerminationCommitted::call internal/runtime/correlation.InboundEventFromContext": 1,
 		"internal/runtime.BudgetTracker.evaluateScope::call internal/runtime/correlation.InboundEventFromContext":                                     1,
 		"internal/runtime/bus.EventBus.beginReceiverDispatch::call internal/runtime/correlation.WithInboundEvent":                                     1,
-		"internal/runtime/bus.EventBus.materializePublishRecipientPlanWithPlanner::call internal/runtime/correlation.WithInboundEvent":                1,
+		"internal/runtime/bus.deliveryPlanner.materializedTargetOwnerProjection::call internal/runtime/correlation.WithInboundEvent":                  1,
 		"internal/runtime/bus.EventBus.receiverRouteContext::call internal/runtime/correlation.WithInboundEvent":                                      1,
 		"internal/runtime/bus.InboundEventFromContext::call internal/runtime/correlation.InboundEventFromContext":                                     1,
 		"internal/runtime/bus.WithInboundEvent::call internal/runtime/correlation.WithInboundEvent":                                                   1,
 		"internal/runtime/bus.connectRoutePlanResolver.Plan::call internal/runtime/correlation.WithInboundEvent":                                      1,
 		"internal/runtime/bus.deliveryPlanner.PlanDirect::call internal/runtime/correlation.WithInboundEvent":                                         1,
 		"internal/runtime/bus.deliveryPlanner.PlanExactDirect::call internal/runtime/correlation.WithInboundEvent":                                    1,
-		"internal/runtime/bus.deliveryPlanner.planAtGeneration::call internal/runtime/correlation.WithInboundEvent":                                   1,
+		"internal/runtime/bus.deliveryPlanner.planRecipients::call internal/runtime/correlation.WithInboundEvent":                                     1,
 		"internal/runtime/currentstate.RunIDFromContext::call internal/runtime/correlation.InboundEventFromContext":                                   1,
 		"internal/runtime/decisioncard.CausalExecutionMode::call internal/runtime/correlation.InboundEventFromContext":                                1,
 		"internal/runtime/effects.logicalOperationIdentity::call internal/runtime/correlation.InboundEventFromContext":                                1,
@@ -428,6 +428,10 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/store/internal/backend/mutationlog.Insert::call internal/runtime/correlation.InboundEventFromContext":                               1,
 		"internal/store/internal/backend/mutationlog.insertSQLiteAt::call internal/runtime/correlation.InboundEventFromContext":                       1,
 		"internal/store/storetest.PersistManagedAgentTurnFixture::call internal/runtime/correlation.WithInboundEvent":                                 1,
+
+		// Proposed-run authentication only; the event and source must validate the proposal (2617:6162858616).
+		"internal/runtime/bus.deliveryRecipientPolicy.loadSelectedRunTargetOwnerProjection::call internal/runtime/correlation.InboundEventFromContext": 1,
+
 		// T19: accepted execution binding and the existing exact delivery owners.
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::call internal/runtime/correlation.WithInboundEvent":                                                    1,
 		"internal/runtime/pipeline.PipelineCoordinator.executeNodeContractHandler::call internal/runtime/pipeline.DeliveryTargetApplication.Event":                                        1,
@@ -608,7 +612,9 @@ func allowedTransitionBoundaryUses() map[string]int {
 		// Frozen gate carrier validation; not ambient route selection.
 		"internal/runtime/gateruntime.validateTransition::carrier fields": 3,
 		// Exact production handoffs, stage metadata, history writers and strict hydration.
-		"internal/runtime/pipeline.DecodeWorkflowInstancePersistenceRecord::call internal/runtime/pipeline.validateWorkflowTransitionHistoryFlow":                  1,
+		// Detached observation copies the history and nested guard slices, without interpreting either (2617:6162853481).
+		"internal/runtime/pipeline.cloneIndexWorkflowInstance::history evidence fields":                                                                            2,
+		"internal/runtime/pipeline.decodeWorkflowInstancePersistenceRecord::call internal/runtime/pipeline.validateWorkflowTransitionHistoryFlow":                  1,
 		"internal/runtime/pipeline.PipelineCoordinator.handleWorkflowStageTimerFire::call internal/runtime/contracts.WorkflowStageTopology.AdmitTransition":        1,
 		"internal/runtime/pipeline.PipelineCoordinator.handleWorkflowStageTimerFire::call internal/runtime/semanticview.WorkflowStageTopology":                     1,
 		"internal/runtime/pipeline.PipelineCoordinator.handleWorkflowStageTimerFire::call internal/runtime/workflowlifecycle.NewCompiledTransition":                1,
