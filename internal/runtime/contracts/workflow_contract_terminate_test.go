@@ -30,7 +30,6 @@ func TestAuthoredTerminateRequiresAnActualTransition(t *testing.T) {
 				var handler SystemNodeEventHandler
 				body := tc.body
 				if carrier != "handler" {
-					body = "id: selected\n" + body
 					switch carrier {
 					case "rule":
 						body = "rules:\n  - else: true\n" + indentTerminateFixture(body, "    ")
