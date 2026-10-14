@@ -198,6 +198,9 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					}
 					historical := routeEvidenceSnapshot(t, ctx, fixture.db, runID, live.DeliveryID, revision)
 					assertRouteEvidenceEqual(t, historical.Route, route)
+					if live.UpdatedAt.IsZero() || !historical.UpdatedAt.IsZero() || !historical.CreatedAt.Equal(live.CreatedAt) {
+						t.Fatalf("historical admission time or live update clock changed: historical=%#v live=%#v", historical, live)
+					}
 					if historical.RouteIdentity != live.RouteIdentity || historical.DeliveryID != live.DeliveryID || historical.EventID != event.ID() || historical.RunID != runID || historical.Status != runtimedelivery.StatusPending {
 						t.Fatalf("historical/live delivery coordinates disagree: historical=%#v live=%#v", historical, live)
 					}
@@ -263,13 +266,17 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					if err := json.Unmarshal(claimFact, &claimFields); err != nil {
 						t.Fatal(err)
 					}
-					for _, forbidden := range []string{"claim_token", "lease_token", "execution_authority", "claim_expires_at", "continuation_handoff_at"} {
+					for _, forbidden := range []string{"claim_token", "lease_token", "execution_authority", "claim_expires_at", "continuation_handoff_at", "updated_at"} {
 						if _, exists := claimFields[forbidden]; exists {
 							t.Fatalf("real claimed delivery revision contains %s", forbidden)
 						}
 					}
-					if _, err := fixture.store.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
+					settled, err := fixture.store.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection())
+					if err != nil {
 						t.Fatal(err)
+					}
+					if settled.UpdatedAt.IsZero() || settled.SettledAt.IsZero() || settled.ClaimVersion != claimed.Claim.Version() {
+						t.Fatalf("live settlement lost its physical clock or exact claim: %#v", settled)
 					}
 					later := eventtest.PersistedProjection(uuid.NewString(), "route.proof_checkpoint", "route-proof", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, at.Add(time.Second))
 					if err := commitSemanticPipelineProcessedEventFixture(ctx, fixture.store, later); err != nil {
@@ -287,6 +294,12 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 						t.Fatalf("later event did not select later revision: %#v", latest.ForkPoint)
 					}
 					assertRouteEvidencePlan(t, latest, live, latest.ForkPoint.Revision, runfork.RunForkPendingClassificationDeliveredCompleted)
+					for _, pending := range latest.PendingWork {
+						if pending.DeliveryID == live.DeliveryID && (pending.DeliveredAt == nil || !pending.DeliveredAt.Equal(settled.SettledAt) ||
+							!pending.CreatedAt.Equal(historical.CreatedAt) || pending.ClaimVersion != claimed.Claim.Version()) {
+							t.Fatalf("retained semantic settlement coordinates changed: historical=%#v settled=%#v", pending, settled)
+						}
+					}
 					if cell.connected {
 						assertRouteEvidenceStampedConsumers(t, source, latest, event.ID(), route, true)
 					}
