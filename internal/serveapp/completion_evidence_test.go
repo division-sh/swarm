@@ -60,6 +60,7 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 						}
 					}
 					var rt servedControlProofRuntime
+					var invocationProof completion2270InvocationProof
 					var selected *selectedStoreOwner
 					priorCapabilities := buildSelectedAPICapabilities
 					buildSelectedAPICapabilities = func(owner *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
@@ -124,6 +125,7 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 							settings.WorkspaceImage, settings.SourceProjection = image, projection
 							manager.SetConfig(settings)
 							manager.SetSemanticSource(source)
+							invocationProof.add(manager)
 							return manager, nil
 						}
 						t.Cleanup(func() { cliapp.ConfiguredWorkspaceLifecycleForServe = previous })
@@ -153,18 +155,21 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 					http.DefaultTransport = completion2270Transport{t: t, profile: profileID, requests: &requests, base: previous}
 					t.Cleanup(func() { http.DefaultTransport = previous })
 					rt.Endpoint, rt.Runtime = startServedEventPublishFollowUpRuntime(t, opts)
+					if profileID == llmselection.BackendClaudeCLI {
+						requireCompletion2270NoBusinessStartup(t, rt, &invocationProof)
+					}
 					if kind == "selected" {
-						proveCompletion2270ServedSelected(t, rt, selected, &requests)
+						proveCompletion2270ServedSelected(t, rt, selected, profileID, &requests, &invocationProof)
 						return
 					}
-					proveCompletion2270ServedOrdinary(t, rt, profileID, wantObserved, &requests)
+					proveCompletion2270ServedOrdinary(t, rt, profileID, wantObserved, &requests, &invocationProof)
 				})
 			}
 		}
 	}
 }
 
-func proveCompletion2270ServedOrdinary(t *testing.T, rt servedControlProofRuntime, profileID, wantObserved string, requests *atomic.Int32) {
+func proveCompletion2270ServedOrdinary(t *testing.T, rt servedControlProofRuntime, profileID, wantObserved string, requests *atomic.Int32, proof *completion2270InvocationProof) {
 	t.Helper()
 	runID, eventID, _ := createServedControlWaitingRun(t, rt, "completion-2270-"+uuid.NewString())
 	publishServedLiveAgentHoldEvent(t, rt, runID, eventID, "completion-2270")
@@ -176,7 +181,7 @@ func proveCompletion2270ServedOrdinary(t *testing.T, rt servedControlProofRuntim
 	sessionID := conversations.Conversations[0].SessionID
 	var page operatorread.OperatorConversationTurnListResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.list_turns", map[string]any{"session_id": sessionID}, &page)
-	if len(page.Turns) != 1 || page.Turns[0].ResolvedModel != wantObserved || page.Turns[0].CompletionEvidence.Request.RequestedModel != "request-A" || (profileID != llmselection.BackendClaudeCLI && requests.Load() != 1) {
+	if len(page.Turns) != 1 || page.Turns[0].ResolvedModel != wantObserved || page.Turns[0].CompletionEvidence.Request.RequestedModel != "request-A" {
 		t.Fatalf("served admitted/provider identities collapsed: %+v, calls=%d", page, requests.Load())
 	}
 	var detail operatorread.OperatorPublicConversationTurnDetail
@@ -190,6 +195,7 @@ func proveCompletion2270ServedOrdinary(t *testing.T, rt servedControlProofRuntim
 	if len(usage.Breakdown) != 1 || usage.Usage.Exact.LedgerEntries != 1 || usage.Usage.Exact.InputTokens != 12 || usage.Breakdown[0].ResolvedModel != wantObserved || usage.Breakdown[0].CompletionEvidence.Request.RequestedModel != "request-A" {
 		t.Fatalf("served spend lost exact request/report separation: %+v", usage)
 	}
+	requireCompletion2270BusinessInvocation(t, rt, profileID, requests, proof, "")
 }
 
 func proveCompletion2270ServedAgentHistory(t *testing.T, rt servedControlProofRuntime, runID string, want operatorread.OperatorPublicConversationTurn) {
@@ -225,16 +231,16 @@ func proveCompletion2270ServedAgentHistory(t *testing.T, rt servedControlProofRu
 	}
 }
 
-func proveCompletion2270ServedSelected(t *testing.T, rt servedControlProofRuntime, selected *selectedStoreOwner, calls *atomic.Int32) {
+func proveCompletion2270ServedSelected(t *testing.T, rt servedControlProofRuntime, selected *selectedStoreOwner, profileID string, calls *atomic.Int32, proof *completion2270InvocationProof) {
 	t.Helper()
 	owner := selected.RuntimeDeps().EventStore
-	proof := servedWorkspaceProofRuntime{Events: owner}
+	workspaceProof := servedWorkspaceProofRuntime{Events: owner}
 	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash,
 		"payload": map[string]any{"token": "completion-2270"}, "idempotency_key": "completion-2270-selected-seed"})
-	waitWorkspaceProofPipelineHandoff(t, proof, seed.RunID)
+	waitWorkspaceProofPipelineHandoff(t, workspaceProof, seed.RunID)
 	requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.requested", "run_id": seed.RunID, "source_event_id": seed.EventID,
 		"payload": map[string]any{"token": "completion-2270"}, "idempotency_key": "completion-2270-selected-request"})
-	waitWorkspaceProofPipelineHandoff(t, proof, seed.RunID)
+	waitWorkspaceProofPipelineHandoff(t, workspaceProof, seed.RunID)
 	eventID := requireWorkspaceProofWorkReadyEvent(t, rt.Endpoint, owner, seed.RunID)
 	parent := readWorkspaceProofSourceDomain(t, owner, seed.RunID)
 	root := canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
@@ -245,7 +251,7 @@ func proveCompletion2270ServedSelected(t *testing.T, rt servedControlProofRuntim
 	}
 	params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": eventID, "bundle_hash": fact.BundleHash(), "allow_source_freeze": true, "idempotency_key": "completion-2270-selected"}
 	fork := requireSelectedForkExecutionRPCResult(t, rt.Endpoint, params)
-	if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || calls.Load() != 1 {
+	if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID {
 		t.Fatalf("served-selected launch: %+v, calls=%d", fork, calls.Load())
 	}
 	var list operatorread.OperatorConversationListResult
@@ -263,9 +269,16 @@ func proveCompletion2270ServedSelected(t *testing.T, rt servedControlProofRuntim
 			t.Fatalf("served-selected request/observation evidence: %+v", turn)
 		}
 	}
+	var usage operatorread.OperatorAgentUsage
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.usage", map[string]any{"run_id": fork.ForkRunID, "agent_id": "same-name"}, &usage)
+	if len(usage.Breakdown) != 1 || usage.Usage.Exact.LedgerEntries != 1 || usage.Usage.Exact.InputTokens != 12 || usage.Usage.Exact.OutputTokens != 3 {
+		t.Fatalf("served-selected spend: %+v", usage)
+	}
+	attemptID := requireCompletion2270BusinessInvocation(t, rt, profileID, calls, proof, "")
 	var replay apiv1.RunForkExecutionResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-	if calls.Load() != 1 || !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(parent, readWorkspaceProofSourceDomain(t, owner, seed.RunID)) {
+	requireCompletion2270BusinessInvocation(t, rt, profileID, calls, proof, attemptID)
+	if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(parent, readWorkspaceProofSourceDomain(t, owner, seed.RunID)) {
 		t.Fatal("served-selected replay changed parent evidence or repeated the provider effect")
 	}
 }
@@ -277,44 +290,7 @@ func buildCompletion2270CLIImage(t *testing.T) string {
 		t.Fatalf("inspect protocol-proof base image: %v: %s", err, base)
 	}
 	root, image := t.TempDir(), "swarm-completion-proof:"+uuid.NewString()
-	script := `#!/usr/bin/env node
-const fs = require('fs');
-const args = process.argv.slice(2);
-if (args.includes('--version')) { console.log('completion protocol fixture 1'); process.exit(0); }
-const value = flag => { const index = args.indexOf(flag); return index < 0 ? '' : args[index + 1]; };
-const session = value('--session-id') || value('--resume');
-if (!session || value('--model') !== 'request-A') throw Error('missing exact request/session');
-fs.readFileSync(0, 'utf8');
-const directory = process.env.CLAUDE_CONFIG_DIR + '/projects/' + process.cwd().replace(/[^a-zA-Z0-9]/g, '-');
-fs.mkdirSync(directory, { recursive: true });
-fs.writeFileSync(directory + '/' + session + '.jsonl', JSON.stringify({type: 'assistant', sessionId: session}) + '\n');
-(async () => {
-  const configuration = JSON.parse(value('--mcp-config'));
-  const tools = (value('--tools') || '').split(',').filter(Boolean);
-  const servers = [];
-  for (const [name, server] of Object.entries(configuration.mcpServers)) {
-    const headers = {'Content-Type': 'application/json', 'Accept': 'application/json', ...server.headers};
-    const rpc = async body => {
-      const response = await fetch(server.url, {method: 'POST', headers, body: JSON.stringify(body)});
-      const raw = await response.text();
-      if (!response.ok) throw Error('MCP request refused: ' + raw);
-      if (body.id === undefined) return;
-      const result = JSON.parse(raw);
-      if (result.error) throw Error('MCP discovery refused: ' + raw);
-      return result.result;
-    };
-    await rpc({jsonrpc: '2.0', id: 1, method: 'initialize', params: {protocolVersion: '2025-03-26', capabilities: {}, clientInfo: {name: 'completion-proof', version: '1'}}});
-    await rpc({jsonrpc: '2.0', method: 'notifications/initialized', params: {}});
-    const listed = await rpc({jsonrpc: '2.0', id: 2, method: 'tools/list', params: {}});
-    tools.push(...listed.tools.map(tool => 'mcp__' + name + '__' + tool.name));
-    servers.push({name, status: 'connected'});
-  }
-  console.log(JSON.stringify({type: 'system', subtype: 'init', tools, mcp_servers: servers, model: 'initialization-not-execution', session_id: session}));
-  console.log(JSON.stringify({type: 'result', subtype: 'success', result: 'ok', model: 'reported-B', session_id: session, total_cost_usd: 0,
-    usage: {input_tokens: 12, output_tokens: 3}}));
-})().catch(error => { console.error(error); process.exitCode = 1; });
-`
-	if err := os.WriteFile(filepath.Join(root, "completion-proof-cli"), []byte(script), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "completion-proof-cli"), []byte(completion2270CLIProgram), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	dockerfile := fmt.Sprintf("FROM %s\nCOPY completion-proof-cli /usr/local/bin/completion-proof-cli\n", strings.TrimSpace(string(base)))
