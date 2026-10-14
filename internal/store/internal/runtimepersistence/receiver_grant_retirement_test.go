@@ -371,7 +371,7 @@ func receiverClaimTestDB(t *testing.T, selected agentFixtureFlowStore) *sql.DB {
 	}
 }
 
-func commitSelectedReceiverClaimEvent(t *testing.T, ctx context.Context, selected agentFixtureFlowStore, event events.Event, route events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) {
+func commitSelectedReceiverClaimEvent(t testing.TB, ctx context.Context, selected agentFixtureFlowStore, event events.Event, route events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) {
 	t.Helper()
 	admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {

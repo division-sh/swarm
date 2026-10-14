@@ -22,9 +22,11 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -673,8 +675,16 @@ func seedSpecAgent(t *testing.T, ctx context.Context, pg *PostgresStore, agentID
 		Config:        []byte(`{}`),
 		Identity:      specMemoryIdentity(agentID, "global"),
 	})
+	profile, err := selection.ResolveActiveBackend(selection.BackendAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, nil, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config:    cfg,
+		Config:    resolved.Actor,
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),
@@ -1939,7 +1949,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_LeavesLiveSessionRuntimeStateFo
 	pg := newTestPostgresStore(t, db)
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
-	seedSpecAgent(t, ctx, pg, "a1", "", "")
+	seedSpecAgent(t, ctx, pg, "a1", "")
 	sessionID := acquireLiveTestSession(t, ctx, db, "a1", "global")
 	identity := specMemoryIdentity("a1", "global")
 
