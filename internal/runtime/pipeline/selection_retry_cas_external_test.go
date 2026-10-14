@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -82,19 +81,18 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			selected := backend.open(t)
 			runID := uuid.NewString()
-			insertGateRecoveryRun(t, selected.events, runID)
-			ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 			repo := canonicalrouting.RepoRoot(t)
 			bundle, err := contracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopySelectionRetry(t), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 			if err != nil {
 				t.Fatal(err)
 			}
+			ctx, sourceFact := workflowLifecycleSourceContext(t, selected, bundle, runID)
 			source := semanticview.Wrap(bundle)
 			var nodes []pipeline.WorkflowNode
 			for _, row := range []struct{ id, event string }{{"seed", "seed"}, {"select", "select"}, {"final", "selected"}} {
 				nodes = append(nodes, pipeline.WorkflowNode{Node: externalPipelineSourceNode(t, source, ".", row.id), Subscriptions: []events.EventType{events.EventType(row.event)}, ExecutionType: contracts.SystemNodeExecutionType})
 			}
-			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
+			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: sourceFact})
 			if err != nil {
 				t.Fatal(err)
 			}
