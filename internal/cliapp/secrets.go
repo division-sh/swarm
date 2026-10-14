@@ -129,7 +129,8 @@ func newSecretsListCommand(ctx context.Context, repo string) *cobra.Command {
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure credential store: %w", err))
 			}
-			providerRequirements, err := loadSecretsProviderRequirements(repo)
+			configPath, _ := rootConfigFlag(cmd)
+			providerRequirements, err := loadSecretsProviderRequirements(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 			}
@@ -167,7 +168,8 @@ func newSecretsCheckCommand(ctx context.Context, repo string) *cobra.Command {
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), fmt.Errorf("configure credential store: %w", err))
 			}
-			providerRequirements, err := loadSecretsProviderRequirements(repo)
+			configPath, _ := rootConfigFlag(cmd)
+			providerRequirements, err := loadSecretsProviderRequirements(RuntimeConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
 			if err != nil {
 				return returnSecretsRuntimeError(cmd.ErrOrStderr(), err)
 			}
@@ -290,9 +292,9 @@ func trimSecretInputTerminator(value string) string {
 	return value
 }
 
-func loadSecretsProviderRequirements(repo string) (map[string][]runtimecredentials.Requirement, error) {
+func loadSecretsProviderRequirements(opts RuntimeConfigLoadOptions) (map[string][]runtimecredentials.Requirement, error) {
 	requirements := map[string][]runtimecredentials.Requirement{}
-	configResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repo})
+	configResult, err := LoadRuntimeConfigWithOptions(opts)
 	if err != nil {
 		return nil, fmt.Errorf("load runtime config for provider secret requirements: %w", err)
 	}
