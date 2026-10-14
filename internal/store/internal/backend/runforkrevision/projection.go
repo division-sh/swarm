@@ -333,7 +333,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				CAST(e.run_id AS TEXT), e.event_class, e.execution_mode, e.task_id, e.inherited_fan_out_origin,
 				e.payload_schema_bundle_hash, e.payload_schema_flow_id, e.payload_schema_event_key,
 				e.payload_schema_digest, e.payload_schema_class, CAST(e.operator_reference_event_id AS TEXT)`,
-			source: "events e", runAlias: "e",
+			source: eventProjectionSource, runAlias: "e",
 			columns: typedColumns(map[string]valueKind{
 				"source_route": valueJSON, "target_route": valueJSON, "target_set": valueJSON, "route_settlement": valueJSON,
 				"payload_base64": valueBytesBase64, "created_at": valueTime, "inherited_fan_out_origin": valueJSON,
