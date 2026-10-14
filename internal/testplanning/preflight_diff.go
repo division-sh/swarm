@@ -25,7 +25,7 @@ func PreflightDebtRequired(nameStatus []byte) (bool, error) {
 		switch status {
 		case "A", "M", "D", "T":
 		default:
-			if len(status) < 2 || (status[0] != 'R' && status[0] != 'C') {
+			if len(status) < 2 || len(status) > 4 || (status[0] != 'R' && status[0] != 'C') || strings.Trim(status[1:], "0123456789") != "" {
 				return false, fmt.Errorf("unknown or unresolved preflight diff status %q", status)
 			}
 			score, err := strconv.Atoi(status[1:])
@@ -53,9 +53,13 @@ func preflightDebtPath(name string) bool {
 	if strings.HasSuffix(name, ".go") || strings.HasPrefix(name, "internal/store/") || strings.HasPrefix(name, "internal/storetest/") {
 		return true
 	}
+	switch path.Base(name) {
+	case "go.mod", "go.sum", "go.work", "go.work.sum":
+		return true
+	}
 	// Module/workspace inputs and the actual plan, semantic and authority-policy inputs.
 	switch name {
-	case "go.mod", "go.sum", "go.work", "go.work.sum", "platform-spec.yaml", ".github/test-proof-plan.yaml":
+	case "platform-spec.yaml", ".github/test-proof-plan.yaml":
 		return true
 	}
 	return false

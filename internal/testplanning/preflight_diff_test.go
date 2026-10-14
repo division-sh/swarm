@@ -4,7 +4,7 @@ import "testing"
 
 func TestPreflightDebtDiffRequiresEveryAuthorityInput(t *testing.T) {
 	for _, path := range []string{
-		"cmd/client/non_store_caller.go", "internal/policy/tagged_test.go", "go.mod", "go.sum", "go.work", "go.work.sum",
+		"cmd/client/non_store_caller.go", "internal/policy/tagged_test.go", "go.mod", "go.sum", "go.work", "go.work.sum", "nested/go.mod", "nested/go.work.sum",
 		"platform-spec.yaml", ".github/test-proof-plan.yaml", "internal/store/testdata/persistence_authority_debt_baseline.tsv",
 		"internal/store/testdata/persistence_authority_debt_baseline.collector.json", "internal/store/testdata/persistence_authority_findings.tsv",
 		"internal/checkoutsource/fixture_role.go", "internal/store/internal/runtimepersistence/fixtures/authority.yaml", "internal/storetest/fixture.yaml",
@@ -27,7 +27,7 @@ func TestPreflightDebtDiffRequiresEveryAuthorityInput(t *testing.T) {
 }
 
 func TestPreflightDebtDiffRefusesAmbiguousEvidence(t *testing.T) {
-	for _, raw := range []string{"M\x00file.go", "M\x00", "R100\x00file.go\x00", "C101\x00a\x00b\x00", "Rinvalid\x00a\x00b\x00", "U\x00file.go\x00", "X\x00file.go\x00", "M\x00../outside\x00", "M\x00/absolute\x00", "M\x00a/../b\x00", "M\x00.\x00"} {
+	for _, raw := range []string{"M\x00file.go", "M\x00", "R100\x00file.go\x00", "C101\x00a\x00b\x00", "Rinvalid\x00a\x00b\x00", "R+1\x00a\x00b\x00", "R0000\x00a\x00b\x00", "U\x00file.go\x00", "X\x00file.go\x00", "M\x00../outside\x00", "M\x00/absolute\x00", "M\x00a/../b\x00", "M\x00.\x00"} {
 		t.Run(raw, func(t *testing.T) {
 			if _, err := PreflightDebtRequired([]byte(raw)); err == nil {
 				t.Fatal("ambiguous diff gained docs-only exemption")
