@@ -38,7 +38,7 @@ func VerifyNativeAuthoredRuleReceiverPreparationRetryBothStoresForTest(t *testin
 					"schema.yaml":   "name: delivery-authority\nstages:\n  queued: {}\n  done: {final: true}\n",
 					"entities.yaml": "test_entity: {}\n",
 					"events.yaml":   "source.evt:\n",
-					"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      rules:\n        - when: |-\n                  true\n          advances_to: done\n        - else: true\n",
+					"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      rules:\n        - when: |-\n                  true\n          advances_to: done\n",
 				})
 				module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 				node := pipelineNode(t, ".", "node-a")
@@ -53,8 +53,8 @@ func VerifyNativeAuthoredRuleReceiverPreparationRetryBothStoresForTest(t *testin
 				pc.deliveryRuntime = retention
 				pc.deliveryStore = observed
 				handler, found := pc.SemanticSource().ExecutableNodeEventHandler(node, "source.evt")
-				if !found || len(handler.Rules) != 2 || !handler.Rules[0].Authored() || !handler.Rules[1].Authored() || handler.Rules[1].Condition != "else" {
-					t.Fatalf("source lacks the authored predicate and fallback: found=%v handler=%#v", found, handler)
+				if !found || len(handler.Rules) != 1 || !handler.Rules[0].Authored() || handler.Rules[0].Condition != "true" || handler.Rules[0].AdvancesTo != "done" {
+					t.Fatalf("source lacks the exact authored predicate and transition: found=%v handler=%#v", found, handler)
 				}
 				ref, qualified := handler.Rules[0].DeclarationIdentity()
 				if !qualified {

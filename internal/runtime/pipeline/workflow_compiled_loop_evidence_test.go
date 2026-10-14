@@ -48,8 +48,7 @@ reviewer:
     loop.rule:
       loop: {admit: revision, from: drafting}
       rules:
-        - else: true
-          advances_to: review
+        - advances_to: review
 collector:
   event_handlers:
     loop.complete:
