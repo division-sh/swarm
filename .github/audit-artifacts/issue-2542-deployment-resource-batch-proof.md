@@ -79,6 +79,20 @@ Evidence prefix /home/youmew/.cache/swarm-2542-family145/deployment-resource-:
   deterministic queued SQLite cancellation/join, PASS21.710s.
 - affected-preservation: original source-fork/run-delivery/deployment/setup
   history controls, PASS87.502s. Unchanged earlier receipts carry.
+- original1362-native-nonrace: the unchanged 1362-row import/route/settlement
+  and restart/public-readback journey passes both stores,259.896s total;
+  SQLite141.22s and PostgreSQL118.67s, within their unchanged hard acceptance.
+- complete-propagation-history-repair: PASS24.180s; the original six-caller/
+  seven-call guard now uses its existing complete source-fork history chain,
+  rather than trying to normalize cumulative successor bodies as one step.
+  No original caller count, argument, cut or business assertion is dropped.
+- owner-addition-hostile-cuts-final: PASS0.457s. The exact added event bridge
+  and sixteen delivery declarations remove back to every byte of signed1c4;
+  changed new/retained predicates and an incomplete predecessor are rejected.
+- final-owner-guards-vet: PASS with -composites=false, not a claim that default
+  repository vet is clean. Final-guard-unused passes pinned Staticcheckv0.8.1
+  U1000 for the complete changed tool-package subtree; native/domain receipt
+  from unused.log carries because those sources have not changed afterward.
 
 Intermediate compile-only REDs (missing bridge imports; a new control calling
 the wrong finite-transform helper) are retained and repaired. The first
@@ -87,13 +101,63 @@ boundary after311.79s. Census/ratchet qualification must use the existing
 explicit signed predecessor/head comparison, as previous accepted batches did;
 no collector/policy change is made to bypass that refusal.
 
-## Pending Checkpoint Qualification
+The non-fail-fast Family145 collection retains87 passing roots before the
+existing ten-minute package timeout in ForkSourceDomainConsumesExactSevenTable-
+OwnerAndAll42Calls. That interrupted root is subsequently GREEN32.23s in the
+bounded remaining-affected-history receipt. There is no timeout inflation or
+unchanged whole-package rerun. Only still-unexecuted affected comparisons run
+separately; unchanged receipts carry. The final checkpoint must disclose the
+aggregate RED, not describe this as a green whole codemod package.
 
-No new accepted removal count yet. Accepted remaining5516 findings/3497 raw
-includes unchanged uncredited mock78/62 and numeric-fork9/8 holds. The initial
-204/192 opportunity survey is not credit, and the surviving independent
-diagnostic pool/query seam remains explicitly counted. Final batch census,
-signed read-only real ratchet, unused and complexity receipts are pending.
+Two whole-file owner comparisons fail identically at signed PRE-BATCH1c4:
+ServedObservationEventOwnerIsNonWorseningFromSignedPreBatch and
+DeliveryStatusPollingStatementsAndExistingQueryOwnerAreUnchanged. The matched
+pre-batch run is RED0.065s at the same files/phase as the candidate. Historical
+pins are NOT rotated, and neither RED is called green. The new exact complete-
+file addition controls prove non-worsening only for this batch. These existing
+owner-history obligations remain named landing repairs under #2542; the older
+served-event-count and two Template9 guard carry-overs are also unwaived.
+The two Template9 roots remain RED32.076s, with all three source files and
+their guard unchanged from1c4. Disposition6162561533 still applies to those
+pre-batch obligations; no filtering, debt credit or oracle weakening is used.
+
+## Accounting And Checkpoint Qualification
+
+The signed-predecessor downward census passes214.325s at2d84fce014, comparing
+to accepted1c4 through the existing explicit event before/after mechanism:
+196 findings /186 raw removed, ZERO ADDED. Physical baseline5429/3427 becomes
+5233/3241; excluded-source67 and collector
+b5bdd1d92df22693c570dab217a46c8a184f37085f496653d59b732c12399a4d stay unchanged.
+No role/classifier/collector transition, pair move, debt transfer or ceiling
+increase. The initial204/192 opportunity survey is not credit; the independent
+diagnostic pool/query seam remains explicitly counted.
+
+Accepted remaining before this checkpoint is5516/3497, including unchanged
+uncredited mock78/62 and numeric-fork9/8 holds. If the reviewer accepts196/186,
+qualified remaining becomes5320/3311, including those87/70; cumulative accepted
+since04:02Z would become1313/1111. Do not infer acceptance from physical debt.
+Final signed read-only ratchet and repair-delta complexity receipts will be
+recorded against the checkpoint SHA, with no census refresh on that ratchet.
+The earlier signed whole-batch complexity at2d84 is GREEN: cognitive30/50
+557/196, cyclomatic30/50 259/59, zero new hotspots across24260 callables.
+
+## Manifestation Coverage
+
+Each row below names execution or hostile structural proof, not a shared-owner
+claim. All original polling/deadline/assertion and failure branches remain.
+
+| Known manifestation | Status | Exact proof |
+| --- | --- | --- |
+| Both raw native constructors and db carrier/alias capability | reproduced and fixed | DeploymentResourceCarrierRetirementHasCompleteNativeCallers; all32 finite recipe controls; native-text-constructors-original-roots and complete-fork-cut-callers-race |
+| Text-file keyed/keyless import, replay, empty/error refusal and exact source bytes | execution-proven through the same corrected path | native-text-constructors-original-roots:14 original roots including KeylessOperatorRouteRestartReplay, Keyed37DeltaOldPin, Keyed37DynamicReceivers, HostileGrammarNoMutation, FreshProcessBindingAndExactWire |
+| Multi-pin event/intent/feed/settlement and physical diagnostic scopes | execution-proven through the same corrected path | TestDeploymentSourceTwoPinnedFeedsSettleIndependentlyBothStores in complete-fork-cut-callers-race |
+| Selected pending receiver and pre-receipt snapshots, empty/last-row quiescence and concurrent first materialization | execution-proven through the same corrected path | complete-fork-cut-callers-race, keyless-preissue-race and carried native empty/control roots |
+| Predecessor claim, activation interruption, external attempt lineage and recovery stages | execution-proven through the same corrected path | complete-fork-cut-callers-race:SelectedPredecessorClaimCannotSettleAfterRecovery, QuiescedBeforeActivationCrash, SelectedDeploymentExternalEffectRecovery and fixture control |
+| Full workload, real serving restart and public supported-surface readback | execution-proven through the same corrected path | TestVolumeFanOutExactJobflow1362ImportRouteAndSettleBothStores plus TestServedParityHarnessRunStartDeploymentFeedLifecycle |
+| Malformed root.ready shape under exact selected writer, cancellation and joined fault cleanup | reproduced and fixed | both named import-shape-fault-race roots; no production-package write or arbitrary fault callback |
+| New fixed data ports reject foreign/cancelled/closed owners and preserve physical bytes/read cuts | execution-proven through the same corrected path | both data-ports-boundaries-race roots, event/lifecycle/executable-delivery boundary guards |
+| Independent DSN progress/pg_stat_activity query seam | split / escalated as separate class | retained startDeploymentProgressProbe debt; original1362-native-nonrace executes its independent PostgreSQL probe and joined close; not claimed retired |
+| Historical owner whole-file and Template9 comparisons | split / escalated as separate class | exact pre-batch RED receipt, new complete-file non-worsening/hostile controls, unchanged Template9 source bytes; landing repair remains under #2542 |
 
 Working closure is this carrier and its native/observer/fault consumer chain;
 broader raw persistence-authority debt and both global completion guards remain

@@ -171,8 +171,16 @@ func TestFamily145DeploymentObservationEntire44QueryInventoryHasExactClosedOwner
 }
 
 func TestFamily145DeploymentObservationCallerPropagationChangesOnlyOriginalCarrier(t *testing.T) {
+	var current []map[string]any
+	if err := json.Unmarshal(family145TransitionBytes, &current); err != nil {
+		t.Fatal(err)
+	}
+	prior, err := json.Marshal(restoreSourceForkHistory(t, current, false))
+	if err != nil {
+		t.Fatal(err)
+	}
 	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
+	if err := json.Unmarshal(prior, &rows); err != nil {
 		t.Fatal(err)
 	}
 	callers, calls := 0, 0
