@@ -15,6 +15,10 @@ import (
 // checkpoint211293506 adds the exact admitted-parent barrier setup and
 // checkpoint4b2c02e90 retains the admitted count-join source through recovery.
 // reviewer-c6163224137 adds four exact compiled-mode gate endpoints.
+// reviewer-c6164135426 adds the five explicit-parent join endpoints; the
+// three admitted-source gate repairs append to their prior Mode receipts.
+// reviewer-c6164473807 retains the two exact recovery-port successors; its
+// separate dead-letter timing RED remains unqualified.
 //
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
@@ -26,7 +30,7 @@ type fixtureSetupSuccessor2617 struct {
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "01ca2d5c7490a717877072b37feee8738a756006f8135e4837cdd0d3909ff4e3" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "7164139f6a316f47c0f2bb6752a015417796a9740e1f650437b9ccea1236bb2c" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -37,11 +41,12 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 17 {
+	if len(pins) != 27 {
 		t.Fatal("fixture successor row count changed")
 	}
-	for _, pin := range pins {
+	for index, pin := range pins {
 		t.Run(pin.Original.Function, func(t *testing.T) {
+			latest := fixtureSetupLatestSuccessor2617(t, pins, index)
 			var matches []recipe
 			for _, row := range rows {
 				if sameReviewedRecipeKey(row, pin.Original) {
@@ -52,8 +57,8 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 				t.Fatalf("fixture successor multiplicity=%d", len(matches))
 			}
 			row := matches[0]
-			actual := selectedCausalObservationBody(t, row.File, projectionShapeFunction(t, pin.Candidate).Name.Name)
-			expected, err := canonicalFunction(pin.Candidate)
+			actual := selectedCausalObservationBody(t, row.File, projectionShapeFunction(t, latest.Candidate).Name.Name)
+			expected, err := canonicalFunction(latest.Candidate)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -101,4 +106,21 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 			}
 		})
 	}
+}
+
+func fixtureSetupLatestSuccessor2617(t *testing.T, pins []fixtureSetupSuccessor2617, index int) fixtureSetupSuccessor2617 {
+	t.Helper()
+	latest := pins[index]
+	for _, next := range pins[index+1:] {
+		if !sameReviewedRecipeKey(next.Original, latest.Original) {
+			continue
+		}
+		original := next.Original
+		original.Successor = latest.Original.Successor
+		if !reflect.DeepEqual(original, latest.Original) || next.Original.Successor != latest.Candidate {
+			t.Fatal("finite fixture receipt chain crossed or rewrote its prior endpoint")
+		}
+		latest = next
+	}
+	return latest
 }
