@@ -38,12 +38,14 @@ func TestCommandLiveUneditedScaffoldReadiness(t *testing.T) {
 				"SWARM_CREDENTIALS_FILE="+filepath.Join(operator, "credentials.json"),
 				"SWARM_MANAGED_CREDENTIALS_FILE="+filepath.Join(operator, "managed-credentials.json"))
 			// The built-in profile remains Anthropic API. Select the provisioned
-			// Claude transport in operator config, never in generated source.
+			// Claude transport in an explicitly selected operator file, never in generated source.
 			config := "llm:\n  backend: claude_cli\nworkspace:\n  image: " + strconv.Quote(prerequisites.image) + "\n"
 			if prerequisites.network != "" {
 				config += "  network: " + strconv.Quote(prerequisites.network) + "\n"
 			}
-			writeReleaseFile(t, filepath.Join(operator, "home", ".config", "swarm", "swarm.yaml"), config)
+			configPath := filepath.Join(operator, "swarm.yaml")
+			writeReleaseFile(t, configPath, config)
+			env = append(env, "SWARM_CONFIG="+configPath)
 			result := runReleaseCommand(t, time.Minute, root, env, "", binary, "new", archetype, "--output", project)
 			if result.err != nil {
 				t.Fatalf("new: %v\n%s", result.err, result.output)
@@ -101,7 +103,7 @@ func TestCommandLiveUneditedScaffoldReadiness(t *testing.T) {
 					if after, err := releaseSourceTree(project, true); err != nil || !reflect.DeepEqual(before, after) {
 						t.Fatalf("bare command mutated authored source: %v", err)
 					}
-					t.Log("public live readiness; operator-global Claude provisioning; unchanged scaffold; no project config or command source/backend/store selector; no messages sent")
+					t.Log("public live readiness; explicitly selected operator Claude provisioning; unchanged scaffold; no project config or command source/backend/store selector; no messages sent")
 				})
 			}
 		})
