@@ -32,15 +32,38 @@ type serveSessionBootstrap struct {
 }
 
 type serveSessionBootstrapAttempt struct {
-	operation  channelonboarding.Operation
-	connection *sessionprovider.RuntimeConnection
-	done       chan struct{}
-	err        error
+	mu          sync.Mutex
+	operation   channelonboarding.Operation
+	connection  *sessionprovider.RuntimeConnection
+	done        chan struct{}
+	err         error
+	bootstrap   bool
+	incoming    *sessionprovider.RuntimeIncomingOptions
+	connecting  bool
+	connected   bool
+	connectErr  error
+	connectDone chan struct{}
 }
 
 func (a *serveSessionBootstrapAttempt) current(ctx context.Context) (*sessionprovider.RuntimeConnection, error) {
+	connection, err := a.finishedConnection(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := connection.CheckBootstrap(ctx); err != nil {
+		return nil, err
+	}
+	return connection, nil
+}
+
+// Completed preparation/transport is historical ownership, not current health
+// or execution authority. Those consumers retain their own exact checks.
+func (a *serveSessionBootstrapAttempt) finishedConnection(ctx context.Context) (*sessionprovider.RuntimeConnection, error) {
 	if ctx == nil {
 		return nil, channelonboarding.ErrInvalidRequest
+	}
+	if ctx.Err() != nil {
+		return nil, context.Cause(ctx)
 	}
 	select {
 	case <-a.done:
@@ -50,12 +73,20 @@ func (a *serveSessionBootstrapAttempt) current(ctx context.Context) (*sessionpro
 		if a.connection == nil {
 			return nil, channelonboarding.ErrRevisionConflict
 		}
-		if err := a.connection.CheckBootstrap(ctx); err != nil {
-			return nil, err
+		a.mu.Lock()
+		connected, connectErr := a.connected, a.connectErr
+		a.mu.Unlock()
+		if connectErr != nil {
+			return nil, connectErr
+		}
+		if !connected {
+			return nil, channelonboarding.ErrSessionPending
 		}
 		return a.connection, nil
 	case <-ctx.Done():
 		return nil, context.Cause(ctx)
+	default:
+		return nil, channelonboarding.ErrSessionPending
 	}
 }
 
@@ -124,8 +155,7 @@ func (s *serveSessionBootstrap) BootstrapSession(ctx context.Context, op channel
 	}
 	s.mu.Unlock()
 	if reused {
-		_, err := attempt.current(ctx)
-		return err
+		return s.connectSessionAttempt(ctx, attempt)
 	}
 	return s.openSessionAttempt(ctx, op, candidate, attempt, true)
 }
@@ -143,11 +173,16 @@ func (s *serveSessionBootstrap) ResumeSession(ctx context.Context, op channelonb
 		select {
 		case <-previous.done:
 		default:
-			_, err := previous.current(ctx)
-			return err
+			return channelonboarding.ErrSessionPending
 		}
 		if previous.connection != nil {
 			if previous.err == nil {
+				previous.mu.Lock()
+				unfinished := !previous.connected && previous.connectErr == nil
+				previous.mu.Unlock()
+				if unfinished {
+					return s.connectSessionAttempt(ctx, previous)
+				}
 				reused, err := previous.connection.CheckSessionReuse(ctx, op)
 				if err != nil || reused {
 					return err
@@ -161,8 +196,7 @@ func (s *serveSessionBootstrap) ResumeSession(ctx context.Context, op channelonb
 	s.mu.Lock()
 	if current := s.connections[op.OperationID]; current != previous {
 		s.mu.Unlock()
-		_, err := current.current(ctx)
-		return err
+		return s.connectSessionAttempt(ctx, current)
 	}
 	attempt := &serveSessionBootstrapAttempt{operation: op, done: make(chan struct{})}
 	s.connections[op.OperationID] = attempt
@@ -246,16 +280,11 @@ func (s *serveSessionBootstrap) ObserveSession(ctx context.Context, op channelon
 	if attempt == nil {
 		return operatorchannel.ProviderAuthority{}, empty, false, nil
 	}
-	select {
-	case <-attempt.done:
-	case <-ctx.Done():
-		return operatorchannel.ProviderAuthority{}, empty, false, context.Cause(ctx)
-	}
-	if attempt.err != nil {
-		return operatorchannel.ProviderAuthority{}, empty, false, attempt.err
-	}
-	if attempt.connection == nil {
-		return operatorchannel.ProviderAuthority{}, empty, false, channelonboarding.ErrRevisionConflict
+	if _, err := attempt.finishedConnection(ctx); err != nil {
+		if errors.Is(err, channelonboarding.ErrSessionPending) {
+			return operatorchannel.ProviderAuthority{}, empty, false, nil
+		}
+		return operatorchannel.ProviderAuthority{}, empty, false, err
 	}
 	current, err := attempt.connection.CheckSessionReuse(ctx, op)
 	if err != nil || !current {
@@ -396,14 +425,9 @@ func (s *serveSessionBootstrap) openSessionAttempt(ctx context.Context, op chann
 	}
 	// Selection retains counted work before launch. The original attempt joins
 	// construction and releases it even after its requesting caller stops waiting.
+	attempt.bootstrap, attempt.incoming = bootstrap, incoming
 	go s.completeSessionAttempt(ctx, owned, op, candidate, attempt, bootstrap, incoming, processBinding, release)
-	select {
-	case <-attempt.done:
-		return errors.Join(attempt.err, context.Cause(ctx))
-	case <-ctx.Done():
-		trace.Log(ctx, "whatsapp.bootstrap", "request-canceled")
-		return context.Cause(ctx)
-	}
+	return s.connectSessionAttempt(ctx, attempt)
 }
 
 func (s *serveSessionBootstrap) completeSessionAttempt(ctx, owned context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate, attempt *serveSessionBootstrapAttempt, bootstrap bool, incoming *sessionprovider.RuntimeIncomingOptions, processBinding processbinding.Binding, release func() error) (err error) {
@@ -413,9 +437,8 @@ func (s *serveSessionBootstrap) completeSessionAttempt(ctx, owned context.Contex
 		attempt.err = errors.Join(err, release())
 		close(attempt.done)
 	}()
-	if ctx.Err() != nil {
-		return context.Cause(ctx)
-	}
+	// The admitted handoff owns non-executable storage preparation. No SDK dial
+	// is launched here; a live explicit request or startup owner must connect it.
 	options := sessionprovider.RuntimeConnectionOptions{Directory: s.directory, InvocationState: s.invocationState, OperationID: op.OperationID,
 		Store: s.store, Credentials: s.credentials, Plan: candidate.Plan, Incoming: incoming, ProcessBinding: processBinding}
 	var connection *sessionprovider.RuntimeConnection
@@ -427,24 +450,6 @@ func (s *serveSessionBootstrap) completeSessionAttempt(ctx, owned context.Contex
 	s.mu.Lock()
 	attempt.connection = connection
 	s.mu.Unlock()
-	if err == nil {
-		err = connection.Connect(ctx)
-	}
-	if err == nil && !bootstrap {
-		err = connection.AwaitSessionAccount(ctx)
-	}
-	if err != nil && connection != nil {
-		err = errors.Join(err, connection.Close(ctx))
-	}
-	if err == nil {
-		err = connection.CheckBootstrap(ctx)
-	}
-	if err == nil && incoming != nil {
-		err = connection.ReconcileIncoming(ctx)
-		if err != nil {
-			err = errors.Join(err, connection.Close(ctx))
-		}
-	}
 	return err
 }
 
