@@ -954,6 +954,16 @@ func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthor
 	}
 	resolved := source.ResolvedEventCatalog()
 	authored := source.AuthoredResolvedEventCatalog()
+	creationEvents := make(map[string]bool)
+	for _, flow := range source.FlowScopes() {
+		if flow.AutoEmitEvent == "" {
+			continue
+		}
+		proof := semanticview.ResolveFlowEventProof(source, flow.ID, flow.AutoEmitEvent)
+		if proof.HasSchema && proof.IsAuthored(source) {
+			creationEvents[proof.EventKey()] = true
+		}
+	}
 	byName := make(map[string]runtimeauthoractivity.EventDescriptor, len(resolved)+len(authored))
 	add := func(name string, disposition runtimeauthoractivity.StoryDisposition) error {
 		name = strings.TrimSpace(name)
@@ -969,7 +979,7 @@ func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthor
 	}
 	for name := range resolved {
 		disposition := runtimeauthoractivity.StoryDifferent
-		if _, ok := authored[name]; ok {
+		if _, ok := authored[name]; ok || creationEvents[name] {
 			disposition = runtimeauthoractivity.StoryAuthored
 		}
 		if err := add(name, disposition); err != nil {

@@ -6318,7 +6318,9 @@ engine:
         exactly once. Before that completion, source revision rebuilds the occurrence only from the revised schema, persisted
         instance config, and the plan's exact trigger lineage. It never republishes stale event type/schema/payload facts and
         never invents lineage for a newly introduced auto-emit. Conflicting duplicates do not auto-emit. This bootstraps the
-        flow without requiring an external trigger.
+        flow without requiring an external trigger. The creation emission is an authored story event of the child, regardless
+        of whether its input schema is owned by the child or referenced from the producer; it receives the ordinary
+        event.emitted occurrence in the same publication transaction.
       auto_emit_revision_boundary: >
         Only the explicitly admitted source-revision transaction may replace the complete un-emitted creation plan.
         It constructs the declaration, schema, source, validated payload and final business publication identity before
