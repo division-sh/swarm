@@ -84,11 +84,9 @@ func TestManagerNativeLostAdmissionCleanupBothStores(t *testing.T) {
 					}
 					options.PersistenceRoles.AgentRoutes = routes
 					options.PersistenceRoles.FlowActivation = routes
-					options.PersistenceRoles.RouteInstaller = routes
-					options.PersistenceRoles.RouteVerifier = routes
-					options.PersistenceRoles.RouteRestorer = routes
 					nativeOptions = *options
 				})
+				f.constructKeylessRoot(t)
 				grant, err := f.grant.Evidence()
 				if err != nil {
 					t.Fatal(err)
@@ -126,10 +124,10 @@ func TestManagerNativeLostAdmissionCleanupBothStores(t *testing.T) {
 					t.Fatalf("admission diagnostic lost: panic=%v error=%v", panicked, finalErr)
 				}
 				t.Logf("attachment result: %v", finalErr)
-				if cut == "commit" && !routes.HasFlowInstanceRoute(owner) {
-					t.Fatal("resolved committed admission failed to install exact route")
+				if cut == "commit" && len(f.manager.ListAgentConfigs()) != 1 {
+					t.Fatal("resolved committed admission failed to install exact agent")
 				}
-				if cut != "commit" && routes.HasFlowInstanceRoute(owner) {
+				if cut != "commit" && len(f.manager.ListAgentConfigs()) != 0 {
 					t.Fatal("unresolved, cancelled or rolled-back admission installed topology")
 				}
 				if cut == "unresolved" {
@@ -141,8 +139,8 @@ func TestManagerNativeLostAdmissionCleanupBothStores(t *testing.T) {
 				if err := f.manager.Shutdown(); err != nil {
 					t.Fatalf("native exact retirement: %v", err)
 				}
-				if routes.HasFlowInstanceRoute(owner) {
-					t.Fatal("joined retirement retained executable route")
+				if readiness, found, err := f.workflows.LoadDynamicFlowRuntimeReadiness(ctx, owner.RunID, owner.Route); err != nil || !found || readiness.AttemptState == "accepted" {
+					t.Fatalf("joined retirement retained executable attempt: %+v found=%t err=%v", readiness, found, err)
 				}
 				row, found, err := f.workflows.LoadDynamicFlowRuntimeReadiness(ctx, owner.RunID, owner.Route)
 				want := "aborted"

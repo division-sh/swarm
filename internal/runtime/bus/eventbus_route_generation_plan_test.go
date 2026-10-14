@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 type routeGenerationPlanBarrier struct {
@@ -36,10 +37,15 @@ func TestEventBusSubscribedPublishDoesNotCrossAgentRouteGenerations(t *testing.T
 		t.Run(test.name, func(t *testing.T) {
 			store := newTargetRouteMemoryStore()
 			barrier := routeGenerationPlanBarrier{started: make(chan struct{}, 1), release: make(chan struct{})}
-			eb, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{barrier}})
+			source := routeGenerationPublicationSource(t)
+			eb, err := newScopedTestEventBus(store, EventBusOptions{
+				ContractBundle: source, Interceptors: []EventInterceptor{barrier},
+				Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
+			installConnectionSourceConstruction(t, eb, source, ".")
 			const agentID = "route-generation-agent"
 			oldToken := testAgentLifecycleToken(t, agentID, "", 11, 1)
 			newToken := testAgentLifecycleToken(t, agentID, "", 11, 2)
@@ -83,10 +89,15 @@ func TestEventBusSubscribedPublishDoesNotCrossAgentRouteGenerations(t *testing.T
 func TestEventBusPublishDoesNotCrossAgentRouteGenerations(t *testing.T) {
 	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
 	barrier := routeGenerationPlanBarrier{started: make(chan struct{}, 1), release: make(chan struct{})}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{barrier}})
+	source := routeGenerationPublicationSource(t)
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: source, Interceptors: []EventInterceptor{barrier},
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, ".")
 	const agentID = "route-generation-mutation-agent"
 	oldToken := testAgentLifecycleToken(t, agentID, "", 12, 1)
 	newToken := testAgentLifecycleToken(t, agentID, "", 12, 2)
@@ -112,10 +123,15 @@ func TestEventBusPublishDoesNotCrossAgentRouteGenerations(t *testing.T) {
 func TestEventBusPublishAcknowledgedDoesNotCrossAgentRouteGenerations(t *testing.T) {
 	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
 	barrier := routeGenerationPlanBarrier{started: make(chan struct{}, 1), release: make(chan struct{})}
-	eb, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{barrier}})
+	source := routeGenerationPublicationSource(t)
+	eb, err := newScopedTestEventBus(store, EventBusOptions{
+		ContractBundle: source, Interceptors: []EventInterceptor{barrier},
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
+	installConnectionSourceConstruction(t, eb, source, ".")
 	const agentID = "route-generation-ack-agent"
 	oldToken := testAgentLifecycleToken(t, agentID, "", 13, 1)
 	newToken := testAgentLifecycleToken(t, agentID, "", 13, 2)
@@ -202,8 +218,16 @@ func TestEventBusIdentityRouteAuthorityDominatesDuplicateExactSubscription(t *te
 	}
 }
 
+func routeGenerationPublicationSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	return semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"schema.yaml": "name: route-generation-proof\npins:\n  inputs: [test.route_generation, test.route_generation_mutation, test.route_generation_ack]\n  outputs: [test.route_generation, test.route_generation_mutation, test.route_generation_ack]\n",
+		"events.yaml": "test.route_generation:\ntest.route_generation_mutation:\ntest.route_generation_ack:\n",
+	}))
+}
+
 func routeGenerationTestEvent(id, eventType string) events.Event {
-	return eventtest.RunCreatingRootIngress(
+	return eventtest.ExistingRunRootIngress(
 		eventtest.UUID(id),
 		events.EventType(eventType),
 		"route-generation-test",
@@ -211,7 +235,6 @@ func routeGenerationTestEvent(id, eventType string) events.Event {
 		[]byte(`{}`),
 		0,
 		busInternalTestRunID,
-		"",
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)

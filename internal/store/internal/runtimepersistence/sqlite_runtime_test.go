@@ -27,6 +27,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -475,12 +476,6 @@ func (s *sqliteFlowActivationLifecycleStore) CommitAgentLifecycleTransition(ctx 
 func (o sqliteFlowActivationCommitter) CommitFlowInstanceActivation(ctx context.Context, plan runtimepipeline.FlowInstanceActivationPlan) (runtimepipeline.CommittedFlowInstanceActivation, error) {
 	return o.store.CommitFlowInstanceActivation(ctx, runtimebus.FlowInstanceActivationCommand{
 		Plan: plan,
-		RouteTopology: []runtimebus.FlowInstanceRouteRecordSet{{
-			Identity: runtimeflowidentity.RunScopedFlowInstance{
-				RunID: plan.Readiness.RunID,
-				Route: plan.Identity.Route(),
-			},
-		}},
 	})
 }
 
@@ -512,9 +507,6 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 			LifecycleOutcome: sqliteStore,
 			AgentRoutes:      bus,
 			FlowActivation:   sqliteFlowActivationCommitter{store: sqliteStore},
-			RouteInstaller:   bus,
-			RouteVerifier:    bus,
-			RouteRestorer:    bus,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
@@ -553,6 +545,12 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 		}
 	})
 	req := sqliteKeyedFlowActivationRequest(t, ctx, bundle, "inst-1")
+	activateFixtureStructuralRoot(t, ctx, manager, bundle, req.OccurredAt)
+	prepared, err := manager.PrepareFlowInstanceActivation(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertFixtureActivationVariables(t, prepared, "review", "inst-1", "review/inst-1")
 	if err := manager.ActivateFlowInstance(ctx, req); err != nil {
 		t.Fatalf("ActivateFlowInstance through closed SQLite owner: %v", err)
 	}
@@ -572,13 +570,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 		t.Fatalf("LoadAgents: %v", err)
 	}
 	assertSQLiteActivatedAgentRoutes(t, agents, "reviewer\x00review/inst-1")
-	assertSQLiteAddedRoutes(t, bus, "review/inst-1")
-	assertSQLiteRouteMaterializationVars(t, bus, "review/inst-1", map[string]string{
-		"flow_instance_path": "review/inst-1",
-		"flow_scope_key":     "review",
-		"instance_id":        "inst-1",
-		"template_id":        "review",
-	})
+	assertSQLiteActivatedAgentFlowTopologies(t, ctx, sqliteStore, agents, runID, "review/inst-1")
 }
 
 func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T) {
@@ -609,9 +601,6 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 			LifecycleOutcome: sqliteStore,
 			AgentRoutes:      bus,
 			FlowActivation:   sqliteFlowActivationCommitter{store: sqliteStore},
-			RouteInstaller:   bus,
-			RouteVerifier:    bus,
-			RouteRestorer:    bus,
 		}, ReceiverExecution: eventreceiver.NormalExecution(),
 	}, sqliteStore))
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
@@ -639,6 +628,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 			t.Error(err)
 		}
 	})
+	activateFixtureStructuralRoot(t, ctx, manager, bundle, time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC))
 	start := make(chan struct{})
 	errs := make(chan error, 2)
 	var wg sync.WaitGroup
@@ -649,6 +639,12 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 			defer wg.Done()
 			<-start
 			req := sqliteKeyedFlowActivationRequest(t, ctx, bundle, instanceID)
+			prepared, err := manager.PrepareFlowInstanceActivation(ctx, req)
+			if err != nil {
+				errs <- err
+				return
+			}
+			assertFixtureActivationVariables(t, prepared, "review", instanceID, "review/"+instanceID)
 			errs <- manager.ActivateFlowInstance(ctx, req)
 		}()
 	}
@@ -695,19 +691,6 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	if !exists || len(plan.Agents) != 0 {
 		t.Fatalf("fixture source set exists=%v agents=%#v, want no flow-owned static desired agents", exists, plan.Agents)
 	}
-	assertSQLiteAddedRoutes(t, bus, "review/component-a", "review/component-b")
-	assertSQLiteRouteMaterializationVars(t, bus, "review/component-a", map[string]string{
-		"flow_instance_path": "review/component-a",
-		"flow_scope_key":     "review",
-		"instance_id":        "component-a",
-		"template_id":        "review",
-	})
-	assertSQLiteRouteMaterializationVars(t, bus, "review/component-b", map[string]string{
-		"flow_instance_path": "review/component-b",
-		"flow_scope_key":     "review",
-		"instance_id":        "component-b",
-		"template_id":        "review",
-	})
 	for _, entry := range bus.runtimeLogEntries() {
 		if entry.Level == "error" || entry.Failure != nil {
 			t.Fatalf("runtime log = %#v, want no activation dead-letter/runtime errors", entry)
@@ -716,35 +699,63 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 }
 
 type sqliteFlowActivationBus struct {
-	mu             sync.Mutex
-	runtimeLog     []runtimepipeline.RuntimeLogEntry
-	stagedRequests []runtimebus.FlowInstanceRouteMaterializationRequest
-	routeRequests  []runtimebus.FlowInstanceRouteMaterializationRequest
-	routeAttempts  map[runtimeflowidentity.RunScopedFlowInstance]string
-	fencedAttempts map[string]struct{}
-	published      []events.Event
+	mu                   sync.Mutex
+	runtimeLog           []runtimepipeline.RuntimeLogEntry
+	preparedAgentRoutes  []runtimeeffects.LifecycleToken
+	publishedAgentRoutes map[runtimeeffects.LifecycleToken]struct{}
+	published            []events.Event
 }
 
-type sqliteFlowActivationPublication struct {
-	bus      *sqliteFlowActivationBus
-	attempt  runtimepipeline.DynamicFlowRuntimeActivationAttempt
-	identity runtimeflowidentity.RunScopedFlowInstance
-}
-
-func (p sqliteFlowActivationPublication) Retire() error {
-	return p.bus.RetireFlowInstanceRouteForAttempt(p.identity, p.attempt)
+func TestNativeFlowActivationFixtureObservesPublishedAgentCarriersBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newReceiverConfigActivationFixture(t, backend)
+			f.constructKeylessRoot(t)
+			binding, err := f.grant.ProcessExecutionBinding()
+			if err != nil {
+				t.Fatal(err)
+			}
+			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, binding.RuntimeInstanceID, binding.RuntimeGeneration, "", "native-carrier-observation", binding.BundleHash, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.manager.Run(managedexecution.WithAdmission(f.ctx, admission)); err != nil {
+				t.Fatal(err)
+			}
+			req := f.request("business-key", "carrier-proof", "state")
+			if err := f.manager.ActivateFlowInstance(f.ctx, req); err != nil {
+				t.Fatal(err)
+			}
+			paths := f.bus.routePaths()
+			if len(paths) != 1 || paths[0] != req.Instance.InstancePath {
+				t.Fatalf("actual published agent carriers = %v, want exactly %s", paths, req.Instance.InstancePath)
+			}
+			f.bus.mu.Lock()
+			prepared := append([]runtimeeffects.LifecycleToken(nil), f.bus.preparedAgentRoutes...)
+			f.bus.mu.Unlock()
+			if len(prepared) != 1 || prepared[0].Identity.RunID != runtimecorrelation.RunIDFromContext(f.ctx) || prepared[0].Identity.Route.InstancePath != req.Instance.InstancePath {
+				t.Fatalf("actual prepared agent carriers = %+v, want exact run/receiver", prepared)
+			}
+			f.bus.RemoveAgentRoute(prepared[0])
+			if paths := f.bus.routePaths(); len(paths) != 0 {
+				t.Fatalf("exact agent-carrier cleanup retained publication: %v", paths)
+			}
+		})
+	}
 }
 
 type sqliteFlowActivationRoutePreparation struct {
 	deliveries chan *worklifetime.EventDelivery
+	publish    func() error
+	discard    func() error
 }
 
 func (p *sqliteFlowActivationRoutePreparation) Deliveries() <-chan *worklifetime.EventDelivery {
 	return p.deliveries
 }
 
-func (*sqliteFlowActivationRoutePreparation) Publish() error { return nil }
-func (*sqliteFlowActivationRoutePreparation) Discard() error { return nil }
+func (p *sqliteFlowActivationRoutePreparation) Publish() error { return p.publish() }
+func (p *sqliteFlowActivationRoutePreparation) Discard() error { return p.discard() }
 
 func (*sqliteFlowActivationBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
 	return ctx, nil
@@ -843,145 +854,45 @@ func (*sqliteFlowActivationBus) Store() runtimebus.EventStore { return nil }
 
 func (*sqliteFlowActivationBus) ResetInMemoryState() error { return nil }
 
-func (*sqliteFlowActivationBus) PrepareAgentRoute(
-	runtimeeffects.LifecycleToken,
-	semanticview.FlowOwnedAgentSubscriptionAdmission,
+func (b *sqliteFlowActivationBus) PrepareAgentRoute(
+	token runtimeeffects.LifecycleToken,
+	_ semanticview.FlowOwnedAgentSubscriptionAdmission,
 ) runtimebus.AgentRoutePreparation {
+	b.mu.Lock()
+	b.preparedAgentRoutes = append(b.preparedAgentRoutes, token)
+	b.mu.Unlock()
 	return &sqliteFlowActivationRoutePreparation{
 		deliveries: make(chan *worklifetime.EventDelivery),
+		publish: func() error {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			if b.publishedAgentRoutes == nil {
+				b.publishedAgentRoutes = make(map[runtimeeffects.LifecycleToken]struct{})
+			}
+			b.publishedAgentRoutes[token] = struct{}{}
+			return nil
+		},
+		discard: func() error {
+			b.RemoveAgentRoute(token)
+			return nil
+		},
 	}
 }
 
-func (*sqliteFlowActivationBus) FenceAgentRoute(runtimeeffects.LifecycleToken)  {}
-func (*sqliteFlowActivationBus) RemoveAgentRoute(runtimeeffects.LifecycleToken) {}
-func (*sqliteFlowActivationBus) SignalDeliveryContinuations()                   {}
+func (b *sqliteFlowActivationBus) FenceAgentRoute(token runtimeeffects.LifecycleToken) {
+	b.RemoveAgentRoute(token)
+}
+func (b *sqliteFlowActivationBus) RemoveAgentRoute(token runtimeeffects.LifecycleToken) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.publishedAgentRoutes, token)
+}
+func (*sqliteFlowActivationBus) SignalDeliveryContinuations() {}
 
 func (b *sqliteFlowActivationBus) LogRuntime(_ context.Context, entry runtimepipeline.RuntimeLogEntry) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.runtimeLog = append(b.runtimeLog, entry)
-	return nil
-}
-
-func (b *sqliteFlowActivationBus) AddFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
-	return b.AddFlowInstanceRouteContext(context.Background(), req)
-}
-
-func (b *sqliteFlowActivationBus) StageFlowInstanceRouteContext(_ context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) (runtimebus.FlowInstanceRouteTopologyResult, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.stagedRequests = append(b.stagedRequests, req.Normalized())
-	return runtimebus.FlowInstanceRouteTopologyResult{Acknowledged: true}, nil
-}
-
-func (b *sqliteFlowActivationBus) PublishPersistedFlowInstanceRoute(req runtimebus.FlowInstanceRouteMaterializationRequest) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	req = req.Normalized()
-	for _, existing := range b.routeRequests {
-		if existing.Identity == req.Identity {
-			return nil
-		}
-	}
-	b.routeRequests = append(b.routeRequests, req)
-	return nil
-}
-
-func (b *sqliteFlowActivationBus) PublishPersistedFlowInstanceRouteForAttempt(_ context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) (runtimebus.FlowRoutePublicationHandle, error) {
-	if err := attempt.Validate(); err != nil {
-		return nil, err
-	}
-	req = req.Normalized()
-	if req.Identity.RunID != attempt.RunID() || req.Identity.Route.InstancePath != attempt.InstancePath() {
-		return nil, errors.New("flow route publication differs from activation attempt")
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if _, fenced := b.fencedAttempts[attempt.ID()]; fenced {
-		return nil, errors.New("flow route activation attempt is fenced")
-	}
-	if owner := b.routeAttempts[req.Identity]; owner != "" {
-		if owner != attempt.ID() {
-			return nil, errors.New("flow route predecessor remains published")
-		}
-		return sqliteFlowActivationPublication{bus: b, identity: req.Identity, attempt: attempt}, nil
-	}
-	for _, existing := range b.routeRequests {
-		if existing.Identity == req.Identity {
-			return nil, errors.New("flow route exists without an activation attempt owner")
-		}
-	}
-	if b.routeAttempts == nil {
-		b.routeAttempts = make(map[runtimeflowidentity.RunScopedFlowInstance]string)
-	}
-	b.routeAttempts[req.Identity] = attempt.ID()
-	b.routeRequests = append(b.routeRequests, req)
-	return sqliteFlowActivationPublication{bus: b, identity: req.Identity, attempt: attempt}, nil
-}
-
-func (b *sqliteFlowActivationBus) RetireFlowInstanceRouteForAttempt(identity runtimeflowidentity.RunScopedFlowInstance, attempt runtimepipeline.DynamicFlowRuntimeActivationAttempt) error {
-	if err := attempt.Validate(); err != nil {
-		return err
-	}
-	if err := identity.Validate(); err != nil {
-		return err
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.fencedAttempts == nil {
-		b.fencedAttempts = make(map[string]struct{})
-	}
-	b.fencedAttempts[attempt.ID()] = struct{}{}
-	if b.routeAttempts[identity] != attempt.ID() {
-		return nil
-	}
-	delete(b.routeAttempts, identity)
-	filtered := b.routeRequests[:0]
-	for _, req := range b.routeRequests {
-		if req.Identity != identity {
-			filtered = append(filtered, req)
-		}
-	}
-	b.routeRequests = filtered
-	return nil
-}
-
-func (b *sqliteFlowActivationBus) RetirePublishedFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	delete(b.routeAttempts, identity)
-	filtered := b.routeRequests[:0]
-	for _, req := range b.routeRequests {
-		if req.Identity != identity {
-			filtered = append(filtered, req)
-		}
-	}
-	b.routeRequests = filtered
-	return nil
-}
-
-func (b *sqliteFlowActivationBus) AddFlowInstanceRouteContext(_ context.Context, req runtimebus.FlowInstanceRouteMaterializationRequest) error {
-	if _, err := b.StageFlowInstanceRouteContext(context.Background(), req); err != nil {
-		return err
-	}
-	return b.PublishPersistedFlowInstanceRoute(req)
-}
-
-func (b *sqliteFlowActivationBus) HasFlowInstanceRoute(identity runtimeflowidentity.RunScopedFlowInstance) bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	for _, req := range b.routeRequests {
-		if req.Identity == identity {
-			return true
-		}
-	}
-	return false
-}
-
-func (b *sqliteFlowActivationBus) VerifyFlowInstanceRoute(_ context.Context, identity runtimeflowidentity.RunScopedFlowInstance) error {
-	if !b.HasFlowInstanceRoute(identity) {
-		return errors.New("flow-instance route is not installed")
-	}
 	return nil
 }
 
@@ -996,18 +907,10 @@ func (b *sqliteFlowActivationBus) runtimeLogEntries() []runtimepipeline.RuntimeL
 func (b *sqliteFlowActivationBus) routePaths() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	out := make([]string, 0, len(b.routeRequests))
-	for _, req := range b.routeRequests {
-		out = append(out, strings.TrimSpace(req.Identity.Route.InstancePath))
+	out := make([]string, 0, len(b.publishedAgentRoutes))
+	for token := range b.publishedAgentRoutes {
+		out = append(out, token.Identity.Route.InstancePath)
 	}
-	return out
-}
-
-func (b *sqliteFlowActivationBus) materializationRequests() []runtimebus.FlowInstanceRouteMaterializationRequest {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	out := make([]runtimebus.FlowInstanceRouteMaterializationRequest, len(b.routeRequests))
-	copy(out, b.routeRequests)
 	return out
 }
 
@@ -1114,6 +1017,18 @@ func sqliteKeyedFlowActivationRequest(t *testing.T, ctx context.Context, bundle 
 	return req
 }
 
+func activateFixtureStructuralRoot(t *testing.T, ctx context.Context, manager *runtimemanager.AgentManager, bundle *runtimecontracts.WorkflowContractBundle, at time.Time) {
+	t.Helper()
+	source := semanticview.Wrap(bundle)
+	root, err := runtimeflowidentity.StandingForGeneration(source, semanticview.RootExecutionFlowID(source), runtimecorrelation.RunIDFromContext(ctx))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ActivateFlowInstance(ctx, runtimepipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: root, OccurredAt: at}); err != nil {
+		t.Fatalf("construct actual structural fixture root: %v", err)
+	}
+}
+
 func assertSQLiteActivatedAgentRoutes(t *testing.T, agents []runtimemanager.PersistedAgent, wantRoutes ...string) {
 	t.Helper()
 	got := map[string]struct{}{}
@@ -1152,6 +1067,9 @@ func assertSQLiteActivatedAgentFlowTopologies(
 		if err != nil || !found {
 			t.Fatalf("load readiness owner for %s: found=%v err=%v", path, found, err)
 		}
+		if !readiness.Eligible() || readiness.Pending() || readiness.Phase != runtimepipeline.FlowAttachmentReady || readiness.Plan.RunID != runID || readiness.Plan.Identity.InstancePath != path {
+			t.Fatalf("attachment did not complete for exact owner %s: %+v", path, readiness)
+		}
 		fingerprint, err := readiness.Plan.Hash()
 		if err != nil {
 			t.Fatalf("fingerprint readiness owner for %s: %v", path, err)
@@ -1178,33 +1096,13 @@ func assertSQLiteActivatedAgentFlowTopologies(
 	}
 }
 
-func assertSQLiteAddedRoutes(t *testing.T, bus *sqliteFlowActivationBus, wantPaths ...string) {
+func assertFixtureActivationVariables(t *testing.T, plan runtimepipeline.FlowInstanceActivationPlan, flow, instanceID, path string) {
 	t.Helper()
-	got := map[string]struct{}{}
-	for _, path := range bus.routePaths() {
-		got[strings.TrimSpace(path)] = struct{}{}
-	}
-	for _, want := range wantPaths {
-		if _, ok := got[want]; !ok {
-			t.Fatalf("added route paths = %#v, missing %q", got, want)
+	for key, want := range map[string]string{"flow_instance_path": path, "flow_scope_key": flow, "instance_id": instanceID, "template_id": flow} {
+		if got := plan.ActivationVariables[key]; got != want {
+			t.Fatalf("admitted activation variable %s for %s = %q want %q", key, path, got, want)
 		}
 	}
-}
-
-func assertSQLiteRouteMaterializationVars(t *testing.T, bus *sqliteFlowActivationBus, wantPath string, wantVars map[string]string) {
-	t.Helper()
-	for _, req := range bus.materializationRequests() {
-		if strings.TrimSpace(req.Identity.Route.InstancePath) != wantPath {
-			continue
-		}
-		for key, want := range wantVars {
-			if got := strings.TrimSpace(req.ActivationVariables[key]); got != want {
-				t.Fatalf("route materialization vars for %s key %s = %q, want %q; all vars=%#v", wantPath, key, got, want, req.ActivationVariables)
-			}
-		}
-		return
-	}
-	t.Fatalf("route materialization request for %s not found; got %#v", wantPath, bus.materializationRequests())
 }
 
 func TestSQLiteRuntimeStoreAPIIdempotencyAllowsNestedEventBusPublish(t *testing.T) {

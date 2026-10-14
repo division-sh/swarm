@@ -15,6 +15,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -70,12 +73,6 @@ func TestSelectedAgentConstructionUsesExactFixedHeader(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					metadata := runfork.RunForkMaterializedEntitySnapshotMetadata{
-						Owner:  runfork.RunForkMaterializedEntitySnapshotMetadataOwner,
-						Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
-						Mode:   "static", FlowTemplate: flow, FlowInstance: constructed.InstancePath,
-						FlowConfig: selectedAgentHeaderConfig(t, constructed),
-					}
 					lifecycle, found := semanticview.WorkflowStageTopology(source, flow)
 					if !found {
 						t.Fatal("fixed header requires its lifecycle declaration")
@@ -85,10 +82,11 @@ func TestSelectedAgentConstructionUsesExactFixedHeader(t *testing.T) {
 						t.Fatal(err)
 					}
 					entered := time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)
+					metadata := selectedAgentConstructionMetadata(t, source, runID, constructed, "", entered)
 					metadata.CreatedAt, metadata.UpdatedAt, metadata.EnteredStateAt = entered, entered, entered
 					metadata.Status, metadata.StageDefined = "active", lifecycle.StageCount() != 0
 					plan := runfork.RunForkPlan{SourceRunID: runID, Entities: []runfork.RunForkEntityState{{
-						EntityID: constructed.EntityID, MaterializationMetadata: &metadata, CurrentState: stage.ID(), EnteredStateAt: &entered,
+						EntityID: constructed.EntityID, MaterializationMetadata: metadata, CurrentState: stage.ID(), EnteredStateAt: &entered,
 					}}}
 					before, err := json.Marshal(plan)
 					if err != nil {
@@ -130,7 +128,7 @@ func TestSelectedAgentConstructionUsesExactFixedHeader(t *testing.T) {
 					}
 					for _, fault := range []string{"missing", "duplicate", "duplicate_route", "wrong_declaration", "wrong_mode", "wrong_entity", "missing_state", "missing_entered", "missing_parent", "foreign_parent", "malformed_config", "foreign_route"} {
 						t.Run(fault, func(t *testing.T) {
-							bad, row := plan, metadata
+							bad, row := plan, *metadata
 							bad.Entities = []runfork.RunForkEntityState{plan.Entities[0]}
 							bad.Entities[0].MaterializationMetadata = &row
 							switch fault {
@@ -175,6 +173,57 @@ func TestSelectedAgentConstructionUsesExactFixedHeader(t *testing.T) {
 				})
 			}
 		}
+	}
+}
+
+// Capture component construction through the same record owner as production.
+func selectedAgentConstructionMetadata(t testing.TB, source semanticview.Source, runID string, instance flowidentity.Instance, key string, at time.Time) *runfork.RunForkMaterializedEntitySnapshotMetadata {
+	t.Helper()
+	if err := instance.ValidateConstruction(source, runID); err != nil {
+		t.Fatal(err)
+	}
+	schema, found := source.FlowSchemaByID(instance.TemplateID)
+	if !found {
+		t.Fatal("fixture lacks its exact constructor declaration")
+	}
+	graph, found := semanticview.WorkflowStageTopology(source, instance.TemplateID)
+	if !found {
+		t.Fatal("fixture lacks its compiled lifecycle")
+	}
+	initial, err := graph.InitialStoredStage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, _ := semanticview.Bundle(source)
+	hash, err := contracts.BundleHash(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entity, _ := entityruntime.ResolveForFlow(source, instance.TemplateID)
+	mode := schema.EffectiveMode()
+	construction := pipeline.FlowInstanceActivationPlan{
+		Identity: instance, OccurredAt: at,
+		Readiness: pipeline.DynamicFlowRuntimeReadinessPlan{
+			Identity: instance, RunID: runID, BundleHash: hash, WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live,
+		},
+		Instance: pipeline.WorkflowInstance{
+			InstanceID: instance.InstanceID, StorageRef: instance.InstancePath, EntityID: instance.EntityID,
+			EntityType: entity.EntityType, InstanceKind: mode, Mode: mode, Status: "active", InstanceKey: key,
+			ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance, ParentEntityID: instance.ParentEntityID,
+			WorkflowName: instance.TemplateID, WorkflowVersion: source.WorkflowVersion(), CurrentState: initial.ID(), StageDefined: graph.StageCount() != 0,
+			EnteredStageAt: at, CreatedAt: at, UpdatedAt: at,
+		},
+	}
+	record, err := construction.PersistenceRecord()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &runfork.RunForkMaterializedEntitySnapshotMetadata{
+		Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
+		Mode: mode, FlowTemplate: instance.TemplateID, FlowInstance: instance.InstancePath, EntityType: entity.EntityType,
+		FlowConfig: record.Config, InitialMaterialization: record.InitialMaterialization,
+		ParentInstance: instance.ParentRoute.FlowInstance, InstanceKey: key, StageDefined: graph.StageCount() != 0,
+		Status: "active", CreatedAt: at, UpdatedAt: at, EnteredStateAt: at,
 	}
 }
 

@@ -19,7 +19,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -573,6 +572,83 @@ func TestRoleScopedEntityTools_CurrentEntityEligibilityFiltersTurnSurface(t *tes
 	deniedCtx := toolcapabilities.WithContext(invalidCtx, caps)
 	_, err := exec.Execute(deniedCtx, "read_validation_case", map[string]any{})
 	requireToolFailure(t, err, runtimefailures.ClassAuthorizationDenied, "tool_not_allowed")
+}
+
+func TestRoleScopedEntityTools_EntitylessDeliveryPreservesTriggerEligibility(t *testing.T) {
+	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator"}
+	bundle := loadRoleScopedEntityToolBundle(t, actor)
+	ctx, exec, db := newEntityToolTestHarnessWithBundleAndLegacyAccess(t, actor, bundle, false)
+	currentID := uuid.NewString()
+	seedEntityStateRow(t, db, currentID, "", "validation/inst-1", "validation_case", "queued", map[string]any{
+		"status": "open", "business_brief": map[string]any{"summary": "trigger-owned", "confidence": 1},
+	}, time.Now().UTC())
+	currentActor, found := runtimetools.ActorFromContext(ctx)
+	if !found || currentActor.EffectiveEntityID() != "" {
+		t.Fatal("eligibility proof requires an exactly entityless actor")
+	}
+	routing := eventtest.ConcreteTemplateRoutingSource("validation", "validation/inst-1", currentID)
+	publication := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "validation.started", eventtest.Producer(events.EventProducerPlatform, "workflow"), "", []byte(`{}`), 1,
+		events.EventLineage{RunID: entityToolTestRunID, ParentEventID: uuid.NewString(), ExecutionMode: "live"},
+		events.EnvelopeForTargetRoute(events.EventEnvelope{}, routing.Route()), routing, time.Now().UTC())
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(currentActor.ID), AgentIdentity: currentActor.Identity,
+		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "validation", FlowInstance: "validation/inst-1"})}
+	delivery, err := events.NewDeliveryEvent(publication, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view := delivery.Event()
+	if view.EntityID() != "" || view.SourceRoute() != publication.SourceRoute() || delivery.JournalEvent().EntityID() != currentID {
+		t.Fatal("delivery proof changed actor ownership or lost its immutable trigger")
+	}
+	for _, event := range []events.Event{publication, view} {
+		t.Run(fmt.Sprintf("entityless=%t", event.EntityID() == ""), func(t *testing.T) {
+			turn := runtimebus.WithInboundEvent(ctx, event)
+			definitions := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(turn, currentActor))
+			for _, name := range []string{"read_validation_case", "read_validation_case_status"} {
+				if _, visible := definitions[name]; !visible {
+					t.Fatalf("receiver projection dropped an eligible triggering entity: tool=%s actor_entity=%q event_entity=%q source=%+v", name, currentActor.EffectiveEntityID(), event.EntityID(), event.SourceRoute())
+				}
+			}
+			value, err := exec.Execute(turn, "read_validation_case_status", map[string]any{})
+			if err != nil || value != "open" {
+				t.Fatalf("callable read lost its exact triggering entity: value=%v err=%v", value, err)
+			}
+		})
+	}
+	foreignID := uuid.NewString()
+	seedEntityStateRow(t, db, foreignID, "", "run-root", "default", "queued", map[string]any{"status": "foreign"}, time.Now().UTC())
+	for _, denied := range []struct {
+		name   string
+		source events.RoutingSource
+	}{
+		{"no_current", events.NoRoutingSource()},
+		{"root_current", eventtest.RootRoutingSource(entityToolTestRunID)},
+		{"missing_current", eventtest.ConcreteTemplateRoutingSource("validation", "validation/inst-1", uuid.NewString())},
+		{"foreign_contract", eventtest.StaticFlowRoutingSource("run-root", "run-root", foreignID)},
+	} {
+		t.Run(denied.name, func(t *testing.T) {
+			event := eventtest.ChildForProducerWithRoutingSource(uuid.NewString(), "validation.started", eventtest.Producer(events.EventProducerPlatform, "workflow"), "", []byte(`{}`), 1,
+				events.EventLineage{RunID: entityToolTestRunID, ParentEventID: uuid.NewString(), ExecutionMode: "live"}, events.EventEnvelope{}, denied.source, time.Now().UTC())
+			projected, err := events.NewDeliveryEvent(event, route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			turn := runtimebus.WithInboundEvent(ctx, projected.Event())
+			// Even an independently configured entity cannot fill absent or
+			// contradictory message context.
+			configured := currentActor
+			configured.EntityID = currentID
+			definitions := roleScopedToolDefinitionMap(exec.ToolDefinitionsForActorInContext(turn, configured))
+			if _, visible := definitions["read_validation_case"]; visible {
+				t.Fatalf("ineligible message borrowed actor/construction entity: %s", denied.name)
+			}
+			caps := exec.ToolCapabilitiesForActorInContext(turn, configured, []string{"read_validation_case"}, nil)
+			capability, present := caps.Capability("read_validation_case")
+			if !present || capability.Visible || capability.Callable || capability.DenialReason != "current_entity_contract_unavailable" {
+				t.Fatalf("invalid context was callable: %+v", capability)
+			}
+		})
+	}
 }
 
 func TestRoleScopedEntityTools_GeneratedSchemasAreClosedAndRuntimeRejectsExtras(t *testing.T) {
@@ -1435,6 +1511,14 @@ accounts:
 	bundleHash := bundle.SourceArtifact.BundleHash()
 	storetest.RequireDurableDataCatalog(t, ctx, pg, bundleHash)
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: bundleHash})
+	source := semanticview.Wrap(bundle)
+	sourceFact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = runtimecorrelation.WithSourceArtifactFact(runtimecorrelation.WithRunID(ctx, sourceRunID), sourceFact)
+	constructEntityToolFixture(t, ctx, pg, newEntityToolPipeline(t, pg, source), source, "review", "review/inst-1", entityID, "queued",
+		map[string]any{"fixture_key": "inst-1", "status": "open"}, at)
 	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(
 		stateEventID, "fork.state_entry", eventtest.Producer(events.EventProducerPlatform, "test"),
 		"", []byte(`{}`), 0, sourceRunID, "",
@@ -1449,44 +1533,6 @@ accounts:
 			($1::uuid, $2::uuid, 'authored_field', 'status', 'null'::jsonb, '"open"'::jsonb, $3::uuid, 'platform', 'activation-tool-test', 'seed', $4)
 	`, sourceRunID, entityID, stateEventID, at); err != nil {
 		t.Fatalf("seed mutations: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'review/inst-1', 'accounts', 'queued',
-			'{}'::jsonb, '{"status":"open"}'::jsonb, '{}'::jsonb, 1, $3, $4, $4
-		)
-	`, sourceRunID, entityID, at, at); err != nil {
-		t.Fatalf("seed source entity_state: %v", err)
-	}
-	source := semanticview.Wrap(bundle)
-	parent, err := flowidentity.StandingForGeneration(source, ".", sourceRunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	instance, err := flowidentity.KeyedChild(source, parent, "review", "inst-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	instance.EntityID = entityID
-	configPayload, err := runtimepipeline.WorkflowInstanceHeaderPayloadForIdentity(instance, bundle.Semantics.Version)
-	if err != nil {
-		t.Fatal(err)
-	}
-	headerConfig, err := json.Marshal(configPayload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO flow_instances
-		(run_id, instance_path, entity_id, entity_type, flow_template, mode, stage_defined,
-		 current_state, config, status, gates, bookkeeping, accumulator, revision,
-		 entered_state_at, created_at, updated_at)
-		VALUES ($1::uuid, 'review/inst-1', $2::uuid, 'accounts', 'review', 'template', TRUE,
-		 'queued', $4::jsonb, 'active', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $3, $3, $3)`, sourceRunID, entityID, at, string(headerConfig)); err != nil {
-		t.Fatalf("seed exact native fork source header: %v", err)
 	}
 	captureEntityToolRunForkRevision(t, db, sourceRunID)
 	storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, eventtest.PersistedProjectionForProducer(

@@ -76,7 +76,7 @@ func VerifyNativePipelineRejectsFabricatedGuardCauseOnBothStoresForTest(t *testi
 				entityID := runID
 				address := testEngineStateAddress(".", runID, entityID)
 				address.FlowInstance = testRunScopedWorkflowInstanceFromContext(ctx, runID)
-				if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, WorkflowInstance{
 					InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: ".", WorkflowVersion: "1",
 					Mode: contracts.FlowModeStatic, CurrentState: "ready", EntityType: "test_entity", Fields: map[string]any{"marker": "unchanged"},
 				})); err != nil {

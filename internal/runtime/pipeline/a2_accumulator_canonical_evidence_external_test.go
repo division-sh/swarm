@@ -1,7 +1,6 @@
 package pipeline_test
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -315,9 +313,8 @@ func newA2CanonicalAccumulatorProof(t *testing.T, selected gateRecoveryStoreCase
 	}
 	source := semanticview.Wrap(bundle)
 	runID := uuid.NewString()
-	insertGateRecoveryRun(t, selected.events, runID)
-	ctx := withLiveGateExecution(correlation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-	proof := &a2AccumulatorPersistenceProof{selected: selected, ctx: ctx, runID: runID, module: proposedEffectProofModule{
+	ctx, fact := nativeConstructionContextFixture(t, selected.events, source, runID)
+	proof := &a2AccumulatorPersistenceProof{selected: selected, ctx: ctx, fact: fact, runID: runID, module: proposedEffectProofModule{
 		source: source, nodes: []pipeline.WorkflowNode{
 			{Node: externalPipelineSourceNode(t, source, ".", "collector"), Subscriptions: []events.EventType{"numeric.completed"}, ExecutionType: contracts.SystemNodeExecutionType},
 			{Node: externalPipelineSourceNode(t, source, ".", "numeric"), Subscriptions: []events.EventType{"numeric.requested"}, ExecutionType: contracts.SystemNodeExecutionType},
@@ -343,20 +340,20 @@ func restartA2CanonicalAccumulatorProof(t *testing.T, proof *a2AccumulatorPersis
 	}
 	reconstructed := proof.selected.events
 	proof.logger = &exactJoinRuntimeLogger{}
-	admitter := swarmruntime.NewRuntimePayloadAdmitter(nil, proof.module.source, authorActivityTestSourceArtifactFact)
+	admitter := swarmruntime.NewRuntimePayloadAdmitter(nil, proof.module.source, proof.fact)
 	reconstructed.(swarmruntime.EventPayloadAdmissionBinder).SetEventPayloadAdmitter(admitter)
 	work, ok := worklifetime.OccurrenceFromContext(proof.ctx)
 	if !ok {
 		t.Fatal("canonical evidence proof lost its actual runtime lifetime")
 	}
-	bus, err := newScopedTestEventBus(t, reconstructed, runtimebus.EventBusOptions{ContractBundle: proof.module.source, PayloadAdmitter: admitter, WorkOwner: work, Logger: proof.logger})
+	bus, err := newScopedTestEventBus(t, reconstructed, runtimebus.EventBusOptions{ContractBundle: proof.module.source, SourceArtifactFact: proof.fact, PayloadAdmitter: admitter, WorkOwner: work, Logger: proof.logger})
 	if err != nil {
 		t.Fatal(err)
 	}
 	proof.bus = bus
 	proof.persistence = &a2AccumulatorPersistenceObserver{WorkflowPersistenceOwner: reconstructed.(pipeline.WorkflowPersistenceOwner)}
 	proof.selected.persistence = pipeline.NewWorkflowPersistence(proof.persistence)
-	proof.pc = newGateRecoveryCoordinator(proof.bus, proof.selected, pipeline.PipelineCoordinatorOptions{Module: proof.module, WorkOwner: work})
+	proof.pc = newGateRecoveryCoordinator(proof.bus, proof.selected, pipeline.PipelineCoordinatorOptions{Module: proof.module, SourceArtifactFact: proof.fact, WorkOwner: work})
 }
 
 func a2CanonicalAccumulatorObject(t *testing.T, raw []byte) map[string]any {

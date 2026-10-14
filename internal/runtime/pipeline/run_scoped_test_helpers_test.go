@@ -32,6 +32,11 @@ func testPipelineRunContextNoSeed(t *testing.T) context.Context {
 
 func materializedWorkflowInstanceForTest(instance WorkflowInstance) WorkflowInstance {
 	occurredAt := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
+	// Component fixtures are keyless unless their caller supplies a mode;
+	// attaching readiness must not turn that declaration into a template.
+	if instance.Mode == "" {
+		instance.Mode = runtimecontracts.FlowModeStatic
+	}
 	instance.Fields = cloneStringAnyMap(instance.Fields)
 	if instance.Fields == nil {
 		instance.Fields = map[string]any{}
@@ -62,6 +67,30 @@ func materializedWorkflowInstanceForTest(instance WorkflowInstance) WorkflowInst
 		instance.CreatedAt = occurredAt
 	}
 	return instance
+}
+
+func TestComponentFixtureModeDoesNotDeriveFromReadinessOrRepairExplicitMode(t *testing.T) {
+	for _, mode := range []string{"", runtimecontracts.FlowModeStatic, runtimecontracts.FlowModeTemplate, "invalid"} {
+		t.Run(mode, func(t *testing.T) {
+			instance := WorkflowInstance{
+				WorkflowName: "review", StorageRef: "review/one", Mode: mode,
+				Fields: map[string]any{"value": "original"},
+			}
+			prepared := materializedWorkflowInstanceForTest(instance)
+			want := mode
+			if want == "" {
+				want = runtimecontracts.FlowModeStatic
+			}
+			prepared.RuntimeReadiness = &DynamicFlowRuntimeReadinessPlan{}
+			if prepared.Mode != want || workflowInstanceMode(prepared) != want || prepared.InstanceKey != instance.InstanceKey {
+				t.Fatalf("component attachment changed declaration/key: mode=%q key=%+v want=%q/%+v", prepared.Mode, prepared.InstanceKey, want, instance.InstanceKey)
+			}
+			prepared.Fields["value"] = "changed"
+			if instance.Mode != mode || instance.Fields["value"] != "original" || instance.RuntimeReadiness != nil {
+				t.Fatal("component preparation changed the original input")
+			}
+		})
+	}
 }
 
 func testEntityContractsForType(entityType string) runtimecontracts.EntityContractsDocument {

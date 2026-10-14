@@ -52,9 +52,6 @@ var errInjectedDirectivePersistence = errors.New("injected directive persistence
 
 type directiveIntegrationStore interface {
 	storeTestDurableEventBusStore
-	runtimebus.ScopedSelectedRunTargetOwnerLister
-	runtimebus.ScopedActiveFlowInstanceDescriptorLister
-	runtimebus.KeyedActiveFlowInstanceDescriptorLister
 	runtimeagentcontrol.DirectiveOperationStore
 	runtimemanager.ManagerPersistence
 	runtimemanager.AgentLifecycleOutcomeReader
@@ -515,8 +512,13 @@ func (h *directiveAmbiguityHarness) workContext(t *testing.T) context.Context {
 
 func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBackend, agent *directiveAmbiguityAgent) *directiveAmbiguityHarness {
 	t.Helper()
+	return newDirectiveAmbiguityHarnessInFlow(t, backend, agent, "directive/"+agent.id)
+}
+
+func newDirectiveAmbiguityHarnessInFlow(t *testing.T, backend directiveAmbiguityBackend, agent *directiveAmbiguityAgent, flowInstance string) *directiveAmbiguityHarness {
+	t.Helper()
 	runID := uuid.NewString()
-	identity := mustTestAgentIdentityForRun(runID, agent.id, "directive/"+agent.id)
+	identity := mustTestAgentIdentityForRun(runID, agent.id, flowInstance)
 	seedDirectiveAmbiguityRun(t, backend, runID)
 	faults := &faultingDirectiveIntegrationStore{directiveIntegrationStore: backend.store}
 	bus, err := newStoreTestEventBus(t, faults, runtimebus.EventBusOptions{

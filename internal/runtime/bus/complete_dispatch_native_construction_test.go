@@ -24,7 +24,7 @@ func TestCompleteDispatchDecisionFixtureUsesOriginalDecisionOwnerBothStores(t *t
 			if err != nil || !reflect.DeepEqual(stored, card) || stored.Status != decisioncard.StatusDecided ||
 				stored.RunID != fixture.event.RunID() || stored.DecisionEventID != fixture.event.ID() ||
 				stored.Verdict != "approve" || stored.DecidedBy != "test" || !stored.DecidedAt.Equal(fixture.event.CreatedAt()) ||
-				stored.BundleHash != authorActivityTestBundleHash || stored.CardContentHash == "card-hash" || stored.DecisionSchemaHash == "schema-hash" {
+				stored.BundleHash != testSourceArtifactFact(fixture.source).BundleHash() || stored.CardContentHash == "card-hash" || stored.DecisionSchemaHash == "schema-hash" {
 				t.Fatalf("canonical decided card lost fixture identity/content/clock: %+v err=%v", stored, err)
 			}
 			if status := fixture.decisionObligationStatus(t, fixture.event.ID()); status != "pending" {

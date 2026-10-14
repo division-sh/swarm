@@ -48,7 +48,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
 		target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
-		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, db, flowInstance, false)
+		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runTelegramConnectorSupportedSurfaceRoundTrip(t, telegramConnectorSupportedSurfaceBackend{
 			name:          "postgres",
@@ -74,7 +74,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
-		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, storetest.Database(sqliteStore), flowInstance, true)
+		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runTelegramConnectorSupportedSurfaceRoundTrip(t, telegramConnectorSupportedSurfaceBackend{
 			name:          "sqlite",
@@ -153,7 +153,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 	source := telegramConnectorSupportedSurfaceSource(t, server.URL, backend.flowInstance)
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedTestEventBus(t, backend.eventStore, runtimebus.EventBusOptions{
-		ContractBundle: source,
+		ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
 				return nil
@@ -242,7 +242,7 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 	source := telegramConnectorSupportedSurfaceSource(t, baseURL, backend.flowInstance)
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedTestEventBus(t, backend.eventStore, runtimebus.EventBusOptions{
-		ContractBundle: source,
+		ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source),
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if pc == nil {
 				return nil
@@ -416,6 +416,7 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 		guards: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	pc := newExternalRuntimeTestPipelineCoordinator(t, bus, backend.eventStore, runtimepipeline.PipelineCoordinatorOptions{
+		SourceArtifactFact:  runtimeTestSourceArtifactFact(t, source),
 		WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 		Module:              module,
 		Persistence:         backend.persistence,
@@ -423,7 +424,6 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 		PipelineObligations: backend.obligations,
 		DeliveryStore:       backend.deliveryStore,
 		Credentials:         credentialStore,
-		FlowRoutes:          bus,
 	})
 
 	startConfiguredChannelActivityNode(t, backend.ctx, pc, bus, backend.db)
@@ -442,31 +442,6 @@ func telegramConnectorSupportedSurfaceCredentialStore(t *testing.T, key, value s
 		}
 	}
 	return store
-}
-
-func seedTelegramConnectorSupportedSurfaceWorkflowVersion(t *testing.T, ctx context.Context, db *sql.DB, flowInstance string, sqlite bool) {
-	t.Helper()
-	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	if runID == "" {
-		t.Fatal("seed workflow version requires exact run context")
-	}
-	if sqlite {
-		if _, err := db.ExecContext(ctx, `
-			UPDATE flow_instances
-			SET config = json_set(COALESCE(config, '{}'), '$.workflow_version', '1.0.0')
-			WHERE run_id = ? AND instance_path = ?
-		`, runID, flowInstance); err != nil {
-			t.Fatalf("seed sqlite workflow version: %v", err)
-		}
-		return
-	}
-	if _, err := db.ExecContext(ctx, `
-		UPDATE flow_instances
-		SET config = jsonb_set(COALESCE(config, '{}'::jsonb), '{workflow_version}', '"1.0.0"'::jsonb, true)
-		WHERE run_id = $1::uuid AND instance_path = $2
-	`, runID, flowInstance); err != nil {
-		t.Fatalf("seed postgres workflow version: %v", err)
-	}
 }
 
 func requireTelegramConnectorSupportedSurfaceCall(t *testing.T, calls <-chan telegramConnectorSupportedSurfaceCall, backendName string, backend telegramConnectorSupportedSurfaceBackend) telegramConnectorSupportedSurfaceCall {

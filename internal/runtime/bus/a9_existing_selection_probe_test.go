@@ -1,7 +1,8 @@
 package bus
 
 import (
-	"context"
+	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -30,19 +32,10 @@ func TestA9TriageExistingSelectionUsesStoredConstructionAndEdgeKey(t *testing.T)
 	if err := stored.ValidateConstruction(source, busInternalTestRunID); err != nil {
 		t.Fatalf("existing constructor owner rejects setup: %v", err)
 	}
-	table := &RouteTable{instanceOwners: map[flowidentity.RunScopedFlowInstance]flowidentity.Instance{}}
-	for _, owner := range []flowidentity.Instance{root, stored} {
-		coordinate, err := flowidentity.NewRunScopedFlowInstance(busInternalTestRunID, owner.Route())
-		if err != nil {
-			t.Fatal(err)
-		}
-		table.instanceOwners[coordinate] = owner
-	}
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("existing-edge-key"), "start", "test", "", []byte(`{"parent_key":"left","leaf_key":"same"}`), 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
-	owner := newTemplateInstanceLifecycleOwner(source, table, nil, constructionReceiptTestReader{root, stored})
-	materialized, selected, _, err := owner.Materialize(withConnectRoutePlanPreview(context.Background()), event, plan,
-		map[string]string{"payload.parent_key": "left", "payload.leaf_key": "same"},
-		[]pinrouting.Descriptor{{EntityID: stored.EntityID, FlowInstance: stored.InstancePath, AddressFields: map[string]string{"entity.id": "left"}}})
+	owner := connectInstanceSelector{source: source, index: constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, busInternalTestRunID, root, ""), constructionIndexObservation(t, source, busInternalTestRunID, stored, "left")}}}
+	materialized, selected, _, err := owner.Materialize(withConnectRoutePlanPreview(constructionIndexContext(t, source)), event, plan,
+		map[string]string{"payload.parent_key": "left", "payload.leaf_key": "same"})
 	if err != nil || !materialized.Failure.Empty() || selected.identity != stored {
 		t.Fatalf("per-edge key failed to reuse admitted stored construction: failure=%v selection=%+v want=%+v err=%v", materialized.Failure, selected, stored, err)
 	}
@@ -59,9 +52,9 @@ func TestA9StoredReceiverSelectionPreservesIdentityAndChecksKeys(t *testing.T) {
 		{"select", contracts.FlowInputResolutionModeSelect, []string{"acct-1"}, 0, false},
 		{"reuse", contracts.FlowInputResolutionModeSelectOrCreate, []string{"acct-1"}, 0, false},
 		{"select wrong key", contracts.FlowInputResolutionModeSelect, []string{"acct-other"}, pinrouting.ConnectFailureTargetUnresolved, false},
-		{"select missing key", contracts.FlowInputResolutionModeSelect, []string{""}, pinrouting.ConnectFailureTargetUnresolved, false},
-		{"select ambiguous", contracts.FlowInputResolutionModeSelect, []string{"acct-1", "acct-1"}, pinrouting.ConnectFailureTargetAmbiguous, false},
-		{"reuse ambiguous", contracts.FlowInputResolutionModeSelectOrCreate, []string{"acct-1", "acct-1"}, pinrouting.ConnectFailureTargetAmbiguous, false},
+		{"select missing key", contracts.FlowInputResolutionModeSelect, []string{""}, 0, false},
+		{"select ambiguous", contracts.FlowInputResolutionModeSelect, []string{"acct-1", "acct-1"}, 0, false},
+		{"reuse ambiguous", contracts.FlowInputResolutionModeSelectOrCreate, []string{"acct-1", "acct-1"}, 0, false},
 		{"routable derived path with wrong key", contracts.FlowInputResolutionModeSelect, []string{"acct-other"}, pinrouting.ConnectFailureTargetUnresolved, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -80,10 +73,7 @@ func TestA9StoredReceiverSelectionPreservesIdentityAndChecksKeys(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(root.Route()), Instance: root}); err != nil {
-				t.Fatal(err)
-			}
-			var descriptors []pinrouting.Descriptor
+			indexReader := constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, busInternalTestRunID, root, "")}}
 			var stored []flowidentity.Instance
 			for index, key := range test.keys {
 				instanceID := []string{"stored-one", "stored-two"}[index]
@@ -92,36 +82,54 @@ func TestA9StoredReceiverSelectionPreservesIdentityAndChecksKeys(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					instanceID = templateInstanceLifecycleInstanceID(plan, []contracts.TemplateInstanceKeyValue{{Field: field, Value: "acct-1"}})
+					instanceID = connectMissingInstanceID(plan, []contracts.TemplateInstanceKeyValue{{Field: field, Value: "acct-1"}})
 				}
 				instance, err := flowidentity.KeyedChild(source, root, "account", instanceID)
 				if err != nil {
 					t.Fatal(err)
 				}
 				instance.EntityID = eventtest.UUID(instanceID + "-native-header")
-				if err := table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(instance.Route()), Instance: instance}); err != nil {
+				stored = append(stored, instance)
+				if key == "" {
+					indexReader.selectionErr = &pipeline.FlowInstanceConstructionCorruption{RunID: busInternalTestRunID, FlowID: "account", InstancePath: instance.InstancePath, Cause: errors.New("missing immutable key")}
+				} else {
+					indexReader.observations = append(indexReader.observations, constructionIndexObservation(t, source, busInternalTestRunID, instance, key))
+				}
+			}
+			before := make([]pipeline.FlowInstanceObservation, len(indexReader.observations))
+			for i, observed := range indexReader.observations {
+				before[i] = constructionIndexObservation(t, source, busInternalTestRunID, observed.Identity(), observed.InstanceKey())
+			}
+			defer func() {
+				if !reflect.DeepEqual(before, indexReader.observations) {
+					t.Fatal("selection mutated admitted construction evidence")
+				}
+			}()
+			if test.derived {
+				definitions, err := table.ConnectReceiverDefinitions(busInternalTestRunID, stored[0])
+				if err != nil {
 					t.Fatal(err)
 				}
-				stored = append(stored, instance)
-				descriptors = append(descriptors, pinrouting.Descriptor{EntityID: instance.EntityID, FlowInstance: instance.InstancePath, AddressFields: map[string]string{"entity.account_id": key}})
-			}
-			if test.derived && len(table.evaluateConnectPlan(busInternalTestRunID, plan, []events.RouteIdentity{plan.ReceiverRoute(stored[0].InstancePath, stored[0].EntityID)}).Recipients()) != 1 {
-				t.Fatal("counterexample requires an installed routable derived address")
+				if len(table.connectGraph.EvaluateMaterializedRecipients(plan, []events.RouteIdentity{plan.ReceiverRoute(stored[0].InstancePath, stored[0].EntityID)}, definitions).Recipients()) != 1 {
+					t.Fatal("counterexample requires a compiled routable derived address")
+				}
 			}
 			event := eventtest.ExistingRunRootIngress(eventtest.UUID(test.name), "producer/account.ready", "test", "", []byte(`{"account_id":"acct-1"}`), 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
-			owner := newTemplateInstanceLifecycleOwner(source, table, nil, append(constructionReceiptTestReader{root}, stored...))
-			materialized, selected, handled, err := owner.Materialize(withConnectRoutePlanPreview(context.Background()), event, plan,
-				map[string]string{"payload.account_id": "acct-1"}, descriptors)
+			owner := connectInstanceSelector{source: source, index: indexReader}
+			materialized, selected, handled, err := owner.Materialize(withConnectRoutePlanPreview(constructionIndexContext(t, source)), event, plan,
+				map[string]string{"payload.account_id": "acct-1"})
+			if test.name == "select ambiguous" || test.name == "reuse ambiguous" || test.name == "select missing key" {
+				var corruption *pipeline.FlowInstanceConstructionCorruption
+				if !errors.As(err, &corruption) || selected.identity != (flowidentity.Instance{}) {
+					t.Fatalf("duplicate selector was not corruption: %+v %v", selected, err)
+				}
+				return
+			}
 			if err != nil || !handled || materialized.Failure != test.failure {
 				t.Fatalf("stored selection: %+v selected=%+v handled=%t err=%v", materialized, selected, handled, err)
 			}
 			if test.failure.Empty() && (selected.identity != stored[0] || selected.Activation != nil || materialized.Target.EntityID != stored[0].EntityID) {
 				t.Fatalf("selection recomputed or reactivated stored identity: %+v want=%+v", selected, stored[0])
-			}
-			for _, instance := range stored {
-				if actual := table.instanceOwners[testRunScopedFlowRoute(instance.Route())]; actual != instance {
-					t.Fatalf("selection mutated a stored construction: %+v -> %+v", instance, actual)
-				}
 			}
 		})
 	}
@@ -136,28 +144,15 @@ func TestA9StoredLeafSelectionExcludesOtherStructuralParents(t *testing.T) {
 		}
 	}
 	root := flowidentity.Stored(source, ".", busInternalTestRunID, busInternalTestRunID, busInternalTestRunID, "")
-	table, err := DeriveRouteTable(source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	add := func(instance flowidentity.Instance) {
-		t.Helper()
-		if err := table.AddFlowInstanceRoute(FlowInstanceRouteMaterializationRequest{Identity: testRunScopedFlowRoute(instance.Route()), Instance: instance}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	add(root)
-	receipts := constructionReceiptTestReader{root}
-	ctx := withConnectRoutePlanPreview(context.Background())
+	indexReader := constructionIndexTestReader{observations: []pipeline.FlowInstanceObservation{constructionIndexObservation(t, source, busInternalTestRunID, root, "")}}
+	ctx := withConnectRoutePlanPreview(constructionIndexContext(t, source))
 	var leaves []flowidentity.Instance
-	var descriptors []pinrouting.Descriptor
 	for _, discriminator := range []string{"left-stored", "right-stored"} {
 		parent, err := flowidentity.KeyedChild(source, root, "parent", discriminator)
 		if err != nil {
 			t.Fatal(err)
 		}
-		add(parent)
-		receipts = append(receipts, parent)
+		indexReader.observations = append(indexReader.observations, constructionIndexObservation(t, source, busInternalTestRunID, parent, discriminator))
 		if discriminator == "left-stored" {
 			if err := selectConnectionConstruction(ctx, parent); err != nil {
 				t.Fatal(err)
@@ -167,20 +162,17 @@ func TestA9StoredLeafSelectionExcludesOtherStructuralParents(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		add(middle)
-		receipts = append(receipts, middle)
+		indexReader.observations = append(indexReader.observations, constructionIndexObservation(t, source, busInternalTestRunID, middle, ""))
 		leaf, err := flowidentity.KeyedChild(source, middle, "parent/middle/leaf", "same-stored")
 		if err != nil {
 			t.Fatal(err)
 		}
-		add(leaf)
-		receipts = append(receipts, leaf)
+		indexReader.observations = append(indexReader.observations, constructionIndexObservation(t, source, busInternalTestRunID, leaf, "same-business-key"))
 		leaves = append(leaves, leaf)
-		descriptors = append(descriptors, pinrouting.Descriptor{EntityID: leaf.EntityID, FlowInstance: leaf.InstancePath, AddressFields: map[string]string{"entity.id": "same-business-key"}})
 	}
 	event := eventtest.ExistingRunRootIngress(eventtest.UUID("parent-exclusion"), "start", "test", "", []byte(`{"parent_key":"left","leaf_key":"same-business-key"}`), 0, busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
-	owner := newTemplateInstanceLifecycleOwner(source, table, nil, receipts)
-	materialized, selected, _, err := owner.Materialize(ctx, event, plan, map[string]string{"payload.leaf_key": "same-business-key"}, descriptors)
+	owner := connectInstanceSelector{source: source, index: indexReader}
+	materialized, selected, _, err := owner.Materialize(ctx, event, plan, map[string]string{"payload.leaf_key": "same-business-key"})
 	if err != nil || !materialized.Failure.Empty() || selected.identity != leaves[0] || materialized.Target.FlowInstance == leaves[1].InstancePath {
 		t.Fatalf("same key under another parent changed selection: %+v selected=%+v err=%v", materialized, selected, err)
 	}

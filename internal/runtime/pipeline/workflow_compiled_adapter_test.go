@@ -226,7 +226,11 @@ func newNativeCompiledAdapterFixture(t *testing.T, backend string, bundle *contr
 		}
 		if flow != "." {
 			instance.ParentFlowID, instance.ParentFlowInstance, instance.ParentEntityID = ".", runID, FlowInstanceEntityID(runID)
+			if err := native.Construct(ctx, constructedScenarioInstanceForTest(t, pc.SemanticSource(), ctx, ".")); err != nil {
+				t.Fatal(err)
+			}
 		}
+		instance = materializedWorkflowInstanceForSource(t, pc.SemanticSource(), ctx, instance)
 		if err := native.Construct(ctx, instance); err != nil {
 			t.Fatal(err)
 		}
@@ -1034,7 +1038,7 @@ func VerifyNativePipelineCompiledTransitionInitialAdmissionOnBothStoresForTest(t
 func (f *compiledAdapterFixture) initialInstance(stage string) WorkflowInstance {
 	return WorkflowInstance{
 		InstanceID: testWorkflowInstanceRoute(f.path).InstanceID, StorageRef: f.path, EntityID: f.entityID,
-		WorkflowName: f.flow, WorkflowVersion: f.pc.SemanticSource().WorkflowVersion(), EntityType: "test_entity",
+		WorkflowName: f.flow, WorkflowVersion: f.pc.SemanticSource().WorkflowVersion(), EntityType: "test_entity", Mode: "static",
 		CurrentState: stage, Fields: map[string]any{"marker": "unchanged"},
 	}
 }

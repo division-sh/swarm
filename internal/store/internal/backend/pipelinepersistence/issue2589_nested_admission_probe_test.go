@@ -129,7 +129,7 @@ func TestIssue2589NestedStateGuardReusesRunAdmissionAndPreservesState(t *testing
 }
 
 func issue2589FieldlessTargetRows(record runtimepipeline.WorkflowEngineStateRecord, revision int64) *sqlmock.Rows {
-	columns := make([]string, 34)
+	columns := make([]string, 36)
 	for i := range columns {
 		columns[i] = "column" + string(rune('A'+i))
 	}
@@ -139,5 +139,6 @@ func issue2589FieldlessTargetRows(record runtimepipeline.WorkflowEngineStateReco
 		string(record.Config), nil, record.CreatedAt, record.EntityID, nil, nil, nil,
 		record.CurrentState, revision, record.EnteredStageAt, record.UpdatedAt, record.StageDefined,
 		string(record.Gates), string(record.Bookkeeping), string(record.Accumulator),
+		nil, "",
 	)
 }

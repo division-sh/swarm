@@ -16,12 +16,12 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
-	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -111,8 +111,6 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 			t.Run(backend.name+"/"+name, func(t *testing.T) {
 				selected := backend.open(t)
 				runID := uuid.NewString()
-				insertGateRecoveryRun(t, selected.events, runID)
-				ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 				root := canonicalrouting.CopyMaterializingSenderExistingReceiver(t, true)
 				if terminal {
 					root = canonicalrouting.CopyProspectiveTerminalSender(t)
@@ -123,18 +121,19 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 					t.Fatal(err)
 				}
 				source := semanticview.Wrap(bundle)
+				ctx, fact := nativeConstructionContextFixture(t, selected.events.(storetest.RunFixtureStore), source, runID)
 				var nodes []runtimepipeline.WorkflowNode
 				for _, declaration := range []struct{ id, event string }{{"intake", "start"}, {"receiver", "work.ready"}} {
 					nodes = append(nodes, runtimepipeline.WorkflowNode{Node: externalPipelineSourceNode(t, source, "", declaration.id), Subscriptions: []events.EventType{events.EventType(declaration.event)}, ExecutionType: runtimecontracts.SystemNodeExecutionType})
 				}
-				canonical, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source})
+				canonical, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: fact})
 				if err != nil {
 					t.Fatal(err)
 				}
 				observed := &observedProspectiveBus{EventBus: canonical}
 				persistence := &observedProspectivePersistence{WorkflowPersistenceOwner: selected.events.(runtimepipeline.WorkflowPersistenceOwner), mode: name, db: selected.db}
 				selected.persistence = runtimepipeline.NewWorkflowPersistence(persistence)
-				coordinator := newGateRecoveryCoordinator(observed, selected, runtimepipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}, SourceArtifactFact: authorActivityTestSourceArtifactFact})
+				coordinator := newGateRecoveryCoordinator(observed, selected, runtimepipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}, SourceArtifactFact: fact})
 				commitKeylessConstructorComponent(t, ctx, selected, coordinator, source)
 				var initialFields string
 				var initialRevision int64

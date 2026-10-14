@@ -150,8 +150,8 @@ func validateRunForkSelectedContractRouteRecoveryAtActivation(ctx context.Contex
 	actual, err := loadRunForkSelectedContractRouteRecovery(ctx, tx, `WHERE fork_run_id = $1`, expected.ForkRunID)
 	if err == sql.ErrNoRows {
 		return runForkReplayResumeError(
-			runfork.RunForkBlockerFlowRouteHistoryUnproven,
-			runfork.RunForkReplayResumeFactRouteHistory,
+			runfork.RunForkBlockerSelectedContractRouteRecoveryUnproven,
+			runfork.RunForkHistoricalReplayFactRoutes,
 			"selected-contract activation requires persisted route recovery from materialization",
 		)
 	}
@@ -188,8 +188,8 @@ func validateRunForkSelectedContractRouteRecoveryAtActivation(ctx context.Contex
 		actual.DynamicTopologyProofCount != expected.DynamicTopologyProofCount ||
 		actual.RecipientPlanEventCount != expected.RecipientPlanEventCount {
 		return runForkReplayResumeError(
-			runfork.RunForkBlockerFlowRouteHistoryUnproven,
-			runfork.RunForkReplayResumeFactRouteHistory,
+			runfork.RunForkBlockerSelectedContractRouteRecoveryUnproven,
+			runfork.RunForkHistoricalReplayFactRoutes,
 			"selected-contract activation route recovery does not match current canonical topology proof",
 		)
 	}

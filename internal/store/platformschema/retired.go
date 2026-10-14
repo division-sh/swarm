@@ -12,6 +12,7 @@ const (
 	RetiredPlatformSchedules                     RetiredPlatformTable = "schedules"
 	RetiredPlatformStartupAuthorityFacts         RetiredPlatformTable = "runtime_startup_authority_facts"
 	RetiredPlatformStartupAuthorityRepairs       RetiredPlatformTable = "runtime_startup_authority_repairs"
+	RetiredPlatformRoutingRules                  RetiredPlatformTable = "routing_rules"
 )
 
 func RetiredPlatformTables() []RetiredPlatformTable {
@@ -23,5 +24,6 @@ func RetiredPlatformTables() []RetiredPlatformTable {
 		RetiredPlatformSchedules,
 		RetiredPlatformStartupAuthorityFacts,
 		RetiredPlatformStartupAuthorityRepairs,
+		RetiredPlatformRoutingRules,
 	}
 }

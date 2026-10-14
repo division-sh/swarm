@@ -18,16 +18,18 @@ func TestReviewCycle2DeferredDispatchFailureOwnership(t *testing.T) {
 		for _, fault := range []string{"read_panic", "predecessor_error"} {
 			for failAt := 0; failAt < 3; failAt++ {
 				t.Run(fmt.Sprintf("%s/%s/position_%d", mode, fault, failAt+1), func(t *testing.T) {
-					ctx := testAuthorActivityContext(context.Background())
+					source := review2460DispatchSource(t)
+					ctx := constructionIndexContext(t, source)
 					store := &review2460ReadFaultStore{targetRouteMemoryStore: newTargetRouteMemoryStore(), fault: errors.New("read failure")}
-					bus, err := newScopedTestEventBus(store)
+					bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 					if err != nil {
 						t.Fatal(err)
 					}
 					intents := make([]runtimeengine.EmitIntent, 3)
 					runID := uuid.NewString()
+					installConnectionSourceConstructionForRun(t, bus, source, ".", runID)
 					for i := range intents {
-						intents[i].Event = eventtest.RunCreatingRootIngress(uuid.NewString(), "custom.emitted", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+						intents[i].Event = eventtest.ExistingRunRootIngress(uuid.NewString(), "custom.emitted", "", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 					}
 					plans, err := bus.PrepareEnginePublications(ctx, intents)
 					if err != nil {
@@ -102,7 +104,10 @@ func TestReviewCycle2InboundFinalizationKeepsCommittedSiblings(t *testing.T) {
 			store := &InMemoryEventStore{}
 			probe := &review2460PublicationProbe{failAt: failAt}
 			source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
-			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, ProviderOutputVerifier: catalog, TestLifecycleProbe: probe})
+			bus, err := newScopedTestEventBus(store, EventBusOptions{
+				ContractBundle: source, ProviderOutputVerifier: catalog, TestLifecycleProbe: probe,
+				Durable: DurableDependencies{Instances: FlowInstanceIndexFixture()},
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -136,15 +141,20 @@ func TestReviewCycle2InboundFinalizationKeepsCommittedSiblings(t *testing.T) {
 }
 
 func TestOrdinaryCommittedPublicationDiagnosticRetainsDispatchAuthority(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	source := review2460DispatchSource(t)
+	ctx := constructionIndexContext(t, source)
 	store := newTargetRouteMemoryStore()
 	probe := &review2460PublicationProbe{failAt: 1}
-	bus, err := newScopedTestEventBus(store, EventBusOptions{TestLifecycleProbe: probe})
+	runID := uuid.NewString()
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, TestLifecycleProbe: probe,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: runID}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	internal := subscribeInternalDeliveriesForTest(t, bus, "committed-diagnostic-internal", events.EventType("custom.emitted"))
-	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "custom.emitted", "", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	installConnectionSourceConstructionForRun(t, bus, source, ".", runID)
+	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "custom.emitted", "", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 	prepared, ready, diagnostic := bus.commitPublish(ctx, eventBusCommitPublishPlan{bus: bus, event: event})
 	if !ready || diagnostic == nil || probe.seen != 1 {
 		t.Fatalf("ready=%t diagnostic=%v notifications=%d", ready, diagnostic, probe.seen)
@@ -176,16 +186,18 @@ func TestOrdinaryCommittedPublicationDiagnosticRetainsDispatchAuthority(t *testi
 func TestCommittedDispatchCancellationSettlesExactBatchClaims(t *testing.T) {
 	for _, mode := range []string{"immediate", "intercepted", "deferred"} {
 		t.Run(mode, func(t *testing.T) {
-			ctx := testAuthorActivityContext(context.Background())
+			source := review2460DispatchSource(t)
+			ctx := constructionIndexContext(t, source)
 			store := newTargetRouteMemoryStore()
-			bus, err := newScopedTestEventBus(store)
+			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 			if err != nil {
 				t.Fatal(err)
 			}
 			intents := make([]runtimeengine.EmitIntent, 2)
 			runID := uuid.NewString()
+			installConnectionSourceConstructionForRun(t, bus, source, ".", runID)
 			for i := range intents {
-				intents[i].Event = eventtest.RunCreatingRootIngress(uuid.NewString(), "custom.emitted", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+				intents[i].Event = eventtest.ExistingRunRootIngress(uuid.NewString(), "custom.emitted", "", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 			}
 			plans, err := bus.PrepareEnginePublications(ctx, intents)
 			if err != nil {

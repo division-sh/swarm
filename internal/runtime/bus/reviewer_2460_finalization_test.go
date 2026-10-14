@@ -14,6 +14,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -68,17 +69,28 @@ func TestReview2460ImmediateDispatchContinuesAfterFirstError(t *testing.T) {
 func TestReview2460InterceptedDispatchContinuesAfterFirstError(t *testing.T) {
 	review2460DispatchContinues(t, true)
 }
+
+func review2460DispatchSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	return semanticview.Wrap(loadTargetRouteTempBundle(t, map[string]string{
+		"schema.yaml": "name: committed-dispatch\npins:\n  inputs: [custom.emitted]\n  outputs: [custom.emitted]\n",
+		"events.yaml": "custom.emitted:\n",
+	}))
+}
+
 func review2460DispatchContinues(t *testing.T, intercepted bool) {
-	ctx := testAuthorActivityContext(context.Background())
+	source := review2460DispatchSource(t)
+	ctx := constructionIndexContext(t, source)
 	store := &review2460ReadFaultStore{targetRouteMemoryStore: newTargetRouteMemoryStore(), fault: errors.New("first dispatch read failed")}
-	bus, err := newScopedTestEventBus(store)
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatal(err)
 	}
 	runID := uuid.NewString()
+	installConnectionSourceConstructionForRun(t, bus, source, ".", runID)
 	intents := make([]runtimeengine.EmitIntent, 2)
 	for i := range intents {
-		intents[i].Event = eventtest.RunCreatingRootIngress(uuid.NewString(), "custom.emitted", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+		intents[i].Event = eventtest.ExistingRunRootIngress(uuid.NewString(), "custom.emitted", "", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 	}
 	plans, err := bus.PrepareEnginePublications(ctx, intents)
 	if err != nil {
@@ -221,16 +233,18 @@ func TestImmediateCommittedDispatchVisitsEveryOutputAcrossReadFaultPositions(t *
 	for _, panicOnFailure := range []bool{false, true} {
 		for failAt := 0; failAt < 3; failAt++ {
 			t.Run(fmt.Sprintf("panic_%t/position_%d", panicOnFailure, failAt+1), func(t *testing.T) {
-				ctx := testAuthorActivityContext(context.Background())
+				source := review2460DispatchSource(t)
+				ctx := constructionIndexContext(t, source)
 				store := &review2460ReadFaultStore{targetRouteMemoryStore: newTargetRouteMemoryStore(), fault: errors.New("selected read fault"), panicOnFailure: panicOnFailure}
-				bus, err := newScopedTestEventBus(store)
+				bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 				if err != nil {
 					t.Fatal(err)
 				}
 				runID := uuid.NewString()
+				installConnectionSourceConstructionForRun(t, bus, source, ".", runID)
 				intents := make([]runtimeengine.EmitIntent, 3)
 				for i := range intents {
-					intents[i].Event = eventtest.RunCreatingRootIngress(uuid.NewString(), "custom.emitted", "", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
+					intents[i].Event = eventtest.ExistingRunRootIngress(uuid.NewString(), "custom.emitted", "", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 				}
 				plans, err := bus.PrepareEnginePublications(ctx, intents)
 				if err != nil {
@@ -285,14 +299,16 @@ func TestImmediateCommittedDispatchVisitsEveryOutputAcrossReadFaultPositions(t *
 }
 
 func TestCommittedDispatchRejectsSameIDForeignPayloadWithoutConsumingClaim(t *testing.T) {
-	ctx := testAuthorActivityContext(context.Background())
+	source := review2460DispatchSource(t)
+	ctx := constructionIndexContext(t, source)
 	store := newTargetRouteMemoryStore()
-	bus, err := newScopedTestEventBus(store)
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatal(err)
 	}
 	runID, eventID := uuid.NewString(), uuid.NewString()
-	original := runtimeengine.EmitIntent{Event: eventtest.RunCreatingRootIngress(eventID, "custom.emitted", "", "", []byte(`{"value":1}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())}
+	installConnectionSourceConstructionForRun(t, bus, source, ".", runID)
+	original := runtimeengine.EmitIntent{Event: eventtest.ExistingRunRootIngress(eventID, "custom.emitted", "", "", []byte(`{"value":1}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())}
 	plans, err := bus.PrepareEnginePublications(ctx, []runtimeengine.EmitIntent{original})
 	if err != nil {
 		t.Fatal(err)
@@ -309,11 +325,11 @@ func TestCommittedDispatchRejectsSameIDForeignPayloadWithoutConsumingClaim(t *te
 	if err := bus.FinalizeEnginePublications(ctx, []runtimeengine.CommittedDurablePublication{proof}); err != nil {
 		t.Fatal(err)
 	}
-	foreign := runtimeengine.EmitIntent{Event: eventtest.RunCreatingRootIngress(eventID, "custom.emitted", "", "", []byte(`{"value":2}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())}
+	foreign := runtimeengine.EmitIntent{Event: eventtest.ExistingRunRootIngress(eventID, "custom.emitted", "", "", []byte(`{"value":2}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())}
 	if _, err := (engineDispatcher{bus: bus}).dispatchPendingOutboxOperation(ctx, foreign); !errors.Is(err, events.ErrEventIdentityConflict) {
 		t.Fatalf("foreign same-ID dispatch = %v", err)
 	}
-	wrongTime := runtimeengine.EmitIntent{Event: eventtest.RunCreatingRootIngress(eventID, "custom.emitted", "", "", []byte(`{"value":1}`), 0, runID, "", events.EventEnvelope{}, original.Event.CreatedAt().Add(time.Second))}
+	wrongTime := runtimeengine.EmitIntent{Event: eventtest.ExistingRunRootIngress(eventID, "custom.emitted", "", "", []byte(`{"value":1}`), 0, runID, events.EventEnvelope{}, original.Event.CreatedAt().Add(time.Second))}
 	if _, err := (engineDispatcher{bus: bus}).dispatchPendingOutboxOperation(ctx, wrongTime); !errors.Is(err, events.ErrEventIdentityConflict) {
 		t.Fatalf("foreign same-ID timestamp dispatch = %v", err)
 	}
@@ -373,9 +389,10 @@ func TestCommittedDispatchRetiredPreflightReleasesEveryExactClaim(t *testing.T) 
 
 func testCommittedDispatchTerminalPreflightReleasesEveryExactClaim(t *testing.T, stop func(*worklifetime.Process, *worklifetime.RuntimeOccurrence) error, wantErr error) {
 	t.Helper()
-	ctx := testAuthorActivityContext(context.Background())
+	source := semanticview.Wrap(connectRoutePlanTestBundle(t, nil, nil))
+	ctx := testAuthorActivityContext(constructionIndexContext(t, source))
 	process := worklifetime.NewProcess()
-	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: uuid.NewString(), BundleHash: "review-committed-dispatch"})
+	owner, err := process.NewRuntime(ctx, worklifetime.RuntimeIdentity{RuntimeInstanceID: authorActivityTestRuntimeInstanceID, BundleHash: authorActivityTestSourceArtifactFact.BundleHash()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,7 +405,7 @@ func testCommittedDispatchTerminalPreflightReleasesEveryExactClaim(t *testing.T,
 		}
 	})
 	store := newTargetRouteMemoryStore()
-	bus, err := newScopedTestEventBus(store, EventBusOptions{WorkOwner: owner})
+	bus, err := newScopedTestEventBus(store, EventBusOptions{WorkOwner: owner, ContractBundle: source})
 	if err != nil {
 		t.Fatal(err)
 	}

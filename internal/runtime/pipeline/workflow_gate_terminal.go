@@ -89,13 +89,12 @@ func (pc *PipelineCoordinator) commitWorkflowTermination(
 	flowIdentity runtimeflowidentity.RunScopedFlowInstance,
 	entityID identity.EntityID,
 	terminatedAt time.Time,
-	retireRoute bool,
 ) (WorkflowInstance, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return WorkflowInstance{}, err
 		}
-		instance, err := pc.commitWorkflowTerminationAttempt(ctx, flowIdentity, entityID, terminatedAt, retireRoute)
+		instance, err := pc.commitWorkflowTerminationAttempt(ctx, flowIdentity, entityID, terminatedAt)
 		if instance.Status == "terminated" || !failures.IsStateContention(err) {
 			return instance, err
 		}
@@ -107,7 +106,6 @@ func (pc *PipelineCoordinator) commitWorkflowTerminationAttempt(
 	flowIdentity runtimeflowidentity.RunScopedFlowInstance,
 	entityID identity.EntityID,
 	terminatedAt time.Time,
-	retireRoute bool,
 ) (result WorkflowInstance, resultErr error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -180,9 +178,6 @@ func (pc *PipelineCoordinator) commitWorkflowTerminationAttempt(
 	command.PostCommit.FlowDeactivation = &WorkflowEngineFlowDeactivation{
 		Identity: flowIdentity, EntityID: entityID.String(), NextState: instance.CurrentState,
 	}
-	if retireRoute {
-		command.RouteRetirement = &WorkflowEngineRouteRetirement{Identity: state.Identity}
-	}
 	committed, err := pc.workflowStore.engineMutations.CommitWorkflowEngineMutation(ctx, command)
 	if err != nil && committed.PostCommit.FlowDeactivation == nil {
 		if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
@@ -196,31 +191,12 @@ func (pc *PipelineCoordinator) commitWorkflowTerminationAttempt(
 	resultErr = err
 	unlock()
 	unlock = nil
-	pendingRoute := committed.RouteRetirement
-	retireCommittedRoute := func() (retireErr error) {
-		if pendingRoute == nil {
-			return nil
-		}
-		retiring := *pendingRoute
-		pendingRoute = nil
-		defer func() {
-			if recovered := recover(); recovered != nil {
-				retireErr = fmt.Errorf("committed flow route retirement panic: %v", recovered)
-			}
-		}()
-		if pc.flowRoutes == nil {
-			return fmt.Errorf("committed flow route retirement requires process route owner")
-		}
-		return pc.flowRoutes.RetireCommittedFlowInstanceRoute(retiring)
-	}
-	defer func() { resultErr = errors.Join(resultErr, retireCommittedRoute()) }()
 	pc.notifyTestFlowTerminationCommitted(ctx)
 	postCommitErr := err
 	if planner, ok := pc.bus.(EnginePublicationPlanner); ok {
 		postCommitErr = errors.Join(postCommitErr, planner.FinalizeEnginePublications(ctx, committed.Publications))
 	}
 	postCommitErr = errors.Join(postCommitErr, pc.finalizeWorkflowLifecycleMutation(ctx, committed.Lifecycle))
-	postCommitErr = errors.Join(postCommitErr, retireCommittedRoute())
 	if len(prepared.Emissions) > 0 {
 		dispatcher := pc.bus.EngineDispatcher()
 		if dispatcher == nil {

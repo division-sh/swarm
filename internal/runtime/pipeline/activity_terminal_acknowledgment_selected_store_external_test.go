@@ -1,7 +1,6 @@
 package pipeline_test
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,7 +12,6 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -26,10 +24,8 @@ func TestActivityTerminalTimestampPostCommitErrorBothStores(t *testing.T) {
 				name = "uncertain"
 			}
 			t.Run(tc.name+"/"+name, func(t *testing.T) {
-				ctx := testAuthorActivityContext(t, context.Background())
 				runID := uuid.NewString()
 				selected := tc.open(t)
-				requireActivityReplayRun(t, ctx, selected, runID)
 				fault := errors.New("injected activity post-commit cleanup fault")
 				persistence, faultCount := storetest.ActivityJournalCleanupPersistenceFault(t, selected.events, fault)
 				selected.persistence = persistence
@@ -41,7 +37,8 @@ func TestActivityTerminalTimestampPostCommitErrorBothStores(t *testing.T) {
 				}))
 				defer server.Close()
 				tool := runtimepipeline.CompiledChannelActivityToolForTest(server.URL)
-				source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"channel.ops.deliver": tool}})
+				source := activityJournalProofSource(t, map[string]runtimecontracts.ToolSchemaEntry{"channel.ops.deliver": tool})
+				ctx := requireActivityReplayRun(t, selected, source, runID)
 				bus := newActivityJournalProofBus(t, selected, source)
 				pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
 				var client *http.Client
@@ -58,7 +55,7 @@ func TestActivityTerminalTimestampPostCommitErrorBothStores(t *testing.T) {
 				intent.FailureEvent = "channel.deliver.failed"
 				intent.Input = runtimepipeline.ActivityInputForTest(map[string]any{"message_id": 42})
 				intent = intent.Normalized()
-				seedSelectedActivitySource(t, ctx, selected, intent)
+				intent = seedSelectedActivitySource(t, ctx, selected, pc, intent)
 				if err := runtimepipeline.ExecuteActivityIntentForTest(ctx, pc, client, intent); !errors.Is(err, fault) {
 					t.Fatalf("terminal execution error = %v, want post-commit fault", err)
 				}

@@ -29,13 +29,19 @@ func TestIssue2564CommittedRouteRejectionIsNotAcknowledgedAgain(t *testing.T) {
 	for _, mode := range []string{"ordinary", "engine", "continuation", "fan_out"} {
 		t.Run(mode, func(t *testing.T) {
 			store := &committedRejectionStore{targetRouteMemoryStore: newTargetRouteMemoryStore()}
-			bus, err := newScopedTestEventBus(store, EventBusOptions{PipelineObligations: store})
+			source := connectRoutePlanRootProducerSingletonSource(t)
+			runID := uuid.NewString()
+			root := ConstructedFlowInstanceIdentityFixture(source, ".", "", runID)
+			consumer := ConstructedFlowInstanceIdentityFixture(source, "consumer", "", runID)
+			store.installIndexObservation(constructionIndexObservation(t, source, runID, root, ""))
+			store.installIndexObservation(TerminatedFlowInstanceObservationFixture(t, source, runID, consumer))
+			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, PipelineObligations: store})
 			if err != nil {
 				t.Fatal(err)
 			}
-			ctx := testAuthorActivityContext(context.Background())
-			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "child/output.done", "", "", []byte(`{}`), 0, uuid.NewString(), "",
-				events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: uuid.NewString(), FlowInstance: "missing-flow"}), time.Now().UTC())
+			ctx := constructionIndexContext(t, source)
+			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "root.ready", "", "", []byte(`{"entity_id":"consumer-one"}`), 0, runID, "",
+				events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: consumer.TemplateID, EntityID: consumer.EntityID, FlowInstance: consumer.InstancePath}), time.Now().UTC())
 			intent := engine.EmitIntent{Event: event}
 			plans, err := bus.PrepareEnginePublications(ctx, []engine.EmitIntent{intent})
 			if err != nil || len(plans) != 1 {
@@ -44,6 +50,9 @@ func TestIssue2564CommittedRouteRejectionIsNotAcknowledgedAgain(t *testing.T) {
 			plan := plans[0].(EnginePublicationPlan)
 			if !plan.prepared.targetFailure || plan.command.Commit.Disposition == nil {
 				t.Fatal("fixture must have a canonical publication-time route rejection")
+			}
+			if plan.command.Commit.DeadLetter == nil || plan.command.Commit.DeadLetter.Failure.Detail.Code != "target_unreachable_terminated" {
+				t.Fatalf("fixture did not authorize its exact terminated receiver: %+v", plan.command.Commit.DeadLetter)
 			}
 			committed, err := store.CommitPublication(ctx, plan.PublicationCommand())
 			if err != nil {
@@ -93,12 +102,15 @@ func TestIssue2564CommittedRouteRejectionIsNotAcknowledgedAgain(t *testing.T) {
 
 func TestIssue2564CommittedRejectionCannotReplaceAcceptedEvidence(t *testing.T) {
 	store := newTargetRouteMemoryStore()
-	bus, err := newScopedTestEventBus(store)
+	source := review2460DispatchSource(t)
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := testAuthorActivityContext(context.Background())
-	event := eventtest.RunCreatingRootIngress(uuid.NewString(), "custom.emitted", "", "", []byte(`{}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+	ctx := constructionIndexContext(t, source)
+	runID := uuid.NewString()
+	installConnectionSourceConstructionForRun(t, bus, source, ".", runID)
+	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "custom.emitted", "", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 	plans, err := bus.PrepareEnginePublications(ctx, []engine.EmitIntent{{Event: event}})
 	if err != nil || len(plans) != 1 {
 		t.Fatalf("prepare accepted publication: plans=%d err=%v", len(plans), err)

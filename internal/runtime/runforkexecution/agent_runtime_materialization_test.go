@@ -173,7 +173,7 @@ func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredeces
 	if oldRoute == nil {
 		t.Fatal("predecessor route was not installed")
 	}
-	oldEvent := eventtest.RuntimeControl(eventtest.UUID("old-work"), events.EventType("item.received"), "test", "", []byte(`{}`), 0, eventtest.UUID("run-1"), "", events.EventEnvelope{}, time.Now())
+	oldEvent := eventtest.RuntimeControl(eventtest.UUID("old-work"), events.EventType("item.received"), "test", "", []byte(`{}`), 0, forkIdentity.RunID, "", events.EventEnvelope{}, time.Now())
 	if err := eventBus.Publish(context.Background(), oldEvent); err != nil {
 		t.Fatalf("publish predecessor event: %v", err)
 	}
@@ -196,7 +196,7 @@ func TestSelectedContractAgentRuntimeWaitsForCurrentRouteSettlementAfterPredeces
 	case <-time.After(time.Second):
 		t.Fatal("replacement did not complete after predecessor settlement")
 	}
-	newEvent := eventtest.RuntimeControl(eventtest.UUID("new-work"), events.EventType("item.received"), "test", "", []byte(`{}`), 0, eventtest.UUID("run-1"), "", events.EventEnvelope{}, time.Now())
+	newEvent := eventtest.RuntimeControl(eventtest.UUID("new-work"), events.EventType("item.received"), "test", "", []byte(`{}`), 0, forkIdentity.RunID, "", events.EventEnvelope{}, time.Now())
 	if err := eventBus.Publish(context.Background(), newEvent); err != nil {
 		t.Fatalf("publish successor event: %v", err)
 	}
