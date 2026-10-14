@@ -324,8 +324,7 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 			if !ok || logicalCall != "provider-turn\x00tool_call:1:0:mock-1:ask_human" {
 				t.Fatalf("logical call = %q, present %v", logicalCall, ok)
 			}
-			ctx = runtimecorrelation.WithSourceArtifactFact(ctx, authorActivityTestSourceArtifactFact)
-			requester, loader := humanTaskConstructedRequester(t, ctx, tc.store, source, requester)
+			ctx, requester, loader := humanTaskConstructedRequester(t, ctx, tc.store, source, requester)
 			exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
 				Config: cfg, HumanTaskStore: tc.store, AuthorityProvider: allowHumanTaskAuthority{}, WorkflowSource: source, WorkflowInstances: loader,
 			})
@@ -397,8 +396,7 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 
 			forkCtx, _, _ := seedReplyToolContext(t, tc.store)
 			forkCtx = runtimeeffects.WithLogicalOperationIdentity(forkCtx, logicalCall)
-			forkCtx = runtimecorrelation.WithSourceArtifactFact(forkCtx, authorActivityTestSourceArtifactFact)
-			forkRequester, _ := humanTaskConstructedRequester(t, forkCtx, tc.store, source, requester)
+			forkCtx, forkRequester, _ := humanTaskConstructedRequester(t, forkCtx, tc.store, source, requester)
 			forkCtx = runtimetools.WithActor(forkCtx, forkRequester)
 			forked, err := exec.Execute(forkCtx, "ask_human", input)
 			if err != nil {
