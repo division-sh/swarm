@@ -21,6 +21,8 @@ func TestNodeHandlerEventAdmissionDirectoryAndRetainedSource(t *testing.T) {
 		{name: "exact empty consumer", event: "work.requested", declared: "work.requested"},
 		{name: "dotless", event: "request", declared: "request"},
 		{name: "wildcard concrete", event: "work.*", declared: "work.requested"},
+		{name: "wildcard suffix", event: "*.requested", declared: "work.requested"},
+		{name: "wildcard all", event: "*", declared: "work.requested"},
 		{name: "declared wildcard", event: "work.*", declared: "work.*"},
 		{name: "undeclared", event: "work.unknown", declared: "work.requested", want: "undeclared event"},
 		{name: "misspelled node field", event: "state_schma", declared: "work.requested", want: "undeclared event"},
@@ -80,7 +82,7 @@ func TestNodeHandlerEventAdmissionDirectoryAndRetainedSource(t *testing.T) {
 func TestNodeHandlerEventAdmissionKeepsGeneratedAndPlatformDeclarations(t *testing.T) {
 	repo := contractRepoRoot(t)
 	for _, flow := range []string{".", "child"} {
-		for _, event := range []string{"lookup.succeeded", "lookup.failed", "lookup.*", "platform.boot", "platform.*", "other.succeeded", "other.*"} {
+		for _, event := range []string{"lookup.succeeded", "lookup.failed", "lookup.*", "*.succeeded", "platform.boot", "platform.*", "other.succeeded", "other.*"} {
 			t.Run(flow+"/"+event, func(t *testing.T) {
 				root := t.TempDir()
 				writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: generated-handler-admission\n")
