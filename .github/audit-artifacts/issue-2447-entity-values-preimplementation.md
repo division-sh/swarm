@@ -92,14 +92,45 @@ include tools/executor_entity_query.go, tools/platform_builtin_catalog.go,
 tools/role_scoped_entity_tools.go and bootverify/workflow_flow_boundary_checks.go.
 Their signatures, selected reads, authorization and phase wrappers stay unchanged.
 
-Before production extraction, finish the exact named native/public root mapping
-for constructor, ordinary handler, clear+cold-reload, sparse equality, generated
-read/save/contained mutation and compiled public restart. This checkpoint does
-not claim those executions or final tier selection. Provisional hosted lifecycle;
-add catalog-replay-2-3 only if a real value/replay manifestation is established.
-Local focused only. Independent omission trials for presence, cloning,
-refinement and root/structural equality remain post-extraction work, not credit
-from successful pre-extraction characterization.
+### Named native and public proofs
+
+Each root below explicitly selects SQLite and PostgreSQL. These are planned
+post-extraction receipts, not execution credit from this read-only mapping.
+
+| Consumer / law | Package and complete root | Distinguishing assertion |
+| --- | --- | --- |
+| Constructor key, provided/initial fields, missing/optional values | runtimepersistence.TestFlowConstructorActivationConsumesExactInputBothStores | Correct normalized supplied fields and creation defaults; missing/wrong/contradictory key, wrong value, missing required field and internal collision refuse without construction |
+| Ordinary handler creation and guard reads | pipeline.TestExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValuesBeforeGuardReads | The guard observes the actual persisted explicit initializer, not a fabricated snapshot default |
+| Creation then intentional clear | pipeline.TestExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaInitialValue | A later clear stays absent instead of restoring the creation initializer |
+| Empty snapshot and cold reload | pipeline.TestEntityLastFieldClearAndColdReloadBothStores | Two fresh-coordinator reads find a complete empty field map; wrong owner and undeclared mutation refuse without revision change |
+| Sparse root equality | pipeline.TestSelectedHandlerSparseEqualityMutationsBothStores | Ordered paired writes and paired clear use the final candidate; no synthetic absent values |
+| Generated read/save and required/optional records | tools.TestEntitySparseGeneratedToolMutation | Real stored fields/history preserve empty text, optional omission and nested replacement; invalid equality, immutable/null/required-record writes leave state unchanged |
+| Generated contained-operation fresh admission | tools.TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores | Stale presentation cannot refuse a valid current index or admit an invalid current index; rejected write preserves snapshot/revision and exact mutation count |
+| Compiled CLI/RPC and graceful restart | releasee2e.TestCatalogTypeAdmissionPublicRestartBothStores | Public readback/restart retain list, map, enum/UUID keys and contained edits; invalid domain/reference/recursion cases still refuse |
+
+`MapTypeParts`' direct contained consumer is additionally covered by V5 and the
+unchanged entityruntime contained-operation and normalized-key-collision roots.
+Pure tools surface roots cover map/list operations and source/actor ownership;
+they are not substituted for the native contained-operation root above.
+
+### Hosted selection
+
+Select lifecycle plus `catalog-replay-2-3`. The additional unit has a concrete
+normalization/replay manifestation: selected-store partition 3 includes
+`tests/tier1-primitives/test-rules-data-accumulation`, whose declared integer
+`core.value` receives payload 42 and whose existing field oracle requires 42.
+`runCatalogReplayCleanPartition` performs three selected-store executions
+(PostgreSQL twice and SQLite once), reopens each store and reasserts the fixture
+outcome and unchanged canonical event projection. The field assertion, not the
+event projection alone, is the value oracle. This is not a new fixture or runner;
+the existing exact combined unit also includes partition 2. Lifecycle already
+includes partition 1. No full-tier or duplicate local-tier run is proposed.
+
+Independent omission trials for presence, cloning, refinement and root versus
+structural equality remain post-extraction work, not credit from successful
+pre-extraction characterization. The selected native fixture owners are live
+#2617 consumers; their setup failures, if any, must be attributed separately and
+not repaired by this extraction or credited as passing normalization proof.
 
 Proposed production files: contracts.go, value_normalization.go,
 value_refinements.go, value_normalization_helpers.go; separate characterization
