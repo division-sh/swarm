@@ -682,13 +682,13 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 		for _, verdict := range []string{"approve", "revise", "reject"} {
 			t.Run(storeCase.name+"/"+verdict, func(t *testing.T) {
 				selected := storeCase.open(t)
-				ctx := testAuthorActivityContext(t, context.Background())
+				bundle := proposedEffectProofBundle(t, "http://127.0.0.1:1", false)
+				source := semanticview.Wrap(bundle)
 				runID := uuid.NewString()
 				entityID := runID
-				ctx = runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(ctx, mustAuthorActivityTestSourceArtifactFactForHash(gateRecoveryBundle)), runID)
+				ctx, bundleSource := workflowLifecycleSourceContext(t, selected, bundle, runID)
 				supportNode := externalPipelineNode(t, "", "support")
 				supportOwner := activityidentity.MustNodeOwner(supportNode)
-				insertGateRecoveryRun(t, selected.events, runID)
 				now := time.Date(2026, 7, 14, 22, 0, 0, 0, time.UTC)
 				input, err := canonicaljson.FromGo(map[string]any{"chat_id": "support-room", "text": "Exact approved text"})
 				if err != nil {
@@ -707,7 +707,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				continuation := decisioncard.ProposedEffectContinuation{
 					CardID: decisioncard.ProposedEffectCardID(requestEventID, "support_reply"), RunID: runID,
 					RequestEventID: requestEventID, ActivityID: "send_support_reply", Tool: "provider_write",
-					BundleHash: gateRecoveryBundle, WorkflowVersion: "1", Input: input,
+					BundleHash: bundleSource.BundleHash(), WorkflowVersion: "1", Input: input,
 					EffectClass:  runtimecontracts.ActivityEffectClassNonIdempotentWrite,
 					SuccessEvent: "send_support_reply.succeeded", FailureEvent: "send_support_reply.failed",
 					RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
@@ -744,7 +744,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				card, err := decisioncard.New(decisioncard.Card{
 					CardID: continuation.CardID, RunID: runID, Anchor: anchor, Snapshot: snapshot,
 					ExecutionMode:     "live",
-					EffectContentHash: continuation.EffectContentHash, BundleHash: gateRecoveryBundle,
+					EffectContentHash: continuation.EffectContentHash, BundleHash: bundleSource.BundleHash(),
 					WorkflowVersion: "1", CreatedAt: now,
 				})
 				if err != nil {
@@ -771,8 +771,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				decisionEvent := eventtest.RuntimeControl(decisionEventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
 					events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), runID), now.Add(time.Minute))
 				storetest.CommitSemanticEvent(t, ctx, selected.events, decisionEvent)
-				source := semanticview.Wrap(proposedEffectProofBundle(t, "http://127.0.0.1:1", false))
-				canonicalBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source},
+				canonicalBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: bundleSource},
 					"platform.activity_requested", "send_support_reply.revision_requested", "send_support_reply.rejected")
 				if err != nil {
 					t.Fatal(err)
@@ -780,7 +779,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 				bus := &proposedEffectRouteProofBus{eventBus: canonicalBus}
 				coordinator := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{
 					Module: gateRecoveryModule{source: source}, Persistence: selected.persistence,
-					DecisionCards: selected.cards, SourceArtifactFact: mustAuthorActivityTestSourceArtifactFactForHash(gateRecoveryBundle),
+					DecisionCards: selected.cards, SourceArtifactFact: bundleSource,
 				})
 				commitKeylessConstructorComponent(t, withLiveGateExecution(ctx), selected, coordinator, source)
 				forward, emitted, _, err := coordinator.Intercept(withLiveGateExecution(ctx), decisionEvent)
@@ -800,7 +799,7 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					bundleHash, bundleText := bundleValue.String()
 					versionValue, versionPresent := request.Lookup("workflow_version")
 					workflowVersion, versionText := versionValue.String()
-					if err != nil || !bundlePresent || !bundleText || bundleHash != gateRecoveryBundle || !versionPresent || !versionText || workflowVersion != "1" {
+					if err != nil || !bundlePresent || !bundleText || bundleHash != bundleSource.BundleHash() || !versionPresent || !versionText || workflowVersion != "1" {
 						t.Fatalf("released request contract pin = bundle:%q/%v/%v version:%q/%v/%v error:%v", bundleHash, bundlePresent, bundleText, workflowVersion, versionPresent, versionText, err)
 					}
 				} else {
