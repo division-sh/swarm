@@ -97,9 +97,8 @@ func TestDurableDataOperationAggregatePublicRestartBothStores(t *testing.T) {
 			rows := strings.Split(strings.TrimSpace(string(raw)), "\n")
 			writeReleaseFile(t, filepath.Join(project, "input.jsonl"), rows[2]+"\n")
 			writeReleaseFile(t, filepath.Join(project, "invalid.jsonl"), "{\"unknown\":true}\n")
-			writeReleaseFile(t, filepath.Join(project, ".swarm/swarm.yaml"), goldenRuntimeConfig(selected))
+			writeReleaseFile(t, filepath.Join(project, ".swarm/swarm.yaml"), goldenRuntimeConfig(selected)+"connection:\n  api_token_file: api-token\n")
 			writeReleaseFile(t, filepath.Join(project, "api-token"), goldenAPIToken+"\n")
-			writeReleaseFile(t, filepath.Join(root, "home/.config/swarm/swarm.yaml"), "connection:\n  api_token_file: api-token\n")
 			env := goldenProcessEnv(t, root, selected.passwordEnv, 0)
 			assertGoldenProcessHasNoExternalExecutables(t, env)
 			start := func() *releaseServeProcess {

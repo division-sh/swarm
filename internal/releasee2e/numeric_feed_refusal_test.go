@@ -32,9 +32,8 @@ func TestGoldenNumericDataScatterParkRefusalBothStores(t *testing.T) {
 			project := filepath.Join(root, "yaml-project")
 			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), numericScatterSource), filepath.Join(project, "contracts"))
 			loadNumericFeedCorpus(t, filepath.Join(project, "contracts"))
-			writeReleaseFile(t, filepath.Join(project, ".swarm/swarm.yaml"), goldenRuntimeConfig(selected))
+			writeReleaseFile(t, filepath.Join(project, ".swarm/swarm.yaml"), goldenRuntimeConfig(selected)+"connection:\n  api_token_file: api-token\n")
 			writeReleaseFile(t, filepath.Join(project, "api-token"), goldenAPIToken+"\n")
-			writeReleaseFile(t, filepath.Join(root, "home/.config/swarm/swarm.yaml"), "connection:\n  api_token_file: api-token\n")
 			env := goldenProcessEnv(t, root, selected.passwordEnv, 0)
 			verified := runReleaseCommand(t, goldenStartupTimeout, project, env, "", binary,
 				"verify", "contracts", "--config", ".swarm/swarm.yaml", "--portable", "--json")
