@@ -104,7 +104,7 @@ func TestUnavailableMemberPreparationRequiresExactPrivateClaim(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			candidate := member
 			test.change(&candidate)
-			current := *publication
+			current := pipelinePublicationClaim{bus: publication.bus, eventID: publication.eventID, claim: publication.claim}
 			if test.name == "wrong purpose" {
 				current.claim = candidate.claim
 			}
