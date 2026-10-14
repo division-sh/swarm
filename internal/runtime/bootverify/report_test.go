@@ -2099,12 +2099,10 @@ func TestRun_DoesNotWarnWhenOnCompleteBranchReachesDeclaredState(t *testing.T) {
 func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
 	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
       rules:
-        - id: review
-          when: |-
+        - when: |-
                   true
           advances_to: review
-        - id: unmatched
-          else: true`)
+        - else: true`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -2117,16 +2115,13 @@ func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
 func TestRun_PreservesStateMachineCoherenceErrorWhenInvalidTargetExists(t *testing.T) {
 	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
       rules:
-        - id: review
-          when: |-
+        - when: |-
                   true
           advances_to: review
-        - id: invalid
-          when: |-
+        - when: |-
                   true
           advances_to: bogus_state
-        - id: unmatched
-          else: true`)
+        - else: true`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -4792,8 +4787,7 @@ func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *test
 	clearWave1ExpressionFeedbackEmit(t, bundle, flowID, nodeID)
 	handler.CreateEntity = false
 	handler.Rules = mustBootHandlerFixture(t, `rules:
-  - id: ready
-    when: entity.revision_count == 0 && payload.score >= 0.0 && event["source"].entity_id != ""
+  - when: entity.revision_count == 0 && payload.score >= 0.0 && event["source"].entity_id != ""
   - else: true
 `).Rules
 	owner := bundleExecutableNodeByLocalID(t, bundle, nodeID)
