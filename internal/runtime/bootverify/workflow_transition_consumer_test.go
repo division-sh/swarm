@@ -363,12 +363,12 @@ worker:
     selected:
       rules:
         - {when: true, advances_to: done}
-        - {else: true, advances_to: done}
+        - {advances_to: done}
     inherited:
       advances_to: done
       rules:
         - {when: true}
-        - {else: true}
+        - {when: false}
     completed:
       on_complete:
         - {condition: true, advances_to: done}
