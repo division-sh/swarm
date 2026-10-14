@@ -578,6 +578,15 @@ func (c *agentLifecycleCoordinator) resolveAgentTargetLocked(
 	flowInstance string,
 	includeTerminated bool,
 ) (runtimeagentidentity.Identity, *agentLifecycleCell, error) {
+	return c.resolveMatchingAgentTargetLocked(runID, agentID, flowInstance, func(cell *agentLifecycleCell) bool {
+		return includeTerminated || (cell.view.Phase != AgentLifecycleTerminated && cell.view.Phase != AgentLifecycleFailed)
+	})
+}
+
+func (c *agentLifecycleCoordinator) resolveMatchingAgentTargetLocked(
+	runID, agentID, flowInstance string,
+	include func(*agentLifecycleCell) bool,
+) (runtimeagentidentity.Identity, *agentLifecycleCell, error) {
 	runID = strings.TrimSpace(runID)
 	agentID = strings.TrimSpace(agentID)
 	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
@@ -597,7 +606,7 @@ func (c *agentLifecycleCoordinator) resolveAgentTargetLocked(
 		if flowInstance != "" && identity.FlowInstance() != flowInstance {
 			continue
 		}
-		if !includeTerminated && (cell.view.Phase == AgentLifecycleTerminated || cell.view.Phase == AgentLifecycleFailed) {
+		if !include(cell) {
 			continue
 		}
 		candidates = append(candidates, identity.Normalize())
@@ -635,6 +644,16 @@ func (c *agentLifecycleCoordinator) resolveAgentTarget(runID, agentID, flowInsta
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	identity, _, err := c.resolveAgentTargetLocked(runID, agentID, flowInstance, includeTerminated)
+	return identity, err
+}
+
+func (c *agentLifecycleCoordinator) resolvePublishedAgentTarget(runID, agentID, flowInstance string) (runtimeagentidentity.Identity, error) {
+	if c == nil {
+		return runtimeagentidentity.Identity{}, fmt.Errorf("%w: %s", ErrAgentNotFound, strings.TrimSpace(agentID))
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	identity, _, err := c.resolveMatchingAgentTargetLocked(runID, agentID, flowInstance, executionPublishable)
 	return identity, err
 }
 

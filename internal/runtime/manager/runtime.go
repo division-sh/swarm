@@ -235,7 +235,7 @@ func (am *AgentManager) shutdownAdmissionClosedLocked() bool {
 }
 
 func (am *AgentManager) ResolveAgentConfig(runID, agentID, flowInstance string) (runtimeactors.AgentConfig, error) {
-	identity, err := am.lifecycle.resolveAgentTarget(runID, agentID, flowInstance, false)
+	identity, err := am.lifecycle.resolvePublishedAgentTarget(runID, agentID, flowInstance)
 	if err != nil {
 		return runtimeactors.AgentConfig{}, err
 	}
@@ -503,43 +503,33 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 	if req.Directive == "" {
 		return runtimeagentcontrol.SendDirectiveResult{}, errors.New("directive is required")
 	}
-	identity, err := am.lifecycle.resolveAgentTarget(req.RunID, agentID, req.FlowInstance, false)
+	if req.RunID == "" {
+		return runtimeagentcontrol.SendDirectiveResult{}, errors.New("run_id is required")
+	}
+	var operationStore runtimeagentcontrol.DirectiveOperationStore
+	if req.IdempotencyKey != "" {
+		operationStore, err = am.directiveOperationStore()
+		if err != nil {
+			return runtimeagentcontrol.SendDirectiveResult{}, err
+		}
+		// Historical command outcomes do not elect or authorize a live actor.
+		existing, found, err := loadDirectiveReplayOperation(ctx, operationStore, req)
+		if err != nil {
+			return runtimeagentcontrol.SendDirectiveResult{}, err
+		}
+		if found {
+			return am.continueDirectiveOperation(ctx, operationStore, existing)
+		}
+	}
+	identity, err := am.lifecycle.resolvePublishedAgentTarget(req.RunID, agentID, req.FlowInstance)
 	if err != nil {
 		return runtimeagentcontrol.SendDirectiveResult{}, err
 	}
 	req.FlowInstance = identity.FlowInstance()
-	operationStore, err := am.directiveOperationStore()
-	if err != nil {
-		return runtimeagentcontrol.SendDirectiveResult{}, err
-	}
-	if req.IdempotencyKey != "" {
-		existing, ok, err := operationStore.LoadDirectiveOperationByKey(ctx, runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
+	if operationStore == nil {
+		operationStore, err = am.directiveOperationStore()
 		if err != nil {
 			return runtimeagentcontrol.SendDirectiveResult{}, err
-		}
-		if ok {
-			now := time.Now().UTC()
-			if (existing.State == runtimeagentcontrol.DirectiveOperationSucceeded || existing.State == runtimeagentcontrol.DirectiveOperationFailed || existing.State == runtimeagentcontrol.DirectiveOperationCanceled) && !existing.ExpiresAt.IsZero() && !existing.ExpiresAt.After(now) {
-				existing, ok, err = operationStore.ReconcileDirectiveOperation(ctx, existing.OperationID, now, directiveOperationTTL)
-				if err != nil {
-					return runtimeagentcontrol.SendDirectiveResult{}, err
-				}
-			}
-			if ok {
-				if existing.RequestHash != req.RequestHash {
-					return runtimeagentcontrol.SendDirectiveResult{}, &runtimeagentcontrol.DirectiveIdempotencyConflictError{OriginalRequestHash: existing.RequestHash, ConflictingRequestHash: req.RequestHash, OperationID: existing.OperationID}
-				}
-				if existing.State == runtimeagentcontrol.DirectiveOperationExecuting && !existing.ExecutionLeaseExpiresAt.IsZero() && !existing.ExecutionLeaseExpiresAt.After(now) {
-					existing, ok, err = operationStore.ReconcileDirectiveOperation(ctx, existing.OperationID, now, directiveOperationTTL)
-					if err != nil {
-						return runtimeagentcontrol.SendDirectiveResult{}, err
-					}
-					if !ok {
-						return runtimeagentcontrol.SendDirectiveResult{}, errors.New("directive operation disappeared during reconciliation")
-					}
-				}
-				return am.continueDirectiveOperation(ctx, operationStore, existing)
-			}
 		}
 	}
 	if _, err := am.directiveBoardAgentIdentity(identity); err != nil {
@@ -591,6 +581,34 @@ func (am *AgentManager) SendDirective(ctx context.Context, req runtimeagentcontr
 		am.logDirectivePostcommitError(ctx, "directive_reservation_post_commit_failure", reservation.Operation.OperationID, err)
 	}
 	return am.continueDirectiveOperation(ctx, operationStore, reservation.Operation)
+}
+
+func loadDirectiveReplayOperation(ctx context.Context, store runtimeagentcontrol.DirectiveOperationStore, req runtimeagentcontrol.SendDirectiveRequest) (runtimeagentcontrol.DirectiveOperation, bool, error) {
+	existing, found, err := store.LoadDirectiveOperationByKey(ctx, runtimeagentcontrol.DirectiveOperationMethod, req.ActorTokenID, req.IdempotencyKey)
+	if err != nil || !found {
+		return existing, found, err
+	}
+	now := time.Now().UTC()
+	terminal := existing.State == runtimeagentcontrol.DirectiveOperationSucceeded || existing.State == runtimeagentcontrol.DirectiveOperationFailed || existing.State == runtimeagentcontrol.DirectiveOperationCanceled
+	if terminal && !existing.ExpiresAt.IsZero() && !existing.ExpiresAt.After(now) {
+		existing, found, err = store.ReconcileDirectiveOperation(ctx, existing.OperationID, now, directiveOperationTTL)
+		if err != nil || !found {
+			return existing, found, err
+		}
+	}
+	if existing.RequestHash != req.RequestHash || existing.AgentIdentity.RunID != req.RunID || !existing.AgentIdentity.MatchesAgentID(req.AgentID) || (req.FlowInstance != "" && existing.FlowInstance() != req.FlowInstance) {
+		return existing, false, &runtimeagentcontrol.DirectiveIdempotencyConflictError{OriginalRequestHash: existing.RequestHash, ConflictingRequestHash: req.RequestHash, OperationID: existing.OperationID}
+	}
+	if existing.State == runtimeagentcontrol.DirectiveOperationExecuting && !existing.ExecutionLeaseExpiresAt.IsZero() && !existing.ExecutionLeaseExpiresAt.After(now) {
+		existing, found, err = store.ReconcileDirectiveOperation(ctx, existing.OperationID, now, directiveOperationTTL)
+		if err != nil {
+			return existing, found, err
+		}
+		if !found {
+			return existing, false, errors.New("directive operation disappeared during reconciliation")
+		}
+	}
+	return existing, true, nil
 }
 
 func (am *AgentManager) logDirectivePostcommitError(ctx context.Context, action, operationID string, err error) {
