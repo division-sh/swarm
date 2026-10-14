@@ -198,6 +198,12 @@ func (f *runtimeBootstrapFixture) ResumeSession(ctx context.Context, op channelo
 	}
 	return nil
 }
+func (f *runtimeBootstrapFixture) AwaitSessionBootstrap(ctx context.Context, _ channelonboarding.Operation) error {
+	if f.connection == nil {
+		return errRuntimeConnection
+	}
+	return f.connection.CheckBootstrap(ctx)
+}
 func (f *runtimeBootstrapFixture) ReadSessionPairing(ctx context.Context, op channelonboarding.Operation, principal operatorchannel.Principal) (channelonboarding.PairingReadback, error) {
 	if f.connection == nil {
 		return channelonboarding.PairingReadback{Status: "not_started"}, nil
