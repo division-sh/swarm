@@ -414,9 +414,9 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 	sharedAudienceAnnounced := false
 	advancePending := opts.verb == "resume"
 	for {
-		pending, err := result.SessionPreparationPending()
-		if err != nil || result.Operation.OperationID == "" || result.Operation.Revision < 1 || !result.Operation.Phase.Valid() {
-			return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel onboarding response has invalid progress evidence"))
+		pending, err := validateCLIChannelProgress(result)
+		if err != nil {
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
 		}
 		if pending && !advancePending && opts.resumeCredential == "" {
 			return result, nil
@@ -470,18 +470,12 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 		}
 		delete(params, "provider_credential")
 		opts.resumeCredential = ""
-		if next.Operation.OperationID != result.Operation.OperationID {
-			return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel retry changed the retained operation"))
-		}
-		pending, pendingErr := next.SessionPreparationPending()
+		pending, pendingErr := validateCLIChannelContinuation(result, next)
 		if pendingErr != nil {
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, pendingErr)
 		}
 		if pending {
 			return next, nil
-		}
-		if next.Operation.Revision == result.Operation.Revision && next.Operation.Phase == result.Operation.Phase {
-			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("channel onboarding is blocked in %s; retry after resolving the reported prerequisite", next.Operation.Phase))
 		}
 		result = next
 	}
