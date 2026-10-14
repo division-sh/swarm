@@ -2,8 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -37,14 +35,14 @@ func TestLoadFanOutWorkers(t *testing.T) {
 			if tc.declaration != "" {
 				source += "runtime:\n  fan_out_workers: " + tc.declaration + "\n"
 			}
-			path := filepath.Join(t.TempDir(), "swarm.yaml")
-			if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
-				t.Fatal(err)
+			var cfg Config
+			err := decodeConfigSourceTest(source, &cfg)
+			if err == nil {
+				err = cfg.Validate()
 			}
-			cfg, err := Load(path)
 			if tc.wantErr {
 				if err == nil || !strings.Contains(err.Error(), "runtime.fan_out_workers") {
-					t.Fatalf("Load = %v, want worker declaration refusal", err)
+					t.Fatalf("DecodeSource/Validate = %v, want worker declaration refusal", err)
 				}
 				return
 			}
