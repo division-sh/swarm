@@ -559,7 +559,7 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, runI
 	if runID == "" {
 		return fmt.Errorf("workflow timer lifecycle requires run identity")
 	}
-	active, err := pc.workflowStore.listPersistedWorkflowTimerActivations(ctx, runID, entityID.String(), true)
+	active, err := pc.readWorkflowPlanningTimers(ctx, runID, route, entityID.String(), cause)
 	if err != nil {
 		return err
 	}

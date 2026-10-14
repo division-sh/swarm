@@ -13,6 +13,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -357,7 +358,7 @@ func TestSameFlowAgentPolicyDerivesExactSelectedRunOwners(t *testing.T) {
 		required:         true,
 		source:           source,
 	}
-	projection.context = admittedAgentConstructionContext(t, source, runID)
+	projection.context, projection.instances = admittedAgentConstructionFixture(t, source, runID)
 	plan := RoutePlan{
 		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("same-flow-agent-publication"), "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
 		DeliveryIntents: []RoutePlanDeliveryIntent{
@@ -445,7 +446,7 @@ func TestRuntimeCreatedTargetlessIgnoresNativeAndProspectiveConstruction(t *test
 						t.Fatal(err)
 					}
 				} else {
-					projection.context = admittedAgentConstructionContext(t, source, runID)
+					projection.context, projection.instances = admittedAgentConstructionFixture(t, source, runID)
 				}
 				intent := RoutePlanDeliveryIntent{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity, Producer: routeIntentProducerAgentPolicy, Persist: true}
 				resolved, err := projection.resolveRoutePlan(RoutePlan{Event: event, DeliveryIntents: []RoutePlanDeliveryIntent{intent}})
@@ -487,7 +488,7 @@ func TestSameFlowDeclaredEntitylessAgentsDoNotInheritSelectedNodeOwners(t *testi
 		required:         true,
 		source:           connectRoutePlanRootProducerSingletonSource(t),
 	}
-	projection.context = admittedAgentConstructionContext(t, projection.source, runID)
+	projection.context, projection.instances = admittedAgentConstructionFixture(t, projection.source, runID)
 	plan := RoutePlan{
 		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("same-flow-entityless-publication"), "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
 		DeliveryIntents: []RoutePlanDeliveryIntent{
@@ -507,14 +508,20 @@ func TestSameFlowDeclaredEntitylessAgentsDoNotInheritSelectedNodeOwners(t *testi
 	}
 }
 
-func admittedAgentConstructionContext(t testing.TB, source semanticview.Source, runID string) context.Context {
+func admittedAgentConstructionFixture(t testing.TB, source semanticview.Source, runID string) (context.Context, runtimepipeline.FlowInstanceIndexReader) {
 	t.Helper()
 	var observations []runtimepipeline.FlowInstanceObservation
 	for _, flow := range []string{semanticview.RootExecutionFlowID(source), "consumer"} {
 		instance := ConstructedFlowInstanceIdentityFixture(source, flow, "", runID)
 		observations = append(observations, constructionIndexObservation(t, source, runID, instance, ""))
 	}
-	return context.WithValue(constructionIndexContext(t, source), selectedTargetOwnerLookupScopeKey{}, selectedTargetOwnerLookupScope{observations: observations})
+	ctx := constructionIndexContext(t, source)
+	fact, _ := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	scope, err := runtimepipeline.NewFlowInstanceLookupScope(source, fact, runID, []string{semanticview.RootExecutionFlowID(source), "consumer"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return withSelectedTargetOwnerLookupScope(ctx, selectedTargetOwnerLookupScope{lookup: scope, observations: observations}), constructionIndexTestReader{observations: observations}
 }
 
 func TestSameFlowRootAgentOwnerContradictionFailsClosed(t *testing.T) {
@@ -533,7 +540,7 @@ func TestSameFlowRootAgentOwnerContradictionFailsClosed(t *testing.T) {
 		required:         true,
 		source:           source,
 	}
-	projection.context = admittedAgentConstructionContext(t, source, runID)
+	projection.context, projection.instances = admittedAgentConstructionFixture(t, source, runID)
 	plan := RoutePlan{
 		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("same-flow-contradiction-publication"), "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
 		DeliveryIntents: []RoutePlanDeliveryIntent{{

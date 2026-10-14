@@ -19235,6 +19235,19 @@ platform_tables:
         material, or NULL for a keyless declaration. Both are immutable construction facts;
         changing business fields cannot change instance selection. Lookup bounds the declaration
         by run, actual parent and key, and rejects ambiguous occupancy rather than selecting one.
+        Each ordinary planning pass composes index reads within one finite canonical snapshot;
+        preview and final planning open separate fresh cuts. No expired reader escapes in a route
+        or persisted command. A publication group retains its separate existing preparation cut
+        and reobserves consumed dependencies inside its fenced committing transaction. Inventory
+        binds immutable membership, complete construction/source/run identity and the entire
+        desired attachment plan, not unrelated mutable sibling progress. After immutable narrowing,
+        every positive and negative source-availability, target-availability, agent-eligibility,
+        structural-parent, construction-dependency and reply-origin decision performs an exact
+        canonical lookup before consuming mutable state. An overlapping list never replaces this
+        stronger dependency. Missing or crossed evidence, cancellation and independent or joined
+        read errors refuse without inventory fallback; a stale comparison cannot hide a later
+        read failure. The existing claim, grant, generation and source-ordering fences remain
+        authoritative at commit.
         Selector filtering cannot hide contradictory construction as absence: bounded candidate
         occupancy and native companion evidence must be admitted before absence is reported.
         Malformed construction returns typed corruption, distinct from cancellation or store I/O

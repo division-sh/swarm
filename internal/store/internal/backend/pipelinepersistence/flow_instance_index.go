@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -144,6 +145,119 @@ func (s *PipelineSQLiteOwner) ListFlowInstances(ctx context.Context, scope pipel
 		return nil, err
 	}
 	return observations, nil
+}
+
+func (s *PipelinePostgresOwner) WithFlowInstancePlanningSnapshot(ctx context.Context, scope pipeline.FlowInstanceLookupScope, prepare func(context.Context, pipeline.FlowInstanceIndexReader) error) error {
+	if s == nil || s.backend == nil || !scope.Valid() || prepare == nil {
+		return fmt.Errorf("PostgreSQL instance planning requires its admitted scope and owner")
+	}
+	if err := s.requireCurrent(); err != nil {
+		return err
+	}
+	return s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		run, err := s.LoadSnapshotTx(ctx, tx, scope.RunID(), false)
+		if err != nil {
+			return err
+		}
+		snapshot := &flowInstanceIndexSnapshot{tx: tx, postgres: true, source: scope.Source(), run: run, historical: s.historicalInstances, observed: make(map[string]pipeline.FlowInstanceObservation)}
+		return snapshot.withPlanningReader(ctx, scope, prepare)
+	})
+}
+
+func (s *PipelineSQLiteOwner) WithFlowInstancePlanningSnapshot(ctx context.Context, scope pipeline.FlowInstanceLookupScope, prepare func(context.Context, pipeline.FlowInstanceIndexReader) error) error {
+	if s == nil || s.backend == nil || !scope.Valid() || prepare == nil {
+		return fmt.Errorf("SQLite instance planning requires its admitted scope and owner")
+	}
+	if err := s.requireCurrent(); err != nil {
+		return err
+	}
+	return s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		run, err := s.LoadSnapshotTx(ctx, tx, scope.RunID())
+		if err != nil {
+			return err
+		}
+		snapshot := &flowInstanceIndexSnapshot{tx: tx, source: scope.Source(), run: run, historical: s.historicalInstances, observed: make(map[string]pipeline.FlowInstanceObservation)}
+		return snapshot.withPlanningReader(ctx, scope, prepare)
+	})
+}
+
+type flowInstanceIndexPlanningReader struct {
+	mu       sync.Mutex
+	snapshot *flowInstanceIndexSnapshot
+	scope    pipeline.FlowInstanceLookupScope
+}
+
+func (s *flowInstanceIndexSnapshot) withPlanningReader(ctx context.Context, scope pipeline.FlowInstanceLookupScope, prepare func(context.Context, pipeline.FlowInstanceIndexReader) error) error {
+	if err := validateFlowInstanceIndexSnapshot(scope.Source(), scope.SourceFact().BundleHash(), s.run, s.historical); err != nil {
+		return err
+	}
+	reader := &flowInstanceIndexPlanningReader{snapshot: s, scope: scope}
+	defer func() {
+		reader.mu.Lock()
+		defer reader.mu.Unlock()
+		reader.snapshot = nil
+	}()
+	bounded, err := pipeline.WithFlowInstancePlanningInitialTimerReader(ctx, reader)
+	if err != nil {
+		return err
+	}
+	return prepare(bounded, reader)
+}
+
+func (r *flowInstanceIndexPlanningReader) ListFlowInstancePlanningInitialTimers(ctx context.Context, owner flowidentity.RunScopedFlowInstance, entityID string) ([]pipeline.WorkflowTimerActivation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	fact, present := correlation.SourceArtifactFactFromContext(ctx)
+	if !present {
+		return nil, fmt.Errorf("initial-entry timer planning requires its admitted source")
+	}
+	if err := r.requireScope(ctx, fact, owner.RunID); err != nil {
+		return nil, err
+	}
+	if entityID == "" || strings.TrimSpace(entityID) != entityID {
+		return nil, fmt.Errorf("initial-entry timer planning requires an exact entity")
+	}
+	if _, err := pipeline.NewExactFlowInstanceLookup(r.scope.Source(), fact, owner); err != nil {
+		return nil, err
+	}
+	return listWorkflowTimerActivations(ctx, r.snapshot.tx, !r.snapshot.postgres, owner.RunID, entityID, true)
+}
+
+func (r *flowInstanceIndexPlanningReader) requireScope(ctx context.Context, fact correlation.SourceArtifactFact, runID string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if r.snapshot == nil {
+		return fmt.Errorf("instance planning read lifetime has ended")
+	}
+	if runID != r.scope.RunID() || !fact.Matches(r.scope.SourceFact()) {
+		return fmt.Errorf("instance planning crosses its admitted source or run")
+	}
+	return nil
+}
+
+func (r *flowInstanceIndexPlanningReader) LookupFlowInstance(ctx context.Context, request pipeline.FlowInstanceLookupRequest) (pipeline.FlowInstanceObservation, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.requireScope(ctx, request.SourceFact(), request.RunID()); err != nil {
+		return pipeline.FlowInstanceObservation{}, false, err
+	}
+	if !request.Valid() {
+		return pipeline.FlowInstanceObservation{}, false, fmt.Errorf("instance planning requires an admitted lookup")
+	}
+	return r.snapshot.lookup(ctx, request)
+}
+
+func (r *flowInstanceIndexPlanningReader) ListFlowInstances(ctx context.Context, scope pipeline.FlowInstanceLookupScope) ([]pipeline.FlowInstanceObservation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.requireScope(ctx, scope.SourceFact(), scope.RunID()); err != nil {
+		return nil, err
+	}
+	if !scope.Valid() {
+		return nil, fmt.Errorf("instance planning requires an admitted scope")
+	}
+	return r.snapshot.list(ctx, scope)
 }
 
 // This memo belongs to one repeatable read, never to a process or a later plan.

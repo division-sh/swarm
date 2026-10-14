@@ -56,6 +56,14 @@ func TestFanOutInstancePlanningReobservesTerminationBeforeEffectsBothStores(t *t
 						t.Fatalf("capture lost exact producer: %+v", observations)
 					}
 				}
+				request, err := pipeline.NewExactFlowInstanceLookup(source, fact, flowidentity.RunScopedFlowInstance{RunID: f.seed.runID, Route: producer.Route()})
+				if err != nil {
+					return err
+				}
+				observed, found, err := reader.LookupFlowInstance(ctx, request)
+				if err != nil || !found || observed.Identity() != producer {
+					t.Fatalf("exact producer decision lost: found=%v err=%v", found, err)
+				}
 				return nil
 			}); err != nil {
 				t.Fatal(err)
@@ -89,8 +97,34 @@ func TestFanOutInstancePlanningCorruptionWinsOverEarlierStalenessBothStores(t *t
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f, _, coordinator := newMixedExecutionFixture(t, backend, nil)
-			observations := captureFanOutPlanningScopes(t, f, coordinator.SemanticSource(), "producer", "one")
-			producer, receiver := observations[0].Identity(), observations[1].Identity()
+			source := coordinator.SemanticSource()
+			observations := captureFanOutPlanningScopes(t, f, source, "producer")
+			producer := observations[0].Identity()
+			fact, found := correlation.SourceArtifactFactFromContext(f.ctx)
+			if !found {
+				t.Fatal("missing admitted source")
+			}
+			scope, err := pipeline.NewFlowInstanceLookupScope(source, fact, f.seed.runID, []string{"one"}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			planning := f.group.(interface {
+				WithFlowInstancePlanningSnapshot(context.Context, semanticview.Source, func(context.Context, pipeline.FlowInstanceIndexReader) error) error
+			})
+			var receiver flowidentity.Instance
+			if err := planning.WithFlowInstancePlanningSnapshot(f.ctx, source, func(ctx context.Context, reader pipeline.FlowInstanceIndexReader) error {
+				members, err := reader.ListFlowInstances(ctx, scope)
+				if err != nil {
+					return err
+				}
+				if len(members) != 1 {
+					t.Fatalf("missing inventory-only sibling: %+v", members)
+				}
+				receiver = members[0].Identity()
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
 			f.prepare(t)
 			f.seal(t)
 			if err := coordinator.MarkTerminated(f.ctx, flowidentity.RunScopedFlowInstance{RunID: f.seed.runID, Route: producer.Route()}, identity.NormalizeEntityID(producer.EntityID), time.Now().UTC()); err != nil {
@@ -205,13 +239,123 @@ func captureFanOutPlanningScopes(t *testing.T, f *groupProofFixture, source sema
 			if len(observations) != 1 {
 				t.Fatalf("capture requires exactly one admitted %s: %+v", flow, observations)
 			}
-			captured = append(captured, observations[0])
+			request, err := pipeline.NewExactFlowInstanceLookup(source, fact, observations[0].Owner())
+			if err != nil {
+				return err
+			}
+			observed, found, err := reader.LookupFlowInstance(ctx, request)
+			if err != nil || !found || observed.Identity() != observations[0].Identity() {
+				t.Fatalf("capture lost exact %s decision: found=%v err=%v", flow, found, err)
+			}
+			captured = append(captured, observed)
 		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 	return captured
+}
+
+func TestFanOutInstancePlanningInventoryAndExactDecisionsBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, order := range []string{"inventory_first", "lookup_first"} {
+			for _, changedFlow := range []string{"one", "producer"} {
+				t.Run(backend+"/"+order+"/"+changedFlow, func(t *testing.T) {
+					f, _, coordinator := newMixedExecutionFixture(t, backend, nil)
+					source := coordinator.SemanticSource()
+					fact, found := correlation.SourceArtifactFactFromContext(f.ctx)
+					if !found {
+						t.Fatal("missing admitted source")
+					}
+					request, err := pipeline.NewExactFlowInstanceLookup(source, fact, flowidentity.RunScopedFlowInstance{RunID: f.seed.runID, Route: flowidentity.StoredRoute(flowidentity.ScopeKey(source, "producer"), "", "producer")})
+					if err != nil {
+						t.Fatal(err)
+					}
+					scope, err := pipeline.NewFlowInstanceLookupScope(source, fact, f.seed.runID, []string{"producer", "one"}, nil)
+					if err != nil {
+						t.Fatal(err)
+					}
+					planning := f.group.(interface {
+						WithFlowInstancePlanningSnapshot(context.Context, semanticview.Source, func(context.Context, pipeline.FlowInstanceIndexReader) error) error
+					})
+					var producer flowidentity.Instance
+					var sibling pipeline.FlowInstanceObservation
+					if err := planning.WithFlowInstancePlanningSnapshot(f.ctx, source, func(ctx context.Context, reader pipeline.FlowInstanceIndexReader) error {
+						list := func() error {
+							observations, err := reader.ListFlowInstances(ctx, scope)
+							if err != nil {
+								return err
+							}
+							if len(observations) != 2 {
+								t.Fatalf("lost immutable membership: %+v", observations)
+							}
+							for _, observation := range observations {
+								if observation.Identity().TemplateID == "one" {
+									sibling = observation
+								}
+							}
+							return nil
+						}
+						lookup := func() error {
+							observed, found, err := reader.LookupFlowInstance(ctx, request)
+							if err != nil || !found {
+								t.Fatalf("missing exact target: found=%v err=%v", found, err)
+							}
+							producer = observed.Identity()
+							instance, err := observed.WorkflowInstance()
+							if err != nil || instance.Status != "active" {
+								t.Fatalf("exact decision lost target availability: %+v err=%v", instance, err)
+							}
+							return nil
+						}
+						for range 3 {
+							first, second := list, lookup
+							if order == "lookup_first" {
+								first, second = lookup, list
+							}
+							if err := first(); err != nil {
+								return err
+							}
+							if err := second(); err != nil {
+								return err
+							}
+						}
+						return nil
+					}); err != nil {
+						t.Fatal(err)
+					}
+					if !sibling.Valid() {
+						t.Fatal("missing admitted nonselected sibling")
+					}
+					if err := f.group.Seal(f.ctx, 1, nil); err != nil {
+						t.Fatal(err)
+					}
+					changed := sibling.Identity()
+					if changedFlow == "producer" {
+						changed = producer
+					}
+					if err := coordinator.MarkTerminated(f.ctx, flowidentity.RunScopedFlowInstance{RunID: f.seed.runID, Route: changed.Route()}, identity.NormalizeEntityID(changed.EntityID), time.Now().UTC()); err != nil {
+						t.Fatal(err)
+					}
+					before := f.snapshot(t)
+					committed, err := f.owner.CommitFanOutChunk(f.ctx, rejectedFanOutChunk(f.claim, 0, 1, time.Now().UTC()))
+					if changedFlow == "producer" {
+						failure := failures.Normalize(err, "test", "commit")
+						if err == nil || !failure.Retryable || failure.Detail.Code != "flow_instance_planning_stale" || len(committed.Publications) != 0 {
+							t.Fatalf("changed exact decision authorized effects: %+v err=%v", committed, err)
+						}
+						f.unchanged(t, before)
+						assertFanOutCursorAndOutcomeCount(t, f.ctx, f.db, f.seed, 0, 0)
+					} else {
+						if err != nil || len(committed.Publications) != 0 {
+							t.Fatalf("unrelated sibling invalidated unchanged exact target: %+v err=%v", committed, err)
+						}
+						assertFanOutCursorAndOutcomeCount(t, f.ctx, f.db, f.seed, 1, 1)
+					}
+				})
+			}
+		}
+	}
 }
 
 func TestFanOutInstancePlanningReobservesAbsentKeyAndNewMemberBothStores(t *testing.T) {

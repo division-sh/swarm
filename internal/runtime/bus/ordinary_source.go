@@ -119,6 +119,11 @@ func (p selectedRunTargetOwnerProjection) validateProviderExecutionDescriptor(fl
 			return fmt.Errorf("provider receiver has no admitted same-publication constructor")
 		}
 	}
+	var err error
+	descriptor, err = p.decisionTargetDescriptor(descriptor)
+	if err != nil {
+		return err
+	}
 	return descriptor.Availability.Validate(p.source, flowID)
 }
 
