@@ -2101,8 +2101,7 @@ func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
       rules:
         - when: |-
                   true
-          advances_to: review
-        - else: true`)
+          advances_to: review`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -2120,8 +2119,7 @@ func TestRun_PreservesStateMachineCoherenceErrorWhenInvalidTargetExists(t *testi
           advances_to: review
         - when: |-
                   true
-          advances_to: bogus_state
-        - else: true`)
+          advances_to: bogus_state`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -4788,7 +4786,6 @@ func TestRun_AllowsRuleConditionReferenceToDeclaredEntityAndEventContext(t *test
 	handler.CreateEntity = false
 	handler.Rules = mustBootHandlerFixture(t, `rules:
   - when: entity.revision_count == 0 && payload.score >= 0.0 && event["source"].entity_id != ""
-  - else: true
 `).Rules
 	owner := bundleExecutableNodeByLocalID(t, bundle, nodeID)
 	var err error
