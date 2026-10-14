@@ -63,6 +63,7 @@ func runDeliveryPriorHistory(t *testing.T, recipes bool) []byte {
 
 func runDeliveryEarlierHistory(t *testing.T, current []byte, recipes bool) []byte {
 	t.Helper()
+	current = sourceBlobEarlierHistory(t, current, recipes)
 	raw, err := rundelivery.RestoreHistory(current, runDeliveryPriorHistory(t, recipes), runDeliveryLivePins(t), recipes)
 	if err != nil {
 		t.Fatal(err)
@@ -100,11 +101,13 @@ func TestFamily145RunDeliveryHistoryRestoresCompletePriorLedgersAndCollisionSucc
 		if recipes {
 			current, wantCount = recipeBytes, 1519
 		}
+		live := current
+		current = sourceBlobEarlierHistory(t, current, recipes)
 		var before, after, composed, restored []map[string]any
 		for _, input := range []struct {
 			raw  []byte
 			rows *[]map[string]any
-		}{{prior, &before}, {current, &after}, {expected, &composed}, {runDeliveryEarlierHistory(t, current, recipes), &restored}} {
+		}{{prior, &before}, {current, &after}, {expected, &composed}, {runDeliveryEarlierHistory(t, live, recipes), &restored}} {
 			if err := json.Unmarshal(input.raw, input.rows); err != nil {
 				t.Fatal(err)
 			}

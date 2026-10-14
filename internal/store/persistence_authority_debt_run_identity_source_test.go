@@ -49,6 +49,11 @@ type debtRunIdentitySourceBody struct {
 
 // Exact source evidence only: no census occurrence or signature is rewritten.
 func debtRunIdentitySourcePrevious(root, file, function, current string) (string, error) {
+	var err error
+	current, err = debtSourceBlobResetPrevious(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	for _, pin := range debtRunIdentitySourcePins {
 		if pin.File != file || pin.Function != function {
 			continue
@@ -208,6 +213,7 @@ func debtRunIdentityCopySourceEvidence(t *testing.T, root, copy string) {
 		}
 		debtWriteModuleSource(t, copy, pin.File, strings.Replace(string(raw), previous, current[pin.Function], 1))
 	}
+	debtSourceBlobCopySourceEvidence(t, root, copy)
 }
 
 func TestPersistenceAuthorityDebtRunIdentityCollectorAddsNoCredit(t *testing.T) {

@@ -1,5 +1,8 @@
 # Persisted Source Bytes: Local Whole-Rule Checkpoint
 
+The finite history hold below is repaired under6159906599 in the subsequent
+issue-2542-source-blob-history-repair.md. Original RED receipts are retained.
+
 Six positive artifact-byte observations in three served roots consume the existing
 GetSourceArtifact owner. Four complete declaration pins include their shared
 constructor; the only shared fixture type change is one SourceArtifacts field of

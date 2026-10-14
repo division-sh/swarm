@@ -54,7 +54,7 @@ func TestFamily145RunIdentityWholeRulePreservesEveryAssertionAndCut(t *testing.T
 			t.Fatal("run identity complete signed predecessor changed:", pin.Function, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, current, pin.Function) != pin.After {
+		if err != nil || sourceBlobPreviousDeclaration(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("run identity current output changed:", pin.Function, err)
 		}
 		rule := runidentity.Rules[i]
@@ -128,6 +128,7 @@ if err!=nil { return 0,err }; return count,nil
 }
 
 func TestFamily145RunIdentityCallerInventoryIsClosed(t *testing.T) {
+	sourceBlobLivePins(t)
 	root := "../../.."
 	calls, definitions := 0, 0
 	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
@@ -201,8 +202,9 @@ func runIdentityFileError(path string, file *ast.File) error {
 			}
 			allowed[fn.Name.Pos()] = true
 		}
+		current := sourceBlobEarlierInventoryEndpoint(path, fn.Name.Name, requestkey.Node(fn))
 		for _, pin := range runIdentityPins {
-			if pin.File == path && pin.Function == fn.Name.Name && pin.After == requestkey.Node(fn) {
+			if pin.File == path && pin.Function == fn.Name.Name && pin.After == current {
 				recordRunIdentityReferences(allowed, fn)
 			}
 		}

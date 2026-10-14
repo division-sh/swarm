@@ -48,6 +48,7 @@ func main() {
 	}
 	path := sourceblob.Rules[0].File
 	outputs[path] = captureField(outputs[path])
+	printFixtureType(outputs[path])
 	validateCandidate(outputs)
 	raw, err := json.MarshalIndent(pins, "", "  ")
 	must(err)
@@ -60,6 +61,20 @@ func main() {
 			must(os.WriteFile(path, out, 0644))
 		}
 		must(os.WriteFile(sourceblob.Path, raw, 0644))
+	}
+}
+
+func printFixtureType(raw []byte) {
+	file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", raw, parser.AllErrors)
+	must(err)
+	for _, declaration := range file.Decls {
+		if group, ok := declaration.(*ast.GenDecl); ok {
+			for _, spec := range group.Specs {
+				if typed, ok := spec.(*ast.TypeSpec); ok && typed.Name.Name == "servedControlProofRuntime" {
+					fmt.Printf("fixture_type_sha256=%x\n", sha256.Sum256([]byte(requestkey.Node(typed))))
+				}
+			}
+		}
 	}
 }
 

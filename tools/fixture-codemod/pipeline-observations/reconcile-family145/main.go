@@ -33,6 +33,7 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runscalar"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedeventcount"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/sourceblob"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/sourcefork"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/standingdiagnostic"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/workflowstate"
@@ -41,10 +42,11 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "99d12e2b73efc3ae9ba2318bfbc320349cfce5d28deefd3f87e56e32b003cf26"
+const targetDigest = "5d4c0576e11418663842a2d83c8c8eabfdfbff57a40b9b580d65b1a4da3449e3"
 
 var sourceForkComparison = map[string]string{}
 var runDeliveryComparison = map[string]string{}
+var sourceBlobComparison = map[string]string{}
 
 type recipe struct {
 	Family, File, Function, Before, After string
@@ -312,6 +314,7 @@ func main() {
 	includeStopWitnessTargets()
 	sourceForkPins := sourceForkHistoryPins()
 	runDeliveryPins := runDeliveryHistoryPins()
+	sourceBlobPins := sourceBlobHistoryPins()
 	var rows []recipe
 	must(json.Unmarshal(commit(ledger), &rows))
 	var changes []transition
@@ -349,6 +352,7 @@ func main() {
 	changes = composePublicRollbackTransitions(preserveRunIdentityTransitions(changes), rollbackPins)
 	rows, changes = composeSourceForkHistory(rows, changes, sourceForkPins)
 	rows, changes = composeRunDeliveryHistory(rows, changes, runDeliveryPins)
+	rows, changes = composeSourceBlobHistory(rows, changes, sourceBlobPins)
 	raw, err := json.Marshal(changes)
 	must(err)
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
@@ -365,6 +369,42 @@ func main() {
 	} else if len(os.Args) != 1 {
 		panic("usage: reconcile-family145 [-write]")
 	}
+}
+
+func sourceBlobHistoryPins() []sourceblob.Pin {
+	raw, err := os.ReadFile(sourceblob.Path)
+	must(err)
+	pins, err := sourceblob.Decode(raw)
+	must(err)
+	for _, pin := range pins {
+		current, err := os.ReadFile(pin.File)
+		must(err)
+		must(sourceblob.ValidateCurrentSource(pin, current))
+		old, err := exec.Command("git", "show", sourceblob.Predecessor+":"+pin.File).Output()
+		must(err)
+		if functions(old)[pin.Function] != pin.Before {
+			panic("source blob exact predecessor changed: " + pin.Function)
+		}
+		sourceBlobComparison[pin.File+"/"+pin.Function] = pin.Before
+	}
+	raw, err = os.ReadFile(sourceblob.Rules[0].File)
+	must(err)
+	must(sourceblob.ValidateFixtureRole(raw))
+	return pins
+}
+
+func composeSourceBlobHistory(rows []recipe, changes []transition, pins []sourceblob.Pin) ([]recipe, []transition) {
+	raw, err := json.Marshal(rows)
+	must(err)
+	raw, err = sourceblob.ComposeHistory(raw, pins, true)
+	must(err)
+	must(json.Unmarshal(raw, &rows))
+	raw, err = json.Marshal(changes)
+	must(err)
+	raw, err = sourceblob.ComposeHistory(raw, pins, false)
+	must(err)
+	must(json.Unmarshal(raw, &changes))
+	return rows, changes
 }
 
 func runDeliveryHistoryPins() []rundelivery.Pin {
@@ -1240,6 +1280,9 @@ func currentReplacement(path, key string, after map[string]string) (string, bool
 }
 
 func currentHistoryComparison(path, key, current string) string {
+	if previous := sourceBlobComparison[path+"/"+key]; previous != "" {
+		return previous
+	}
 	if previous := runDeliveryComparison[path+"/"+key]; previous != "" {
 		return previous
 	}
