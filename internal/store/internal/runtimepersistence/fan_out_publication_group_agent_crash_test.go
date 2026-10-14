@@ -260,10 +260,21 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 	if _, err := live.MarkProbesSettled(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := live.AdmitExecution(ctx); err != nil {
+	admitted, err := live.AdmitExecution(ctx)
+	if err != nil {
 		t.Fatal(err)
 	}
-	managed, err := managedexecution.New(managedexecution.KindNormalRuntime, request.RuntimeInstanceID, 1, "", "publication-group-agent", fact.BundleHash(), nil)
+	deliveryAuthority, err = deliverylifecycle.NewNormalExecutionAuthority(fact, admitted.GrantID, admitted.RuntimeGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := selected.ActivateDeliveryAuthority(ctx, deliveryAuthority); err != nil {
+		t.Fatal(err)
+	}
+	if err := eventBus.SetDeliveryAuthority(deliveryAuthority); err != nil {
+		t.Fatal(err)
+	}
+	managed, err := managedexecution.New(managedexecution.KindNormalRuntime, admitted.GrantID, admitted.RuntimeGeneration, "", "publication-group-agent", fact.BundleHash(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,6 +290,18 @@ func runPublicationGroupAgentCrashChild(t *testing.T, mode string) {
 	construction.OccurredAt = time.Now().UTC()
 	if _, err := am.EnsureFlowInstance(ctx, construction); err != nil {
 		t.Fatalf("attach original constructed crash receiver: %v", err)
+	}
+	name, err := agentidentity.DeclaredName("item-worker", "swarm://item-worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := agentidentity.New(runID, name, agentidentity.RootRoute())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, found, err := fixture.store.(manager.AgentLifecycleStateReader).LoadAgentLifecycleState(ctx, identity)
+	if err != nil || !found || state.Phase != manager.AgentLifecycleRunning || state.RunMode != manager.AgentRunModeStandard || state.ProcessBinding.GenerationGrantID != deliveryAuthority.ExecutionID() || state.ProcessBinding.RuntimeGeneration != deliveryAuthority.Generation() {
+		t.Fatalf("actual crash receiver authority: found=%v phase=%s mode=%s grant=%s delivery=%s generation=%d/%d err=%v", found, state.Phase, state.RunMode, state.ProcessBinding.GenerationGrantID, deliveryAuthority.ExecutionID(), state.ProcessBinding.RuntimeGeneration, deliveryAuthority.Generation(), err)
 	}
 	eventBus.SetInterceptors(coordinator)
 	continuations, err := deliverycontinuation.New(selected, selected, deliveryAuthority, work, eventBus, func(_ context.Context, err error) { t.Errorf("agent continuation recovery: %v", err) })
@@ -432,13 +455,14 @@ func assertPublicationGroupAgentEffects(t *testing.T, ctx context.Context, fixtu
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantTargetRoute := events.RouteIdentity{FlowID: ".", FlowInstance: runID}
 	for ordinal, id := range ids {
 		view, err := reader.LoadOperatorEvent(ctx, id)
 		if err != nil || view.RunID != runID || view.ExecutionMode != executionmode.Mock || view.Payload["value"] != fmt.Sprintf("item-%03d", ordinal) || len(view.Deliveries) != 1 || view.NoDelivery != nil || len(view.DeadLetters) != 0 {
 			t.Fatalf("actual agent publication: %+v err=%v", view, err)
 		}
 		delivery := view.Deliveries[0]
-		if delivery.SubscriberType != "agent" || delivery.SubscriberID != "item-worker" || !delivery.Route.Recipient.IsAgent() || delivery.Route.AgentIdentity != wantIdentity || delivery.Target.Kind != "" || delivery.Target.EntityID != "" || delivery.Failure != nil {
+		if delivery.SubscriberType != "agent" || delivery.SubscriberID != "item-worker" || !delivery.Route.Recipient.IsAgent() || delivery.Route.AgentIdentity != wantIdentity || !delivery.Route.Target.EntitylessReceiver() || delivery.Route.Target.Route() != wantTargetRoute || delivery.Target.Kind != "entityless_receiver" || delivery.Target.FlowID != "." || delivery.Target.FlowInstance != runID || delivery.Target.EntityID != "" || delivery.Failure != nil {
 			t.Fatalf("missing real exact managed agent delivery: %+v", delivery)
 		}
 		if recovered && (delivery.Status != "delivered" || !delivery.Terminal) {
