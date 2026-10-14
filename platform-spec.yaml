@@ -3931,6 +3931,8 @@ handler_specification:
       sources; validators, authoring views and execution diagnostics consume it without reconstructing lowered CEL.
       Else/default displays else, and predicate-less/value-only rows retain position and admitted kind without invented
       else semantics. Presentation is neither declaration identity nor activity naming authority.
+      Handler rules and ordinary completion rows cannot author id or description; both fields fail
+      current-vocabulary admission on presence. Positional identities are retained separately from display text.
   short_circuits:
     guard_fail: If guard fails, handler stops. on_fail action executes (reject/kill/discard/escalate). No further steps.
   handler_fields:
@@ -4086,8 +4088,9 @@ handler_specification:
         advances_to: string — target state
         terminate: Optional boolean transition cancellation intent; requires advances_to on this entry.
         emit: string or object — event to emit, optionally with local fields payload construction
-      _note: MUST be a YAML list (ordered), not a map (unordered). Each entry has a condition evaluated as CEL. First matching
-        condition executes.
+      _note: MUST be a YAML list (ordered), not a map (unordered). An authored condition is evaluated as CEL; first match
+        wins. id and description fail on presence. Activity is not a completion-row field. This spelling cut does not
+        introduce a predicate requirement or change admitted predicate-less rows.
     advances_to:
       field: advances_to
       type: string
@@ -4343,7 +4346,7 @@ handler_specification:
           event rolls back both emitted events and all same-handler state changes.
     rules:
       field: rules
-      type: Ordered list or keyed map lowered to ordered rules. Every row receives a canonical DeclarationIdentity from its semantic position; optional id remains display text.
+      type: Ordered YAML list of rule mappings only. Every row receives a canonical DeclarationIdentity from its semantic position; authored row names do not exist.
       purpose: Type-based routing and policy-sheet selection. Match rule conditions or typed selection rows over the
         rule-condition handler context; common dispatch reads payload fields, but selection is not payload-only.
       rule_fields:
@@ -4396,17 +4399,26 @@ handler_specification:
         advances_to: string — optional state change
         terminate: Optional boolean transition cancellation intent; requires advances_to on this row.
         data_accumulation: object — optional data write (same format as handler-level)
-        description: string — human-readable note
+        activity: object — selected rule activity using the shared activity contract; a non-empty explicit activity.id is required, independently of predicate text and row position.
       admission_rule: >-
         Selection rules admit when for a predicate and else/default for a default row. Unknown fields fail
         current-vocabulary admission on authored presence, including null, empty, alias and merge forms.
+        Keyed maps and singleton mappings fail before row admission. id and description are unknown row fields.
+        Admission never derives activity identity from a row label or row index. Display text comes from the one
+        admitted predicate/context/position projection, never from authored names or re-parsed lowered CEL.
         Ordinary on_complete.condition remains its distinct ordered completion-rule predicate; join outcomes
-        and timeouts reject both condition and when. No removed-spelling teaching table exists.
+        and timeouts reject both condition and when and retain their singular outcome mappings.
+        This slice does not retire default: true, predicate-less rows, or require a no-op else row.
+      shape_diagnostic: >-
+        DIALECT-RULES-ORDER names the source and rules slot and teaches an ordered list evaluated top to bottom:
+        rules: [{when: payload.kind == 'a', emit: routed.a}, {else: true}].
+        A mapping keyed by rule name, a single row without the list marker, or an authored row id is not accepted;
+        rows are identified by position. Unknown row fields use the current declared vocabulary.
       policy_sheet_selection_rows:
         scope: Selection rows are `when`, `case`, `range`, and explicit else/default rows. Lookup value rows are specified
           under `policy_sheet_value_rows`; validate value rows are governed by policy_validation_contracts. Arithmetic/expression
           derivation and temporal/join/loop/collection/schedule rows are separate future gates.
-        stable_identity: Typed policy-sheet rows use canonical DeclarationIdentity. Moving a row is delete plus add; optional id is non-authoritative display text.
+        stable_identity: Typed policy-sheet rows use canonical DeclarationIdentity. Moving a row is delete plus add; display text is derived from its admitted predicate and position, never an authored id.
         lowering: Accepted selection rows lower before runtime execution into ordinary selected `HandlerRuleEntry` branches.
           Runtime must not contain a second switch/table/range interpreter.
         default_requirement: A rules block containing typed policy-sheet selection rows must include an authored
@@ -4440,7 +4452,7 @@ handler_specification:
           Closed domains may omit `default: fail` only when boot verification proves exhaustive table coverage. Any open or
           unknown domain component requires `default: fail`.
         diagnostics: >-
-          A `default: fail` miss is deterministic no-retry failure with row ID and unmatched tuple in diagnostics, distinct from
+          A `default: fail` miss is deterministic no-retry failure with derived row display and unmatched tuple in diagnostics, distinct from
           validation failures.
         validation_rows: >-
           validate rows reference scoped rules.yaml machine sets, map exactly the declared typed inputs, evaluate only Slice B
@@ -10013,8 +10025,8 @@ engine:
     - id: dialect_compliance
       severity: error
       scope: per-node
-      trigger: A handler uses on_complete as a map instead of an ordered list. Or a rules mapping is structurally ambiguous
-        between one singleton rule and keyed rule rows. Or a handler uses both on_complete and rules on the same handler. Or
+      trigger: A handler uses on_complete or rules as a map instead of an ordered list, or a row authors id or description.
+        Or a handler uses both on_complete and rules on the same handler. Or
         uses both accumulate and handler-level on_complete. Handler create_entity is independently retired on presence.
       when: boot-only
     - id: single_node_per_event

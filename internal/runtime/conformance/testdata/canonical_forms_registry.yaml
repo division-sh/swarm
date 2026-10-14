@@ -394,19 +394,19 @@ rows:
     corpus: {handlers: 31, duplicate_action_option_uses: 0}
 
   - id: handler.rules_shape
-    ruled: mechanical-ratified
-    paths: "handler.rules, handler.on_complete, join.on_complete, join.timeout"
-    owners: [projectNodeRuleRowsValue, projectNodeRuleValue]
+    ruled: user-ratified-2287-ordered-unnamed-rows
+    paths: "handler.rules, handler.on_complete"
+    owners: [projectNodeRuleRowsValue, projectNodeRuleEntryValue, HandlerRuleEntry.DisplayLabel]
     information:
-      fact: [stable row identity when trace-addressable]
+      fact: [positional DeclarationIdentity]
       choice: [ordered row behavior]
-      annotation: [description]
+      derived_projection: [predicate_context_position_display]
     spelling:
       canonical_candidate: ordered_sequence_of_mappings
-      retired_duplicates: [scalar_description, single_rule_mapping, keyed_rule_mapping]
+      retired_duplicates: [scalar_description, single_rule_mapping, keyed_rule_mapping, authored_row_id, authored_row_description]
       distinct_overrides: []
     corpus: {rules_sequences: 1, rules_mappings: 0, scalar_rows: 0}
-    action_retirement: "#2307: all rule/completion/join rows reject retired action fields; this does not retire keyed/singleton rule shapes or reserve their display labels."
+    action_retirement: "#2307 retired action fields. USER/LEAD #2287 ruling6148375122 additionally requires ordered unnamed handler/completion rows; ids/descriptions fail on presence. Ordinary completion keeps condition; joins keep singular outcomes and their own closed fields. Rule activities require explicit activity.id, with no display/index fallback. default:true, predicate-less rows and mandatory no-op else remain separately banked. Historical corpus counts are immutable."
 
   - id: handler.policy_selection_rows
     ruled: mechanical-ratified
@@ -414,13 +414,13 @@ rows:
     owner: projectNodeRuleRowsValue + projectNodePolicyRowValue
     information:
       choice: [predicate, case/range/lookup/validation/module selection, default branch]
-      fact: [stable row id, module and validation references]
-      annotation: [description]
+      fact: [positional DeclarationIdentity, module and validation references]
+      derived_projection: [predicate_context_position_display]
     spelling:
       canonical_candidate: typed_policy_sheet_rows_with_when_only_predicate
       retired_duplicates: [condition_under_handler_rules, else_default, selector_one_item_selectors, scalar_one_item_equals]
       distinct_overrides: [multi_selector_case, literal_and_typed_lookup_values]
-    f2_resolution: "handler.rules.condition rejects at context-aware admission; when retains PolicyRow metadata and typed-row validation; on_complete.condition remains distinct"
+    f2_resolution: "handler.rules.condition rejects at context-aware admission; when retains PolicyRow metadata and typed-row validation; on_complete.condition remains distinct. #2287 removes authored row id/description and binds internal lookup/validate/module RowID diagnostics to the shared admitted display. else/default and other row-shape census candidates are not retired by this slice."
     corpus: {condition: 0, when: 1, else: 1, default: 0}
 
   - id: handler.emit_action_activity
