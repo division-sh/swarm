@@ -26,7 +26,7 @@ func validatePolicySheetComputeModuleInto(into string) error {
 func validatePolicySheetRows(rules []HandlerRuleEntry, context handlerRuleDecodeContext) error {
 	hasPolicyRows := false
 	for _, rule := range rules {
-		if rule.PolicyRow.Kind != "" {
+		if rule.PolicyRow.Kind != "" && rule.PolicyRow.Kind != PolicySheetRowKindWhen && rule.PolicyRow.Kind != PolicySheetRowKindDefault {
 			hasPolicyRows = true
 			break
 		}
@@ -42,7 +42,7 @@ func validatePolicySheetRows(rules []HandlerRuleEntry, context handlerRuleDecode
 	caseKeys := map[string]int{}
 	rangesByValue := map[string][]policySheetRangeForValidation{}
 	for idx, rule := range rules {
-		if rule.PolicyRow.Kind == PolicySheetRowKindDefault {
+		if idx == len(rules)-1 && rule.PolicyRow.Kind == PolicySheetRowKindDefault && strings.TrimSpace(rule.Condition) == "" {
 			hasDefault = true
 		}
 		if rule.PolicyRow.Kind == PolicySheetRowKindWhen || rule.PolicyRow.Kind == PolicySheetRowKindCase || rule.PolicyRow.Kind == PolicySheetRowKindRange {
@@ -66,7 +66,7 @@ func validatePolicySheetRows(rules []HandlerRuleEntry, context handlerRuleDecode
 		}
 	}
 	if hasSelectionRow && !hasDefault {
-		return fmt.Errorf("POLICY-SHEET-ROW: rules with typed policy-sheet rows require an else/default row")
+		return fmt.Errorf("POLICY-SHEET-ROW: rules with typed policy-sheet selection rows must end with a predicate-less default row")
 	}
 	for value, ranges := range rangesByValue {
 		if err := validatePolicySheetRanges(value, ranges); err != nil {

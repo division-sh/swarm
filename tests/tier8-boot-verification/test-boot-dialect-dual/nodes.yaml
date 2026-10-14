@@ -9,5 +9,4 @@ dual-dialect-node:
           advances_to: done
       rules:
         - when: payload.score >= 70
-        - else: true
       advances_to: done

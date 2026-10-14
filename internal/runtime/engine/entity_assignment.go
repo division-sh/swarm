@@ -589,7 +589,7 @@ func handlerRuleSelectable(rule c.HandlerRuleEntry) bool {
 
 func handlerRuleUnconditional(rule c.HandlerRuleEntry) bool {
 	condition := strings.TrimSpace(rule.Condition)
-	return condition == "" || strings.EqualFold(condition, "else")
+	return condition == ""
 }
 
 func entityAssignmentGuardAllows(handler c.SystemNodeEventHandler, stage string) bool {

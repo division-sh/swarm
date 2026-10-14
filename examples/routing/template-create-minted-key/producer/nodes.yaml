@@ -11,4 +11,3 @@ producer-node:
     validation.started:
       rules:
         - when: payload.validation_case_id != ""
-        - else: true

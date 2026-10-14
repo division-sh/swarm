@@ -243,10 +243,10 @@ func validateHandlerRuleEmitTemplateSpecialization(handler SystemNodeEventHandle
 	if err := validateEmitTemplateFields("handler.emit.fields", handler.Emit.Fields); err != nil {
 		return err
 	}
-	hasElse := false
+	hasDefault := false
 	for idx, rule := range handler.Rules {
-		if strings.TrimSpace(rule.Condition) == "" || strings.EqualFold(strings.TrimSpace(rule.Condition), "else") {
-			hasElse = true
+		if idx == len(handler.Rules)-1 && strings.TrimSpace(rule.Condition) == "" {
+			hasDefault = true
 		}
 		if rule.FanOut != nil {
 			return fmt.Errorf("UNSUPPORTED-EMIT: handler emit template specialization is not supported with rules[%d].fan_out", idx)
@@ -276,8 +276,8 @@ func validateHandlerRuleEmitTemplateSpecialization(handler SystemNodeEventHandle
 			}
 		}
 	}
-	if !hasElse {
-		return fmt.Errorf("INVALID-EMIT: handler emit template specialization requires an else rule")
+	if !hasDefault {
+		return fmt.Errorf("INVALID-EMIT: handler emit template specialization must end with a predicate-less default row")
 	}
 	return nil
 }
