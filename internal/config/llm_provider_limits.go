@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 )
 
@@ -44,42 +45,29 @@ func (c *Config) validateLLMProviderLimits() error {
 		if _, err := llmselection.ResolveActiveBackend(trimmedProfile); err != nil {
 			return fmt.Errorf("llm.provider_limits.%s: %w", trimmedProfile, err)
 		}
-		if err := validateLLMProviderLimitPolicy("llm.provider_limits."+trimmedProfile, c.LLM.ProviderLimits[profile], true); err != nil {
+		if err := validateLLMProviderLimitPolicy("llm.provider_limits."+trimmedProfile, c.LLM.ProviderLimits[profile]); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateLLMProviderLimitPolicy(location string, policy LLMProviderLimitPolicy, allowModels bool) error {
-	if _, _, err := policy.ParseRateLimit(); err != nil {
-		return fmt.Errorf("%s: %w", location, err)
-	}
-	if _, _, err := policy.ParseConcurrencyLimit(); err != nil {
-		return fmt.Errorf("%s: %w", location, err)
-	}
-	if len(policy.Models) == 0 {
-		return nil
-	}
-	if !allowModels {
-		return fmt.Errorf("%s.models: nested model limits are not supported", location)
-	}
-	models := make([]string, 0, len(policy.Models))
-	for model := range policy.Models {
-		models = append(models, model)
-	}
-	sort.Strings(models)
-	for _, model := range models {
-		trimmedModel := strings.TrimSpace(model)
-		if trimmedModel == "" {
-			return fmt.Errorf("%s.models: model key is required", location)
+func validateLLMProviderLimitPolicy(location string, policy LLMProviderLimitPolicy) error {
+	for _, retired := range []struct {
+		key     string
+		present bool
+	}{
+		{"rate_limit", policy.RateLimit != ""},
+		{"rate_limit_max_wait", policy.RateLimitMaxWait != ""},
+		{"max_concurrency_max_wait", policy.MaxConcurrencyMaxWait != ""},
+		{"models", policy.Models != nil},
+	} {
+		if retired.present {
+			return runtimecontracts.NewUndefinedFieldDiagnostic(location, retired.key, map[string]struct{}{"max_concurrency": {}})
 		}
-		if model != trimmedModel {
-			return fmt.Errorf("%s.models.%q: model key must not contain leading or trailing whitespace", location, model)
-		}
-		if err := validateLLMProviderLimitPolicy(location+".models."+trimmedModel, policy.Models[model], false); err != nil {
-			return err
-		}
+	}
+	if policy.MaxConcurrency < 0 {
+		return fmt.Errorf("%s.max_concurrency must be a positive integer", location)
 	}
 	return nil
 }
@@ -121,7 +109,7 @@ func (p LLMProviderLimitPolicy) ParseConcurrencyLimit() (LLMProviderConcurrencyL
 		return LLMProviderConcurrencyLimit{}, false, fmt.Errorf("max_concurrency must be a positive integer when max_concurrency_max_wait is present")
 	}
 	if !maxWaitSet {
-		return LLMProviderConcurrencyLimit{}, false, fmt.Errorf("max_concurrency requires max_concurrency_max_wait")
+		return LLMProviderConcurrencyLimit{Enabled: true, Limit: p.MaxConcurrency}, true, nil
 	}
 	wait, err := parseLLMProviderDuration(p.MaxConcurrencyMaxWait, true)
 	if err != nil {

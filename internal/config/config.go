@@ -216,11 +216,25 @@ type LLMSessionConfig struct {
 }
 
 type LLMProviderLimitPolicy struct {
-	RateLimit             string                            `yaml:"rate_limit"`
-	RateLimitMaxWait      string                            `yaml:"rate_limit_max_wait"`
-	MaxConcurrency        int                               `yaml:"max_concurrency"`
-	MaxConcurrencyMaxWait string                            `yaml:"max_concurrency_max_wait"`
-	Models                map[string]LLMProviderLimitPolicy `yaml:"models"`
+	MaxConcurrency int `yaml:"max_concurrency"`
+	// The old controller's Go-only inputs remain until its gated S6 retirement.
+	RateLimit             string                            `yaml:"-"`
+	RateLimitMaxWait      string                            `yaml:"-"`
+	MaxConcurrencyMaxWait string                            `yaml:"-"`
+	Models                map[string]LLMProviderLimitPolicy `yaml:"-"`
+}
+
+func (p *LLMProviderLimitPolicy) UnmarshalYAML(value *yaml.Node) error {
+	if err := validateConfigSource(yamlsource.ValueFromNode(value), reflect.TypeFor[LLMProviderLimitPolicy](), "llm.provider_limits"); err != nil {
+		return err
+	}
+	type raw LLMProviderLimitPolicy
+	var decoded raw
+	if err := value.Decode(&decoded); err != nil {
+		return err
+	}
+	*p = LLMProviderLimitPolicy(decoded)
+	return validateLLMProviderLimitPolicy("llm.provider_limits", *p)
 }
 
 type ClaudeCLIConfig struct {
