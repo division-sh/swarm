@@ -422,9 +422,10 @@ func InsertRevisionedExistingRunRootEventForTest(ctx context.Context, selected a
 	eventType events.EventType, producer events.ProducerIdentity, payload []byte,
 	envelope events.EventEnvelope, createdAt time.Time,
 ) (events.Event, error) {
+	var rejected events.Event
 	dialect, err := eventFixtureDialectForTest(selected)
 	if err != nil {
-		return events.Event{}, err
+		return rejected, err
 	}
 	var event events.Event
 	err = runEventFixtureMutationForTest(ctx, selected, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
@@ -433,7 +434,7 @@ func InsertRevisionedExistingRunRootEventForTest(ctx context.Context, selected a
 		return err
 	})
 	if err != nil {
-		return events.Event{}, err
+		return rejected, err
 	}
 	return event, nil
 }
