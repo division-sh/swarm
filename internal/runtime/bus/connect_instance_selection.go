@@ -34,12 +34,13 @@ type connectInstanceSelector struct {
 
 type connectInstanceSelection struct {
 	pipeline.FlowInstanceSelection
-	KeyDigest     string
-	KeyMaterial   []contracts.TemplateInstanceKeyValue
-	SourceEventID string
-	receiver      pinrouting.ConnectRoutePlanEndpoint
-	mode          contracts.FlowInputResolutionMode
-	identity      flowidentity.Instance
+	KeyDigest                string
+	KeyMaterial              []contracts.TemplateInstanceKeyValue
+	SourceEventID            string
+	receiver                 pinrouting.ConnectRoutePlanEndpoint
+	mode                     contracts.FlowInputResolutionMode
+	identity                 flowidentity.Instance
+	unavailableReceiverError error
 }
 
 func (s connectInstanceSelection) Empty() bool               { return s.receiver.Readback().FlowID == "" }
@@ -128,7 +129,9 @@ func (o connectInstanceSelector) Materialize(ctx context.Context, event events.E
 	})
 	if err != nil {
 		if _, unavailable := selected.UnavailableReceiver(); unavailable {
-			return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureLifecycleUnavailable}, connectInstanceSelection{}, true, nil
+			return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureLifecycleUnavailable}, connectInstanceSelection{
+				FlowInstanceSelection: selected, SourceEventID: event.ID(), unavailableReceiverError: err,
+			}, true, nil
 		}
 		if isolatedInstanceLookupMiss(err) {
 			return pinrouting.ConnectRoutePlanMaterialization{Failure: pinrouting.ConnectFailureTargetUnresolved}, connectInstanceSelection{}, true, nil

@@ -30,6 +30,14 @@ type fanOutInstancePlanningGroup interface {
 	WithFlowInstancePlanningSnapshot(context.Context, semanticview.Source, func(context.Context, runtimepipeline.FlowInstanceIndexReader) error) error
 }
 
+// This binds preparation to its privately admitted member. RecordPrepared and
+// the selected owner's Seal still authenticate membership before any commit.
+func (m *fanOutPublicationMember) ownsPreparation(event events.Event, claim *pipelinePublicationClaim) bool {
+	return m != nil && m.group != nil && m.context != nil && claim != nil &&
+		m.claim == claim.claim && m.claim.Purpose() == runtimepipelineobligation.PurposePublication && m.claim.EventID() == event.ID() &&
+		m.admitted.ID() == event.ID() && m.admitted.Event().RunID() == event.RunID()
+}
+
 func (eb *EventBus) PrepareFanOutPublications(ctx context.Context, group runtimepipelineobligation.PublicationGroup, requests []runtimepipeline.FanOutPublicationRequest) ([]runtimepipeline.FanOutPublicationPreparation, error) {
 	if group == nil {
 		return nil, errors.New("fan-out publication group is required")

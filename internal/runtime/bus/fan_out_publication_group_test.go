@@ -61,6 +61,60 @@ func (p *publicationSettlementProbe) ReadPublicationSettlement(_ context.Context
 }
 func (*publicationSettlementProbe) Close(context.Context) error { return nil }
 
+func TestUnavailableMemberPreparationRequiresExactPrivateClaim(t *testing.T) {
+	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.ready", "test", "", []byte(`{}`), 0,
+		busInternalTestRunID, events.EventEnvelope{}, time.Now().UTC())
+	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer := pipelineobligation.NewClaimIssuer()
+	claim, err := issuer.Issue(event.ID(), pipelineobligation.PurposePublication)
+	if err != nil {
+		t.Fatal(err)
+	}
+	member := fanOutPublicationMember{group: &publicationSettlementProbe{}, context: context.Background(), admitted: admitted, claim: claim}
+	publication := &pipelinePublicationClaim{eventID: event.ID(), claim: claim}
+	if !member.ownsPreparation(event, publication) {
+		t.Fatal("exact private preparation binding refused")
+	}
+	if (*fanOutPublicationMember)(nil).ownsPreparation(event, publication) {
+		t.Fatal("ordinary publication borrowed fan-out preparation")
+	}
+	for _, test := range []struct {
+		name   string
+		change func(*fanOutPublicationMember)
+	}{
+		{"missing group", func(m *fanOutPublicationMember) { m.group = nil }},
+		{"missing context", func(m *fanOutPublicationMember) { m.context = nil }},
+		{"missing admitted event", func(m *fanOutPublicationMember) { m.admitted = events.AdmittedEvent{} }},
+		{"different opaque claim", func(m *fanOutPublicationMember) {
+			m.claim, err = issuer.Issue(event.ID(), pipelineobligation.PurposePublication)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"wrong purpose", func(m *fanOutPublicationMember) {
+			m.claim, err = issuer.Issue(event.ID(), pipelineobligation.PurposeRecovery)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			candidate := member
+			test.change(&candidate)
+			current := *publication
+			if test.name == "wrong purpose" {
+				current.claim = candidate.claim
+			}
+			if candidate.ownsPreparation(event, &current) {
+				t.Fatal("unbound preparation permitted")
+			}
+		})
+	}
+}
+
 func TestNodeRouteCoverageDoesNotConflateAgentAndNodeIDs(t *testing.T) {
 	node := events.MustNodeDeliveryRecipient(testRootNode(t, "handoff"))
 	routes := []events.DeliveryRoute{{Recipient: node}}

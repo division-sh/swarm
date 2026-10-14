@@ -463,6 +463,7 @@ type eventBusCommitPublishPlan struct {
 	outputConsumers       *runtimepinrouting.OutputConsumerResolver
 	stageFeedback         *runtimepipeline.WorkflowPublicationStageRequest
 	runProposal           runtimepipeline.FlowInstanceRunProposal
+	fanOutMember          *fanOutPublicationMember
 }
 
 func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublishPlan) (PreparedPublish, bool, error) {
@@ -717,6 +718,10 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		return releaseFailure(err)
 	}
 	routePlan := routes.plan
+	if routePlan.unavailableReceiverError != nil && !routePlan.authorizesTerminalTargetDiagnostic(evt) &&
+		!publication.fanOutMember.ownsPreparation(evt, claim) {
+		return releaseFailure(routePlan.unavailableReceiverError)
+	}
 	if eb.semanticSource != nil && !explicitRootPublicationTarget(evt).Empty() && len(routePlan.DeliveryRoutes()) == 0 && !routePlan.authorizesTerminalTargetDiagnostic(evt) {
 		return releaseFailure(fmt.Errorf("explicit root target %s has no selected root-local or compiled-connection delivery", evt.TargetRoute().FlowInstance))
 	}

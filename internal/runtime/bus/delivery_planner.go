@@ -452,6 +452,7 @@ func routePlanFromConnectRouteDispatch(evt events.Event, connectPlan connectRout
 	routePlan.ActivationPlans = append([]runtimepipeline.FlowInstanceActivationPlan(nil), connectPlan.ActivationPlans...)
 	routePlan.ReplyCreations = append([]runtimereplycontext.Record(nil), connectPlan.ReplyCreations...)
 	routePlan.ReplyClaims = append([]runtimereplycontext.ClaimCommand(nil), connectPlan.ReplyClaims...)
+	routePlan.unavailableReceiverError = connectPlan.unavailableReceiverError
 	return routePlan.Normalized()
 }
 
