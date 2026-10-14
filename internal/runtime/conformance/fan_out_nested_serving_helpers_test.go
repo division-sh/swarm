@@ -172,11 +172,7 @@ type nestedServingTurn struct {
 	carriers    int
 }
 
-func (turn *nestedServingTurn) LoadFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim) (pipeline.FanOutEvaluationInput, error) {
-	input, err := turn.FanOutObligationOwner.LoadFanOutEvaluation(ctx, claim)
-	if err != nil {
-		return input, err
-	}
+func (turn *nestedServingTurn) observeLoadedEvaluation(input pipeline.FanOutEvaluationInput) {
 	turn.receipt.ParentEvent, turn.receipt.LoadedAt = input.Trigger.ID(), time.Now()
 	p := turn.probe
 	p.mu.Lock()
@@ -184,7 +180,6 @@ func (turn *nestedServingTurn) LoadFanOutEvaluation(ctx context.Context, claim f
 	turn.loadedItems = len(input.Items)
 	p.counts.PeakLoadedItems = max(p.counts.PeakLoadedItems, p.counts.LoadedItems)
 	p.mu.Unlock()
-	return input, nil
 }
 
 func (turn *nestedServingTurn) CommitFanOutChunk(ctx context.Context, command pipeline.FanOutChunkCommand) (pipeline.CommittedFanOutChunk, error) {
@@ -227,11 +222,14 @@ func (turn *nestedServingTurn) CommitFanOutChunk(ctx context.Context, command pi
 	return committed, nil
 }
 
-func (turn *nestedServingTurn) BeginFanOutPublicationGroup(ctx context.Context, claim fanoutobligation.Claim) (pipelineobligation.PublicationGroup, error) {
-	turn.receipt.GroupAt = time.Now()
-	group, err := turn.FanOutObligationOwner.BeginFanOutPublicationGroup(ctx, claim)
+func (turn *nestedServingTurn) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(pipeline.FanOutEvaluationInput) error) (pipeline.FanOutEvaluationInput, pipelineobligation.PublicationGroup, error) {
+	input, group, err := turn.FanOutObligationOwner.BeginFanOutEvaluation(ctx, claim, func(input pipeline.FanOutEvaluationInput) error {
+		turn.observeLoadedEvaluation(input)
+		turn.receipt.GroupAt = time.Now()
+		return validate(input)
+	})
 	turn.receipt.GroupReturnedAt = time.Now()
-	return group, err
+	return input, group, err
 }
 
 func newNestedServingRuntime(t *testing.T, backend string, source semanticview.Source, gate *notifyAllChildrenAgentGate, probe *nestedServingProbe, heldChild ...*nestedChildHandlerGate) (notifyAllChildrenRuntime, *sql.DB) {

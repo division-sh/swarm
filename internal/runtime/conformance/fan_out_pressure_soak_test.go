@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
@@ -379,10 +378,6 @@ func (o *pressureSoakOwner) ClaimFanOutIntent(ctx context.Context, req pipeline.
 		o.timing.Claim = claim
 	}
 	return i, claim, found, err
-}
-
-func (o *pressureSoakOwner) BeginFanOutPublicationGroup(ctx context.Context, claim fanoutobligation.Claim) (pipelineobligation.PublicationGroup, error) {
-	return o.FanOutObligationOwner.BeginFanOutPublicationGroup(ctx, claim)
 }
 
 func (o *pressureSoakOwner) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) (pipeline.FanOutClaimSettlement, error) {

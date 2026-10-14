@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
@@ -108,25 +109,15 @@ type publicationGroup struct {
 }
 
 func (s *fanOutPostgresOwner) BeginFanOutPublicationGroup(ctx context.Context, claim fanoutobligation.Claim) (pipelineobligation.PublicationGroup, error) {
-	g := &publicationGroup{postgres: s.PipelinePostgresOwner, admission: s.admission, grant: s.grant, registry: &s.publicationGroups, claim: claim}
-	load := func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		if s.grant.SelectedFork != nil {
-			g.intent, err = admitAndLoadSelectedFanOutClaim(ctx, tx, s.admission, s.grant, true, claim, time.Now)
-		} else {
-			g.intent, err = observeFanOutClaim(ctx, tx, s.admission, s.grant, true, claim, time.Now)
-		}
-		return err
+	intent, err := s.loadFanOutEvaluationIntent(ctx, claim)
+	if err != nil {
+		return nil, err
 	}
-	var loadErr error
-	if s.grant.SelectedFork != nil {
-		loadErr = s.backend.RunTransaction(ctx, load)
-	} else {
-		loadErr = s.backend.RunReadTransaction(ctx, load)
-	}
-	if loadErr != nil {
-		return nil, loadErr
-	}
+	return s.openFanOutPublicationGroup(ctx, claim, intent)
+}
+
+func (s *fanOutPostgresOwner) openFanOutPublicationGroup(ctx context.Context, claim fanoutobligation.Claim, intent fanoutobligation.Intent) (pipelineobligation.PublicationGroup, error) {
+	g := &publicationGroup{postgres: s.PipelinePostgresOwner, admission: s.admission, grant: s.grant, registry: &s.publicationGroups, claim: claim, intent: intent}
 	var err error
 	g.session, g.releaseSession, err = s.reservePostgresPipelineClaimConnection(ctx)
 	if err != nil {
@@ -144,25 +135,15 @@ func (s *fanOutPostgresOwner) BeginFanOutPublicationGroup(ctx context.Context, c
 }
 
 func (s *fanOutSQLiteOwner) BeginFanOutPublicationGroup(ctx context.Context, claim fanoutobligation.Claim) (pipelineobligation.PublicationGroup, error) {
-	g := &publicationGroup{sqlite: s.PipelineSQLiteOwner, admission: s.admission, grant: s.grant, registry: &s.publicationGroups, claim: claim}
-	load := func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		if s.grant.SelectedFork != nil {
-			g.intent, err = admitAndLoadSelectedFanOutClaim(ctx, tx, s.admission, s.grant, false, claim, s.now)
-		} else {
-			g.intent, err = observeFanOutClaim(ctx, tx, s.admission, s.grant, false, claim, s.now)
-		}
-		return err
+	intent, err := s.loadFanOutEvaluationIntent(ctx, claim)
+	if err != nil {
+		return nil, err
 	}
-	var loadErr error
-	if s.grant.SelectedFork != nil {
-		loadErr = s.backend.RunTransaction(ctx, "admit selected fan-out publication group", load)
-	} else {
-		loadErr = s.backend.RunReadTransaction(ctx, load)
-	}
-	if loadErr != nil {
-		return nil, loadErr
-	}
+	return s.openFanOutPublicationGroup(ctx, claim, intent)
+}
+
+func (s *fanOutSQLiteOwner) openFanOutPublicationGroup(ctx context.Context, claim fanoutobligation.Claim, intent fanoutobligation.Intent) (pipelineobligation.PublicationGroup, error) {
+	g := &publicationGroup{sqlite: s.PipelineSQLiteOwner, admission: s.admission, grant: s.grant, registry: &s.publicationGroups, claim: claim, intent: intent}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -170,6 +151,57 @@ func (s *fanOutSQLiteOwner) BeginFanOutPublicationGroup(ctx context.Context, cla
 		return nil, err
 	}
 	return g, nil
+}
+
+func (s *fanOutPostgresOwner) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(runtimepipeline.FanOutEvaluationInput) error) (runtimepipeline.FanOutEvaluationInput, pipelineobligation.PublicationGroup, error) {
+	intent, err := s.loadFanOutEvaluationIntent(ctx, claim)
+	if err != nil {
+		return runtimepipeline.FanOutEvaluationInput{}, nil, &runtimepipeline.FanOutEvaluationLoadError{Cause: err}
+	}
+	input, err := loadFanOutEvaluation(ctx, s.backend.ConstructionHandle(), true, s.resourceData, intent)
+	if err != nil {
+		return input, nil, &runtimepipeline.FanOutEvaluationLoadError{Cause: err}
+	}
+	if err := validateFanOutEvaluationInput(input, validate); err != nil {
+		return input, nil, &runtimepipeline.FanOutEvaluationLoadError{Cause: err, Stage: "validate_evaluation"}
+	}
+	if err := ctx.Err(); err != nil {
+		return input, nil, err
+	}
+	if err := intent.AdmitClaim(claim, time.Now().UTC()); err != nil {
+		return input, nil, err
+	}
+	group, err := s.openFanOutPublicationGroup(ctx, claim, intent)
+	return input, group, err
+}
+
+func (s *fanOutSQLiteOwner) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(runtimepipeline.FanOutEvaluationInput) error) (runtimepipeline.FanOutEvaluationInput, pipelineobligation.PublicationGroup, error) {
+	intent, err := s.loadFanOutEvaluationIntent(ctx, claim)
+	if err != nil {
+		return runtimepipeline.FanOutEvaluationInput{}, nil, &runtimepipeline.FanOutEvaluationLoadError{Cause: err}
+	}
+	input, err := loadFanOutEvaluation(ctx, s.backend.ConstructionHandle(), false, s.resourceData, intent)
+	if err != nil {
+		return input, nil, &runtimepipeline.FanOutEvaluationLoadError{Cause: err}
+	}
+	if err := validateFanOutEvaluationInput(input, validate); err != nil {
+		return input, nil, &runtimepipeline.FanOutEvaluationLoadError{Cause: err, Stage: "validate_evaluation"}
+	}
+	if err := ctx.Err(); err != nil {
+		return input, nil, err
+	}
+	if err := intent.AdmitClaim(claim, s.now().UTC()); err != nil {
+		return input, nil, err
+	}
+	group, err := s.openFanOutPublicationGroup(ctx, claim, intent)
+	return input, group, err
+}
+
+func validateFanOutEvaluationInput(input runtimepipeline.FanOutEvaluationInput, validate func(runtimepipeline.FanOutEvaluationInput) error) error {
+	if validate == nil {
+		return errors.New("fan-out evaluation requires its caller validation")
+	}
+	return validate(input)
 }
 
 func (g *publicationGroup) initialize() error {
@@ -818,6 +850,12 @@ func (g *publicationGroup) candidatesAndClock() (completionCandidateWriter, func
 var _ pipelineobligation.PublicationGroup = (*publicationGroup)(nil)
 
 // Ungranted private fixtures cannot open production publication authority.
+func (*PipelinePostgresOwner) BeginFanOutEvaluation(context.Context, fanoutobligation.Claim, func(runtimepipeline.FanOutEvaluationInput) error) (runtimepipeline.FanOutEvaluationInput, pipelineobligation.PublicationGroup, error) {
+	return runtimepipeline.FanOutEvaluationInput{}, nil, &runtimepipeline.FanOutEvaluationLoadError{Cause: errors.New("fan-out evaluation requires an exact granted owner")}
+}
+func (*PipelineSQLiteOwner) BeginFanOutEvaluation(context.Context, fanoutobligation.Claim, func(runtimepipeline.FanOutEvaluationInput) error) (runtimepipeline.FanOutEvaluationInput, pipelineobligation.PublicationGroup, error) {
+	return runtimepipeline.FanOutEvaluationInput{}, nil, &runtimepipeline.FanOutEvaluationLoadError{Cause: errors.New("fan-out evaluation requires an exact granted owner")}
+}
 func (*PipelinePostgresOwner) BeginFanOutPublicationGroup(context.Context, fanoutobligation.Claim) (pipelineobligation.PublicationGroup, error) {
 	return nil, errors.New("fan-out publication group requires an exact granted owner")
 }

@@ -300,6 +300,14 @@ func claimFanOutIntentRow(ctx context.Context, tx *sql.Tx, request runtimepipeli
 }
 
 func (s *fanOutPostgresOwner) LoadFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim) (runtimepipeline.FanOutEvaluationInput, error) {
+	intent, err := s.loadFanOutEvaluationIntent(ctx, claim)
+	if err != nil {
+		return runtimepipeline.FanOutEvaluationInput{}, err
+	}
+	return loadFanOutEvaluation(ctx, s.backend.ConstructionHandle(), true, s.resourceData, intent)
+}
+
+func (s *fanOutPostgresOwner) loadFanOutEvaluationIntent(ctx context.Context, claim fanoutobligation.Claim) (fanoutobligation.Intent, error) {
 	var intent fanoutobligation.Intent
 	load := func(ctx context.Context, tx *sql.Tx) error {
 		transactiontest.Mark(ctx, transactiontest.FanOutLoad)
@@ -318,12 +326,20 @@ func (s *fanOutPostgresOwner) LoadFanOutEvaluation(ctx context.Context, claim fa
 		err = s.backend.RunReadTransaction(ctx, load)
 	}
 	if err != nil {
-		return runtimepipeline.FanOutEvaluationInput{}, err
+		return fanoutobligation.Intent{}, err
 	}
-	return loadFanOutEvaluation(ctx, s.backend.ConstructionHandle(), true, s.resourceData, intent)
+	return intent, nil
 }
 
 func (s *fanOutSQLiteOwner) LoadFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim) (runtimepipeline.FanOutEvaluationInput, error) {
+	intent, err := s.loadFanOutEvaluationIntent(ctx, claim)
+	if err != nil {
+		return runtimepipeline.FanOutEvaluationInput{}, err
+	}
+	return loadFanOutEvaluation(ctx, s.backend.ConstructionHandle(), false, s.resourceData, intent)
+}
+
+func (s *fanOutSQLiteOwner) loadFanOutEvaluationIntent(ctx context.Context, claim fanoutobligation.Claim) (fanoutobligation.Intent, error) {
 	var intent fanoutobligation.Intent
 	load := func(ctx context.Context, tx *sql.Tx) error {
 		transactiontest.Mark(ctx, transactiontest.FanOutLoad)
@@ -342,9 +358,9 @@ func (s *fanOutSQLiteOwner) LoadFanOutEvaluation(ctx context.Context, claim fano
 		err = s.backend.RunReadTransaction(ctx, load)
 	}
 	if err != nil {
-		return runtimepipeline.FanOutEvaluationInput{}, err
+		return fanoutobligation.Intent{}, err
 	}
-	return loadFanOutEvaluation(ctx, s.backend.ConstructionHandle(), false, s.resourceData, intent)
+	return intent, nil
 }
 
 func admitAndLoadSelectedFanOutClaim(ctx context.Context, tx *sql.Tx, admission FanOutAdmission, grant startupownership.GrantEvidence, postgres bool, claim fanoutobligation.Claim, now func() time.Time) (fanoutobligation.Intent, error) {
