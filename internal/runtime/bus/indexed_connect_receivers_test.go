@@ -190,6 +190,73 @@ func TestMaterializedTargetProjectionUsesExactIndexScope(t *testing.T) {
 	}
 }
 
+func TestMaterializedTargetProjectionKeepsRuntimeTargetlessOutsideConstructionScope(t *testing.T) {
+	source := connectRoutePlanRootProducerSingletonSource(t)
+	ctx := constructionIndexContext(t, source)
+	event := eventtest.RuntimeControl(eventtest.UUID("runtime-targetless-index-event"), "mailbox.card_deferred", "", "", nil, 0,
+		busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	name, err := agentidentity.RuntimeName("independent-runtime", "runtime-targetless-index")
+	if err != nil {
+		t.Fatal(err)
+	}
+	route, err := agentidentity.PresentRoute("runtime-only", "worker", "runtime-only/worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor, err := agentidentity.New(event.RunID(), name, route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := &unscopedConnectIndexTestReader{}
+	bus := &EventBus{semanticSource: source, durable: DurableDependencies{Instances: reader}}
+	bus.rebuildRoutePlanners()
+	bus.deliveryPlanner.recipientPolicy.loadActiveAgentDescriptors = func(context.Context) (map[agentidentity.Identity]ActiveAgentDescriptor, bool, error) {
+		return map[agentidentity.Identity]ActiveAgentDescriptor{actor: {Identity: actor}}, true, nil
+	}
+	plan := newRoutePlan(event)
+	plan.DeliveryIntents = []RoutePlanDeliveryIntent{{
+		Recipient: events.MustAgentDeliveryRecipient(actor.AgentID()), AgentIdentity: actor,
+		Producer: routeIntentProducerAgentPolicy, Persist: true,
+	}}
+	projection, err := bus.deliveryPlanner.materializedTargetOwnerProjection(ctx, event, plan)
+	if err != nil {
+		t.Fatalf("runtime-created targetless actor acquired native construction admission: %v", err)
+	}
+	resolved, err := projection.resolveRoutePlan(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if routes := resolved.DeliveryRoutes(); len(routes) != 1 || routes[0].AgentIdentity != actor || !routes[0].Target.Empty() || !routes[0].Initialization.Empty() {
+		t.Fatalf("runtime-created targetless actor changed ownership: %+v", routes)
+	}
+	if len(reader.requested) != 1 || len(reader.requested[0].Coordinates()) != 0 || len(reader.requested[0].FlowIDs()) != 0 {
+		t.Fatalf("runtime-created actor broadened construction scope: %+v", reader.requested)
+	}
+	for _, failure := range []error{context.Canceled, errors.New("independent targetless index failure"), errors.Join(context.Canceled, errors.New("joined targetless index failure"))} {
+		reader.err = failure
+		if _, err := bus.deliveryPlanner.materializedTargetOwnerProjection(ctx, event, plan); !errors.Is(err, failure) {
+			t.Fatalf("targetless classification suppressed scoped index admission: got=%v want=%v", err, failure)
+		}
+	}
+	reader.err = nil
+	if _, err := bus.deliveryPlanner.materializedTargetOwnerProjection(context.Background(), event, plan); err == nil {
+		t.Fatal("targetless actor bypassed admitted source evidence")
+	}
+	for _, receiver := range []bool{false, true} {
+		targeted := plan
+		targeted.DeliveryIntents = append([]RoutePlanDeliveryIntent(nil), plan.DeliveryIntents...)
+		explicit := events.RouteIdentity{FlowID: route.ScopeKey, FlowInstance: route.InstancePath}
+		if receiver {
+			targeted.DeliveryIntents[0].ReceiverBlueprint = explicit
+		} else {
+			targeted.DeliveryIntents[0].TargetBlueprint = explicit
+		}
+		if _, err := bus.deliveryPlanner.materializedTargetOwnerProjection(ctx, event, targeted); err == nil {
+			t.Fatalf("explicit undeclared construction accepted: receiver=%v", receiver)
+		}
+	}
+}
+
 func TestReplyOriginLookupPreservesPreparedConstructionAndIndependentFailures(t *testing.T) {
 	source := connectRoutePlanCarriedKeyResolutionSource(t, contracts.FlowInputResolutionModeSelect)
 	ctx := constructionIndexContext(t, source)

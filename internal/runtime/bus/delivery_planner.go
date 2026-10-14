@@ -465,15 +465,17 @@ func (p deliveryPlanner) materializedTargetOwnerProjection(ctx context.Context, 
 				if identity.Validate() != nil || identity.RunID != evt.RunID() || identity.AgentID() != intent.Recipient.ID() {
 					return selectedRunTargetOwnerProjection{}, fmt.Errorf("materialized agent requires its exact publication identity")
 				}
-				route := runtimeflowidentity.StoredRoute(identity.Route.ScopeKey, identity.Route.InstanceID, identity.Route.InstancePath)
-				if identity.Route.Presence == agentidentity.RouteRoot {
-					route = runtimeflowidentity.StoredRoute(".", evt.RunID(), evt.RunID())
+				if !runtimeCreatedTargetlessAgentIntent(intent) {
+					route := runtimeflowidentity.StoredRoute(identity.Route.ScopeKey, identity.Route.InstanceID, identity.Route.InstancePath)
+					if identity.Route.Presence == agentidentity.RouteRoot {
+						route = runtimeflowidentity.StoredRoute(".", evt.RunID(), evt.RunID())
+					}
+					owner, err := runtimeflowidentity.NewRunScopedFlowInstance(evt.RunID(), route)
+					if err != nil {
+						return selectedRunTargetOwnerProjection{}, err
+					}
+					owners = append(owners, owner)
 				}
-				owner, err := runtimeflowidentity.NewRunScopedFlowInstance(evt.RunID(), route)
-				if err != nil {
-					return selectedRunTargetOwnerProjection{}, err
-				}
-				owners = append(owners, owner)
 			}
 			target := intent.TargetBlueprint
 			if intent.Recipient.IsNode() {

@@ -35,6 +35,13 @@ func TestMixedPubsubConnectAuthorityStructuralGuard(t *testing.T) {
 			"planIndependentPubsubBranch":    false,
 			"composeIndependentPubsubBranch": false,
 		},
+		"deliveryPlanner.materializedTargetOwnerProjection": {
+			"runtimeCreatedTargetlessAgentIntent": false,
+			"lookupTargetScope":                   false,
+		},
+		"selectedRunTargetOwnerProjection.admitAgentTarget": {
+			"runtimeCreatedTargetlessAgentIntent": false,
+		},
 		"selectedRunTargetOwnerProjection.resolveRoutePlan": {
 			"admitAgentTarget":               false,
 			"validateAdmittedAgentTarget":    false,

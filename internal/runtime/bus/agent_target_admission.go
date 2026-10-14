@@ -84,7 +84,7 @@ func (p selectedRunTargetOwnerProjection) admitAgentTarget(event events.Event, i
 		return intent, fmt.Errorf("agent configuration identity disagrees with recipient")
 	}
 	descriptor = descriptor.Normalized()
-	if identity.Name.Source == agentidentity.NameSourceRuntimeCreated && intent.TargetBlueprint.Empty() && intent.ReceiverBlueprint.Empty() && intent.ConnectPlan.Empty() && intent.ConnectClaim.Empty() {
+	if runtimeCreatedTargetlessAgentIntent(intent) {
 		return intent, nil
 	}
 	dependency, selected, err := p.agentConstructionDependency(event, identity, intent.ReceiverBlueprint)
@@ -137,6 +137,12 @@ func (p selectedRunTargetOwnerProjection) admitAgentTarget(event events.Event, i
 		}
 	}
 	return intent, nil
+}
+
+func runtimeCreatedTargetlessAgentIntent(intent RoutePlanDeliveryIntent) bool {
+	return intent.AgentIdentity.Name.Source == agentidentity.NameSourceRuntimeCreated &&
+		intent.TargetBlueprint.Empty() && intent.ReceiverBlueprint.Empty() &&
+		intent.ConnectPlan.Empty() && intent.ConnectClaim.Empty()
 }
 
 func (p selectedRunTargetOwnerProjection) agentRecipientTarget(event events.Event, descriptor ActiveAgentDescriptor, singular events.RouteIdentity, targets []events.RouteIdentity, root semanticview.RootExecutionCoordinate) (events.RouteIdentity, bool, error) {
