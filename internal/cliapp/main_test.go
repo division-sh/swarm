@@ -1418,7 +1418,7 @@ func TestWorkspaceSourceAdmissionRejectsUnsupportedAuthoritiesBeforeEffects(t *t
 					root := t.TempDir()
 					configPath := filepath.Join(root, "swarm.yaml")
 					writeRuntimeConfigText(t, configPath, body)
-					if _, err := config.Load(configPath); err == nil || !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), "Valid fields:") {
+					if _, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root, ExplicitPath: configPath}); err == nil || !strings.Contains(err.Error(), key) || !strings.Contains(err.Error(), "Valid fields:") {
 						t.Fatalf("source admission = %v, want current workspace vocabulary", err)
 					}
 					if _, err := os.Stat(filepath.Join(root, ".swarm", "data")); !os.IsNotExist(err) {
