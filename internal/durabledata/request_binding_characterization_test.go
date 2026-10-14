@@ -358,7 +358,7 @@ func TestRequestBindingR08RejectedPins(t *testing.T) {
 	}
 }
 
-func TestRequestBindingR09BuilderAuthority(t *testing.T) {
+func TestRequestBindingR09ProjectionAuthority(t *testing.T) {
 	command, record, binding := requestBindingFixture(t)
 	hash, _, canonical, err := command.RequestHash()
 	if err != nil || binding.RequestHash != hash || !reflect.DeepEqual(binding.Pins, canonical.Data.Pins) {
@@ -380,14 +380,14 @@ func TestRequestBindingR09BuilderAuthority(t *testing.T) {
 	badCommand.Actor = "another-operator"
 	other, err := BindRunCreationRequest(badCommand, record)
 	if err != nil || other.RequestHash == binding.RequestHash {
-		t.Fatalf("builder did not retain changed command hash: %v", err)
+		t.Fatalf("request projection did not retain changed command hash: %v", err)
 	}
 	command.Data.Imports, command.Data.Pins = nil, nil
 	record.Summary.ImportCount, record.Summary.PinCount = 0, 0
 	record.Binding, record.Evidence = DataBinding{State: "none"}, RunCreationEvidence{}
 	eventOnly, err := BindRunCreationRequest(command, record)
 	if err != nil || eventOnly.Imports == nil || eventOnly.Pins == nil {
-		t.Fatalf("event-only builder empty-array contract: %+v, %v", eventOnly, err)
+		t.Fatalf("event-only request projection empty-array contract: %+v, %v", eventOnly, err)
 	}
 }
 

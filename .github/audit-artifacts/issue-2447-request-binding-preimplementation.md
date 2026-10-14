@@ -13,10 +13,10 @@ store/API/CLI implementation, plan, registry or baseline change is authorized.
 | --- | --- | --- | --- | --- |
 | BindRunCreationRequest | 15/22 | Command hash/canonicalization; record-for-command validation; created or ordered rejected import metadata; copied full pins; binding-for-record validation. | Store internal/durabledata.LoadDataRunCreationOperation, inside its selected read transaction after validateStoredRunCreationReceipt returns the retained command and record. | broad-08 pure R09/R10 and existing TestRejectedTwoPinRequestBindingRetainsBothPins; api-llm-bus-full TestRunCreationRequestBindingAcrossSelectedStores and corrupt-receipt roots. |
 | RunCreationRequestBinding.Validate | 31/37 | Run/bundle/event/hash; combined bound/initiation; ordered import fields/sort/source uniqueness; ordered pin fields/sort/overlap. | ValidateForRecord and CLI loadRunCreationRequestBinding. | broad-08 R01-R04/R10; catalog-required-verify CLI package; hitl-releasee2e-rest compiled retry/restart. |
-| RunCreationRequestBinding.ValidateForRecord | 38/56 | Standalone validation; record validation; summary; created/rejected facts; ordered created import/pin or rejected target relationship. | Builder and API executeDataShowRunCreationOperation(request_binding). | broad-08 R05-R08/R10; api-llm-bus-full public selected-store created/rejected/corrupt readback; hitl-releasee2e-rest permanent public restart. |
+| RunCreationRequestBinding.ValidateForRecord | 38/56 | Standalone validation; record validation; summary; created/rejected facts; ordered created import/pin or rejected target relationship. | BindRunCreationRequest and API executeDataShowRunCreationOperation(request_binding). | broad-08 R05-R08/R10; api-llm-bus-full public selected-store created/rejected/corrupt readback; hitl-releasee2e-rest permanent public restart. |
 
 These three functions are the complete current file. Only the two validators
-will be extracted into same-package helpers. The builder need not move for
+will be extracted into same-package helpers. The projection constructor need not move for
 symmetry. The DTO remains metadata, not the final replay equality authority.
 Complete retained canonical request/hash equality stays in the selected store.
 
@@ -26,14 +26,14 @@ Complete retained canonical request/hash equality stays in the selected store.
 | API executeDataShowRunCreationOperation | Nil binding refuses; validates binding against record before presenting payload-free metadata. | Same three API roots; TestDataShowOperationReadFamilyAcrossSelectedStores is a sibling, not inferred qualification. Exact selected roots will be copied from the final bound plan. |
 | CLI loadRunCreationRequestBinding | Only OPERATION_MISSING means absence; every other RPC error propagates; standalone validation and exact requested run ID. | catalog-required-verify; TestRequestBindingCompiledRetryBothStores, hitl-releasee2e-rest (execution pending). |
 | CLI runCommandStart, initial binding load | Original bundle and event/data initiation; reconstructs the retained request rather than today's head. | TestDurableDataOperationAggregatePublicRestartBothStores, hitl-releasee2e-rest, created and rejected CLI retries after head movement and restart. |
-| CLI runCommandStart, conflict recovery load | Exact recovered bundle/initiation; schema binding; original head/pins; retained command is the last equality owner. | TestRequestBindingCompiledRetryBothStores covers same-run initial reconstruction and explicit/payload/intent refusal; the raced conflict recovery load is not implied by a sequential retry. |
+| CLI runCommandStart, conflict recovery load | Exact recovered bundle/initiation; schema binding; original head/pins; retained command is the last equality owner. | TestRequestBindingCompiledRetryBothStores/conflict_recovery holds the prepared original before publication, advances the head, lets a real peer commit, then proves the original reaches both binding loads and two publication calls and preserves the peer's receipt. No sleeps or synthetic absence. |
 | CLI buildRunDataEnvelope -> validateRunDataBindingSchemas and rebindRunDataEnvelope | Original source identity/ref/schema/CAS, ordered complete import/pin set, exact explicit pin unless selector was head. | TestRequestBindingCompiledRetryBothStores and existing restart; pure file-lowering tests are siblings, not substitute replay proof. |
-| RunCreationOperationRecord.RequestBinding | Transient read projection excluded from record JSON, no second builder/validator. | R10 wire/detachment and selected-store/public readback. |
+| RunCreationOperationRecord.RequestBinding | Transient read projection excluded from record JSON, no second projection constructor/validator. | R10 wire/detachment and selected-store/public readback. |
 
 The live symbol census covers internal/**/*.go excluding tests, including every
 RunCreationRequestBinding, BindRunCreationRequest, RequestBinding,
 loadRunCreationRequestBinding and rebindRunDataEnvelope reference. No second
-production builder or public binding interpreter was found. No concrete
+production projection constructor or public binding interpreter was found. No concrete
 full-only binding manifestation has been established; provisional hosted tier
 is lifecycle, no CI-Units. Broad packing names above come from the actual
 generated lifecycle plan on this base, not inferred alphabetical placement.
@@ -55,7 +55,7 @@ unchanged.
 | R06 | TestRequestBindingR06CreatedRelationships | Exact imports/pins; changed source/schema/head, absent requested pin, wrong explicit version, reversed fused/explicit selection. |
 | R07 | TestRequestBindingR07RejectedChildren | Ready child retained under explicit rejection; each source/ref/schema/head/bundle mismatch; ordered two-child control and swapped sources; missing/unsorted child evidence refused by the earlier record owner. |
 | R08 | TestRequestBindingR08RejectedPins | Full canonical two-pin rejected request despite empty committed evidence; missing target and wrong target version. |
-| R09 | TestRequestBindingR09BuilderAuthority | Hash and canonical selections, command error before bad record, record error before projection, changed requested CAS, changed actor changes hash, event-only nonnil empty arrays. |
+| R09 | TestRequestBindingR09ProjectionAuthority | Hash and canonical selections, command error before bad record, record error before projection, changed requested CAS, changed actor changes hash, event-only nonnil empty arrays. |
 | R10 | TestRequestBindingR10WireDetachmentAndPrecedence | Detached pins/import metadata; exact six-field eventful top-level wire, payload/actor absent; standalone before record, record before summary, summary before relationships, created summary before imports, identity before hash, imports before pins. |
 
 Record validation already excludes invalid outcome/evidence unions and rejected
