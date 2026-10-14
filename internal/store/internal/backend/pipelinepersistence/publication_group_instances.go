@@ -97,7 +97,8 @@ func sameFlowInstancePlanningRequest(a, b flowInstancePlanningRead) bool {
 	return a.scope != nil && b.scope != nil && slices.Equal(a.scope.FlowIDs(), b.scope.FlowIDs()) && slices.Equal(a.scope.Coordinates(), b.scope.Coordinates())
 }
 
-func (s *flowInstancePlanningReadSet) reobserve(ctx context.Context, snapshot *flowInstanceIndexSnapshot) error {
+func (s *flowInstancePlanningReadSet) reobserve(ctx context.Context, snapshot *flowInstanceIndexSnapshot) (bool, error) {
+	changed := false
 	for _, read := range s.reads {
 		var current []pipeline.FlowInstanceObservation
 		var err error
@@ -114,17 +115,17 @@ func (s *flowInstancePlanningReadSet) reobserve(ctx context.Context, snapshot *f
 		// Corruption, cancellation and independent read failures keep their
 		// original classification; only a valid changed view is retryable.
 		if err != nil {
-			return err
+			return false, err
 		}
 		equal, err := sameFlowInstancePlanningObservations(read.observations, current)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !equal {
-			return failures.New(failures.ClassDependencyUnavailable, "flow_instance_planning_stale", "fan-out-publication", "reobserve_instances", map[string]any{"run_id": s.runID})
+			changed = true
 		}
 	}
-	return nil
+	return changed, nil
 }
 
 func sameFlowInstancePlanningObservations(a, b []pipeline.FlowInstanceObservation) (bool, error) {
@@ -257,11 +258,22 @@ func (g *publicationGroup) reobserveInstances(ctx context.Context, tx *sql.Tx) e
 		return nil
 	}
 	return g.withInstancePlanningSnapshot(ctx, tx, g.planningReads[0], func(snapshot *flowInstanceIndexSnapshot) error {
-		for _, reads := range g.planningReads {
-			if err := reads.reobserve(ctx, snapshot); err != nil {
-				return err
-			}
-		}
-		return nil
+		return g.reobservePlanningReadSets(ctx, snapshot)
 	})
+}
+
+func (g *publicationGroup) reobservePlanningReadSets(ctx context.Context, snapshot *flowInstanceIndexSnapshot) error {
+	changed := false
+	for _, reads := range g.planningReads {
+		stale, err := reads.reobserve(ctx, snapshot)
+		if err != nil {
+			return err
+		}
+		changed = changed || stale
+	}
+	// Retry only after every preparation's dependencies were read successfully.
+	if changed {
+		return failures.New(failures.ClassDependencyUnavailable, "flow_instance_planning_stale", "fan-out-publication", "reobserve_instances", map[string]any{"run_id": g.claim.Key.RunID})
+	}
+	return nil
 }
