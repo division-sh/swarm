@@ -1,9 +1,9 @@
 # Receiver/publication readback: batch proof
 
 Track: FULL. Local continuation of #2542/#2151 from signed19de2c2e1f.
-This is a prepared proof record, not acceptance or a claim of parent closure.
-Final census/qualified counts and the signed checkpoint are recorded only after
-the real ratchet and exact source-evidence integration pass.
+This is a local batch proof, not reviewer acceptance or a claim of parent closure.
+The real downward ratchet passes; final read-only and quality receipts are
+attached to the signed checkpoint. No held occurrence is claimed as accepted.
 
 ## Class and boundaries
 
@@ -107,17 +107,27 @@ identities and multiplicities, requires actual-census proof, exact donors and
 fresh authentication of all32 native endpoints, and refuses resurrection,
 altered identities/owners/carriers, fabricated proofs or deletion funding a new
 escape. Its own focused controls and71-occurrence conservation pass. The
-combined downward/read-only ratchet remains pending; no earlier failed command
-is represented as a real ratchet pass.
+combined downward ratchet passes in431.797s, removing182/160 with0 additions.
+Read-only revalidation follows that generated baseline. No earlier failed
+command is represented as a real ratchet pass.
 
 The accepted predecessor remains751 findings /635 raw removals. Its physical
-baseline5804/3725 includes a held78/62 mock migration; qualified remaining is
-5882/3787. Those78/62 remain held at this checkpoint too. Final new numbers
-require the real downward census and a per-identity qualified/held comparison.
+baseline5804/3725 includes a held78/62 mock migration; qualified remaining was
+5882/3787. The combined generated baseline is now5622/3565 with excluded67
+unchanged. Exact seven-field identities and multiplicities show182/160 removed
+and0 added/increased. Those78/62 remain held at this checkpoint too.
 The separate numeric-fork hold is exactly9 findings /8 raw occurrences: six
 direct query/scan operations, the helper's raw carrier and two caller operations.
-Thus the read-only projection would qualify173/152 independently green, not182/160
-and not the175 target. This is still a projection, not ratchet/acceptance credit.
+Thus this checkpoint claims173/152 independently green, not182/160 and not the175
+target. Qualified remaining is5709/3635 after adding both holds to physical debt.
+If independently accepted, cumulative credit becomes924/787; no acceptance is
+assumed here. No extra scope is added to cover the two-finding target gap.
+
+| Identity slice | Findings / raw | Qualification |
+| --- | ---: | --- |
+| All non-child-helper decreases in the32-pin readback batch |173/152|Claimed independently green; exact per-identity generated-baseline comparison and the executed proofs below |
+| requireNumericMockForkOutput's six query/scan operations, one raw carrier and two calls from proveActivitySemanticResultExecutionParity |9/8|Held; SQLite child execution deadline remains unclassified |
+| Previous mock helper/caller group listed in6172459033 |78/62|Held from the predecessor, not counted in this batch's182/160 physical delta |
 
 ## Executed Manifestations
 
