@@ -920,67 +920,40 @@ func (a *Adapter) PipelineHandoffIncomplete(ctx context.Context, q queryer, even
 // processing to executable delivery continuation ownership.
 func (a *Adapter) CommitPipelineHandoff(ctx context.Context, attempt *mutationprotocol.Attempt, eventID string) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return a.commitPipelineHandoffTx(ctx, tx, attempt, eventID)
+		return a.persistPipelineHandoffTx(ctx, tx, eventID)
 	})
-}
-
-func (a *Adapter) commitPipelineHandoffTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, eventID string) error {
-	facts, err := a.persistPipelineHandoffTx(ctx, tx, eventID)
-	if err != nil {
-		return err
-	}
-	for _, fact := range facts {
-		if err := attempt.AddFact(fact.runID, privaterunforkrevision.FamilyEventDeliveries, fact.deliveryID); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // CommitUnrevisionedFixturePipelineHandoffTx transfers the same durable
 // continuations without moving the fixture's retained fork-history frontier.
 func (a *Adapter) CommitUnrevisionedFixturePipelineHandoffTx(ctx context.Context, tx *sql.Tx, eventID string) error {
-	_, err := a.persistPipelineHandoffTx(ctx, tx, eventID)
-	return err
+	return a.persistPipelineHandoffTx(ctx, tx, eventID)
 }
 
-type pipelineHandoffFact struct{ runID, deliveryID string }
-
-func (a *Adapter) persistPipelineHandoffTx(ctx context.Context, tx *sql.Tx, eventID string) ([]pipelineHandoffFact, error) {
+func (a *Adapter) persistPipelineHandoffTx(ctx context.Context, tx *sql.Tx, eventID string) error {
 	if tx == nil {
-		return nil, errors.New("delivery continuation handoff transaction is required")
+		return errors.New("delivery continuation handoff transaction is required")
 	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
-		return nil, errors.New("delivery continuation handoff event identity is required")
+		return errors.New("delivery continuation handoff event identity is required")
 	}
 	query := `
 		UPDATE event_deliveries
 		SET continuation_handoff_at = COALESCE(continuation_handoff_at, CURRENT_TIMESTAMP)
-		WHERE event_id = $1::uuid
-		RETURNING CAST(run_id AS TEXT), CAST(delivery_id AS TEXT)`
+		WHERE event_id = $1::uuid`
 	args := []any{eventID}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_deliveries
 			SET continuation_handoff_at = COALESCE(continuation_handoff_at, CURRENT_TIMESTAMP)
-			WHERE event_id = ?
-			RETURNING run_id, delivery_id`
+			WHERE event_id = ?`
 	}
-	rows, err := tx.QueryContext(ctx, query, args...)
+	_, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("transfer delivery continuations after pipeline acknowledgement: %w", err)
+		return fmt.Errorf("transfer delivery continuations after pipeline acknowledgement: %w", err)
 	}
-	defer rows.Close()
-	var facts []pipelineHandoffFact
-	for rows.Next() {
-		var runID, deliveryID string
-		if err := rows.Scan(&runID, &deliveryID); err != nil {
-			return nil, err
-		}
-		facts = append(facts, pipelineHandoffFact{runID: runID, deliveryID: deliveryID})
-	}
-	return facts, rows.Err()
+	return nil
 }
 
 func executionAuthorityCursorID(authority ExecutionAuthority) string {
@@ -1118,9 +1091,6 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutation
 	if err := a.recordTransition(ctx, attempt, claimed, "in_progress", nil, now); err != nil {
 		return ClaimedObligation{}, err
 	}
-	if err := attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID); err != nil {
-		return ClaimedObligation{}, err
-	}
 	return ClaimedObligation{Snapshot: claimed.Snapshot, Claim: claim}, nil
 }
 
@@ -1196,9 +1166,6 @@ func (a *Adapter) bindAgentSessionTx(ctx context.Context, tx *sql.Tx, attempt *m
 	}
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return Snapshot{}, fmt.Errorf("%w: delivery session binding lost claim", ErrConflict)
-	}
-	if err := attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID); err != nil {
-		return Snapshot{}, err
 	}
 	updated, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
 	return updated.Snapshot, err
@@ -1313,9 +1280,6 @@ func (a *Adapter) renewClaimWrite(ctx context.Context, tx *sql.Tx, attempt *muta
 		if rows, _ := deliveryResult.RowsAffected(); rows != 1 {
 			return time.Time{}, fmt.Errorf("%w: delivery claim renewal lost lifecycle owner", ErrConflict)
 		}
-	}
-	if err := attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID()); err != nil {
-		return time.Time{}, err
 	}
 	return expiresAt, nil
 }
@@ -1496,7 +1460,7 @@ func (a *Adapter) prepareProviderOriginRecovery(ctx context.Context, tx *sql.Tx,
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return false, fmt.Errorf("%w: provider origin recovery lost delivery lifecycle owner", ErrConflict)
 	}
-	return false, attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())
+	return false, nil
 }
 
 func (a *Adapter) SettleFailure(ctx context.Context, attempt *mutationprotocol.Attempt, claim Claim, settlement Settlement) (Snapshot, error) {
@@ -2900,7 +2864,7 @@ func (a *Adapter) insertAttempt(ctx context.Context, tx *sql.Tx, attempt *mutati
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("record delivery claim attempt: %w", err)
 	}
-	return attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)
+	return nil
 }
 
 func (a *Adapter) expireAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, record deliveryRecord, now time.Time) error {
@@ -2919,7 +2883,7 @@ func (a *Adapter) expireAttempt(ctx context.Context, tx *sql.Tx, attempt *mutati
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return fmt.Errorf("%w: expired delivery attempt is missing", ErrConflict)
 	}
-	return attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)
+	return nil
 }
 
 func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, outcome, reason string, failure *runtimefailures.Envelope, sideEffects []string, duration time.Duration, now time.Time) error {
