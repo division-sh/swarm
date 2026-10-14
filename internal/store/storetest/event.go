@@ -205,6 +205,27 @@ func ReadCanonicalEventRecord(ctx context.Context, selectedStore any, eventID st
 	return private.ReadCanonicalEventRecordForTest(ctx, selectedStore, eventID)
 }
 
+// InsertRevisionedExistingRunRootEventRecord advances the selected run's event
+// history through its native mutation owner, without creating delivery work.
+func InsertRevisionedExistingRunRootEventRecord(
+	t testing.TB,
+	ctx context.Context,
+	selected any,
+	eventID, runID string,
+	eventType events.EventType,
+	producer events.ProducerIdentity,
+	payload []byte,
+	envelope events.EventEnvelope,
+	createdAt time.Time,
+) events.Event {
+	t.Helper()
+	event, err := private.InsertRevisionedExistingRunRootEventForTest(ctx, selected, eventID, runID, eventType, producer, payload, envelope, createdAt)
+	if err != nil {
+		t.Fatalf("insert revisioned existing-run root event fixture: %v", err)
+	}
+	return event
+}
+
 func InsertExistingRunRootEventRecord(
 	t testing.TB,
 	ctx context.Context,
