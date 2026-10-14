@@ -46,20 +46,16 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
     inherited:
       advances_to: done
       rules:
-        - id: inherited-choice
-          else: true
+        - else: true
     rule:
       rules:
-        - id: not-selected
-          when: |-
+        - when: |-
             false
           advances_to: done
-        - id: explicit-choice
-          when: |-
+        - when: |-
             true
           advances_to: done
-        - id: fallback
-          else: true
+        - else: true
           advances_to: done
     complete:
       data_accumulation:
@@ -68,8 +64,7 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
             value: |-
               'completed'
       on_complete:
-        - id: completion-choice
-          advances_to: done
+        - advances_to: done
     self:
       advances_to: ready
     write_only:
@@ -80,12 +75,10 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
               'written'
     fallback:
       rules:
-        - id: never
-          when: |-
+        - when: |-
             false
           advances_to: done
-        - id: fallback-choice
-          else: true
+        - else: true
     emit_only:
       emit: observed
     guarded:
@@ -102,16 +95,14 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
             value: |-
               'guarded'
       rules:
-        - id: explicit-choice
-          when: |-
+        - when: |-
             true
           advances_to: done
           emit:
             event: guard_observed
             fields:
               marker: "guard-output"
-        - id: guard-fallback
-          else: true
+        - else: true
     kill:
       guard:
         id: kill-check
@@ -163,16 +154,14 @@ func compiledAdapterSourceWithKillStages(t *testing.T, killStages string, initia
             value: |-
               'guarded'
       rules:
-        - id: explicit-choice
-          when: |-
+        - when: |-
             true
           advances_to: done
           emit:
             event: guard_observed
             fields:
               marker: "guard-output"
-        - id: guard-fallback
-          else: true
+        - else: true
 `,
 	}
 	if len(initialTimer) > 0 && initialTimer[0] {
