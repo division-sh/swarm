@@ -56,7 +56,7 @@ func TestWorkflowSemanticsRuleEmitUsesHandlerAdvancesToFallback(t *testing.T) {
 								Emit:      EmitSpec{Event: "review.requested"},
 							},
 							{
-								Condition: "else",
+								Condition: "",
 							},
 						},
 					},
@@ -347,7 +347,7 @@ func TestWorkflowSemanticsDerivesEffectiveSystemNodeFacts(t *testing.T) {
 								Emit:      EmitSpec{Event: "task.rules.then"},
 							},
 							{
-								Condition: "else",
+								Condition: "",
 								Emit:      EmitSpec{Event: "task.rules.else"},
 							},
 						},

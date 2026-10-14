@@ -1574,7 +1574,7 @@ func TestRun_ValidatesHandlerSetsGateWhenRulesExist(t *testing.T) {
 			}, runtimecontracts.SystemNodeEventHandler{
 				SetsGate: &runtimecontracts.GateSpec{Name: tc.setsGate, Value: true},
 				Rules: []runtimecontracts.HandlerRuleEntry{{
-					Condition: "else",
+					Condition: "",
 				}},
 			})
 
@@ -3260,7 +3260,7 @@ func TestRun_LowersEmitFromThroughRulesEmitTemplateSpecialization(t *testing.T) 
 		From:  "entity",
 	}
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-		Condition: "else",
+		Condition: "",
 		Emit: runtimecontracts.EmitSpec{
 			Fields: map[string]runtimecontracts.ExpressionValue{
 				"geography": runtimecontracts.CELExpression("payload.geography"),
@@ -3460,7 +3460,7 @@ func TestRun_RulesEmitTemplateSpecializationUsesMergedBranchPayloads(t *testing.
 			},
 		},
 		{
-			Condition: "else",
+			Condition: "",
 			Emit: runtimecontracts.EmitSpec{
 				Fields: map[string]runtimecontracts.ExpressionValue{
 					"geography": runtimecontracts.CELExpression("payload.geography"),
@@ -3503,7 +3503,7 @@ func TestRun_RulesEmitTemplateSpecializationErrorsPerMergedBranch(t *testing.T) 
 			},
 		},
 		{
-			Condition: "else",
+			Condition: "",
 			Emit: runtimecontracts.EmitSpec{
 				Fields: map[string]runtimecontracts.ExpressionValue{
 					"bucket": runtimecontracts.CELExpression(`"partial"`),
@@ -3545,7 +3545,7 @@ func TestRun_ErrorsForOnSuccessEmitSitePayloadDrift(t *testing.T) {
 		Emit: runtimecontracts.EmitSpec{Event: "market_research.audit_logged"},
 	}
 	handler.Rules = []runtimecontracts.HandlerRuleEntry{{
-		Condition: "else",
+		Condition: "",
 		Emit: runtimecontracts.EmitSpec{
 			Event: "market_research.scan_assigned",
 			Fields: map[string]runtimecontracts.ExpressionValue{

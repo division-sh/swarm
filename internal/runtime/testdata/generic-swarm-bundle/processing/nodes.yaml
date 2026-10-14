@@ -30,8 +30,7 @@ processing-node:
           advances_to: approved
           emit:
             event: item.completed
-        - else: true
-          advances_to: rejected
+        - advances_to: rejected
           emit:
             event: item.rejected
       sets_gate: score_ready
