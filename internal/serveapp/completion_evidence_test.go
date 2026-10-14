@@ -293,7 +293,11 @@ func buildCompletion2270CLIImage(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(root, "completion-proof-cli"), []byte(completion2270CLIProgram), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	dockerfile := fmt.Sprintf("FROM %s\nCOPY completion-proof-cli /usr/local/bin/completion-proof-cli\n", strings.TrimSpace(string(base)))
+	if err := os.WriteFile(filepath.Join(root, completion2270InvocationFile), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Fresh native workspace volumes inherit only this fixture-owned witness.
+	dockerfile := fmt.Sprintf("FROM %s\nCOPY completion-proof-cli /usr/local/bin/completion-proof-cli\nCOPY --chown=10001:10001 %s /workspace/%s\n", strings.TrimSpace(string(base)), completion2270InvocationFile, completion2270InvocationFile)
 	if err := os.WriteFile(filepath.Join(root, "Dockerfile"), []byte(dockerfile), 0o600); err != nil {
 		t.Fatal(err)
 	}
