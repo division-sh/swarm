@@ -161,7 +161,7 @@ func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions)
 	if err != nil {
 		return returnCLIValidationError(cmd.ErrOrStderr(), err)
 	}
-	report, err := buildDoctorTargetReport(cmd.Context(), repo, cmd, opts, cfg, swarmDir, runtimeCfgResult.Config)
+	report, err := buildDoctorTargetReport(cmd.Context(), repo, opts, cfg, swarmDir, runtimeCfgResult.Config)
 	if err != nil {
 		return returnCLIValidationError(cmd.ErrOrStderr(), err)
 	}
@@ -192,7 +192,7 @@ func doctorTargetEnvReport(findings []swarmEnvFinding) LocalPreflightReport {
 	return report.finalize()
 }
 
-func buildDoctorTargetReport(ctx context.Context, repo string, cmd *cobra.Command, opts doctorOptions, cfg cliCommandConfig, swarmDir CLISwarmDirResolution, runtimeCfg *config.Config) (doctorTargetReport, error) {
+func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOptions, cfg cliCommandConfig, swarmDir CLISwarmDirResolution, runtimeCfg *config.Config) (doctorTargetReport, error) {
 	api, err := resolveDoctorTargetAPI(repo, opts, cfg, swarmDir)
 	if err != nil {
 		return doctorTargetReport{}, err
@@ -203,11 +203,11 @@ func buildDoctorTargetReport(ctx context.Context, repo string, cmd *cobra.Comman
 	}
 	project := resolveDoctorTargetProject(repo, opts, cfg)
 	localStateProject := doctorTargetLocalRuntimeProject(repo, project)
-	store, err := resolveDoctorTargetStore(repo, swarmDir, localStateProject, runtimeCfg)
+	store, selection, err := resolveDoctorTargetStore(repo, swarmDir, localStateProject, runtimeCfg)
 	if err != nil {
 		return doctorTargetReport{}, err
 	}
-	projectOwner := doctorTargetProjectOwner(ctx, repo, cmd, opts, store)
+	projectOwner := doctorTargetProjectOwner(ctx, store, selection, runtimeCfg)
 	data := resolveDoctorTargetData(repo, opts, localStateProject, runtimeCfg)
 	runtimeIdentity := doctorTargetRuntimeIdentityFact(registryReport)
 	return doctorTargetReport{
@@ -235,7 +235,7 @@ func buildDoctorTargetReport(ctx context.Context, repo string, cmd *cobra.Comman
 	}, nil
 }
 
-func doctorTargetProjectOwner(ctx context.Context, repo string, cmd *cobra.Command, opts doctorOptions, selectedPath doctorTargetPath) doctorTargetPendingFact {
+func doctorTargetProjectOwner(ctx context.Context, selectedPath doctorTargetPath, selection storebackend.Selection, cfg *config.Config) doctorTargetPendingFact {
 	if selectedPath.Status == "legacy_conflict" {
 		return doctorTargetPendingFact{Status: "unavailable", Owner: selectedStoreOwnerReader, Detail: "Project owner: unavailable because the selected store conflicts with a retired path."}
 	}
@@ -248,7 +248,7 @@ func doctorTargetProjectOwner(ctx context.Context, repo string, cmd *cobra.Comma
 	}
 	inspectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	selected, _, err := openAuthorityInspectionStore(inspectCtx, opts.apiOptions.invocationRoot, cmd, opts)
+	selected, err := constructAuthorityInspectionStore(inspectCtx, selection, cfg)
 	if err != nil {
 		return doctorTargetPendingFact{Status: "unavailable", Owner: selectedStoreOwnerReader, Detail: "Project owner: unavailable because the selected store cannot be inspected: " + err.Error()}
 	}
@@ -490,14 +490,14 @@ func doctorTargetLocalRuntimeProject(repo string, project doctorTargetProject) l
 	}
 }
 
-func resolveDoctorTargetStore(repo string, swarmDir CLISwarmDirResolution, project localRuntimeStateProject, cfg *config.Config) (doctorTargetPath, error) {
+func resolveDoctorTargetStore(repo string, swarmDir CLISwarmDirResolution, project localRuntimeStateProject, cfg *config.Config) (doctorTargetPath, storebackend.Selection, error) {
 	defaultPath, defaultSource := localRuntimeSQLiteDefault(swarmDir, project)
 	selection, err := resolveRuntimeStoreSelectionWithDefault(repo, storebackend.ActiveDefaultBackend().String(), false, cfg, defaultPath, defaultSource)
 	if err != nil {
-		return doctorTargetPath{}, err
+		return doctorTargetPath{}, storebackend.Selection{}, err
 	}
 	if selection.Backend != storebackend.BackendSQLite {
-		return doctorTargetPath{Source: string(selection.BackendSource), Status: "not_applicable", Detail: "postgres runtime store selected"}, nil
+		return doctorTargetPath{Source: string(selection.BackendSource), Status: "not_applicable", Detail: "postgres runtime store selected"}, selection, nil
 	}
 	status := "resolved"
 	detail := "target dry-run; no store directories were created"
@@ -510,7 +510,7 @@ func resolveDoctorTargetStore(repo string, swarmDir CLISwarmDirResolution, proje
 		Source: string(selection.SQLitePathSource),
 		Status: status,
 		Detail: detail,
-	}, nil
+	}, selection, nil
 }
 
 func resolveDoctorTargetData(repo string, opts doctorOptions, project localRuntimeStateProject, cfg *config.Config) doctorTargetPath {
