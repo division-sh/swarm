@@ -2773,13 +2773,21 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), source), runID)
 	var selected targetFailurePublicationStore
-	var reopen func() targetFailurePublicationStore
+	var reopen func(*testing.T) targetFailurePublicationStore
 	if backend == "postgres" {
-		primary, open := storetest.StartPostgresRuntimeStoreWithReopen(t)
-		selected, reopen = primary, func() targetFailurePublicationStore { return open() }
+		location := storetest.PostgresFixtureLocation(t)
+		primary, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, location)
+		selected, reopen = primary, func(t *testing.T) targetFailurePublicationStore {
+			peer, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, location)
+			return peer
+		}
 	} else {
-		primary, open := storetest.StartSQLiteRuntimeStoreWithReopen(t, ctx)
-		selected, reopen = primary, func() targetFailurePublicationStore { return open() }
+		primary, _ := storetest.StartSQLiteRuntimeStoreWithReopen(t, ctx)
+		location := primary.Path()
+		selected, reopen = primary, func(t *testing.T) targetFailurePublicationStore {
+			peer, _ := storetest.StartSQLiteRuntimeStoreWithReopen(t, ctx, location)
+			return peer
+		}
 	}
 	at := time.Now().UTC()
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: bundle.SourceArtifact, StartedAt: at})
@@ -2881,7 +2889,7 @@ func proveConstructedTargetFailurePublication(t *testing.T, backend string) {
 		if err != nil || len(exactDiagnostic.DeadLetters) != 1 || !reflect.DeepEqual(view.DeadLetters, exactDiagnostic.DeadLetters) {
 			t.Fatalf("exact replay changed terminal diagnostic: before=%+v after=%+v err=%v", view.DeadLetters, exactDiagnostic.DeadLetters, err)
 		}
-		freshStore := reopen()
+		freshStore := reopen(t)
 		freshBus, err := newScopedTestEventBus(freshStore, runtimebus.EventBusOptions{ContractBundle: source})
 		if err != nil {
 			t.Fatal(err)
