@@ -18,8 +18,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/publicingress"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -55,7 +57,12 @@ func installedSessionBootstrapFixture(t *testing.T, backend string) (*channelonb
 		BundleIdentity: contracts.BundleIdentity{WorkflowName: "whatsapp-session", WorkflowVersion: "1.0.0", BundleHash: fact.BundleHash()},
 		ChannelPlans:   projection.ChannelPlans,
 		Runtime: &runtimepkg.Runtime{Bus: bus, ExecutionPosture: executionposture.Live,
-			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: owner.Identity().RuntimeInstanceID, ChannelPlans: projection.ChannelPlans}}})
+			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: owner.Identity().RuntimeInstanceID, SourceArtifactFact: fact, ChannelPlans: projection.ChannelPlans}}})
+	grant := admitServeSessionProcessFixture(t, selected.(startupownership.Store), owner.Identity().RuntimeInstanceID, fact.BundleHash())
+	definition.Runtime.Manager = manager.NewAgentManager(bus, nil)
+	if err := definition.Runtime.InstallStartupGrant(grant); err != nil {
+		t.Fatal(err)
+	}
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, definition)
 	if err != nil {
 		t.Fatal(err)

@@ -12,7 +12,12 @@ import (
 
 	domain "github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/google/uuid"
 )
 
@@ -47,13 +52,78 @@ func pairedLogoutRequestOperation(t *testing.T, f callbackLockFixture, request d
 	return op
 }
 
-func logoutReservation(op domain.Operation) domain.ReserveTeardownRequest {
+type logoutProcessFixture struct {
+	process startupownership.ProcessCapability
+	binding processbinding.Binding
+}
+
+func (f callbackLockFixture) logoutBinding(t *testing.T, op domain.Operation) processbinding.Binding {
+	t.Helper()
+	if !f.logout.binding.IsZero() {
+		if f.logout.binding.BundleHash != op.Coordinate.BundleHash || f.logout.binding.RuntimeInstanceID != op.Coordinate.RuntimeInstanceID {
+			t.Fatal("logout fixture cannot adopt another source/runtime")
+		}
+		return f.logout.binding
+	}
+	ctx := context.Background()
+	scope := backendselection.Selection{Backend: backendselection.BackendPostgres}
+	if !f.postgres {
+		scope = backendselection.Selection{Backend: backendselection.BackendSQLite, SQLitePath: strings.Split(strings.TrimPrefix(f.probe.dsn, "file:"), "?")[0]}
+	}
+	selected, err := selectedtest.OpenProcessLeaseFixture(ctx, scope, f.probe.dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := selected.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	bootstrapCallbackSchema(t, selected)
+	f.logout.process, err = selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{
+		OwnerID: "logout-reservation-fixture", BootID: uuid.NewString(), RuntimeInstanceID: op.Coordinate.RuntimeInstanceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := f.logout.process.Release(ctx); err != nil {
+			t.Error(err)
+		}
+	})
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{{BundleHash: op.Coordinate.BundleHash}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.logout.process.InstallCompleteSourceSet(ctx, agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+		t.Fatal(err)
+	}
+	grant, err := f.logout.process.IssueGenerationGrant(ctx, startupownership.GrantRequest{BundleHash: op.Coordinate.BundleHash,
+		RuntimeInstanceID: op.Coordinate.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := grant.AdmitExecution(ctx); err != nil {
+		t.Fatal(err)
+	}
+	f.logout.binding, err = grant.ProcessExecutionBinding()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f.logout.binding
+}
+
+func logoutReservation(t *testing.T, f callbackLockFixture, op domain.Operation) domain.ReserveTeardownRequest {
+	t.Helper()
+	binding := f.logoutBinding(t, op)
 	return domain.ReserveTeardownRequest{
 		TeardownID: uuid.NewString(), Kind: domain.TeardownLogout, PrincipalID: op.PrincipalID,
 		RequestKeyHash: uuid.NewString(), RequestHash: uuid.NewString(),
 		Scope: domain.TeardownScope{Interface: op.Interface}, RequestedAt: time.Now().UTC(),
-		Logout: &domain.SessionLogoutTarget{OperationID: op.OperationID, OperationRevision: op.Revision,
-			OccurrenceID: uuid.NewString(), Account: op.SessionAccount, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector},
+		Logout: &domain.SessionLogoutPreparation{OperationID: op.OperationID, OperationRevision: op.Revision,
+			OccurrenceID: uuid.NewString(), Account: op.SessionAccount, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector, ProcessBinding: binding},
 	}
 }
 
@@ -62,14 +132,14 @@ func TestSessionLogoutReservationFreezesAndFencesBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			f := newCallbackLockFixture(t, backend)
 			op := pairedLogoutOperation(t, f)
-			request := logoutReservation(op)
+			request := logoutReservation(t, f, op)
 			ctx := context.Background()
 			teardown, err := f.selected.ReserveChannelTeardown(ctx, request)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if teardown.Kind != domain.TeardownLogout || teardown.Phase != domain.TeardownAuthorityRetired ||
-				teardown.Logout == nil || *teardown.Logout != *request.Logout || teardown.RetiredOperations != 1 {
+				teardown.Logout == nil || teardown.Logout.SessionLogoutPreparation != *request.Logout || teardown.Logout.ProcessStamp.Validate() != nil || teardown.RetiredOperations != 1 {
 				t.Fatalf("logout did not retain exact fenced responsibility: %+v", teardown)
 			}
 			retired, err := f.selected.GetChannelOnboarding(ctx, op.OperationID)
@@ -117,13 +187,14 @@ func TestSessionLogoutReservationIsolatesSameAccountSiblingBothStores(t *testing
 			original := pairedLogoutOperation(t, f)
 			request := sessionReservation(t, f.principal, time.Now().UTC())
 			request.TargetSelector = "ingress:other:whatsapp"
+			request.Coordinate.RuntimeInstanceID = original.Coordinate.RuntimeInstanceID
 			sibling := pairedLogoutRequestOperation(t, f, request)
 			if original.SessionAccount.AccountRef != sibling.SessionAccount.AccountRef ||
 				original.SessionConnectionID == sibling.SessionConnectionID {
 				t.Fatal("isolation fixture did not reserve distinct connections for the same account")
 			}
 			ctx := context.Background()
-			logout, err := f.selected.ReserveChannelTeardown(ctx, logoutReservation(original))
+			logout, err := f.selected.ReserveChannelTeardown(ctx, logoutReservation(t, f, original))
 			if err != nil || logout.RetiredOperations != 1 {
 				t.Fatal("logout did not scope its exact connection", logout, err)
 			}
@@ -135,7 +206,7 @@ func TestSessionLogoutReservationIsolatesSameAccountSiblingBothStores(t *testing
 			if err != nil || pending {
 				t.Fatal("sibling adopted original logout cleanup possession", pending, err)
 			}
-			foreign := logoutReservation(sibling)
+			foreign := logoutReservation(t, f, sibling)
 			foreign.Logout.OccurrenceID = logout.Logout.OccurrenceID
 			foreign.Logout.Account = original.SessionAccount
 			if _, err := f.selected.ReserveChannelTeardown(ctx, foreign); err == nil {
@@ -175,7 +246,7 @@ func TestSessionLogoutReservationRejectsContradictionsBothStores(t *testing.T) {
 				{"selector", func(r *domain.ReserveTeardownRequest) { r.Logout.TargetSelector += "-other" }},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
-					request := logoutReservation(op)
+					request := logoutReservation(t, f, op)
 					tc.edit(&request)
 					if _, err := f.selected.ReserveChannelTeardown(context.Background(), request); err == nil {
 						t.Fatal("contradictory logout target admitted")
@@ -200,7 +271,7 @@ func TestSessionLogoutReservationOverlapsAndRollbackBothStores(t *testing.T) {
 			t.Run(backend+"/"+string(first), func(t *testing.T) {
 				f := newCallbackLockFixture(t, backend)
 				op := pairedLogoutOperation(t, f)
-				logout := logoutReservation(op)
+				logout := logoutReservation(t, f, op)
 				ordinary := domain.ReserveTeardownRequest{TeardownID: uuid.NewString(), RequestKeyHash: uuid.NewString(), RequestHash: uuid.NewString(),
 					Kind: domain.TeardownUnbind, PrincipalID: f.principal, Scope: domain.TeardownScope{Interface: op.Interface},
 					ExpectedBindingRevision: 1, RequestedAt: time.Now().UTC()}
@@ -251,7 +322,7 @@ func TestSessionLogoutConcurrentExactReservationBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			f := newCallbackLockFixture(t, backend)
 			op := pairedLogoutOperation(t, f)
-			request := logoutReservation(op)
+			request := logoutReservation(t, f, op)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			var workers sync.WaitGroup
@@ -315,7 +386,7 @@ func TestSessionLogoutFencesCurrentActivationBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			logout, err := f.selected.ReserveChannelTeardown(ctx, logoutReservation(op))
+			logout, err := f.selected.ReserveChannelTeardown(ctx, logoutReservation(t, f, op))
 			if err != nil || logout.RetiredOperations != 1 || logout.RetiredActivations != 1 {
 				t.Fatalf("current executable consumers were not fenced: %+v, %v", logout, err)
 			}
@@ -375,9 +446,9 @@ func (s logoutRecoveryCanceledReadStore) ListChannelTeardowns(ctx context.Contex
 	return rows, err
 }
 
-func (p *logoutRecoveryProbe) PrepareSessionLogout(context.Context, domain.Operation) (domain.SessionLogoutTarget, error) {
+func (p *logoutRecoveryProbe) PrepareSessionLogout(context.Context, domain.Operation) (domain.SessionLogoutPreparation, error) {
 	p.prepared++
-	return domain.SessionLogoutTarget{}, errors.New("recovery must not select a successor SDK occurrence")
+	return domain.SessionLogoutPreparation{}, errors.New("recovery must not select a successor SDK occurrence")
 }
 
 func (p *logoutRecoveryProbe) DispatchSessionLogout(ctx context.Context, op domain.TeardownOperation) error {
@@ -393,7 +464,7 @@ func TestSessionLogoutRecoveryConsumesFrozenResponsibilityBothStores(t *testing.
 		t.Run(backend, func(t *testing.T) {
 			f := newCallbackLockFixture(t, backend)
 			op := pairedLogoutOperation(t, f)
-			request := logoutReservation(op)
+			request := logoutReservation(t, f, op)
 			teardown, err := f.selected.ReserveChannelTeardown(context.Background(), request)
 			if err != nil {
 				t.Fatal(err)
@@ -415,7 +486,7 @@ func TestSessionLogoutRecoveryConsumesFrozenResponsibilityBothStores(t *testing.
 			// implementation. Recovery cannot fabricate a successful outcome.
 			current, err := f.selected.GetChannelTeardown(context.Background(), teardown.TeardownID)
 			if err != nil || current.Phase != domain.TeardownAuthorityRetired || current.Revision != teardown.Revision ||
-				current.Logout == nil || *current.Logout != *request.Logout {
+				current.Logout == nil || current.Logout.SessionLogoutPreparation != *request.Logout {
 				t.Fatal("recovery fabricated settlement or rewrote frozen session evidence", err)
 			}
 			readback, err := domain.NewSessionLogoutReadback(current)
