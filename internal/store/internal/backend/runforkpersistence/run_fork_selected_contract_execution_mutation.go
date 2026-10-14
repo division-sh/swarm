@@ -40,41 +40,34 @@ func prepareRunForkSelectedContractRouteResolution(
 	frontier runfork.RunForkContractFrontierAdmission,
 	topology runfork.RunForkSelectedContractRouteTopology,
 	planning runfork.RunForkSelectedContractRecipientPlanning,
-) (runfork.RunForkSelectedContractRouteRecovery, bool, error) {
-	switch strings.TrimSpace(plan.RouteHistory.State) {
-	case runfork.RunForkRouteHistoryNotApplicable:
-		return runfork.RunForkSelectedContractRouteRecovery{}, false, nil
-	case runfork.RunForkRouteHistoryUnknownUnversioned:
-	default:
-		return runfork.RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("selected-contract route resolution received unsupported route history state %q", plan.RouteHistory.State)
-	}
+) (runfork.RunForkSelectedContractRouteRecovery, error) {
 	if strings.TrimSpace(frontier.Owner) != runfork.RunForkContractFrontierAdmissionOwner || !frontier.NonMutating {
-		return runfork.RunForkSelectedContractRouteRecovery{}, false, runForkReplayResumeError(
-			runfork.RunForkBlockerFlowRouteHistoryUnproven,
-			runfork.RunForkReplayResumeFactRouteHistory,
+		return runfork.RunForkSelectedContractRouteRecovery{}, runForkReplayResumeError(
+			runfork.RunForkBlockerSelectedContractRouteRecoveryUnproven,
+			runfork.RunForkHistoricalReplayFactRoutes,
 			"selected-contract route resolution requires canonical frontier admission",
 		)
 	}
 	if !topology.StaticTopologySupported || !topology.DynamicTopologySupported {
-		return runfork.RunForkSelectedContractRouteRecovery{}, false, runForkReplayResumeError(
-			runfork.RunForkBlockerFlowRouteHistoryUnproven,
-			runfork.RunForkReplayResumeFactRouteHistory,
+		return runfork.RunForkSelectedContractRouteRecovery{}, runForkReplayResumeError(
+			runfork.RunForkBlockerSelectedContractRouteRecoveryUnproven,
+			runfork.RunForkHistoricalReplayFactRoutes,
 			"selected-contract route resolution requires complete static and dynamic topology proof",
 		)
 	}
 	if err := validateRunForkSelectedContractRouteRecoverySelection("route resolution frontier", selection, frontier.ContractSelection); err != nil {
-		return runfork.RunForkSelectedContractRouteRecovery{}, false, err
+		return runfork.RunForkSelectedContractRouteRecovery{}, err
 	}
 	count, eventIDs, fingerprint, err := runfork.RunForkContractFrontierEvidenceBinding(frontier)
 	if err != nil {
-		return runfork.RunForkSelectedContractRouteRecovery{}, false, err
+		return runfork.RunForkSelectedContractRouteRecovery{}, err
 	}
 	if count != topology.FrontierEventCount || !equalTrimmedStrings(eventIDs, topology.FrontierSourceEventIDs) || fingerprint != strings.TrimSpace(topology.FrontierEvidenceFingerprint) {
-		return runfork.RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("selected-contract route topology does not match the fixed-event frontier")
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route topology does not match the fixed-event frontier")
 	}
 	historicalEventIDs, ok := plan.HistoricalEventIDs(plan.ForkPoint.Revision)
 	if !ok {
-		return runfork.RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("selected-contract route resolution requires the fixed-event revision snapshot")
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route resolution requires the fixed-event revision snapshot")
 	}
 	historicalEvents := map[string]struct{}{}
 	for _, eventID := range historicalEventIDs {
@@ -82,7 +75,7 @@ func prepareRunForkSelectedContractRouteResolution(
 	}
 	for _, eventID := range eventIDs {
 		if _, ok := historicalEvents[strings.TrimSpace(eventID)]; !ok {
-			return runfork.RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("selected-contract route frontier event %s is outside fixed revision %d", eventID, plan.ForkPoint.Revision)
+			return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route frontier event %s is outside fixed revision %d", eventID, plan.ForkPoint.Revision)
 		}
 	}
 	record, err := normalizeRunForkSelectedContractRouteRecovery(runfork.RunForkSelectedContractRouteRecoveryRequest{
@@ -95,9 +88,9 @@ func prepareRunForkSelectedContractRouteResolution(
 		RecipientPlanning: planning,
 	}, time.Now().UTC())
 	if err != nil {
-		return runfork.RunForkSelectedContractRouteRecovery{}, false, err
+		return runfork.RunForkSelectedContractRouteRecovery{}, err
 	}
-	return record, true, nil
+	return record, nil
 }
 
 func equalTrimmedStrings(left, right []string) bool {
@@ -224,7 +217,12 @@ func selectedContractWorkflowStateConfig(state selectedContractWorkflowState) ([
 	if err != nil {
 		return nil, err
 	}
-	descriptor, err := runtimepipeline.WorkflowInstanceHeaderPayloadForIdentity(identity, state.WorkflowVersion)
+	metadata := state.History.MaterializationMetadata
+	recorded, err := runtimepipeline.DecodeWorkflowInstanceRecordedHeader(runtimeflowidentity.RouteForInstancePath(metadata.FlowInstance), metadata.FlowConfig)
+	if err != nil {
+		return nil, fmt.Errorf("read selected-contract captured header version: %w", err)
+	}
+	descriptor, err := runtimepipeline.WorkflowInstanceHeaderPayloadForIdentity(identity, recorded.WorkflowVersion())
 	if err != nil {
 		return nil, fmt.Errorf("encode selected-contract workflow route config: %w", err)
 	}
@@ -401,6 +399,10 @@ func selectedContractHistoricalHeader(state selectedContractWorkflowState, confi
 	if err != nil {
 		return runtimepipeline.WorkflowEngineStateRecord{}, err
 	}
+	construction, err := runtimepipeline.DecodeWorkflowInstanceRecordedHeader(identity.Route, config)
+	if err != nil {
+		return runtimepipeline.WorkflowEngineStateRecord{}, err
+	}
 	projection, err := projectRunForkEntityOwnership(state.SourceRunID, state.RunID, history.EntityID, metadata.FlowInstance)
 	if err != nil {
 		return runtimepipeline.WorkflowEngineStateRecord{}, fmt.Errorf("historical header requires exact source/child entity correspondence: %w", err)
@@ -417,7 +419,8 @@ func selectedContractHistoricalHeader(state selectedContractWorkflowState, confi
 		return runtimepipeline.WorkflowEngineStateRecord{}, err
 	}
 	record := runtimepipeline.WorkflowEngineStateRecord{
-		Identity: identity, EntityID: state.EntityID, WorkflowName: state.WorkflowName, WorkflowVersion: state.WorkflowVersion,
+		Identity: identity, EntityID: state.EntityID, WorkflowName: state.WorkflowName, WorkflowVersion: construction.WorkflowVersion(),
+		ParentInstance: construction.ParentRoute().FlowInstance, InstanceKey: metadata.InstanceKey,
 		Mode: state.Mode, Status: "active", CurrentState: history.CurrentState, StageDefined: metadata.StageDefined,
 		EntityType: state.EntityType, Slug: metadata.Slug, Name: metadata.Name, Config: config,
 		EnteredStageAt: *history.EnteredStateAt, CreatedAt: now, UpdatedAt: now,

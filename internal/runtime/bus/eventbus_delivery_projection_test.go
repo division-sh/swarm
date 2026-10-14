@@ -283,23 +283,12 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	}.Normalized()
 	targetNode := testFlowNode(t, "worker", "target-node")
 	targetHandler := runtimepipeline.MustDeliveryTargetHandler(targetNode)
-	routeTable := newRouteTable(nil)
-	routeTable.eventPath[eventType] = struct{}{}
-	routeTable.routes[routeResolutionKey{eventType: eventType}] = []Subscriber{{
-		Recipient:      events.MustNodeDeliveryRecipient(targetNode),
-		Path:           "worker/inst-1",
-		LocalizedEvent: "work.started",
-		handlerNode:    targetNode,
-		targetHandler:  targetHandler,
-		routeSource:    subscriberRouteSourceSubscription,
-	}}
 	store := newTargetRouteMemoryStore()
-	store.setTargetOwnerRoutes(target)
+	source := semanticview.Wrap(materializedTargetBundleWithHandler(
+		t, "worker", "target-node", "work.started", existingOwnerHandlerFixture(),
+	))
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
-		ContractBundle: semanticview.Wrap(materializedTargetBundleWithHandler(
-			t, "worker", "target-node", "work.started", existingOwnerHandlerFixture(),
-		)),
-		RouteTable: routeTable,
+		ContractBundle: source,
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {
 			return []DeliveryRouteBlueprint{{
 				Recipient: events.MustNodeDeliveryRecipient(targetNode),
@@ -317,6 +306,10 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	installConnectionSourceConstructionForRun(t, eb, source, ".", lineage.DestinationRunID())
+	constructed := StoredFlowInstanceIdentityFixture(source, target.FlowID, "inst-1", lineage.DestinationRunID(), target.EntityID)
+	constructed.InstancePath, constructed.InstanceID = target.FlowInstance, "inst-1"
+	store.installIndexObservation(constructionIndexObservation(t, source, lineage.DestinationRunID(), constructed, "inst-1"))
 	evt, err := events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{
 		Facts: events.EventFacts{
 			ID: uuid.NewString(), Type: eventType,
@@ -328,7 +321,7 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := eb.PrepareSelectedForkPublish(context.Background(), evt, SelectedInputValidation{})
+	prepared, err := eb.PrepareSelectedForkPublish(constructionIndexContext(t, source), evt, SelectedInputValidation{})
 	if err != nil {
 		t.Fatalf("prepare selected-fork publication: %v", err)
 	}
@@ -485,8 +478,7 @@ func TestRoutePlanTargetProjectionPreservesExplicitlyAbsentIngressSource(t *test
 
 func TestPayloadCarriesAreNotPersistedInDeliveryProjection(t *testing.T) {
 	plan := mustInstanceKeyConnectRoutePlan(t, connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelect))
-	projection, err := syntheticDeliveryPayloadProjection(plan, TemplateInstanceLifecycleDecision{
-		Action:      templateInstanceLifecycleActionSelectedExisting,
+	projection, err := syntheticDeliveryPayloadProjection(plan, connectInstanceSelection{
 		KeyMaterial: []runtimecontracts.TemplateInstanceKeyValue{{Field: mustBusTemplateInstanceField(t, "account_id"), Value: "acct-1"}},
 	})
 	if err != nil {

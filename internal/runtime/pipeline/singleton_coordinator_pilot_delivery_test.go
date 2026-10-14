@@ -23,6 +23,9 @@ func VerifyNativeSingletonCoordinatorPilotPipelineDispatchPersistsContainedState
 		t.Run(backend, func(t *testing.T) {
 			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
 			workflowStore := pc.workflowStore
+			if err := fixture.Construct(ctx, constructedScenarioInstanceForTest(t, source, ctx, semanticview.RootExecutionFlowID(source))); err != nil {
+				t.Fatalf("construct singleton pilot structural root: %v", err)
+			}
 			entityID := FlowInstanceEntityID(singletoncoordinatorpilot.FlowInstance)
 			constructNativeSingletonCoordinatorPilotForTest(t, fixture, ctx, bundle, entityID)
 
@@ -131,7 +134,11 @@ func VerifyNativeSingletonCoordinatorPilotPipelineRejectsContainedItemDeliveryTa
 				FlowInstance: singletoncoordinatorpilot.FlowInstance + "/lead-42",
 				EntityID:     uuid.NewString(),
 			}
-			if pc.workflowNodeMatchesDeliveryTarget(pipelineNode(t, singletoncoordinatorpilot.FlowID, singletoncoordinatorpilot.NodeID), runtimecorrelation.RunIDFromContext(ctx), containedTarget) {
+			matched, err := pc.workflowNodeMatchesDeliveryTarget(ctx, pipelineSourceNode(t, pc.SemanticSource(), singletoncoordinatorpilot.FlowID, singletoncoordinatorpilot.NodeID), runtimecorrelation.RunIDFromContext(ctx), containedTarget)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if matched {
 				t.Fatalf("contained item target %#v matched singleton coordinator node; contained map entries must not be route recipients", containedTarget)
 			}
 		})
@@ -149,7 +156,7 @@ func constructNativeSingletonCoordinatorPilotForTest(t *testing.T, fixture *Pipe
 		t.Fatal(err)
 	}
 	constructed := constructorUnitIdentity(t, semanticview.Wrap(bundle), runtimecorrelation.RunIDFromContext(ctx), singletoncoordinatorpilot.FlowID)
-	if err := fixture.Construct(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+	if err := fixture.Construct(ctx, materializedWorkflowInstanceForSource(t, semanticview.Wrap(bundle), ctx, WorkflowInstance{
 		InstanceID:   singletoncoordinatorpilot.FlowInstance,
 		StorageRef:   singletoncoordinatorpilot.FlowInstance,
 		EntityID:     entityID,

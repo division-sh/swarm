@@ -557,19 +557,13 @@ func (*runtimeTestUnavailableHumanTaskExpiry) CommitHumanTaskExpirations(context
 }
 
 type runtimeTestDurableEventStore interface {
+	runtimepipeline.FlowInstanceIndexReader
 	runtimepipeline.FlowConstructionPublicationReader
 	runtimebus.EventStore
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
-	runtimebus.FlowInstanceRoutePersistence
-	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteSetPersistence
-	runtimebus.FlowInstanceRouteTopologyPersistence
-	runtimebus.FlowInstanceRouteRollbackPersistence
 	runtimebus.ActiveAgentDescriptorLister
-	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.SelectedRunTargetOwnerLister
 	runtimepipeline.WorkflowInstancePersistenceReader
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
@@ -579,19 +573,20 @@ type runtimeTestDurableEventStore interface {
 
 func runtimeTestDurableDependencies(durable runtimeTestDurableEventStore) runtimebus.DurableDependencies {
 	return runtimebus.DurableDependencies{
+		Instances:                durable,
 		ConstructionPublications: durable,
 		ReplyContext:             durable, RunLifecycle: durable,
-		DeliveryLifecycle: durable, FlowRoutes: durable, FlowRouteRecords: durable,
-		FlowRouteSets: durable, FlowRouteTopology: durable, FlowRouteRollback: durable, ActiveAgents: durable,
-		ActiveFlows: durable, TargetOwners: durable, PreparedEvents: durable,
+		DeliveryLifecycle:     durable,
+		ActiveAgents:          durable,
+		PreparedEvents:        durable,
 		TargetFailureRecorder: durable, RunOrigins: durable, StandingRestarts: durable,
 	}
 }
 
 func runtimeTestManagerBusRoles(bus *runtimebus.EventBus) runtimemanager.PersistenceRoles {
 	return runtimemanager.PersistenceRoles{
-		AgentRoutes: bus, RouteInstaller: bus, RouteVerifier: bus,
-		RouteRestorer: bus, FlowActivation: bus, CreationPublisher: bus, DeliveryRuntime: bus,
+		AgentRoutes:    bus,
+		FlowActivation: bus, CreationPublisher: bus, DeliveryRuntime: bus,
 	}
 }
 

@@ -11,16 +11,15 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 )
 
-func (eb *EventBus) prepareJoinAdmission(ctx context.Context, evt events.Event, prospective pipeline.PreparedWorkflowPublicationState, plan *RoutePlan) error {
+func (eb *EventBus) prepareJoinAdmission(ctx context.Context, evt events.Event, prospective pipeline.PreparedWorkflowPublicationState, plan *RoutePlan, owners *publicationTargetOwnerEvidence) error {
 	if eb.semanticSource == nil || isJoinLifecycleControlEvent(evt.Type()) {
 		return nil
 	}
 	if err := eb.prepareDeliveryJoinAdmission(ctx, evt, prospective, plan); err != nil {
 		return err
 	}
-	var returnOwners *selectedRunTargetOwnerProjection
 	for index := range plan.ReplyCreations {
-		if err := eb.prepareReplyJoinAdmission(ctx, prospective, plan, &plan.ReplyCreations[index], &returnOwners); err != nil {
+		if err := eb.prepareReplyJoinAdmission(ctx, evt, prospective, plan, &plan.ReplyCreations[index], owners); err != nil {
 			return err
 		}
 	}
@@ -54,12 +53,24 @@ func (eb *EventBus) prepareDeliveryJoinAdmission(ctx context.Context, evt events
 	return nil
 }
 
-func (eb *EventBus) prepareReplyJoinAdmission(ctx context.Context, prospective pipeline.PreparedWorkflowPublicationState, plan *RoutePlan, record *runtimereplycontext.Record, returnOwners **selectedRunTargetOwnerProjection) error {
+func (eb *EventBus) prepareReplyJoinAdmission(ctx context.Context, evt events.Event, prospective pipeline.PreparedWorkflowPublicationState, plan *RoutePlan, record *runtimereplycontext.Record, owners *publicationTargetOwnerEvidence) error {
+	if record.RunID != evt.RunID() {
+		return fmt.Errorf("reply origin crosses its admitted publication run")
+	}
+	if err := owners.validate(ctx, evt); err != nil {
+		return err
+	}
+	planningContext, err := owners.planner.previewPreparedConstructions(
+		withSelectedRunTargetOwnerProjection(owners.projection.context, owners.projection), evt.RunID(), plan.ActivationPlans,
+	)
+	if err != nil {
+		return err
+	}
 	for _, returnPlan := range eb.connectRoutePlanner.graph.Plans() {
 		if returnPlan.ReplyRole() != runtimepinrouting.ConnectReplyRoleResponse || !returnPlan.MatchesReplyRecord(*record) {
 			continue
 		}
-		subscribers, err := eb.connectRoutePlanner.resolveSelectedReceiverCarriers(ctx, record.RunID, returnPlan, record.Origin)
+		subscribers, err := owners.planner.connectPlanner.resolveSelectedReceiverCarriers(planningContext, record.RunID, returnPlan, record.Origin)
 		if err != nil {
 			return err
 		}
@@ -68,14 +79,7 @@ func (eb *EventBus) prepareReplyJoinAdmission(ctx context.Context, prospective p
 			if !isNode || len(pipeline.WorkflowJoinAdmissionPlans(eb.semanticSource, node, string(returnPlan.ReceiverLocalEvent()))) == 0 {
 				continue
 			}
-			if *returnOwners == nil {
-				owners, err := eb.loadJoinReturnOwners(ctx, prospective, plan)
-				if err != nil {
-					return err
-				}
-				*returnOwners = owners
-			}
-			target, err := (*returnOwners).resolveSelectedRoute(record.Origin)
+			target, err := owners.returnOwner(ctx, evt, plan, *record)
 			if err != nil {
 				return err
 			}
@@ -91,17 +95,6 @@ func (eb *EventBus) prepareReplyJoinAdmission(ctx context.Context, prospective p
 		}
 	}
 	return record.Validate()
-}
-
-func (eb *EventBus) loadJoinReturnOwners(ctx context.Context, prospective pipeline.PreparedWorkflowPublicationState, plan *RoutePlan) (*selectedRunTargetOwnerProjection, error) {
-	policy := eb.deliveryPlanner.recipientPolicy
-	policy.prospective = prospective
-	owners, err := policy.loadSelectedRunTargetOwnerProjection(ctx)
-	if err != nil {
-		return nil, err
-	}
-	owners, err = owners.withActivationPlans(plan.ActivationPlans)
-	return &owners, err
 }
 
 func (eb *EventBus) prepareJoinRouteAdmission(ctx context.Context, runID, event string, prospective pipeline.PreparedWorkflowPublicationState, plan *RoutePlan, route events.DeliveryRoute) ([]events.JoinAdmissionReceipt, *pipeline.WorkflowJoinAdmissionFence, error) {

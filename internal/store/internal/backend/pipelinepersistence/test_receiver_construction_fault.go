@@ -52,7 +52,7 @@ func (s *PipelinePostgresOwner) CopyReceiverConstructionReceiptForTest(ctx conte
 	if err != nil {
 		return err
 	}
-	return copyReceiverConstructionReceiptForTest(ctx, tx, source, destination, sourceEntity, destinationEntity, run, s.receiverHistory, false)
+	return copyReceiverConstructionReceiptForTest(ctx, tx, source, destination, sourceEntity, destinationEntity, run, s.historicalInstances, false)
 }
 
 func (s *PipelineSQLiteOwner) CopyReceiverConstructionReceiptForTest(ctx context.Context, tx *sql.Tx, source, destination flowidentity.RunScopedFlowInstance, sourceEntity, destinationEntity string) error {
@@ -60,10 +60,10 @@ func (s *PipelineSQLiteOwner) CopyReceiverConstructionReceiptForTest(ctx context
 	if err != nil {
 		return err
 	}
-	return copyReceiverConstructionReceiptForTest(ctx, tx, source, destination, sourceEntity, destinationEntity, run, s.receiverHistory, true)
+	return copyReceiverConstructionReceiptForTest(ctx, tx, source, destination, sourceEntity, destinationEntity, run, s.historicalInstances, true)
 }
 
-func copyReceiverConstructionReceiptForTest(ctx context.Context, tx *sql.Tx, source, destination flowidentity.RunScopedFlowInstance, sourceEntity, destinationEntity string, run runlifecycle.Snapshot, history ReceiverConstructionHistory, sqlite bool) error {
+func copyReceiverConstructionReceiptForTest(ctx context.Context, tx *sql.Tx, source, destination flowidentity.RunScopedFlowInstance, sourceEntity, destinationEntity string, run runlifecycle.Snapshot, history HistoricalFlowInstanceReader, sqlite bool) error {
 	if _, err := ReadFlowConstructionPublicationTx(ctx, tx, source, sourceEntity); err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func copyReceiverConstructionReceiptForTest(ctx context.Context, tx *sql.Tx, sou
 	return nil
 }
 
-func validateReceiverReceiptFaultHistory(ctx context.Context, tx *sql.Tx, source, destination flowidentity.RunScopedFlowInstance, sourceEntity, destinationEntity string, run runlifecycle.Snapshot, history ReceiverConstructionHistory, sqlite bool) error {
+func validateReceiverReceiptFaultHistory(ctx context.Context, tx *sql.Tx, source, destination flowidentity.RunScopedFlowInstance, sourceEntity, destinationEntity string, run runlifecycle.Snapshot, history HistoricalFlowInstanceReader, sqlite bool) error {
 	if history == nil || run.RunID != destination.RunID || run.Origin.SourceRunID() != source.RunID || source.Route.ScopeKey != destination.Route.ScopeKey {
 		return fmt.Errorf("contradictory receipt fault requires its bound historical destination and native ancestor")
 	}
@@ -105,7 +105,7 @@ func validateReceiverReceiptFaultHistory(ctx context.Context, tx *sql.Tx, source
 	if err != nil {
 		return err
 	}
-	historical, err := history.ReadReceiverConstructionHistoryTx(ctx, tx, run, header)
+	_, historical, err := history.ReadHistoricalFlowInstanceConstructionEvidenceTx(ctx, tx, run, header)
 	if err != nil {
 		return err
 	}

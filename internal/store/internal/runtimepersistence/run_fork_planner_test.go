@@ -12,6 +12,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -229,7 +230,6 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	}
 	for _, code := range []string{
 		"delivery_history_unproven",
-		runfork.RunForkBlockerFlowRouteHistoryUnproven,
 	} {
 		if !blockers[code] {
 			t.Fatalf("missing blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
@@ -278,9 +278,6 @@ func TestRunForkPlanner_PendingUnstartedDeliveryIsDeliveryEventReplayReady(t *te
 	}
 	if !plan.ReplayResumeAdmission.DeliveryEventReplayReady || !plan.ReplayResumeAdmission.ReplayResumeFactsPresent || !plan.ReplayResumeAdmission.BoundedReplaySupported {
 		t.Fatalf("replay flags = %#v, want delivery-event replay ready and supported", plan.ReplayResumeAdmission)
-	}
-	if plan.RouteHistory.State != runfork.RunForkRouteHistoryNotApplicable {
-		t.Fatalf("route history = %#v, want %s", plan.RouteHistory, runfork.RunForkRouteHistoryNotApplicable)
 	}
 	for _, disposition := range plan.ReplayResumeAdmission.Dispositions {
 		if disposition.Fact == runfork.RunForkReplayResumeFactDeliveryPendingHistory && disposition.Disposition == runfork.RunForkReplayResumeDispositionForkReplay {
@@ -432,6 +429,7 @@ func TestRunForkPlanner_SystemDeliveryRowsAreNotCanonicalEventDeliveries(t *test
 	}
 }
 
+// Current unrelated instance mutations cannot affect the independently blocked timer cut.
 func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentRouteRows(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
@@ -468,28 +466,24 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 	admitGenericScheduleFixture(t, ctx, pg, testAgentGenericScheduleCommand(
 		t, runID, "other-agent", "flow-other/1", uuid.NewString(), "unrelated", runtimegenericschedule.AbsoluteDue(at.Add(time.Hour)),
 	))
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO routing_rules (
-			event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at
-		)
-		VALUES ('other.event', 'node', 'other-node', 'flow-other/1', 'flow-other', false, 'active', $1)
-	`, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed unrelated route: %v", err)
+	unrelatedRunID := uuid.NewString()
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: unrelatedRunID, StartedAt: at.Add(-time.Minute)})
+	constructUnrelated := func() {
+		commitPreparedWorkflowAggregateFixture(t, ctx, pg, unrelatedRunID, pipeline.WorkflowInstance{
+			InstanceID: unrelatedRunID, StorageRef: unrelatedRunID, EntityID: unrelatedRunID,
+			WorkflowName: ".", WorkflowVersion: "1", Mode: "static", CurrentState: "active",
+			CreatedAt: at.Add(-time.Minute), EnteredStageAt: at.Add(-time.Minute),
+		}, at.Add(-time.Minute))
 	}
+	constructUnrelated()
 
 	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
-	if plan.ExecutionReady {
-		t.Fatalf("ExecutionReady = true, want route-history blocker; blockers=%#v", plan.UnsupportedBlockers)
-	}
-	if !runForkTestHasBlocker(plan, runfork.RunForkBlockerFlowRouteHistoryUnproven) {
-		t.Fatalf("blockers=%#v, want %s", plan.UnsupportedBlockers, runfork.RunForkBlockerFlowRouteHistoryUnproven)
-	}
-	if plan.RouteHistory.State != runfork.RunForkRouteHistoryUnknownUnversioned {
-		t.Fatalf("route history = %#v, want %s", plan.RouteHistory, runfork.RunForkRouteHistoryUnknownUnversioned)
+	if plan.ExecutionReady || len(plan.UnsupportedBlockers) != 1 || plan.UnsupportedBlockers[0].Code != runfork.RunForkBlockerTimerHistoryUnproven {
+		t.Fatalf("fixed state inherited current route authority: %#v", plan.UnsupportedBlockers)
 	}
 	baseline, err := json.Marshal(plan)
 	if err != nil {
@@ -499,12 +493,14 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 		label string
 		query string
 	}{
-		{label: "update", query: `UPDATE routing_rules SET event_pattern='fork.state', flow_instance='flow-a/1', source_flow='flow-a', status='active'`},
-		{label: "delete", query: `DELETE FROM routing_rules`},
-		{label: "insert", query: `INSERT INTO routing_rules (event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at) VALUES ('fork.state', 'node', 'late-node', 'flow-a/9', 'flow-a', false, 'active', now())`},
+		{label: "update", query: `UPDATE flow_instances SET name='late unrelated owner' WHERE run_id=$1::uuid`},
+		{label: "delete", query: `DELETE FROM flow_instances WHERE run_id=$1::uuid`},
+		{label: "insert"},
 	} {
-		if _, err := db.ExecContext(ctx, mutation.query); err != nil {
-			t.Fatalf("%s current routing rules: %v", mutation.label, err)
+		if mutation.label == "insert" {
+			constructUnrelated()
+		} else if _, err := db.ExecContext(ctx, mutation.query, unrelatedRunID); err != nil {
+			t.Fatalf("%s current unrelated instance: %v", mutation.label, err)
 		}
 		replanned, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
 		if err != nil {
@@ -557,15 +553,11 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 	admitGenericScheduleFixture(t, ctx, pg, testAgentGenericScheduleCommand(
 		t, runID, "node-a", "flow-a/1", entityID, "relevant", runtimegenericschedule.AbsoluteDue(at.Add(time.Hour)),
 	))
-	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, uuid.NewString(), "flow-a/2", "flow-a", "", "waiting", "{}", at.Add(-time.Minute))
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO routing_rules (
-			run_id, event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at
-		)
-		VALUES ($1::uuid, 'fork.timer_route', 'node', 'node-a', 'flow-a/2', 'flow-a', true, 'active', $2)
-	`, runID, at.Add(-time.Minute)); err != nil {
-		t.Fatalf("seed relevant route: %v", err)
-	}
+	commitPreparedWorkflowAggregateFixture(t, ctx, pg, runID, pipeline.WorkflowInstance{
+		InstanceID: "2", StorageRef: "flow-a/2", EntityID: uuid.NewString(),
+		WorkflowName: "flow-a", WorkflowVersion: "1", Mode: "static", StageDefined: true,
+		CurrentState: "waiting", Fields: map[string]any{}, CreatedAt: at.Add(-time.Minute), EnteredStageAt: at.Add(-time.Minute),
+	}, at.Add(-time.Minute))
 
 	captureRunForkTestRevision(t, db, runID)
 	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: eventID})
@@ -573,14 +565,14 @@ func TestRunForkPlanner_RelevantTimerAndRouteRemainBlockers(t *testing.T) {
 		t.Fatalf("PlanRunFork: %v", err)
 	}
 	if plan.ExecutionReady {
-		t.Fatal("ExecutionReady = true, want false for relevant timer/route facts")
+		t.Fatal("ExecutionReady = true, want false for relevant timer history")
 	}
-	for _, code := range []string{"timer_history_unproven", "flow_route_history_unproven"} {
+	for _, code := range []string{"timer_history_unproven"} {
 		if !runForkTestHasBlocker(plan, code) {
 			t.Fatalf("missing blocker %q; blockers=%#v", code, plan.UnsupportedBlockers)
 		}
 	}
-	for _, fact := range []string{runfork.RunForkReplayResumeFactTimerHistory, runfork.RunForkReplayResumeFactRouteHistory} {
+	for _, fact := range []string{runfork.RunForkReplayResumeFactTimerHistory} {
 		if !runForkTestHasDisposition(plan.ReplayResumeAdmission, fact) {
 			t.Fatalf("missing taxonomy disposition for %s; admission=%#v", fact, plan.ReplayResumeAdmission)
 		}

@@ -104,9 +104,10 @@ func TestPrepareInboundDeliveryBatchRejectsInvalidProviderOutputAuthorizationBef
 
 func TestPrepareInboundDeliveryBatchAcceptsOnlyExactCurrentProviderOutputAuthorizationIntoMutation(t *testing.T) {
 	source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", true)
-	store := &InMemoryEventStore{}
+	store := newTargetRouteMemoryStore()
 	bus, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source, ProviderOutputVerifier: catalog,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 	})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
@@ -224,7 +225,9 @@ func TestPrepareInboundDeliveryBatchUsesLiveSourceOwnerAndSettlesConsumerlessRaw
 		t.Run(state, func(t *testing.T) {
 			store := newTargetRouteMemoryStore()
 			source, catalog, batch := authenticatedTelegramBatchFixture(t, "telegram-ingress", false)
-			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, ProviderOutputVerifier: catalog})
+			bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source, ProviderOutputVerifier: catalog,
+				Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+			})
 			if err != nil {
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
@@ -300,7 +303,7 @@ func TestPrepareInboundDeliveryBatchRejectsChangedAuthenticatedPublicationBefore
 			if _, err := bus.PrepareInboundDeliveryBatch(testAuthorActivityContext(context.Background()), batch); err == nil {
 				t.Fatal("changed authenticated publication was accepted")
 			}
-			if len(store.events) != 0 || len(store.routes) != 0 || len(bus.RouteTable().instanceOwners) != 0 {
+			if len(store.events) != 0 || len(store.routes) != 0 || len(store.instanceObservations) != 0 || len(store.constructions) != 0 {
 				t.Fatal("refused authenticated publication changed event, delivery or construction state")
 			}
 		})
@@ -319,7 +322,9 @@ func TestAuthenticatedRawSettlementCannotEraseGenuineLocalConsumer(t *testing.T)
 	store := newTargetRouteMemoryStore()
 	instance := ConstructedFlowInstanceIdentityFixture(base, flow, "", busInternalTestRunID)
 	store.setTargetOwners(ActiveTargetDescriptor{ID: flow, FlowInstance: instance.InstancePath, EntityID: instance.EntityID})
-	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: base, ProviderOutputVerifier: catalog})
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: base, ProviderOutputVerifier: catalog,
+		Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

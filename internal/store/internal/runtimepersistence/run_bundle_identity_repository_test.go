@@ -108,11 +108,15 @@ func runFixtureIdentityViolations(path string, file *ast.File) ([]string, error)
 	if err != nil {
 		return nil, err
 	}
+	historical, err := classifyReceiverHistoryMinimalRunLiterals(path, file)
+	if err != nil {
+		return nil, err
+	}
 	oracles := classifyRunFixtureIdentityOracleLiterals(path, file)
 	var violations []string
 	ast.Inspect(file, func(node ast.Node) bool {
 		literal, ok := node.(*ast.BasicLit)
-		if !ok || literal.Kind != token.STRING || minimal[literal.Pos()] || oracles[literal.Pos()] {
+		if !ok || literal.Kind != token.STRING || minimal[literal.Pos()] || historical[literal.Pos()] || oracles[literal.Pos()] {
 			return true
 		}
 		value, err := strconv.Unquote(literal.Value)
@@ -212,6 +216,35 @@ func TestRepositoryRunFixtureIdentityGuardRejectsNewWriters(t *testing.T) {
 		})
 	}
 
+	const historyPath = "internal/store/internal/backend/runforkpersistence/receiver_config_history_test.go"
+	const historyScope = "TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores"
+	const historySchema = "CREATE TEMP TABLE runs (run_id TEXT PRIMARY KEY, origin_kind TEXT, trigger_event_id TEXT, trigger_event_type TEXT, origin_service_id TEXT, origin_generation BIGINT, forked_from_run_id TEXT, forked_from_point_kind TEXT, forked_from_revision BIGINT, forked_from_event_id TEXT)"
+	const historyInsert = "INSERT INTO runs (run_id,origin_kind) VALUES ($1,'deployment')"
+	historySource := "package fixture\nfunc " + historyScope + "() { db.Exec(" + strconv.Quote(historySchema) + "); db.Exec(" + strconv.Quote(historyInsert) + ") }\n"
+	for _, tc := range []struct {
+		name, path, source string
+		want               bool
+	}{
+		{"historical-stub-exact", historyPath, historySource, true},
+		{"historical-stub-wrong-owner", "internal/runtime/other_test.go", historySource, false},
+		{"historical-stub-wrong-scope", historyPath, strings.ReplaceAll(historySource, historyScope, "Other"), false},
+		{"historical-stub-nontemporary", historyPath, strings.ReplaceAll(historySource, "CREATE TEMP TABLE", "CREATE TABLE"), false},
+		{"historical-stub-semantic-column", historyPath, strings.ReplaceAll(historySource, "forked_from_event_id TEXT)", "forked_from_event_id TEXT, status TEXT)"), false},
+		{"historical-stub-foreign-origin", historyPath, strings.ReplaceAll(historySource, "'deployment'", "'fork_materialization'"), false},
+		{"historical-stub-sibling-writer", historyPath, historySource + "func other() { db.Exec(" + strconv.Quote(historyInsert) + ") }", false},
+		{"historical-stub-extra-writer", historyPath, strings.Replace(historySource, "db.Exec(", "db.Exec("+strconv.Quote(historyInsert)+"); db.Exec(", 1), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", tc.source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			violations, err := runFixtureIdentityViolations(tc.path, file)
+			if allowed := err == nil && len(violations) == 0; allowed != tc.want {
+				t.Fatalf("allowed=%t want=%t violations=%v err=%v", allowed, tc.want, violations, err)
+			}
+		})
+	}
 }
 
 func TestRepositoryContainsNoLegacyBundleIdentityInterpreter(t *testing.T) {
@@ -458,8 +491,6 @@ func eventBusSourceOperationLedger() map[string]string {
 		"FinalizeFanOutPublications":                 operationMutation,
 		"FenceAgentRoute":                            operationMutation,
 		"FinalizeSelectedReceiverAdmission":          operationRetained,
-		"HasFlowInstanceRoute":                       operationPureRead,
-		"ListFlowInstanceRoutes":                     operationPureRead,
 		"LookupAPIEventPublication":                  operationPureRead,
 		"LogRuntime":                                 operationMutation,
 		// This projects an exact already-admitted durable transition, including retained
@@ -467,7 +498,6 @@ func eventBusSourceOperationLedger() map[string]string {
 		"ProjectLifecycleDiagnostic":        operationAdmittedChild,
 		"MarkDeliveryInProgress":            operationMutation,
 		"OutboxSweeperActive":               operationPureRead,
-		"PinRoutingDescriptors":             operationPureRead,
 		"PipelineObligationOwner":           operationRetained,
 		"PipelineWorkPresence":              operationPureRead,
 		"PrepareAgentRoute":                 operationRetained,
@@ -478,64 +508,59 @@ func eventBusSourceOperationLedger() map[string]string {
 		"PrepareInboundDeliveryBatch":       operationMutation,
 		// Admission-only projection and elected-receipt validation do not commit
 		// construction or publication; their existing owners retain authority.
-		"PrepareInboundEvidence":                      operationPureRead,
-		"ReconcileInboundConstruction":                operationPureRead,
-		"PrepareSelectedForkPublish":                  operationMutation,
-		"PrepareTurnTimeoutReaction":                  operationMutation,
-		"PrepareRecoveredTurnTimeoutReaction":         operationMutation,
-		"PreflightRunQueue":                           operationPureRead,
-		"PreflightRuntimeIngressQueue":                operationPureRead,
-		"Publish":                                     operationMutation,
-		"PublishAcknowledged":                         operationMutation,
-		"PublishAPIEventAcknowledged":                 operationMutation,
-		"PublishAPIEventWithRunCreationAcknowledged":  operationMutation,
-		"PublishAndWait":                              operationMutation,
-		"PublishDirect":                               operationMutation,
-		"PublishDirectRoutes":                         operationMutation,
-		"PublishEmit":                                 operationMutation,
-		"RecoverPersistedPipeline":                    operationMutation,
-		"RecoverSelectedRunPipelineToExhaustion":      operationMutation,
-		"RegisterRuntimeActiveAgentDescriptor":        operationRetained,
-		"ReleaseRunQueue":                             operationMutation,
-		"ReleaseEnginePublications":                   operationMutation,
-		"ReleaseRuntimeIngressQueue":                  operationMutation,
-		"ReleaseTurnTimeoutReaction":                  operationMutation,
-		"RemoveAgentRoute":                            operationMutation,
-		"ReplaceAgentRoute":                           operationAdmittedChild,
-		"ResetInMemoryState":                          operationMutation,
-		"ResolveSubscribedRecipients":                 operationPureRead,
-		"PublishPersistedFlowInstanceRouteForAttempt": operationMutation,
-		"RetireFlowInstanceRouteForAttempt":           operationAdmittedChild,
-		"RetireCommittedFlowInstanceRoute":            operationAdmittedChild,
-		"RouteTable":                                  operationRetained,
-		"RunLifecycleCandidateOwner":                  operationRetained,
-		"SealFanOutPublications":                      operationMutation,
-		"SetDeliveryAuthority":                        operationRetained,
-		"SetDeliveryContinuationOwner":                operationRetained,
-		"SetCommittedAgentReadinessFinalizer":         operationRetained,
-		"SetInterceptors":                             operationRetained,
-		"SetLoggerHook":                               operationRetained,
-		"SetProviderOutputAuthorizationVerifier":      operationRetained,
-		"SetRunDispatchGate":                          operationRetained,
-		"SetRuntimeIngressDispatchGate":               operationRetained,
-		"SetStandingRunWorkOwner":                     operationRetained,
-		"StartOutboxSweeper":                          operationRetained,
-		"StageFlowInstanceRouteContext":               operationMutation,
-		"StartDeploymentRunAcknowledged":              operationMutation,
-		"Store":                                       operationRetained,
-		"SubscribeInternal":                           operationRetained,
-		"DeliveryAuthority":                           operationRetained,
-		"DeliveryContinuationOwner":                   operationRetained,
-		"AcquireDeliveryContinuation":                 operationRetained,
-		"AcceptCommittedDeliveryHandoffs":             operationRetained,
-		"RetainDeliveryContinuation":                  operationRetained,
-		"ReleaseDeliveryContinuation":                 operationRetained,
-		"SignalDeliveryContinuations":                 operationRetained,
-		"SweepPipelineObligations":                    operationMutation,
-		"WaitForOutboxSweeper":                        operationMutation,
-		"WaitForQuiescence":                           operationMutation,
-		"VerifyFlowInstanceRoute":                     operationPureRead,
-		"SetupScenarioEntities":                       operationMutation,
+		"PrepareInboundEvidence":                     operationPureRead,
+		"ReconcileInboundConstruction":               operationPureRead,
+		"PrepareSelectedForkPublish":                 operationMutation,
+		"PrepareTurnTimeoutReaction":                 operationMutation,
+		"PrepareRecoveredTurnTimeoutReaction":        operationMutation,
+		"PreflightRunQueue":                          operationPureRead,
+		"PreflightRuntimeIngressQueue":               operationPureRead,
+		"Publish":                                    operationMutation,
+		"PublishAcknowledged":                        operationMutation,
+		"PublishAPIEventAcknowledged":                operationMutation,
+		"PublishAPIEventWithRunCreationAcknowledged": operationMutation,
+		"PublishAndWait":                             operationMutation,
+		"PublishDirect":                              operationMutation,
+		"PublishDirectRoutes":                        operationMutation,
+		"PublishEmit":                                operationMutation,
+		"RecoverPersistedPipeline":                   operationMutation,
+		"RecoverSelectedRunPipelineToExhaustion":     operationMutation,
+		"RegisterRuntimeActiveAgentDescriptor":       operationRetained,
+		"ReleaseRunQueue":                            operationMutation,
+		"ReleaseEnginePublications":                  operationMutation,
+		"ReleaseRuntimeIngressQueue":                 operationMutation,
+		"ReleaseTurnTimeoutReaction":                 operationMutation,
+		"RemoveAgentRoute":                           operationMutation,
+		"ReplaceAgentRoute":                          operationAdmittedChild,
+		"ResetInMemoryState":                         operationMutation,
+		"ResolveSubscribedRecipients":                operationPureRead,
+		"RouteTable":                                 operationRetained,
+		"RunLifecycleCandidateOwner":                 operationRetained,
+		"SealFanOutPublications":                     operationMutation,
+		"SetDeliveryAuthority":                       operationRetained,
+		"SetDeliveryContinuationOwner":               operationRetained,
+		"SetCommittedAgentReadinessFinalizer":        operationRetained,
+		"SetInterceptors":                            operationRetained,
+		"SetLoggerHook":                              operationRetained,
+		"SetProviderOutputAuthorizationVerifier":     operationRetained,
+		"SetRunDispatchGate":                         operationRetained,
+		"SetRuntimeIngressDispatchGate":              operationRetained,
+		"SetStandingRunWorkOwner":                    operationRetained,
+		"StartOutboxSweeper":                         operationRetained,
+		"StartDeploymentRunAcknowledged":             operationMutation,
+		"Store":                                      operationRetained,
+		"SubscribeInternal":                          operationRetained,
+		"DeliveryAuthority":                          operationRetained,
+		"DeliveryContinuationOwner":                  operationRetained,
+		"AcquireDeliveryContinuation":                operationRetained,
+		"AcceptCommittedDeliveryHandoffs":            operationRetained,
+		"RetainDeliveryContinuation":                 operationRetained,
+		"ReleaseDeliveryContinuation":                operationRetained,
+		"SignalDeliveryContinuations":                operationRetained,
+		"SweepPipelineObligations":                   operationMutation,
+		"WaitForOutboxSweeper":                       operationMutation,
+		"WaitForQuiescence":                          operationMutation,
+		"SetupScenarioEntities":                      operationMutation,
 	}
 }
 
@@ -691,8 +716,6 @@ var bundleIdentityFixtureLedger = []string{
 	"internal/store/internal/runtimepersistence/directive_acknowledgment_test.go",
 	"internal/store/internal/runtimepersistence/entity_state_run_scope_test.go",
 	"internal/store/internal/runtimepersistence/event_admission_persistence_test.go",
-	"internal/store/internal/runtimepersistence/flow_instance_descriptors_sqlite_test.go",
-	"internal/store/internal/runtimepersistence/flow_instance_routes_test.go",
 	"internal/store/internal/runtimepersistence/operator_agent_conversation_read_surface_test.go",
 	"internal/store/internal/runtimepersistence/operator_conversation_projection_test.go",
 	"internal/store/internal/runtimepersistence/operator_entity_read_surface_test.go",

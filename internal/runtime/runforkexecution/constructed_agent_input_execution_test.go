@@ -3,8 +3,11 @@ package runforkexecution
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -36,6 +39,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -79,8 +83,22 @@ func TestSelectedNestedConstructedAgentInputExecutesBothStores(t *testing.T) {
 
 func TestSelectedHistoricalPredecessorScanBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) { proveSelectedConstructedAgentInput(t, backend, false, false, true) })
+		t.Run(backend, func(t *testing.T) {
+			proveSelectedConstructedAgentInput(t, backend, false, false, selectedConstructedInputProof{scan: true})
+		})
 	}
+}
+
+func TestSelectedConstructedRecoveryKeepsCapturedVersionBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			proveSelectedConstructedAgentInput(t, backend, false, false, selectedConstructedInputProof{changedVersionRecovery: true})
+		})
+	}
+}
+
+type selectedConstructedInputProof struct {
+	scan, changedVersionRecovery bool
 }
 
 type selectedHistoricalScanProbe struct {
@@ -119,8 +137,12 @@ func (p selectedHistoricalScanProbe) CommitSelectedForkEvent(ctx context.Context
 	return result, errSelectedHistoricalScanCut
 }
 
-func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fields bool, scan ...bool) {
+func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fields bool, proofs ...selectedConstructedInputProof) {
 	t.Helper()
+	var proof selectedConstructedInputProof
+	if len(proofs) != 0 {
+		proof = proofs[0]
+	}
 	var db *sql.DB
 	var selected startupownership.Store
 	var owner SelectedContractExecutionOwner
@@ -192,10 +214,21 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 	writeCtx := effects.WithExecutionMode(correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, runID), loaded.SourceArtifactFact), input.ExecutionMode())
 	for _, identity := range instances {
 		var constructorInput []string
+		constructorEvent := input
 		if nested && identity.TemplateID == "templ" {
 			constructorInput = []string{string(anchorType)}
+			payload, err := json.Marshal(map[string]any{"work_id": identity.InstanceID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			constructorEvent = eventtest.OperatorInjectedWithRoutingSource(uuid.NewString(), anchorType, "operator", "", payload, 0, runID, nil,
+				events.EventEnvelope{}, eventtest.RootRoutingSource(runID), at)
+			constructorEvent, err = eventtest.AdmitPayload(constructorEvent, ".", string(anchorType))
+			if err != nil {
+				t.Fatal(err)
+			}
 		}
-		command := selectedExecutionSourceFlowCommand(t, writeCtx, loaded, input, identity, constructorInput...)
+		command := selectedExecutionSourceFlowCommand(t, writeCtx, loaded, constructorEvent, identity, constructorInput...)
 		result, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(writeCtx, command)
 		if err != nil || !result.Acknowledged || !result.Created {
 			t.Fatalf("component source construction: result=%#v err=%v", result, err)
@@ -269,12 +302,26 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		}
 	}
 	before := selectedPreparationDatabaseSnapshot(t, db, backend)
-	if len(scan) != 0 && scan[0] {
+	capturedVersion := loaded.Source.WorkflowVersion()
+	var sourceLoader SelectedContractSourceLoader = loader
+	if proof.changedVersionRecovery {
+		if err := os.WriteFile(filepath.Join(root, "child/prompts/worker.md"), []byte("Consume the assigned task using the compatible selected version.\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err = loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+		if err != nil || loaded.Source.WorkflowVersion() == capturedVersion {
+			t.Fatalf("recovery proof needs distinct captured and selected versions: captured=%s err=%v", capturedVersion, err)
+		}
+		selectedBundle, _ := semanticview.Bundle(loaded.Source)
+		sourceartifactfixture.RequireArtifact(t, ctx, selected.(sourceartifactfixture.Writer), selectedBundle.SourceArtifact)
+		sourceLoader = SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)}
+	}
+	if proof.scan {
 		owner.ports.replay = selectedHistoricalScanProbe{SelectedContractReplayPersistence: owner.ports.replay, store: selected.(deliverylifecycle.Store)}
 	}
 	agents := map[agentidentity.Identity]*constructedInputAgent{}
-	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
-		SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
+	request := SelectedContractExecutionRequest{
+		SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: sourceLoader,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live,
 			ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected),
@@ -296,8 +343,14 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 				return agent, nil
 			},
 		},
-	})
-	if len(scan) != 0 && scan[0] {
+	}
+	var proveRecovery func(string)
+	if proof.changedVersionRecovery {
+		request.ContractSelection = runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: loaded.SourceArtifactFact.BundleHash()}
+		proveRecovery = prepareSelectedConstructedRecovery(t, ctx, owner, request, loaded)
+	}
+	result, err := ExecuteSelectedContractRunFork(ctx, request)
+	if proof.scan {
 		if !errors.Is(err, errSelectedHistoricalScanCut) {
 			t.Fatalf("historical scan did not reach its exact admitted component cut: %v", err)
 		}
@@ -341,6 +394,12 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 			if fields && source.TemplateID != "templ" && header.Fields["value"] != "retained" {
 				t.Fatalf("fork companion lost retained business field: %+v", header.Fields)
 			}
+			if proof.changedVersionRecovery && header.WorkflowVersion != capturedVersion {
+				t.Fatalf("selected execution rewrote captured header version: got=%s want=%s", header.WorkflowVersion, capturedVersion)
+			}
+		}
+		if proof.changedVersionRecovery {
+			proveRecovery(result.Materialization.ForkRunID)
 		}
 	}
 	after := selectedPreparationDatabaseSnapshot(t, db, backend)
@@ -355,6 +414,91 @@ func proveSelectedConstructedAgentInput(t *testing.T, backend string, nested, fi
 		}
 	}
 
+}
+
+func prepareSelectedConstructedRecovery(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, request SelectedContractExecutionRequest, loaded LoadedSelectedContractSource) func(string) {
+	t.Helper()
+	ctx = correlation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact)
+	plan, err := owner.ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: request.SourceRunID, At: request.At})
+	if err != nil {
+		t.Fatal(err)
+	}
+	frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: loaded.Source, ContractSelection: request.ContractSelection})
+	if err != nil {
+		t.Fatal(err)
+	}
+	history, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{Plan: plan, Source: loaded.Source, ContractSelection: request.ContractSelection, FrontierAdmission: frontier})
+	if err != nil {
+		t.Fatal(err)
+	}
+	topology, err := BuildSelectedContractRouteTopology(SelectedContractRouteTopologyRequest{Admission: frontier, RouteAdmission: history})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := BuildSelectedContractExecutionModel(SelectedContractExecutionModelRequest{Admission: frontier, RouteAdmission: history, RouteTopology: topology})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, readiness, err := prepareSelectedContractWorkflowReadiness(ctx, owner.ports.replay, loaded, *model.RecipientPlanning, plan, frontier, []string{request.At}, request.AgentRuntime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := runtime.releaseWorkspaceProjection(); err != nil {
+			t.Error(err)
+		}
+	})
+	projection, err := readiness.Projection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	states, err := projection.MaterializationStates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return func(forkRunID string) {
+		ctx := correlation.WithRunID(ctx, forkRunID)
+		before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, owner.ports.events)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, variant := range []string{"captured_header_current_readiness", "stale_selected_version", "foreign_entity", "foreign_mode"} {
+			t.Run(variant, func(t *testing.T) {
+				selectedStates := slices.Clone(states)
+				for i := range selectedStates {
+					if selectedStates[i].AddressKind != runfork.RunForkSelectedContractWorkflowStateExact {
+						continue
+					}
+					switch variant {
+					case "stale_selected_version":
+						selectedStates[i].WorkflowVersion = "stale-selected-version"
+					case "foreign_entity":
+						selectedStates[i].EntityID = uuid.NewString()
+					case "foreign_mode":
+						selectedStates[i].Mode = "template"
+					}
+				}
+				bound, err := bindRecoveredSelectedContractAgentRuntime(ctx, owner.ports.workflow, forkRunID, loaded, selectedStates, runtime)
+				if variant == "captured_header_current_readiness" {
+					if err != nil || len(bound.Records) != 1 || bound.Records[0].Config.Identity.RunID != forkRunID || bound.Records[0].Config.EffectiveEntityID() != "" {
+						t.Fatalf("exact changed-version recovery did not bind the original entityless actor: records=%+v err=%v", bound.Records, err)
+					}
+				} else {
+					want := "disagrees with exact entity/type/workflow descriptor"
+					if variant == "stale_selected_version" {
+						want = "disagrees with regenerated fork state"
+					}
+					if err == nil || len(bound.Records) != 0 || !strings.Contains(err.Error(), want) {
+						t.Fatalf("hostile regenerated recovery state missed its exact gate: variant=%s err=%v want=%s", variant, err, want)
+					}
+				}
+				after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, owner.ports.events)
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatalf("recovery binding changed construction, fields, delivery or execution evidence: %v", err)
+				}
+			})
+		}
+	}
 }
 
 func observeSelectedConstructedInput(ctx context.Context, selected startupownership.Store, event events.Event) error {

@@ -39,7 +39,11 @@ func TestFanOutReceiverInitializationDoesNotBecomeChildPublication(t *testing.T)
 				route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(capsule.Receiver.Node), Target: capsule.Receiver.Target}
 				var err error
 				if supplier == "construction" {
-					route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target)
+					receiver, routeErr := capsule.Route.AgentIdentityRoute()
+					if routeErr != nil {
+						t.Fatal(routeErr)
+					}
+					route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target, receiver)
 				} else {
 					route.Target, err = events.NewExistingEntityTarget(route.Target.Route())
 				}

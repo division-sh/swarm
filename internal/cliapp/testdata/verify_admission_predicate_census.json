@@ -1311,7 +1311,7 @@
     "owner": "internal/runtime/manager/recovery_inspection.go::InspectRecoverableStateSnapshot",
     "audit_rows": "A23,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "333fe71b0cfb9959f44aefa15608dc652d99e5b6ac9989da56a9aa4b0582b890"
+    "body_sha256": "9f494b7b890015ac1463d896aab5a6a8be7f285b20424ef95c77c80c2827b6cc"
   },
   {
     "owner": "internal/runtime/manager/recovery_inspection.go::managerRecoveryReads.GlobalWorkPresence",
@@ -1324,12 +1324,6 @@
     "audit_rows": "A23,A24",
     "proof_families": "P20,P21",
     "body_sha256": "f4374e096061f2b85b9a929503a7a9b4b9e19ec82b003acd5efeb13d776f01be"
-  },
-  {
-    "owner": "internal/runtime/manager/recovery_inspection.go::managerRecoveryReads.ListFlowInstanceRoutes",
-    "audit_rows": "A23,A24",
-    "proof_families": "P20,P21",
-    "body_sha256": "9ee32ec8995b4b87155fb5c283a7a7c3ea90dcacf2ffe64afe41543c6553bf37"
   },
   {
     "owner": "internal/runtime/manager/recovery_inspection.go::managerRecoveryReads.ListSelectedContractRouteRecoveryRecords",
@@ -1875,7 +1869,7 @@
     "owner": "internal/runtime/runtime.go::newRuntime",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "b52742ec816459cdc93bfbb8a1042d96ae6d9e42ca2a34bf30cf80b6c8c8cbd9"
+    "body_sha256": "96737500997020a514836cb9b1f96d0be26f2aafc249b83daaa9163e5a9eb346"
   },
   {
     "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
@@ -3808,12 +3802,6 @@
     "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
     "proof_families": "P08,P18,P19,P20,P21",
     "body_sha256": "164932929b3ce42d628955a9bfc8792eed5cb0022eea24221322b6149abfe23f"
-  },
-  {
-    "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListFlowInstanceRoutes",
-    "audit_rows": "A10,A19,A20,A22,A23,A24,A27",
-    "proof_families": "P08,P18,P19,P20,P21",
-    "body_sha256": "aa78080ee154819c785777b9b17bad85f71d5ff49811096d5fc44e4f5c786b25"
   },
   {
     "owner": "internal/store/selected/admission.go::*AdmissionSnapshot.ListSelectedContractRouteRecoveryRecords",

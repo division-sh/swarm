@@ -73,7 +73,12 @@ func TestReceiverReadinessRequiresConstructedHeaderBothStores(t *testing.T) {
 				agent := mustTestAgentIdentityForRun(runID, "worker", "review")
 				route := events.DeliveryRoute{
 					Recipient: events.MustAgentDeliveryRecipient(agent.AgentID()), AgentIdentity: agent,
-					Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: "review", EntityID: req.Instance.EntityID, FlowInstance: "review"}),
+					Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "review", FlowInstance: "review"}),
+				}
+				dependency := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: req.Instance.TemplateID, EntityID: req.Instance.EntityID, FlowInstance: req.Instance.InstancePath})
+				route.Initialization, err = events.AdmitStoredFlowReceiverInitialization(runID, plan.Children[0].CreatingInput.EventID, dependency, agent.Route)
+				if err != nil {
+					t.Fatal(err)
 				}
 				ready, err := readReceiverConstructionReady(t, f, route)
 				if test.refusal != "" {
@@ -119,8 +124,14 @@ func readReceiverConstructionReady(t *testing.T, f receiverConfigActivationFixtu
 
 func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, shape := range []string{"root", "keyed", "fieldless_descendant"} {
-			for _, variant := range []string{"exact", "unrelated_event", "missing_receipt", "partial_receipt", "contradictory_control", "contradictory_origin", "crossed_agent_scope"} {
+		for _, shape := range []string{"root", "keyed", "fieldless_descendant", "later_native_fork"} {
+			for _, variant := range []string{"exact", "stored_exact", "crossed_flow", "stored_crossed_flow", "unrelated_event", "missing_receipt", "partial_receipt", "contradictory_control", "contradictory_origin", "crossed_agent_scope", "conflicting_historical"} {
+				if variant == "conflicting_historical" && shape != "keyed" {
+					continue
+				}
+				if shape == "later_native_fork" && variant != "exact" && variant != "stored_exact" && variant != "missing_receipt" {
+					continue
+				}
 				t.Run(backend+"/"+shape+"/"+variant, func(t *testing.T) {
 					var f receiverConfigActivationFixture
 					if shape == "root" {
@@ -130,6 +141,10 @@ func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testin
 						}, nil)
 					} else {
 						f = newEagerFlowConstructorFixture(t, backend)
+					}
+					if shape == "later_native_fork" {
+						fork := materializeReceiverConstructionProofFork(t, f, correlation.RunIDFromContext(f.ctx))
+						f.ctx = correlation.WithRunID(f.ctx, fork.ForkRunID)
 					}
 					var req pipeline.FlowInstanceActivationRequest
 					if shape == "root" {
@@ -157,6 +172,10 @@ func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testin
 						t.Fatal(err)
 					}
 					event := req.TriggerEvent
+					var historical events.HistoricalReceiverConstruction
+					if variant == "conflicting_historical" {
+						runID, target, receipt, historical = conflictingHistoricalReceiverReceipt(t, f, target, receipt)
+					}
 					switch variant {
 					case "unrelated_event":
 						event = eventtest.ExistingRunRootIngress(uuid.NewString(), event.Type(), "constructor-fixture", "", event.Payload(), 0, runID, events.EventEnvelope{}, event.CreatedAt())
@@ -164,7 +183,7 @@ func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testin
 						if _, err := f.db.ExecContext(f.ctx, `DELETE FROM workflow_instance_initial_materializations WHERE run_id=$1 AND instance_path=$2`, runID, target.InstancePath); err != nil {
 							t.Fatal(err)
 						}
-					case "partial_receipt", "contradictory_control", "contradictory_origin":
+					case "partial_receipt", "contradictory_control", "contradictory_origin", "conflicting_historical":
 						var document map[string]json.RawMessage
 						if err := json.Unmarshal(receipt, &document); err != nil {
 							t.Fatal(err)
@@ -197,7 +216,13 @@ func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testin
 						if err != nil {
 							t.Fatal(err)
 						}
-						if _, err := f.db.ExecContext(f.ctx, `UPDATE workflow_instance_initial_materializations SET projection=$1 WHERE run_id=$2 AND instance_path=$3`, string(receipt), runID, target.InstancePath); err != nil {
+						query := `UPDATE workflow_instance_initial_materializations SET projection=$1 WHERE run_id=$2 AND instance_path=$3`
+						arguments := []any{string(receipt), runID, target.InstancePath}
+						if variant == "conflicting_historical" {
+							query = `INSERT INTO workflow_instance_initial_materializations (projection,run_id,instance_path,entity_id,projection_version,occurred_at) VALUES ($1,$2,$3,$4,$5,$6)`
+							arguments = append(arguments, target.EntityID, pipeline.FlowConstructionReceiptVersion, plan.OccurredAt)
+						}
+						if _, err := f.db.ExecContext(f.ctx, query, arguments...); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -209,6 +234,7 @@ func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testin
 					if err != nil {
 						t.Fatal(err)
 					}
+					receiverRoute := agentRoute
 					if variant == "crossed_agent_scope" {
 						agentRoute, err = agentidentity.PresentRoute("foreign", target.InstanceID, target.InstancePath)
 						if err != nil {
@@ -219,23 +245,44 @@ func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testin
 					if err != nil {
 						t.Fatal(err)
 					}
+					dependencyTarget := events.RouteIdentity{FlowID: target.TemplateID, EntityID: target.EntityID, FlowInstance: target.InstancePath}
+					if strings.HasSuffix(variant, "crossed_flow") {
+						dependencyTarget.FlowID = "foreign"
+					}
+					actorTarget := dependencyTarget
+					actorTarget.EntityID = ""
 					route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agent.AgentID()), AgentIdentity: agent,
-						Target: events.MustMaterializingEntityTarget(events.RouteIdentity{FlowID: target.TemplateID, EntityID: target.EntityID, FlowInstance: target.InstancePath})}
-					route.Initialization, err = events.AdmitFlowReceiverInitialization(event, route.Target)
+						Target: events.MustEntitylessReceiverTarget(actorTarget)}
+					if variant == "conflicting_historical" {
+						route.Initialization, err = events.AdmitHistoricalFlowReceiverInitialization(runID, events.MustExistingEntityTarget(dependencyTarget), receiverRoute, historical)
+					} else if strings.HasPrefix(variant, "stored_") {
+						route.Initialization, err = events.AdmitStoredFlowReceiverInitialization(runID, req.TriggerEvent.ID(), events.MustExistingEntityTarget(dependencyTarget), receiverRoute)
+					} else {
+						route.Initialization, err = events.AdmitFlowReceiverInitialization(event, events.MustMaterializingEntityTarget(dependencyTarget), receiverRoute)
+					}
 					if err != nil {
 						t.Fatal(err)
 					}
-					before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
+					before, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+					if err != nil {
+						t.Fatal(err)
+					}
 					ready, err := readReceiverConstructionReady(t, f, route)
-					if variant == "exact" {
+					if variant == "exact" || variant == "stored_exact" {
 						if !ready || err != nil {
 							t.Fatalf("exact constructor receipt refused: ready=%t %v", ready, err)
 						}
 					} else if ready || err == nil {
 						t.Fatalf("corrupt/unrelated receipt admitted: ready=%t %v", ready, err)
 					}
-					if after := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres"); !reflect.DeepEqual(before, after) {
-						t.Fatal("construction receipt reader mutated execution state")
+					if variant == "conflicting_historical" && err.Error() != "receiver native receipt contradicts fixed historical construction" {
+						t.Fatalf("dual evidence reached the wrong refusal: %v", err)
+					}
+					if shape == "later_native_fork" && variant == "missing_receipt" && err.Error() != "native receiver construction lacks its original receipt" {
+						t.Fatalf("later native absence fell back to fixed history: %v", err)
+					}
+					if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(before, after) {
+						t.Fatalf("construction receipt reader mutated durable evidence: %v", err)
 					}
 				})
 			}

@@ -326,11 +326,7 @@ func (eb *EventBus) StartDeploymentRunAcknowledged(
 	if err != nil {
 		return CommittedDeploymentRunCreation{}, fmt.Errorf("prepare deployment root construction: %w", err)
 	}
-	topology, err := eb.prepareFlowInstanceActivationRouteTopology(ctx, []runtimepipeline.FlowInstanceActivationPlan{root})
-	if err != nil {
-		return CommittedDeploymentRunCreation{}, err
-	}
-	committed, commitErr := owner.CommitDeploymentRunCreation(ctx, DeploymentRunCreationCommand{RunCreation: canonical, Idempotency: request, Root: FlowInstanceActivationCommand{Plan: root, RouteTopology: topology}})
+	committed, commitErr := owner.CommitDeploymentRunCreation(ctx, DeploymentRunCreationCommand{RunCreation: canonical, Idempotency: request, Root: FlowInstanceActivationCommand{Plan: root}})
 	validationErr := durabledata.ValidateRunCreationReceiptForCommand(committed.Record, canonical)
 	if !committed.Acknowledged {
 		return committed, errors.Join(commitErr, validationErr, errors.New("deployment run creation commit was not acknowledged"))
@@ -465,6 +461,7 @@ type eventBusCommitPublishPlan struct {
 	dynamicFlowCreation   *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
 	outputConsumers       *runtimepinrouting.OutputConsumerResolver
 	stageFeedback         *runtimepipeline.WorkflowPublicationStageRequest
+	runProposal           runtimepipeline.FlowInstanceRunProposal
 }
 
 func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublishPlan) (PreparedPublish, bool, error) {
@@ -508,7 +505,8 @@ func (eb *EventBus) preparePublishCommand(ctx context.Context, plan eventBusComm
 	if err := eb.executionPosture.Admit(plan.event.ExecutionMode(), "event persistence and delivery"); err != nil {
 		return preparedCtx, PreparedPublish{}, PublicationCommand{}, err
 	}
-	if err := eb.requireExistingRunActive(preparedCtx, plan.event); err != nil {
+	plan.runProposal, err = eb.preparePublicationRunProposal(preparedCtx, admitted, plan.runProposal)
+	if err != nil {
 		return preparedCtx, PreparedPublish{}, PublicationCommand{}, err
 	}
 	prepared, command, err := eb.prepareClosedPublication(preparedCtx, plan)
@@ -535,34 +533,65 @@ func (eb *EventBus) applyCommittedPublication(ctx context.Context, prepared Prep
 	return consequences.prepared, true, err
 }
 
-func (eb *EventBus) requireExistingRunActive(ctx context.Context, event events.Event) error {
+func (eb *EventBus) requireExistingRunActive(ctx context.Context, admitted events.AdmittedEvent) (bool, error) {
+	event := admitted.Event()
 	if eb == nil || eb.store == nil {
-		return nil
+		return false, nil
 	}
 	runID := strings.TrimSpace(event.RunID())
 	if runID == "" {
-		return nil
+		return false, nil
 	}
-	if reader, ok := eb.store.(PreparedPublishEventReader); ok {
+	if reader := eb.durable.PreparedEvents; reader != nil {
 		_, found, err := loadValidatedPreparedPublishEvent(ctx, reader, event.ID())
 		if err != nil {
-			return fmt.Errorf("load publication event before run preflight: %w", err)
+			return false, fmt.Errorf("load publication event before run preflight: %w", err)
 		}
 		if found {
-			return nil
+			return false, nil
 		}
 	}
-	owner, ok := eb.store.(interface {
-		RequirePublicationRunActive(context.Context, string) error
-	})
-	if !ok {
-		return nil
+	owner := eb.durable.RunLifecycle
+	if owner == nil {
+		return false, nil
 	}
-	err := owner.RequirePublicationRunActive(ctx, runID)
-	if errors.Is(err, runtimerunlifecycle.ErrRunNotFound) {
-		return nil
+	err := owner.RequireActiveRun(ctx, runID)
+	if admitted.RunDisposition() == events.AdmittedRunCreateAuthorized && isolatedPublicationRunMissing(err, runID) {
+		return true, nil
 	}
-	return err
+	return false, err
+}
+
+func isolatedPublicationRunMissing(err error, runID string) bool {
+	for err != nil {
+		if missing, ok := err.(*runtimerunlifecycle.RunNotFoundError); ok {
+			return missing != nil && missing.RunID == runID
+		}
+		switch wrapped := err.(type) {
+		case interface{ Unwrap() []error }:
+			children := wrapped.Unwrap()
+			if len(children) != 1 {
+				return false
+			}
+			err = children[0]
+		case interface{ Unwrap() error }:
+			err = wrapped.Unwrap()
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func (eb *EventBus) preparePublicationRunProposal(ctx context.Context, admitted events.AdmittedEvent, proposal runtimepipeline.FlowInstanceRunProposal) (runtimepipeline.FlowInstanceRunProposal, error) {
+	if proposal.Present() {
+		return proposal, proposal.Validate(admitted.Event().RunID(), eb.sourceArtifactFact)
+	}
+	missing, err := eb.requireExistingRunActive(ctx, admitted)
+	if err != nil || !missing {
+		return runtimepipeline.FlowInstanceRunProposal{}, err
+	}
+	return runtimepipeline.NewFlowInstanceRunProposal(eb.sourceArtifactFact, admitted)
 }
 
 func (eb *EventBus) finalizeCommittedFlowInstanceActivations(
@@ -653,14 +682,14 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		return releaseFailure(descriptorErr)
 	}
 	authorScope, hasAuthorScope := runtimeauthoractivity.ScopeFromContext(ctx)
-	if reader, ok := eb.store.(PreparedPublishEventReader); ok {
+	if reader := eb.durable.PreparedEvents; reader != nil {
 		durable, found, err := loadValidatedPreparedPublishEvent(ctx, reader, admitted.ID())
 		if err != nil {
 			return releaseFailure(fmt.Errorf("load durable event identity: %w", err))
 		}
 		if found {
 			if !publication.direct {
-				admitted, evt, err = reuseDurableSubscribedEventRouteFacts(admitted, durable.Event)
+				admitted, evt, err = reuseDurableSubscribedEventRouteFacts(admitted, durable)
 				if err != nil {
 					return releaseFailure(err)
 				}
@@ -682,11 +711,12 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		}
 	}
 
-	routePlan, err := eb.planClosedPublicationRoutes(ctx, evt, publication)
+	routes, err := eb.planClosedPublicationRoutes(ctx, evt, publication)
 	if err != nil {
 		return releaseFailure(err)
 	}
-	if eb.semanticSource != nil && !explicitRootPublicationTarget(evt).Empty() && len(routePlan.DeliveryRoutes()) == 0 {
+	routePlan := routes.plan
+	if eb.semanticSource != nil && !explicitRootPublicationTarget(evt).Empty() && len(routePlan.DeliveryRoutes()) == 0 && !routePlan.authorizesTerminalTargetDiagnostic(evt) {
 		return releaseFailure(fmt.Errorf("explicit root target %s has no selected root-local or compiled-connection delivery", evt.TargetRoute().FlowInstance))
 	}
 	targetFailureInput := evt
@@ -707,7 +737,7 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	if err := validateRoutePlanEventProjection(evt, routePlan); err != nil {
 		return releaseFailure(err)
 	}
-	if err := eb.prepareJoinAdmission(ctx, evt, publication.prospective, &routePlan); err != nil {
+	if err := eb.prepareJoinAdmission(ctx, evt, publication.prospective, &routePlan, routes.owners); err != nil {
 		return releaseFailure(fmt.Errorf("admit exact join recipients: %w", err))
 	}
 	if err := routePlan.ValidatePersistentDeliveries(); err != nil {
@@ -748,14 +778,9 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 		prepared.receiver = receiver
 	}
 	request := prepared.CommitRequest()
-	routeTopology, err := eb.prepareFlowInstanceActivationRouteTopology(ctx, routePlan.ActivationPlans)
-	if err != nil {
-		return releaseFailure(err)
-	}
 	return prepared, PublicationCommand{
 		Commit:              request,
 		Activations:         append([]runtimepipeline.FlowInstanceActivationPlan(nil), routePlan.ActivationPlans...),
-		RouteTopology:       routeTopology,
 		DynamicFlowCreation: publication.dynamicFlowCreation,
 		AuthorScope:         authorScope,
 		HasAuthorScope:      hasAuthorScope,
@@ -764,9 +789,10 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	}, nil
 }
 
-func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.Event, publication eventBusCommitPublishPlan) (RoutePlan, error) {
-	planner := eb.deliveryPlanner
-	planner.recipientPolicy.prospective = publication.prospective
+func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.Event, publication eventBusCommitPublishPlan) (closedPublicationRoutes, error) {
+	planner := eb.publicationDeliveryPlanner(publication.prospective, publication.runProposal)
+	owners := &publicationTargetOwnerEvidence{event: evt, planner: planner}
+	planner.preparedOwners = owners
 	planRoutes := func(context.Context, events.Event) (RoutePlan, error) {
 		return eb.planSubscribedRoutePlanWithPlanner(withClosedPublicationPlanning(ctx), evt, true, planner)
 	}
@@ -780,7 +806,7 @@ func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.
 		default:
 			requested := uniqueStrings(publication.directRecipients)
 			if len(requested) == 0 {
-				return RoutePlan{}, errors.New("direct event publication requires at least one recipient")
+				return closedPublicationRoutes{}, errors.New("direct event publication requires at least one recipient")
 			}
 			planRoutes = func(context.Context, events.Event) (RoutePlan, error) {
 				plan, err := planner.PlanDirect(withClosedPublicationPlanning(ctx), evt, requested)
@@ -797,9 +823,9 @@ func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.
 
 	routePlan, err := planRoutes(ctx, evt)
 	if err != nil {
-		return RoutePlan{}, err
+		return closedPublicationRoutes{}, err
 	}
-	return routePlan, nil
+	return closedPublicationRoutes{plan: routePlan, owners: owners}, nil
 }
 
 func (eb *EventBus) prepareClosedPublicationDispatch(ctx context.Context, evt events.Event, publication eventBusCommitPublishPlan, recoveringTimeout bool, prepared *PreparedPublish) error {
@@ -820,73 +846,8 @@ func (eb *EventBus) prepareClosedPublicationDispatch(ctx context.Context, evt ev
 	return nil
 }
 
-func (eb *EventBus) prepareFlowInstanceActivationRouteTopology(
-	ctx context.Context,
-	plans []runtimepipeline.FlowInstanceActivationPlan,
-) ([]FlowInstanceRouteRecordSet, error) {
-	if len(plans) == 0 {
-		return nil, nil
-	}
-	var constructionPlans []runtimepipeline.FlowInstanceActivationPlan
-	for _, plan := range plans {
-		constructionPlans = append(constructionPlans, plan.ConstructionPlans()...)
-	}
-	plans = constructionPlans
-	eb.mu.RLock()
-	table := eb.routeTable
-	lister := eb.durable.ActiveFlows
-	eb.mu.RUnlock()
-	if table == nil || lister == nil {
-		return nil, errors.New("flow activation publication requires route topology owners")
-	}
-	changedPaths := make([]string, 0, len(plans))
-	for _, plan := range plans {
-		changedPaths = append(changedPaths, plan.Identity.Route().ScopeKey)
-	}
-	selected, err := eb.selectFlowInstanceRouteContext(ctx, table, lister, plans[0].Readiness.RunID, changedPaths)
-	if err != nil {
-		return nil, err
-	}
-	staged, contextIdentities, err := eb.deriveFlowInstanceRouteTopologyFromDescriptors(
-		ctx,
-		table,
-		plans[0].Readiness.RunID,
-		nil,
-		runtimeflowidentity.RunScopedFlowInstance{},
-		selected.graph,
-		selected.inputProducers,
-		true,
-		selected.descriptors,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("derive selected route topology before activation: %w", err)
-	}
-	explicit := make([]runtimeflowidentity.RunScopedFlowInstance, 0, len(plans))
-	for index, plan := range plans {
-		identity, err := runtimeflowidentity.NewRunScopedFlowInstance(plan.Readiness.RunID, plan.Identity.Route())
-		if err != nil {
-			return nil, fmt.Errorf("compose publication activation route %d: %w", index, err)
-		}
-		request := FlowInstanceRouteMaterializationRequest{
-			Identity:            identity,
-			Instance:            plan.Identity,
-			ActivationVariables: plan.ActivationVariables,
-		}
-		_, err = staged.addFlowInstanceRouteForTopology(request, &selected.inputProducers)
-		if err != nil {
-			return nil, fmt.Errorf("derive publication activation route %d: %w", index, err)
-		}
-		identity = request.Normalized().Identity
-		explicit = append(explicit, identity)
-	}
-	// The staged table is discarded after record projection; it is never used
-	// to resolve subscribers, so rebuilding its resolution index is unnecessary.
-	identities := selectedFlowInstanceRouteOwners(selected.selection, contextIdentities, explicit...)
-	return flowInstanceRouteTopologyRecordSets(staged, identities), nil
-}
-
-// CommitFlowInstanceActivation commits the exact instance record and the full
-// derived route topology before making either fact process-visible.
+// CommitFlowInstanceActivation acknowledges the exact constructor transaction
+// before attachment can make its executable resources process-visible.
 func (eb *EventBus) CommitFlowInstanceActivation(
 	ctx context.Context,
 	plan runtimepipeline.FlowInstanceActivationPlan,
@@ -898,11 +859,7 @@ func (eb *EventBus) CommitFlowInstanceActivation(
 	if !ok || owner == nil {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, errors.New("selected store does not support the closed flow instance activation operation")
 	}
-	topology, err := eb.prepareFlowInstanceActivationRouteTopology(ctx, []runtimepipeline.FlowInstanceActivationPlan{plan})
-	if err != nil {
-		return runtimepipeline.CommittedFlowInstanceActivation{}, err
-	}
-	committed, err := owner.CommitFlowInstanceActivation(ctx, FlowInstanceActivationCommand{Plan: plan, RouteTopology: topology})
+	committed, err := owner.CommitFlowInstanceActivation(ctx, FlowInstanceActivationCommand{Plan: plan})
 	if err != nil && !committed.Acknowledged {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, err
 	}
@@ -1267,15 +1224,23 @@ func (eb *EventBus) admitPublicationEventFacts(ctx context.Context, evt events.E
 	return ictx, admitted, nil
 }
 
-func reuseDurableSubscribedEventRouteFacts(admitted, durable events.AdmittedEvent) (events.AdmittedEvent, events.Event, error) {
+func reuseDurableSubscribedEventRouteFacts(admitted events.AdmittedEvent, durable PreparedPublishEvent) (events.AdmittedEvent, events.Event, error) {
 	evt := admitted.Event()
-	durableEvent := durable.Event()
+	durableEvent := durable.Event.Event()
 	if evt.ID() == "" || durableEvent.ID() != evt.ID() {
 		return admitted, evt, errors.New("durable event route facts do not match the admitted event identity")
 	}
 	durableTargets := eventDeliveryTargetRoutes(durableEvent)
 	existingTargets := eventDeliveryTargetRoutes(evt)
-	if len(existingTargets) > 0 && !sameRouteIdentities(existingTargets, durableTargets) && !routeIdentitiesCanBeExactlyCompleted(existingTargets, durableTargets) {
+	if len(existingTargets) > 0 && len(durableTargets) == 0 && durable.Settlement.NoDelivery() && durable.Settlement.Reason() == events.NoDeliveryResolutionBlocked && blockedConnectTargetsMatch(durable.Settlement.Ledger(), existingTargets) {
+		resolved, _, err := ResolvePreparedPublishEventTargetProjection(evt, durable.DeliveryRoutes)
+		if err != nil {
+			return admitted, evt, err
+		}
+		replayed, err := events.AdmitForPersistence(resolved, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+		return replayed, replayed.Event(), err
+	}
+	if !publicationTargetProjectionAcceptsSelector(evt, durable.DeliveryRoutes, durableTargets) {
 		return admitted, evt, errors.New("durable event route facts conflict with the admitted event target")
 	}
 	if len(durableTargets) == 0 || sameRouteIdentities(existingTargets, durableTargets) {
@@ -1317,16 +1282,52 @@ func resolveRoutePlanEventProjection(evt events.Event, plan RoutePlan) (events.E
 	if projection.kind == preparedEventTargetProjectionSingular {
 		targets = []events.RouteIdentity{projection.target}
 	}
-	existing := uniqueRouteIdentities(eventDeliveryTargetRoutes(evt))
-	if projection.kind != preparedEventTargetProjectionNone && len(existing) > 0 &&
-		!sameRouteIdentities(existing, targets) && !routeIdentitiesCanBeExactlyCompleted(existing, targets) {
-		return evt, false, fmt.Errorf("delivery route projection conflicts with the admitted event target: admitted=%#v planned=%#v", existing, targets)
+	if projection.kind != preparedEventTargetProjectionNone && !publicationTargetProjectionAcceptsSelector(evt, routes, targets) {
+		return evt, false, fmt.Errorf("delivery route projection conflicts with the admitted event target: admitted=%#v planned=%#v", eventDeliveryTargetRoutes(evt), targets)
 	}
 	resolved, changed, err := ResolvePreparedPublishEventTargetProjection(evt, routes)
 	if err != nil {
 		return evt, false, fmt.Errorf("resolve delivery route projection: %w", err)
 	}
 	return resolved, changed, nil
+}
+
+// A public selector constrains the constructed flow; its consumers retain their
+// own actor targets. Durable replay proves that relation from captured receipts.
+func publicationTargetProjectionAcceptsSelector(evt events.Event, routes []events.DeliveryRoute, targets []events.RouteIdentity) bool {
+	existing := eventDeliveryTargetRoutes(evt)
+	if len(existing) == 0 || sameRouteIdentities(existing, targets) || routeIdentitiesCanBeExactlyCompleted(existing, targets) {
+		return true
+	}
+	selector := explicitRootPublicationTarget(evt)
+	if selector.FlowInstance == "" || selector.EntityID == "" || len(routes) == 0 {
+		return false
+	}
+	for _, route := range routes {
+		if routeIdentitiesCanBeExactlyCompleted([]events.RouteIdentity{selector}, []events.RouteIdentity{route.Target.Route()}) {
+			continue
+		}
+		if !agentConstructionAcceptsPublicationSelector(evt, selector, route) {
+			return false
+		}
+	}
+	return true
+}
+
+func agentConstructionAcceptsPublicationSelector(evt events.Event, selector events.RouteIdentity, route events.DeliveryRoute) bool {
+	if !route.Recipient.IsAgent() || route.Initialization.Empty() ||
+		route.Initialization.ValidateEvent(evt) != nil || route.Initialization.ValidateRoute(route) != nil {
+		return false
+	}
+	if route.ConnectClaim.Empty() && route.AgentIdentity.Route.Presence != agentidentity.RouteRoot {
+		return false
+	}
+	return publicSelectorMatchesConstruction(selector, route.Initialization.ConstructionTarget().Route())
+}
+
+func publicSelectorMatchesConstruction(selector, construction events.RouteIdentity) bool {
+	return selector.FlowInstance != "" && selector.EntityID != "" &&
+		routeIdentitiesCanBeExactlyCompleted([]events.RouteIdentity{selector}, []events.RouteIdentity{construction})
 }
 
 func sameEventTargetProjection(left, right events.Event) bool {
@@ -2247,6 +2248,11 @@ func (eb *EventBus) planSubscribedRoutePlan(ctx context.Context, evt events.Even
 }
 
 func (eb *EventBus) planSubscribedRoutePlanWithPlanner(ctx context.Context, evt events.Event, recordDiagnostic bool, planner deliveryPlanner) (RoutePlan, error) {
+	var err error
+	ctx, err = eb.admitSourceArtifactFact(ctx)
+	if err != nil {
+		return RoutePlan{}, err
+	}
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
 	if err := eb.authorizePublishRecipientPlanning(ctx, evt); err != nil {
 		return RoutePlan{}, err
@@ -2309,7 +2315,7 @@ func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Conte
 	}
 	routePlan.MarkLowerPrecedenceRouteProduction(routeIntentProducerRecipientMaterializer)
 	routePlan.AddDeliveryIntents(routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerRecipientMaterializer)...)
-	projection, err := planner.recipientPolicy.loadSelectedRunTargetOwnerProjection(runtimecorrelation.WithInboundEvent(ctx, evt))
+	projection, err := planner.materializedTargetOwnerProjection(ctx, evt, routePlan)
 	if err != nil {
 		return RoutePlan{}, err
 	}
@@ -2317,7 +2323,7 @@ func (eb *EventBus) materializePublishRecipientPlanWithPlanner(ctx context.Conte
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	return projection.resolveRoutePlan(routePlan)
+	return planner.resolvePreparedRoutePlan(projection, routePlan)
 }
 
 func (eb *EventBus) authorizePublishRecipientPlan(ctx context.Context, evt events.Event, routePlan RoutePlan) error {
@@ -2731,7 +2737,7 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 			return PublishRecipientPlan{}, fmt.Errorf("load durable event before recipient preflight: %w", err)
 		}
 		if found {
-			admitted, evt, err = reuseDurableSubscribedEventRouteFacts(admitted, durable.Event)
+			admitted, evt, err = reuseDurableSubscribedEventRouteFacts(admitted, durable)
 			if err != nil {
 				return PublishRecipientPlan{}, err
 			}
@@ -2749,7 +2755,26 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 			return result, nil
 		}
 	}
-	plan, err := eb.planSubscribedRoutePlan(withTemplateInstanceLifecyclePreview(ictx), evt, false)
+	return eb.previewFreshPublicationRecipients(ictx, admitted)
+}
+
+func (eb *EventBus) publicationDeliveryPlanner(prospective runtimepipeline.PreparedWorkflowPublicationState, proposal runtimepipeline.FlowInstanceRunProposal) deliveryPlanner {
+	planner := eb.deliveryPlanner
+	planner.recipientPolicy.prospective = prospective
+	planner.recipientPolicy.runProposal = proposal
+	planner.connectPlanner.lifecycle.runProposal = proposal
+	planner.routeResolver.resolveRoutedSubscribers = planner.connectPlanner.resolvePubsubSubscribers
+	return planner
+}
+
+func (eb *EventBus) previewFreshPublicationRecipients(ctx context.Context, admitted events.AdmittedEvent) (PublishRecipientPlan, error) {
+	proposal, err := eb.preparePublicationRunProposal(ctx, admitted, runtimepipeline.FlowInstanceRunProposal{})
+	if err != nil {
+		return PublishRecipientPlan{}, err
+	}
+	planner := eb.publicationDeliveryPlanner(runtimepipeline.PreparedWorkflowPublicationState{}, proposal)
+	evt := admitted.Event()
+	plan, err := eb.planSubscribedRoutePlanWithPlanner(withConnectPlanningPreview(ctx), evt, false, planner)
 	if err != nil {
 		return PublishRecipientPlan{}, err
 	}

@@ -88,22 +88,30 @@ func bindRecoveredSelectedContractAgentRuntime(
 		if err != nil {
 			return selectedContractAgentRuntimePlan{}, err
 		}
-		instance, found, err := workflow.LoadWorkflowInstance(ctx, owner)
+		lookup, err := runtimepipeline.NewExactFlowInstanceLookup(loaded.Source, loaded.SourceArtifactFact, owner)
+		if err != nil {
+			return selectedContractAgentRuntimePlan{}, err
+		}
+		observed, found, err := workflow.LookupFlowInstance(ctx, lookup)
 		if err != nil {
 			return selectedContractAgentRuntimePlan{}, fmt.Errorf("load selected-contract recovered workflow %s: %w", state.Route.InstancePath, err)
 		}
 		if !found {
 			return selectedContractAgentRuntimePlan{}, fmt.Errorf("selected-contract recovered workflow %s has no durable flow owner", state.Route.InstancePath)
 		}
+		if err := observed.ValidateSelection(lookup); err != nil {
+			return selectedContractAgentRuntimePlan{}, err
+		}
+		instance, err := observed.WorkflowInstance()
+		if err != nil {
+			return selectedContractAgentRuntimePlan{}, err
+		}
 		if instance.EntityID != state.EntityID || instance.EntityType != state.EntityType ||
-			instance.WorkflowName != state.FlowID || instance.WorkflowVersion != state.WorkflowVersion ||
+			instance.WorkflowName != state.FlowID ||
 			instance.Mode != state.Mode || instance.StorageRef != state.Route.InstancePath || instance.InstanceID != state.Route.InstanceID {
 			return selectedContractAgentRuntimePlan{}, fmt.Errorf("selected-contract recovered workflow %s disagrees with exact entity/type/workflow descriptor", state.Route.InstancePath)
 		}
-		readiness, found, err := workflow.LoadDynamicFlowRuntimeReadiness(ctx, forkRunID, state.Route)
-		if err != nil {
-			return selectedContractAgentRuntimePlan{}, fmt.Errorf("load selected-contract recovered workflow readiness %s: %w", state.Route.InstancePath, err)
-		}
+		readiness, found := observed.Readiness()
 		if !found {
 			return selectedContractAgentRuntimePlan{}, fmt.Errorf("selected-contract recovered workflow %s has no durable readiness owner", state.Route.InstancePath)
 		}

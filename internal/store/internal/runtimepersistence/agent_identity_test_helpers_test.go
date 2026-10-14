@@ -15,9 +15,10 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
-const testAgentTopologyBundleHash = "bundle-v2:sha256:475110a469b91fc27e36bf58b6a0bfda6dc0eb100b10692299019b487c866cc4"
+const testAgentTopologyBundleHash = sourceartifactfixture.BundleHash
 
 func testAgentTopologyAdmission(t testing.TB) runtimeagenttopology.Admission {
 	t.Helper()

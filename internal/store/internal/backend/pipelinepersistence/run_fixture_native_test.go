@@ -78,11 +78,6 @@ func requireStatementRun(t testing.TB, owner runlifecycle.OperationOwner, artifa
 	}
 }
 
-func requireSQLiteStatementRuns(t testing.TB, db *sql.DB, ids ...string) runlifecycle.OperationOwner {
-	t.Helper()
-	return materializeSQLiteStatementRuns(t, db, false, ids...)
-}
-
 func materializeSQLiteStatementRuns(t testing.TB, db *sql.DB, snapshot bool, ids ...string) runlifecycle.OperationOwner {
 	t.Helper()
 	backend, err := sqlitebackend.New(db)
@@ -104,11 +99,6 @@ func materializeSQLiteStatementRuns(t testing.TB, db *sql.DB, snapshot bool, ids
 	}
 	requireStatementRun(t, owner, artifacts, ids...)
 	return owner
-}
-
-func requirePostgresStatementRuns(t testing.TB, db *sql.DB, ids ...string) runlifecycle.OperationOwner {
-	t.Helper()
-	return materializePostgresStatementRuns(t, db, false, ids...)
 }
 
 func materializePostgresStatementRuns(t testing.TB, db *sql.DB, snapshot bool, ids ...string) runlifecycle.OperationOwner {

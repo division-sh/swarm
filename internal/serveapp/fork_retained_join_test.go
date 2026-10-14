@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -15,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // #642 owns future completed-history fork admission. Its original success oracle
@@ -70,8 +72,8 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			if t.Failed() {
 				t.FailNow()
 			}
-			waitForkReceiverSourceCompletion(t, rt, started.RunID)
-			first, joins := readRetainedRootJoins(t, rt, started.RunID)
+			waitRetainedJoinPipelineHandoff(t, rt.ReceiverStateReader, started.RunID)
+			first, joins := readRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)
 			if len(joins) != 1 || first.Attempt != 1 {
 				t.Fatalf("first ordinary join: loop=%+v joins=%+v", first, joins)
 			}
@@ -97,8 +99,8 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				"payload": map[string]any{"revision_id": first.RevisionID, "token": "member-one"}, "idempotency_key": "retained-join-repeat",
 			})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-			waitForkReceiverSourceCompletion(t, rt, started.RunID)
-			current, sourceJoins := readRetainedRootJoins(t, rt, started.RunID)
+			waitRetainedJoinPipelineHandoff(t, rt.ReceiverStateReader, started.RunID)
+			current, sourceJoins := readRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)
 			if current.Attempt != 2 || current.ActivationID != first.ActivationID || len(sourceJoins) != 2 {
 				t.Fatalf("ordinary repeat lost retained joins: loop=%+v joins=%+v", current, sourceJoins)
 			}
@@ -165,7 +167,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 					"payload": map[string]any{"revision_id": current.RevisionID}, "idempotency_key": "retained-join-checkpoint",
 				})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-				waitForkReceiverSourceCompletion(t, rt, started.RunID)
+				waitRetainedJoinPipelineHandoff(t, rt.ReceiverStateReader, started.RunID)
 			}
 			var frontier string
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='join.observed' AND CAST(payload AS TEXT) LIKE $2`, started.RunID, "%"+current.RevisionID+"%").Scan(&frontier); err != nil {
@@ -186,11 +188,11 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				t.Fatal("missing fork owner")
 			}
 			request := runfork.RunForkMaterializeRequest{SourceRunID: started.RunID, At: frontier, OriginalLoopCarriage: carriage}
-			const refusal = "fork materialization requires execution-ready plan; blockers: timer_history_unproven, flow_route_history_unproven"
+			const refusal = "fork materialization requires execution-ready plan; blockers: timer_history_unproven"
 			for attempt := 0; attempt < 2; attempt++ {
 				child, err := owner.Materialize(servedControlProofAuthorActivityContext(t, rt), request)
 				if err == nil || err.Error() != refusal {
-					t.Fatalf("completed ordinary join history must retain both exact policy blockers: result=%+v err=%v", child, err)
+					t.Fatalf("completed ordinary join history must retain its exact policy blocker: result=%+v err=%v", child, err)
 				}
 				if child.ForkRunID != "" || child.MaterializedEntityCount != 0 {
 					t.Fatalf("refused materialization returned child work: %+v", child)
@@ -202,7 +204,7 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 				for _, blocker := range child.UnsupportedBlockers {
 					codes = append(codes, blocker.Code)
 				}
-				if !reflect.DeepEqual(codes, []string{runfork.RunForkBlockerTimerHistoryUnproven, runfork.RunForkBlockerFlowRouteHistoryUnproven}) {
+				if !reflect.DeepEqual(codes, []string{runfork.RunForkBlockerTimerHistoryUnproven}) {
 					t.Fatalf("refusal lost canonical blocker evidence: %+v", child.UnsupportedBlockers)
 				}
 				if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {
@@ -218,17 +220,28 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 	}
 }
 
-func readRetainedRootJoins(t *testing.T, rt servedControlProofRuntime, runID string) (loopruntime.Activation, []joinruntime.Activation) {
+func waitRetainedJoinPipelineHandoff(t *testing.T, reader receiverProofStateReader, runID string) {
 	t.Helper()
-	var raw []byte
-	if err := rt.DB.QueryRow(`SELECT accumulator FROM entity_state WHERE run_id=$1 AND entity_id=$1`, runID).Scan(&raw); err != nil {
-		t.Fatal(err)
+	deadline := time.Now().Add(servedProofPollDeadline)
+	var incomplete int
+	for time.Now().Before(deadline) {
+		var err error
+		incomplete, err = storetest.ReadServedIncompletePipelineHandoffCount(context.Background(), reader, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if incomplete == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	var persisted map[string]any
-	if err := json.Unmarshal(raw, &persisted); err != nil {
-		t.Fatal(err)
-	}
-	carrier, err := engine.StateCarrierFromPersisted(nil, nil, nil, persisted)
+	t.Fatalf("source pipeline completion did not finish: run=%s incomplete=%d", runID, incomplete)
+}
+
+func readRetainedRootJoins(t *testing.T, reader receiverProofStateReader, runID string) (loopruntime.Activation, []joinruntime.Activation) {
+	t.Helper()
+	_, root := requireReceiverTargetState(t, reader, runID, ".", runID, runID)
+	carrier, err := engine.StateCarrierFromPersisted(root.Fields, root.Bookkeeping, root.Gates, root.StateBuckets)
 	if err != nil {
 		t.Fatal(err)
 	}

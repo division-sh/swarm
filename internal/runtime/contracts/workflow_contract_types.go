@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/packartifact"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -1199,8 +1200,16 @@ type SingletonCoordinatorContainedField struct {
 }
 
 type TemplateInstanceKeyValue struct {
-	Field TemplateInstanceField
-	Value string
+	Field         TemplateInstanceField
+	Value         string
+	resolvedValue any
+}
+
+func (k TemplateInstanceKeyValue) ResolvedValue() (any, error) {
+	if k.resolvedValue == nil {
+		return nil, fmt.Errorf("instance key requires its resolved scalar, not formatted text alone")
+	}
+	return canonicaljson.CloneRuntimeValue(k.resolvedValue)
 }
 
 func (c TemplateInstanceContract) CanonicalKeyMaterial(values map[string]any) ([]TemplateInstanceKeyValue, error) {
@@ -1216,7 +1225,11 @@ func (c TemplateInstanceContract) CanonicalKeyMaterial(values map[string]any) ([
 	if valueText == "" {
 		return nil, fmt.Errorf("INVALID-TEMPLATE-INSTANCE: flow %s instance key field %q is empty", defaultPrimaryEntityFlowLabel(c.FlowID), field)
 	}
-	return []TemplateInstanceKeyValue{{Field: c.Field, Value: valueText}}, nil
+	resolved, err := canonicaljson.CloneRuntimeValue(value)
+	if err != nil {
+		return nil, err
+	}
+	return []TemplateInstanceKeyValue{{Field: c.Field, Value: valueText, resolvedValue: resolved}}, nil
 }
 
 type AutoEmitOnCreateContract struct {

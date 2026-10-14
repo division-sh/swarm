@@ -1832,21 +1832,12 @@ func TestRunForkActivation_FailsClosedForDeliveryAdvancementAndUsesTypedOriginLi
 		State:     storerunlifecycle.StatePaused,
 		StartedAt: at,
 	})
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'Orphan Fork Entity',
-			'pending', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
-			$3, $3, $3
-		)
-	`, orphanRunID, orphanEntityID, at); err != nil {
-		t.Fatalf("seed orphan fork entity_state: %v", err)
-	}
-	seedWorkflowHeaderProjectionFixture(t, ctx, db, orphanRunID, orphanEntityID, "flow-a/1", "flow-a", "default", "pending", "{}", at)
+	commitPreparedWorkflowAggregateFixture(t, ctx, pg, orphanRunID, runtimepipeline.WorkflowInstance{
+		InstanceID: "1", StorageRef: "flow-a/1", EntityID: orphanEntityID, EntityType: "default",
+		WorkflowName: "flow-a", WorkflowVersion: "1", Mode: "static", StageDefined: true,
+		Name: "Orphan Fork Entity", CurrentState: "pending", Fields: map[string]any{},
+		CreatedAt: at, EnteredStageAt: at,
+	}, at)
 	activated, err := pg.ActivateRunFork(ctx, runfork.RunForkActivateRequest{ForkRunID: orphanRunID, AllowSourceFreeze: true})
 	if err != nil {
 		t.Fatalf("ActivateRunFork typed-origin lineage: %v", err)
@@ -2137,10 +2128,12 @@ func seedActivationReadySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityI
 
 func seedActivationReadySourceState(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) {
 	t.Helper()
-	seedWorkflowHeaderProjectionFixture(t, ctx, db, sourceRunID, entityID, "flow-a/1", "flow-a", "fork_entity", "ready", "{}", at)
-	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET name='Activation Entity' WHERE run_id=$1 AND instance_path='flow-a/1'`, sourceRunID); err != nil {
-		t.Fatal(err)
-	}
+	commitPreparedWorkflowAggregateFixture(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), sourceRunID, runtimepipeline.WorkflowInstance{
+		InstanceID: "1", StorageRef: "flow-a/1", EntityID: entityID, EntityType: "fork_entity",
+		WorkflowName: "flow-a", WorkflowVersion: "1", Mode: "static", StageDefined: true,
+		Name: "Activation Entity", CurrentState: "ready", Fields: map[string]any{"name": "Activation Entity"},
+		CreatedAt: at, EnteredStageAt: at,
+	}, at)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.ready", events.EventProducerPlatform, "test", entityID, "", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_mutations (
@@ -2151,20 +2144,6 @@ func seedActivationReadySourceState(t *testing.T, ctx context.Context, db *sql.D
 			($1::uuid, $2::uuid, 'authored_field', 'name', 'null'::jsonb, '"Activation Entity"'::jsonb, $3::uuid, 'platform', 'activation-test', 'seed', $4)
 	`, sourceRunID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed mutations: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'flow-a/1', 'fork_entity', 'Activation Entity',
-			'ready', '{}'::jsonb, '{"name":"Activation Entity"}'::jsonb, '{}'::jsonb, 1,
-			$3, $3, $3
-		)
-	`, sourceRunID, entityID, at); err != nil {
-		t.Fatalf("seed source entity_state: %v", err)
 	}
 }
 

@@ -14,7 +14,6 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -28,35 +27,6 @@ const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-11111111111
 const authorActivityTestBundleHash = sourceartifactfixture.BundleHash
 
 var authorActivityTestSourceArtifactFact = sourceartifactfixture.Fact()
-
-func exactTestFlowInstanceDescriptors(in []runtimebus.ActiveFlowInstanceDescriptor, workflowVersion string, sourceFact runtimecorrelation.SourceArtifactFact, runID string, sources ...semanticview.Source) []runtimebus.ActiveFlowInstanceDescriptor {
-	if sourceFact.Validate() != nil {
-		sourceFact = authorActivityTestSourceArtifactFact
-	}
-	bundleHash := sourceFact.BundleHash()
-	out := append([]runtimebus.ActiveFlowInstanceDescriptor(nil), in...)
-	for idx := range out {
-		if strings.TrimSpace(out[idx].RunID) == "" {
-			out[idx].RunID = strings.TrimSpace(runID)
-		}
-		if strings.TrimSpace(out[idx].FlowTemplate) == "" {
-			out[idx].FlowTemplate = runtimeflowidentity.RouteForInstancePath(out[idx].FlowInstance).ScopeKey
-		}
-		if strings.TrimSpace(out[idx].BundleHash) == "" {
-			out[idx].BundleHash = bundleHash
-		}
-		if strings.TrimSpace(out[idx].WorkflowVersion) == "" {
-			out[idx].WorkflowVersion = strings.TrimSpace(workflowVersion)
-		}
-		if out[idx].Identity == (runtimeflowidentity.Instance{}) && len(sources) == 1 {
-			out[idx].Identity = runtimebus.ConstructedFlowInstanceIdentityFixture(sources[0], out[idx].FlowTemplate, runtimeflowidentity.LogicalInstanceID(out[idx].FlowInstance), out[idx].RunID)
-			if out[idx].EntityID == "" {
-				out[idx].EntityID = out[idx].Identity.EntityID
-			}
-		}
-	}
-	return out
-}
 
 var authorActivityTestDifferentEventTypes = strings.Fields(`
 account.ready child/child.start child/grandchild/micro.done child/grandchild/micro.started child/inst-1/micro.started
@@ -110,6 +80,7 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 		}
 	}
 	originReader := opts.Durable.RunOrigins
+	instanceReader := opts.Durable.Instances
 	if opts.PipelineObligations == nil {
 		opts.Durable = runtimebus.DurableTestDependencyProjection(store)
 	} else {
@@ -117,6 +88,9 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 	}
 	if originReader != nil {
 		opts.Durable.RunOrigins = originReader
+	}
+	if instanceReader != nil {
+		opts.Durable.Instances = instanceReader
 	}
 	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
 		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
@@ -134,15 +108,6 @@ func newScopedTestEventBus(store runtimebus.EventStore, options ...runtimebus.Ev
 		setTestConstructionSource(semanticview.Source)
 	}); ok {
 		receiver.setTestConstructionSource(opts.ContractBundle)
-	}
-	if receiver, ok := store.(interface {
-		setTestSemanticSource(runtimecorrelation.SourceArtifactFact, string)
-	}); ok {
-		workflowVersion := "1.0.0"
-		if opts.ContractBundle != nil && strings.TrimSpace(opts.ContractBundle.WorkflowVersion()) != "" {
-			workflowVersion = opts.ContractBundle.WorkflowVersion()
-		}
-		receiver.setTestSemanticSource(opts.SourceArtifactFact, workflowVersion)
 	}
 	if opts.WorkOwner == nil {
 		processOwner := worklifetime.NewProcess()
