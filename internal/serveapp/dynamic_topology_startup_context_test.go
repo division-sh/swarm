@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -267,16 +268,7 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 func loadServeDynamicTopologySource(t *testing.T, selected *selectedStoreOwner, label string) serveRuntimeBundle {
 	t.Helper()
 	root := t.TempDir()
-	for path, contents := range map[string]string{
-		"manifest.yaml":        "name: startup-preflight\nversion: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"schema.yaml":          "name: startup-preflight\nstages: []\npins:\n  inputs: [spawn.requested]\n  outputs: [worker.requested]\nconnect:\n  - event: worker.requested\n    from: .\n    to: worker\n    resolution: create\n# " + label + "\n",
-		"events.yaml":          "spawn.requested:\n  worker_id: text\nworker.requested:\n  worker_id: text\n",
-		"nodes.yaml":           "orchestrator:\n  execution_type: system_node\n  subscribes_to: [spawn.requested]\n  produces: [worker.requested]\n  event_handlers:\n    spawn.requested:\n      emit:\n        event: worker.requested\n        fields:\n          worker_id: payload.worker_id\n",
-		"worker/schema.yaml":   "name: worker\ninstance: worker_id\nstages:\n  idle: {}\npins:\n  inputs: [worker.requested]\n",
-		"worker/manifest.yaml": "name: worker\nversion: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"worker/entities.yaml": "worker:\n  worker_id: text\n",
-		"worker/nodes.yaml":    "task-handler:\n  execution_type: system_node\n  subscribes_to: [worker.requested]\n  produces: []\n  event_handlers:\n    worker.requested: {}\n",
-	} {
+	for path, contents := range canonicalrouting.DynamicTopologyStartupDocuments(t, label) {
 		writeWorkflowValidationFixtureFile(t, filepath.Join(root, path), contents)
 	}
 	loaded, err := loadServeRuntimeBundle(context.Background(), repoRootForTest(), selected.SourceArtifactStore(),
