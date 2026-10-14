@@ -102,6 +102,8 @@ type publicationGroup struct {
 	committed             bool
 	closed                bool
 	preparationFailed     bool
+	planningActive        bool
+	planningReads         []*flowInstancePlanningReadSet
 	publicationTx         atomic.Pointer[sql.Tx]
 }
 
@@ -288,7 +290,7 @@ func (g *publicationGroup) Seal(ctx context.Context, end int, claims []pipelineo
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if g.closed || g.preparationFailed || g.committed || end <= g.intent.Cursor || end > g.intent.ChunkEndOrdinal() {
+	if g.closed || g.planningActive || g.preparationFailed || g.committed || end <= g.intent.Cursor || end > g.intent.ChunkEndOrdinal() {
 		return errors.New("invalid publication group attempt seal")
 	}
 	if g.sealed && (!g.restrictAfterRollback || end >= g.end) {

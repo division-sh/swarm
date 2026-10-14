@@ -449,6 +449,7 @@ func (eb *EventBus) LookupAPIEventPublication(ctx context.Context, request apiid
 }
 
 type eventBusCommitPublishPlan struct {
+	instances             runtimepipeline.FlowInstanceIndexReader
 	prospective           runtimepipeline.PreparedWorkflowPublicationState
 	bus                   *EventBus
 	event                 events.Event
@@ -791,6 +792,10 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 
 func (eb *EventBus) planClosedPublicationRoutes(ctx context.Context, evt events.Event, publication eventBusCommitPublishPlan) (closedPublicationRoutes, error) {
 	planner := eb.publicationDeliveryPlanner(publication.prospective, publication.runProposal)
+	if publication.instances != nil {
+		planner.connectPlanner.lifecycle.index = publication.instances
+		planner.routeResolver.resolveRoutedSubscribers = planner.connectPlanner.resolvePubsubSubscribers
+	}
 	owners := &publicationTargetOwnerEvidence{event: evt, planner: planner}
 	planner.preparedOwners = owners
 	planRoutes := func(context.Context, events.Event) (RoutePlan, error) {
