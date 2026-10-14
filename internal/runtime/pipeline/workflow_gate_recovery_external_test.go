@@ -1077,12 +1077,10 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 			t.Run(tc.name+"/"+form, func(t *testing.T) {
 				selected := tc.open(t)
 				runID := uuid.NewString()
-				insertGateRecoveryRun(t, selected.events, runID)
 				fixture := seedGateRecoveryForegroundRoute(t, selected, runID, time.Now().UTC())
-				bundle := gateRecoveryContractBundle(t)
 				bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-					ContractBundle: semanticview.Wrap(bundle),
-					Interceptors:   []runtimebus.EventInterceptor{gateRecoveryPoisonInterceptor{poisonEventID: fixture.event.ID()}},
+					ContractBundle: semanticview.Wrap(fixture.bundle), SourceArtifactFact: fixture.sourceFact,
+					Interceptors: []runtimebus.EventInterceptor{gateRecoveryPoisonInterceptor{poisonEventID: fixture.event.ID()}},
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -1090,14 +1088,14 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 
 				switch form {
 				case "synchronous":
-					if err := bus.Publish(testAuthorActivityContext(t, context.Background()), fixture.event); err == nil {
+					if err := bus.Publish(fixture.ctx, fixture.event); err == nil {
 						t.Fatal("synchronous poison route publish succeeded, want interceptor failure")
 					}
 				case "acknowledged":
-					if err := bus.PublishAcknowledged(testAuthorActivityContext(t, context.Background()), fixture.event); err != nil {
+					if err := bus.PublishAcknowledged(fixture.ctx, fixture.event); err != nil {
 						t.Fatalf("acknowledged poison route publish: %v", err)
 					}
-					waitCtx, cancel := context.WithTimeout(testAuthorActivityContext(t, context.Background()), 5*time.Second)
+					waitCtx, cancel := context.WithTimeout(fixture.ctx, 5*time.Second)
 					defer cancel()
 					if err := bus.WaitForQuiescence(waitCtx); err != nil {
 						t.Fatalf("wait for acknowledged poison route: %v", err)
@@ -1106,8 +1104,8 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 
 				assertGateRecoveryObligationStatus(t, selected.events, fixture.event.ID(), "quarantined")
 				assertGateRecoveryErrorReceipt(t, selected.events, fixture.event.ID(), "decision_route_fixture_invalid")
-				assertGateRecoveryActivation(t, fixture.coordinator, runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID), fixture.entityID, "awaiting_review", gateruntime.StatusDecisionCommitted)
-				card, err := selected.cards.GetDecisionCard(testAuthorActivityContext(t, context.Background()), fixture.cardID)
+				assertGateRecoveryActivation(t, fixture.coordinator, fixture.ctx, fixture.entityID, "awaiting_review", gateruntime.StatusDecisionCommitted)
+				card, err := selected.cards.GetDecisionCard(fixture.ctx, fixture.cardID)
 				if err != nil {
 					t.Fatalf("read quarantined decision card: %v", err)
 				}
@@ -1116,12 +1114,12 @@ func TestDecisionRouteForegroundFailureQuarantinesOnBothStoresAndPublicationForm
 				}
 
 				validEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC())
-				if _, err := bus.SweepPipelineObligations(testAuthorActivityContext(t, context.Background()), 10); err != nil {
+				if _, err := bus.SweepPipelineObligations(fixture.ctx, 10); err != nil {
 					t.Fatalf("sweep unrelated route behind quarantined foreground failure: %v", err)
 				}
 				assertGateRecoveryProcessedReceipt(t, selected.events, validEventID)
 				assertGateRecoveryObligationStatus(t, selected.events, validEventID, "completed")
-				if result, err := bus.SweepPipelineObligations(testAuthorActivityContext(t, context.Background()), 10); err != nil || result.Settled != 0 {
+				if result, err := bus.SweepPipelineObligations(fixture.ctx, 10); err != nil || result.Settled != 0 {
 					t.Fatalf("second foreground quarantine sweep recovered = %d, %v; want 0, nil", result.Settled, err)
 				}
 			})
@@ -1134,20 +1132,23 @@ type gateRecoveryForegroundFixture struct {
 	entityID    string
 	cardID      string
 	coordinator *runtimepipeline.PipelineCoordinator
+	ctx         context.Context
+	bundle      *runtimecontracts.WorkflowContractBundle
+	sourceFact  runtimecorrelation.SourceArtifactFact
 }
 
 func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, runID string, at time.Time) gateRecoveryForegroundFixture {
 	t.Helper()
-	ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
 	entityID := runID
 	bundle := gateRecoveryContractBundle(t)
-	setupBus, err := newScopedTestEventBus(t, tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle)})
+	ctx, sourceFact := workflowLifecycleSourceContext(t, tc, bundle, runID)
+	setupBus, err := newScopedTestEventBus(t, tc.events, runtimebus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle), SourceArtifactFact: sourceFact})
 	if err != nil {
 		t.Fatal(err)
 	}
 	setupCoordinator := newGateRecoveryCoordinator(setupBus, tc, runtimepipeline.PipelineCoordinatorOptions{
 		Module: gateRecoveryModule{source: semanticview.Wrap(bundle)}, Persistence: tc.persistence,
-		DecisionCards: tc.cards, SourceArtifactFact: mustAuthorActivityTestSourceArtifactFactForHash(gateRecoveryBundle),
+		DecisionCards: tc.cards, SourceArtifactFact: sourceFact,
 	})
 	{
 		construction1118Ctx := ctx
@@ -1210,7 +1211,10 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 	payload, _ := json.Marshal(map[string]any{"card_id": card.CardID})
 	evt := eventtest.RuntimeControl(eventID, events.EventType("mailbox.card_decided"), "platform", "", payload, 0, runID, "",
 		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), recoveryStageAnchor(t, card).Route.InstancePath), at)
-	return gateRecoveryForegroundFixture{event: evt, entityID: entityID, cardID: card.CardID, coordinator: setupCoordinator}
+	return gateRecoveryForegroundFixture{
+		event: evt, entityID: entityID, cardID: card.CardID, coordinator: setupCoordinator,
+		ctx: ctx, bundle: bundle, sourceFact: sourceFact,
+	}
 }
 
 func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, runID string, at time.Time) string {
