@@ -12,7 +12,7 @@ func TestCommandConfigFanOutWorkers(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			root := t.TempDir()
 			if value != "" {
-				writeRuntimeConfigText(t, filepath.Join(root, "swarm.yaml"), "runtime:\n  fan_out_workers: "+value+"\n")
+				writeSingleDeploymentConfig(t, filepath.Join(root, ".swarm", "swarm.yaml"), "runtime:\n  fan_out_workers: "+value+"\n")
 			}
 			loaded, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: root})
 			if value == "0" || value == "-1" || value == "null" || value == "4.0" || value == "'4'" {
@@ -39,7 +39,7 @@ func TestCommandConfigFanOutWorkers(t *testing.T) {
 	}
 }
 
-func TestCommandConfigFanOutWorkersLayerOverride(t *testing.T) {
+func TestCommandConfigFanOutWorkersSelectedReplacement(t *testing.T) {
 	for _, override := range []string{"", "1", "0", "null"} {
 		t.Run(override, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
@@ -61,12 +61,13 @@ func TestCommandConfigFanOutWorkersLayerOverride(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := 4
-			if override == "1" {
-				want = 1
-			}
-			if workers := loaded.Config.Runtime.FanOutWorkers; workers == nil || *workers != want {
-				t.Fatalf("workers = %v, want %d", workers, want)
+			workers := loaded.Config.Runtime.FanOutWorkers
+			if override == "" {
+				if workers != nil {
+					t.Fatal("ignored root workers replaced backend-default selection")
+				}
+			} else if workers == nil || *workers != 1 {
+				t.Fatalf("workers = %v, want explicit 1", workers)
 			}
 			if loaded.Config.Runtime.RecoveryOnStartup {
 				t.Fatal("worker config changed existing explicit-false semantics")

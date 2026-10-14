@@ -2,7 +2,6 @@ package cliapp
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -11,8 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 )
-
-var runtimeConfigExecutablePath = os.Executable
 
 type RuntimeConfigLoadOptions struct {
 	RepoRoot        string
@@ -24,22 +21,14 @@ type RuntimeConfigLoadResult struct {
 	Config      *config.Config
 	Source      string
 	Path        string
-	Layers      []unifiedConfigLayer
-	KeyOrigins  map[string]unifiedConfigKeyOrigin
 	Diagnostics []unifiedConfigDiagnostic
 	cli         cliCommandConfig
 }
 
-// DeploymentConfigured uses admitted layer facts, not a default backend or an
-// unrelated user's global connection settings, to select strict verification.
+// DeploymentConfigured uses the selected file, not a default backend or an
+// ignored root/global file, to select strict verification.
 func (r RuntimeConfigLoadResult) DeploymentConfigured() bool {
-	for _, layer := range r.Layers {
-		switch layer.Name {
-		case unifiedLayerExplicit, unifiedLayerLocalOperator, unifiedLayerProject:
-			return true
-		}
-	}
-	return false
+	return strings.TrimSpace(r.Path) != ""
 }
 
 func (r RuntimeConfigLoadResult) ResolveServeListeners(opts ServeOptions, apiFlagSet, mcpFlagSet bool) (string, string, error) {
@@ -82,8 +71,6 @@ func LoadRuntimeConfigWithOptions(opts RuntimeConfigLoadOptions) (RuntimeConfigL
 		Config:      loaded.Config,
 		Source:      loaded.Source,
 		Path:        loaded.Path,
-		Layers:      loaded.Layers,
-		KeyOrigins:  loaded.KeyOrigins,
 		Diagnostics: loaded.Diagnostics,
 		cli:         loaded.CLI,
 	}
@@ -91,29 +78,6 @@ func LoadRuntimeConfigWithOptions(opts RuntimeConfigLoadOptions) (RuntimeConfigL
 		return result, err
 	}
 	return result, nil
-}
-
-func executableAdjacentRuntimeConfigPath() (string, bool, error) {
-	executable, err := runtimeConfigExecutablePath()
-	if err != nil {
-		return "", false, fmt.Errorf("resolve executable config path: %w", err)
-	}
-	executable = strings.TrimSpace(executable)
-	if executable == "" {
-		return "", false, nil
-	}
-	path := filepath.Join(filepath.Dir(executable), "config.yaml")
-	info, err := os.Stat(path)
-	if err == nil {
-		if info.IsDir() {
-			return "", false, fmt.Errorf("executable-adjacent runtime config %s is a directory", path)
-		}
-		return path, true, nil
-	}
-	if os.IsNotExist(err) {
-		return "", false, nil
-	}
-	return "", false, fmt.Errorf("inspect executable-adjacent runtime config %s: %w", path, err)
 }
 
 func defaultRuntimeConfig() (*config.Config, error) {
