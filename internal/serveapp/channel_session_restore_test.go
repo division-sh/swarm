@@ -25,7 +25,7 @@ import (
 
 func seedServePairedDevice(t *testing.T, f *serveBootstrapTestFixture) string {
 	t.Helper()
-	if err := f.adapter.BootstrapSession(f.ctx, f.op, f.candidate); err != nil {
+	if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.adapter.connection(f.op.OperationID).Close(f.ctx); err != nil {
@@ -51,7 +51,7 @@ func TestServeSessionResumePublicationRebindBothStores(t *testing.T) {
 			f := newServeBootstrapTestFixture(t, backend)
 			serveBootstrapWireFixture(t, "paired", f.owner)
 			seedServePairedDevice(t, f)
-			if err := f.adapter.ResumeSession(f.ctx, f.op, f.candidate); err != nil {
+			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, true); err != nil {
 				t.Fatal(err)
 			}
 			paired, ok, err := f.adapter.CheckpointSessionPairing(f.ctx, f.op)
@@ -67,7 +67,7 @@ func TestServeSessionResumePublicationRebindBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := f.adapter.ResumeSession(f.ctx, rebound, f.candidate); err == nil {
+			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, rebound, f.candidate, true); err == nil {
 				t.Fatal("stale candidate admitted restoration")
 			}
 			if f.adapter.connection(paired.OperationID) != previous || f.selections.Load() != 2 {
@@ -75,7 +75,7 @@ func TestServeSessionResumePublicationRebindBothStores(t *testing.T) {
 			}
 			candidate := f.candidate
 			candidate.Coordinate = coordinate
-			if err := f.adapter.ResumeSession(f.ctx, rebound, candidate); err != nil {
+			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, rebound, candidate, true); err != nil {
 				t.Fatal("exact publication rebind failed", err)
 			}
 			current := f.adapter.connection(paired.OperationID)
@@ -91,7 +91,7 @@ func TestServeSessionResumePublicationRebindBothStores(t *testing.T) {
 			if id != rebound.OperationID || revision != rebound.Revision {
 				t.Fatal("rebound occurrence adopted another selected parent", id, revision)
 			}
-			if err := f.adapter.ResumeSession(f.ctx, rebound, candidate); err != nil || f.adapter.connection(id) != current || f.selections.Load() != 3 {
+			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, rebound, candidate, true); err != nil || f.adapter.connection(id) != current || f.selections.Load() != 3 {
 				t.Fatal("healthy rebound occurrence was reopened", err)
 			}
 		})
@@ -104,10 +104,10 @@ func TestServeSessionExplicitResumeRetainsPairedIdentityBothStores(t *testing.T)
 			f := newServeBootstrapTestFixture(t, backend)
 			serveBootstrapWireFixture(t, "paired", f.owner)
 			accountRef := seedServePairedDevice(t, f)
-			if err := f.adapter.BootstrapSession(f.ctx, f.op, f.candidate); err == nil {
+			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false); err == nil {
 				t.Fatal("ordinary cache reuse silently reconnected a closed owner")
 			}
-			if err := f.adapter.ResumeSession(f.ctx, f.op, f.candidate); err != nil {
+			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, true); err != nil {
 				t.Fatal("explicit original-reservation retry failed", err)
 			}
 			paired, ok, err := f.adapter.CheckpointSessionPairing(f.ctx, f.op)
@@ -120,13 +120,13 @@ func TestServeSessionExplicitResumeRetainsPairedIdentityBothStores(t *testing.T)
 				t.Fatal(err)
 			}
 			original := f.adapter.connection(f.op.OperationID)
-			if err := f.adapter.ResumeSession(f.ctx, paired, f.candidate); err != nil || f.adapter.connection(f.op.OperationID) != original {
+			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, paired, f.candidate, true); err != nil || f.adapter.connection(f.op.OperationID) != original {
 				t.Fatal("healthy paired resume replaced its connection", err)
 			}
 			if err := original.Close(f.ctx); err != nil {
 				t.Fatal(err)
 			}
-			if err := f.adapter.ResumeSession(f.ctx, paired, f.candidate); err != nil {
+			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, paired, f.candidate, true); err != nil {
 				t.Fatal("explicit paired resume failed", err)
 			}
 			current := f.adapter.connection(f.op.OperationID)
@@ -145,7 +145,7 @@ func TestServeSessionExplicitResumeRetainsPairedIdentityBothStores(t *testing.T)
 				t.Fatal("restoration adopted identity or manufactured executable admission", retained, err, headerErr)
 			}
 			for index := 0; index < 2; index++ {
-				if err := f.adapter.ResumeSession(f.ctx, paired, f.candidate); err != nil || f.adapter.connection(f.op.OperationID) != current {
+				if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, paired, f.candidate, true); err != nil || f.adapter.connection(f.op.OperationID) != current {
 					t.Fatal("repeated resume created another socket", err)
 				}
 			}
@@ -175,13 +175,13 @@ func TestServeSessionResumeRejectsContradictoryResponsibilityBothStores(t *testi
 			} {
 				op := f.op
 				mutate(&op)
-				if err := f.adapter.ResumeSession(f.ctx, op, f.candidate); err == nil {
+				if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, op, f.candidate, true); err == nil {
 					t.Fatal("contradictory responsibility was restored", op)
 				}
 			}
 			caller, cancel := context.WithCancel(f.ctx)
 			cancel()
-			if err := f.adapter.ResumeSession(caller, f.op, f.candidate); !errors.Is(err, context.Canceled) {
+			if err := awaitServeSessionBootstrapFixture(caller, f.adapter, f.op, f.candidate, true); !errors.Is(err, context.Canceled) {
 				t.Fatal("canceled resume acquired a connection", err)
 			}
 			if f.selections.Load() != 0 || f.adapter.connection(f.op.OperationID) != nil {
@@ -232,13 +232,13 @@ func TestServeSessionPendingResumeSharesFailedAttemptBothStores(t *testing.T) {
 				}
 			}
 			first := make(chan error, 1)
-			go func() { first <- f.adapter.ResumeSession(f.ctx, f.op, f.candidate) }()
+			go func() { first <- awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, true) }()
 			<-entered
 			lookup := make(chan struct{})
 			var once sync.Once
 			f.adapter.store = &serveSessionReadFaultStore{Store: f.adapter.store, onRead: func() { once.Do(func() { close(lookup) }) }}
 			second := make(chan error, 1)
-			go func() { second <- f.adapter.ResumeSession(f.ctx, f.op, f.candidate) }()
+			go func() { second <- awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, true) }()
 			<-lookup
 			select {
 			case err := <-second:
@@ -268,7 +268,7 @@ func TestServeSessionResumePreservesObservationErrorWithoutReconnectBothStores(t
 			f.adapter.store = fault
 			serveBootstrapWireFixture(t, "paired", f.owner)
 			seedServePairedDevice(t, f)
-			if err := f.adapter.ResumeSession(f.ctx, f.op, f.candidate); err != nil {
+			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, true); err != nil {
 				t.Fatal(err)
 			}
 			paired, ok, err := f.adapter.CheckpointSessionPairing(f.ctx, f.op)
@@ -278,7 +278,7 @@ func TestServeSessionResumePreservesObservationErrorWithoutReconnectBothStores(t
 			original, selections := f.adapter.connection(f.op.OperationID), f.selections.Load()
 			fault.reads.Store(0)
 			fault.failAt.Store(2) // request validation passes; genuine connected reuse then observes the failure.
-			if err := f.adapter.ResumeSession(f.ctx, paired, f.candidate); !errors.Is(err, fault.cause) {
+			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, paired, f.candidate, true); !errors.Is(err, fault.cause) {
 				t.Fatal("selected I/O failure became a reconnect instruction", err)
 			}
 			fault.failAt.Store(0)
@@ -310,7 +310,7 @@ func TestServeSessionResumeCancellationRetainsJoinAndPossessionBothStores(t *tes
 			go func() {
 				region := trace.StartRegion(caller, "whatsapp.test.resume-call")
 				defer region.End()
-				done <- f.adapter.ResumeSession(caller, f.op, f.candidate)
+				done <- awaitServeSessionBootstrapFixture(caller, f.adapter, f.op, f.candidate, true)
 			}()
 			select {
 			case <-entered:
@@ -344,7 +344,7 @@ func TestServeSessionResumeCancellationRetainsJoinAndPossessionBothStores(t *tes
 				t.Fatal("canceled resume lost its partial cleanup owner")
 			}
 			second, stop := context.WithTimeout(f.ctx, 100*time.Millisecond)
-			err := f.adapter.ResumeSession(second, f.op, f.candidate)
+			err := awaitServeSessionBootstrapFixture(second, f.adapter, f.op, f.candidate, true)
 			stop()
 			if !errors.Is(err, context.DeadlineExceeded) || f.selections.Load() != 1 || f.adapter.connection(f.op.OperationID) != old {
 				t.Fatal("overlapping resume replaced unresolved predecessor", err, f.selections.Load())
@@ -385,7 +385,7 @@ func TestServeSessionConcurrentResumeConstructsOneSuccessorBothStores(t *testing
 			f := newServeBootstrapTestFixture(t, backend)
 			serveBootstrapWireFixture(t, "paired", f.owner)
 			seedServePairedDevice(t, f)
-			if err := f.adapter.ResumeSession(f.ctx, f.op, f.candidate); err != nil {
+			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, true); err != nil {
 				t.Fatal(err)
 			}
 			paired, ok, err := f.adapter.CheckpointSessionPairing(f.ctx, f.op)
@@ -402,7 +402,7 @@ func TestServeSessionConcurrentResumeConstructsOneSuccessorBothStores(t *testing
 				go func() {
 					defer workers.Done()
 					<-start
-					results <- f.adapter.ResumeSession(f.ctx, paired, f.candidate)
+					results <- awaitServeSessionBootstrapFixture(f.ctx, f.adapter, paired, f.candidate, true)
 				}()
 			}
 			close(start)
