@@ -196,7 +196,7 @@ func TestClaudeCLICompletion2270InvocationReaderUsesPublishedProjectionWorkspace
 		}
 		if err := contexts.Register(runtimepkg.BundleContext{
 			SourceArtifactFact: fact, Source: source, WorkOwner: owner,
-			Runtime: &runtimepkg.Runtime{Bus: eventBus, Workspace: bound},
+			Runtime: &runtimepkg.Runtime{Bus: eventBus, Workspace: &completion2270ObservedWorkspace{DockerManager: bound, proof: &proof}},
 		}); err != nil {
 			t.Fatal(err)
 		}
