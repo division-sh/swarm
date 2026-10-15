@@ -74,6 +74,12 @@ func TestServeBootstrapConstructionCallerCancellationBothStores(t *testing.T) {
 				case <-time.After(5 * time.Second):
 					t.Fatal("construction did not reach its controlled owner barrier")
 				}
+				f.adapter.mu.Lock()
+				original := f.adapter.connections[f.op.OperationID]
+				f.adapter.mu.Unlock()
+				if original == nil {
+					t.Fatal("controlled construction lost its original attempt")
+				}
 				cancel()
 				returned := false
 				select {
@@ -104,6 +110,24 @@ func TestServeBootstrapConstructionCallerCancellationBothStores(t *testing.T) {
 						t.Fatal("controlled construction did not finish after release")
 					}
 				}
+				// Construction publishes its connection before releasing its counted
+				// use. Join publication before deciding whether Close is required.
+				if err := f.owner.WaitForQuiescence(f.ctx); err != nil {
+					t.Fatal("construction released caller but retained unresolved transient work", err)
+				}
+				// Releasing that use precedes close(done); Pending is not proof of a
+				// settled refusal, so join this exact original attempt as well.
+				select {
+				case <-original.done:
+				case <-f.ctx.Done():
+					t.Fatal("original construction did not settle", context.Cause(f.ctx))
+				}
+				f.adapter.mu.Lock()
+				retained := f.adapter.connections[f.op.OperationID]
+				f.adapter.mu.Unlock()
+				if retained != original {
+					t.Fatal("construction replaced its original attempt before cleanup")
+				}
 				if connection := f.adapter.connection(f.op.OperationID); connection != nil {
 					if err := connection.Close(context.Background()); err != nil {
 						t.Fatal("original partial construction did not join", err)
@@ -112,7 +136,7 @@ func TestServeBootstrapConstructionCallerCancellationBothStores(t *testing.T) {
 				if err := f.owner.WaitForQuiescence(f.ctx); err != nil {
 					t.Fatal("construction released caller but retained unresolved transient work", err)
 				}
-				if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false); err == nil || f.selections.Load() != 1 {
+				if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false); err == nil || errors.Is(err, channelonboarding.ErrSessionPending) || f.selections.Load() != 1 {
 					t.Fatal("canceled construction became success or an automatic replacement", err, f.selections.Load())
 				}
 			})
