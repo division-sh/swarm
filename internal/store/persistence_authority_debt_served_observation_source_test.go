@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -64,8 +65,13 @@ func debtServedObservationManifests(root string) ([][]debtRunIdentitySourceBody,
 		if err != nil || debtBaselineChecksum(raw) != pin[1] {
 			return nil, fmt.Errorf("served observation immutable stage changed: %s: %v", pin[0], err)
 		}
-		if err := json.Unmarshal(raw, &out[index]); err != nil || strconv.Itoa(len(out[index])) != pin[2] {
-			return nil, fmt.Errorf("served observation complete stage inventory changed: %s: %v", pin[0], err)
+		if cached, ok := debtSelectedReadRolePinCache.Load(pin[1]); ok {
+			out[index] = slices.Clone(cached.([]debtRunIdentitySourceBody))
+		} else {
+			if err := json.Unmarshal(raw, &out[index]); err != nil || strconv.Itoa(len(out[index])) != pin[2] {
+				return nil, fmt.Errorf("served observation complete stage inventory changed: %s: %v", pin[0], err)
+			}
+			debtSelectedReadRolePinCache.Store(pin[1], slices.Clone(out[index]))
 		}
 	}
 	return out, nil
@@ -90,6 +96,12 @@ func debtServedObservationLiveSources(root string) ([]debtRunIdentitySourceBody,
 	if err != nil {
 		return nil, err
 	}
+	// Authenticate the complete setup family once, before consuming any of its
+	// intermediate bodies. Repeating that validation for every key is quadratic.
+	verified, err := debtServedSetupVerifiedPredecessors(root)
+	if err != nil {
+		return nil, err
+	}
 	var pins []debtRunIdentitySourceBody
 	keys := append(append([][2]string{}, debtServedObservationResetSourceKeys[:]...), debtServedObservationOlderSourceKeys[:]...)
 	files := map[string]map[string]string{}
@@ -104,7 +116,10 @@ func debtServedObservationLiveSources(root string) ([]debtRunIdentitySourceBody,
 				return nil, err
 			}
 		}
-		current, err := debtServedSetupSourcePrevious(root, key[0], key[1], files[key[0]][key[1]])
+		current, known := verified[key]
+		if !known {
+			current, err = debtServedSetupSourcePrevious(root, key[0], key[1], files[key[0]][key[1]])
+		}
 		if err != nil || current != pin.After {
 			return nil, fmt.Errorf("served observation actual final unique body changed: %s: %v", key[1], err)
 		}
@@ -337,9 +352,9 @@ func TestPersistenceAuthorityDebtServedObservationSourceInversesAreExactAndActua
 			t.Fatal("foreign declaration received inverse:", err)
 		}
 	}
+	copy := t.TempDir()
+	debtServedObservationCopySourceEvidence(t, root, copy)
 	for _, pin := range pins {
-		copy := t.TempDir()
-		debtServedObservationCopySourceEvidence(t, root, copy)
 		raw, err := os.ReadFile(filepath.Join(copy, pin.File))
 		if err != nil {
 			t.Fatal(err)
@@ -349,11 +364,16 @@ func TestPersistenceAuthorityDebtServedObservationSourceInversesAreExactAndActua
 			t.Fatal(err)
 		}
 		body := current[pin.Function]
-		mutant := strings.Replace(body, "{", "{foreignLiveCut();", 1)
-		debtWriteModuleSource(t, copy, pin.File, strings.Replace(string(raw), body, mutant, 1))
+		mutant := strings.Replace(body, "{\n", "{\nforeignLiveCut();\n", 1)
+		debtSourceBlobCopyDeclaration(t, copy, pin.File, pin.Function, mutant)
+		changed, err := debtServedSetupDeclarations(filepath.Join(copy, pin.File))
+		if err != nil || changed[pin.Function] == body {
+			t.Fatal("hostile actual-source mutation did not execute:", pin.Function, err)
+		}
 		if _, err := debtServedObservationPreviousForKeys(copy, pins[0].File, pins[0].Function, pins[0].After, keys); err == nil {
 			t.Fatal("unchanged supplied string bypassed changed actual live source:", pin.Function)
 		}
+		debtWriteModuleSource(t, copy, pin.File, string(raw))
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"testing"
@@ -62,8 +63,13 @@ func debtServedSetupSourcePins(root string) ([]debtRunIdentitySourceBody, error)
 			return nil, fmt.Errorf("served setup immutable stage changed: %s: %v", stage[0], err)
 		}
 		var pins []debtRunIdentitySourceBody
-		if err := json.Unmarshal(raw, &pins); err != nil || len(pins) != [2]int{4, 101}[index] {
-			return nil, fmt.Errorf("served setup stage inventory changed")
+		if cached, ok := debtSelectedReadRolePinCache.Load(stage[1]); ok {
+			pins = slices.Clone(cached.([]debtRunIdentitySourceBody))
+		} else {
+			if err := json.Unmarshal(raw, &pins); err != nil || len(pins) != [2]int{4, 101}[index] {
+				return nil, fmt.Errorf("served setup stage inventory changed")
+			}
+			debtSelectedReadRolePinCache.Store(stage[1], slices.Clone(pins))
 		}
 		seen := map[string]bool{}
 		for _, pin := range pins {
@@ -109,7 +115,10 @@ func debtServedSetupLiveSources(root string) ([]debtRunIdentitySourceBody, error
 				return nil, err
 			}
 		}
-		current, err := debtSelectedReadRoleSourcePrevious(root, pin.File, pin.Function, files[pin.File][pin.Function])
+		current, err := debtStandingControlSourcePrevious(root, pin.File, pin.Function, files[pin.File][pin.Function])
+		if err == nil {
+			current, err = debtSelectedReadRoleSourcePrevious(root, pin.File, pin.Function, current)
+		}
 		if err == nil {
 			current, err = debtChannelSettlementSourcePrevious(root, pin.File, pin.Function, current)
 		}
@@ -120,9 +129,24 @@ func debtServedSetupLiveSources(root string) ([]debtRunIdentitySourceBody, error
 	return pins, nil
 }
 
+func debtServedSetupVerifiedPredecessors(root string) (map[[2]string]string, error) {
+	pins, err := debtServedSetupLiveSources(root)
+	if err != nil {
+		return nil, err
+	}
+	verified := map[[2]string]string{}
+	for _, pin := range pins {
+		verified[[2]string{pin.File, pin.Function}] = pin.Before
+	}
+	return verified, nil
+}
+
 func debtServedSetupSourcePrevious(root, file, function, current string) (string, error) {
 	var err error
-	current, err = debtSelectedReadRoleSourcePrevious(root, file, function, current)
+	current, err = debtStandingControlSourcePrevious(root, file, function, current)
+	if err == nil {
+		current, err = debtSelectedReadRoleSourcePrevious(root, file, function, current)
+	}
 	if err == nil {
 		current, err = debtChannelSettlementSourcePrevious(root, file, function, current)
 	}
@@ -166,6 +190,7 @@ func debtServedSetupCopySourceEvidence(t *testing.T, root, copy string) {
 	}
 	debtChannelSettlementCopySources(t, root, copy)
 	debtSelectedReadRoleCopySources(t, root, copy)
+	debtStandingControlCopySources(t, root, copy)
 }
 
 func TestPersistenceAuthorityDebtServedSetupSourceInverseRejectsStaleAndForeignCuts(t *testing.T) {

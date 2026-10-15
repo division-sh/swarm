@@ -161,7 +161,10 @@ func TestPersistenceAuthorityDebtServedDebugSourcePinsRejectProvenanceAndNearMat
 		t.Run(body.Function, func(t *testing.T) {
 			raw, current := debtServedDebugCurrentSource(t, copy, body)
 			changed := strings.Replace(current, "{\n", "{\nforeignReaderProvenance();\n", 1)
-			debtWriteModuleSource(t, copy, body.File, strings.Replace(string(raw), current, changed, 1))
+			if changed == current {
+				t.Fatal("hostile declaration mutation is absent")
+			}
+			debtSourceBlobCopyDeclaration(t, copy, body.File, body.Function, changed)
 			if err := debtServedDebugSourcePins(copy); err == nil {
 				t.Fatal("changed complete reader provenance/argument/body admitted")
 			}
@@ -171,7 +174,7 @@ func TestPersistenceAuthorityDebtServedDebugSourcePinsRejectProvenanceAndNearMat
 					continue
 				}
 				changed := strings.Replace(current, role, "foreignSameTypedReader", 1)
-				debtWriteModuleSource(t, copy, body.File, strings.Replace(string(raw), current, changed, 1))
+				debtSourceBlobCopyDeclaration(t, copy, body.File, body.Function, changed)
 				if err := debtServedDebugSourcePins(copy); err == nil {
 					t.Fatal("changed same-typed inspection provenance admitted")
 				}
@@ -202,9 +205,9 @@ func debtServedDebugCurrentSource(t *testing.T, root string, body debtServedDebu
 	if err != nil {
 		t.Fatal(err)
 	}
-	current := decls[body.Function]
-	if strings.Count(string(raw), current) != 1 {
-		t.Fatal("hostile source requires one exact current declaration")
+	current, found := decls[body.Function]
+	if !found || current == "" {
+		t.Fatal("hostile source requires its unique parsed current declaration")
 	}
 	return raw, current
 }

@@ -21,11 +21,17 @@ func debtChannelProcessSourcePrevious(root, file, function, current string) (str
 	if err != nil || debtBaselineChecksum(raw) != "1e94cca2eaa12fedf807b37ed910371a79d0ba5df00df9f79afb4db5de879334" {
 		return "", fmt.Errorf("channel process signed source composition changed: %v", err)
 	}
+	const digest = "1e94cca2eaa12fedf807b37ed910371a79d0ba5df00df9f79afb4db5de879334"
 	var rows []debtRunIdentitySourceBody
-	if err := json.Unmarshal(raw, &rows); err != nil || len(rows) != 45 {
-		return "", fmt.Errorf("channel process complete source inventory changed: %v", err)
+	if cached, ok := debtSelectedReadRolePinCache.Load(digest); ok {
+		rows = cached.([]debtRunIdentitySourceBody)
+	} else {
+		if err := json.Unmarshal(raw, &rows); err != nil || len(rows) != 45 {
+			return "", fmt.Errorf("channel process complete source inventory changed: %v", err)
+		}
+		debtSelectedReadRolePinCache.Store(digest, rows)
 	}
-	declarations, err := debtServedDebugDeclarations(filepath.Join(root, file))
+	declarations, err := debtServedSetupDeclarations(filepath.Join(root, file))
 	if err != nil {
 		return "", err
 	}
@@ -60,5 +66,37 @@ func TestPersistenceAuthorityDebtChannelProcessSourceInverseIsExactAndAccounting
 	}
 	if unchanged, err := debtChannelProcessSourcePrevious(root, pin.File, pin.Function+"Foreign", current); err != nil || unchanged != current {
 		t.Fatal("channel inverse widened its finite declaration scope")
+	}
+}
+
+func TestPersistenceAuthorityDebtChannelProcessCachesKeepActualEvidence(t *testing.T) {
+	root := persistenceAuthorityRepoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, debtChannelProcessManifest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pins []debtRunIdentitySourceBody
+	if err := json.Unmarshal(raw, &pins); err != nil || len(pins) != 45 {
+		t.Fatal("invalid complete channel source inventory", err)
+	}
+	pin := pins[0]
+	for _, cut := range []string{"manifest", "current source"} {
+		t.Run(cut, func(t *testing.T) {
+			copy := t.TempDir()
+			debtWriteModuleSource(t, copy, debtChannelProcessManifest, string(raw))
+			debtWriteModuleSource(t, copy, pin.File, "package proof\n"+pin.After)
+			before, err := debtChannelProcessSourcePrevious(copy, pin.File, pin.Function, pin.After)
+			if err != nil || before != pin.Before {
+				t.Fatal("valid cache warm-up lost exact source:", err)
+			}
+			if cut == "manifest" {
+				debtWriteModuleSource(t, copy, debtChannelProcessManifest, string(raw)+"\n")
+			} else {
+				debtWriteModuleSource(t, copy, pin.File, "package proof\n"+pin.Before)
+			}
+			if _, err := debtChannelProcessSourcePrevious(copy, pin.File, pin.Function, pin.After); err == nil {
+				t.Fatal("warm cache hid changed actual evidence")
+			}
+		})
 	}
 }

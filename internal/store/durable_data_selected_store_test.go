@@ -3,7 +3,6 @@ package store_test
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -18,7 +17,6 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -50,7 +48,7 @@ type durableDataSelectedStore interface {
 }
 
 func TestDurableDataSelectedStoreRejectsUnshapedDeclarationCatalog(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, _ *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		withoutShapes := catalog
@@ -72,16 +70,16 @@ func TestDurableDataSelectedStoreRejectsUnshapedDeclarationCatalog(t *testing.T)
 	})
 }
 
-func forEachDurableDataStore(t *testing.T, run func(*testing.T, durableDataSelectedStore, *sql.DB)) {
+func forEachDurableDataStore(t *testing.T, run func(*testing.T, durableDataSelectedStore)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
 		selected := storetest.StartSQLiteRuntimeStore(t)
-		run(t, selected, storetest.Database(selected))
+		run(t, selected)
 	})
 	t.Run("postgres", func(t *testing.T) {
-		dsn, db, _ := testutil.StartPostgres(t)
+		dsn, _, _ := testutil.StartPostgres(t)
 		selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, dsn)
-		run(t, selected, db)
+		run(t, selected)
 	})
 }
 
@@ -98,7 +96,7 @@ func requireEmptySourceDefectsPage(t testing.TB, result durabledata.SourceOperat
 }
 
 func TestDurableDataSelectedStoreLifecycleReplayAndPrune(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, primary durableDataSelectedStore, _ *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, primary durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, primary, catalog); err != nil {
@@ -245,7 +243,7 @@ func TestDurableDataSelectedStoreLifecycleReplayAndPrune(t *testing.T) {
 }
 
 func TestResolveDataVersionPayloadIsAtomicAcrossPruneAndRematerialize(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, _ *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -340,7 +338,7 @@ func TestResolveDataVersionPayloadIsAtomicAcrossPruneAndRematerialize(t *testing
 }
 
 func TestDurableDataSelectedStoreKeylessPreservesMultiplicityOrderAndSchemaMode(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, _ *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataKeylessTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -384,7 +382,7 @@ func TestDurableDataSelectedStoreKeylessPreservesMultiplicityOrderAndSchemaMode(
 }
 
 func TestDurableDataConcurrentCASHasOneWinner(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, _ *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -427,7 +425,7 @@ func TestDurableDataConcurrentCASHasOneWinner(t *testing.T) {
 }
 
 func TestDurableDataHeadConflictEvidenceIgnoresHistoricalRetentionState(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, _ *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -489,7 +487,7 @@ func TestDurableDataHeadConflictEvidenceIgnoresHistoricalRetentionState(t *testi
 }
 
 func TestDurableDataFailsClosedOnPayloadCorruption(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -502,13 +500,7 @@ func TestDurableDataFailsClosedOnPayloadCorruption(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		query := `UPDATE resource_versions SET canonical_jsonl = ? WHERE version_id = ?`
-		if _, ok := selected.(*store.PostgresStore); ok {
-			query = `UPDATE resource_versions SET canonical_jsonl = $1 WHERE version_id = $2`
-		}
-		if _, err := db.ExecContext(ctx, query, []byte("{\"slug\":\"poison\",\"score\":99}\n"), result.Candidate.VersionID); err != nil {
-			t.Fatal(err)
-		}
+		storetest.RequireResourcePayloadCorruption(t, ctx, selected, string(result.Candidate.VersionID), "poison sibling")
 		if _, err := selected.ShowDataResource(ctx, testDataBundle, ref); err == nil {
 			t.Fatal("ShowDataResource succeeded with contradictory immutable payload")
 		}
@@ -528,7 +520,7 @@ func TestDurableDataFailsClosedOnPayloadCorruption(t *testing.T) {
 }
 
 func TestDurableDataSourceReceiptRejectsCandidateStateCorruption(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -542,33 +534,7 @@ func TestDurableDataSourceReceiptRejectsCandidateStateCorruption(t *testing.T) {
 		if _, err := selected.ExecuteDataSourceOperation(ctx, command); err != nil {
 			t.Fatal(err)
 		}
-		query := `SELECT result_json FROM resource_source_invocations WHERE source_invocation_id = ?`
-		update := `UPDATE resource_source_invocations SET result_json = ? WHERE source_invocation_id = ?`
-		if _, ok := selected.(*store.PostgresStore); ok {
-			query = `SELECT result_json FROM resource_source_invocations WHERE source_invocation_id = $1::uuid`
-			update = `UPDATE resource_source_invocations SET result_json = $1 WHERE source_invocation_id = $2::uuid`
-		}
-		var raw []byte
-		if err := db.QueryRowContext(ctx, query, invocationID).Scan(&raw); err != nil {
-			t.Fatal(err)
-		}
-		var result map[string]any
-		if err := json.Unmarshal(raw, &result); err != nil {
-			t.Fatal(err)
-		}
-		candidate, ok := result["candidate"].(map[string]any)
-		if !ok {
-			t.Fatalf("stored candidate = %#v", result["candidate"])
-		}
-		candidate["state"] = "candidate"
-		delete(candidate, "alias")
-		corrupt, err := json.Marshal(result)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := db.ExecContext(ctx, update, corrupt, invocationID); err != nil {
-			t.Fatal(err)
-		}
+		storetest.RequireResourceReceiptFault(t, ctx, selected, invocationID, "", "source/candidate state")
 		for _, load := range []func() error{
 			func() error { _, err := selected.LoadDataSourceOperation(ctx, invocationID); return err },
 			func() error { _, err := selected.ExecuteDataSourceOperation(ctx, command); return err },
@@ -582,7 +548,7 @@ func TestDurableDataSourceReceiptRejectsCandidateStateCorruption(t *testing.T) {
 }
 
 func TestDurableDataSourceReceiptRejectsDefectsPageCorruption(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -596,31 +562,7 @@ func TestDurableDataSourceReceiptRejectsDefectsPageCorruption(t *testing.T) {
 		if _, err := selected.ExecuteDataSourceOperation(ctx, command); err != nil {
 			t.Fatal(err)
 		}
-		query := `SELECT result_json FROM resource_source_invocations WHERE source_invocation_id = ?`
-		update := `UPDATE resource_source_invocations SET result_json = ? WHERE source_invocation_id = ?`
-		if _, ok := selected.(*store.PostgresStore); ok {
-			query = `SELECT result_json FROM resource_source_invocations WHERE source_invocation_id = $1::uuid`
-			update = `UPDATE resource_source_invocations SET result_json = $1 WHERE source_invocation_id = $2::uuid`
-		}
-		var raw []byte
-		if err := db.QueryRowContext(ctx, query, invocationID).Scan(&raw); err != nil {
-			t.Fatal(err)
-		}
-		var result map[string]any
-		if err := json.Unmarshal(raw, &result); err != nil {
-			t.Fatal(err)
-		}
-		result["defects"] = map[string]any{
-			"items": nil, "item_count": 0, "encoded_items_bytes": 0,
-			"continuation": map[string]any{"state": ""},
-		}
-		corrupt, err := json.Marshal(result)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := db.ExecContext(ctx, update, corrupt, invocationID); err != nil {
-			t.Fatal(err)
-		}
+		storetest.RequireResourceReceiptFault(t, ctx, selected, invocationID, "", "source/empty defects page")
 		for _, load := range []func() error{
 			func() error { _, err := selected.LoadDataSourceOperation(ctx, invocationID); return err },
 			func() error { _, err := selected.ExecuteDataSourceOperation(ctx, command); return err },
@@ -634,66 +576,33 @@ func TestDurableDataSourceReceiptRejectsDefectsPageCorruption(t *testing.T) {
 }
 
 func TestDurableDataSourceReceiptRejectsAggregateCorruptionMatrix(t *testing.T) {
-	tests := []struct {
-		name   string
-		column string
-		mutate func(map[string]any)
-	}{
-		{name: "result invocation", column: "result_json", mutate: func(value map[string]any) { value["source_invocation_id"] = uuid.NewString() }},
-		{name: "result operation", column: "result_json", mutate: func(value map[string]any) { value["operation"] = "import" }},
-		{name: "result outcome", column: "result_json", mutate: func(value map[string]any) { value["outcome"] = "validation_rejected" }},
-		{name: "result bundle", column: "result_json", mutate: func(value map[string]any) {
-			value["bundle_hash"] = "bundle-v2:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-		}},
-		{name: "result schema", column: "result_json", mutate: func(value map[string]any) {
-			value["schema_digest"] = "resource-schema-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-		}},
-		{name: "result declaration", column: "result_json", mutate: func(value map[string]any) {
-			value["declaration"] = map[string]any{"flow_path": ".", "event_name": "hostile.changed"}
-		}},
-		{name: "result expected head", column: "result_json", mutate: func(value map[string]any) {
-			candidate := value["candidate"].(map[string]any)
-			value["expected_head"] = map[string]any{"state": "version", "version_id": candidate["version_id"]}
-		}},
-		{name: "result observed head", column: "result_json", mutate: func(value map[string]any) {
-			candidate := value["candidate"].(map[string]any)
-			value["observed_head"] = map[string]any{"state": "version", "version_id": candidate["version_id"]}
-		}},
-		{name: "result candidate union", column: "result_json", mutate: func(value map[string]any) {
-			value["candidate"].(map[string]any)["state"] = "none"
-		}},
-		{name: "result head transition", column: "result_json", mutate: func(value map[string]any) { value["head"].(map[string]any)["changed"] = true }},
-		{name: "result delta", column: "result_json", mutate: func(value map[string]any) {
-			value["delta"] = map[string]any{"state": "not_computed", "reason": "head_conflict"}
-		}},
-		{name: "result delta row identity", column: "result_json", mutate: func(value map[string]any) {
-			delete(value["delta"].(map[string]any), "row_identity")
-		}},
-		{name: "result defect page", column: "result_json", mutate: func(value map[string]any) {
-			value["defects"] = map[string]any{
-				"items":      []any{map[string]any{"code": "hostile", "message": "hostile"}},
-				"item_count": 1, "encoded_items_bytes": 42, "continuation": map[string]any{"state": "end"},
-			}
-		}},
-		{name: "result completion", column: "result_json", mutate: func(value map[string]any) { value["completed_at"] = "0001-01-01T00:00:00Z" }},
-		{name: "evidence defects", column: "evidence_json", mutate: func(value map[string]any) {
-			value["defects"] = []any{map[string]any{"code": "hostile", "message": "hostile"}}
-		}},
-		{name: "keyed delta evidence deleted", column: "evidence_json", mutate: func(value map[string]any) {
-			delete(value, "delta_added")
-			delete(value, "delta_removed")
-			delete(value, "delta_changed")
-		}},
-		{name: "request hash agreement", column: "request_json", mutate: func(value map[string]any) { value["actor"] = "hostile" }},
+	tests := []string{
+		"result invocation",
+		"result operation",
+		"result outcome",
+		"result bundle",
+		"result schema",
+		"result declaration",
+		"result expected head",
+		"result observed head",
+		"result candidate union",
+		"result head transition",
+		"result delta",
+		"result delta row identity",
+		"result defect page",
+		"result completion",
+		"evidence defects",
+		"keyed delta evidence deleted",
+		"request hash agreement",
 	}
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
 			t.Fatal(err)
 		}
 		for _, test := range tests {
-			t.Run(test.name, func(t *testing.T) {
+			t.Run(test, func(t *testing.T) {
 				invocationID := uuid.NewString()
 				command := durabledata.SourceCommand{
 					Operation: "check", SourceInvocationID: invocationID, Actor: "operator", BundleHash: testDataBundle,
@@ -702,14 +611,14 @@ func TestDurableDataSourceReceiptRejectsAggregateCorruptionMatrix(t *testing.T) 
 				if result, err := selected.ExecuteDataSourceOperation(ctx, command); err != nil || result.Outcome != "accepted" {
 					t.Fatalf("source fixture = %#v, %v", result, err)
 				}
-				corruptDurableDataJSONColumn(t, ctx, selected, db, "resource_source_invocations", test.column, "source_invocation_id", invocationID, test.mutate)
+				storetest.RequireResourceReceiptFault(t, ctx, selected, invocationID, "", storetest.ResourceReceiptFaultCase("source/"+test))
 				for _, load := range []func() error{
 					func() error { _, err := selected.LoadDataSourceOperation(ctx, invocationID); return err },
 					func() error { _, err := selected.ExecuteDataSourceOperation(ctx, command); return err },
 				} {
 					var domainErr *durabledata.DomainError
 					if err := load(); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
-						t.Fatalf("corrupt %s error = %v, want %s", test.name, err, durabledata.CodeIntegrity)
+						t.Fatalf("corrupt %s error = %v, want %s", test, err, durabledata.CodeIntegrity)
 					}
 				}
 			})
@@ -718,7 +627,7 @@ func TestDurableDataSourceReceiptRejectsAggregateCorruptionMatrix(t *testing.T) 
 }
 
 func TestDurableDataSourceReceiptRejectsCoordinatedSemanticCorruption(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -751,32 +660,17 @@ func TestDurableDataSourceReceiptRejectsCoordinatedSemanticCorruption(t *testing
 
 		t.Run("changed exact input with valid request hash", func(t *testing.T) {
 			id, command := newCheck(t, []byte("{\"slug\":\"alpha\",\"score\":1}\n"), durabledata.AbsentHead())
-			hostile := command
-			hostile.Input = []byte("{\"slug\":\"beta\",\"score\":2}\n")
-			hash, raw, err := hostile.RequestHash()
-			if err != nil {
-				t.Fatal(err)
-			}
-			query := `UPDATE resource_source_invocations SET request_hash = ?, request_json = ? WHERE source_invocation_id = ?`
-			if _, ok := selected.(*store.PostgresStore); ok {
-				query = `UPDATE resource_source_invocations SET request_hash = $1, request_json = $2 WHERE source_invocation_id = $3::uuid`
-			}
-			if _, err := db.ExecContext(ctx, query, hash, raw, id); err != nil {
-				t.Fatal(err)
+			hostile := storetest.RequireSourceExactInputCorruption(t, ctx, selected, id)
+			if string(command.Input) != "{\"slug\":\"alpha\",\"score\":1}\n" {
+				t.Fatal("exact input corruption lost its original source fixture")
 			}
 			assertIntegrity(t, id, hostile)
 		})
 
 		t.Run("keyed to positional downgrade", func(t *testing.T) {
 			id, command := newCheck(t, []byte("{\"slug\":\"alpha\",\"score\":1}\n"), durabledata.AbsentHead())
-			corruptDurableDataJSONColumn(t, ctx, selected, db, "resource_source_invocations", "result_json", "source_invocation_id", id, func(value map[string]any) {
-				value["delta"].(map[string]any)["row_identity"] = "position"
-			})
-			corruptDurableDataJSONColumn(t, ctx, selected, db, "resource_source_invocations", "evidence_json", "source_invocation_id", id, func(value map[string]any) {
-				value["delta_added"] = nil
-				value["delta_removed"] = nil
-				value["delta_changed"] = nil
-			})
+			storetest.RequireResourceReceiptFault(t, ctx, selected, id, "", "source/positional result")
+			storetest.RequireResourceReceiptFault(t, ctx, selected, id, "", "source/empty delta evidence")
 			assertIntegrity(t, id, command)
 		})
 
@@ -789,42 +683,21 @@ func TestDurableDataSourceReceiptRejectsCoordinatedSemanticCorruption(t *testing
 			if len(defects) != 0 {
 				t.Fatal(defects)
 			}
-			corruptDurableDataJSONColumn(t, ctx, selected, db, "resource_source_invocations", "result_json", "source_invocation_id", id, func(value map[string]any) {
-				candidate := value["candidate"].(map[string]any)
-				candidate["version_id"] = other.VersionID
-				candidate["manifest"] = map[string]any{
-					"manifest_format": other.Manifest.ManifestFormat, "declaration": map[string]any{"flow_path": ref.FlowPath, "event": ref.EventName},
-					"schema_digest": other.Manifest.SchemaDigest, "row_codec": other.Manifest.RowCodec,
-					"content_digest": other.Manifest.ContentDigest, "row_count": other.Manifest.RowCount,
-				}
-			})
+			storetest.RequireSourceCandidateCorruption(t, ctx, selected, id, other)
 			assertIntegrity(t, id, command)
 		})
 
 		t.Run("delta classes and counts", func(t *testing.T) {
 			id, command := newCheck(t, []byte("{\"slug\":\"alpha\",\"score\":1}\n"), durabledata.AbsentHead())
-			corruptDurableDataJSONColumn(t, ctx, selected, db, "resource_source_invocations", "result_json", "source_invocation_id", id, func(value map[string]any) {
-				value["delta"].(map[string]any)["summary"] = map[string]any{"added": 0, "removed": 1, "changed": 0}
-			})
-			corruptDurableDataJSONColumn(t, ctx, selected, db, "resource_source_invocations", "evidence_json", "source_invocation_id", id, func(value map[string]any) {
-				value["delta_added"] = nil
-				value["delta_removed"] = []any{map[string]any{"key": "alpha"}}
-				value["delta_changed"] = nil
-			})
+			storetest.RequireResourceReceiptFault(t, ctx, selected, id, "", "source/delta summary classes")
+			storetest.RequireResourceReceiptFault(t, ctx, selected, id, "", "source/delta evidence classes")
 			assertIntegrity(t, id, command)
 		})
 
 		t.Run("validation defects", func(t *testing.T) {
 			id, command := newCheck(t, []byte("{}\n"), durabledata.AbsentHead())
-			defect := map[string]any{"row": 1, "path": "$.slug", "code": "schema_rejected", "message": "coordinated false defect"}
-			corruptDurableDataJSONColumn(t, ctx, selected, db, "resource_source_invocations", "result_json", "source_invocation_id", id, func(value map[string]any) {
-				items := []any{defect}
-				raw, _ := json.Marshal(items)
-				value["defects"] = map[string]any{"items": items, "item_count": 1, "encoded_items_bytes": len(raw), "continuation": map[string]any{"state": "end"}}
-			})
-			corruptDurableDataJSONColumn(t, ctx, selected, db, "resource_source_invocations", "evidence_json", "source_invocation_id", id, func(value map[string]any) {
-				value["defects"] = []any{defect}
-			})
+			storetest.RequireResourceReceiptFault(t, ctx, selected, id, "", "source/false validation result")
+			storetest.RequireResourceReceiptFault(t, ctx, selected, id, "", "source/false validation evidence")
 			assertIntegrity(t, id, command)
 		})
 
@@ -848,22 +721,14 @@ func TestDurableDataSourceReceiptRejectsCoordinatedSemanticCorruption(t *testing
 			if len(defects) != 0 {
 				t.Fatal(defects)
 			}
-			corruptDurableDataJSONColumn(t, ctx, selected, db, "resource_source_invocations", "result_json", "source_invocation_id", id, func(value map[string]any) {
-				candidate := value["candidate"].(map[string]any)
-				candidate["version_id"] = other.VersionID
-				candidate["manifest"] = map[string]any{
-					"manifest_format": other.Manifest.ManifestFormat, "declaration": map[string]any{"flow_path": ref.FlowPath, "event": ref.EventName},
-					"schema_digest": other.Manifest.SchemaDigest, "row_codec": other.Manifest.RowCodec,
-					"content_digest": other.Manifest.ContentDigest, "row_count": other.Manifest.RowCount,
-				}
-			})
+			storetest.RequireSourceCandidateCorruption(t, ctx, selected, id, other)
 			assertIntegrity(t, id, command)
 		})
 	})
 }
 
 func TestDurableDataSourceReceiptsRetainHistoricalBaseAfterPrune(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, _ *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -922,7 +787,7 @@ func TestDurableDataSourceReceiptsRetainHistoricalBaseAfterPrune(t *testing.T) {
 }
 
 func TestDurableDataProvenanceOwnsTypedLineageAndProjection(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -947,14 +812,7 @@ func TestDurableDataProvenanceOwnsTypedLineageAndProjection(t *testing.T) {
 			if err := provenance.Validate(); err != nil {
 				t.Fatal(err)
 			}
-			raw, _ := json.Marshal(provenance)
-			query := `INSERT INTO resource_version_provenance (version_id, provenance_sequence, producer_kind, producer_id, actor, provenance_json, committed_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
-			if _, ok := selected.(*store.PostgresStore); ok {
-				query = `INSERT INTO resource_version_provenance (version_id, provenance_sequence, producer_kind, producer_id, actor, provenance_json, committed_at) VALUES ($1, $2, $3, $4::uuid, $5, $6, $7)`
-			}
-			if _, err := db.ExecContext(ctx, query, result.Candidate.VersionID, sequence, kind, id, "operator", raw, now); err != nil {
-				t.Fatal(err)
-			}
+			storetest.RequireProvenanceReadArm(t, ctx, selected, string(result.Candidate.VersionID), kind, id, now)
 		}
 		insertProvenance(2, "normal_run", uuid.NewString())
 		insertProvenance(3, "fork_candidate_promotion", uuid.NewString())
@@ -975,107 +833,40 @@ func TestDurableDataProvenanceOwnsTypedLineageAndProjection(t *testing.T) {
 				t.Fatalf("provenance contradiction error = %v, want %s", err, durabledata.CodeIntegrity)
 			}
 		}
-		jsonMutations := []struct {
-			name   string
-			mutate func(map[string]any)
-		}{
-			{name: "version", mutate: func(value map[string]any) {
-				value["version_id"] = "resource-version-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-			}},
-			{name: "producer ref", mutate: func(value map[string]any) {
-				value["producer_ref"] = map[string]any{"kind": "normal_run", "run_id": uuid.NewString()}
-			}},
-			{name: "actor", mutate: func(value map[string]any) { value["actor"] = "hostile" }},
-			{name: "committed at", mutate: func(value map[string]any) { value["committed_at"] = now.Add(time.Minute).Format(time.RFC3339Nano) }},
-		}
-		for _, test := range jsonMutations {
-			t.Run("json/"+test.name, func(t *testing.T) {
-				query := `SELECT provenance_json FROM resource_version_provenance WHERE version_id = ? AND provenance_sequence = 1`
-				update := `UPDATE resource_version_provenance SET provenance_json = ? WHERE version_id = ? AND provenance_sequence = 1`
-				if _, ok := selected.(*store.PostgresStore); ok {
-					query = `SELECT provenance_json FROM resource_version_provenance WHERE version_id = $1 AND provenance_sequence = 1`
-					update = `UPDATE resource_version_provenance SET provenance_json = $1 WHERE version_id = $2 AND provenance_sequence = 1`
-				}
-				var original []byte
-				if err := db.QueryRowContext(ctx, query, result.Candidate.VersionID).Scan(&original); err != nil {
-					t.Fatal(err)
-				}
-				var value map[string]any
-				_ = json.Unmarshal(original, &value)
-				test.mutate(value)
-				corrupt, _ := json.Marshal(value)
-				if _, err := db.ExecContext(ctx, update, corrupt, result.Candidate.VersionID); err != nil {
-					t.Fatal(err)
-				}
-				assertCorrupt(t)
-				if _, err := db.ExecContext(ctx, update, original, result.Candidate.VersionID); err != nil {
-					t.Fatal(err)
-				}
-			})
-		}
-		typedMutations := []struct {
-			name    string
-			column  string
-			hostile any
-			valid   any
-		}{
-			{name: "producer kind", column: "producer_kind", hostile: "normal_run", valid: "import"},
-			{name: "producer id", column: "producer_id", hostile: uuid.NewString(), valid: command.SourceInvocationID},
-			{name: "actor", column: "actor", hostile: "hostile", valid: "operator"},
-			{name: "committed at", column: "committed_at", hostile: now.Add(time.Minute), valid: now},
-		}
-		for _, test := range typedMutations {
-			t.Run("typed/"+test.name, func(t *testing.T) {
-				update := fmt.Sprintf("UPDATE resource_version_provenance SET %s = ? WHERE version_id = ? AND provenance_sequence = 1", test.column)
-				if _, ok := selected.(*store.PostgresStore); ok {
-					update = fmt.Sprintf("UPDATE resource_version_provenance SET %s = $1 WHERE version_id = $2 AND provenance_sequence = 1", test.column)
-				}
-				if _, err := db.ExecContext(ctx, update, test.hostile, result.Candidate.VersionID); err != nil {
-					t.Fatal(err)
-				}
-				assertCorrupt(t)
-				if _, err := db.ExecContext(ctx, update, test.valid, result.Candidate.VersionID); err != nil {
-					t.Fatal(err)
-				}
-			})
+		for _, kind := range []string{"json", "typed"} {
+			names := []string{"version", "producer ref", "actor", "committed at"}
+			if kind == "typed" {
+				names = []string{"producer kind", "producer id", "actor", "committed at"}
+			}
+			for _, name := range names {
+				t.Run(kind+"/"+name, func(t *testing.T) {
+					fault := storetest.RequireProvenanceCorruption(t, ctx, selected, string(result.Candidate.VersionID), kind+"/"+name)
+					assertCorrupt(t)
+					if err := fault.RestoreForTest(ctx); err != nil {
+						t.Fatal(err)
+					}
+				})
+			}
 		}
 	})
 }
-
 func TestDurableDataPruneReceiptRejectsDestructiveDecisionCorruption(t *testing.T) {
-	tests := []struct {
-		name   string
-		column string
-		mutate func(map[string]any)
-	}{
-		{name: "result invocation", column: "result_json", mutate: func(value map[string]any) { value["prune_invocation_id"] = uuid.NewString() }},
-		{name: "result outcome", column: "result_json", mutate: func(value map[string]any) { value["outcome"] = "already_pruned" }},
-		{name: "result declaration", column: "result_json", mutate: func(value map[string]any) {
-			value["declaration"] = map[string]any{"flow_path": ".", "event_name": "hostile.changed"}
-		}},
-		{name: "result version", column: "result_json", mutate: func(value map[string]any) {
-			value["version_id"] = "resource-version-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-		}},
-		{name: "result expected head", column: "result_json", mutate: func(value map[string]any) {
-			value["expected_head"] = map[string]any{"state": "absent"}
-		}},
-		{name: "result observed head", column: "result_json", mutate: func(value map[string]any) {
-			value["observed_head"] = map[string]any{"state": "version", "version_id": value["version_id"]}
-		}},
-		{name: "result current version", column: "result_json", mutate: func(value map[string]any) { value["current_version_id"] = value["version_id"] }},
-		{name: "result payload before", column: "result_json", mutate: func(value map[string]any) { value["payload_before"] = "pruned" }},
-		{name: "result payload after", column: "result_json", mutate: func(value map[string]any) { value["payload_after"] = "materialized" }},
-		{name: "result pin count", column: "result_json", mutate: func(value map[string]any) { value["pin_count"] = 1 }},
-		{name: "result defects", column: "result_json", mutate: func(value map[string]any) {
-			value["defects"] = map[string]any{
-				"items":      []any{map[string]any{"code": "version_not_found", "message": "hostile"}},
-				"item_count": 1, "encoded_items_bytes": 61, "continuation": map[string]any{"state": "end"},
-			}
-		}},
-		{name: "result completion", column: "result_json", mutate: func(value map[string]any) { value["completed_at"] = "0001-01-01T00:00:00Z" }},
-		{name: "request hash agreement", column: "request_json", mutate: func(value map[string]any) { value["actor"] = "hostile" }},
+	tests := []string{
+		"result invocation",
+		"result outcome",
+		"result declaration",
+		"result version",
+		"result expected head",
+		"result observed head",
+		"result current version",
+		"result payload before",
+		"result payload after",
+		"result pin count",
+		"result defects",
+		"result completion",
+		"request hash agreement",
 	}
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -1083,7 +874,7 @@ func TestDurableDataPruneReceiptRejectsDestructiveDecisionCorruption(t *testing.
 		}
 		head := durabledata.AbsentHead()
 		for index, test := range tests {
-			t.Run(test.name, func(t *testing.T) {
+			t.Run(test, func(t *testing.T) {
 				target, err := selected.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
 					Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: testDataBundle,
 					Declaration: ref, ExpectedHead: head, InputFormat: "jsonl",
@@ -1109,14 +900,14 @@ func TestDurableDataPruneReceiptRejectsDestructiveDecisionCorruption(t *testing.
 				if result, err := selected.PruneDataResource(ctx, command); err != nil || result.Outcome != "pruned" {
 					t.Fatalf("prune fixture = %#v, %v", result, err)
 				}
-				corruptDurableDataJSONColumn(t, ctx, selected, db, "resource_prune_invocations", test.column, "prune_invocation_id", pruneID, test.mutate)
+				storetest.RequireResourceReceiptFault(t, ctx, selected, pruneID, "", storetest.ResourceReceiptFaultCase("prune/"+test))
 				for _, load := range []func() error{
 					func() error { _, err := selected.LoadDataPruneOperation(ctx, pruneID); return err },
 					func() error { _, err := selected.PruneDataResource(ctx, command); return err },
 				} {
 					var domainErr *durabledata.DomainError
 					if err := load(); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
-						t.Fatalf("corrupt %s error = %v, want %s", test.name, err, durabledata.CodeIntegrity)
+						t.Fatalf("corrupt %s error = %v, want %s", test, err, durabledata.CodeIntegrity)
 					}
 				}
 			})
@@ -1125,7 +916,7 @@ func TestDurableDataPruneReceiptRejectsDestructiveDecisionCorruption(t *testing.
 }
 
 func TestDurableDataSourceReceiptAnchorsAdmittedContextAndHistoricalBase(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -1153,19 +944,17 @@ func TestDurableDataSourceReceiptAnchorsAdmittedContextAndHistoricalBase(t *test
 			if _, err := selected.ExecuteDataSourceOperation(ctx, command); err != nil {
 				t.Fatal(err)
 			}
-			record, err := selected.LoadDataSourceOperation(ctx, id)
+			_, err := selected.LoadDataSourceOperation(ctx, id)
 			if err != nil {
 				t.Fatal(err)
 			}
-			schema := []byte(`{"type":"object","additionalProperties":false,"required":["score"],"properties":{"score":{"type":"integer"}}}`)
-			record.Evaluation.Declaration = durabledata.Declaration{
-				Name: ref.EventName, Ref: ref, OwnerFlowID: "root", SchemaDigest: durabledata.SchemaDigestFor(schema), CanonicalSchema: schema,
+			fault, result := storetest.CaptureSourceContextCorruption(t, ctx, selected, id, "replacement schema")
+			if result.Outcome != "accepted" {
+				t.Fatalf("hostile source context = %#v", result)
 			}
-			_, result, evidence, err := record.Evaluation.Evaluate(command)
-			if err != nil || result.Outcome != "accepted" {
-				t.Fatalf("hostile source context = %#v, %v", result, err)
+			if err := fault.InstallForTest(ctx); err != nil {
+				t.Fatal(err)
 			}
-			updateSourceReceiptAggregate(t, ctx, selected, db, id, record.Evaluation, result, evidence)
 			assertIntegrity(t, id, command)
 		})
 
@@ -1185,18 +974,17 @@ func TestDurableDataSourceReceiptAnchorsAdmittedContextAndHistoricalBase(t *test
 			if _, err := selected.ExecuteDataSourceOperation(ctx, command); err != nil {
 				t.Fatal(err)
 			}
-			record, err := selected.LoadDataSourceOperation(ctx, id)
+			_, err := selected.LoadDataSourceOperation(ctx, id)
 			if err != nil {
 				t.Fatal(err)
 			}
-			record.Evaluation.Base = durabledata.SourceEvaluationBase{
-				State: "absent", Head: durabledata.HeadResult{Before: durabledata.AbsentHead(), After: durabledata.AbsentHead()},
+			fault, result := storetest.CaptureSourceContextCorruption(t, ctx, selected, id, "historical head")
+			if result.Outcome != "head_conflict" {
+				t.Fatalf("hostile historical context = %#v", result)
 			}
-			_, result, evidence, err := record.Evaluation.Evaluate(command)
-			if err != nil || result.Outcome != "head_conflict" {
-				t.Fatalf("hostile historical context = %#v, %v", result, err)
+			if err := fault.InstallForTest(ctx); err != nil {
+				t.Fatal(err)
 			}
-			updateSourceReceiptAggregate(t, ctx, selected, db, id, record.Evaluation, result, evidence)
 			assertIntegrity(t, id, command)
 		})
 	})
@@ -1213,7 +1001,7 @@ func TestDurableDataSourceReceiptOrdersEvaluationByRevisionNotWallClock(t *testi
 		{name: "backward clock after import", firstOperation: "import", secondTime: func(first time.Time) time.Time { return first.Add(-time.Hour) }},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
-			forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+			forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 				ctx := context.Background()
 				catalog, ref := durableDataTestCatalog(t)
 				if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -1235,7 +1023,7 @@ func TestDurableDataSourceReceiptOrdersEvaluationByRevisionNotWallClock(t *testi
 				if err != nil || second.Outcome != "accepted" || !second.Head.Changed {
 					t.Fatalf("second source operation = %#v, %v", second, err)
 				}
-				rewriteSourceOperationCompletedAt(t, ctx, selected, db, secondCommand.SourceInvocationID, second.Candidate.VersionID, ref, scenario.secondTime(first.CompletedAt))
+				storetest.RequireSourceClockRewrite(t, ctx, selected, secondCommand.SourceInvocationID, scenario.secondTime(first.CompletedAt))
 
 				for _, replay := range []struct {
 					command durabledata.SourceCommand
@@ -1257,7 +1045,7 @@ func TestDurableDataSourceReceiptOrdersEvaluationByRevisionNotWallClock(t *testi
 func TestDurableDataSourceReceiptRequiresExactCommitAggregate(t *testing.T) {
 	for _, scenario := range []string{"missing provenance", "missing head history", "wrong head history"} {
 		t.Run(scenario, func(t *testing.T) {
-			forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+			forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 				ctx := context.Background()
 				catalog, ref := durableDataTestCatalog(t)
 				if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -1272,20 +1060,10 @@ func TestDurableDataSourceReceiptRequiresExactCommitAggregate(t *testing.T) {
 				if err != nil || !result.Head.Changed {
 					t.Fatalf("source fixture = %#v, %v", result, err)
 				}
-				var statement string
-				switch scenario {
-				case "missing provenance":
-					statement = `DELETE FROM resource_version_provenance WHERE producer_kind = 'import' AND producer_id = ?`
-				case "missing head history":
-					statement = `DELETE FROM resource_head_history WHERE operation_id = ?`
-				case "wrong head history":
-					statement = `UPDATE resource_head_history SET operation_kind = 'fused_import' WHERE operation_id = ?`
-				}
-				if _, ok := selected.(*store.PostgresStore); ok {
-					statement = strings.Replace(statement, "?", "$1::uuid", 1)
-				}
-				if _, err := db.ExecContext(ctx, statement, id); err != nil {
-					t.Fatal(err)
+				if scenario == "missing provenance" {
+					storetest.RequireImportProvenanceRemoval(t, ctx, selected, id)
+				} else {
+					storetest.RequireSourceHeadCommitFault(t, ctx, selected, id, scenario)
 				}
 				for _, operation := range []func() error{
 					func() error { _, err := selected.LoadDataSourceOperation(ctx, id); return err },
@@ -1302,7 +1080,7 @@ func TestDurableDataSourceReceiptRequiresExactCommitAggregate(t *testing.T) {
 }
 
 func TestDurableDataNonMutatingSourceReceiptsRejectCommitFacts(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -1346,7 +1124,7 @@ func TestDurableDataNonMutatingSourceReceiptsRejectCommitFacts(t *testing.T) {
 				if err != nil || result.Outcome == "accepted" {
 					t.Fatalf("non-mutating source fixture = %#v, %v", result, err)
 				}
-				insertHostileImportProvenance(t, ctx, selected, db, base.Candidate.VersionID, test.command.SourceInvocationID, test.command.Actor, result.CompletedAt)
+				storetest.RequireNonMutatingProvenance(t, ctx, selected, string(base.Candidate.VersionID), test.command.SourceInvocationID)
 				assertIntegrity(t, test.command.SourceInvocationID, test.command)
 			})
 		}
@@ -1360,27 +1138,24 @@ func TestDurableDataNonMutatingSourceReceiptsRejectCommitFacts(t *testing.T) {
 			if err != nil || result.Outcome != "accepted" {
 				t.Fatalf("check fixture = %#v, %v", result, err)
 			}
-			insertHostileHeadHistory(t, ctx, selected, db, ref, base.Head.Revision+1, base.Head.After, command.SourceInvocationID, result.CompletedAt)
+			storetest.RequireNonMutatingHeadHistory(t, ctx, selected, command.SourceInvocationID)
 			assertIntegrity(t, command.SourceInvocationID, command)
 		})
 	})
 }
 
 func TestDurableDataSourceReceiptRejectsTypedColumnCorruption(t *testing.T) {
-	tests := []struct {
-		name, column string
-		value        func() any
-	}{
-		{name: "operation", column: "operation", value: func() any { return "check" }},
-		{name: "parent run", column: "parent_run_id", value: func() any { return uuid.NewString() }},
-		{name: "actor", column: "actor", value: func() any { return "hostile-actor" }},
-		{name: "bundle", column: "bundle_hash", value: func() any { return "bundle-v2:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }},
-		{name: "package", column: "flow_path", value: func() any { return "hostile" }},
-		{name: "event", column: "event_name", value: func() any { return "hostile.event" }},
-		{name: "observed head revision", column: "observed_head_revision", value: func() any { return 999 }},
-		{name: "completed at", column: "completed_at", value: func() any { return time.Date(2035, 1, 2, 3, 4, 5, 0, time.UTC) }},
+	tests := []string{
+		"operation",
+		"parent run",
+		"actor",
+		"bundle",
+		"package",
+		"event",
+		"observed head revision",
+		"completed at",
 	}
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -1388,7 +1163,7 @@ func TestDurableDataSourceReceiptRejectsTypedColumnCorruption(t *testing.T) {
 		}
 		head := durabledata.AbsentHead()
 		for index, test := range tests {
-			t.Run(test.name, func(t *testing.T) {
+			t.Run(test, func(t *testing.T) {
 				id := uuid.NewString()
 				command := durabledata.SourceCommand{
 					Operation: "import", SourceInvocationID: id, Actor: "operator", BundleHash: testDataBundle,
@@ -1400,14 +1175,14 @@ func TestDurableDataSourceReceiptRejectsTypedColumnCorruption(t *testing.T) {
 					t.Fatal(err)
 				}
 				head = result.Head.After
-				corruptDurableDataScalarColumn(t, ctx, selected, db, "resource_source_invocations", test.column, "source_invocation_id", id, test.value())
+				storetest.RequireResourceReceiptFault(t, ctx, selected, id, "", storetest.ResourceReceiptFaultCase("source/typed "+test))
 				for _, operation := range []func() error{
 					func() error { _, err := selected.LoadDataSourceOperation(ctx, id); return err },
 					func() error { _, err := selected.ExecuteDataSourceOperation(ctx, command); return err },
 				} {
 					var domainErr *durabledata.DomainError
 					if err := operation(); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
-						t.Fatalf("typed %s corruption error = %v, want %s", test.name, err, durabledata.CodeIntegrity)
+						t.Fatalf("typed %s corruption error = %v, want %s", test, err, durabledata.CodeIntegrity)
 					}
 				}
 			})
@@ -1416,19 +1191,14 @@ func TestDurableDataSourceReceiptRejectsTypedColumnCorruption(t *testing.T) {
 }
 
 func TestDurableDataPruneReceiptRejectsTypedColumnCorruption(t *testing.T) {
-	tests := []struct {
-		name, column string
-		value        func() any
-	}{
-		{name: "actor", column: "actor", value: func() any { return "hostile-actor" }},
-		{name: "package", column: "flow_path", value: func() any { return "hostile" }},
-		{name: "event", column: "event_name", value: func() any { return "hostile.event" }},
-		{name: "version", column: "version_id", value: func() any {
-			return "resource-version-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-		}},
-		{name: "completed at", column: "completed_at", value: func() any { return time.Date(2035, 1, 2, 3, 4, 5, 0, time.UTC) }},
+	tests := []string{
+		"actor",
+		"package",
+		"event",
+		"version",
+		"completed at",
 	}
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -1436,7 +1206,7 @@ func TestDurableDataPruneReceiptRejectsTypedColumnCorruption(t *testing.T) {
 		}
 		head := durabledata.AbsentHead()
 		for index, test := range tests {
-			t.Run(test.name, func(t *testing.T) {
+			t.Run(test, func(t *testing.T) {
 				target, err := selected.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
 					Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: testDataBundle,
 					Declaration: ref, ExpectedHead: head, InputFormat: "jsonl", Input: []byte(fmt.Sprintf("{\"slug\":\"target-%d\",\"score\":%d}\n", index, index)),
@@ -1457,14 +1227,14 @@ func TestDurableDataPruneReceiptRejectsTypedColumnCorruption(t *testing.T) {
 				if result, err := selected.PruneDataResource(ctx, command); err != nil || result.Outcome != "pruned" {
 					t.Fatalf("prune fixture = %#v, %v", result, err)
 				}
-				corruptDurableDataScalarColumn(t, ctx, selected, db, "resource_prune_invocations", test.column, "prune_invocation_id", id, test.value())
+				storetest.RequireResourceReceiptFault(t, ctx, selected, id, "", storetest.ResourceReceiptFaultCase("prune/typed "+test))
 				for _, operation := range []func() error{
 					func() error { _, err := selected.LoadDataPruneOperation(ctx, id); return err },
 					func() error { _, err := selected.PruneDataResource(ctx, command); return err },
 				} {
 					var domainErr *durabledata.DomainError
 					if err := operation(); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
-						t.Fatalf("typed %s corruption error = %v, want %s", test.name, err, durabledata.CodeIntegrity)
+						t.Fatalf("typed %s corruption error = %v, want %s", test, err, durabledata.CodeIntegrity)
 					}
 				}
 			})
@@ -1472,163 +1242,8 @@ func TestDurableDataPruneReceiptRejectsTypedColumnCorruption(t *testing.T) {
 	})
 }
 
-func updateSourceReceiptAggregate(t testing.TB, ctx context.Context, selected durableDataSelectedStore, db *sql.DB, id string, evaluation durabledata.SourceEvaluationContext, result durabledata.SourceOperationResult, evidence durabledata.SourceEvidence) {
-	t.Helper()
-	evaluationJSON, _ := json.Marshal(evaluation)
-	resultJSON, _ := json.Marshal(result)
-	evidenceJSON, _ := json.Marshal(evidence)
-	query := `UPDATE resource_source_invocations SET evaluation_json = ?, result_json = ?, evidence_json = ? WHERE source_invocation_id = ?`
-	if _, ok := selected.(*store.PostgresStore); ok {
-		query = `UPDATE resource_source_invocations SET evaluation_json = $1, result_json = $2, evidence_json = $3 WHERE source_invocation_id = $4::uuid`
-	}
-	if _, err := db.ExecContext(ctx, query, evaluationJSON, resultJSON, evidenceJSON, id); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func rewriteSourceOperationCompletedAt(t testing.TB, ctx context.Context, selected durableDataSelectedStore, db *sql.DB, id string, versionID durabledata.VersionID, ref durabledata.DeclarationRef, completedAt time.Time) {
-	t.Helper()
-	query := `SELECT evaluation_json, result_json FROM resource_source_invocations WHERE source_invocation_id = ?`
-	provenanceQuery := `SELECT provenance_json FROM resource_version_provenance WHERE producer_kind = 'import' AND producer_id = ?`
-	if _, ok := selected.(*store.PostgresStore); ok {
-		query = `SELECT evaluation_json, result_json FROM resource_source_invocations WHERE source_invocation_id = $1::uuid`
-		provenanceQuery = `SELECT provenance_json FROM resource_version_provenance WHERE producer_kind = 'import' AND producer_id = $1::uuid`
-	}
-	var evaluationJSON, resultJSON, provenanceJSON []byte
-	if err := db.QueryRowContext(ctx, query, id).Scan(&evaluationJSON, &resultJSON); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.QueryRowContext(ctx, provenanceQuery, id).Scan(&provenanceJSON); err != nil {
-		t.Fatal(err)
-	}
-	var evaluation durabledata.SourceEvaluationContext
-	var result durabledata.SourceOperationResult
-	var provenance durabledata.Provenance
-	if json.Unmarshal(evaluationJSON, &evaluation) != nil || json.Unmarshal(resultJSON, &result) != nil || json.Unmarshal(provenanceJSON, &provenance) != nil {
-		t.Fatal("decode source operation time projections")
-	}
-	evaluation.CompletedAt = completedAt
-	result.CompletedAt = completedAt
-	provenance.CommittedAt = completedAt
-	evaluationJSON, _ = json.Marshal(evaluation)
-	resultJSON, _ = json.Marshal(result)
-	provenanceJSON, _ = json.Marshal(provenance)
-
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	receiptUpdate := `UPDATE resource_source_invocations SET evaluation_json = ?, result_json = ?, completed_at = ? WHERE source_invocation_id = ?`
-	provenanceUpdate := `UPDATE resource_version_provenance SET provenance_json = ?, committed_at = ? WHERE producer_kind = 'import' AND producer_id = ?`
-	historyUpdate := `UPDATE resource_head_history SET committed_at = ? WHERE operation_id = ?`
-	versionUpdate := `UPDATE resource_versions SET created_at = ? WHERE version_id = ?`
-	headUpdate := `UPDATE resource_heads SET updated_at = ? WHERE flow_path = ? AND event_name = ?`
-	if _, ok := selected.(*store.PostgresStore); ok {
-		receiptUpdate = `UPDATE resource_source_invocations SET evaluation_json = $1, result_json = $2, completed_at = $3 WHERE source_invocation_id = $4::uuid`
-		provenanceUpdate = `UPDATE resource_version_provenance SET provenance_json = $1, committed_at = $2 WHERE producer_kind = 'import' AND producer_id = $3::uuid`
-		historyUpdate = `UPDATE resource_head_history SET committed_at = $1 WHERE operation_id = $2::uuid`
-		versionUpdate = `UPDATE resource_versions SET created_at = $1 WHERE version_id = $2`
-		headUpdate = `UPDATE resource_heads SET updated_at = $1 WHERE flow_path = $2 AND event_name = $3`
-	}
-	updates := []struct {
-		query string
-		args  []any
-	}{
-		{receiptUpdate, []any{evaluationJSON, resultJSON, completedAt, id}},
-		{provenanceUpdate, []any{provenanceJSON, completedAt, id}},
-		{historyUpdate, []any{completedAt, id}},
-		{versionUpdate, []any{completedAt, versionID}},
-		{headUpdate, []any{completedAt, ref.FlowPath, ref.EventName}},
-	}
-	for _, update := range updates {
-		if _, err := tx.ExecContext(ctx, update.query, update.args...); err != nil {
-			_ = tx.Rollback()
-			t.Fatal(err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func insertHostileImportProvenance(t testing.TB, ctx context.Context, selected durableDataSelectedStore, db *sql.DB, versionID durabledata.VersionID, sourceInvocationID, actor string, committedAt time.Time) {
-	t.Helper()
-	var sequence uint64
-	query := `SELECT COALESCE(MAX(provenance_sequence), 0) + 1 FROM resource_version_provenance WHERE version_id = ?`
-	if _, ok := selected.(*store.PostgresStore); ok {
-		query = `SELECT COALESCE(MAX(provenance_sequence), 0) + 1 FROM resource_version_provenance WHERE version_id = $1`
-	}
-	if err := db.QueryRowContext(ctx, query, versionID).Scan(&sequence); err != nil {
-		t.Fatal(err)
-	}
-	provenance := durabledata.Provenance{
-		Sequence: sequence, VersionID: versionID,
-		ProducerRef: durabledata.ProvenanceRef{Kind: "import", SourceInvocationID: sourceInvocationID},
-		Actor:       actor, CommittedAt: committedAt,
-	}
-	raw, err := json.Marshal(provenance)
-	if err != nil {
-		t.Fatal(err)
-	}
-	query = `INSERT INTO resource_version_provenance (version_id, provenance_sequence, producer_kind, producer_id, actor, provenance_json, committed_at) VALUES (?, ?, 'import', ?, ?, ?, ?)`
-	if _, ok := selected.(*store.PostgresStore); ok {
-		query = `INSERT INTO resource_version_provenance (version_id, provenance_sequence, producer_kind, producer_id, actor, provenance_json, committed_at) VALUES ($1, $2, 'import', $3::uuid, $4, $5, $6)`
-	}
-	if _, err := db.ExecContext(ctx, query, versionID, sequence, sourceInvocationID, actor, raw, committedAt); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func insertHostileHeadHistory(t testing.TB, ctx context.Context, selected durableDataSelectedStore, db *sql.DB, ref durabledata.DeclarationRef, revision uint64, head durabledata.ExpectedHead, sourceInvocationID string, committedAt time.Time) {
-	t.Helper()
-	query := `INSERT INTO resource_head_history (flow_path, event_name, revision, before_version_id, after_version_id, operation_kind, operation_id, committed_at) VALUES (?, ?, ?, ?, ?, 'source_import', ?, ?)`
-	if _, ok := selected.(*store.PostgresStore); ok {
-		query = `INSERT INTO resource_head_history (flow_path, event_name, revision, before_version_id, after_version_id, operation_kind, operation_id, committed_at) VALUES ($1, $2, $3, $4, $5, 'source_import', $6::uuid, $7)`
-	}
-	if _, err := db.ExecContext(ctx, query, ref.FlowPath, ref.EventName, revision, head.VersionID, head.VersionID, sourceInvocationID, committedAt); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func corruptDurableDataScalarColumn(t testing.TB, ctx context.Context, selected durableDataSelectedStore, db *sql.DB, table, column, identityColumn, identity string, value any) {
-	t.Helper()
-	query := fmt.Sprintf("UPDATE %s SET %s = ? WHERE %s = ?", table, column, identityColumn)
-	if _, ok := selected.(*store.PostgresStore); ok {
-		query = fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s = $2::uuid", table, column, identityColumn)
-	}
-	if _, err := db.ExecContext(ctx, query, value, identity); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func corruptDurableDataJSONColumn(t testing.TB, ctx context.Context, selected durableDataSelectedStore, db *sql.DB, table, column, identityColumn, identity string, mutate func(map[string]any)) {
-	t.Helper()
-	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s = ?", column, table, identityColumn)
-	update := fmt.Sprintf("UPDATE %s SET %s = ? WHERE %s = ?", table, column, identityColumn)
-	if _, ok := selected.(*store.PostgresStore); ok {
-		query = fmt.Sprintf("SELECT %s FROM %s WHERE %s = $1::uuid", column, table, identityColumn)
-		update = fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s = $2::uuid", table, column, identityColumn)
-	}
-	var raw []byte
-	if err := db.QueryRowContext(ctx, query, identity).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
-	var value map[string]any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		t.Fatal(err)
-	}
-	mutate(value)
-	corrupt, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, update, corrupt, identity); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestDurableDataPruneValidatesCurrentAggregateBeforeHeadConflict(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -1648,13 +1263,7 @@ func TestDurableDataPruneValidatesCurrentAggregateBeforeHeadConflict(t *testing.
 		if err != nil {
 			t.Fatal(err)
 		}
-		query := `UPDATE resource_versions SET canonical_jsonl = ? WHERE version_id = ?`
-		if _, ok := selected.(*store.PostgresStore); ok {
-			query = `UPDATE resource_versions SET canonical_jsonl = $1 WHERE version_id = $2`
-		}
-		if _, err := db.ExecContext(ctx, query, []byte("{\"slug\":\"corrupt\",\"score\":99}\n"), second.Candidate.VersionID); err != nil {
-			t.Fatal(err)
-		}
+		storetest.RequireResourcePayloadCorruption(t, ctx, selected, string(second.Candidate.VersionID), "corrupt sibling")
 
 		pruneID := uuid.NewString()
 		_, err = selected.PruneDataResource(ctx, durabledata.PruneCommand{
@@ -1666,27 +1275,19 @@ func TestDurableDataPruneValidatesCurrentAggregateBeforeHeadConflict(t *testing.
 			t.Fatalf("prune error = %v, want %s before head_conflict", err, durabledata.CodeIntegrity)
 		}
 
-		var receiptCount int
-		query = `SELECT COUNT(*) FROM resource_prune_invocations WHERE prune_invocation_id = ?`
-		if _, ok := selected.(*store.PostgresStore); ok {
-			query = `SELECT COUNT(*) FROM resource_prune_invocations WHERE prune_invocation_id = $1`
-		}
-		if err := db.QueryRowContext(ctx, query, pruneID).Scan(&receiptCount); err != nil || receiptCount != 0 {
+		receiptCount, err := storetest.CountPruneInvocationStorage(ctx, selected, pruneID)
+		if err != nil || receiptCount != 0 {
 			t.Fatalf("prune receipt count = %d, %v; want zero", receiptCount, err)
 		}
-		var payload []byte
-		query = `SELECT canonical_jsonl FROM resource_versions WHERE version_id = ?`
-		if _, ok := selected.(*store.PostgresStore); ok {
-			query = `SELECT canonical_jsonl FROM resource_versions WHERE version_id = $1`
-		}
-		if err := db.QueryRowContext(ctx, query, first.Candidate.VersionID).Scan(&payload); err != nil || payload == nil {
+		payload, err := storetest.ReadResourceVersionJSONLStorage(ctx, selected, string(first.Candidate.VersionID))
+		if err != nil || payload == nil {
 			t.Fatalf("historical payload after failed prune = %q, %v; want materialized", payload, err)
 		}
 	})
 }
 
 func TestDurableDataPruneRetainsCompletePinRefusalEvidence(t *testing.T) {
-	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore) {
 		ctx := context.Background()
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
@@ -1707,10 +1308,6 @@ func TestDurableDataPruneRetainsCompletePinRefusalEvidence(t *testing.T) {
 			t.Fatalf("second import = %#v, %v", second, err)
 		}
 
-		postgres := false
-		if _, ok := selected.(*store.PostgresStore); ok {
-			postgres = true
-		}
 		const pinCount = durabledata.MaxPublicPageItems + 5
 		for index := 0; index < pinCount; index++ {
 			runID := fmt.Sprintf("00000000-0000-4000-8000-%012d", index+1)
@@ -1723,22 +1320,7 @@ func TestDurableDataPruneRetainsCompletePinRefusalEvidence(t *testing.T) {
 			})
 		}
 
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		pinInsert := `INSERT INTO resource_version_pins (run_id, flow_path, event_name, schema_digest, version_id, selection, pinned_at) VALUES (?, ?, ?, ?, ?, 'explicit', ?)`
-		if postgres {
-			pinInsert = `INSERT INTO resource_version_pins (run_id, flow_path, event_name, schema_digest, version_id, selection, pinned_at) VALUES ($1::uuid, $2, $3, $4, $5, 'explicit', $6)`
-		}
-		for index := 0; index < pinCount; index++ {
-			runID := fmt.Sprintf("00000000-0000-4000-8000-%012d", index+1)
-			if _, err := tx.ExecContext(ctx, pinInsert, runID, ref.FlowPath, ref.EventName, first.SchemaDigest, first.Candidate.VersionID, time.Unix(int64(index+1), 0).UTC()); err != nil {
-				_ = tx.Rollback()
-				t.Fatalf("insert pin evidence source %d: %v", index, err)
-			}
-		}
-		if err := tx.Commit(); err != nil {
+		if err := storetest.MaterializePruneWitnessPins(ctx, selected, first.Candidate.VersionID, ref, first.SchemaDigest); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1804,13 +1386,7 @@ func TestDurableDataPruneRetainsCompletePinRefusalEvidence(t *testing.T) {
 			t.Fatalf("public prune pin evidence count = %d, want %d", len(seen), pinCount)
 		}
 
-		deleteQuery := `DELETE FROM resource_prune_pin_evidence WHERE prune_invocation_id = ? AND ordinal = ?`
-		if postgres {
-			deleteQuery = `DELETE FROM resource_prune_pin_evidence WHERE prune_invocation_id = $1::uuid AND ordinal = $2`
-		}
-		if _, err := db.ExecContext(ctx, deleteQuery, pruneID, pinCount); err != nil {
-			t.Fatal(err)
-		}
+		storetest.RequirePrunePinEvidenceRemoval(t, ctx, selected, pruneID, pinCount)
 		for _, load := range []func() error{
 			func() error { _, err := selected.LoadDataPruneOperation(ctx, pruneID); return err },
 			func() error { _, err := selected.PruneDataResource(ctx, command); return err },

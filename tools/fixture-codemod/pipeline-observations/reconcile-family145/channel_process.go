@@ -49,6 +49,10 @@ func captureRecentFamilyCommand(args []string) bool {
 		return false
 	}
 	switch args[1] {
+	case "-durable-resource-capture":
+		captureDurableResource()
+	case "-durable-resource-history":
+		composeDurableResourceHistory()
 	case "-channel-process-capture":
 		captureChannelProcess()
 	case "-channel-process-history":

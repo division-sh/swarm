@@ -895,3 +895,14 @@ func optionalWake(value time.Time) *time.Time {
 	value = value.UTC()
 	return &value
 }
+
+type DeploymentCompletionClockStorage struct {
+	Revision int64
+	Due      any
+}
+
+func ReadDeploymentCompletionClockStorageTx(ctx context.Context, tx *sql.Tx, run string) (DeploymentCompletionClockStorage, error) {
+	var out DeploymentCompletionClockStorage
+	err := tx.QueryRowContext(ctx, `SELECT completion_revision,completion_due_at FROM runs WHERE run_id=$1`, run).Scan(&out.Revision, &out.Due)
+	return out, err
+}

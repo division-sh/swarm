@@ -69,7 +69,7 @@ func TestPersistenceAuthorityDebtServedObservationCollectorRetainsTrustedPredece
 	prior := head
 	prior.Collector = debtPublicRollbackCollectorTo
 	if err := debtValidateCollectorIdentity(baseCollector, prior.Collector, trusted, prior, "", proof); err != nil {
-		t.Fatal("unchanged predecessor chain refused retained ceiling:", baseCollector, err)
+		t.Fatal("unchanged predecessor chain refused retained ceiling:", baseCollector, err, authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites, proof))
 	}
 	if err := debtValidateCollectorIdentity(baseCollector, head.Collector, trusted, head, "", proof); err != nil {
 		t.Fatal("new entry-only collector refused retained ceiling:", err, authorityDebtRatchet(head.Sites, head.Sites, trusted.Sites, trusted.Sites, proof))

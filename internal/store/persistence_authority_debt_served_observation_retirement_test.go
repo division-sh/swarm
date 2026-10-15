@@ -114,6 +114,10 @@ func debtServedObservationRetirementSourcePins(root string) error {
 	if len(keys) != 48 {
 		return fmt.Errorf("served observation complete retirement source inventory changed")
 	}
+	verified, err := debtServedSetupVerifiedPredecessors(root)
+	if err != nil {
+		return err
+	}
 	files := map[string]map[string]string{}
 	for key := range keys {
 		pin, err := debtServedObservationComposedPin(stages, key)
@@ -126,7 +130,10 @@ func debtServedObservationRetirementSourcePins(root string) error {
 				return err
 			}
 		}
-		current, err := debtServedSetupSourcePrevious(root, key[0], key[1], files[key[0]][key[1]])
+		current, known := verified[key]
+		if !known {
+			current, err = debtServedSetupSourcePrevious(root, key[0], key[1], files[key[0]][key[1]])
+		}
 		if err != nil || current != pin.After {
 			return fmt.Errorf("served observation retirement changed actual final body: %s: %v", key[1], err)
 		}

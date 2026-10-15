@@ -67,6 +67,17 @@ func CountDeploymentOriginIntentsStorageTx(ctx context.Context, tx *sql.Tx, runI
 
 type DeploymentIntentCardinalityStorage struct{ Cursor, Cardinality int }
 
+type DeploymentIntentStatusStorage struct {
+	Cardinality int
+	Status      string
+}
+
+func ReadDeploymentIntentStatusStorageTx(ctx context.Context, tx *sql.Tx, run string) (DeploymentIntentStatusStorage, error) {
+	var out DeploymentIntentStatusStorage
+	err := tx.QueryRowContext(ctx, `SELECT cardinality,status FROM fan_out_intents WHERE run_id=$1`, run).Scan(&out.Cardinality, &out.Status)
+	return out, err
+}
+
 func ReadDeploymentIntentCardinalityStorageTx(ctx context.Context, tx *sql.Tx, runID string) (DeploymentIntentCardinalityStorage, error) {
 	var out DeploymentIntentCardinalityStorage
 	err := tx.QueryRowContext(ctx, `SELECT cursor,cardinality FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, runID).Scan(&out.Cursor, &out.Cardinality)

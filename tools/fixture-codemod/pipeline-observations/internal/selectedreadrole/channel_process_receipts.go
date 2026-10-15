@@ -105,6 +105,11 @@ func channelProcessCurrentFiles(root string, pins []EntityToolPin) (map[string][
 }
 
 func EarlierChannelProcessSource(root, file, function, current string) (string, error) {
+	var err error
+	current, err = EarlierDurableResourceSource(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	pins, err := ReadChannelProcessPins(root)
 	if err != nil {
 		return "", err
@@ -171,6 +176,11 @@ func ComposeChannelProcessHistory(root string, prior []byte, recipes bool) ([]by
 }
 
 func EarlierChannelProcessHistory(root string, current []byte, recipes bool) ([]byte, error) {
+	var err error
+	current, err = BeforeDurableResourceHistory(root, current, recipes)
+	if err != nil {
+		return nil, err
+	}
 	prior, err := PriorChannelProcessHistory(root, recipes)
 	if err != nil {
 		return nil, err
@@ -189,6 +199,11 @@ func EarlierChannelProcessHistory(root string, current []byte, recipes bool) ([]
 // Older owners still validate their complete predecessor. Peel this stage only
 // when one of its exact new endpoints is actually present in the supplied ledger.
 func BeforeChannelProcessHistory(root string, current []byte, recipes bool) ([]byte, error) {
+	var err error
+	current, err = BeforeDurableResourceHistory(root, current, recipes)
+	if err != nil {
+		return nil, err
+	}
 	var rows []map[string]any
 	if err := json.Unmarshal(current, &rows); err != nil {
 		return nil, err

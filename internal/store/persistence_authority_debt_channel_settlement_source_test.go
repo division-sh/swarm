@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -15,10 +16,15 @@ func debtChannelSettlementPins(root string) ([]debtRunIdentitySourceBody, error)
 	if err != nil || debtBaselineChecksum(raw) != "b4e5394d408d8fdfffc4f997a366d45896abfdd71e19c893d8a06baac3c8168f" {
 		return nil, fmt.Errorf("channel settlement exact source inventory changed: %v", err)
 	}
+	const digest = "b4e5394d408d8fdfffc4f997a366d45896abfdd71e19c893d8a06baac3c8168f"
+	if cached, ok := debtSelectedReadRolePinCache.Load(digest); ok {
+		return slices.Clone(cached.([]debtRunIdentitySourceBody)), nil
+	}
 	var pins []debtRunIdentitySourceBody
 	if err := json.Unmarshal(raw, &pins); err != nil || len(pins) != 38 {
 		return nil, fmt.Errorf("channel settlement source inventory changed")
 	}
+	debtSelectedReadRolePinCache.Store(digest, slices.Clone(pins))
 	return pins, nil
 }
 

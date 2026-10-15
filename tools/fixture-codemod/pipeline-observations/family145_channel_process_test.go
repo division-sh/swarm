@@ -140,6 +140,10 @@ func TestFamily145ChannelProcessCompleteHistoryAndEventBoundary(t *testing.T) {
 		if recipes {
 			actual = recipeBytes
 		}
+		actual, err = selectedreadrole.BeforeDurableResourceHistory(root, actual, recipes)
+		if err != nil {
+			t.Fatal(err)
+		}
 		var have, want any
 		if json.Unmarshal(actual, &have) != nil || json.Unmarshal(expected, &want) != nil || !reflect.DeepEqual(have, want) {
 			t.Fatal("history changed outside the exact channel composition")

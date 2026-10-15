@@ -827,7 +827,6 @@ func TestDurableDataHTTPPublicSurfaceAcrossSelectedStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx := context.Background()
 			selected := backend.open(t)
-			db := storetest.Database(selected)
 			catalog, ref := dataHTTPProbeCatalog(t)
 			if _, err := selected.EnsureSourceArtifactWithData(ctx, dataProbeSourceArtifact, catalog); err != nil {
 				t.Fatalf("register catalog: %v", err)
@@ -958,14 +957,7 @@ func TestDurableDataHTTPPublicSurfaceAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("second selector-free versions page = %#v", versionsPage)
 			}
 
-			corrupt := []byte("{\"slug\":")
-			update := `UPDATE resource_versions SET canonical_jsonl = ? WHERE version_id = ?`
-			if backend.name == "postgres" {
-				update = `UPDATE resource_versions SET canonical_jsonl = $1 WHERE version_id = $2`
-			}
-			if _, err := db.ExecContext(ctx, update, corrupt, firstVersion); err != nil {
-				t.Fatalf("corrupt sibling payload: %v", err)
-			}
+			payloadFault := storetest.RequireResourcePayloadCorruption(t, ctx, selected, firstVersion, "truncated JSON")
 			selectedVersion := map[string]any{"kind": "version", "version_id": secondVersion}
 			for _, probe := range []map[string]any{
 				{"view": "version", "declaration": declaration, "selector": selectedVersion},
@@ -983,7 +975,7 @@ func TestDurableDataHTTPPublicSurfaceAcrossSelectedStores(t *testing.T) {
 			}); asMap(t, err.Data)["code"] != string(durabledata.CodeIntegrity) {
 				t.Fatalf("corrupt selected payload error = %#v", err)
 			}
-			if _, err := db.ExecContext(ctx, update, []byte("{\"slug\":\"alpha\"}\n"), firstVersion); err != nil {
+			if err := payloadFault.RestoreForTest(ctx); err != nil {
 				t.Fatalf("restore sibling payload: %v", err)
 			}
 			pruned := call("data.prune", map[string]any{

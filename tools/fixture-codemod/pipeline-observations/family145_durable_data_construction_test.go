@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 func family145DurableDataConstructionProofError(before, after string) error {
@@ -30,7 +31,11 @@ func family145DurableDataConstructionProofError(before, after string) error {
 
 func TestFamily145DurableDataConstructionPreservesEntireUnchangedConsumerFamily(t *testing.T) {
 	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
+	prior, err := selectedreadrole.BeforeDurableResourceHistory("../../..", family145TransitionBytes, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(prior, &rows); err != nil {
 		t.Fatal(err)
 	}
 	matched := 0
@@ -85,7 +90,11 @@ func family145DurableDataCallerInventory(t *testing.T) map[string]string {
 			function, ok := declaration.(*ast.FuncDecl)
 			if ok && family145DurableDataCallerReferences(t, function) != 0 {
 				key := filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator))) + "/" + function.Name.Name
-				callers[key] = family145NodeString(function)
+				current, err := selectedreadrole.EarlierDurableResourceSource(root, filepath.ToSlash(strings.TrimPrefix(path, root+string(filepath.Separator))), function.Name.Name, family145NodeString(function))
+				if err != nil {
+					return err
+				}
+				callers[key] = current
 			}
 		}
 		return nil
