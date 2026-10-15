@@ -17,15 +17,21 @@ draft or an account-free test binary.
 - A second screen to scan the Linked Devices QR. Record phone OS, WhatsApp
   version, number/account type, UTC date and region privately, without the number.
 - Consent to an unofficial client and possible account restriction, v1
-  unencrypted session files in a restrictive bridge-owned directory, controlled
+  unencrypted session files in a restrictive provider-owned directory, controlled
   network loss, graceful/crash restart, reset, unbind and explicit logout/re-pair.
 - Reserve about 90 minutes and a next-day 15-20 minute continuity check. No
   verification code, API token, QR, pairing key or session file goes into chat,
   GitHub, a screen recording or an online QR renderer.
 
-F operates Swarm and collects redacted machine evidence; the user performs the
-phone actions. Each destructive action needs the user's immediate confirmation.
-Do not start a destructive step while the previous effect outcome is uncertain.
+G now owns the implementation continuation and redacted machine-evidence
+collection under [F's handoff](https://github.com/division-sh/swarm/issues/2577#issuecomment-6188033199)
+and [reviewer-f's confirmation](https://github.com/division-sh/swarm/issues/2577#issuecomment-6188070641).
+The user performs the phone actions. This transfer does not authorize the
+physical session or publication of #2614. Each destructive action needs the
+user's immediate confirmation. Do not start a destructive step while the
+previous effect outcome is uncertain. F's source-pinned receipts and private
+evidence remain in their original locations; ownership transfer does not rebind
+those receipts to G's current candidate.
 
 ## Exact Setup
 
@@ -112,9 +118,12 @@ affected journey; do not retry, raise a deadline, clear a row, delete history or
 adopt replacement authority to obtain green. The PostgreSQL 5s resume entry
 observation remains OPEN/unclassified on #2577, as recorded in reviewer-f's
 [6180950229 acceptance](https://github.com/division-sh/swarm/issues/2577#issuecomment-6180950229).
-#2353 is closed and retains historical evidence only. This separate row needs
-causal resolution or explicit LEAD/user landing-risk disposition. Physical
-success does not waive it or authorize another unchanged timing exposure.
+The [current diagnostic-budget disposition](https://github.com/division-sh/swarm/issues/2577#issuecomment-6183734681)
+does not authorize another unchanged exposure. #2353's umbrella was reopened,
+as [reviewer-f clarified at handoff](https://github.com/division-sh/swarm/issues/2338#issuecomment-6188038611),
+but the live resume row remains on #2577. It needs causal resolution or explicit
+LEAD/user landing-risk disposition. Physical success does not waive it or
+authorize another unchanged timing exposure.
 
 After the session, perform the agreed explicit logout, verify Linked Devices and
 public retirement/readback, and remove disposable local evidence only after all
