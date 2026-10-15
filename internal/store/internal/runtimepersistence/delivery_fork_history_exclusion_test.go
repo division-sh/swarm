@@ -127,6 +127,7 @@ func TestDeliveryOperationalWritesDoNotAdvanceForkHistoryBothStores(t *testing.T
 			proveRetainedDeliveryLifecycleAccounting(t, fixture, completion)
 		})
 	}
+	t.Run("emitter_session", proveDeliveryHistoricalEmitterSessionPredicatesBothStores)
 }
 
 func proveRetainedDeliveryLifecycleAccounting(t *testing.T, fixture authorActivityReceiptFixture, completion completionSettlementFixture) {
