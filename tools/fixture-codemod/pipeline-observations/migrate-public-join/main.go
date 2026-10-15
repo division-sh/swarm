@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedsettlement"
 )
 
 const predecessor = "c760d28bd28b84c7b62578cbe7037833d441747f"
@@ -219,8 +220,13 @@ func currentEdit(fset *token.FileSet, file *ast.File, row pin) edit {
 			continue
 		}
 		actual := nodeString(function)
-		if actual != row.Before && actual != row.After {
+		comparison, err := servedsettlement.ObservationEarlierSource(".", row.File, row.Function, actual)
+		must(err)
+		if comparison != row.Before && comparison != row.After {
 			panic("join consumer escaped complete rule: " + row.File + "/" + row.Function)
+		}
+		if actual != comparison {
+			return edit{fset.Position(function.Pos()).Offset, fset.Position(function.End()).Offset, actual}
 		}
 		return edit{fset.Position(function.Pos()).Offset, fset.Position(function.End()).Offset, row.Source}
 	}

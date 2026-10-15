@@ -212,6 +212,10 @@ func earlierStandingIngressOwnerFile(root, file string, current []byte) ([]byte,
 	if err != nil {
 		return nil, err
 	}
+	current, err = earlierOutboxAndSelectedForkOwner(root, file, current)
+	if err != nil {
+		return nil, err
+	}
 	if file == agentSnapshotEventOwner {
 		var err error
 		current, err = earlierChannelProcessEventOwnerFile(root, current)

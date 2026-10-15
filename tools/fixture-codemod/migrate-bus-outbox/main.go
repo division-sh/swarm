@@ -4,13 +4,14 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -30,27 +31,124 @@ var roots = map[string]bool{
 	"TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedManifest": true,
 	"TestEnginePublicationRejectsFilteredDirectIntentBeforePersistence":                true,
 	"TestPublishDirectRejectsFilteredExplicitRecipient":                                true,
+	"TestEngineOutboxAndDispatcher_DoesNotFabricateRoutesForPendingInternalDeliveries": true,
 }
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "--early-release-overlay" {
+		if err := earlyReleaseOverlay(os.Args[2]); err != nil {
+			panic(err)
+		}
+		return
+	}
 	const path = "internal/runtime/bus/outbox_test.go"
 	source, err := os.ReadFile(path)
 	if err != nil {
 		panic(err)
 	}
-	if len(os.Args) == 2 && os.Args[1] == "--reviewed-source" {
-		source, err = exec.Command("git", "show", "a525874ba4:"+path).Output()
-		if err != nil {
-			panic(err)
-		}
-	}
 	output, err := rewrite(source)
+	if err != nil {
+		panic(err)
+	}
+	output, err = retireFakeOwners(output)
 	if err != nil {
 		panic(err)
 	}
 	if err := os.WriteFile(path, output, 0o644); err != nil {
 		panic(err)
 	}
+}
+
+func earlyReleaseOverlay(directory string) error {
+	const path = "internal/runtime/bus/pipeline_publication_claim.go"
+	const original = "claim: c.claim, batchBorrowed: true"
+	source, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if strings.Count(string(source), original) != 1 {
+		return fmt.Errorf("early-release control requires its exact reviewed claim view")
+	}
+	source = bytes.Replace(source, []byte(original), []byte("claim: c.claim, batchBorrowed: false"), 1)
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return err
+	}
+	target, err := filepath.Abs(filepath.Join(directory, "pipeline_publication_claim.go"))
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(target, source, 0o644); err != nil {
+		return err
+	}
+	input, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	overlay, err := json.Marshal(map[string]any{"Replace": map[string]string{input: target}})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(directory, "overlay.json"), overlay, 0o644)
+}
+
+func retiredOwnerName(name string) bool {
+	return name == "directRecipientTransactionalStore" || name == "outboxClaimStore" || name == "commitEnginePublicationsForTest"
+}
+
+func retiredOwnerDeclaration(declaration ast.Decl) bool {
+	switch declaration := declaration.(type) {
+	case *ast.FuncDecl:
+		if retiredOwnerName(declaration.Name.Name) {
+			return true
+		}
+		if declaration.Recv == nil {
+			return false
+		}
+		receiver := declaration.Recv.List[0].Type
+		if pointer, ok := receiver.(*ast.StarExpr); ok {
+			receiver = pointer.X
+		}
+		return retiredOwnerName(render(receiver))
+	case *ast.GenDecl:
+		if len(declaration.Specs) == 1 {
+			if named, ok := declaration.Specs[0].(*ast.TypeSpec); ok {
+				return retiredOwnerName(named.Name.Name)
+			}
+		}
+	}
+	return false
+}
+
+func retireFakeOwners(source []byte) ([]byte, error) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "outbox_test.go", source, parser.ParseComments)
+	if err != nil {
+		return nil, err
+	}
+	var kept []ast.Decl
+	for _, declaration := range file.Decls {
+		if retiredOwnerDeclaration(declaration) {
+			continue
+		}
+		var residual string
+		ast.Inspect(declaration, func(node ast.Node) bool {
+			if name, ok := node.(*ast.Ident); ok && retiredOwnerName(name.Name) {
+				residual = name.Name
+			}
+			return true
+		})
+		if residual != "" {
+			return nil, fmt.Errorf("native propagation incomplete: surviving consumer of %s", residual)
+		}
+		kept = append(kept, declaration)
+	}
+	file.Decls = kept
+	astutil.DeleteNamedImport(fset, file, "runtimepipelinefixture", "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture")
+	var output bytes.Buffer
+	if err := format.Node(&output, fset, file); err != nil {
+		return nil, err
+	}
+	return format.Source(output.Bytes())
 }
 
 func rewrite(source []byte) ([]byte, error) {
@@ -123,6 +221,9 @@ func rewriteBlocks(body *ast.BlockStmt) error {
 			}
 			if strings.HasPrefix(text, "db, mock, err := sqlmock.New()") || strings.HasPrefix(text, "tx, err := db.Begin()") || strings.HasPrefix(text, "eb, err := newScopedTestEventBus(") {
 				index++ // The immediately following error check belongs to this setup.
+				if strings.Contains(text, "Interceptors:") {
+					result = append(result, statements("eb.SetInterceptors(interceptor)")...)
+				}
 				continue
 			}
 			if obsoleteStatement(text) {
@@ -189,7 +290,7 @@ func removeUnusedSetup(body *ast.BlockStmt) {
 		for _, statement := range block.List {
 			if assignment, ok := statement.(*ast.AssignStmt); ok && len(assignment.Lhs) == 1 && assignment.Tok == token.DEFINE {
 				name := render(assignment.Lhs[0])
-				if (name == "store" || name == "recordingStore" || name == "eb" || name == "ctx") && counts[name] == 1 {
+				if (name == "store" || name == "recordingStore" || name == "eb" || name == "ctx" || name == "txctx") && counts[name] == 1 {
 					continue
 				}
 			}

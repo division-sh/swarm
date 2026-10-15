@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedsettlement"
 )
 
 const predecessor = "13f976220fbe24e0271434c10e2f6eba29665657"
@@ -238,8 +239,13 @@ func currentEdit(fset *token.FileSet, file *ast.File, row transition) []edit {
 			continue
 		}
 		actual := nodeString(function)
-		if actual != row.Before && actual != row.After {
+		comparison, err := servedsettlement.ObservationEarlierSource(".", row.File, row.Function, actual)
+		must(err)
+		if comparison != row.Before && comparison != row.After {
 			panic("receiver caller changed outside complete rule: " + row.File + "/" + row.Function)
+		}
+		if actual != comparison {
+			return []edit{{fset.Position(function.Pos()).Offset, fset.Position(function.End()).Offset, actual}}
 		}
 		return []edit{{fset.Position(function.Pos()).Offset, fset.Position(function.End()).Offset, row.Source}}
 	}

@@ -152,6 +152,40 @@ func EarlierSource(pins []runphysical.Pin, file, function, current string) (stri
 	return current, nil
 }
 
+// ObservationEarlierSource composes the already reviewed setup and observation
+// stages for generators that predate both. Live source is still authenticated.
+func ObservationEarlierSource(root, file, function, current string) (string, error) {
+	current, err := SetupEarlierSource(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
+	pins, err := ReadBatchPins(root)
+	if err != nil {
+		return "", err
+	}
+	for _, pin := range pins {
+		if pin.File == file && pin.Function == function {
+			if err := ValidateBatchCurrentSource(root, pins); err != nil {
+				return "", err
+			}
+			current, err = EarlierSource(pins, file, function, current)
+			if err != nil {
+				return "", err
+			}
+			break
+		}
+	}
+	raw, err := os.ReadFile(filepath.Join(root, runphysical.Path))
+	if err != nil {
+		return "", err
+	}
+	physical, err := runphysical.Decode(raw)
+	if err != nil {
+		return "", err
+	}
+	return runphysical.Previous(physical, file, function, current), nil
+}
+
 type batchHistoryRow map[string]any
 
 func ComposeBatchHistory(prior []byte, pins []runphysical.Pin, recipes bool) ([]byte, error) {

@@ -67,3 +67,35 @@ func TestFiniteOutboxTransformRefusesSemanticFixtureFields(t *testing.T) {
 		}
 	}
 }
+
+func TestOutboxRetirementRequiresLastCallerDeletion(t *testing.T) {
+	declarations := []byte(`package bus_test
+type directRecipientTransactionalStore struct { marker int }
+func (*directRecipientTransactionalStore) CommitPublication() {}
+type outboxClaimStore struct { directRecipientTransactionalStore }
+func commitEnginePublicationsForTest() {}
+type recordingEventStore struct { marker int }
+func TestPureRecorder(t *testing.T) { preserveRecorder(t) }
+`)
+	for _, escaped := range []string{
+		`func escaped(){ _ = &directRecipientTransactionalStore{} }`,
+		`func escaped(){ _ = &outboxClaimStore{} }`,
+		`func escaped(){ commitEnginePublicationsForTest() }`,
+	} {
+		if _, err := retireFakeOwners(append(append([]byte(nil), declarations...), escaped...)); err == nil {
+			t.Errorf("retired with surviving caller: %s", escaped)
+		}
+	}
+	output, err := retireFakeOwners(declarations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, retired := range []string{"directRecipientTransactionalStore", "outboxClaimStore", "commitEnginePublicationsForTest"} {
+		if strings.Contains(string(output), retired) {
+			t.Errorf("retained obsolete capability %s", retired)
+		}
+	}
+	if !strings.Contains(string(output), "preserveRecorder(t)") {
+		t.Fatal("lost pure-recorder neighbor")
+	}
+}

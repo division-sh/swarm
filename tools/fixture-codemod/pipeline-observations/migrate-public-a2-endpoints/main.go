@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicjoin"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedsettlement"
 )
 
 const predecessor = "9c964b502e52681d01d02c678b67ba996e5aed8a"
@@ -138,7 +139,9 @@ func currentOutput(r result) []byte {
 			continue
 		}
 		actual := nodeString(function)
-		preceding := publicjoin.Previous(joinPins, r.path, pin.Function, actual)
+		comparison, err := servedsettlement.ObservationEarlierSource(".", r.path, pin.Function, actual)
+		must(err)
+		preceding := publicjoin.Previous(joinPins, r.path, pin.Function, comparison)
 		if preceding != pin.Before && preceding != pin.After {
 			panic("caller changed outside exact endpoint transform: " + r.path + "/" + pin.Function)
 		}

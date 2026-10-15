@@ -67,6 +67,11 @@ func TestFamily145ChannelProcessNativeControlInventoryIsExact(t *testing.T) {
 }
 
 func earlierChannelProcessEventOwnerFile(root string, current []byte) ([]byte, error) {
+	var err error
+	current, err = earlierOutboxAndSelectedForkOwner(root, agentSnapshotEventOwner, current)
+	if err != nil {
+		return nil, err
+	}
 	if fmt.Sprintf("%x", sha256.Sum256(current)) != channelProcessEventOwnerAfter {
 		return current, nil
 	}
@@ -155,6 +160,10 @@ func TestFamily145ChannelProcessCompleteHistoryAndEventBoundary(t *testing.T) {
 		assertChannelProcessHistoryHostileControls(t, root, actual, recipes)
 	}
 	current, err := os.ReadFile(filepath.Join(root, agentSnapshotEventOwner))
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err = earlierOutboxAndSelectedForkOwner(root, agentSnapshotEventOwner, current)
 	if err != nil {
 		t.Fatal(err)
 	}

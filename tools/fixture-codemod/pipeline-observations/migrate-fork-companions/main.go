@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/forknotice"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedsettlement"
 )
 
 const predecessor = "f0ce6f7bea8f8f89d44f98a317ed0432e2ba90ce"
@@ -169,7 +170,8 @@ func currentEdit(fset *token.FileSet, file *ast.File, pin pin) edit {
 			continue
 		}
 		current := nodeString(function)
-		comparison := current
+		comparison, err := servedsettlement.ObservationEarlierSource(".", pin.File, pin.Function, current)
+		must(err)
 		if raw, err := os.ReadFile(requestkey.Path); err == nil {
 			pins, err := requestkey.Decode(raw)
 			must(err)

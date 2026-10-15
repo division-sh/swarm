@@ -141,6 +141,14 @@ func (p CommittedEnginePublication) ValidateCommittedDurablePublication() error 
 	return p.committed.Validate()
 }
 
+func (p CommittedEnginePublication) ValidatePlannedPublication(expected runtimeengine.DurablePublicationPlan) error {
+	plan, ok := expected.(EnginePublicationPlan)
+	if !ok || plan.prepared.publicationClaim != p.plan.prepared.publicationClaim || !reflect.DeepEqual(plan, p.plan) {
+		return errors.New("committed engine publication differs from its exact planned occurrence")
+	}
+	return p.ValidateCommittedDurablePublication()
+}
+
 // NewlyInserted reports whether this commit inserted the canonical occurrence.
 // Consumers use this typed evidence to avoid repeating post-commit projections
 // for exact duplicate replays.
@@ -170,47 +178,28 @@ func (eb *EventBus) prepareEnginePublicationsWithMember(ctx context.Context, int
 		return nil, nil
 	}
 	plans := make([]runtimeengine.DurablePublicationPlan, 0, len(intents))
-	release := func() {
-		_ = eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+	batch := make(map[string]EnginePublicationPlan, len(intents))
+	release := func(err error) error {
+		return errors.Join(err, eb.ReleaseEnginePublications(context.WithoutCancel(ctx), plans))
 	}
 	for _, original := range intents {
 		intent := original
 		if strings.TrimSpace(string(intent.Event.Type())) == "" {
 			continue
 		}
-		intentCtx := events.WithDeliveryContext(ctx, intent.Context)
-		preparedCtx := intentCtx
-		var admitted events.AdmittedEvent
-		var err error
-		if member != nil {
-			if member.claim.EventID() == "" || member.context == nil {
-				release()
-				return nil, errors.New("fan-out preparation requires exact admitted member evidence")
-			}
-			preparedCtx, admitted = member.context, member.admitted
-		} else {
-			preparedCtx, admitted, err = eb.admitEnginePublishEvent(intentCtx, intent.Event)
-		}
+		preparedCtx, admitted, err := eb.admitEnginePublicationOccurrence(ctx, intent, member)
 		if err != nil {
-			release()
-			return nil, err
+			return nil, release(err)
 		}
 		intent.Event = admitted.Event()
 		if !prospective.Empty() {
 			if err := prospective.ValidatePublication(eb.sourceArtifactFact, intent.Event); err != nil {
-				release()
-				return nil, err
+				return nil, release(err)
 			}
 		}
 		publication := eventBusCommitPublishPlan{bus: eb, event: intent.Event, admitted: admitted, prospective: prospective}
-		if member != nil {
-			publication.outputConsumers = member.outputConsumers
-			claim := member.claim
-			if claim.EventID() != intent.Event.ID() {
-				release()
-				return nil, errors.New("fan-out preparation lacks its exact pre-admitted claim")
-			}
-			publication.publicationClaim = &pipelinePublicationClaim{bus: eb, eventID: intent.Event.ID(), claim: claim}
+		if err := bindEngineBatchPublicationClaim(&publication, member, batch); err != nil {
+			return nil, release(err)
 		}
 		if len(intent.Recipients) > 0 {
 			publication.direct = true
@@ -218,8 +207,7 @@ func (eb *EventBus) prepareEnginePublicationsWithMember(ctx context.Context, int
 		}
 		prepared, command, err := eb.prepareClosedPublication(preparedCtx, publication)
 		if err != nil {
-			release()
-			return nil, err
+			return nil, release(err)
 		}
 		if prepared.plan.TargetFailure == runtimepinrouting.TargetFailureFromConnect(runtimepinrouting.ConnectFailureInstanceConflict) {
 			// A declared create conflict rejects the handler's mutation, just as
@@ -233,20 +221,64 @@ func (eb *EventBus) prepareEnginePublicationsWithMember(ctx context.Context, int
 		command.prospective = prospective
 		plan := EnginePublicationPlan{prepared: prepared, command: command, intent: intent, admittedSource: admitted}
 		if err := plan.ValidateDurablePublicationPlan(); err != nil {
-			_ = prepared.publicationClaim.Release(context.WithoutCancel(preparedCtx))
-			release()
-			return nil, err
+			return nil, release(errors.Join(err, prepared.publicationClaim.Release(context.WithoutCancel(preparedCtx))))
 		}
 		if member != nil {
 			if err := member.group.RecordPrepared(preparedCtx, prepared.publicationClaim.Claim(), plan); err != nil {
 				err = errors.Join(err, prepared.publicationClaim.Release(context.WithoutCancel(preparedCtx)))
-				release()
-				return nil, err
+				return nil, release(err)
 			}
+		} else if previous, found := batch[intent.Event.ID()]; found {
+			if err := sameEngineBatchPublicationSource(previous.prepared.Event, prepared.Event); err != nil {
+				return nil, release(err)
+			}
+		} else {
+			batch[intent.Event.ID()] = plan
 		}
 		plans = append(plans, plan)
 	}
 	return plans, nil
+}
+
+func (eb *EventBus) admitEnginePublicationOccurrence(ctx context.Context, intent runtimeengine.EmitIntent, member *fanOutPublicationMember) (context.Context, events.AdmittedEvent, error) {
+	if member != nil {
+		if member.claim.EventID() == "" || member.context == nil {
+			return nil, events.AdmittedEvent{}, errors.New("fan-out preparation requires exact admitted member evidence")
+		}
+		return member.context, member.admitted, nil
+	}
+	return eb.admitEnginePublishEvent(events.WithDeliveryContext(ctx, intent.Context), intent.Event)
+}
+
+func bindEngineBatchPublicationClaim(publication *eventBusCommitPublishPlan, member *fanOutPublicationMember, batch map[string]EnginePublicationPlan) error {
+	if member != nil {
+		publication.outputConsumers = member.outputConsumers
+		if member.claim.EventID() != publication.event.ID() {
+			return errors.New("fan-out preparation lacks its exact pre-admitted claim")
+		}
+		publication.publicationClaim = &pipelinePublicationClaim{bus: publication.bus, eventID: publication.event.ID(), claim: member.claim}
+	} else if previous, found := batch[publication.event.ID()]; found {
+		if err := sameEngineBatchPublicationSource(previous.admittedSource.Event(), publication.admitted.Event()); err != nil {
+			return err
+		}
+		publication.publicationClaim = previous.prepared.publicationClaim.borrowForEngineBatch()
+	}
+	return nil
+}
+
+func sameEngineBatchPublicationSource(original, candidate events.Event) error {
+	want, err := events.IntegrityProjection(original)
+	if err != nil {
+		return err
+	}
+	actual, err := events.IntegrityProjection(candidate)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(actual, want) {
+		return fmt.Errorf("conflicting event identity in engine batch: %w", events.ErrEventIdentityConflict)
+	}
+	return nil
 }
 
 func (eb *EventBus) ReleaseEnginePublications(ctx context.Context, plans []runtimeengine.DurablePublicationPlan) error {
@@ -290,6 +322,13 @@ func (eb *EventBus) finalizeOneEnginePublication(ctx context.Context, committed 
 	}()
 	if err := committed.ValidateCommittedDurablePublication(); err != nil {
 		return err
+	}
+	if committed.committed.AppendOutcome == EventAppendExactDuplicate {
+		// Duplicate occurrences retain their ordered native result, but cannot
+		// run readiness, activation or any other inserted-publication effect.
+		eb.stageCommittedOutboxOperationWithFinalization(committed.plan.intent, committed.plan.admittedSource.Event(), EventAppendExactDuplicate, claim, nil, false, nil, nil)
+		staged = true
+		return nil
 	}
 	consequences, err := eb.finalizeCommittedPublicationConsequences(ctx, committed.plan.prepared, committed.committed, true)
 	if consequences.prerequisiteErr != nil {
@@ -409,8 +448,11 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 		defer func() { _ = lease.Done() }()
 	}
 	var dispatchErr error
+	consumed := make(map[string]bool, len(intents))
 	for _, intent := range intents {
-		dispatchErr = errors.Join(dispatchErr, d.dispatchOnePostCommit(ctx, intent))
+		handled, err := d.dispatchOnePostCommit(ctx, intent, consumed[intent.Event.ID()])
+		consumed[intent.Event.ID()] = consumed[intent.Event.ID()] || handled
+		dispatchErr = errors.Join(dispatchErr, err)
 	}
 	return dispatchErr
 }
@@ -437,9 +479,9 @@ func (d engineDispatcher) flushCommittedPublicationPredecessor(ctx context.Conte
 	return flushEnclosingPublicationSettlement(ctx)
 }
 
-func (d engineDispatcher) dispatchOnePostCommit(ctx context.Context, intent runtimeengine.EmitIntent) (err error) {
+func (d engineDispatcher) dispatchOnePostCommit(ctx context.Context, intent runtimeengine.EmitIntent, requirePending bool) (handled bool, err error) {
 	if strings.TrimSpace(string(intent.Event.Type())) == "" {
-		return nil
+		return false, nil
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -457,19 +499,22 @@ func (d engineDispatcher) dispatchOnePostCommit(ctx context.Context, intent runt
 		if ctx.Err() != nil {
 			err = errors.Join(err, d.releaseUnadmittedPostCommit(context.WithoutCancel(ctx), intent.Event))
 		}
-		return err
+		return false, err
 	}
 	intent.Event = admitted.Event()
 	result, err := d.dispatchPendingOutboxOperation(ctx, intent)
 	if err != nil || result.handled {
-		return err
+		return result.handled, err
+	}
+	if requirePending {
+		return false, fmt.Errorf("committed publication %s has no remaining ordered outbox outcome", intent.Event.ID())
 	}
 	if intent.Event.AdmissionClass() == events.EventAdmissionInheritedFanOut {
 		if err := d.bus.requireCommittedInheritedFanOut(ctx, intent.Event); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return d.dispatchAndRecord(ctx, intent, nil)
+	return false, d.dispatchAndRecord(ctx, intent, nil)
 }
 
 func (d engineDispatcher) releaseUnadmittedPostCommit(ctx context.Context, event events.Event) error {

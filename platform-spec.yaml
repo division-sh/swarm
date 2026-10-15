@@ -1613,6 +1613,13 @@ contract_formats:
           fall through to a fresh dispatch after consuming another same-ID intent. An inserted intent followed by exact
           duplicates in one committed batch dispatches once; an all-duplicate batch dispatches zero times; conflicting
           same-ID facts roll back the batch; and distinct inserted intents each dispatch once.
+          Within one preparation operation, exact repeated immutable source and projected-event facts retain separate
+          plans and native append outcomes while borrowing only the first occurrence's publication claim. Later
+          occurrences cannot settle or release that claim, repeat readiness/activation, or manufacture dispatch after
+          their ordered outcome is consumed. The owning occurrence retains cleanup through designated dispatch or
+          failure; all-duplicate batches release without dispatch. Separate operations remain excluded by the live
+          native claim. Preparation, rollback, finalization, cancellation and shutdown preserve original errors and
+          cleanup failures without creating backend-wide reentrant claims.
         terminal_evidence: >
           Executable terminal outcome events persist before the terminal transition in the same owner transaction.
           There is no generic post-terminal event bypass. Only typed platform.runtime_log evidence may persist after

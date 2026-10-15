@@ -3,9 +3,9 @@ package pipeline
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	identitypkg "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 )
 
@@ -22,20 +22,16 @@ func (pc *PipelineCoordinator) CommitConstructedOutboxFixture(ctx context.Contex
 	if !found {
 		return engine.CommittedEngineMutation{}, fmt.Errorf("outbox fixture requires a constructed workflow instance")
 	}
-	state, err := workflowEngineStateRecord(identity, instance, instance.CurrentState, instance.Revision, WorkflowEngineStateTransitionUpdateStateAndCompanion, time.Now().UTC())
-	if err != nil {
-		return engine.CommittedEngineMutation{}, err
+	address := engine.StateAddress{
+		FlowInstance: identity, FlowID: identitypkg.NormalizeFlowID(instance.WorkflowName), EntityID: identitypkg.NormalizeEntityID(instance.EntityID),
 	}
-	planner, ok := pc.bus.(EnginePublicationPlanner)
-	if !ok {
-		return engine.CommittedEngineMutation{}, fmt.Errorf("outbox fixture requires the native publication planner")
+	dependencies := coordinatorEngineDependencies(pc)
+	state, found, err := dependencies.StateRepo.LoadState(ctx, address)
+	if err != nil || !found {
+		return engine.CommittedEngineMutation{}, fmt.Errorf("load evaluated outbox fixture state: found=%v: %w", found, err)
 	}
-	publications, err := planner.PrepareEnginePublications(ctx, intents)
-	if err != nil {
-		return engine.CommittedEngineMutation{}, err
-	}
-	owner := pipelineEngineMutationOwner{
-		store: pc.workflowStore, state: pipelineEngineStateRepo{coordinator: pc}, publication: planner,
-	}
-	return owner.commitPreparedEngineMutation(ctx, engine.EngineMutation{EmitIntents: intents}, WorkflowEngineMutationCommand{State: state, Publications: publications}, publications)
+	return dependencies.MutationOwner.CommitEngineMutation(ctx, engine.EngineMutation{
+		Address: address, EvaluatedState: state,
+		State: engine.StateMutation{StateCarrier: state.StateCarrier}, EmitIntents: intents,
+	})
 }

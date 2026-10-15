@@ -33,6 +33,26 @@ import (
 
 type PublicationResultSourceStorage = eventrecord.PublicationResultSourceStorage
 
+func SetOutboxDeadLetterInsertFaultForTest(ctx context.Context, selected any, eventID string, enabled bool) error {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return err
+	}
+	_, postgres := selected.(*PostgresStore)
+	return runWorkflowProjectionFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return deliveryadapter.SetOutboxDeadLetterInsertFaultTx(ctx, tx, postgres, eventID, enabled)
+	})
+}
+
+func SetOutboxAfterFirstEventWriteFaultForTest(ctx context.Context, selected any, run, first, second string, enabled bool) error {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return err
+	}
+	_, postgres := selected.(*PostgresStore)
+	return runWorkflowProjectionFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return eventrecord.SetOutboxAfterFirstEventWriteFaultTx(ctx, tx, postgres, run, first, second, enabled)
+	})
+}
+
 func ReadPostgresSelectedForkEventTimelineStorageForTest(ctx context.Context, selected any, runID string) (string, error) {
 	if owner, ok := selected.(*PostgresStore); !ok || owner == nil {
 		return "", fmt.Errorf("selected execution diagnostic requires its original PostgreSQL owner")
