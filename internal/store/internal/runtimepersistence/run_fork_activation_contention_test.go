@@ -131,6 +131,16 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 					// PostgreSQL queues an observer lock ahead of the losing operation.
 					// SQLite holds the loser after a real BUSY rollback, before retry.
 					gate := barrier.queueGate(t, ctx, observer, winnerPID)
+					if gate != nil {
+						gate.onObservationFailure = func() {
+							current, observationErr := forkContentionPostgresWait(ctx, observer, 0, gate.pid, 0)
+							t.Logf("failure-only current_waiter=%+v observation_error=%v loser_result_available=%t", current, observationErr, len(loser) != 0)
+							barrier.openGate(t, gate)
+							barrier.resume()
+							actual := awaitForkContentionResult(t, ctx, loser)
+							t.Logf("failure-only actual_loser_error=%v activated=%t frozen=%t", actual.err, actual.activation.Activated, actual.activation.SourceFrozen)
+						}
+					}
 					loserStarted = true
 					go func() { defer close(loserFinished); loser <- invoke(loserCtx, second) }()
 					barrier.awaitContender(t, ctx, observer, winnerPID, gate, loser)
@@ -795,11 +805,12 @@ func (b *forkContentionBarrier) awaitWinner(t *testing.T, ctx context.Context, d
 }
 
 type forkContentionGate struct {
-	tx              *sql.Tx
-	pid             int
-	acquired        chan error
-	contender       forkContentionWait
-	cancelRequested bool
+	onObservationFailure func()
+	tx                   *sql.Tx
+	pid                  int
+	acquired             chan error
+	contender            forkContentionWait
+	cancelRequested      bool
 }
 
 func (b *forkContentionBarrier) queueGate(t *testing.T, ctx context.Context, db *sql.DB, winnerPID int) *forkContentionGate {
@@ -897,6 +908,9 @@ func (b *forkContentionBarrier) assertContenderFenced(t *testing.T, ctx context.
 	}
 	wait, err := forkContentionPostgresWait(ctx, db, 0, gate.pid, gate.contender.pid)
 	if err != nil || !wait.fenced || wait.transaction != gate.contender.transaction || !strings.Contains(wait.query, "author_activity_order") {
+		if gate.onObservationFailure != nil {
+			gate.onObservationFailure()
+		}
 		t.Fatalf("identified contender escaped observer fence: before=%+v after=%+v err=%v", gate.contender, wait, err)
 	}
 	t.Logf("observer_fence observer_pid=%d native_contender=%+v", gate.pid, wait)
