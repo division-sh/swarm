@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 	"github.com/google/uuid"
 )
 
@@ -25,7 +25,7 @@ func (s *EntityPostgresOwner) LoadEntityState(ctx context.Context, identity runt
 	if err != nil {
 		return nil, false, err
 	}
-	rows, err := s.backend.QueryContext(ctx, toolEntitySelectSQL(`run_id = $1::uuid AND entity_id = $2::uuid`), runID, entityID)
+	rows, err := s.backend.QueryContext(ctx, toolEntitySelectSQL(`es.run_id = $1::uuid AND es.entity_id = $2::uuid`), runID, entityID)
 	if err != nil {
 		return nil, false, fmt.Errorf("load postgres entity state: %w", err)
 	}
@@ -48,7 +48,7 @@ func (s *EntitySQLiteOwner) LoadEntityState(ctx context.Context, identity runtim
 	if err != nil {
 		return nil, false, err
 	}
-	rows, err := s.backend.QueryContext(ctx, toolEntitySelectSQL(`run_id = ? AND entity_id = ?`), runID, entityID)
+	rows, err := s.backend.QueryContext(ctx, toolEntitySelectSQL(`es.run_id = ? AND es.entity_id = ?`), runID, entityID)
 	if err != nil {
 		return nil, false, fmt.Errorf("load sqlite entity state: %w", err)
 	}
@@ -73,7 +73,7 @@ func (s *EntityPostgresOwner) QueryEntityStates(ctx context.Context, query runti
 	}
 	order := ""
 	if query.OrderByCreatedDesc {
-		order = " ORDER BY created_at DESC"
+		order = " ORDER BY es.created_at DESC"
 	}
 	rows, err := s.backend.QueryContext(ctx, toolEntitySelectSQL(where)+order, args...)
 	if err != nil {
@@ -93,7 +93,7 @@ func (s *EntitySQLiteOwner) QueryEntityStates(ctx context.Context, query runtime
 	}
 	order := ""
 	if query.OrderByCreatedDesc {
-		order = " ORDER BY created_at DESC"
+		order = " ORDER BY es.created_at DESC"
 	}
 	rows, err := s.backend.QueryContext(ctx, toolEntitySelectSQL(where)+order, args...)
 	if err != nil {
@@ -104,92 +104,53 @@ func (s *EntitySQLiteOwner) QueryEntityStates(ctx context.Context, query runtime
 }
 
 func toolEntitySelectSQL(where string) string {
-	return `
-		SELECT entity_id, run_id, COALESCE(flow_instance, ''), COALESCE(entity_type, ''), name, current_state,
-		       COALESCE(gates, '{}'), COALESCE(fields, '{}'), COALESCE(bookkeeping, '{}'), COALESCE(accumulator, '{}'),
-		       revision, entered_state_at, created_at, updated_at
-		FROM entity_state
-		WHERE ` + where
+	return `SELECT ` + workflowheader.DataReadColumns + ` ` + workflowheader.DataReadFrom + ` WHERE ` + where
 }
 
 func ScanToolEntityRows(rows *sql.Rows) ([]map[string]any, error) {
 	out := make([]map[string]any, 0)
+	seen := map[string]bool{}
 	for rows.Next() {
-		var entityID, runID, flowInstance, entityType, currentState string
-		var name sql.NullString
-		var gatesRaw, fieldsRaw, bookkeepingRaw, accumulatorRaw any
-		var revision int
-		var enteredStateAtRaw, createdAtRaw, updatedAtRaw any
-		if err := rows.Scan(
-			&entityID,
-			&runID,
-			&flowInstance,
-			&entityType,
-			&name,
-			&currentState,
-			&gatesRaw,
-			&fieldsRaw,
-			&bookkeepingRaw,
-			&accumulatorRaw,
-			&revision,
-			&enteredStateAtRaw,
-			&createdAtRaw,
-			&updatedAtRaw,
-		); err != nil {
+		full, err := workflowheader.ScanData(rows, DecodeEntityTime)
+		if err != nil {
 			return nil, fmt.Errorf("scan entity state: %w", err)
 		}
-		gates, err := DecodeJSONMap(gatesRaw)
-		if err != nil {
-			return nil, fmt.Errorf("decode entity gates: %w", err)
+		item := full.Entity
+		key := item.RunID + "/" + item.EntityID
+		if seen[key] {
+			return nil, fmt.Errorf("entity has conflicting constructed header owners")
 		}
-		fields, err := DecodeJSONMap(fieldsRaw)
-		if err != nil {
-			return nil, fmt.Errorf("decode entity fields: %w", err)
-		}
-		bookkeeping, err := DecodeJSONMap(bookkeepingRaw)
-		if err != nil {
-			return nil, fmt.Errorf("decode entity bookkeeping: %w", err)
-		}
-		accumulator, err := DecodeJSONMap(accumulatorRaw)
-		if err != nil {
-			return nil, fmt.Errorf("decode entity accumulator: %w", err)
-		}
-		loops, err := loopruntime.PublicActivations(accumulator)
-		if err != nil {
-			return nil, fmt.Errorf("decode entity loop state: %w", err)
-		}
-		accumulator = loopruntime.PublicStateBuckets(accumulator)
-		enteredStateAt, err := toolTimeString(enteredStateAtRaw)
-		if err != nil {
-			return nil, fmt.Errorf("decode entity entered_state_at: %w", err)
-		}
-		createdAt, err := toolTimeString(createdAtRaw)
-		if err != nil {
-			return nil, fmt.Errorf("decode entity created_at: %w", err)
-		}
-		updatedAt, err := toolTimeString(updatedAtRaw)
-		if err != nil {
-			return nil, fmt.Errorf("decode entity updated_at: %w", err)
-		}
+		seen[key] = true
 		row := map[string]any{
-			"entity_id":        strings.TrimSpace(entityID),
-			"run_id":           strings.TrimSpace(runID),
-			"flow_instance":    strings.TrimSpace(flowInstance),
-			"entity_type":      strings.TrimSpace(entityType),
-			"name":             nil,
-			"current_state":    strings.TrimSpace(currentState),
-			"gates":            gates,
-			"fields":           fields,
-			"bookkeeping":      bookkeeping,
-			"accumulator":      accumulator,
-			"loops":            loops,
-			"revision":         revision,
-			"entered_state_at": enteredStateAt,
-			"created_at":       createdAt,
-			"updated_at":       updatedAt,
+			"entity_id":            item.EntityID,
+			"run_id":               item.RunID,
+			"flow_instance":        item.FlowInstance,
+			"entity_type":          item.EntityType,
+			"name":                 nil,
+			"stage_defined":        nil,
+			"current_state":        nil,
+			"gates":                nil,
+			"fields":               full.Fields,
+			"bookkeeping":          nil,
+			"accumulator":          nil,
+			"loops":                nil,
+			"revision":             nil,
+			"entered_state_at":     nil,
+			"lifecycle_created_at": nil,
+			"lifecycle_updated_at": nil,
+			"created_at":           item.CreatedAt.Format(time.RFC3339Nano),
+			"updated_at":           item.UpdatedAt.Format(time.RFC3339Nano),
 		}
-		if name.Valid {
-			row["name"] = strings.TrimSpace(name.String)
+		if item.StageDefined != nil {
+			row["stage_defined"], row["revision"] = *item.StageDefined, *item.Revision
+			row["gates"], row["bookkeeping"], row["accumulator"], row["loops"] = full.Gates, full.Bookkeeping, full.Accumulated, full.Loops
+			row["lifecycle_created_at"], row["lifecycle_updated_at"] = item.LifecycleCreatedAt.Format(time.RFC3339Nano), item.LifecycleUpdatedAt.Format(time.RFC3339Nano)
+			if item.CurrentState != nil {
+				row["current_state"], row["entered_state_at"] = *item.CurrentState, item.EnteredStateAt.Format(time.RFC3339Nano)
+			}
+		}
+		if item.Name != "" {
+			row["name"] = item.Name
 		}
 		out = append(out, row)
 	}
@@ -204,7 +165,7 @@ func postgresToolEntityWhere(query runtimetools.EntityStateQuery) (string, []any
 	if _, err := uuid.Parse(runID); err != nil {
 		return "", nil, fmt.Errorf("run_id must be uuid")
 	}
-	clauses := []string{"run_id = $1::uuid"}
+	clauses := []string{"es.run_id = $1::uuid"}
 	args := []any{runID}
 	addArg := func(value any) string {
 		args = append(args, value)
@@ -218,18 +179,18 @@ func postgresToolEntityWhere(query runtimetools.EntityStateQuery) (string, []any
 		if scope.IncludeDescendants {
 			eq := addArg(root)
 			like := addArg(root + "/%")
-			clauses = append(clauses, fmt.Sprintf("(flow_instance = %s OR flow_instance LIKE %s)", eq, like))
+			clauses = append(clauses, fmt.Sprintf("(es.flow_instance = %s OR es.flow_instance LIKE %s)", eq, like))
 			return
 		}
-		clauses = append(clauses, "flow_instance = "+addArg(root))
+		clauses = append(clauses, "es.flow_instance = "+addArg(root))
 	}
 	appendFlowScope(query.FlowScope)
 	appendFlowScope(query.RequestedFlowScope)
 	if exact := strings.Trim(strings.TrimSpace(query.RequestedFlowExact), "/"); exact != "" {
-		clauses = append(clauses, "flow_instance = "+addArg(exact))
+		clauses = append(clauses, "es.flow_instance = "+addArg(exact))
 	}
 	if state := strings.TrimSpace(query.CurrentState); state != "" {
-		clauses = append(clauses, "current_state = "+addArg(state))
+		clauses = append(clauses, "(fi.stage_defined AND fi.current_state = "+addArg(state)+")")
 	}
 	for _, filter := range query.FieldEquals {
 		path := strings.TrimSpace(filter.Path)
@@ -250,7 +211,7 @@ func sqliteToolEntityWhere(query runtimetools.EntityStateQuery) (string, []any, 
 	if _, err := uuid.Parse(runID); err != nil {
 		return "", nil, fmt.Errorf("run_id must be uuid")
 	}
-	clauses := []string{"run_id = ?"}
+	clauses := []string{"es.run_id = ?"}
 	args := []any{runID}
 	appendFlowScope := func(scope runtimetools.EntityFlowScope) {
 		root := strings.Trim(strings.TrimSpace(scope.Root), "/")
@@ -258,21 +219,21 @@ func sqliteToolEntityWhere(query runtimetools.EntityStateQuery) (string, []any, 
 			return
 		}
 		if scope.IncludeDescendants {
-			clauses = append(clauses, "(flow_instance = ? OR flow_instance LIKE ?)")
+			clauses = append(clauses, "(es.flow_instance = ? OR es.flow_instance LIKE ?)")
 			args = append(args, root, root+"/%")
 			return
 		}
-		clauses = append(clauses, "flow_instance = ?")
+		clauses = append(clauses, "es.flow_instance = ?")
 		args = append(args, root)
 	}
 	appendFlowScope(query.FlowScope)
 	appendFlowScope(query.RequestedFlowScope)
 	if exact := strings.Trim(strings.TrimSpace(query.RequestedFlowExact), "/"); exact != "" {
-		clauses = append(clauses, "flow_instance = ?")
+		clauses = append(clauses, "es.flow_instance = ?")
 		args = append(args, exact)
 	}
 	if state := strings.TrimSpace(query.CurrentState); state != "" {
-		clauses = append(clauses, "current_state = ?")
+		clauses = append(clauses, "(fi.stage_defined AND fi.current_state = ?)")
 		args = append(args, state)
 	}
 	for _, filter := range query.FieldEquals {
@@ -293,11 +254,11 @@ func sqliteToolEntityWhere(query runtimetools.EntityStateQuery) (string, []any, 
 func postgresToolEntityFieldExpr(path string) string {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return `COALESCE(fields, '{}'::jsonb)`
+		return `es.fields`
 	}
 	segments := strings.Split(path, ".")
 	if len(segments) == 1 {
-		return fmt.Sprintf("COALESCE(fields, '{}'::jsonb) -> %s", postgresStringLiteral(segments[0]))
+		return fmt.Sprintf("es.fields -> %s", postgresStringLiteral(segments[0]))
 	}
 	sqlPath := make([]string, 0, len(segments))
 	for _, segment := range segments {
@@ -306,7 +267,7 @@ func postgresToolEntityFieldExpr(path string) string {
 			sqlPath = append(sqlPath, postgresStringLiteral(segment))
 		}
 	}
-	return fmt.Sprintf("COALESCE(fields, '{}'::jsonb) #> ARRAY[%s]", strings.Join(sqlPath, ", "))
+	return fmt.Sprintf("es.fields #> ARRAY[%s]", strings.Join(sqlPath, ", "))
 }
 
 func postgresStringLiteral(value string) string {
@@ -333,9 +294,9 @@ func sqliteToolEntityFieldEqualsClause(path string, value any) (string, []any, e
 		if err != nil {
 			return "", nil, fmt.Errorf("marshal sqlite entity field filter %s: %w", path, err)
 		}
-		return "json(json_extract(COALESCE(fields, '{}'), ?)) = json(?)", []any{jsonPath, string(valueJSON)}, nil
+		return "json(json_extract(es.fields, ?)) = json(?)", []any{jsonPath, string(valueJSON)}, nil
 	}
-	return "json_extract(COALESCE(fields, '{}'), ?) = ?", []any{jsonPath, sqliteToolJSONCompareValue(value)}, nil
+	return "json_extract(es.fields, ?) = ?", []any{jsonPath, sqliteToolJSONCompareValue(value)}, nil
 }
 
 func sqliteToolStructuredJSONCompareValue(value any) bool {
@@ -392,15 +353,6 @@ func DecodeJSONMap(raw any) (map[string]any, error) {
 	return out, nil
 }
 
-func toolTimeString(raw any) (string, error) {
-	if at, ok, err := sqliteTimeValue(raw); err != nil {
-		return "", err
-	} else if ok {
-		return at.Format(time.RFC3339Nano), nil
-	}
-	return "", nil
-}
-
 func jsonRawMessageValue(raw any) json.RawMessage {
 	switch value := raw.(type) {
 	case nil:
@@ -420,7 +372,7 @@ func jsonRawMessageValue(raw any) json.RawMessage {
 	}
 }
 
-func sqliteTimeValue(raw any) (time.Time, bool, error) {
+func DecodeEntityTime(raw any) (time.Time, bool, error) {
 	switch value := raw.(type) {
 	case nil:
 		return time.Time{}, false, nil

@@ -286,9 +286,9 @@ func VerifyDeliveryTargetApplicationRejectsWrongRunRootTargetsBeforeMutationOnBo
 				t.Fatalf("wrong-run rejection mutated persistence: state %d->%d lifecycle %d->%d", stateBefore, stateAfter, lifecycleBefore, lifecycleAfter)
 			}
 			if testCase.seed != "" {
-				persisted, found, err := fixture.Persistence.store.LoadEntityState(ctx, testRunScopedWorkflowInstanceFromContext(ctx, wrongRunID), runtimeidentity.NormalizeEntityID(entityID))
-				marker := string(persisted.Fields)
-				if err != nil || !found || !strings.Contains(marker, "unchanged") {
+				persisted, err := fixture.Persistence.store.LoadTargetPersistence(ctx, testRunScopedWorkflowInstanceFromContext(ctx, wrongRunID), runtimeidentity.NormalizeEntityID(entityID))
+				marker := string(persisted.State.Fields)
+				if err != nil || persisted.Presence == WorkflowTargetPersistenceAbsent || !strings.Contains(marker, "unchanged") {
 					t.Fatalf("wrong-run rejection changed seeded state: fields=%q err=%v", marker, err)
 				}
 				// Compare exact snapshots from one reader, not driver-local times against UTC.
@@ -372,11 +372,11 @@ func VerifyDeliveryTargetApplicationRejectsStateOnlyChildRelabeledAsParentOnBoth
 	}
 
 	route := runtimeflowidentity.StoredRoute("review", runtimeflowidentity.LogicalInstanceID(instancePath), instancePath)
-	persisted, found, err := fixture.Persistence.store.LoadEntityState(ctx, testRunScopedWorkflowInstanceForRun(testPipelineRunID, route.InstancePath), runtimeidentity.NormalizeEntityID(entityID))
+	persisted, err := fixture.Persistence.store.LoadTargetPersistence(ctx, testRunScopedWorkflowInstanceForRun(testPipelineRunID, route.InstancePath), runtimeidentity.NormalizeEntityID(entityID))
 	var fields map[string]any
-	fieldsErr := json.Unmarshal(persisted.Fields, &fields)
-	if err != nil || !found || persisted.CurrentState != "active" || persisted.Revision != 1 || fieldsErr != nil || fields["marker"] != "unchanged" {
-		t.Fatalf("rejected child state changed: found=%t err=%v state=%#v", found, err, persisted)
+	fieldsErr := json.Unmarshal(persisted.State.Fields, &fields)
+	if err != nil || persisted.Presence != WorkflowTargetPersistenceStateOnly || fieldsErr != nil || fields["marker"] != "unchanged" {
+		t.Fatalf("rejected child state changed or gained lifecycle: err=%v state=%#v", err, persisted)
 	}
 	after, err := fixture.Persistence.store.LoadTargetPersistence(ctx, childOwner, runtimeidentity.NormalizeEntityID(entityID))
 	if err != nil || !reflect.DeepEqual(prestate, after) {
@@ -492,9 +492,8 @@ func VerifyDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycl
 				t.Fatalf("invalid lifecycle rejection changed exact persistence: before=%+v after=%+v err=%v", before, after, err)
 			}
 			if testCase.name == "lifecycle-only" {
-				_, found, err := fixture.Persistence.store.LoadEntityState(ctx, stateOwner, runtimeidentity.NormalizeEntityID(entityID))
-				if err != nil || found {
-					t.Fatalf("lifecycle-only rejection state rows = %t, err=%v", found, err)
+				if after.Presence != WorkflowTargetPersistenceCompleteFieldless || after.State.EntityID != "" || after.State.Fields != nil {
+					t.Fatalf("lifecycle-only rejection acquired a state row: %+v", after)
 				}
 				return
 			}

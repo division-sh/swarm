@@ -12,14 +12,24 @@ import (
 	"time"
 )
 
-func seedEntityToolStorageWitness(t *testing.T, fixture authorActivityReceiptFixture, runID, entityID string) {
+func seedEntityToolStorageWitness(t *testing.T, fixture authorActivityReceiptFixture, runID, entityID string, constructed, fielded bool) {
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
-	if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_state
-		(run_id, entity_id, flow_instance, entity_type, current_state, fields, bookkeeping, revision)
-		VALUES ($1, $2, 'storage-witness/one', 'storage_witness', 'queued', '{}', '{}', 7)`, runID, entityID); err != nil {
-		t.Fatal(err)
+	path := "storage-witness/" + entityID
+	if constructed {
+		entityType := ""
+		if fielded {
+			entityType = "storage_witness"
+		}
+		seedWorkflowHeaderProjectionFixture(t, ctx, fixture.db, runID, entityID, path, "storage-witness", entityType, "queued", `{"handler_loops":{},"evidence":{"score":2}}`, time.Unix(1700000000, 0).UTC())
+	}
+	if fielded {
+		if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_state
+			(run_id, entity_id, flow_instance, entity_type, fields)
+			VALUES ($1, $2, $3, 'storage_witness', '{}')`, runID, entityID, path); err != nil {
+			t.Fatal(err)
+		}
 	}
 	for index, value := range []any{nil, `""`, `7`, `{"name":"second"}`} {
 		if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_mutations
@@ -109,7 +119,7 @@ func seedWorkflowProjectionFaultCut(t *testing.T, fixture authorActivityReceiptF
 		if _, err := tx.ExecContext(ctx, `INSERT INTO flow_instances(run_id,entity_id,instance_path,current_state,flow_template,mode,status,config,stage_defined,gates,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at) VALUES($1,$2,'storage-ref','queued','projection-flow','static','active','{"config":{},"workflow_version":"1.0.0","instance_id":"storage-ref","flow_path":"storage-ref"}',TRUE,'{}','{}','{}',1,$3,$3,$3)`, run, entity, time.Now().UTC()); err != nil {
 			return err
 		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO entity_state(run_id,entity_id,flow_instance,entity_type,current_state,revision,fields,gates,accumulator) VALUES($1,$2,'storage-ref','test_entity','queued',1,'{}','{}','{}')`, run, entity)
+		_, err := tx.ExecContext(ctx, `INSERT INTO entity_state(run_id,entity_id,flow_instance,entity_type,fields) VALUES($1,$2,'storage-ref','test_entity','{}')`, run, entity)
 		return err
 	}); err != nil {
 		t.Fatal(err)

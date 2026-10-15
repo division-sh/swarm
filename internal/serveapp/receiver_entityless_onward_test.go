@@ -65,10 +65,11 @@ func TestReceiverCompositionEntitylessOnwardBothStores(t *testing.T) {
 				}
 				requireReceiverConstructedInstance(t, rt, started.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "pending", started.RunID, "ready", 2, map[string]any{})
 				requireReceiverConstructedInstance(t, rt, started.RunID, "sink/tail", "sink/tail", flowidentity.EntityID("sink/tail"), "receipt", "done", "sink", "ready", 2, map[string]any{"result": "emitted"})
-				var rawFields string
-				if err := rt.DB.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance='sink/tail' AND current_state='done'`, started.RunID).Scan(&rawFields); err != nil {
-					t.Fatal(err)
+				record, tail := requireReceiverTargetState(t, rt.ReceiverStateReader, started.RunID, "sink/tail", "sink/tail", flowidentity.EntityID("sink/tail"))
+				if tail.CurrentState != "done" {
+					t.Fatalf("grandchild state=%s, want done", tail.CurrentState)
 				}
+				rawFields := string(record.State.Fields)
 				var fields map[string]any
 				if err := json.Unmarshal([]byte(rawFields), &fields); err != nil {
 					t.Fatal(err)

@@ -303,6 +303,12 @@ func loadRunForkSourceSummary(ctx context.Context, q rowQueryer, plan *runfork.R
 }
 
 func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]runfork.RunForkEntityState, error) {
+	if snapshot == nil {
+		return nil, fmt.Errorf("entity reconstruction requires a fixed snapshot")
+	}
+	if err := validateRunForkEntityMetadataOwners(snapshot); err != nil {
+		return nil, err
+	}
 	type timedProjectionMutation struct {
 		mutationlog.ProjectionMutation
 		CreatedAt time.Time
@@ -310,6 +316,18 @@ func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]runfork.RunFo
 	grouped := map[string][]timedProjectionMutation{}
 	entityOrder := []string{}
 	seen := map[string]struct{}{}
+	// Empty authored-data imports have a real immutable birth, even when their
+	// empty fields produce no diff row. Live inventory cannot prove that birth.
+	for _, metadata := range snapshot.EntityMetadata {
+		if metadata.ConstructionKind != "imported_state" {
+			continue
+		}
+		if metadata.EntityType == "" || metadata.FlowInstance == "" || metadata.DataCreatedAt == nil || metadata.DataUpdatedAt == nil || metadata.DataCreatedAt.IsZero() || metadata.DataUpdatedAt.IsZero() || metadata.DataUpdatedAt.Before(*metadata.DataCreatedAt) {
+			return nil, fmt.Errorf("data-only historical birth requires admitted identity and data clocks")
+		}
+		seen[metadata.EntityID] = struct{}{}
+		entityOrder = append(entityOrder, metadata.EntityID)
+	}
 	for _, fact := range snapshot.EntityMutations {
 		entityID := strings.TrimSpace(fact.EntityID)
 		domain := mutationlog.Domain(strings.TrimSpace(fact.Domain))

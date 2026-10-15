@@ -88,6 +88,8 @@ type runForkRevisionEntityMetadata struct {
 	EnteredStateAt         time.Time                                      `json:"entered_state_at"`
 	UpdatedAt              time.Time                                      `json:"updated_at"`
 	TerminatedAt           time.Time                                      `json:"terminated_at"`
+	DataCreatedAt          *time.Time                                     `json:"data_created_at"`
+	DataUpdatedAt          *time.Time                                     `json:"data_updated_at"`
 }
 
 type runForkRevisionDelivery struct {
@@ -371,8 +373,8 @@ func loadRunForkRevisionSnapshot(ctx context.Context, tx *sql.Tx, runID string, 
 	return loadRunForkRevisionSnapshotScope(ctx, tx, runID, revision, false)
 }
 
-// The oracle shares fork admission and ordering, but needs only mutation
-// coordinates; unrelated historical families are not its evidence operands.
+// The oracle shares fork admission and ordering, including immutable entity
+// birth metadata for fieldless/empty members, but no unrelated fact families.
 func loadRunForkRevisionSnapshotScope(ctx context.Context, tx *sql.Tx, runID string, revision int64, mutationsOnly bool) (*runForkRevisionSnapshot, error) {
 	snapshot, err := loadRunForkRevisionSnapshotRaw(ctx, tx, runID, revision, mutationsOnly)
 	if err != nil || mutationsOnly {
@@ -395,7 +397,7 @@ func loadRunForkRevisionSnapshotRaw(ctx context.Context, tx *sql.Tx, runID strin
 			       MIN(revision) OVER (PARTITION BY family, fact_key) AS first_revision,
 			       ROW_NUMBER() OVER (PARTITION BY family, fact_key ORDER BY revision DESC) AS latest_rank
 			FROM run_fork_fact_revisions
-			WHERE run_id = $1 AND revision <= $2 AND (NOT $3 OR family = 'entity_mutations')
+			WHERE run_id = $1 AND revision <= $2 AND (NOT $3 OR family IN ('entity_mutations', 'entity_metadata'))
 		)
 		SELECT run_id, family, fact_key, first_revision, revision, fact
 		FROM bounded

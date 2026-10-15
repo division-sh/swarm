@@ -138,7 +138,7 @@ func TestWorkflowEngineConstructedTransitionAtomicOnBothStores(t *testing.T) {
 					if err != nil || transition != runtimepipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion {
 						t.Fatalf("constructed reload lost paired transition: %d %v", transition, err)
 					}
-					record.ExpectedState, record.ExpectedRevision = target.State.CurrentState, target.State.Revision
+					record.ExpectedState, record.ExpectedRevision = target.Lifecycle.State.CurrentState, target.Lifecycle.State.Revision
 					record.CurrentState = "settled"
 					record.EnteredStageAt, record.UpdatedAt = record.UpdatedAt.Add(time.Minute), record.UpdatedAt.Add(time.Minute)
 					record = workflowTargetMutationEntry(t, f, record, "settle.requested")
@@ -369,14 +369,14 @@ func TestSupportedStateOnlyProducersCannotAcquireWorkflowConstructionOnBothStore
 							RunID: runID, CreatedAt: createdAt,
 							Entities: []runtimepipeline.ScenarioSetupEntityRequest{{
 								Alias: "receiver", EntityID: entityID, FlowInstance: instancePath,
-								EntityType: "review_item", CurrentState: "active", Fields: fields,
+								EntityType: "review_item", Fields: fields,
 							}},
 						})
 						if err != nil {
 							t.Fatalf("setup scenario state-only target: %v", err)
 						}
 					}
-					assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "", "active", 1, 0)
+					assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "", "", 0, 0)
 					before := snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")
 					record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
 					schema, found := source.FlowSchemaByID(flowID)
@@ -412,7 +412,7 @@ func TestSupportedStateOnlyProducersCannotAcquireWorkflowConstructionOnBothStore
 					} else if !strings.Contains(err.Error(), "workflow engine state route is missing: "+instancePath) {
 						t.Fatalf("missing-header update lacked exact route refusal: %v", err)
 					}
-					assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "", "active", 1, 0)
+					assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, instancePath, "", "", 0, 0)
 					if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")) {
 						t.Fatal("refused imported execution changed persisted state")
 					}
@@ -446,13 +446,13 @@ func stateOnlyWorkflowEngineMutationRecord(t *testing.T, runID, flowID, instance
 	}
 }
 
-func seedWorkflowTargetStateForTransition(t *testing.T, backend string, db *sql.DB, runID, entityID, instancePath, state string, revision int64, at time.Time) {
+func seedWorkflowTargetStateForTransition(t *testing.T, backend string, db *sql.DB, runID, entityID, instancePath string, at time.Time) {
 	t.Helper()
-	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, ?, 'review_item', ?, '{}', '{"account_id":"preserved"}', '{}', '{}', ?, ?, ?, ?)`
-	args := []any{runID, entityID, instancePath, state, revision, at, at, at}
+	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES (?, ?, ?, 'review_item', '{"account_id":"preserved"}', ?, ?)`
+	args := []any{runID, entityID, instancePath, at, at}
 	if backend == "postgres" {
-		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'review_item', $4, '{}'::jsonb, '{"account_id":"preserved"}'::jsonb, '{}'::jsonb, '{}'::jsonb, $5, $6, $6, $6)`
-		args = []any{runID, entityID, instancePath, state, revision, at}
+		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'review_item', '{"account_id":"preserved"}'::jsonb, $4, $4)`
+		args = []any{runID, entityID, instancePath, at}
 	}
 	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
 		t.Fatalf("seed workflow target state: %v", err)
@@ -461,19 +461,29 @@ func seedWorkflowTargetStateForTransition(t *testing.T, backend string, db *sql.
 
 func assertWorkflowTargetTransitionRows(t *testing.T, backend string, db *sql.DB, runID, entityID, instancePath, wantWorkflow, wantState string, wantRevision, wantCompanions int) {
 	t.Helper()
-	stateQuery := `SELECT current_state, revision FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
+	stateQuery := `SELECT current_state, revision FROM flow_instances WHERE run_id = ? AND entity_id = ? AND instance_path = ?`
+	dataQuery := `SELECT COUNT(*) FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = ?`
 	companionQuery := `SELECT COUNT(*), COALESCE(MAX(flow_template), '') FROM flow_instances WHERE run_id = ? AND instance_path = ?`
 	if backend == "postgres" {
-		stateQuery = `SELECT current_state, revision FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3`
+		stateQuery = `SELECT current_state, revision FROM flow_instances WHERE run_id = $1::uuid AND entity_id = $2::uuid AND instance_path = $3`
+		dataQuery = `SELECT COUNT(*) FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3`
 		companionQuery = `SELECT COUNT(*), COALESCE(MAX(flow_template), '') FROM flow_instances WHERE run_id = $1::uuid AND instance_path = $2`
 	}
 	var state string
 	var revision int
-	if err := db.QueryRowContext(context.Background(), stateQuery, runID, entityID, instancePath).Scan(&state, &revision); err != nil {
+	err := db.QueryRowContext(context.Background(), stateQuery, runID, entityID, instancePath).Scan(&state, &revision)
+	if wantCompanions == 0 {
+		if wantState != "" || wantRevision != 0 || err != sql.ErrNoRows {
+			t.Fatalf("data-only target gained lifecycle or invalid absence expectation: state=%q revision=%d err=%v, want absent header", state, revision, err)
+		}
+	} else if err != nil {
 		t.Fatalf("load workflow target state: %v", err)
-	}
-	if state != wantState || revision != wantRevision {
+	} else if state != wantState || revision != wantRevision {
 		t.Fatalf("workflow target state = %q/revision %d, want %q/%d", state, revision, wantState, wantRevision)
+	}
+	var dataRows int
+	if err := db.QueryRowContext(context.Background(), dataQuery, runID, entityID, instancePath).Scan(&dataRows); err != nil || dataRows != 1 {
+		t.Fatalf("workflow target lost physical authored data: rows=%d err=%v", dataRows, err)
 	}
 	var companions int
 	var workflow string

@@ -392,7 +392,7 @@ func materializeSelectedContractWorkflowState(ctx context.Context, tx *sql.Tx, p
 func selectedContractHistoricalHeader(state selectedContractWorkflowState, config []byte, targetBundleHash string, now time.Time) (runtimepipeline.WorkflowEngineStateRecord, error) {
 	history := state.History
 	metadata := history.MaterializationMetadata
-	if metadata == nil || metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance || history.EnteredStateAt == nil || history.EnteredStateAt.IsZero() || history.CurrentState == "" {
+	if metadata == nil || metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance || history.EnteredStateAt == nil || history.EnteredStateAt.IsZero() || history.CurrentState == nil || strings.TrimSpace(*history.CurrentState) == "" {
 		return runtimepipeline.WorkflowEngineStateRecord{}, fmt.Errorf("selected-contract header requires exact historical lifecycle evidence")
 	}
 	identity, err := runtimeflowidentity.NewRunScopedFlowInstance(state.RunID, runtimeflowidentity.StoredRoute(state.WorkflowName, runtimeflowidentity.LogicalInstanceID(state.Route), state.Route))
@@ -421,7 +421,7 @@ func selectedContractHistoricalHeader(state selectedContractWorkflowState, confi
 	record := runtimepipeline.WorkflowEngineStateRecord{
 		Identity: identity, EntityID: state.EntityID, WorkflowName: state.WorkflowName, WorkflowVersion: construction.WorkflowVersion(),
 		ParentInstance: construction.ParentRoute().FlowInstance, InstanceKey: metadata.InstanceKey,
-		Mode: state.Mode, Status: "active", CurrentState: history.CurrentState, StageDefined: metadata.StageDefined,
+		Mode: state.Mode, Status: "active", CurrentState: *history.CurrentState, StageDefined: metadata.StageDefined,
 		EntityType: state.EntityType, Slug: metadata.Slug, Name: metadata.Name, Config: config,
 		EnteredStageAt: *history.EnteredStateAt, CreatedAt: now, UpdatedAt: now,
 		Transition: runtimepipeline.WorkflowEngineStateTransitionCreateStateAndCompanion,

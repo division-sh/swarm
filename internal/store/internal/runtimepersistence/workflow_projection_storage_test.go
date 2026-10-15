@@ -27,14 +27,14 @@ func TestWorkflowProjectionStorageUsesOriginalSnapshotAndExactPredicatesBothStor
 			}
 			var control WorkflowControlProjectionStorage
 			var controlFields []byte
-			if err := f.db.QueryRowContext(f.ctx, `SELECT es.current_state,es.fields,COALESCE(`+status+`,'') FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance WHERE es.run_id=$1 AND es.entity_id=$2`, run, entity).
+			if err := f.db.QueryRowContext(f.ctx, `SELECT fi.current_state,es.fields,COALESCE(`+status+`,'') FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id WHERE es.run_id=$1 AND es.entity_id=$2`, run, entity).
 				Scan(&control.CurrentState, &controlFields, &control.ControlStatus); err != nil {
 				t.Fatal(err)
 			}
 			control.Fields = controlFields
 			var duplicate WorkflowDuplicateProjectionStorage
 			var duplicateFields []byte
-			if err := f.db.QueryRowContext(f.ctx, `SELECT es.revision,COALESCE(`+name+`,''),es.fields FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance WHERE es.run_id=$1 AND es.entity_id=$2`, run, entity).
+			if err := f.db.QueryRowContext(f.ctx, `SELECT fi.revision,COALESCE(`+name+`,''),es.fields FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id WHERE es.run_id=$1 AND es.entity_id=$2`, run, entity).
 				Scan(&duplicate.Revision, &duplicate.FieldName, &duplicateFields); err != nil {
 				t.Fatal(err)
 			}
@@ -63,6 +63,15 @@ func TestWorkflowProjectionStorageUsesOriginalSnapshotAndExactPredicatesBothStor
 			}
 			if got, err := ReadWorkflowDuplicateProjectionStorageForTest(cancelled, f.store, run, entity); !errors.Is(err, context.Canceled) || !reflect.DeepEqual(got, WorkflowDuplicateProjectionStorage{}) {
 				t.Fatalf("cancelled duplicate retained evidence: %+v %v", got, err)
+			}
+			if changed, err := RemoveWorkflowProjectionHeaderForTest(f.ctx, f.store, run, plan.Instance.StorageRef); err != nil || changed != 1 {
+				t.Fatalf("remove exact constructed header: rows=%d err=%v", changed, err)
+			}
+			if got, err := ReadWorkflowControlProjectionStorageForTest(f.ctx, f.store, run, entity); !errors.Is(err, sql.ErrNoRows) || !reflect.DeepEqual(got, WorkflowControlProjectionStorage{}) {
+				t.Fatalf("headerless control fabricated lifecycle: %+v %v", got, err)
+			}
+			if got, err := ReadWorkflowDuplicateProjectionStorageForTest(f.ctx, f.store, run, entity); !errors.Is(err, sql.ErrNoRows) || !reflect.DeepEqual(got, WorkflowDuplicateProjectionStorage{}) {
+				t.Fatalf("headerless duplicate fabricated revision: %+v %v", got, err)
 			}
 		})
 	}

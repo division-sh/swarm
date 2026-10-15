@@ -194,10 +194,10 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 						state := f.state
 						if !root && entity.EntityID == f.runID {
 							state = parentRecord.State
-							if state.Identity.Route.ScopeKey != "." || state.ParentInstance != "" || state.InstanceKey != "" || len(entity.Fields) != 0 || entity.CurrentState != "pending" {
+							if state.Identity.Route.ScopeKey != "." || state.ParentInstance != "" || state.InstanceKey != "" || len(entity.Fields) != 0 || entity.CurrentState == nil || *entity.CurrentState != "pending" {
 								t.Fatalf("fixed structural parent changed scope or business state: %#v", entity)
 							}
-						} else if !root && (state.Identity.Route.ScopeKey != "owner" || state.ParentInstance != f.runID || state.InstanceKey != "one" || entity.CurrentState != "active") {
+						} else if !root && (state.Identity.Route.ScopeKey != "owner" || state.ParentInstance != f.runID || state.InstanceKey != "one" || entity.CurrentState == nil || *entity.CurrentState != "active") {
 							t.Fatalf("fixed business child changed constructor identity: %#v", entity)
 						}
 						assertA2ForkConstructionMetadata(t, entity, record, state)

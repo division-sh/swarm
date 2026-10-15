@@ -155,6 +155,7 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 						ParentInstance: f.runID, InstanceKey: "one",
 						StageDefined: true, FlowTemplate: "owner", Mode: "template", Status: "active",
 						CreatedAt: f.state.CreatedAt, UpdatedAt: f.state.UpdatedAt, EnteredStateAt: f.state.EnteredStageAt,
+						DataCreatedAt: &f.state.CreatedAt, DataUpdatedAt: &f.state.UpdatedAt,
 					}
 					if entity.MaterializationMetadata != nil {
 						gotMetadata := *entity.MaterializationMetadata
@@ -200,7 +201,10 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 						t.Fatalf("refused activation wrote facts: before=%v after=%v", before, after)
 					}
 					var sourceState, sourceName string
-					if err := f.db.QueryRowContext(f.ctx, `SELECT current_state, name FROM entity_state WHERE run_id=$1 AND entity_id=$2`, f.runID, f.entityID).Scan(&sourceState, &sourceName); err != nil {
+					if err := f.db.QueryRowContext(f.ctx, `SELECT fi.current_state, es.name
+FROM entity_state es JOIN flow_instances fi
+ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
+WHERE es.run_id=$1 AND es.entity_id=$2`, f.runID, f.entityID).Scan(&sourceState, &sourceName); err != nil {
 						t.Fatal(err)
 					}
 					if sourceState != "later" || sourceName != "Later Name" {
@@ -229,7 +233,7 @@ func assertSnapshotOwnershipEntity(t *testing.T, f snapshotOwnershipFixture, for
 	t.Helper()
 	got := readSnapshotOwnershipEntity(t, f, forkRunID)
 	meta := want.MaterializationMetadata
-	if got.Flow != meta.FlowInstance || got.EntityType != meta.EntityType || got.Slug != meta.Slug || got.Name != meta.Name || got.State != want.CurrentState || got.Revision != wantRevision || want.EnteredStateAt == nil || !got.Entered.Equal(*want.EnteredStateAt) {
+	if got.Flow != meta.FlowInstance || got.EntityType != meta.EntityType || got.Slug != meta.Slug || got.Name != meta.Name || want.CurrentState == nil || got.State != *want.CurrentState || got.Revision != wantRevision || want.EnteredStateAt == nil || !got.Entered.Equal(*want.EnteredStateAt) {
 		t.Fatalf("fork row differs: got=%#v want=%#v revision=%d", got, want, wantRevision)
 	}
 	for i, bucket := range []map[string]any{want.Fields, want.Gates, want.Bookkeeping, want.Accumulator} {
@@ -252,7 +256,11 @@ func readSnapshotOwnershipEntity(t *testing.T, f snapshotOwnershipFixture, runID
 	var fields, gates, bookkeeping, accumulator []byte
 	var revision int64
 	var rawEntered any
-	if err := f.db.QueryRowContext(f.ctx, `SELECT flow_instance, entity_type, slug, name, current_state, fields, gates, bookkeeping, accumulator, revision, entered_state_at FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, f.entityID).Scan(&flow, &entityType, &slug, &name, &state, &fields, &gates, &bookkeeping, &accumulator, &revision, &rawEntered); err != nil {
+	if err := f.db.QueryRowContext(f.ctx, `SELECT es.flow_instance, es.entity_type, es.slug, es.name, fi.current_state,
+es.fields, fi.gates, fi.bookkeeping, fi.accumulator, fi.revision, fi.entered_state_at
+FROM entity_state es JOIN flow_instances fi
+ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
+WHERE es.run_id=$1 AND es.entity_id=$2`, runID, f.entityID).Scan(&flow, &entityType, &slug, &name, &state, &fields, &gates, &bookkeeping, &accumulator, &revision, &rawEntered); err != nil {
 		t.Fatal(err)
 	}
 	entered, present, err := sqliteTimeValue(rawEntered)

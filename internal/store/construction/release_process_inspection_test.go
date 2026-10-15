@@ -32,8 +32,8 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 			entityID := runtimeidentity.NormalizeEntityID("b3c04b72-07f1-4097-a1f0-779955000002")
 			storetest.RequireRunningRun(t, ctx, writer.(storetest.RunFixtureStore), identity.RunID, time.Now().UTC())
 			if _, err := db.ExecContext(ctx, `INSERT INTO entity_state
-				(run_id,entity_id,flow_instance,entity_type,current_state,revision,fields,entered_state_at,created_at,updated_at)
-				VALUES ($1,$2,$3,'inspection_entity','ready',1,$4,$5,$5,$5)`,
+				(run_id,entity_id,flow_instance,entity_type,fields,created_at,updated_at)
+				VALUES ($1,$2,$3,'inspection_entity',$4,$5,$5)`,
 				identity.RunID, entityID.String(), identity.Route.InstancePath,
 				`{"quantity":9007199254740993,"optional":null}`, time.Now().UTC()); err != nil {
 				t.Fatal(err)

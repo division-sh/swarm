@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -86,7 +87,7 @@ func TestSelectedAgentConstructionUsesExactFixedHeader(t *testing.T) {
 					metadata.CreatedAt, metadata.UpdatedAt, metadata.EnteredStateAt = entered, entered, entered
 					metadata.Status, metadata.StageDefined = "active", lifecycle.StageCount() != 0
 					plan := runfork.RunForkPlan{SourceRunID: runID, Entities: []runfork.RunForkEntityState{{
-						EntityID: constructed.EntityID, MaterializationMetadata: metadata, CurrentState: stage.ID(), EnteredStateAt: &entered,
+						EntityID: constructed.EntityID, MaterializationMetadata: metadata, CurrentState: mutationlog.PresentLifecycleState(stage.ID()), EnteredStateAt: &entered,
 					}}}
 					before, err := json.Marshal(plan)
 					if err != nil {
@@ -126,7 +127,7 @@ func TestSelectedAgentConstructionUsesExactFixedHeader(t *testing.T) {
 					if selected.AllowsSubscriber(bus.Subscriber{Recipient: evidence.Recipient, Path: evidence.Path, AgentPlan: agent}) {
 						t.Fatal("construction facts invented a root-to-descendant routing permission")
 					}
-					for _, fault := range []string{"missing", "duplicate", "duplicate_route", "wrong_declaration", "wrong_mode", "wrong_entity", "missing_state", "missing_entered", "missing_parent", "foreign_parent", "malformed_config", "foreign_route"} {
+					for _, fault := range []string{"missing", "duplicate", "duplicate_route", "wrong_declaration", "wrong_mode", "wrong_entity", "missing_state", "absent_state", "missing_entered", "missing_parent", "foreign_parent", "malformed_config", "foreign_route"} {
 						t.Run(fault, func(t *testing.T) {
 							bad, row := plan, *metadata
 							bad.Entities = []runfork.RunForkEntityState{plan.Entities[0]}
@@ -147,7 +148,9 @@ func TestSelectedAgentConstructionUsesExactFixedHeader(t *testing.T) {
 							case "wrong_entity":
 								bad.Entities[0].EntityID = uuid.NewString()
 							case "missing_state":
-								bad.Entities[0].CurrentState = ""
+								bad.Entities[0].CurrentState = mutationlog.PresentLifecycleState("")
+							case "absent_state":
+								bad.Entities[0].CurrentState = nil
 							case "missing_entered":
 								bad.Entities[0].EnteredStateAt = nil
 							case "missing_parent", "foreign_parent":

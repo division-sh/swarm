@@ -138,18 +138,18 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	`, sourceRunID, entityID, firstEventID, at); err != nil {
 		t.Fatalf("seed first mutations: %v", err)
 	}
+	seedWorkflowHeaderProjectionFixture(t, ctx, db, sourceRunID, entityID, "flow-a/1", "flow-a", "historical_entity", "queued", `{"total":7}`, at)
+	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET slug='before-slug',name='Before Name',gates='{"review":true}'::jsonb,bookkeeping='{"activation":"standing"}'::jsonb WHERE run_id=$1 AND entity_id=$2`, sourceRunID, entityID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name,
-				current_state, gates, fields, bookkeeping, accumulator, revision,
-			entered_state_at, created_at, updated_at
+			run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'flow-a/1', 'historical_entity', 'before-slug', 'Before Name',
-				'queued', '{"review": true}'::jsonb,
 				'{"title":"before-title","slug":"before-slug","name":"Before Name","gates":{"review":"authored-review"},"accumulator":{"total":"authored-total"},"bookkeeping":{"activation":"manual"}}'::jsonb,
-				'{"activation":"standing"}'::jsonb, '{"total":7}'::jsonb, 1,
-			$3, $3, $3
+			$3, $3
 		)
 	`, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
@@ -170,7 +170,6 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	if _, err := db.ExecContext(ctx, `
 		UPDATE entity_state
 			SET fields = jsonb_set(jsonb_set(fields, '{title}', '"fork-title"'::jsonb, true), '{current_state}', '"business-state"'::jsonb, true),
-		    revision = 2,
 		    updated_at = $3
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid
 	`, sourceRunID, entityID, fieldOnlyAt); err != nil {
@@ -193,17 +192,16 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	}
 	if _, err := db.ExecContext(ctx, `
 		UPDATE entity_state
-		SET current_state = 'done',
-		    slug = 'after-slug',
+		SET slug = 'after-slug',
 		    name = 'After Name',
 		    fields = '{"title": "after-title", "slug": "after-slug", "name": "After Name"}'::jsonb,
-		    accumulator = '{"score": 9}'::jsonb,
-		    revision = 4,
-		    entered_state_at = $3,
 		    updated_at = $3
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid
 	`, sourceRunID, entityID, afterAt); err != nil {
 		t.Fatalf("update later source state: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET current_state='done',slug='after-slug',name='After Name',accumulator='{"score":9}'::jsonb,revision=4,entered_state_at=$3,updated_at=$3 WHERE run_id=$1 AND entity_id=$2`, sourceRunID, entityID, afterAt); err != nil {
+		t.Fatal(err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 
@@ -256,16 +254,16 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	var sourceRevision, forkRevision int
 	var forkEnteredStateAt time.Time
 	if err := db.QueryRowContext(ctx, `
-		SELECT current_state, fields->>'title', revision
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+		SELECT f.current_state, e.fields->>'title', f.revision
+		FROM entity_state e JOIN flow_instances f ON f.run_id=e.run_id AND f.entity_id=e.entity_id AND f.instance_path=e.flow_instance AND f.entity_type=e.entity_type
+		WHERE e.run_id = $1::uuid AND e.entity_id = $2::uuid
 	`, sourceRunID, entityID).Scan(&sourceState, &sourceTitle, &sourceRevision); err != nil {
 		t.Fatalf("load source entity_state: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `
-		SELECT current_state, fields->>'title', revision, entered_state_at
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+		SELECT f.current_state, e.fields->>'title', f.revision, f.entered_state_at
+		FROM entity_state e JOIN flow_instances f ON f.run_id=e.run_id AND f.entity_id=e.entity_id AND f.instance_path=e.flow_instance AND f.entity_type=e.entity_type
+		WHERE e.run_id = $1::uuid AND e.entity_id = $2::uuid
 	`, result.ForkRunID, entityID).Scan(&forkState, &forkTitle, &forkRevision, &forkEnteredStateAt); err != nil {
 		t.Fatalf("load fork entity_state: %v", err)
 	}
@@ -286,9 +284,9 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	}
 	var forkFieldsJSON, forkBookkeepingJSON, forkGatesJSON, forkAccumulatorJSON []byte
 	if err := db.QueryRowContext(ctx, `
-			SELECT fields, bookkeeping, gates, accumulator
-			FROM entity_state
-			WHERE run_id = $1::uuid AND entity_id = $2::uuid
+			SELECT e.fields, f.bookkeeping, f.gates, f.accumulator
+			FROM entity_state e JOIN flow_instances f ON f.run_id=e.run_id AND f.entity_id=e.entity_id AND f.instance_path=e.flow_instance AND f.entity_type=e.entity_type
+			WHERE e.run_id = $1::uuid AND e.entity_id = $2::uuid
 		`, result.ForkRunID, entityID).Scan(&forkFieldsJSON, &forkBookkeepingJSON, &forkGatesJSON, &forkAccumulatorJSON); err != nil {
 		t.Fatalf("load fork semantic domains: %v", err)
 	}
@@ -431,16 +429,17 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	`, sourceRunID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed selected mutations: %v", err)
 	}
+	seedWorkflowHeaderProjectionFixture(t, ctx, db, sourceRunID, entityID, "state-flow/at-T", "state-flow", "validation_case", "pending", "{}", at)
+	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET name='Fork Point Name' WHERE run_id=$1 AND entity_id=$2`, sourceRunID, entityID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
+			run_id, entity_id, flow_instance, entity_type, name, fields, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'state-flow/at-T', 'validation_case', 'Fork Point Name',
-			'pending', '{}'::jsonb, '{"name": "Fork Point Name"}'::jsonb, '{}'::jsonb, 1,
-			$3, $3, $3
+			'{"name": "Fork Point Name"}'::jsonb, $3, $3
 		)
 	`, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
@@ -459,14 +458,14 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	if _, err := db.ExecContext(ctx, `
 		UPDATE entity_state
 		SET name = 'Current Name',
-		    current_state = 'done',
 		    fields = '{"name": "Current Name"}'::jsonb,
-		    revision = 2,
-		    entered_state_at = $3,
 		    updated_at = $3
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid
 	`, sourceRunID, entityID, afterAt); err != nil {
 		t.Fatalf("update later source state: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET name='Current Name',current_state='done',revision=2,entered_state_at=$3,updated_at=$3 WHERE run_id=$1 AND entity_id=$2`, sourceRunID, entityID, afterAt); err != nil {
+		t.Fatal(err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 
@@ -482,7 +481,7 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	}
 	metadata := plan.Entities[0].MaterializationMetadata
 	if metadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner ||
-		metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState ||
+		metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance ||
 		metadata.FlowInstance != "state-flow/at-T" ||
 		metadata.EntityType != "validation_case" {
 		t.Fatalf("materialization metadata = %#v", metadata)
@@ -494,9 +493,9 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	}
 	var flowInstance, entityType, state, name string
 	if err := db.QueryRowContext(ctx, `
-		SELECT flow_instance, entity_type, current_state, COALESCE(name, '')
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
+		SELECT e.flow_instance, e.entity_type, f.current_state, COALESCE(e.name, '')
+		FROM entity_state e JOIN flow_instances f ON f.run_id=e.run_id AND f.entity_id=e.entity_id AND f.instance_path=e.flow_instance AND f.entity_type=e.entity_type
+		WHERE e.run_id = $1::uuid AND e.entity_id = $2::uuid
 	`, materialized.ForkRunID, entityID).Scan(&flowInstance, &entityType, &state, &name); err != nil {
 		t.Fatalf("load fork entity_state: %v", err)
 	}
@@ -526,16 +525,14 @@ func TestRunForkPlanner_FailsClosedWithoutSourceAtTEntitySnapshotMetadata(t *tes
 		t.Fatalf("seed mutation: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations)
+	seedWorkflowHeaderProjectionFixture(t, ctx, db, sourceRunID, entityID, "post-state-flow", "post-state-flow", "default", "pending", "{}", afterAt)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
+			run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'post-state-flow', 'default',
-			'pending', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
-			$3, $3, $3
+			'{}'::jsonb, $3, $3
 		)
 	`, sourceRunID, entityID, afterAt); err != nil {
 		t.Fatalf("seed post-T entity_state: %v", err)
@@ -620,16 +617,14 @@ func TestRunForkPlanner_TypedSourceMetadataWinsOverAuthoredEntityTypeCollision(t
 	`, sourceRunID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed mutations: %v", err)
 	}
+	seedWorkflowHeaderProjectionFixture(t, ctx, db, sourceRunID, entityID, "state-flow/at-T", "state-flow", "source_case", "pending", "{}", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
+			run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'state-flow/at-T', 'source_case',
-			'pending', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
-			$3, $3, $3
+			'{}'::jsonb, $3, $3
 		)
 	`, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
@@ -648,7 +643,7 @@ func TestRunForkPlanner_TypedSourceMetadataWinsOverAuthoredEntityTypeCollision(t
 	}
 	entity := plan.Entities[0]
 	if entity.MaterializationMetadata.EntityType != "source_case" || entity.MaterializationMetadata.FlowInstance != "state-flow/at-T" ||
-		entity.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState {
+		entity.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance {
 		t.Fatalf("typed source metadata = %#v", entity.MaterializationMetadata)
 	}
 	if entity.Fields["entity_type"] != "field_case" {
@@ -858,14 +853,13 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	`, sourceRunID, entityID, eventID, at); err != nil {
 		t.Fatalf("seed mutation: %v", err)
 	}
+	seedWorkflowHeaderProjectionFixture(t, ctx, db, sourceRunID, entityID, "flow-a/1", "flow-a", "default", "ready", "{}", at)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
+			run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'ready',
-			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $3, $3, $3
+			$1::uuid, $2::uuid, 'flow-a/1', 'default', '{}'::jsonb, $3, $3
 		)
 	`, sourceRunID, entityID, at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
@@ -1011,12 +1005,12 @@ func TestRunForkActivation_ActivatesMaterializedForkAndFreezesSource(t *testing.
 
 	var sourceState, forkState string
 	if err := db.QueryRowContext(ctx, `
-		SELECT current_state FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid
+		SELECT current_state FROM flow_instances WHERE run_id = $1::uuid AND entity_id = $2::uuid AND instance_path='flow-a/1'
 	`, sourceRunID, entityID).Scan(&sourceState); err != nil {
 		t.Fatalf("load source state: %v", err)
 	}
 	if err := db.QueryRowContext(ctx, `
-		SELECT current_state FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid
+		SELECT current_state FROM flow_instances WHERE run_id = $1::uuid AND entity_id = $2::uuid AND instance_path='flow-a/1'
 	`, materialized.ForkRunID, entityID).Scan(&forkState); err != nil {
 		t.Fatalf("load fork state: %v", err)
 	}

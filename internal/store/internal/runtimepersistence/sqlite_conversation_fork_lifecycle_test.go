@@ -26,40 +26,8 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	now := activeConversationForkTestClock()
 	source := seedSQLiteConversationForkSource(t, s, now)
 	entityID := uuid.NewString()
-	if _, err := s.backend.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, bookkeeping, accumulator, revision,
-			entered_state_at, created_at, updated_at
-		) VALUES (?, ?, 'flow/forkchat', 'default', 'draft', '{}', '{}', '{}', '{}', 1, ?, ?, ?)
-	`, source.runID, entityID, source.turn1At.Add(-30*time.Second), source.turn1At.Add(-30*time.Second), source.turn1At.Add(-30*time.Second)); err != nil {
-		t.Fatalf("seed SQLite fork entity state: %v", err)
-	}
-	if _, err := s.backend.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at
-		) VALUES
-			(?, ?, 'lifecycle_state', '', NULL, '"draft"', 'platform', 'test', ?),
-			(?, ?, 'authored_field', 'removed', NULL, '"temporary"', 'platform', 'test', ?),
-			(?, ?, 'authored_field', 'removed', '"temporary"', NULL, 'platform', 'test', ?),
-			(?, ?, 'accumulator', 'removed', NULL, '9', 'platform', 'test', ?),
-			(?, ?, 'accumulator', 'removed', '9', NULL, 'platform', 'test', ?),
-			(?, ?, 'bookkeeping', 'removed', NULL, '"temporary"', 'platform', 'test', ?),
-			(?, ?, 'bookkeeping', 'removed', '"temporary"', NULL, 'platform', 'test', ?),
-			(?, ?, 'gate', 'removed', NULL, 'true', 'platform', 'test', ?),
-			(?, ?, 'gate', 'removed', 'true', NULL, 'platform', 'test', ?)
-	`,
-		source.runID, entityID, source.turn1At.Add(-30*time.Second),
-		source.runID, entityID, source.turn1At.Add(-25*time.Second),
-		source.runID, entityID, source.turn1At.Add(-20*time.Second),
-		source.runID, entityID, source.turn1At.Add(-25*time.Second),
-		source.runID, entityID, source.turn1At.Add(-20*time.Second),
-		source.runID, entityID, source.turn1At.Add(-25*time.Second),
-		source.runID, entityID, source.turn1At.Add(-20*time.Second),
-		source.runID, entityID, source.turn1At.Add(-25*time.Second),
-		source.runID, entityID, source.turn1At.Add(-20*time.Second),
-	); err != nil {
-		t.Fatalf("seed SQLite fork deletion mutations: %v", err)
+	if err := seedConversationForkChatEntityForTest(ctx, s, source.runID, entityID, source.turn1At); err != nil {
+		t.Fatalf("seed closed conversation projection: %v", err)
 	}
 
 	turnFork, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
@@ -136,7 +104,7 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 		t.Fatalf("SQLite snapshot entities = %#v", prepared.Snapshot.EntitySnapshot)
 	}
 	entity := prepared.Snapshot.EntitySnapshot[0]
-	if entity.EntityID != entityID || entity.CurrentState != "draft" {
+	if entity.EntityID != entityID || entity.CurrentState == nil || *entity.CurrentState != "draft" || entity.Fields["name"] != "Before" {
 		t.Fatalf("SQLite reconstructed entity = %#v", entity)
 	}
 	if _, ok := entity.Fields["removed"]; ok {
@@ -254,6 +222,7 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	if deletedAgain.Deleted || !deletedAgain.AlreadyDeleted {
 		t.Fatalf("delete replay = %#v", deletedAgain)
 	}
+	proveQ10ConversationDataOnlyCuts(t, ctx, s, source, entityID, now)
 }
 
 func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base time.Time) conversationForkSourceFixture {

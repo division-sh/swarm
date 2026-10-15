@@ -32,7 +32,7 @@ func proveA2JoinHeaderOnlyReceiverRefusal(t *testing.T, backend string) {
 	defer cancel()
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
-	seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, path, "active", 1, at)
+	seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, path, at)
 	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, path, flowID, "review_item", "active", "{}", at)
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(mustPersistenceNode(flowID, "join-node")), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: path, EntityID: entityID})}
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "item.completed", "fixture", "", []byte(`{"member":"two","value":2}`), 0, runID,

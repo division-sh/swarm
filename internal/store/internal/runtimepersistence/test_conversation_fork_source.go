@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	"github.com/google/uuid"
 )
 
 // ConversationForkSourceFixture is the fixed historical source used by the
@@ -25,16 +26,38 @@ type ConversationForkSourceFixture struct {
 // SeedConversationForkSourceForTest uses the selected backend's existing write
 // admission. No caller-supplied SQL or transaction callback escapes the facade.
 func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixture ConversationForkSourceFixture) ([2]events.Event, error) {
-	var result [2]events.Event
 	identity, err := fixture.Identity.StorageFields()
 	if err != nil {
-		return result, err
+		return [2]events.Event{}, err
 	}
 	if identity.RunID != fixture.RunID {
-		return result, fmt.Errorf("fork fixture run does not match agent identity")
+		return [2]events.Event{}, fmt.Errorf("fork fixture run does not match agent identity")
 	}
 	if fixture.SessionID == "" || fixture.EntityID == "" || fixture.Event1ID == "" || fixture.Event2ID == "" || fixture.CreatedAt.IsZero() || fixture.Turn1At.IsZero() || !fixture.Turn2At.After(fixture.Turn1At) {
-		return result, fmt.Errorf("fork fixture requires exact historical identities and timestamps")
+		return [2]events.Event{}, fmt.Errorf("fork fixture requires exact historical identities and timestamps")
+	}
+	return seedConversationForkFixture(ctx, selected, fixture, conversationForkServedSource)
+}
+
+func seedConversationForkChatEntityForTest(ctx context.Context, selected any, run, entity string, forkAt time.Time) error {
+	_, err := seedConversationForkFixture(ctx, selected, ConversationForkSourceFixture{RunID: run, EntityID: entity, Turn1At: forkAt}, conversationForkNativeChat)
+	return err
+}
+
+func seedConversationForkDataOnlyEntityForTest(ctx context.Context, selected any, run, entity string, forkAt time.Time) error {
+	_, err := seedConversationForkFixture(ctx, selected, ConversationForkSourceFixture{RunID: run, EntityID: entity, Turn1At: forkAt}, conversationForkDataOnlyChat)
+	return err
+}
+
+func seedConversationForkFixture(ctx context.Context, selected any, fixture ConversationForkSourceFixture, kind conversationForkFixtureKind) ([2]events.Event, error) {
+	var result [2]events.Event
+	for _, id := range []string{fixture.RunID, fixture.EntityID} {
+		if _, err := uuid.Parse(id); err != nil {
+			return result, fmt.Errorf("conversation fixture requires exact run/entity UUIDs: %w", err)
+		}
+	}
+	if fixture.Turn1At.IsZero() {
+		return result, fmt.Errorf("conversation fixture requires an exact historical cut")
 	}
 	source, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx)
 	if !ok || source.BundleHash() == "" {
@@ -52,45 +75,39 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 		if bundleHash != source.BundleHash() {
 			return fmt.Errorf("fork fixture source does not match admitted run")
 		}
-		now := fixture.CreatedAt
-		var statements []struct {
-			query string
-			args  []any
+		statements, err := conversationForkProjectionStatements(fixture, kind, dialect)
+		if err != nil {
+			return err
 		}
-		switch dialect {
-		case authoractivityfixture.DialectPostgres:
-			statements = []struct {
-				query string
-				args  []any
-			}{
-				{`INSERT INTO agent_sessions (
+		if kind == conversationForkServedSource {
+			identity, err := fixture.Identity.StorageFields()
+			if err != nil {
+				return err
+			}
+			query := `INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
 				memory_enabled, status, created_at, updated_at
-			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'active',$10,$10)`,
-					[]any{fixture.SessionID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, now.Add(-3 * time.Minute)}},
-				{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid,$2::uuid,'flow/forkchat','default','after','{}'::jsonb,'{"name":"After"}'::jsonb,'{}'::jsonb,2,$3,$3,$3)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
-				{`INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at) VALUES ($1::uuid,$2::uuid,'lifecycle_state','',NULL,'"draft"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'authored_field','name',NULL,'"Before"'::jsonb,'platform','test',$3),($1::uuid,$2::uuid,'lifecycle_state','','"draft"'::jsonb,'"after"'::jsonb,'platform','test',$4)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
-			}
-		case authoractivityfixture.DialectSQLite:
-			statements = []struct {
-				query string
-				args  []any
-			}{
-				{`INSERT INTO agent_sessions (
+			) VALUES (?,?,?,?,?,?,?,?,?,1,'active',?,?)`
+			at := fixture.CreatedAt.Add(-3 * time.Minute)
+			args := []any{fixture.SessionID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, at, at}
+			if dialect == authoractivityfixture.DialectPostgres {
+				query = `INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 				flow_scope_key, flow_instance_id, flow_instance,
 				memory_enabled, status, created_at, updated_at
-			) VALUES (?,?,?,?,?,?,?,?,?,1,'active',?,?)`,
-					[]any{fixture.SessionID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, now.Add(-3 * time.Minute), now.Add(-3 * time.Minute)}},
-				{`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?,?,'flow/forkchat','default','after','{}','{"name":"After"}','{}',2,?,?,?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second), fixture.Turn1At.Add(10 * time.Second)}},
-				{`INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at) VALUES (?,?,'lifecycle_state','',NULL,'"draft"','platform','test',?),(?,?,'authored_field','name',NULL,'"Before"','platform','test',?),(?,?,'lifecycle_state','','"draft"','"after"','platform','test',?)`, []any{fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(-30 * time.Second), fixture.RunID, fixture.EntityID, fixture.Turn1At.Add(10 * time.Second)}},
+			) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'active',$10,$10)`
+				args = args[:10]
 			}
+			statements = append([]conversationForkFixtureStatement{{query, args}}, statements...)
 		}
 		for _, statement := range statements {
 			if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
 				return fmt.Errorf("seed conversation fork source: %w", err)
 			}
+		}
+		if kind != conversationForkServedSource {
+			return nil
 		}
 
 		for i, eventID := range []string{fixture.Event1ID, fixture.Event2ID} {
@@ -110,6 +127,7 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 		}
 		return nil
 	}
+	var err error
 	switch store := selected.(type) {
 	case *PostgresStore:
 		if store == nil || store.backend == nil {
