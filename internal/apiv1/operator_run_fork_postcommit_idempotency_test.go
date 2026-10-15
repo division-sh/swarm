@@ -72,12 +72,14 @@ func TestOperatorRunForkLateWinnerUsesOriginalActorKey(t *testing.T) {
 func TestOperatorRunForkOutcomeRetainsOriginalStartSelector(t *testing.T) {
 	for _, start := range []bool{false, true} {
 		for _, keyed := range []bool{false, true} {
-			name := "latest/keyless"
+			name := "latest"
 			if start {
-				name = "start/keyless"
+				name = "start"
 			}
 			if keyed {
 				name += "/keyed"
+			} else {
+				name += "/keyless"
 			}
 			t.Run(name, func(t *testing.T) {
 				operations := newRecordingRunForkOperations()
