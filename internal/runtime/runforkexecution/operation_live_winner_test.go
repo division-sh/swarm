@@ -2,7 +2,9 @@ package runforkexecution
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -81,11 +83,20 @@ func (p *liveWinnerExecutionProbe) IssueRunForkSelectedContractRuntimeExecution(
 }
 
 func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.T) {
-	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) {
+	for _, cell := range []struct {
+		backend         string
+		cancelDuplicate bool
+	}{
+		{"sqlite", false}, {"postgres", false}, {"sqlite", true}, {"postgres", true},
+	} {
+		name := cell.backend
+		if cell.cancelDuplicate {
+			name += "/loser_cancelled"
+		}
+		t.Run(name, func(t *testing.T) {
 			var selected startupownership.Store
 			var owner SelectedContractExecutionOwner
-			if backend == "sqlite" {
+			if cell.backend == "sqlite" {
 				s := storetest.StartSQLiteRuntimeStore(t)
 				selected, owner = s, selectedContractSQLiteExecutionOwnerForTest(t, s)
 			} else {
@@ -190,6 +201,17 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 			case <-ctx.Done():
 				t.Fatal(ctx.Err())
 			}
+			if cell.cancelDuplicate {
+				cancelDuplicate()
+				select {
+				case <-duplicateDone:
+					if !errors.Is(duplicate.err, context.Canceled) {
+						t.Fatalf("loser cancellation was not retained: %v", duplicate.err)
+					}
+				case <-ctx.Done():
+					t.Fatal("loser cancellation waited for winner execution")
+				}
+			}
 			releaseExecution.Do(func() { close(execution.allow) })
 			for _, done := range []chan struct{}{winnerDone, duplicateDone} {
 				select {
@@ -198,11 +220,40 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 					t.Fatal("operation outcome waited for retained-runtime retirement")
 				}
 			}
-			if winner.err != nil || duplicate.err != nil || !winner.result.Activation.Activated || !duplicate.result.Activation.Activated ||
-				winner.result.Materialization.ForkRunID == "" || winner.result.Materialization.ForkRunID != duplicate.result.Materialization.ForkRunID ||
+			if winner.err != nil || !winner.result.Activation.Activated || winner.result.Materialization.ForkRunID == "" ||
 				probe.creates.Load() != 1 || execution.issues.Load() != 1 {
 				t.Fatalf("keyed join changed child/execution: winner=%+v/%v duplicate=%+v/%v materializations=%d issues=%d",
 					winner.result, winner.err, duplicate.result, duplicate.err, probe.creates.Load(), execution.issues.Load())
+			}
+			if !cell.cancelDuplicate && (duplicate.err != nil || !duplicate.result.Activation.Activated ||
+				winner.result.Materialization.ForkRunID != duplicate.result.Materialization.ForkRunID) {
+				t.Fatalf("duplicate changed acknowledged child: %+v err=%v", duplicate.result, duplicate.err)
+			}
+			before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			activated, err := ExecuteSelectedContractRunFork(ctx, duplicateRequest)
+			if err != nil || !activated.Activation.Activated || activated.Materialization.ForkRunID != winner.result.Materialization.ForkRunID {
+				t.Fatalf("activated replay changed outcome: %+v err=%v", activated, err)
+			}
+			hostile := duplicateOperation
+			hostile.TransportHash = "sha256:changed-request"
+			duplicateRequest.ForkOperation = &hostile
+			_, err = ExecuteSelectedContractRunFork(ctx, duplicateRequest)
+			var conflict *runfork.ForkOperationKeyConflictError
+			if !errors.As(err, &conflict) || probe.creates.Load() != 1 || execution.issues.Load() != 1 {
+				t.Fatalf("changed transport crossed original operation: materializations=%d issues=%d err=%v", probe.creates.Load(), execution.issues.Load(), err)
+			}
+			after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("activated/hostile replay mutated application storage: %v", err)
+			}
+			owner.ports.contexts.mu.Lock()
+			remaining := len(owner.ports.contexts.entries)
+			owner.ports.contexts.mu.Unlock()
+			if remaining != 1 {
+				t.Fatalf("observer preparation leaked: got %d entries, want retained winner only", remaining)
 			}
 		})
 	}
