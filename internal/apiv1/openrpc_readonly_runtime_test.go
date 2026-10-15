@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
@@ -502,6 +503,13 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 	effectiveIntent := apiTestResolvedIntent(t, "researcher", "Research the requested market signal.")
 	now := time.Unix(1700000000, 0).UTC()
 	runID := "run-1"
+	stageDefined, currentState, revision := true, "collecting", int64(1)
+	entitySummary := operatorread.OperatorEntitySummary{
+		EntityID: "entity-1", RunID: runID, FlowInstance: "review/primary", EntityType: "mvp_spec",
+		StageDefined: &stageDefined, CurrentState: &currentState, Revision: &revision,
+		EnteredStateAt: &now, LifecycleCreatedAt: &now, LifecycleUpdatedAt: &now,
+		CreatedAt: now, UpdatedAt: now,
+	}
 	eventID := "evt-1"
 	sessionID := "sess-1"
 	forkID := "00000000-0000-0000-0000-000000000301"
@@ -610,18 +618,10 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 			}},
 		},
 		Entities: &fakeEntityReadStore{
-			listResult: operatorread.OperatorEntityListResult{Entities: []operatorread.OperatorEntitySummary{{
-				EntityID:     "entity-1",
-				RunID:        runID,
-				FlowInstance: "review/primary",
-				EntityType:   "mvp_spec",
-				CurrentState: "collecting",
-				Revision:     1,
-				CreatedAt:    now,
-				UpdatedAt:    now,
-			}}},
+			listResult: operatorread.OperatorEntityListResult{Entities: []operatorread.OperatorEntitySummary{entitySummary}},
 			getResult: operatorread.OperatorEntityFull{
-				Entity:      operatorread.OperatorEntitySummary{EntityID: "entity-1", RunID: runID, CurrentState: "collecting"},
+				Entity:      entitySummary,
+				Loops:       []loopruntime.PublicActivation{},
 				Fields:      map[string]any{"priority": "high", "activation": "manual"},
 				Bookkeeping: map[string]any{"activation": "standing"},
 				Gates:       map[string]bool{"approved": true},

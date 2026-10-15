@@ -19,7 +19,7 @@ import (
 func TestVerifyRunNativeConstructionBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			fixture, record := constructWorkflowMutationFixture(t, backend, "drift-proof", time.Now().UTC())
+			fixture, record := constructWorkflowMutationFixture(t, backend, "drift-proof", time.Now().UTC().Truncate(time.Microsecond))
 			reader := fixture.store.(interface {
 				InspectRunMutationDrift(context.Context, string) (mutationlog.DriftReport, error)
 			})

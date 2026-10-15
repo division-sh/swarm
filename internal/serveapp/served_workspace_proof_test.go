@@ -366,17 +366,21 @@ func readWorkspaceProofClaimStorage(t *testing.T, reader runtimebus.EventStore, 
 	return exact[0].Target, snapshot
 }
 
-func readWorkspaceProofReceiverFields(t *testing.T, reader pipeline.WorkflowEntityStatePersistenceReader, runID string, receiver forkReceiverRow) (string, int64) {
+func readWorkspaceProofReceiverFields(t *testing.T, reader pipeline.WorkflowTargetPersistenceReader, runID string, receiver forkReceiverRow) (string, int64) {
 	t.Helper()
 	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute("consumer", "", receiver.Flow))
 	if err != nil {
 		t.Fatal(err)
 	}
-	record, found, err := reader.LoadWorkflowEntityState(context.Background(), owner, identity.NormalizeEntityID(receiver.ID))
-	if err != nil || !found || record.EntityID != receiver.ID || record.FlowInstance != receiver.Flow || record.EntityType != receiver.Type {
-		t.Fatalf("exact receiver field owner unavailable: found=%t record=%+v err=%v", found, record, err)
+	record, err := reader.LoadWorkflowTargetPersistence(context.Background(), owner, identity.NormalizeEntityID(receiver.ID))
+	if err != nil {
+		t.Fatalf("exact receiver target owner unavailable: %v", err)
 	}
-	return string(record.Fields), record.Revision
+	instance, err := record.DecodeComplete(owner.Route, identity.NormalizeEntityID(receiver.ID))
+	if err != nil || instance.EntityID != receiver.ID || instance.StorageRef != receiver.Flow || instance.EntityType != receiver.Type {
+		t.Fatalf("exact receiver header/field owner unavailable: instance=%+v err=%v", instance, err)
+	}
+	return string(record.State.Fields), instance.Revision
 }
 
 // These are detached physical snapshot rows, not a second SQL reader or a

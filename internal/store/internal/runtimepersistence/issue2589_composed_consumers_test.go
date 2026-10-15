@@ -32,8 +32,8 @@ func TestIssue2589ComposedConsumersPreserveResultsBothStores(t *testing.T) {
 				for _, alias := range []string{"one", "two"} {
 					request.Entities = append(request.Entities, pipeline.ScenarioSetupEntityRequest{
 						Alias: alias, EntityID: uuid.NewString(), FlowInstance: "owner/" + alias,
-						EntityType: "review_item", CurrentState: "active",
-						Fields: map[string]any{"note": alias, "count": 7}, Gates: map[string]bool{"ready": true},
+						EntityType: "review_item",
+						Fields:     map[string]any{"note": alias, "count": 7},
 					})
 				}
 				result, err := owner.SetupScenarioEntities(ctx, request)

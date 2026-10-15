@@ -131,7 +131,7 @@ func (r issue2564H2NodeR1Reader) LoadWorkflowTargetPersistence(ctx context.Conte
 	event, inbound := correlation.InboundEventFromContext(ctx)
 	_, claimed := runtimedelivery.ClaimFromContext(ctx)
 	if err == nil && inbound && claimed && event.Type() == "hub.bump" && issue2564H2IsEngineEvaluationRead() {
-		if err := r.barrier.pause(ctx, fmt.Sprintf("node_R1 event=%s stage=%s revision=%d fields=%s", event.ID(), result.State.CurrentState, result.State.Revision, result.State.Fields)); err != nil {
+		if err := r.barrier.pause(ctx, fmt.Sprintf("node_R1 event=%s stage=%s revision=%d fields=%s", event.ID(), result.Lifecycle.State.CurrentState, result.Lifecycle.State.Revision, result.State.Fields)); err != nil {
 			return WorkflowTargetPersistenceRecord{}, err
 		}
 	}
