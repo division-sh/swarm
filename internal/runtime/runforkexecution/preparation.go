@@ -153,6 +153,11 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 	if err := validateSelectedForkRecoveryRequest(req); err != nil {
 		return nil, err
 	}
+	forkOperation, err := detachedSelectedForkOperation(req.ForkOperation)
+	if err != nil {
+		return nil, fmt.Errorf("capture selected fork operation: %w", err)
+	}
+	req.ForkOperation = forkOperation
 	ports, err := o.require()
 	if err != nil {
 		return nil, err
@@ -257,6 +262,10 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 	if err != nil {
 		return nil, fmt.Errorf("plan selected-contract execution: %w", err)
 	}
+	forkOperation, err = bindPreparedSelectedForkOperation(forkOperation, plan)
+	if err != nil {
+		return nil, err
+	}
 	if err := runforkadmission.ValidateFixedConstructionTree(owned.originalSource.Source, plan); err != nil {
 		return nil, fmt.Errorf("admit original atomic construction tree: %w", err)
 	}
@@ -328,6 +337,7 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 	prepared.agentRuntime, prepared.readiness = agentRuntime, readiness
 	prepared.deferredWorkAdmission = deferredWorkAdmission
 	prepared.dataPinOverrides = append([]durabledata.ExplicitPin(nil), req.DataPinOverrides...)
+	prepared.forkOperation = forkOperation
 	if req.Recovery != nil {
 		prepared.recoveryFromExecutionID = req.Recovery.ExecutionID
 		prepared.recoveryChildRunID = req.Recovery.RunID
@@ -371,8 +381,12 @@ func (p *PreparedSelectedFork) MaterializationRequest() (runforkreadiness.Materi
 	if err := decoder.Decode(&detached); err != nil {
 		return runforkreadiness.MaterializeRequest{}, err
 	}
+	forkOperation, err := detachedSelectedForkOperation(p.forkOperation)
+	if err != nil {
+		return runforkreadiness.MaterializeRequest{}, err
+	}
 	return runforkreadiness.MaterializeRequest{
-		ForkOperation:        p.forkOperation,
+		ForkOperation:        forkOperation,
 		OriginalLoopCarriage: p.originalLoopCarriage,
 		Preparation:          p.evidence(), SourceRunID: p.plan.SourceRunID, At: p.plan.ForkPoint.EventID,
 		ContractSelection: p.loadedSource.Selection, SourceArtifactFact: p.loadedSource.SourceArtifactFact,

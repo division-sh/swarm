@@ -8,11 +8,12 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
-func (o SelectedContractExecutionOwner) replaySelectedForkOperation(ctx context.Context, request SelectedContractExecutionRequest) (_ SelectedContractExecutionResult, found bool, finalErr error) {
-	canonical, _, err := request.ForkOperation.Canonical()
+func (o SelectedContractExecutionOwner) replaySelectedForkOperation(ctx context.Context, request SelectedContractExecutionRequest, elected *runfork.ForkOperationReplayRequiredError) (_ SelectedContractExecutionResult, found bool, finalErr error) {
+	canonical, err := detachedSelectedForkOperation(request.ForkOperation)
 	if err != nil {
 		return SelectedContractExecutionResult{}, false, err
 	}
@@ -24,9 +25,12 @@ func (o SelectedContractExecutionOwner) replaySelectedForkOperation(ctx context.
 	defer func() { finalErr = errors.Join(finalErr, o.completePreparation(observer)) }()
 	ctx = operation.PreparationContext()
 	for {
-		record, exists, live, err := o.observeSelectedForkOperation(ctx, canonical, operation)
+		record, exists, live, err := o.observeSelectedForkOperation(ctx, *canonical, operation)
 		if err != nil || !exists {
 			return SelectedContractExecutionResult{}, exists, err
+		}
+		if elected != nil && (record.Request.OperationID != elected.OperationID || record.ForkRunID != elected.ForkRunID) {
+			return SelectedContractExecutionResult{}, true, errors.New("selected operation observation differs from its native election")
 		}
 		switch record.Status {
 		case runfork.ForkOperationActivated:
@@ -50,6 +54,22 @@ func (o SelectedContractExecutionOwner) replaySelectedForkOperation(ctx context.
 		case <-timer.C:
 		}
 	}
+}
+
+func isolatedSelectedForkOperationReplay(err error) *runfork.ForkOperationReplayRequiredError {
+	var replay *runfork.ForkOperationReplayRequiredError
+	if errors.As(err, &replay) && failures.OnlyBranches(err, func(branch error) bool { return branch == replay }) {
+		return replay
+	}
+	return nil
+}
+
+func (o SelectedContractExecutionOwner) continueElectedSelectedForkOperation(ctx context.Context, request SelectedContractExecutionRequest, elected *runfork.ForkOperationReplayRequiredError) (SelectedContractExecutionResult, error) {
+	result, found, err := o.replaySelectedForkOperation(ctx, request, elected)
+	if !found && err == nil {
+		err = errors.New("native fork election has no original durable operation")
+	}
+	return result, err
 }
 
 func (o SelectedContractExecutionOwner) observeSelectedForkOperation(ctx context.Context, request runfork.ForkOperationRequest, operation *selectedContractOperation) (runfork.ForkOperationRecord, bool, bool, error) {
