@@ -146,7 +146,11 @@ func TestQ10CurrentEndpointsUseTheOriginalMigrationPreparationOwner(t *testing.T
 	}
 	for _, pin := range packet.Rows {
 		projected, err := q10CurrentRecipe(pin.Original)
-		if err != nil || projected.Successor != pin.Candidate {
+		want := pin.Candidate
+		if pin.Original.Family == "native-invalid-lifecycle-target" {
+			want = strings.Replace(want, "if after.Presence != WorkflowTargetPersistenceCompleteFieldless ||", "if after.Presence != WorkflowTargetPersistenceLifecycleOnly ||", 1)
+		}
+		if err != nil || projected.Successor != want {
 			t.Fatalf("original preparation omitted fixed endpoint %s: %v", pin.Original.Function, err)
 		}
 		unlisted := pin.Original
@@ -159,6 +163,39 @@ func TestQ10CurrentEndpointsUseTheOriginalMigrationPreparationOwner(t *testing.T
 		if got, err := q10CurrentRecipe(crossed); err != nil || !reflect.DeepEqual(got, crossed) {
 			t.Fatal("finite endpoint owner interpreted crossed historical input")
 		}
+	}
+}
+
+func TestQ10MissingCompanionSuccessorPreservesConservationAndHistory(t *testing.T) {
+	packet, err := decodeQ10CurrentEndpoints(q10CurrentEndpointBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched := 0
+	for _, pin := range packet.Rows {
+		if pin.Original.Family != "native-invalid-lifecycle-target" {
+			continue
+		}
+		matched++
+		row, err := q10CurrentEndpointRecipe(pin.Original, pin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		const old = "if after.Presence != WorkflowTargetPersistenceCompleteFieldless ||"
+		const current = "if after.Presence != WorkflowTargetPersistenceLifecycleOnly ||"
+		if strings.Count(pin.Candidate, old) != 1 || strings.Count(row.Successor, current) != 1 ||
+			strings.Replace(row.Successor, current, old, 1) != pin.Candidate {
+			t.Fatal("missing-companion repair changed more than its exact presence assertion")
+		}
+		guard := recipe{File: row.File, Function: row.Function, Before: row.Successor, After: row.Successor}
+		for _, stale := range []string{pin.Candidate, strings.Replace(row.Successor, "!reflect.DeepEqual(before, after)", "false", 1)} {
+			if _, changed, err := rewriteFunction(row.File, []byte("package proof\n"+stale), guard); err == nil || changed {
+				t.Fatal("stale presence or weakened conservation admitted as the current endpoint")
+			}
+		}
+	}
+	if matched != 1 {
+		t.Fatalf("missing-companion successor count=%d, want 1", matched)
 	}
 }
 

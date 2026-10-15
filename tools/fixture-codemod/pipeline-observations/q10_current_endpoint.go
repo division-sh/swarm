@@ -78,6 +78,17 @@ func q10CurrentEndpointRecipe(row recipe, pin fixtureSetupSuccessor2617) (recipe
 		return recipe{}, fmt.Errorf("Q10 endpoint failed exact historical reversal")
 	}
 	row.Successor = pin.Candidate
+	// Append the reviewed missing-companion correction without rewriting the
+	// immutable endpoint packet or any historical recipe.
+	if row.Family == "native-invalid-lifecycle-target" {
+		const old = "if after.Presence != WorkflowTargetPersistenceCompleteFieldless ||"
+		const current = "if after.Presence != WorkflowTargetPersistenceLifecycleOnly ||"
+		if row.File != "internal/runtime/pipeline/delivery_target_application_test.go" ||
+			row.Function != "TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleWithoutMutation" || strings.Count(row.Successor, old) != 1 {
+			return recipe{}, fmt.Errorf("unreviewed Q10 missing-companion successor")
+		}
+		row.Successor = strings.Replace(row.Successor, old, current, 1)
+	}
 	return row, nil
 }
 

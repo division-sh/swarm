@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -58,13 +59,24 @@ func requireForkReceiverExecution(t *testing.T, rt servedControlProofRuntime, ru
 		if !found {
 			t.Fatalf("authored receiver %s has no compiled topology", path)
 		}
-		initial, err := graph.InitialStoredStage()
-		if err != nil || row.State != initial.ID() {
-			t.Fatalf("receiver internal stage differs from authored entry: row=%+v entry=%v err=%v", row, initial, err)
-		}
 		staged := graph.StageCount() != 0
+		wantState := "pending"
+		if staged {
+			eventName := "receiver.seeded"
+			if policy == canonicalrouting.ForkReceiverConstructorOwned {
+				eventName = "work.ready"
+			}
+			handler, found := rt.Runtime.Options.WorkflowModule.SemanticSource().ExecutableNodeEventHandler(identitytest.FlowNode(t, path, "collector"), eventName)
+			if !found || handler.AdvancesTo == "" {
+				t.Fatalf("receiver %s has no authored stage advance for %s", path, eventName)
+			}
+			wantState = handler.AdvancesTo
+		}
+		if _, err := graph.ResolveStoredStage(wantState); err != nil || row.State != wantState {
+			t.Fatalf("receiver internal stage differs from authored posture: row=%+v want=%s err=%v", row, wantState, err)
+		}
 		if entity.Entity.StageDefined == nil || *entity.Entity.StageDefined != staged ||
-			(staged && (entity.Entity.CurrentState == nil || *entity.Entity.CurrentState != initial.ID() || entity.Entity.EnteredStateAt == nil)) ||
+			(staged && (entity.Entity.CurrentState == nil || *entity.Entity.CurrentState != wantState || entity.Entity.EnteredStateAt == nil)) ||
 			(!staged && (entity.Entity.CurrentState != nil || entity.Entity.EnteredStateAt != nil)) {
 			t.Fatalf("public receiver stage posture differs from authored source: %+v", entity.Entity)
 		}

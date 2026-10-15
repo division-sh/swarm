@@ -143,7 +143,7 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 
 func requireReleaseInspectionPhysicalNumber(t *testing.T, snapshot map[string]storetest.SelectedForkStorageTableSnapshot, entityID string) {
 	t.Helper()
-	rows, err := private.DecodeSelectedForkSnapshotRowsForTest(snapshot["entity_state"])
+	rows, err := storetest.DecodeSelectedForkSnapshotRows(snapshot["entity_state"])
 	if err != nil {
 		t.Fatal(err)
 	}
