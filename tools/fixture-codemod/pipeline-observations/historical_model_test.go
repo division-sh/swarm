@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -58,8 +59,45 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 		t.Fatalf("mechanical repair target count=%d, want24", count)
 	}
 	digest, err := mechanicalReceiptDigest(rows)
-	if err != nil || digest != "a47db59e4f7118a2c0cca2f463a68c28c32e571d9cea15892635e62d1340d7cf" {
+	if err != nil || digest != "637fcb76a19075ffc1dd93fc6a189652be2a50f2b199647d67cc0ffd58885fed" {
 		t.Fatalf("source-pinned mechanical/current receipts changed: %s/%v", digest, err)
+	}
+	// Retain the complete predecessor digest, including its old live Successors.
+	// Only the two appended #2287 join-presentation receipts may reverse it.
+	var pins []fixtureSetupSuccessor2617
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 39 {
+		t.Fatalf("finite presentation receipt packet changed: %v", err)
+	}
+	prior := append([]recipe(nil), rows...)
+	restored := 0
+	for _, pin := range pins[36:] {
+		if pin.Original.Mechanical == nil {
+			continue
+		}
+		if pin.Original.File != "internal/runtime/pipeline/workflow_join_supported_surface_external_test.go" ||
+			(pin.Original.Function != "TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBothStores" &&
+				pin.Original.Function != "TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEventBusOnBothStores") {
+			t.Fatal("unlisted mechanical presentation successor")
+		}
+		for index, row := range prior {
+			if !sameReviewedRecipeKey(row, pin.Original) {
+				continue
+			}
+			history := row
+			history.Successor = pin.Original.Successor
+			body, err := reverseReviewedSuccessor2617(row.Successor, pin.Edits)
+			if err != nil || body != pin.Original.Successor || row.Successor != pin.Candidate || !reflect.DeepEqual(history, pin.Original) {
+				t.Fatalf("presentation successor changed historical mechanical evidence: %s/%v", row.Function, err)
+			}
+			prior[index] = pin.Original
+			restored++
+		}
+	}
+	if restored != 2 {
+		t.Fatalf("exact mechanical presentation predecessors=%d, want2", restored)
+	}
+	if digest, err := mechanicalReceiptDigest(prior); err != nil || digest != "a47db59e4f7118a2c0cca2f463a68c28c32e571d9cea15892635e62d1340d7cf" {
+		t.Fatalf("historical mechanical/current receipt digest changed: %s/%v", digest, err)
 	}
 }
 
