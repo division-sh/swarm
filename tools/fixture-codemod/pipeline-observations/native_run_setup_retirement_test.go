@@ -45,7 +45,7 @@ func TestNativeRunSetupWholeFamilySnapshotsAndHostility(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireSelectedConfigSuccessor1801(t, recipes)
-	current, changes, err := prepareFiles("../../..", recipes)
+	current, changes, err := prepareFiles("../../..", q10CurrentEndpointRecipes(t))
 	if err != nil || len(current) != 0 || len(changes) != 0 {
 		t.Fatalf("whole current source is not inert: %v", err)
 	}
