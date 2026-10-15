@@ -41,8 +41,13 @@ func TestQ10DataOnlySetupAdmissionAndEmptyBirthBothStores(t *testing.T) {
 					case "unused_second_row":
 						hostile.Entities = append(hostile.Entities, pipeline.ScenarioSetupEntityRequest{Alias: "unused", EntityID: uuid.NewString(), EntityType: "review_item", CurrentState: mutationlog.PresentLifecycleState("ready")})
 					}
+					alias := "empty"
+					if change == "unused_second_row" {
+						alias = "unused"
+					}
+					wantError := "data-only entity " + alias + " cannot carry lifecycle inputs"
 					result, err := setup.SetupScenarioEntities(ctx, hostile)
-					if err == nil || result.Acknowledged || !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")) {
+					if err == nil || err.Error() != wantError || result.Acknowledged || !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, db, backend == "postgres")) {
 						t.Fatalf("data-only input mutated state before refusal: %+v %v", result, err)
 					}
 				})
