@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -38,13 +39,33 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 				`{"quantity":9007199254740993,"optional":null}`, time.Now().UTC()); err != nil {
 				t.Fatal(err)
 			}
+			hostileIdentity, hostileEntityID := identity, entityID
+			identity.Route = runtimeflowidentity.DeriveRoute("inspect", "valid")
+			entityID = runtimeidentity.NormalizeEntityID("b3c04b72-07f1-4097-a1f0-779955000006")
+			if _, err := db.ExecContext(ctx, `INSERT INTO entity_state
+				(run_id,entity_id,flow_instance,entity_type,fields,created_at,updated_at)
+				VALUES ($1,$2,$3,'inspection_entity',$4,$5,$5)`, identity.RunID, entityID.String(), identity.Route.InstancePath,
+				`{"quantity":7,"optional":null}`, time.Now().UTC()); err != nil {
+				t.Fatal(err)
+			}
 			before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, writer)
 			if err != nil {
 				t.Fatal(err)
 			}
+			requireReleaseInspectionPhysicalNumber(t, before, hostileEntityID.String())
+			hostile, hostileErr := writer.(pipeline.WorkflowTargetPersistenceReader).LoadWorkflowTargetPersistence(ctx, hostileIdentity, hostileEntityID)
+			if hostileErr == nil || !strings.Contains(hostileErr.Error(), "safe range") || !reflect.DeepEqual(hostile, pipeline.WorkflowTargetPersistenceRecord{}) {
+				t.Fatalf("writer admitted unsafe semantic number: %+v %v", hostile, hostileErr)
+			}
 			want, err := writer.(pipeline.WorkflowTargetPersistenceReader).LoadWorkflowTargetPersistence(ctx, identity, entityID)
-			if err != nil || want.Presence != pipeline.WorkflowTargetPersistenceStateOnly || !bytes.Contains(want.State.Fields, []byte("9007199254740993")) {
+			if err != nil || want.Presence != pipeline.WorkflowTargetPersistenceStateOnly || !bytes.Contains(want.State.Fields, []byte(`"quantity"`)) {
 				t.Fatalf("native writer evidence: %+v %v", want, err)
+			}
+			var validFields map[string]any
+			decoder := json.NewDecoder(bytes.NewReader(want.State.Fields))
+			decoder.UseNumber()
+			if err := decoder.Decode(&validFields); err != nil || !reflect.DeepEqual(validFields, map[string]any{"quantity": json.Number("7"), "optional": nil}) {
+				t.Fatalf("valid semantic control changed: %#v %v", validFields, err)
 			}
 			observer, err := storetest.OpenReleaseProcessReadOnlyInspection(backend, location)
 			if err != nil {
@@ -55,6 +76,10 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 					t.Error(err)
 				}
 			})
+			hostile, inspectionErr := readReleaseInspectionTarget(ctx, observer, hostileIdentity, hostileEntityID)
+			if inspectionErr == nil || inspectionErr.Error() != hostileErr.Error() || !reflect.DeepEqual(hostile, pipeline.WorkflowTargetPersistenceRecord{}) {
+				t.Fatalf("observer semantic refusal differs from writer: %+v %v, writer=%v", hostile, inspectionErr, hostileErr)
+			}
 			got, err := readReleaseInspectionTarget(ctx, observer, identity, entityID)
 			if err != nil || !reflect.DeepEqual(want, got) {
 				t.Fatalf("independent inspection lost canonical target evidence: want=%+v got=%+v err=%v", want, got, err)
@@ -81,10 +106,14 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 			if err != nil || !reflect.DeepEqual(before, after) {
 				t.Fatalf("opening/reading inspection mutated or lost whole-store evidence: %v", err)
 			}
+			requireReleaseInspectionPhysicalNumber(t, after, hostileEntityID.String())
 			cancelled, cancel := context.WithCancel(ctx)
 			cancel()
 			if snapshot, err := readReleaseInspectionStorageSnapshot(cancelled, observer); !errors.Is(err, context.Canceled) || snapshot != nil {
 				t.Fatalf("cancelled observer returned partial evidence: %v %v", snapshot, err)
+			}
+			if target, err := readReleaseInspectionTarget(cancelled, observer, identity, entityID); !errors.Is(err, context.Canceled) || !reflect.DeepEqual(target, pipeline.WorkflowTargetPersistenceRecord{}) {
+				t.Fatalf("cancelled observer returned valid target evidence: %+v %v", target, err)
 			}
 			foreign := identity
 			foreign.RunID = "b3c04b72-07f1-4097-a1f0-779955000003"
@@ -107,7 +136,45 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 			if err != nil || !reflect.DeepEqual(before, unchanged) {
 				t.Fatalf("inspection lifetime changed writer storage: %v", err)
 			}
+			requireReleaseInspectionPhysicalNumber(t, unchanged, hostileEntityID.String())
 		})
+	}
+}
+
+func requireReleaseInspectionPhysicalNumber(t *testing.T, snapshot map[string]storetest.SelectedForkStorageTableSnapshot, entityID string) {
+	t.Helper()
+	rows, err := private.DecodeSelectedForkSnapshotRowsForTest(snapshot["entity_state"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	for _, row := range rows {
+		id, err := row["entity_id"].Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if id != entityID {
+			continue
+		}
+		found++
+		raw, err := row["fields"].Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoder := json.NewDecoder(strings.NewReader(raw))
+		decoder.UseNumber()
+		var fields map[string]any
+		if err := decoder.Decode(&fields); err != nil {
+			t.Fatal(err)
+		}
+		number, ok := fields["quantity"].(json.Number)
+		optional, present := fields["optional"]
+		if !ok || number.String() != "9007199254740993" || !present || optional != nil || len(fields) != 2 {
+			t.Fatalf("physical number/null evidence changed: %s", raw)
+		}
+	}
+	if found != 1 {
+		t.Fatalf("physical hostile row count = %d, want 1", found)
 	}
 }
 

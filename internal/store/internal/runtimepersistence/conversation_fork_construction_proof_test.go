@@ -146,6 +146,10 @@ func TestConversationForkHistoricalClockDoesNotLeakToOrdinaryConstructionBothSto
 			run := correlation.RunIDFromContext(f.ctx)
 			cut := time.Date(2026, 1, 1, 0, 0, 30, 0, time.UTC)
 			fixture := ConversationForkSourceFixture{RunID: run, EntityID: uuid.NewString(), Turn1At: cut, kind: conversationForkNativeChat}
+			fixture.Construction.CreatingEvent = eventtest.ExistingRunRootIngress(
+				uuid.NewSHA1(uuid.MustParse(fixture.EntityID), []byte("conversation-fork-construction")).String(),
+				"flow/conversation.created", "conversation-construction-fixture", "", []byte(`{"name":"Before"}`), 0,
+				fixture.RunID, events.EventEnvelope{}, fixture.Turn1At.Add(-30*time.Second))
 			var err error
 			fixture.Construction, err = PrepareConversationForkConstructionForTest(f.ctx, f.store, semanticview.Wrap(f.bundle), f.manager, fixture)
 			if err != nil {

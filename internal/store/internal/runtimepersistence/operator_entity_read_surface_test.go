@@ -49,20 +49,20 @@ func TestOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 		INSERT INTO flow_instances (
 			run_id, instance_path, entity_id, entity_type, flow_template, mode, config,
 			stage_defined, current_state, gates, bookkeeping, accumulator, revision,
-			entered_state_at, created_at, updated_at
+			entered_state_at, created_at, updated_at, instance_key
 		)
 		VALUES
 			($1::uuid, 'review/primary', $4::uuid, 'mvp_spec', 'review', 'template', $7::jsonb,
-			 TRUE, 'collecting', '{"approved":true}', '{}', $10::jsonb, 1, $3, $3, $3),
+			 TRUE, 'collecting', '{"approved":true}', '{}', $10::jsonb, 1, $3, $3, $3, 'primary'),
 			($1::uuid, 'review/secondary', $5::uuid, 'mvp_spec', 'review', 'template', $8::jsonb,
-			 TRUE, 'done', '{}', '{}', '{}', 1, $3, $3, $3),
+			 TRUE, 'done', '{}', '{}', '{}', 1, $3, $3, $3, 'secondary'),
 			($1::uuid, 'triage', $6::uuid, 'ticket', 'triage', 'static', $9::jsonb,
-			 TRUE, 'collecting', '{}', '{}', '{}', 1, $3, $3, $3),
+			 TRUE, 'collecting', '{}', '{}', '{}', 1, $3, $3, $3, NULL),
 			($2::uuid, 'triage', $6::uuid, 'ticket', 'triage', 'static', $9::jsonb,
-			 TRUE, 'done', '{}', '{}', '{}', 1, $3, $3, $3)
+			 TRUE, 'done', '{}', '{}', '{}', 1, $3, $3, $3, NULL)
 	`, runA, runB, base, entityA, entityB, sharedEntity,
-		operatorEntityHeaderConfig(t, "review/primary", "v1"), operatorEntityHeaderConfig(t, "review/secondary", "v2"),
-		operatorEntityHeaderConfig(t, "triage", "v1"), operatorLoopAccumulatedJSON(t, runA, entityA, base)); err != nil {
+		operatorEntityHeaderConfig(t, flowidentity.Stored(nil, "review", "review/primary", "primary", entityA, ""), "v1"), operatorEntityHeaderConfig(t, flowidentity.Stored(nil, "review", "review/secondary", "secondary", entityB, ""), "v2"),
+		operatorEntityHeaderConfig(t, flowidentity.Stored(nil, "triage", "triage", "triage", sharedEntity, ""), "v1"), operatorLoopAccumulatedJSON(t, runA, entityA, base)); err != nil {
 		t.Fatalf("seed flow instances: %v", err)
 	}
 
@@ -205,20 +205,20 @@ func TestSQLiteOperatorEntityReadOwnerListGetAggregateAndCursor(t *testing.T) {
 		INSERT INTO flow_instances (
 			run_id, instance_path, entity_id, entity_type, flow_template, mode, config,
 			stage_defined, current_state, gates, bookkeeping, accumulator, revision,
-			entered_state_at, created_at, updated_at
+			entered_state_at, created_at, updated_at, instance_key
 		)
 		VALUES
 			(?1, 'review/primary', ?4, 'mvp_spec', 'review', 'template', ?7,
-			 TRUE, 'collecting', '{"approved":true}', '{}', ?10, 1, ?3, ?3, ?3),
+			 TRUE, 'collecting', '{"approved":true}', '{}', ?10, 1, ?3, ?3, ?3, 'primary'),
 			(?1, 'review/secondary', ?5, 'mvp_spec', 'review', 'template', ?8,
-			 TRUE, 'done', '{}', '{}', '{}', 1, ?3, ?3, ?3),
+			 TRUE, 'done', '{}', '{}', '{}', 1, ?3, ?3, ?3, 'secondary'),
 			(?1, 'triage', ?6, 'ticket', 'triage', 'static', ?9,
-			 TRUE, 'collecting', '{}', '{}', '{}', 1, ?3, ?3, ?3),
+			 TRUE, 'collecting', '{}', '{}', '{}', 1, ?3, ?3, ?3, NULL),
 			(?2, 'triage', ?6, 'ticket', 'triage', 'static', ?9,
-			 TRUE, 'done', '{}', '{}', '{}', 1, ?3, ?3, ?3)
+			 TRUE, 'done', '{}', '{}', '{}', 1, ?3, ?3, ?3, NULL)
 	`, runA, runB, base, entityA, entityB, sharedEntity,
-		operatorEntityHeaderConfig(t, "review/primary", "v1"), operatorEntityHeaderConfig(t, "review/secondary", "v2"),
-		operatorEntityHeaderConfig(t, "triage", "v1"), operatorLoopAccumulatedJSON(t, runA, entityA, base)); err != nil {
+		operatorEntityHeaderConfig(t, flowidentity.Stored(nil, "review", "review/primary", "primary", entityA, ""), "v1"), operatorEntityHeaderConfig(t, flowidentity.Stored(nil, "review", "review/secondary", "secondary", entityB, ""), "v2"),
+		operatorEntityHeaderConfig(t, flowidentity.Stored(nil, "triage", "triage", "triage", sharedEntity, ""), "v1"), operatorLoopAccumulatedJSON(t, runA, entityA, base)); err != nil {
 		t.Fatalf("seed sqlite flow instances: %v", err)
 	}
 
@@ -363,9 +363,9 @@ func assertOperatorEntityOwnerClocks(t *testing.T, entity operatorread.OperatorE
 	}
 }
 
-func operatorEntityHeaderConfig(t *testing.T, path, version string) string {
+func operatorEntityHeaderConfig(t *testing.T, instance flowidentity.Instance, version string) string {
 	t.Helper()
-	payload, err := pipeline.WorkflowInstanceHeaderPayloadForRoute(flowidentity.RouteForInstancePath(path), version)
+	payload, err := pipeline.WorkflowInstanceHeaderPayloadForIdentity(instance, version)
 	if err != nil {
 		t.Fatal(err)
 	}

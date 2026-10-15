@@ -219,6 +219,10 @@ func TestWorkflowEmptyFieldFixturePreservesHeaderAndHistoryBothStores(t *testing
 			expected := before.State
 			expected.Fields = json.RawMessage(`{}`)
 			expected.CreatedAt, expected.UpdatedAt = before.Lifecycle.CreatedAt, before.Lifecycle.State.UpdatedAt
+			if !after.State.CreatedAt.Equal(expected.CreatedAt) || !after.State.UpdatedAt.Equal(expected.UpdatedAt) {
+				t.Fatalf("empty-field fixture changed data-clock instants: after=%+v expected=%+v", after.State, expected)
+			}
+			expected.CreatedAt, expected.UpdatedAt = expected.CreatedAt.UTC(), expected.UpdatedAt.UTC()
 			if !reflect.DeepEqual(after.State, expected) {
 				t.Fatalf("empty-field fixture changed identity/display/clocks: after=%+v expected=%+v", after.State, expected)
 			}

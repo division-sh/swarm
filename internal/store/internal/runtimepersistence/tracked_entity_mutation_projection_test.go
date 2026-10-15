@@ -31,17 +31,18 @@ func TestTrackedMutationProjectionPreservesScopeOrderAndNullBothStores(t *testin
 				t.Fatalf("projection=%+v/%v", got, err)
 			}
 			var want []TrackedProjectionMutationStorage
-			rows, err := fixture.db.QueryContext(ctx, `SELECT domain,path,new_value FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 ORDER BY created_at ASC,mutation_id ASC`, run, entity)
+			rows, err := fixture.db.QueryContext(ctx, `SELECT domain,path,old_value,new_value,writer_type,writer_id,COALESCE(handler_step,'') FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 ORDER BY created_at ASC,mutation_id ASC`, run, entity)
 			if err != nil {
 				t.Fatal(err)
 			}
 			for rows.Next() {
 				var item TrackedProjectionMutationStorage
-				var value []byte
-				if err := rows.Scan(&item.Domain, &item.Path, &value); err != nil {
+				var oldValue, value []byte
+				if err := rows.Scan(&item.Domain, &item.Path, &oldValue, &value, &item.WriterType, &item.WriterID, &item.HandlerStep); err != nil {
 					t.Fatal(err)
 				}
 				item.NewValue = append([]byte(nil), value...)
+				item.OldValue = append([]byte(nil), oldValue...)
 				want = append(want, item)
 			}
 			if err := rows.Err(); err != nil {

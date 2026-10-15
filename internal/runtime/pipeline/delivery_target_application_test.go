@@ -492,7 +492,7 @@ func VerifyDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycl
 				t.Fatalf("invalid lifecycle rejection changed exact persistence: before=%+v after=%+v err=%v", before, after, err)
 			}
 			if testCase.name == "lifecycle-only" {
-				if after.Presence != WorkflowTargetPersistenceCompleteFieldless || after.State.EntityID != "" || after.State.Fields != nil {
+				if after.Presence != WorkflowTargetPersistenceLifecycleOnly || after.State.EntityID != "" || after.State.Fields != nil {
 					t.Fatalf("lifecycle-only rejection acquired a state row: %+v", after)
 				}
 				return

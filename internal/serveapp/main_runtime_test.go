@@ -2348,6 +2348,10 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 		Event1ID: fixture.Event1ID, Event2ID: fixture.Event2ID,
 		CreatedAt: now, Turn1At: fixture.Turn1At, Turn2At: fixture.Turn2At,
 	}
+	construction.Construction.CreatingEvent = eventtest.ExistingRunRootIngress(
+		uuid.NewSHA1(uuid.MustParse(construction.EntityID), []byte("conversation-fork-construction")).String(),
+		"flow/conversation.created", "conversation-construction-fixture", "", []byte(`{"name":"Before"}`), 0,
+		construction.RunID, events.EventEnvelope{}, construction.Turn1At.Add(-30*time.Second))
 	construction.Construction = storetest.PrepareConversationForkConstruction(t, ctx, selected, rt.Runtime.Options.WorkflowModule.SemanticSource(), rt.Runtime.Manager, construction)
 	history := storetest.SeedConversationForkSource(t, ctx, selected, construction)
 	if err := rt.Runtime.Manager.FinalizeCommittedFlowInstanceActivation(ctx, history.Construction); err != nil {

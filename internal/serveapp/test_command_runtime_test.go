@@ -801,7 +801,7 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 		"idempotency_key": "derived-setup-effective-source-mismatch-" + string(backend),
 		"entities": []any{map[string]any{
 			"alias": "subject", "entity_id": setupEntityID, "flow_instance": "fulfillment",
-			"entity_type": "subject", "current_state": "ready", "fields": map[string]any{},
+			"entity_type": "subject", "fields": map[string]any{},
 		}},
 		"scenario_execution": map[string]any{
 			"profile_id": selector.ProfileID, "profile_digest": selector.ProfileDigest,

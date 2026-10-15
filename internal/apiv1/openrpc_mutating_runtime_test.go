@@ -494,9 +494,7 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 					"entity_id":     setupEntityID,
 					"flow_instance": "operating",
 					"entity_type":   "product",
-					"current_state": "waiting",
 					"fields":        map[string]any{"note": "seeded"},
-					"gates":         map[string]any{"review_ready": true},
 				}},
 			},
 			ConflictParams: map[string]any{
@@ -507,9 +505,7 @@ func mutatingHTTPRuntimeFixtures() map[string]mutatingHTTPRuntimeFixture {
 					"entity_id":     setupEntityID,
 					"flow_instance": "operating",
 					"entity_type":   "product",
-					"current_state": "ready",
 					"fields":        map[string]any{"note": "changed"},
-					"gates":         map[string]any{"review_ready": false},
 				}},
 			},
 			ResultKeys:     []string{"run_id", "entities"},
@@ -546,9 +542,7 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 			"entity_id":     setupEntityID,
 			"flow_instance": "operating",
 			"entity_type":   "product",
-			"current_state": "waiting",
 			"fields":        map[string]any{"note": "seeded"},
-			"gates":         map[string]any{"review_ready": true},
 		}},
 	}
 	invalidBundleHashSetup := mergeProbeParams(validSetup, map[string]any{"bundle_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"})

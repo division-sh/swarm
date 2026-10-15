@@ -102,8 +102,8 @@ func Test2376ForkDecisionExecutionSourceBothStores(t *testing.T) {
 				}
 				seedWorkflowHeaderProjectionFixture(t, targetCtx, db, childRun, effect.EntityID, effect.FlowInstance, effect.FlowID, "default", "operating", "{}", now)
 				if _, err := db.ExecContext(targetCtx, `INSERT INTO entity_state
-				(run_id,entity_id,flow_instance,entity_type,current_state,gates,fields,accumulator,entered_state_at,created_at,updated_at)
-				VALUES ($1,$2,'root','default','operating','{}','{}','{}',$3,$3,$3)`, childRun, effect.EntityID, now); err != nil {
+				(run_id,entity_id,flow_instance,entity_type,fields,created_at,updated_at)
+				VALUES ($1,$2,'root','default','{}',$3,$3)`, childRun, effect.EntityID, now); err != nil {
 					t.Fatal(err)
 				}
 				buckets := map[string]map[string]any{}

@@ -22,7 +22,7 @@ func VerifyWorkflowInstanceStore_RequiresRunContextForTest(t *testing.T, open fu
 		CurrentState:    "queued",
 		EntityType:      "test_entity",
 	}))
-	if err == nil || err.Error() != "flow instance activation readiness: dynamic flow runtime readiness requires run_id" {
+	if err == nil || err.Error() != "prepare native component construction: flow instance activation readiness: dynamic flow runtime readiness requires run_id" {
 		t.Fatalf("Upsert error = %v, want missing run_id", err)
 	}
 }

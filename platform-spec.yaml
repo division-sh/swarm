@@ -33205,8 +33205,10 @@ api_specification:
             type: string
             minLength: 1
           current_state:
-            type: string
-            minLength: 1
+            description: Setup imports have no lifecycle; only a constructed member with named stages has a stage name.
+            oneOf:
+            - {type: string, minLength: 1}
+            - {type: 'null'}
       TestSetupEntitiesResult:
         type: object
         additionalProperties: false

@@ -22685,8 +22685,16 @@
             "type": "string"
           },
           "current_state": {
-            "minLength": 1,
-            "type": "string"
+            "description": "Setup imports have no lifecycle; only a constructed member with named stages has a stage name.",
+            "oneOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "entity_id": {
             "$ref": "#/components/schemas/OpaqueId"

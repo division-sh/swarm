@@ -1,12 +1,12 @@
 package runtimepersistence
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/manager"
@@ -38,7 +38,16 @@ func PrepareConversationForkConstructionForTest(ctx context.Context, selected an
 	}
 	child.EntityID = fixture.EntityID
 	id := uuid.NewSHA1(uuid.MustParse(fixture.EntityID), []byte("conversation-fork-construction")).String()
-	event := eventtest.ExistingRunRootIngress(id, "flow/conversation.created", "conversation-construction-fixture", "", []byte(`{"name":"Before"}`), 0, fixture.RunID, events.EventEnvelope{}, fixture.Turn1At.Add(-30*time.Second))
+	event := fixture.Construction.CreatingEvent
+	if event.ID() != id || event.RunID() != fixture.RunID || event.Type() != "flow/conversation.created" ||
+		event.ProducerType() != events.EventProducerExternal || event.Producer().ID() != "conversation-construction-fixture" || !bytes.Equal(event.Payload(), []byte(`{"name":"Before"}`)) ||
+		!event.CreatedAt().Equal(fixture.Turn1At.Add(-30*time.Second)) {
+		return ConversationForkConstruction{}, fmt.Errorf("conversation construction requires its original prepared creating event")
+	}
+	rootSource, err := events.NewRootRoutingSource(fixture.RunID)
+	if err != nil || event.RoutingSource() != rootSource || event.TaskID() != "" {
+		return ConversationForkConstruction{}, fmt.Errorf("conversation construction requires its original root routing source")
+	}
 	childPlan, err := planner.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
 		ContractBundle: source, Instance: child, ConstructorInput: "conversation.created", ResolvedKey: "Before",
 		TriggerEvent: event, OccurredAt: event.CreatedAt(),
