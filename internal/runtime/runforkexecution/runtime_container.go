@@ -680,7 +680,11 @@ func (c selectedContractForkLocalRuntimeContainer) serveCommittedAttachment() (f
 			finalErr = errors.Join(finalErr, bus.AbandonPreparedPublish(context.WithoutCancel(input.ctx), input.prepared))
 		}
 	}()
-	agentRuntime.fanOutServing, err = startupownership.StartFanOutServing(runCtx, agentRuntime.generationGrant, req.Operation.selected, nil, pipeline)
+	fanOutExecutor, err := c.ports.fanOutExecutor(pipeline)
+	if err != nil {
+		return err
+	}
+	agentRuntime.fanOutServing, err = startupownership.StartFanOutServing(runCtx, agentRuntime.generationGrant, req.Operation.selected, nil, fanOutExecutor)
 	if err != nil {
 		return fmt.Errorf("register selected fan-out serving: %w", err)
 	}
