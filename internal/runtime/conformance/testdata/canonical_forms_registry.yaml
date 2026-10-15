@@ -55,16 +55,16 @@ additive_document_families:
     denominator_rule: "additive to the historical 45-row/11-decoder/67-site/24-root receipt; no reset or closure claim for #2300/#2287/#2293, #2486 or #2487"
 
 inventory:
-  custom_unmarshal_total: 12
+  custom_unmarshal_total: 11
   custom_unmarshal_reachable: 9
   custom_unmarshal_retired: 0
-  custom_unmarshal_excluded: 3
+  custom_unmarshal_excluded: 2
   custom_unmarshal_breakdown:
     contracts: 9
     flowmodel_policy: 0
     agentintent: 0
     channel_pack: 0
-    deployment_config_excluded: 3
+    deployment_config_excluded: 2
   yaml_node_functions_in_contracts: 215
   yaml_tagged_fields_in_contracts_flowmodel_agentintent: 926
   yaml_tagged_fields_in_reachable_pack_layers: 167
@@ -730,10 +730,7 @@ decoder_retired: {}
 
 decoder_exclusions:
   internal/config/config.go:
-    # S6 #2269:6161191417; user profile-only rulings6159811720/6159864124.
-    # Reject retired policy keys before projection, including direct YAML use.
-    # Not a bundle-loader decoder; covered by TestS6ProviderLimits*.
-    deployment.swarm_yaml: [WorkspaceConfig, RuntimeConfig, LLMProviderLimitPolicy]
+    deployment.swarm_yaml: [WorkspaceConfig, RuntimeConfig]
 
 decode_bypasses:
   # Counts are production source lines containing yaml.Node selectors outside internal/yamlsource.
@@ -762,7 +759,7 @@ decode_bypasses:
     internal/yamlsource/source.go: {family: canonical_owner, node_sites: 0, direct_decode_roots: 1}
 
 registry_result:
-  completeness: "all 12 remaining production custom unmarshallers classified as 9 bundle-reachable row owners and 3 deployment swarm.yaml exclusions; direct config file parsing consumes yamlsource; pack/platform and trigger BODY wire roots removed; conformance-fixture and scenario roots remain with their existing owners"
+  completeness: "all 11 remaining production custom unmarshallers classified as 9 bundle-reachable row owners and 2 deployment swarm.yaml exclusions; pack/platform and trigger BODY wire roots removed; conformance-fixture and scenario roots remain with their existing owners"
   wave_1_status: closed
   wave_2_status: closed
   later_wave_gate: "W4/W5 and #2486 pack/platform typed-admission cuts implemented; execution proof and independent gate are required for closure. Public scenario admission consumes scenariodocument (#2532); trigger bodies remain #2533 and private execution remains #2143. Accepted #2487 census is historical; publication #2322/#2376 and parent all-row proof #2287 remain separate."

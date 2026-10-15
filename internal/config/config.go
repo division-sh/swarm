@@ -222,20 +222,6 @@ type LLMProviderLimitPolicy struct {
 	Models                map[string]LLMProviderLimitPolicy `yaml:"-"`
 }
 
-func (p *LLMProviderLimitPolicy) UnmarshalYAML(value *yaml.Node) error {
-	source := yamlsource.ValueFromNode(value)
-	if err := validateConfigSource(source, reflect.TypeFor[LLMProviderLimitPolicy](), "llm.provider_limits"); err != nil {
-		return err
-	}
-	type raw LLMProviderLimitPolicy
-	var decoded raw
-	if err := source.Project(&decoded); err != nil {
-		return err
-	}
-	*p = LLMProviderLimitPolicy(decoded)
-	return validateLLMProviderLimitPolicy("llm.provider_limits", *p)
-}
-
 type ClaudeCLIConfig struct {
 	Command              string        `yaml:"command"`
 	Timeout              time.Duration `yaml:"timeout"`
