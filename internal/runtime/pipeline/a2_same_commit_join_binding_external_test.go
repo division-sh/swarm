@@ -18,6 +18,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -146,16 +147,11 @@ func TestA2SameBusinessCommitTransitionArmAndPublicationOnBothStores(t *testing.
 			a2KnownTargetWaitForSettlement(t, ctx, bus, probe, trigger, dispatcher.Key(), "completed", "delivered", logger)
 			outputs := func() (int, string) {
 				t.Helper()
-				query := `SELECT COUNT(*), COALESCE(MIN(CAST(event_id AS TEXT)), '') FROM events WHERE run_id=? AND source_event_id=? AND event_name='item.completed'`
-				if selected.postgres {
-					query = `SELECT COUNT(*), COALESCE(MIN(event_id::text), '') FROM events WHERE run_id=$1::uuid AND source_event_id=$2::uuid AND event_name='item.completed'`
-				}
-				var count int
-				var id string
-				if err := selected.db.QueryRowContext(ctx, query, runID, trigger.ID()).Scan(&count, &id); err != nil {
+				storage, err := storetest.ReadA2WorkerOutputs(ctx, selected.events, runID, trigger.ID())
+				if err != nil {
 					t.Fatalf("read actual same-commit outputs: %v", err)
 				}
-				return count, id
+				return storage.Count, storage.EventID
 			}
 			count, outputID := outputs()
 			if count != 1 || outputID == "" {
@@ -193,12 +189,8 @@ func TestA2SameBusinessCommitTransitionArmAndPublicationOnBothStores(t *testing.
 			var sourceCommits, arrivalCommits int
 			deliveryID := func(eventID, nodeKey string) string {
 				t.Helper()
-				query := `SELECT delivery_id FROM event_deliveries WHERE event_id=? AND subscriber_type='node' AND subscriber_id=?`
-				if selected.postgres {
-					query = `SELECT delivery_id FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_type='node' AND subscriber_id=$2`
-				}
-				var id string
-				if err := selected.db.QueryRowContext(ctx, query, eventID, nodeKey).Scan(&id); err != nil {
+				id, err := storetest.ReadGateNodeDeliveryIdentity(ctx, selected.events, eventID, nodeKey)
+				if err != nil {
 					t.Fatalf("read actual delivery claim owner: %v", err)
 				}
 				return id
@@ -270,14 +262,8 @@ func TestA2SameBusinessCommitTransitionArmAndPublicationOnBothStores(t *testing.
 			for _, delivery := range []struct{ eventID, nodeKey string }{{trigger.ID(), dispatcher.Key()}, {outputID, collector.Key()}} {
 				assertExactJoinDeliveryCount(t, selected, ctx, delivery.eventID, delivery.nodeKey, 1)
 				assertExactJoinDeliveryStatus(t, selected, ctx, delivery.eventID, delivery.nodeKey, "delivered")
-				query := `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON a.delivery_id=d.delivery_id
-					WHERE d.event_id=? AND d.subscriber_type='node' AND d.subscriber_id=? AND a.closure_kind='settled'`
-				if selected.postgres {
-					query = `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON a.delivery_id=d.delivery_id
-						WHERE d.event_id=$1::uuid AND d.subscriber_type='node' AND d.subscriber_id=$2 AND a.closure_kind='settled'`
-				}
-				var attempts int
-				if err := selected.db.QueryRowContext(ctx, query, delivery.eventID, delivery.nodeKey).Scan(&attempts); err != nil || attempts != 1 {
+				attempts, err := storetest.CountGateNodeSettledAttempts(ctx, selected.events, delivery.eventID, delivery.nodeKey)
+				if err != nil || attempts != 1 {
 					t.Fatalf("restart repeated a settled delivery attempt: attempts=%d err=%v", attempts, err)
 				}
 			}

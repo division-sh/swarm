@@ -37,7 +37,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -287,9 +286,7 @@ func TestReplyResolutionConformance_DurableRestartRoutesOverlappingRequestsOnBot
 		{
 			name: "postgres",
 			setup: func(t *testing.T) durableReplyConformanceStore {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db)
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 		{
@@ -392,9 +389,7 @@ func TestReplyResolutionConformance_DurableExplicitCorrelationFailsClosedOnBothB
 		{
 			name: "postgres",
 			setup: func(t *testing.T) durableReplyConformanceStore {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db)
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 		{
@@ -501,9 +496,7 @@ func TestReplyResolutionConformance_TypedHumanTaskPreservesReplyAuthorityAcrossR
 		{
 			name: "postgres",
 			setup: func(t *testing.T) durableReplyConformanceStore {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db)
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 		{

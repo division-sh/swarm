@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type lifecycleNodeRecoveryEntry struct {
@@ -29,27 +30,33 @@ type lifecycleNodeRecoveryDelivery struct {
 	Attempts               []string
 }
 
-func readLifecycleNodeRecoveryDelivery(t *testing.T, rt servedControlProofRuntime, id, phase string) lifecycleNodeRecoveryDelivery {
+func readLifecycleNodeRecoveryDelivery(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, id, phase string) lifecycleNodeRecoveryDelivery {
 	t.Helper()
 	var out lifecycleNodeRecoveryDelivery
-	if err := rt.DB.QueryRow(`SELECT event_id, CAST(delivery_target_route AS TEXT), status FROM event_deliveries WHERE delivery_id=$1`, id).Scan(&out.EventID, &out.Route, &out.Status); err != nil {
+	if err := func() error {
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (storetest.DeliveryRecoveryIdentityStorage, error) {
+			return storetest.ReadDeliveryRecoveryIdentityStorage(ctx, selectedProofReceiverStateReader, id)
+		})
+		out.EventID = observed.EventID
+		out.Route = observed.Route
+		out.Status = observed.Status
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := rt.DB.Query(`SELECT claim_version, COALESCE(outcome,''), COALESCE(reason_code,'') FROM event_delivery_attempts WHERE delivery_id=$1 ORDER BY claim_version`, id)
+	rows, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) ([]storetest.DeliveryRecoveryAttemptStorage, error) {
+		return storetest.ReadDeliveryRecoveryAttemptsStorage(ctx, selectedProofReceiverStateReader, id)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
-	for rows.Next() {
+	for _, selectedReadRow := range rows {
 		var version int64
 		var outcome, reason string
-		if err := rows.Scan(&version, &outcome, &reason); err != nil {
-			t.Fatal(err)
-		}
+		version = selectedReadRow.Version
+		outcome = selectedReadRow.Outcome
+		reason = selectedReadRow.Reason
 		out.Attempts = append(out.Attempts, fmt.Sprintf("version=%d outcome=%s reason=%s", version, outcome, reason))
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	raw, err := json.Marshal(out)
 	if err != nil {
@@ -92,7 +99,9 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/cap_%t", backend, escape), func(t *testing.T) {
 				opts, start := lifecycleRestartHarness(t, backend, canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleLoopRepeatEmits))
 				var runtime *runtimepkg.Runtime
-				opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) { runtime = rt }
+				opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) {
+					runtime = rt
+				}
 				var armed, recovering atomic.Bool
 				var entries atomic.Int64
 				observed := make(chan lifecycleNodeRecoveryEntry, 4)
@@ -109,33 +118,31 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 					if recovering.Load() {
 						return nil
 					}
-					// Interrupt a real claimed attempt before its mutation. Startup
-					// must reclaim this same delivery, not republish a new event.
 					<-ctx.Done()
 					return ctx.Err()
 				}
 				first, rt := start()
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "node-recovery-seed"})
-				entityID := requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, seed.RunID, "waiting")
+				entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, seed.RunID, "waiting")
 				params := func(event, key string, payload map[string]any) map[string]any {
 					return map[string]any{"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": key}
 				}
 				requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.start", "start", map[string]any{"seed": true}))
-				requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "drafting")
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "drafting")
 				attempts := 1
 				if escape {
 					attempts = 2
 				}
 				var loop loopruntime.PublicActivation
 				for attempt := 1; attempt <= attempts; attempt++ {
-					loop = readLifecycleLoop(t, rt, seed.RunID, entityID)
+					loop = readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID)
 					requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", fmt.Sprintf("admit-%d", attempt), map[string]any{"revision_id": loop.RevisionID}))
-					requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "review")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "review")
 					if attempt == attempts {
 						break
 					}
 					requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.repeat", "ordinary-before-cap", map[string]any{"revision_id": loop.RevisionID}))
-					requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "drafting")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "drafting")
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
@@ -152,7 +159,7 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 				if old.Event.ID() != published.EventID {
 					t.Fatal("barrier captured another admitted event")
 				}
-				pending := readLifecycleNodeRecoveryDelivery(t, rt, old.Claim.DeliveryID(), "before_shutdown")
+				pending := readLifecycleNodeRecoveryDelivery(t, rt.ReceiverStateReader, old.Claim.DeliveryID(), "before_shutdown")
 				if pending.Status != "in_progress" || pending.EventID != published.EventID || !reflect.DeepEqual(before, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)) {
 					t.Fatal("pending first attempt changed state/history or identity")
 				}
@@ -178,7 +185,7 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 				if escape {
 					target = "escaped"
 				}
-				requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, target)
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, target)
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				after := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 				if len(after) != 1 || len(before) != 1 || after[0].TriggerEventID == before[0].TriggerEventID {
@@ -189,37 +196,37 @@ func TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores(t *testing.T) {
 				if !ok || !reflect.DeepEqual(compiled, expected) || last.TriggerEventID != published.EventID {
 					t.Fatalf("reexecuted node did not preserve exact compiled identity: %#v", last)
 				}
-				settled := readLifecycleNodeRecoveryDelivery(t, rt, old.Claim.DeliveryID(), "after_recovery")
+				settled := readLifecycleNodeRecoveryDelivery(t, rt.ReceiverStateReader, old.Claim.DeliveryID(), "after_recovery")
 				if settled.Status != "delivered" || settled.Route != pending.Route || len(settled.Attempts) != 2 || entries.Load() != 2 {
 					t.Fatalf("real node recovery attempts=%#v entries=%d", settled, entries.Load())
 				}
-				requireLifecycleEventCount(t, rt, seed.RunID, "ordinary.repeated", 1)
+				requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "ordinary.repeated", 1)
 				if escape {
-					requireLifecycleEventCount(t, rt, seed.RunID, "loop.escaped", 1)
-					requireLifecycleFlowEntity(t, rt, seed.RunID, "sink/", "done")
+					requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "loop.escaped", 1)
+					requireLifecycleFlowEntity(t, rt.ReceiverStateReader, seed.RunID, "sink/", "done")
 				} else {
-					snapshot := lifecycleStoredSnapshot(t, rt, seed.RunID)
+					snapshot := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 					refused := requireServedJSONRPCError(t, rt.Endpoint, "event.replay", map[string]any{"event_id": published.EventID, "idempotency_key": "node-only-refusal"})
-					if refused.Data["code"] != "EVENT_REPLAY_NO_DELIVERY_HISTORY" || lifecycleStoredSnapshot(t, rt, seed.RunID) != snapshot {
+					if refused.Data["code"] != "EVENT_REPLAY_NO_DELIVERY_HISTORY" || lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != snapshot {
 						t.Fatal("node-only public refusal contract changed")
 					}
-					current := readLifecycleLoop(t, rt, seed.RunID, entityID)
+					current := readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID)
 					requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", "final-admit", map[string]any{"revision_id": current.RevisionID}))
-					requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "review")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "review")
 					requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.close", "close", map[string]any{"revision_id": current.RevisionID}))
-					requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "done")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "done")
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				if closed := readLifecycleLoop(t, rt, seed.RunID, entityID); closed.Status != loopruntime.StatusClosed {
+				if closed := readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID); closed.Status != loopruntime.StatusClosed {
 					t.Fatal("loop not closed")
 				}
-				closedState := lifecycleStoredSnapshot(t, rt, seed.RunID)
+				closedState := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 				if code := second.stop(); code != 0 {
 					t.Fatalf("second stop=%d", code)
 				}
 				third, rt := start()
-				final := readLifecycleNodeRecoveryDelivery(t, rt, old.Claim.DeliveryID(), "after_closed_recovery")
-				if !reflect.DeepEqual(final, settled) || entries.Load() != 2 || lifecycleStoredSnapshot(t, rt, seed.RunID) != closedState {
+				final := readLifecycleNodeRecoveryDelivery(t, rt.ReceiverStateReader, old.Claim.DeliveryID(), "after_closed_recovery")
+				if !reflect.DeepEqual(final, settled) || entries.Load() != 2 || lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != closedState {
 					t.Fatal("terminal recovery reexecuted settled work or changed compiled history")
 				}
 				t.Logf("NODE_REEXECUTION event=%s delivery=%s old_claim=%d new_claim=%d compiled=%#v handler_entries=%d", published.EventID, old.Claim.DeliveryID(), old.Claim.Version(), retry.Claim.Version(), compiled, entries.Load())

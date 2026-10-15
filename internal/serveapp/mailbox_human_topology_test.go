@@ -58,7 +58,7 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 						}
 						var id string
 						if err := rt.DB.QueryRow(`SELECT card_id FROM decision_cards WHERE run_id=$1 AND anchor_kind='human_task'`, f.base.RunID).Scan(&id); err != nil {
-							t.Fatalf("real ask_human card: %v\n%s", err, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, f.base.RunID))
+							t.Fatalf("real ask_human card: %v\n%s", err, servedInspectionRunDebugSummary(rt.ReceiverStateReader, f.base.RunID))
 						}
 						card, err := owner.GetDecisionCard(f.ctx, id)
 						if err != nil {
@@ -75,7 +75,6 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 						route := anchor.Source.Route()
 						agentScope, agentPath := flowID, instance
 						if mode == "root" {
-							// Root agent identity is run-bound without a child route.
 							agentScope, agentPath = "", ""
 						}
 						if route.FlowID != flowID || route.FlowInstance != instance || route.EntityID != expectedEntity {
@@ -97,14 +96,12 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 							requireHumanTaskForeignContinuationRefusal(t, rt, card, method, params)
 						}
 						if method == "expiry_restart" {
-							// Preserve the tool-authored deadline. Startup maintenance,
-							// not an injected expiry event or edited row, expires it.
 							if remaining := time.Until(deadline); remaining > 0 {
 								time.Sleep(remaining)
 							}
 							restartDeadline := time.Now().Add(serveRuntimeReadyTimeout)
 							rt, owner = restart()
-							expiryCtx, cancelExpiry := context.WithDeadline(servedControlProofAuthorActivityContext(t, rt), restartDeadline)
+							expiryCtx, cancelExpiry := context.WithDeadline(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), restartDeadline)
 							defer cancelExpiry()
 							recovered, err := waitHumanTaskExpiryCommit(expiryCtx, card, func(ctx context.Context) (decisioncard.Card, error) {
 								return owner.GetDecisionCard(ctx, id)
@@ -116,7 +113,7 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 							for _, request := range completed {
 								var replay map[string]any
 								waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, request.runID)
-								before := mailboxCompletionRunEffects(t, rt, request.runID)
+								before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, request.runID)
 								requireServedJSONRPCResult(t, rt.Endpoint, request.method, request.params, &replay)
 								want := make(map[string]any, len(request.response))
 								for key, value := range request.response {
@@ -126,7 +123,7 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 								if !reflect.DeepEqual(replay, want) {
 									t.Fatalf("restart response changed: got=%#v want=%#v", replay, want)
 								}
-								if after := mailboxCompletionRunEffects(t, rt, request.runID); !reflect.DeepEqual(before, after) {
+								if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, request.runID); !reflect.DeepEqual(before, after) {
 									t.Fatalf("completed retry changed run effects: %v -> %v", before, after)
 								}
 							}
@@ -163,7 +160,7 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 							t.Fatal(err)
 						}
 						if count != 1 {
-							t.Fatalf("requester outcome deliveries=%d, want exactly one\n%s", count, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, f.base.RunID))
+							t.Fatalf("requester outcome deliveries=%d, want exactly one\n%s", count, servedInspectionRunDebugSummary(rt.ReceiverStateReader, f.base.RunID))
 						}
 					})
 				}
@@ -189,11 +186,11 @@ func requireHumanTaskForeignContinuationRefusal(t *testing.T, rt servedControlPr
 					t.Error(err)
 				}
 			})
-			before := mailboxCompletionRunEffects(t, rt, card.RunID)
+			before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, card.RunID)
 			if response := requestServedJSONRPC(t, rt.Endpoint, method, params); response.Error == nil {
 				t.Fatalf("foreign requester %s was admitted", tc.column)
 			}
-			if after := mailboxCompletionRunEffects(t, rt, card.RunID); !reflect.DeepEqual(before, after) {
+			if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, card.RunID); !reflect.DeepEqual(before, after) {
 				t.Fatalf("foreign requester mutation changed run effects: %v -> %v", before, after)
 			}
 			var status string

@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -21,7 +22,7 @@ func TestIssue2394NestedGroupHandoffAcknowledgmentLossBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			source := loadCanonicalRoutingSource(t, canonicalrouting.CopyNotifyAllChildrenNestedServing(t))
 			probe := newNestedServingProbe(t)
-			rt, db := newNestedServingRuntime(t, backend, source, nil, probe)
+			rt := newNestedServingRuntime(t, backend, source, nil, probe)
 			t.Cleanup(func() {
 				if !t.Failed() {
 					return
@@ -93,14 +94,14 @@ func TestIssue2394NestedGroupHandoffAcknowledgmentLossBothStores(t *testing.T) {
 				}
 			}
 			for _, parent := range parents {
-				assertNestedPipelineReceipt(t, ctx, db, parent.ID, true)
+				assertNestedPipelineReceipt(t, ctx, rt.selected, parent.ID, true)
 				assertNestedDeliveredEvent(t, ctx, reader, parent.ID, 1)
 				replay(parent.ID)
 			}
 			waitNotifyAllChildrenRuntimeWithin(t, rt, runID, 30*time.Second)
-			assertNestedSiblingTaskEffects(t, ctx, rt.selected, db, runID, "account.task.requested", "account.task.completed", parents)
-			assertNestedExactBarrier(t, ctx, db, held.Key, "fired", fanoutbarrier.Summary{Total: 3, Succeeded: 3})
-			assertNestedInterruptedFinalState(t, ctx, db, rt, runID, parents)
+			assertNestedSiblingTaskEffects(t, ctx, rt.selected, runID, "account.task.requested", "account.task.completed", parents)
+			assertNestedExactBarrier(t, ctx, rt.selected, held.Key, "fired", fanoutbarrier.Summary{Total: 3, Succeeded: 3})
+			assertNestedInterruptedFinalState(t, ctx, rt, runID, parents)
 			finalParents := loadNotifyAllChildrenItemEvents(t, ctx, rt.selected, runID, notifyID)
 			assertNotifyAllChildrenItemSequence(t, finalParents, accounts)
 			for i := range parents {
@@ -131,7 +132,7 @@ func TestIssue2394NestedGroupHandoffAcknowledgmentLossBothStores(t *testing.T) {
 						t.Fatalf("child group executed twice: %+v", receipt)
 					}
 					seenChildren[receipt.ParentEvent] = true
-					assertNestedExactBarrier(t, ctx, db, receipt.Key, "fired", fanoutbarrier.Summary{Total: 2, Succeeded: 2})
+					assertNestedExactBarrier(t, ctx, rt.selected, receipt.Key, "fired", fanoutbarrier.Summary{Total: 2, Succeeded: 2})
 				case <-time.After(5 * time.Second):
 					t.Fatal("missing recovered nested child caller")
 				}
@@ -150,10 +151,9 @@ func TestIssue2394NestedGroupHandoffAcknowledgmentLossBothStores(t *testing.T) {
 	}
 }
 
-func assertNestedPipelineReceipt(t *testing.T, ctx context.Context, db *sql.DB, id string, success bool) {
+func assertNestedPipelineReceipt(t *testing.T, ctx context.Context, selected notifyAllChildrenStore, id string, success bool) {
 	t.Helper()
-	var outcome string
-	err := db.QueryRowContext(ctx, `SELECT outcome FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, id).Scan(&outcome)
+	outcome, err := storetest.ReadNestedPipelineReceiptOutcome(ctx, selected, id)
 	if success && (err != nil || outcome != "success") {
 		t.Fatalf("event %s pipeline receipt=%q err=%v", id, outcome, err)
 	}
@@ -162,13 +162,13 @@ func assertNestedPipelineReceipt(t *testing.T, ctx context.Context, db *sql.DB, 
 	}
 }
 
-func assertNestedInterruptedFinalState(t *testing.T, ctx context.Context, db *sql.DB, rt notifyAllChildrenRuntime, runID string, parents []notifyAllChildrenItemEvent) {
+func assertNestedInterruptedFinalState(t *testing.T, ctx context.Context, rt notifyAllChildrenRuntime, runID string, parents []notifyAllChildrenItemEvent) {
 	t.Helper()
 	reader := nestedPublicReader(t, rt.selected)
 	for _, parent := range parents {
 		view := assertNestedDeliveredEvent(t, ctx, reader, parent.ID, 1)
 		name := eventidentity.ExternalizeForFlow(view.Deliveries[0].Target.FlowInstance, []string{"account.tasks.completed"}, "account.tasks.completed")
-		id := loadNotifyAllChildrenSingleEventID(t, ctx, rt.selected, db, runID, name)
+		id := loadNotifyAllChildrenSingleEventID(t, ctx, rt.selected, runID, name)
 		completion, err := reader.LoadOperatorEvent(ctx, id)
 		if err != nil || completion.Payload["account_id"] != parent.AccountID || completion.NoDelivery == nil || len(completion.Deliveries) != 0 {
 			t.Fatalf("recovered child public barrier=%+v err=%v", completion, err)
@@ -179,18 +179,13 @@ func assertNestedInterruptedFinalState(t *testing.T, ctx context.Context, db *sq
 			}
 		}
 	}
-	rows, err := db.QueryContext(ctx, `SELECT current_state,fields FROM entity_state WHERE run_id=$1`, runID)
+	rows, err := storetest.ReadNestedRunEntityStateFields(ctx, rt.selected, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	seen := make(map[string]bool)
-	for rows.Next() {
-		var state string
-		var raw []byte
-		if err := rows.Scan(&state, &raw); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range rows {
+		state, raw := row.State, row.Fields
 		var fields map[string]any
 		if err := json.Unmarshal(raw, &fields); err != nil {
 			t.Fatal(err)
@@ -203,9 +198,6 @@ func assertNestedInterruptedFinalState(t *testing.T, ctx context.Context, db *sq
 			}
 			seen[key] = true
 		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	if len(seen) != 6 {
 		t.Fatalf("recovered task states=%v", seen)

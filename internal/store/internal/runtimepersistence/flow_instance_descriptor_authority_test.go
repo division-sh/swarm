@@ -2,7 +2,6 @@ package runtimepersistence_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +17,6 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -38,20 +36,17 @@ type dynamicFlowSourceProjectionStore interface {
 func TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		open func(*testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool)
+		open func(*testing.T) dynamicFlowSourceProjectionStore
 	}{
-		{"postgres", func(t *testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			return storetest.AdmitPostgresRuntimeStore(t, db), db, false
+		{"postgres", func(t *testing.T) dynamicFlowSourceProjectionStore {
+			return storetest.StartPostgresRuntimeStore(t)
 		}},
-		{"sqlite", func(t *testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool) {
-			store := storetest.StartSQLiteRuntimeStore(t)
-			return store, storetest.Database(store), true
+		{"sqlite", func(t *testing.T) dynamicFlowSourceProjectionStore {
+			return storetest.StartSQLiteRuntimeStore(t)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			store, db, sqlite := tc.open(t)
+			store := tc.open(t)
 			sourceA := mustExternalStoreTestSourceArtifactFact()
 			hashA := sourceA.BundleHash()
 			sourceBArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  source_b: {}\n"))
@@ -63,7 +58,7 @@ func TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores(t *testing.T)
 			storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runB, Artifact: sourceBArtifact})
 			seedExactFlowInstanceDescriptorOwner(t, store, runA, uuid.NewString(), "account/a", hashA)
 			seedExactFlowInstanceDescriptorOwner(t, store, runB, uuid.NewString(), "account/b", hashB)
-			setReadinessCoordinate(t, db, sqlite, runA, "account/a", "phase", time.Now().UTC())
+			setReadinessCoordinate(t, store, runA, "account/a", "phase", time.Now().UTC())
 			projection, err := store.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceA)
 			if err != nil {
 				t.Fatal(err)
@@ -71,12 +66,7 @@ func TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores(t *testing.T)
 			if len(projection.CurrentCompleted) != 1 || projection.CurrentCompleted[0].InstancePath != "account/a" || len(projection.CurrentPending) != 1 || projection.CurrentPending[0].InstancePath != runA {
 				t.Fatalf("source A projection = %#v", projection)
 			}
-			deleteQuery := `DELETE FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_path = ?`
-			deleteArgs := []any{runB, "account/b"}
-			if !sqlite {
-				deleteQuery = `DELETE FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid AND instance_path = $2`
-			}
-			if _, err := db.ExecContext(ctx, deleteQuery, deleteArgs...); err != nil {
+			if _, err := storetest.RemoveDescriptorReadiness(ctx, store, runB, "account/b"); err != nil {
 				t.Fatal(err)
 			}
 			var corruption *runtimepipeline.FlowInstanceConstructionCorruption
@@ -90,20 +80,17 @@ func TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores(t *testing.T)
 func TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		open func(*testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool)
+		open func(*testing.T) dynamicFlowSourceProjectionStore
 	}{
-		{"postgres", func(t *testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			return storetest.AdmitPostgresRuntimeStore(t, db), db, false
+		{"postgres", func(t *testing.T) dynamicFlowSourceProjectionStore {
+			return storetest.StartPostgresRuntimeStore(t)
 		}},
-		{"sqlite", func(t *testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool) {
-			selected := storetest.StartSQLiteRuntimeStore(t)
-			return selected, storetest.Database(selected), true
+		{"sqlite", func(t *testing.T) dynamicFlowSourceProjectionStore {
+			return storetest.StartSQLiteRuntimeStore(t)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, db, sqlite := tc.open(t)
+			selected := tc.open(t)
 			current := mustExternalStoreTestSourceArtifactFact()
 			currentHash := current.BundleHash()
 			predecessorArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  predecessor: {}\n"))
@@ -134,13 +121,13 @@ func TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothSto
 					setReadinessRunSource(t, selected, ctx, row.runID, current, sourceartifactfixture.Artifact())
 				}
 				if row.complete {
-					setReadinessCoordinate(t, db, sqlite, row.runID, row.path, "phase", time.Now().UTC())
+					setReadinessCoordinate(t, selected, row.runID, row.path, "phase", time.Now().UTC())
 				}
 			}
 			foreignRun := uuid.NewString()
 			requireReadinessRun(t, ctx, selected, foreignRun, foreignHash, foreignArtifact)
 			seedExactFlowInstanceDescriptorOwner(t, selected, foreignRun, uuid.NewString(), "account/foreign-malformed", foreignHash)
-			setReadinessPlanRaw(t, db, sqlite, foreignRun, "account/foreign-malformed", `{}`)
+			setReadinessPlanRaw(t, selected, foreignRun, "account/foreign-malformed", `{}`)
 
 			projection, err := selected.InspectDynamicFlowRuntimeReadinessForSource(ctx, current)
 			if err != nil {
@@ -187,20 +174,17 @@ func TestDynamicFlowRuntimeReadinessProjectionClassifiesSourceTransitionsBothSto
 func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		open func(*testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool)
+		open func(*testing.T) dynamicFlowSourceProjectionStore
 	}{
-		{"postgres", func(t *testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			return storetest.AdmitPostgresRuntimeStore(t, db), db, false
+		{"postgres", func(t *testing.T) dynamicFlowSourceProjectionStore {
+			return storetest.StartPostgresRuntimeStore(t)
 		}},
-		{"sqlite", func(t *testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool) {
-			selected := storetest.StartSQLiteRuntimeStore(t)
-			return selected, storetest.Database(selected), true
+		{"sqlite", func(t *testing.T) dynamicFlowSourceProjectionStore {
+			return storetest.StartSQLiteRuntimeStore(t)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, db, sqlite := tc.open(t)
+			selected := tc.open(t)
 			source := mustExternalStoreTestSourceArtifactFact()
 			bundleHash := source.BundleHash()
 			otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents:\n  other: {}\n"))
@@ -223,16 +207,7 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 					case "plan":
 						changed := observed.Plan
 						changed.WorkflowVersion = "concurrent"
-						raw, marshalErr := json.Marshal(changed)
-						if marshalErr != nil {
-							t.Fatal(marshalErr)
-						}
-						setReadinessPlanRaw(t, db, sqlite, runID, path, string(raw))
-						query := `UPDATE flow_instance_runtime_readiness SET plan_hash = ? WHERE run_id = ? AND instance_path = ?`
-						if !sqlite {
-							query = `UPDATE flow_instance_runtime_readiness SET plan_hash = $1 WHERE run_id = $2::uuid AND instance_path = $3`
-						}
-						if _, err := db.Exec(query, readinessPlanFixtureHash(t, string(raw)), runID, path); err != nil {
+						if _, err := storetest.SetDescriptorReadinessConcurrentPlan(ctx, selected, changed); err != nil {
 							t.Fatal(err)
 						}
 					case "source":
@@ -240,15 +215,15 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 						desired.BundleHash = otherSource.BundleHash()
 						callCtx = runtimecorrelation.WithSourceArtifactFact(callCtx, otherSource)
 					case "topology":
-						setReadinessCoordinate(t, db, sqlite, runID, path, "phase", time.Now().UTC())
+						setReadinessCoordinate(t, selected, runID, path, "phase", time.Now().UTC())
 					case "creation":
-						setReadinessCoordinate(t, db, sqlite, runID, path, "creation_event_emitted_at", time.Now().UTC())
+						setReadinessCoordinate(t, selected, runID, path, "creation_event_emitted_at", time.Now().UTC())
 					case "run_status":
 						setReadinessRunStatus(t, selected, callCtx, runID, runtimerunlifecycle.StatePaused)
 					case "instance_status":
-						setReadinessInstanceStatus(t, db, sqlite, runID, path, "draining")
+						setReadinessInstanceStatus(t, selected, runID, path, "draining")
 					case "terminated_at":
-						setReadinessCoordinate(t, db, sqlite, runID, path, "instance_terminated_at", time.Now().UTC())
+						setReadinessCoordinate(t, selected, runID, path, "instance_terminated_at", time.Now().UTC())
 					}
 					results, err := selected.ReconcileDynamicFlowRuntimeReadinessPlans(callCtx, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{{Observed: observed, Expected: desired}}, time.Now().UTC())
 					if len(results) != 0 || !runtimepipeline.IsDynamicFlowRuntimeReadinessObservationConflict(err) {
@@ -270,20 +245,17 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 func TestDynamicFlowRuntimeReadinessRejectsABAObservationBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		open func(*testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool)
+		open func(*testing.T) dynamicFlowSourceProjectionStore
 	}{
-		{"postgres", func(t *testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			return storetest.AdmitPostgresRuntimeStore(t, db), db, false
+		{"postgres", func(t *testing.T) dynamicFlowSourceProjectionStore {
+			return storetest.StartPostgresRuntimeStore(t)
 		}},
-		{"sqlite", func(t *testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool) {
-			selected := storetest.StartSQLiteRuntimeStore(t)
-			return selected, storetest.Database(selected), true
+		{"sqlite", func(t *testing.T) dynamicFlowSourceProjectionStore {
+			return storetest.StartSQLiteRuntimeStore(t)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, _, _ := tc.open(t)
+			selected := tc.open(t)
 			source := mustExternalStoreTestSourceArtifactFact()
 			runID := uuid.NewString()
 			path := "account/aba-" + uuid.NewString()
@@ -330,20 +302,17 @@ func TestDynamicFlowRuntimeReadinessRejectsABAObservationBothStores(t *testing.T
 func TestDynamicFlowRuntimeReadinessPlanBatchIsAtomicBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		open func(*testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool)
+		open func(*testing.T) dynamicFlowSourceProjectionStore
 	}{
-		{"postgres", func(t *testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			return storetest.AdmitPostgresRuntimeStore(t, db), db, false
+		{"postgres", func(t *testing.T) dynamicFlowSourceProjectionStore {
+			return storetest.StartPostgresRuntimeStore(t)
 		}},
-		{"sqlite", func(t *testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool) {
-			selected := storetest.StartSQLiteRuntimeStore(t)
-			return selected, storetest.Database(selected), true
+		{"sqlite", func(t *testing.T) dynamicFlowSourceProjectionStore {
+			return storetest.StartSQLiteRuntimeStore(t)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, db, sqlite := tc.open(t)
+			selected := tc.open(t)
 			source := mustExternalStoreTestSourceArtifactFact()
 			bundleHash := source.BundleHash()
 			seedBatch := func(t *testing.T, label string) (context.Context, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation) {
@@ -397,7 +366,7 @@ func TestDynamicFlowRuntimeReadinessPlanBatchIsAtomicBothStores(t *testing.T) {
 			t.Run("last_row_conflict_changes_none", func(t *testing.T) {
 				ctx, requests := seedBatch(t, "conflict")
 				last := requests[1]
-				setReadinessCoordinate(t, db, sqlite, last.Expected.RunID, last.Expected.Identity.InstancePath, "phase", time.Now().UTC())
+				setReadinessCoordinate(t, selected, last.Expected.RunID, last.Expected.Identity.InstancePath, "phase", time.Now().UTC())
 				results, err := selected.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, requests, time.Now().UTC())
 				if len(results) != 0 || !runtimepipeline.IsDynamicFlowRuntimeReadinessObservationConflict(err) {
 					t.Fatalf("batch conflict results=%#v err=%v", results, err)
@@ -407,24 +376,16 @@ func TestDynamicFlowRuntimeReadinessPlanBatchIsAtomicBothStores(t *testing.T) {
 
 			t.Run("later_update_failure_rolls_back", func(t *testing.T) {
 				ctx, requests := seedBatch(t, "rollback")
-				lastPath := requests[1].Expected.Identity.InstancePath
-				triggerName := "fail_readiness_batch_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-				if sqlite {
-					query := fmt.Sprintf(`CREATE TRIGGER %s BEFORE UPDATE OF plan ON flow_instance_runtime_readiness WHEN NEW.instance_path = '%s' BEGIN SELECT RAISE(ABORT, 'injected readiness batch failure'); END`, triggerName, strings.ReplaceAll(lastPath, "'", "''"))
-					if _, err := db.Exec(query); err != nil {
-						t.Fatal(err)
-					}
-				} else {
-					functionName := triggerName + "_fn"
-					functionSQL := fmt.Sprintf(`CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.instance_path = '%s' THEN RAISE EXCEPTION 'injected readiness batch failure'; END IF; RETURN NEW; END $$`, functionName, strings.ReplaceAll(lastPath, "'", "''"))
-					if _, err := db.Exec(functionSQL); err != nil {
-						t.Fatal(err)
-					}
-					triggerSQL := fmt.Sprintf(`CREATE TRIGGER %s BEFORE UPDATE OF plan ON flow_instance_runtime_readiness FOR EACH ROW EXECUTE FUNCTION %s()`, triggerName, functionName)
-					if _, err := db.Exec(triggerSQL); err != nil {
-						t.Fatal(err)
-					}
+				last := requests[1].Expected
+				cleanup, err := storetest.InstallDescriptorReadinessBatchUpdateFailure(ctx, selected, last.RunID, last.Identity.InstancePath)
+				if err != nil {
+					t.Fatal(err)
 				}
+				t.Cleanup(func() {
+					if err := cleanup(context.Background()); err != nil {
+						t.Error(err)
+					}
+				})
 				results, err := selected.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, requests, time.Now().UTC())
 				if err == nil || len(results) != 0 {
 					t.Fatalf("injected batch failure results=%#v err=%v", results, err)
@@ -502,13 +463,9 @@ func requireReadinessRun(t *testing.T, ctx context.Context, selected storetest.R
 	storetest.RequireRun(t, ctx, selected, fixture)
 }
 
-func setReadinessPlanRaw(t *testing.T, db *sql.DB, sqlite bool, runID, instancePath, plan string) {
+func setReadinessPlanRaw(t *testing.T, selected any, runID, instancePath, plan string) {
 	t.Helper()
-	query := `UPDATE flow_instance_runtime_readiness SET plan = ? WHERE run_id = ? AND instance_path = ?`
-	if !sqlite {
-		query = `UPDATE flow_instance_runtime_readiness SET plan = $1::jsonb WHERE run_id = $2::uuid AND instance_path = $3`
-	}
-	if _, err := db.Exec(query, plan, runID, instancePath); err != nil {
+	if _, err := storetest.SetDescriptorReadinessMalformedPlan(context.Background(), selected, runID, instancePath, json.RawMessage(plan)); err != nil {
 		t.Fatalf("set readiness plan for %s: %v", instancePath, err)
 	}
 }
@@ -531,51 +488,38 @@ func setReadinessRunStatus(t *testing.T, owner runtimerunlifecycle.OperationOwne
 	}
 }
 
-func setReadinessCoordinate(t *testing.T, db *sql.DB, sqlite bool, runID, instancePath, coordinate string, value time.Time) {
+func setReadinessCoordinate(t *testing.T, selected interface {
+	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
+}, runID, instancePath, coordinate string, value time.Time) {
 	t.Helper()
-	var query string
+	ctx := context.Background()
+	var err error
 	switch coordinate {
 	case "phase":
-		// Reader-conflict fixtures represent historical completed attachment,
-		// never an executable generation or a planned attempt skipping steps.
-		grantID := uuid.NewString()
-		query = `UPDATE flow_instance_runtime_readiness SET phase = 'ready', activation_attempt_state='retired', activation_attempt_grant_id=?, updated_at = ? WHERE run_id = ? AND instance_path = ?`
-		if !sqlite {
-			query = `UPDATE flow_instance_runtime_readiness SET phase = 'ready', activation_attempt_state='retired', activation_attempt_grant_id=$1::uuid, updated_at = $2 WHERE run_id = $3::uuid AND instance_path = $4`
+		row, found, loadErr := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(instancePath))
+		if loadErr != nil || !found {
+			t.Fatalf("load exact historical readiness: found=%v err=%v", found, loadErr)
 		}
-		if _, err := db.Exec(query, grantID, value, runID, instancePath); err != nil {
-			t.Fatalf("set %s for %s: %v", coordinate, instancePath, err)
-		}
-		return
+		// Existing named historical cut, not a live generation or executable lease.
+		storetest.RetirePlannedReadiness(t, ctx, selected, row.Plan, row.AttemptOrdinal, value)
 	case "creation_event_emitted_at":
-		query = `UPDATE flow_instance_runtime_readiness SET creation_event_emitted_at = ? WHERE run_id = ? AND instance_path = ?`
-		if !sqlite {
-			query = `UPDATE flow_instance_runtime_readiness SET creation_event_emitted_at = $1 WHERE run_id = $2::uuid AND instance_path = $3`
-		}
+		_, err = storetest.SetDescriptorReadinessCreationClock(ctx, selected, runID, instancePath, value)
 	case "instance_terminated_at":
-		query = `UPDATE flow_instances SET terminated_at = ? WHERE run_id = ? AND instance_path = ?`
-		if !sqlite {
-			query = `UPDATE flow_instances SET terminated_at = $1 WHERE run_id = $2::uuid AND instance_path = $3`
-		}
-		if _, err := db.Exec(query, value, runID, instancePath); err != nil {
-			t.Fatalf("set %s for %s: %v", coordinate, instancePath, err)
-		}
-		return
+		_, err = storetest.SetWorkflowProjectionActiveTerminatedTimestamp(ctx, selected, runID, instancePath, value)
 	default:
 		t.Fatalf("unsupported readiness coordinate %q", coordinate)
 	}
-	if _, err := db.Exec(query, value, runID, instancePath); err != nil {
+	if err != nil {
 		t.Fatalf("set %s for %s: %v", coordinate, instancePath, err)
 	}
 }
 
-func setReadinessInstanceStatus(t *testing.T, db *sql.DB, sqlite bool, runID, instancePath, status string) {
+func setReadinessInstanceStatus(t *testing.T, selected any, runID, instancePath, status string) {
 	t.Helper()
-	query := `UPDATE flow_instances SET status = ? WHERE run_id = ? AND instance_path = ?`
-	if !sqlite {
-		query = `UPDATE flow_instances SET status = $1 WHERE run_id = $2::uuid AND instance_path = $3`
+	if status != "draining" {
+		t.Fatalf("unsupported readiness status fault %q", status)
 	}
-	if _, err := db.Exec(query, status, runID, instancePath); err != nil {
+	if _, err := storetest.SetWorkflowProjectionDraining(context.Background(), selected, runID, instancePath); err != nil {
 		t.Fatalf("set readiness instance status for %s: %v", instancePath, err)
 	}
 }

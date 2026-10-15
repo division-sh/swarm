@@ -1,0 +1,87 @@
+[
+  {
+    "File": "internal/serveapp/constructed_decision_deferral_test.go",
+    "Function": "TestServedFieldlessGateDeferralBothStores",
+    "SHA256": "3cc685841ceb00e07990c338472fd89937ba7e5d47d5c58c179731f60d64fe19"
+  },
+  {
+    "File": "internal/serveapp/fork_historical_context_test.go",
+    "Function": "TestRunForkHistoricalIdentityPublicExecutionBothStores",
+    "SHA256": "ccbce7f10d52ad6bf87b99f1f62baa7a417a43eda67791b61af3e781b9e85c6b"
+  },
+  {
+    "File": "internal/serveapp/fork_loop_accumulator_test.go",
+    "Function": "TestServedForkAccumulatorRetainedGenerationBothStores",
+    "SHA256": "fe7e394d4263fb94858bdcc6af24405e54833fe842896b43806bd51400902ae8"
+  },
+  {
+    "File": "internal/serveapp/fork_loop_generation_notice_test.go",
+    "Function": "TestServedForkLoopGenerationStateEffectBothStores",
+    "SHA256": "868ad304b5a09b71e73b7858d39da2f5ed7a1d92587e4b071096443f64055048"
+  },
+  {
+    "File": "internal/serveapp/fork_receiver_acquisition_effect_only_test.go",
+    "Function": "TestSelectedForkSupplementalReceiverAcquisitionWithoutPostRevisionEmissionBothStores",
+    "SHA256": "61af3a4ff761092c5299a4c49bc336e732fb603637be4f85e651f957ad401672"
+  },
+  {
+    "File": "internal/serveapp/fork_receiver_ownership_test.go",
+    "Function": "waitForkReceiverSourceCompletion",
+    "SHA256": "2f745e2ff34bb4fc82525585f94af0ca4968dab4f704e357639b6ddcce6b741a"
+  },
+  {
+    "File": "internal/serveapp/fork_receiver_ownership_test.go",
+    "Function": "runForkReceiverOwnershipJourney",
+    "SHA256": "c27c7c44011cdb881b79fb42053c83854874ab62dcc09e0477bfe3e6faef14c5"
+  },
+  {
+    "File": "internal/serveapp/fork_receiver_ownership_test.go",
+    "Function": "TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores",
+    "SHA256": "47b04aab7a13e43381e0ce49ec541634394928236665be2a705f5400587a5986"
+  },
+  {
+    "File": "internal/serveapp/fork_receiver_ownership_test.go",
+    "Function": "TestServedForkSourceCompletionWithoutForkBothStores",
+    "SHA256": "460b79d1f297161a6abecf2a47349fc6d7a40910505758b7f82c4646ef9b20b9"
+  },
+  {
+    "File": "internal/serveapp/fork_receiver_ownership_test.go",
+    "Function": "TestSelectedForkIndependentReceiverBusinessMutationBothStores",
+    "SHA256": "780e3bc5c32e3d94fabed33d3aee039eb8dd5486f8cd0292847698feff0355e5"
+  },
+  {
+    "File": "internal/serveapp/fork_receiver_post_revision_refusal_test.go",
+    "Function": "TestSelectedForkReceiverPostRevisionPolicyRefusalBothStores",
+    "SHA256": "ac47cf86c203266339cace264bea76d9afe3954a8f90c058aacdb30905574f5a"
+  },
+  {
+    "File": "internal/serveapp/fork_receiver_post_revision_refusal_test.go",
+    "Function": "requireForkReceiverPostRevisionPolicyRefusal",
+    "SHA256": "459b50c03d9585ff714532d6952465f8c877da4b0260647dad0fa6a91e7327b3"
+  },
+  {
+    "File": "internal/serveapp/fork_recipient_authority_test.go",
+    "Function": "TestServedForkConnectedRecipientAuthorityOnBothStores",
+    "SHA256": "09c918c8de4f44ee1908df204893215243f455b81a6c6f70b803ea534cebccf0"
+  },
+  {
+    "File": "internal/serveapp/fork_retained_join_test.go",
+    "Function": "testServedJoinWriterCompletedHistoryRefusal",
+    "SHA256": "0649cfc5c359bd4483ef82e87011c5f00c9994d1a67958f93472e82be36e592f"
+  },
+  {
+    "File": "internal/serveapp/selected_fork_mailbox_controls_test.go",
+    "Function": "TestSelectedForkMailboxControlRefusalsBothStores",
+    "SHA256": "ddd794a6d4073cdddda03e7943f658deff5cd9e47a1cb9b174a87cca7f2bed92"
+  },
+  {
+    "File": "internal/serveapp/semantic_numeric_activity_test.go",
+    "Function": "proveActivitySemanticResultExecutionParity",
+    "SHA256": "1a797d1b6dc2a31973164e7bde3a9ae11a76e5836d42bbd6b940b8288c0640e8"
+  },
+  {
+    "File": "internal/serveapp/typed_receiver_fork_refusal_test.go",
+    "Function": "TestTypedReceiverConfigSourceAndForkRefusalBothStores",
+    "SHA256": "7180ac56e8613b5f117cf5317e8d10925ef332ac23340516b9b5f773802f16de"
+  }
+]

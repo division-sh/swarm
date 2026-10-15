@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
@@ -88,19 +89,13 @@ func TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores(t *testing.T) 
 					want := before
 					want.Revision++ // The new delivery settles without another business effect.
 					if got := a2CanonicalAccumulatorEvidence(t, proof); got != want {
-						rows, err := proof.selected.db.QueryContext(proof.ctx, `SELECT domain,path,CAST(old_value AS TEXT),CAST(new_value AS TEXT) FROM entity_mutations WHERE caused_by_event=$1`, duplicate.event.ID())
+						mutations, err := storetest.ReadGateDuplicateMutationDiagnostics(proof.ctx, proof.selected.events, duplicate.event.ID())
 						if err != nil {
 							t.Fatal(err)
 						}
-						for rows.Next() {
-							var domain, path, oldValue, newValue string
-							if err := rows.Scan(&domain, &path, &oldValue, &newValue); err != nil {
-								t.Fatal(err)
-							}
+						for _, mutation := range mutations {
+							domain, path, oldValue, newValue := mutation.Domain, mutation.Path, mutation.OldValue, mutation.NewValue
 							t.Logf("duplicate mutation: %s %s old=%s new=%s", domain, path, oldValue, newValue)
-						}
-						if err := rows.Close(); err != nil {
-							t.Fatal(err)
 						}
 						t.Errorf("canonical duplicate changed business/history/output: got=%#v want=%#v", got, want)
 					}
@@ -174,11 +169,12 @@ func TestA2AccumulatorSchemaAdmittedCanonicalEvidenceOnBothStores(t *testing.T) 
 					if err := proof.bus.Publish(proof.ctx, event); err == nil {
 						t.Fatalf("schema admitted malformed numeric/named record: %s", malformed)
 					}
-					var publications, deliveries int
-					if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT COUNT(*) FROM events WHERE event_id=$1`, event.ID()).Scan(&publications); err != nil {
+					publications, err := storetest.CountTemplateEventIdentity(proof.ctx, proof.selected.events, event.ID())
+					if err != nil {
 						t.Fatal(err)
 					}
-					if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1`, event.ID()).Scan(&deliveries); err != nil {
+					deliveries, err := storetest.CountTemplateEventDeliveries(proof.ctx, proof.selected.events, event.ID())
+					if err != nil {
 						t.Fatal(err)
 					}
 					if publications != 0 || deliveries != 0 || a2CanonicalAccumulatorEvidence(t, proof) != before {
@@ -199,9 +195,8 @@ func TestA2AccumulatorPersistedDuplicatedKeyEvidenceRefusesOnBothStores(t *testi
 			proof := newA2CanonicalAccumulatorProof(t, backend.open(t))
 			proof.execute(t, proof.publish(t, "numeric.requested",
 				`{"id":"original","value":3,"amount":7,"nested":{"numbers":[1,2],"fraction":1.0}}`), "")
-			var original []byte
-			if err := proof.selected.db.QueryRowContext(proof.ctx,
-				`SELECT accumulator FROM flow_instances WHERE run_id=$1 AND entity_id=$1`, proof.runID).Scan(&original); err != nil {
+			original, err := storetest.ReadRootFlowAccumulatorStorage(proof.ctx, proof.selected.events, proof.runID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			var buckets map[string]any
@@ -227,17 +222,16 @@ func TestA2AccumulatorPersistedDuplicatedKeyEvidenceRefusesOnBothStores(t *testi
 			// all positive state, publications, claims and outcomes use real owners.
 			write := func(raw []byte) {
 				t.Helper()
-				result, err := proof.selected.db.ExecContext(proof.ctx,
-					`UPDATE flow_instances SET accumulator=$1 WHERE run_id=$2 AND entity_id=$2`, string(raw), proof.runID)
+				rows, err := storetest.SetRootFlowAccumulatorWire(proof.ctx, proof.selected.events, proof.runID, raw)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+				if err != nil || rows != 1 {
 					t.Fatalf("hostile fixture changed %d receivers: %v", rows, err)
 				}
 			}
-			write(hostile)
 			t.Cleanup(func() { write(original) })
+			write(hostile)
 			restartA2CanonicalAccumulatorProof(t, proof)
 			before := a2CanonicalAccumulatorEvidence(t, proof)
 			payload := `{"id":"next","value":4,"amount":8,"nested":{"numbers":[3,4],"fraction":0.5}}`
@@ -248,15 +242,11 @@ func TestA2AccumulatorPersistedDuplicatedKeyEvidenceRefusesOnBothStores(t *testi
 			}
 			requireRefusal := func() {
 				t.Helper()
-				var status string
-				var attempts, settled, open int
-				if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT d.status,
- (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.claim_token IS NOT NULL),
- (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.closure_kind='settled' AND a.open_marker=FALSE),
- (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.open_marker=TRUE)
- FROM event_deliveries d WHERE d.event_id=$1 AND d.subscriber_type='node'`, refused.event.ID()).Scan(&status, &attempts, &settled, &open); err != nil {
+				storage, err := storetest.ReadCanonicalAccumulatorRefusalStorage(proof.ctx, proof.selected.events, refused.event.ID())
+				if err != nil {
 					t.Fatal(err)
 				}
+				status, attempts, settled, open := storage.Status, storage.Attempts, storage.Settled, storage.Open
 				if status != "dead_letter" || attempts != 1 || settled != 1 || open != 0 {
 					t.Fatalf("corruption refusal did not settle its exact claim: status=%s attempts=%d settled=%d open=%d", status, attempts, settled, open)
 				}
@@ -395,22 +385,22 @@ func requireA2CanonicalAccumulatorItem(t *testing.T, proof *a2AccumulatorPersist
 func a2CanonicalAccumulatorEvidence(t *testing.T, proof *a2AccumulatorPersistenceProof) a2AccumulatorPersistedEvidence {
 	t.Helper()
 	evidence := proof.evidence(t)
-	if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='numeric.completed'`, proof.runID).Scan(&evidence.Publications); err != nil {
+	publications, err := storetest.CountRunEventNameStorage(proof.ctx, proof.selected.events, proof.runID, "numeric.completed")
+	if err != nil {
 		t.Fatal(err)
 	}
+	evidence.Publications = publications
 	return evidence
 }
 
 func requireA2CanonicalAccumulatorClaim(t *testing.T, proof *a2AccumulatorPersistenceProof, publication a2AccumulatorPublication) string {
 	t.Helper()
-	var deliveryID, status string
-	var attempts, settled int
-	if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT d.delivery_id, d.status,
- (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.claim_token IS NOT NULL),
- (SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id AND a.closure_kind='settled' AND a.open_marker=FALSE)
- FROM event_deliveries d WHERE d.event_id=$1 AND d.subscriber_type='node'`, publication.event.ID()).Scan(&deliveryID, &status, &attempts, &settled); err != nil {
+	storage, err := storetest.ReadCanonicalAccumulatorClaimStorage(proof.ctx, proof.selected.events, publication.event.ID())
+	if err != nil {
 		t.Fatal(err)
 	}
+	deliveryID, status := storage.DeliveryID, storage.Status
+	attempts, settled := storage.Attempts, storage.Settled
 	if status != "delivered" || attempts != 1 || settled != 1 {
 		t.Fatalf("publication did not acquire and settle one real persisted claim: delivery=%s status=%s attempts=%d settled=%d", deliveryID, status, attempts, settled)
 	}

@@ -32,7 +32,8 @@ func TestRunForkSnapshotFixtureUsesOriginalCoordinatorBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer restore()
-			if err := CaptureRunForkSnapshotForTest(ctx, fixture.store, event.RunID()); err != nil {
+			revision, err := CaptureSelectedRunForkRevisionForTest(ctx, fixture.store, event.RunID())
+			if err != nil || revision < 1 {
 				t.Fatal(err)
 			}
 			if counts := probe.Snapshot(); counts.Total.Begun != 1 || counts.Total.WriteCommits != 1 || counts.Total.Revision.Finalizations != 1 || counts.Active != 0 {
@@ -46,7 +47,7 @@ func TestRunForkSnapshotFixtureUsesOriginalCoordinatorBothStores(t *testing.T) {
 				PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 			})
 			plan, err := planner.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: event.RunID(), At: event.ID()})
-			if err != nil || plan.ForkPoint.EventID != event.ID() {
+			if err != nil || plan.ForkPoint.EventID != event.ID() || plan.ForkPoint.Revision != revision {
 				t.Fatalf("captured historical event is not plannable: plan=%+v err=%v", plan, err)
 			}
 			if err := CaptureRunForkSnapshotForTest(ctx, fixture.store, event.RunID()); err != nil {

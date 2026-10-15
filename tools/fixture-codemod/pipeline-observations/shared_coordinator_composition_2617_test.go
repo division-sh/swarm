@@ -82,6 +82,11 @@ func validateSharedCoordinatorComposition2617(row recipe, actual string, directi
 }
 
 func reviewedSharedCoordinatorCurrentBody2617(row recipe, actual string, prior reviewedSuccessorPacket2617) (string, error) {
+	var integrationErr error
+	row, actual, integrationErr = catchUp2542PriorMasterPair(row, actual)
+	if integrationErr != nil {
+		return "", integrationErr
+	}
 	_, composed, err := sharedCoordinatorComposition2617(row)
 	if err != nil {
 		return "", err

@@ -60,7 +60,11 @@ steps:
 				t.Fatalf("seeded %d noncanonical root entity coordinates", invalid)
 			}
 			var published int
-			if err := rt.DB.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events WHERE event_name = 'widget.scored'`).Scan(&published); err != nil {
+			if err := func() error {
+				var err error
+				published, err = readServedGlobalEventNameCount(context.Background(), rt.ReceiverStateReader, "widget.scored")
+				return err
+			}(); err != nil {
 				t.Fatal(err)
 			}
 			if published != 1 {

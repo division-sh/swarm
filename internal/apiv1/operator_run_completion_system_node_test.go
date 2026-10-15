@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,15 +18,11 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 )
 
 func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	bundle := runCompletionSystemNodeBundle(t)
 	source := semanticview.Wrap(bundle)
 	bundleFact := sourceArtifactFactForTestBundle(t, bundle)
@@ -68,20 +63,20 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	if result := asMap(t, started.Result); result["run_id"] != runID || result["status"] != "running" {
 		t.Fatalf("run.start result = %#v, want running run %s", result, runID)
 	}
-	run := waitForRunGetStatus(t, handler, db, lifecycleExecutor, runID, "completed")
+	run := waitForRunGetStatus(t, handler, pg, lifecycleExecutor, runID, "completed")
 	if run["run_id"] != runID {
 		t.Fatalf("run.get run_id = %#v, want %s", run["run_id"], runID)
 	}
 
-	eventID := triggerEventIDForRun(t, db, runID)
+	eventID := triggerEventIDForRun(t, pg, runID)
 	pipelineNodeID := identitytest.FlowNode(t, "discovery", "pipeline").Key()
-	assertPipelineReceiptSucceeded(t, db, eventID)
-	assertSystemNodeOutcomePersisted(t, db, eventID, pipelineNodeID)
-	assertSystemNodeDeliverySettled(t, db, eventID, pipelineNodeID)
+	assertPipelineReceiptSucceeded(t, pg, eventID)
+	assertSystemNodeOutcomePersisted(t, pg, eventID, pipelineNodeID)
+	assertSystemNodeDeliverySettled(t, pg, eventID, pipelineNodeID)
 	rootNodeID := identitytest.FlowNode(t, ".", "root-completion").Key()
-	assertSystemNodeOutcomePersisted(t, db, eventID, rootNodeID)
-	assertSystemNodeDeliverySettled(t, db, eventID, rootNodeID)
-	assertFlowEntityTerminal(t, db, runID, runtimepipeline.FlowInstanceEntityID("discovery"), "discovery", "discovery", "done")
+	assertSystemNodeOutcomePersisted(t, pg, eventID, rootNodeID)
+	assertSystemNodeDeliverySettled(t, pg, eventID, rootNodeID)
+	assertFlowEntityTerminal(t, pg, runID, runtimepipeline.FlowInstanceEntityID("discovery"), "discovery", "discovery", "done")
 
 	diagnose := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"diagnose","method":"run.diagnose","params":{"run_id":%q}}`, runID))
 	if diagnose.Error != nil {
@@ -194,7 +189,7 @@ func (m runCompletionSystemNodeModule) GuardRegistry() runtimepipeline.GuardRegi
 func waitForRunGetStatus(
 	t *testing.T,
 	handler *Handler,
-	db *sql.DB,
+	selected any,
 	executor *runtimerunlifecycle.Executor,
 	runID,
 	wantStatus string,
@@ -210,11 +205,11 @@ func waitForRunGetStatus(
 		if run["status"] == wantStatus {
 			return true, nil
 		}
-		var revision int64
-		var dueAt sql.NullTime
-		if err := db.QueryRow(`SELECT completion_revision, completion_due_at FROM runs WHERE run_id = $1::uuid`, runID).Scan(&revision, &dueAt); err != nil {
+		clock, err := storetest.ReadPostgresCompletionCandidateClockStorage(context.Background(), selected, runID)
+		if err != nil {
 			return false, err
 		}
+		revision, dueAt := clock.Revision, clock.DueAt
 		return false, fmt.Errorf(
 			"status=%#v, want %s; completion_revision=%d due_present=%t active_candidates=%d",
 			run["status"], wantStatus, revision, dueAt.Valid, executor.ActiveCandidates(),
@@ -223,10 +218,10 @@ func waitForRunGetStatus(
 	return run
 }
 
-func triggerEventIDForRun(t *testing.T, db *sql.DB, runID string) string {
+func triggerEventIDForRun(t *testing.T, selected any, runID string) string {
 	t.Helper()
-	var eventID string
-	if err := db.QueryRow(`SELECT trigger_event_id::text FROM runs WHERE run_id = $1::uuid`, runID).Scan(&eventID); err != nil {
+	eventID, err := storetest.ReadPostgresRunTriggerEventIdentityStorage(context.Background(), selected, runID)
+	if err != nil {
 		t.Fatalf("load trigger event id: %v", err)
 	}
 	if strings.TrimSpace(eventID) == "" {
@@ -235,52 +230,34 @@ func triggerEventIDForRun(t *testing.T, db *sql.DB, runID string) string {
 	return eventID
 }
 
-func assertSystemNodeDeliverySettled(t *testing.T, db *sql.DB, eventID, nodeID string) {
+func assertSystemNodeDeliverySettled(t *testing.T, selected any, eventID, nodeID string) {
 	t.Helper()
-	var status, reason string
-	var settledAt sql.NullTime
-	if err := db.QueryRow(`
-		SELECT COALESCE(status, ''), COALESCE(reason_code, ''), settled_at
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = $2
-	`, eventID, nodeID).Scan(&status, &reason, &settledAt); err != nil {
+	observed, err := storetest.ReadPostgresSystemNodeDeliveryStorage(context.Background(), selected, eventID, nodeID)
+	if err != nil {
 		t.Fatalf("load system-node delivery: %v", err)
 	}
+	status, reason, settledAt := observed.Status, observed.Reason, observed.SettledAt
 	if status != "delivered" || reason != "" || !settledAt.Valid {
 		t.Fatalf("system-node delivery = status:%q reason:%q settled:%v, want canonical delivered settlement", status, reason, settledAt.Valid)
 	}
 }
 
-func assertSystemNodeOutcomePersisted(t *testing.T, db *sql.DB, eventID, nodeID string) {
+func assertSystemNodeOutcomePersisted(t *testing.T, selected any, eventID, nodeID string) {
 	t.Helper()
-	var outcome, reason string
-	if err := db.QueryRow(`
-		SELECT COALESCE(o.outcome, ''), COALESCE(o.reason_code, '')
-		FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
-		JOIN event_deliveries d ON d.delivery_id = o.delivery_id
-		WHERE d.event_id = $1::uuid
-		  AND d.subscriber_type = 'node'
-		  AND d.subscriber_id = $2
-	`, eventID, nodeID).Scan(&outcome, &reason); err != nil {
+	observed, err := storetest.ReadPostgresSystemNodeOutcomeStorage(context.Background(), selected, eventID, nodeID)
+	if err != nil {
 		t.Fatalf("load system-node outcome: %v", err)
 	}
+	outcome, reason := observed.Outcome, observed.Reason
 	if outcome != "delivered" || reason != "" {
 		t.Fatalf("system-node outcome = outcome:%q reason:%q, want delivered with no failure reason", outcome, reason)
 	}
 }
 
-func assertPipelineReceiptSucceeded(t *testing.T, db *sql.DB, eventID string) {
+func assertPipelineReceiptSucceeded(t *testing.T, selected any, eventID string) {
 	t.Helper()
-	var outcome string
-	if err := db.QueryRow(`
-		SELECT COALESCE(outcome, '')
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'platform'
-		  AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&outcome); err != nil {
+	outcome, err := storetest.ReadPostgresExactPipelineReceiptOutcomeStorage(context.Background(), selected, eventID)
+	if err != nil {
 		t.Fatalf("load pipeline receipt: %v", err)
 	}
 	if outcome != "success" {
@@ -288,18 +265,13 @@ func assertPipelineReceiptSucceeded(t *testing.T, db *sql.DB, eventID string) {
 	}
 }
 
-func assertFlowEntityTerminal(t *testing.T, db *sql.DB, runID, entityID, flowInstance, wantEntityType, wantState string) {
+func assertFlowEntityTerminal(t *testing.T, selected any, runID, entityID, flowInstance, wantEntityType, wantState string) {
 	t.Helper()
-	var entityType, state string
-	if err := db.QueryRow(`
-		SELECT entity_type, COALESCE(current_state, '')
-		FROM entity_state
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-		  AND flow_instance = $3
-	`, runID, entityID, flowInstance).Scan(&entityType, &state); err != nil {
+	observed, err := storetest.ReadPostgresFlowEntityTerminalStorage(context.Background(), selected, runID, entityID, flowInstance)
+	if err != nil {
 		t.Fatalf("load flow entity terminal state: %v", err)
 	}
+	entityType, state := observed.EntityType, observed.State
 	if entityType != wantEntityType {
 		t.Fatalf("flow entity entity_type = %q, want %q", entityType, wantEntityType)
 	}

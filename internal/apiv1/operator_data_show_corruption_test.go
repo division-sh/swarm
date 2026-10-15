@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/durabledata"
-	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -118,13 +118,7 @@ func TestDataShowCorruptReadFamilyAcrossSelectedStores(t *testing.T) {
 			})
 		}
 		// Actual stored corruption is separate from hostile interface-result proof.
-		query := "UPDATE resource_versions SET canonical_jsonl = ? WHERE version_id = ?"
-		if _, ok := fixture.primary.(*store.PostgresStore); ok {
-			query = "UPDATE resource_versions SET canonical_jsonl = $1 WHERE version_id = $2"
-		}
-		if _, err := fixture.db.ExecContext(ctx, query, []byte("not JSONL"), second.Candidate.VersionID); err != nil {
-			t.Fatal(err)
-		}
+		storetest.RequireResourcePayloadCorruption(t, ctx, fixture.primary, string(second.Candidate.VersionID), "not JSONL")
 		handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: OperatorDataHandlers(DataHandlerOptions{Store: fixture.reconstructed})})
 		_, response, _ := callReadOnlyProbeRPC(t, handler, "data.show", dataShowResourceParams("rows"), "Bearer "+testToken)
 		if response.Error == nil || asMap(t, response.Error.Data)["code"] != string(durabledata.CodeIntegrity) {

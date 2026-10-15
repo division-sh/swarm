@@ -15,6 +15,7 @@ import (
 	agentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	agentframe "github.com/division-sh/swarm/internal/runtime/agentframe"
 	agentmemory "github.com/division-sh/swarm/internal/runtime/agentmemory"
+	agenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	authoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	budgetspend "github.com/division-sh/swarm/internal/runtime/budgetspend"
 	bus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -473,6 +474,10 @@ func (s *PostgresStore) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Con
 
 func (s *PostgresStore) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source correlation.SourceArtifactFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error) {
 	return s.pipelinePostgresOwner.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
+}
+
+func (s *PostgresStore) InspectSourceSetHead(ctx context.Context) (agenttopology.SourceSetPlan, bool, error) {
+	return s.startupPostgresOwner.InspectSourceSetHead(ctx)
 }
 
 func (s *PostgresStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {
@@ -939,8 +944,16 @@ func (s *PostgresStore) Read(ctx context.Context, scope timerobligation.Scope, o
 	return s.timerObligationPostgresReader.Read(ctx, scope, observedAt)
 }
 
+func (s *PostgresStore) ReadActiveDeliverySnapshots(ctx context.Context) ([]deliverylifecycle.Snapshot, error) {
+	return s.deliveryPostgresOwner.ReadActiveDeliverySnapshots(ctx)
+}
+
 func (s *PostgresStore) ReadAgentLifecycleOutcome(ctx context.Context, req manager.AgentLifecycleTransition) (manager.AgentLifecycleTransitionResult, bool, error) {
 	return s.agentPostgresOwner.ReadAgentLifecycleOutcome(ctx, req)
+}
+
+func (s *PostgresStore) ReadFirstAgentClaimProfile(ctx context.Context, expected deliverylifecycle.Snapshot) (deliverylifecycle.AgentClaimProfile, error) {
+	return s.deliveryPostgresOwner.ReadFirstAgentClaimProfile(ctx, expected)
 }
 
 func (s *PostgresStore) ReadResetInventory(ctx context.Context) (destructivereset.Inventory, error) {
@@ -1715,6 +1728,10 @@ func (s *SQLiteRuntimeStore) InspectDynamicFlowRuntimeReadinessForSource(ctx con
 	return s.pipelineSQLiteOwner.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
 }
 
+func (s *SQLiteRuntimeStore) InspectSourceSetHead(ctx context.Context) (agenttopology.SourceSetPlan, bool, error) {
+	return s.startupSQLiteOwner.InspectSourceSetHead(ctx)
+}
+
 func (s *SQLiteRuntimeStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {
 	return s.effectSQLiteOwner.IsExternalEffectAuthorityCurrent(ctx, authority)
 }
@@ -2151,8 +2168,16 @@ func (s *SQLiteRuntimeStore) Read(ctx context.Context, scope timerobligation.Sco
 	return s.timerObligationSQLiteReader.Read(ctx, scope, observedAt)
 }
 
+func (s *SQLiteRuntimeStore) ReadActiveDeliverySnapshots(ctx context.Context) ([]deliverylifecycle.Snapshot, error) {
+	return s.deliverySQLiteOwner.ReadActiveDeliverySnapshots(ctx)
+}
+
 func (s *SQLiteRuntimeStore) ReadAgentLifecycleOutcome(ctx context.Context, req manager.AgentLifecycleTransition) (manager.AgentLifecycleTransitionResult, bool, error) {
 	return s.agentSQLiteOwner.ReadAgentLifecycleOutcome(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) ReadFirstAgentClaimProfile(ctx context.Context, expected deliverylifecycle.Snapshot) (deliverylifecycle.AgentClaimProfile, error) {
+	return s.deliverySQLiteOwner.ReadFirstAgentClaimProfile(ctx, expected)
 }
 
 func (s *SQLiteRuntimeStore) ReadResetInventory(ctx context.Context) (destructivereset.Inventory, error) {

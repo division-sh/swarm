@@ -15,7 +15,6 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -44,8 +43,7 @@ func TestClaimHeartbeatRealStoreAcknowledgedCleanupParity(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			var selected runtimedelivery.Store
 			if backend == "postgres" {
-				_, db, _ := testutil.StartPostgres(t)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			} else {
 				selected = storetest.StartSQLiteRuntimeStore(t)
 			}

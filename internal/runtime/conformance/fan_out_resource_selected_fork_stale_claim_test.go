@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -94,14 +95,16 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 				_ = owner.FenceSelectedContexts()
 				t.Fatalf("R4 selected receiver claim not reached: %v", ctx.Err())
 			}
-			var childID, status, predecessorExecutionID string
-			var claimVersion int64
-			if err := f.db.QueryRowContext(ctx, `SELECT CAST(fork_run_id AS TEXT) FROM run_fork_operations WHERE idempotency_key=$1`, key).Scan(&childID); err != nil {
+			operation, err := storetest.ReadSelectedForkKeyStorage(ctx, f.selected, key)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := f.db.QueryRowContext(ctx, `SELECT status,current_attempt_version,selected_execution_id FROM event_deliveries WHERE delivery_id=$1 AND run_id=$2`, predecessor.DeliveryID(), childID).Scan(&status, &claimVersion, &predecessorExecutionID); err != nil {
+			childID := operation.RunID
+			claim, err := storetest.ReadSelectedDeploymentClaimStorage(ctx, f.selected, predecessor.DeliveryID(), childID)
+			if err != nil {
 				t.Fatal(err)
 			}
+			status, claimVersion, predecessorExecutionID := claim.Status, claim.Version, claim.ExecutionID
 			if status != "in_progress" || claimVersion != predecessor.Version() {
 				t.Fatalf("R4 claim cut lacks exact persisted predecessor: delivery=%s status=%s version=%d want=%d", predecessor.DeliveryID(), status, claimVersion, predecessor.Version())
 			}
@@ -138,8 +141,8 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 			if settled, err := f.selected.SettleSuccess(context.Background(), predecessor, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err == nil {
 				t.Fatalf("R4 stale predecessor settled after successor recovery: %+v", settled)
 			}
-			var predecessorDelivered int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1 AND claim_version=$2 AND outcome='delivered'`, predecessor.DeliveryID(), predecessor.Version()).Scan(&predecessorDelivered); err != nil {
+			predecessorDelivered, err := storetest.CountDeliveredClaimVersionStorage(f.ctx, f.selected, predecessor.DeliveryID(), predecessor.Version())
+			if err != nil {
 				t.Fatal(err)
 			}
 			if predecessorDelivered != 0 {
@@ -150,20 +153,22 @@ func TestDeploymentSourceSelectedPredecessorClaimCannotSettleAfterRecoveryBothSt
 			if len(rpcErr) != 0 || result.ForkRunID != childID {
 				t.Fatalf("R4 successor failed exact child: result=%+v error=%s", result, rpcErr)
 			}
-			var successorExecutionID, deliveryExecutionID string
-			var successorGeneration, deliveryGeneration int64
-			if err := f.db.QueryRowContext(f.ctx, `SELECT CAST(execution_id AS TEXT),generation FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 ORDER BY generation DESC LIMIT 1`, childID).Scan(&successorExecutionID, &successorGeneration); err != nil {
+			execution, err := storetest.ReadLatestSelectedDeploymentExecutionIdentityStorage(f.ctx, f.selected, childID)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT CAST(selected_execution_id AS TEXT),selected_execution_generation FROM event_deliveries WHERE delivery_id=$1`, predecessor.DeliveryID()).Scan(&deliveryExecutionID, &deliveryGeneration); err != nil {
+			delivery, err := storetest.ReadSelectedDeliveryExecutionStorage(f.ctx, f.selected, predecessor.DeliveryID())
+			if err != nil {
 				t.Fatal(err)
 			}
+			successorExecutionID, successorGeneration := execution.ID, execution.Generation
+			deliveryExecutionID, deliveryGeneration := delivery.ID, delivery.Generation
 			if successorExecutionID == predecessorExecutionID || successorGeneration <= 1 || deliveryExecutionID != successorExecutionID || deliveryGeneration != successorGeneration {
 				t.Fatalf("R4 no exact successor claim transfer: predecessor=%s successor=%s/%d delivery=%s/%d", predecessorExecutionID, successorExecutionID, successorGeneration, deliveryExecutionID, deliveryGeneration)
 			}
 			assertSelectedDeploymentRowsWithClosedExecutions(t, f, server, childID, "root", string(changed.VersionID), changedRows, 2)
-			var successorDelivered int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1 AND claim_version>$2 AND outcome='delivered'`, predecessor.DeliveryID(), predecessor.Version()).Scan(&successorDelivered); err != nil {
+			successorDelivered, err := storetest.CountDeliveredSuccessorClaimVersionsStorage(f.ctx, f.selected, predecessor.DeliveryID(), predecessor.Version())
+			if err != nil {
 				t.Fatal(err)
 			}
 			if successorDelivered != 1 {

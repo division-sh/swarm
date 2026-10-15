@@ -144,7 +144,13 @@ func TestServePostgresLostCommitResponseRecoversDurablePublication(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = observer.Close() })
+	t.Cleanup(func() {
+		_ = observer.Close()
+	})
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		reader = requireReceiverProofStateReader(t, p.deps.EventStore)
+	})
 	var port string
 	if _, err := fmt.Sscanf(server.options, "-h 127.0.0.1 -p %s", &port); err != nil {
 		t.Fatal(err)
@@ -160,7 +166,9 @@ func TestServePostgresLostCommitResponseRecoversDurablePublication(t *testing.T)
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 		return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
 	}
-	t.Cleanup(func() { buildStoresForServe = oldBuild })
+	t.Cleanup(func() {
+		buildStoresForServe = oldBuild
+	})
 	root := writeServedEventPublishFollowUpFixture(t)
 	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
 	if err := os.WriteFile(configPath, []byte("runtime:\n  recovery_on_startup: true\nworkspace: {}\n"), 0600); err != nil {
@@ -201,13 +209,13 @@ func TestServePostgresLostCommitResponseRecoversDurablePublication(t *testing.T)
 	restarted := startServeRuntimeTestProcess(t, opts)
 	restarted.waitForReadyLine()
 	nextEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, restarted.outputString()) + "/v1/rpc"
-	entity := requireServedEventPublishEntityState(t, observer, "postgres", runID, "", "waiting")
+	entity := requireServedEventPublishEntityState(t, reader, "postgres", runID, "", "waiting")
 	requireServedEntityReadback(t, nextEndpoint, runID, entity, "waiting")
 	replay := requireServedEventPublishRPCResult(t, nextEndpoint, params)
 	if replay.RunID != runID || replay.EventID != eventID {
 		t.Fatalf("public idempotency replay lost exact durable identity: %#v", replay)
 	}
-	if n := servedEventPublishScalarCount(t, observer, "postgres", "application_events_by_run", runID, ""); n != 1 {
+	if n := servedEventPublishScalarCount(t, reader, "postgres", "application_events_by_run", runID, ""); n != 1 {
 		t.Fatalf("durable publication count=%d want 1", n)
 	}
 	var deliveries, outcomes int

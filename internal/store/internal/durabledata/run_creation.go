@@ -311,11 +311,7 @@ func CompleteRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, plan *RunC
 		plan.pins[index].RunState = status
 	}
 	for _, pin := range plan.pins {
-		if _, err := tx.ExecContext(ctx, o.query(`
-			INSERT INTO resource_version_pins
-			(run_id, flow_path, event_name, schema_digest, version_id, selection, pinned_at)
-			VALUES (%s, %s, %s, %s, %s, %s, %s)
-		`, 7), pin.RunID, pin.Declaration.FlowPath, pin.Declaration.EventName, pin.SchemaDigest, pin.VersionID, pin.Selection, now); err != nil {
+		if err := o.insertPinTx(ctx, tx, pin, now); err != nil {
 			return runtimedata.RunCreationOperationRecord{}, fmt.Errorf("insert resource version pin: %w", err)
 		}
 	}

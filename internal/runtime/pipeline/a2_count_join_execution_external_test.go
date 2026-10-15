@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -123,8 +124,8 @@ func TestA2CountJoinRealExecutionAndRestartOnBothStores(t *testing.T) {
 					}
 					cancel()
 					before := load()
-					var eventsBefore int
-					if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE run_id=$1", runID).Scan(&eventsBefore); err != nil {
+					eventsBefore, err := storetest.CountPhysicalRunEvents(ctx, selected.events, runID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					if err := schedules.Stop(ctx); err != nil {
@@ -138,8 +139,8 @@ func TestA2CountJoinRealExecutionAndRestartOnBothStores(t *testing.T) {
 					if restored, err := schedules.Restore(ctx); err != nil || restored != wantPending {
 						t.Fatalf("%s restore: count=%d want=%d err=%v", name, restored, wantPending, err)
 					}
-					var eventsAfter int
-					if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE run_id=$1", runID).Scan(&eventsAfter); err != nil {
+					eventsAfter, err := storetest.CountPhysicalRunEvents(ctx, selected.events, runID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					if !reflect.DeepEqual(load(), before) || eventsAfter != eventsBefore {
@@ -176,8 +177,8 @@ func TestA2CountJoinRealExecutionAndRestartOnBothStores(t *testing.T) {
 					}
 					a2KnownTargetWaitForSettlement(t, ctx, bus, probe, event, node.Key(), handlerStatus, deliveryStatus, logger)
 					if want != "" {
-						var raw string
-						if err := selected.db.QueryRowContext(ctx, "SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1", event.ID()).Scan(&raw); err != nil {
+						raw, err := storetest.ReadGateEventFailure(ctx, selected.events, event.ID())
+						if err != nil {
 							t.Fatal(err)
 						}
 						var failure failures.Envelope
