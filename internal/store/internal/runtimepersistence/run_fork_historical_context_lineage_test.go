@@ -86,7 +86,7 @@ func historicalFanOutAncestorLineage(t *testing.T, proveRetry bool) {
 						}
 						if proveRetry {
 							beforeRetry := historicalContextDatabaseRows(t, db, postgres)
-							retry, err := store.MaterializeRunFork(ctx, request)
+							retry, err := store.RequireMaterializedRunFork(ctx, child.ForkRunID, request)
 							historicalContextRequireUnchanged(t, beforeRetry, historicalContextDatabaseRows(t, db, postgres))
 							if err != nil || retry.ForkRunID != child.ForkRunID {
 								t.Fatalf("generation %d exact materialization replay: %#v err=%v", generation, retry, err)

@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -97,7 +98,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 		}, fmt.Errorf("fork materialization requires execution-ready plan; blockers: %s", runForkBlockerCodes(plan.UnsupportedBlockers))
 	}
 
-	forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
+	forkRunID := uuid.NewString()
 	var materialization runfork.RunForkMaterialization
 	var changes privaterunlifecycle.ChannelCardChanges
 	result := mutationprotocol.RunPostgresWithOptions(ctx, s.backend, &sql.TxOptions{Isolation: sql.LevelReadCommitted}, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
@@ -128,33 +129,6 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			scenarioProfile, sourceProfiled, err := admitRunForkScenarioProfile(ctx, tx, plan.SourceRunID, req.EffectiveSourceIdentity, identity.SourceArtifactFact)
 			if err != nil {
 				return err
-			}
-			existing, found, err := loadExactRunForkMaterialization(
-				ctx, func(ctx context.Context, tx *sql.Tx, runID string) (storerunlifecycle.Snapshot, error) {
-					return s.RunLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, runID, true)
-				}, tx, true, forkRunID, plan, identity, selection,
-			)
-			if err != nil {
-				return err
-			}
-			if found {
-				if err := requireExactRunForkScenarioProfile(ctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
-					return err
-				}
-				pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, ctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, true, time.Time{})
-				if err != nil {
-					return err
-				}
-				if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
-					return err
-				}
-				if err := requireExactMaterializedRunForkFanOut(ctx, tx, true, forkRunID, plan, fanOutPlanRefs, req.OriginalLoopCarriage, identity.SourceArtifactFact.BundleHash(), s.durableData, pins); err != nil {
-					return err
-				}
-				existing.DataPins = pins
-				existing.MaterializedFanOutCount = len(plan.FanOutObligations) - countRunForkSourceDeploymentFeeds(plan) + len(pins)
-				materialization = existing
-				return nil
 			}
 			metadata, err := loadRunForkEntityMetadata(plan)
 			if err != nil {
@@ -272,7 +246,7 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 		}, fmt.Errorf("fork materialization requires execution-ready plan; blockers: %s", runForkBlockerCodes(plan.UnsupportedBlockers))
 	}
 
-	forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
+	forkRunID := uuid.NewString()
 	var changes privaterunlifecycle.ChannelCardChanges
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite run fork materialization", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -300,35 +274,6 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 			scenarioProfile, sourceProfiled, err := admitSQLiteRunForkScenarioProfile(txctx, tx, plan.SourceRunID, req.EffectiveSourceIdentity, identity.SourceArtifactFact)
 			if err != nil {
 				return err
-			}
-			existing, found, err := loadExactRunForkMaterialization(
-				txctx,
-				func(ctx context.Context, tx *sql.Tx, runID string) (storerunlifecycle.Snapshot, error) {
-					return s.RunLifecycleSQLiteOwner.LoadSnapshotTx(ctx, tx, runID)
-				},
-				tx, false, forkRunID, plan, identity, selection,
-			)
-			if err != nil {
-				return err
-			}
-			if found {
-				if err := requireExactSQLiteRunForkScenarioProfile(txctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
-					return err
-				}
-				pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, true, time.Time{})
-				if err != nil {
-					return err
-				}
-				if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
-					return err
-				}
-				if err := requireExactMaterializedRunForkFanOut(txctx, tx, false, forkRunID, plan, fanOutPlanRefs, req.OriginalLoopCarriage, identity.SourceArtifactFact.BundleHash(), s.durableData, pins); err != nil {
-					return err
-				}
-				existing.DataPins = pins
-				existing.MaterializedFanOutCount = len(plan.FanOutObligations) - countRunForkSourceDeploymentFeeds(plan) + len(pins)
-				materialization = existing
-				return nil
 			}
 			metadata, err := loadRunForkEntityMetadata(plan)
 			if err != nil {
@@ -407,50 +352,13 @@ func loadExactRunForkMaterialization(
 	identity runForkBundleInsertIdentity,
 	selection *runfork.RunForkContractSelection,
 ) (runfork.RunForkMaterialization, bool, error) {
-	query := `
-		SELECT CAST(run_id AS TEXT)
-		FROM runs
-		WHERE run_id = $1
-	`
-	args := []any{forkRunID}
-	if plan.ForkPoint.Kind == runfork.RunForkPointEvent {
-		query += ` OR (forked_from_run_id = $2 AND forked_from_point_kind = 'event'
-			AND forked_from_revision = $3 AND forked_from_event_id = $4)`
-		args = append(args, plan.SourceRunID, plan.ForkPoint.Revision, plan.ForkPoint.EventID)
-	}
-	query += ` ORDER BY started_at ASC LIMIT 2`
-	rows, err := tx.QueryContext(ctx, query, args...)
-	if err != nil {
-		return runfork.RunForkMaterialization{}, false, fmt.Errorf("check existing fork materialization: %w", err)
-	}
-	var matches []string
-	for rows.Next() {
-		var existing string
-		if err := rows.Scan(&existing); err != nil {
-			_ = rows.Close()
-			return runfork.RunForkMaterialization{}, false, fmt.Errorf("scan existing fork materialization: %w", err)
-		}
-		matches = append(matches, existing)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return runfork.RunForkMaterialization{}, false, fmt.Errorf("read existing fork materialization: %w", err)
-	}
-	_ = rows.Close()
-	if len(matches) == 0 {
-		return runfork.RunForkMaterialization{}, false, nil
-	}
-	if len(matches) != 1 || matches[0] != forkRunID {
-		return runfork.RunForkMaterialization{}, false, fmt.Errorf(
-			"fork materialization identity conflict for source run %s at %s revision %d: matches=%v",
-			plan.SourceRunID, plan.ForkPoint.Kind, plan.ForkPoint.Revision, matches,
-		)
-	}
-
 	if loadSnapshot == nil {
 		return runfork.RunForkMaterialization{}, false, fmt.Errorf("fork lifecycle snapshot loader is required")
 	}
 	snapshot, err := loadSnapshot(ctx, tx, forkRunID)
+	if runtimefailures.OnlyBranches(err, func(branch error) bool { return branch == storerunlifecycle.ErrRunNotFound }) {
+		return runfork.RunForkMaterialization{}, false, nil
+	}
 	if err != nil {
 		return runfork.RunForkMaterialization{}, false, fmt.Errorf("load existing fork lifecycle: %w", err)
 	}
