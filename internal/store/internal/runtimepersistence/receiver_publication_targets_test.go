@@ -162,9 +162,26 @@ func TestReceiverPublicationExplicitTargetsBothStores(t *testing.T) {
 								t.Fatalf("commit selected exact actor: %+v %v", result, err)
 							}
 							stored, found, err := store.LoadPreparedPublishEvent(ctx, event.ID())
+							if err != nil || !found {
+								t.Fatalf("read selected publication: found=%v err=%v", found, err)
+							}
 							projected, _, projectionErr := bus.ResolvePreparedPublishEventTargetProjection(event, command.Commit.DeliveryRoutes)
-							if err != nil || !found || projectionErr != nil || stored.Validate() != nil || !reflect.DeepEqual(stored.DeliveryRoutes, command.Commit.DeliveryRoutes) || !reflect.DeepEqual(stored.Event.Event().NormalizedEnvelope(), projected.NormalizedEnvelope()) {
-								t.Fatalf("readback changed selected actor/construction: %+v %v", stored, err)
+							if projectionErr != nil {
+								t.Fatalf("project selected publication target: %v", projectionErr)
+							}
+							if validationErr := stored.Validate(); validationErr != nil {
+								t.Fatalf("validate stored selected publication: %v", validationErr)
+							}
+							t.Logf("selected publication routes (including actor, construction dependency and connect claim): expected=%#v actual=%#v", command.Commit.DeliveryRoutes, stored.DeliveryRoutes)
+							t.Logf("selected publication normalized envelope: expected=%#v actual=%#v", projected.NormalizedEnvelope(), stored.Event.Event().NormalizedEnvelope())
+							if !reflect.DeepEqual(stored.DeliveryRoutes, command.Commit.DeliveryRoutes) {
+								t.Errorf("readback changed selected delivery routes/dependency/claim: expected=%#v actual=%#v", command.Commit.DeliveryRoutes, stored.DeliveryRoutes)
+							}
+							if !reflect.DeepEqual(stored.Event.Event().NormalizedEnvelope(), projected.NormalizedEnvelope()) {
+								t.Errorf("readback changed selected normalized envelope: expected=%#v actual=%#v", projected.NormalizedEnvelope(), stored.Event.Event().NormalizedEnvelope())
+							}
+							if t.Failed() {
+								t.FailNow()
 							}
 							if err := publisher.ReleaseEnginePublications(ctx, prepared); err != nil {
 								t.Fatal(err)
