@@ -1092,15 +1092,15 @@ func decodeWorkflowInstancePersistedProjection(
 	if err != nil {
 		return workflowInstancePersistedProjection{}, err
 	}
-	bookkeeping, err := decodeWorkflowInstanceJSONMap("entity_state.bookkeeping", bookkeepingRaw)
+	bookkeeping, err := decodeWorkflowInstanceJSONMap("flow_instances.bookkeeping", bookkeepingRaw)
 	if err != nil {
 		return workflowInstancePersistedProjection{}, err
 	}
-	gates, err := decodeWorkflowInstanceJSONBoolMap("entity_state.gates", gatesRaw)
+	gates, err := decodeWorkflowInstanceJSONBoolMap("flow_instances.gates", gatesRaw)
 	if err != nil {
 		return workflowInstancePersistedProjection{}, err
 	}
-	accumulator, err := decodeWorkflowInstanceJSONMap("entity_state.accumulator", accRaw)
+	accumulator, err := decodeWorkflowInstanceJSONMap("flow_instances.accumulator", accRaw)
 	if err != nil {
 		return workflowInstancePersistedProjection{}, err
 	}
