@@ -70,15 +70,6 @@ func catchUp2542PriorLanePair(row recipe, actual string) (recipe, string, error)
 	return catchUp2542PriorPair(row, actual, false)
 }
 
-func requireCatchUp2542MasterPair(t *testing.T, row recipe, actual string) (recipe, string) {
-	t.Helper()
-	prior, source, err := catchUp2542PriorMasterPair(row, actual)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return prior, source
-}
-
 func catchUp2542PriorPair(row recipe, actual string, master bool) (recipe, string, error) {
 	packet, err := selectedreadrole.CatchUp2542Receipts()
 	if err != nil {

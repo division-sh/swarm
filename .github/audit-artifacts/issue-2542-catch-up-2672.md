@@ -33,6 +33,10 @@ Native unused analysis at501c found two unreachable declarations, not missing
 live assertions: `assertStoredEventUntargeted` and the external-package copy of
 `readinessPlanFixtureHash`. Both are removed. Existing live projection assertions
 and the separately used internal-package readiness hash remain unchanged.
+The continued native matrix then reported the old convenience wrapper
+`requireCatchUp2542MasterPair` unused after its five callers moved to the exact
+incoming-source view. Only that dead wrapper is removed; the underlying
+`catchUp2542PriorMasterPair` and all historical/hostile controls remain live.
 
 ## One finite history continuation
 
