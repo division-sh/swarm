@@ -248,9 +248,14 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 		BundleHash: canonical.TargetBundleHash, AllowSourceFreeze: canonical.AllowSourceFreeze,
 		DataPinOverrides: canonical.DataPinOverrides, ContractSelection: canonical.ContractSelection,
 	})
-	stored, found, lookupErr := opts.Operations.LoadForkOperationByID(ctx, canonical.OperationID)
+	stored, found, lookupErr := loadRunForkOutcomeForRequest(ctx, opts.Operations, canonical)
 	if lookupErr != nil {
 		return nil, runForkError(params.SourceRunID, params.ForkEventID, errors.Join(executionErr, lookupErr))
+	}
+	// A different operation's result is observable only after the execution
+	// owner joined it. Arbitrary losing failures are not key-election proof.
+	if found && stored.Request.OperationID != canonical.OperationID && executionErr != nil {
+		return nil, runForkError(params.SourceRunID, params.ForkEventID, executionErr)
 	}
 	if found && stored.Status == runfork.ForkOperationActivated {
 		if executionErr != nil {
@@ -263,6 +268,29 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 		return nil, runForkError(params.SourceRunID, params.ForkEventID, executionErr)
 	}
 	return nil, runForkError(params.SourceRunID, params.ForkEventID, fmt.Errorf("run.fork returned without a durable activation result"))
+}
+
+func loadRunForkOutcomeForRequest(ctx context.Context, reader RunForkOperationReader, request runfork.ForkOperationRequest) (runfork.ForkOperationRecord, bool, error) {
+	var record runfork.ForkOperationRecord
+	var found bool
+	var err error
+	if request.IdempotencyKey != "" {
+		record, found, err = reader.LoadForkOperation(ctx, request.Actor, request.IdempotencyKey, request.TransportHash)
+	} else {
+		record, found, err = reader.LoadForkOperationByID(ctx, request.OperationID)
+	}
+	if err != nil || !found {
+		return record, found, err
+	}
+	if err := record.Validate(); err != nil {
+		return runfork.ForkOperationRecord{}, false, err
+	}
+	if record.Request.Actor != request.Actor || record.Request.IdempotencyKey != request.IdempotencyKey ||
+		record.Request.TransportHash != request.TransportHash || record.Request.SourceRunID != request.SourceRunID ||
+		record.Request.ForkEventID != request.ForkEventID || (request.IdempotencyKey == "" && record.Request.OperationID != request.OperationID) {
+		return runfork.ForkOperationRecord{}, false, fmt.Errorf("durable fork outcome disagrees with original request identity")
+	}
+	return record, true, nil
 }
 
 func projectForkOperationResult(ctx context.Context, artifacts sourceartifact.Reader, record runfork.ForkOperationRecord) (RunForkExecutionResult, error) {
