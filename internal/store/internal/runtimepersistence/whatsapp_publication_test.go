@@ -36,7 +36,8 @@ func TestWhatsAppInboundPublicationRollbackAndLostAcknowledgmentBothStores(t *te
 			f := openStandingDispositionParityFixture(t, backend)
 			store := f.selected.(inboundPublicationProofStore)
 			candidate := f.candidate("whatsapp-publication")
-			candidate.Source = sourceartifactfixture.Require(t, context.Background(), store)
+			candidate.Source = sourceartifactfixture.RequireArtifact(t, context.Background(), store,
+				sourceartifactfixture.New("schema.yaml", []byte("name: whatsapp-publication-component\n")))
 			candidate.FlowPath = "."
 			candidate.ServiceID = runtimeflowidentity.StandingServiceID(candidate.FlowPath)
 			ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), candidate.Source)
