@@ -20,6 +20,8 @@ const (
 	PersistenceDebtGoTimeout = "20m"
 )
 
+const conformanceRebalancedReporterRoot = "TestNumericFanOutReporterShapeCompletesAndPreservesSemanticRejectionsOnBothBackends"
+
 // SoakBackend recognizes only the two approved backend-partitioned soak cells.
 func SoakBackend(run string) (string, bool) {
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -52,8 +54,11 @@ func validateSoakSelection(packages []string, run, skip, timeout, count, budget 
 	if isPipelineRestSelection(packages, run, skip, count, budget) {
 		return nil
 	}
+	if isConformanceReporterExclusion(packages, run, skip, count, budget) {
+		return nil
+	}
 	if skip != "" && (skip != SoakRun || len(packages) != 1 || packages[0] != SoakPackage) {
-		return fmt.Errorf("only the exact separately executed soak or pipeline families may be excluded")
+		return fmt.Errorf("only the exact separately executed soak, pipeline or conformance reporter families may be excluded")
 	}
 	return nil
 }
@@ -71,6 +76,12 @@ func isPipelineRestSelection(packages []string, run, skip, count, budget string)
 	return len(packages) == 1 && packages[0] == "github.com/division-sh/swarm/internal/runtime/pipeline" &&
 		run == `^(Test|Fuzz|Example)` && skip == `^Test(A2|CompiledTransition|Guard|PipelineCompiled|WorkflowCurrentTransition|JoinCapturedLoop|WorkflowTimer|WorkflowJoin|AcceptedWorkflowTimer|MutationFreeAcceptedEventTimer|Issue2564M09).*$` &&
 		count == "count-1" && budget == "broad"
+}
+
+func isConformanceReporterExclusion(packages []string, run, skip, count, budget string) bool {
+	return len(packages) == 1 && packages[0] == SoakPackage &&
+		run == `^(Test($|[^FHIV].*|I($|[^s].*|s($|[^s].*|s($|[^u].*|u($|[^e].*|e($|[^2].*|2($|[^3].*|3($|[^9].*|9($|[^4].*)))))))))|Example.*|Fuzz.*)$` &&
+		skip == "^"+conformanceRebalancedReporterRoot+"$" && count == "count-1" && budget == "broad"
 }
 
 // ValidateConformanceProofPartition expands exactly the two approved backend
@@ -98,8 +109,12 @@ func ValidateConformanceProofPartition(dir string, units []ProofUnit) error {
 		if pattern.MatchString(SoakTest) && unit.Skip != SoakRun {
 			return fmt.Errorf("ordinary unit %s also executes the soak", unit.ID)
 		}
+		skipped, err := regexp.Compile(unit.Skip)
+		if err != nil {
+			return err
+		}
 		matchers = append(matchers, func(name string) bool {
-			return pattern.MatchString(name) && !(unit.Skip == SoakRun && name == SoakTest)
+			return pattern.MatchString(name) && (unit.Skip == "" || !skipped.MatchString(name))
 		})
 	}
 	if len(backends) != 0 && (!backends["sqlite"] || !backends["postgres"]) {

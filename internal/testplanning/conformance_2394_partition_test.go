@@ -58,18 +58,21 @@ func conformance2394Fixture(t *testing.T) (Policy, []string, string) {
 
 func validateConformance2394Partition(policy Policy, names []string) ([][]string, error) {
 	pkg := []string{"github.com/division-sh/swarm/internal/runtime/conformance"}
-	patterns := make([]*regexp.Regexp, len(conformance2394Units))
-	groups := make([][]string, len(patterns))
+	selectors := make([]unitSelector, len(conformance2394Units))
+	groups := make([][]string, len(selectors))
 	for i, id := range conformance2394Units {
 		u := policy.Units[id]
-		if !reflect.DeepEqual(u.Packages, pkg) || u.CountMode != "count-1" || u.EnvironmentID != "" || !reflect.DeepEqual(u.EnvironmentIDs, managedEnvironmentIDs()) || u.BudgetClass != "broad" || u.GoTimeout != "" || u.Skip != "" || strings.Contains(u.Run, "/") {
+		wantSkip := ""
+		if id == "conformance-2" {
+			wantSkip = "^" + conformanceRebalancedReporterRoot + "$"
+		}
+		if !reflect.DeepEqual(u.Packages, pkg) || u.CountMode != "count-1" || u.EnvironmentID != "" || !reflect.DeepEqual(u.EnvironmentIDs, managedEnvironmentIDs()) || u.BudgetClass != "broad" || u.GoTimeout != "" || u.Skip != wantSkip || strings.Contains(u.Run, "/") {
 			return nil, fmt.Errorf("%s changed package/count/environment/budget or filtered a root: %+v", id, u)
 		}
-		var err error
-		patterns[i], err = regexp.Compile(u.Run)
-		if err != nil {
+		if _, err := regexp.Compile(u.Run); err != nil {
 			return nil, err
 		}
+		selectors[i] = compileUnitSelector(ProofUnit{Run: u.Run, Skip: u.Skip})
 	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		id := "conformance-soak-" + backend
@@ -99,14 +102,18 @@ func validateConformance2394Partition(policy Policy, names []string) ([][]string
 	old := regexp.MustCompile(`^(Test($|[^FHV].*)|Example.*|Fuzz.*)$`)
 	for _, name := range names {
 		owners := 0
-		for i, pattern := range patterns {
-			if pattern.MatchString(name) {
+		for i, selector := range selectors {
+			selected, err := selector.matches(name)
+			if err != nil {
+				return nil, err
+			}
+			if selected {
 				owners++
 				groups[i] = append(groups[i], name)
 			}
 		}
 		want := 0
-		if old.MatchString(name) && name != conformance2394Soak {
+		if old.MatchString(name) && name != conformance2394Soak && name != conformanceRebalancedReporterRoot {
 			want = 1
 		}
 		if owners != want {
@@ -252,7 +259,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 		"TestIssue2655StagedRevisionRefusalAndRetryBothStores",
 		"TestIssue2655EventOperationSelectorCorrespondenceBothStores",
 	}
-	want := []int{169 + len(admittedPointRoots), 14, 5, 1, 1}
+	want := []int{168 + len(admittedPointRoots), 14, 5, 1, 1}
 	for i, group := range groups {
 		if len(group) != want[i] {
 			t.Fatalf("%s census=%d, want reviewed %d; account new roots explicitly", conformance2394Units[i], len(group), want[i])
@@ -379,7 +386,7 @@ func TestConformance2394PartitionPreservesCompleteRoots(t *testing.T) {
 	if !reflect.DeepEqual(groups[4], []string{"TestIssue2394ReporterFiveHundredServingWindowBothStores"}) {
 		t.Fatalf("serving-window owner changed: %v", groups[4])
 	}
-	t.Log("complete disjoint census:196 =172 general +14 core +5 pressure +1 stress +1 window +3 long file-row roots in conformance-1")
+	t.Logf("complete disjoint #2394 census: %d general +14 core +5 pressure +1 stress +1 window; named reporter and three long file-row roots in conformance-1", len(groups[0]))
 	for _, profile := range []string{ProfileFull} {
 		var units []ProofUnit
 		for _, id := range policy.Profiles[profile].Units {
