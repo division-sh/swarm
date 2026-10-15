@@ -125,7 +125,12 @@ the policy/support-pin aggregate is also green. Completed transaction/barrier,
 event-adapter and complete-history receipts carry because no relevant source
 or historical byte changed in that naming repair.
 
-PENDING: final signed read-only ratchet after committing the downward files.
+Final signed read-only ratchet at
+eb49bd5d0c74a552afb88dbd10dd3bcaa826e751 is PASS55.090s, refresh disabled,
+same4896/2984/67 and same collector. The working tree is clean after that run.
+This final audit amendment is documentation-only; source, baseline and sidecar
+remain exactly the independently qualified signed endpoint. No later source
+change is claimed covered by that receipt.
 The existing87/70 holds (mock78/62 and numeric-fork9/8) remain excluded from new
 credit. All prior inherited event-count, Template9 and source-history landing
 obligations stay open and unwaived; this checkpoint does not claim the entire
