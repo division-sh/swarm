@@ -15559,7 +15559,7 @@ durable_data_resources:
     keyed_rows: Every row has a 1-based ordinal and a canonical typed boolean, number, or string business key. Duplicate business keys reject the whole input. Rows are byte-sorted by canonical business-key bytes for digesting, storage, activation, and replay; delta and named lookup use the business key.
     import_normalization: External null in an optional field consumes the same recursive structural field-edge owner as event admission and normalizes to omission recursively. Null in required fields and null list elements reject. Internal rows never contain null as an optionality representation.
     atomicity: One invalid row rejects the entire candidate and reports all bounded row defects. No partial version or head mutation exists.
-    empty_input: Canonical empty JSONL is a valid zero-row candidate. Standalone and fused inputs admit its canonical empty Base64 encoding and persist row_count zero without a sentinel row.
+    empty_input: Canonical empty JSONL is a valid zero-row candidate. Standalone and fused inputs admit its canonical empty Base64 encoding and persist row_count zero without a sentinel row. SQL payload presence, immutable reads, content copies and historical source-evaluation receipts preserve present-empty bytes independently of absent or pruned payloads; zero-row heads remain valid evaluation bases for later head advancement.
   source_operations:
     standalone: data.check and data.import require an exact registered bundle_hash, declaration, expected_head, and source_invocation_id.
     replay: The permanent source receipt is consulted before current catalog or head state. Same invocation and identical request returns the exact result; conflicting reuse fails closed.

@@ -397,21 +397,22 @@ func (o *Owner) persistVersion(ctx context.Context, tx *sql.Tx, compiled runtime
 	var alias uint64
 	var manifestJSON, schemaJSON, payload []byte
 	var businessKey string
+	var payloadPresent bool
 	var prunedAt any
 	err := tx.QueryRowContext(ctx, o.query(`
-		SELECT sequence_alias, manifest_json, canonical_schema_bytes, COALESCE(business_key_field, ''), canonical_jsonl, pruned_at
+		SELECT sequence_alias, manifest_json, canonical_schema_bytes, COALESCE(business_key_field, ''), canonical_jsonl, (canonical_jsonl IS NOT NULL), pruned_at
 		FROM resource_versions WHERE version_id = %s
-	`, 1), compiled.VersionID).Scan(&alias, &manifestJSON, &schemaJSON, &businessKey, &payload, &prunedAt)
+	`, 1), compiled.VersionID).Scan(&alias, &manifestJSON, &schemaJSON, &businessKey, &payload, &payloadPresent, &prunedAt)
 	if err == nil {
 		expectedManifest, _ := json.Marshal(compiled.Manifest)
 		if !jsonEqual(manifestJSON, expectedManifest) || !jsonEqual(schemaJSON, declaration.CanonicalSchema) || businessKey != declaration.BusinessKey {
 			return 0, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s immutable evidence is corrupt", compiled.VersionID)
 		}
-		if prunedAt == nil && !bytes.Equal(payload, compiled.CanonicalJSONL) {
+		if prunedAt == nil && (!payloadPresent || !bytes.Equal(payload, compiled.CanonicalJSONL)) {
 			return 0, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s materialized payload is corrupt", compiled.VersionID)
 		}
 		if prunedAt != nil {
-			if payload != nil {
+			if payloadPresent {
 				return 0, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s tombstone retains payload", compiled.VersionID)
 			}
 			if _, err := tx.ExecContext(ctx, o.query(`
@@ -674,12 +675,13 @@ func (o *Owner) loadSourceEvaluationBase(ctx context.Context, tx *sql.Tx, head r
 	}
 	var payload, schemaJSON, manifestJSON []byte
 	var schemaDigest, businessKey string
+	var payloadPresent bool
 	var prunedAt any
 	err := tx.QueryRowContext(ctx, o.query(`
-		SELECT canonical_jsonl, schema_digest, canonical_schema_bytes, COALESCE(business_key_field, ''), manifest_json, pruned_at
+		SELECT canonical_jsonl, (canonical_jsonl IS NOT NULL), schema_digest, canonical_schema_bytes, COALESCE(business_key_field, ''), manifest_json, pruned_at
 		FROM resource_versions WHERE version_id = %s
-	`, 1), head.Before.VersionID).Scan(&payload, &schemaDigest, &schemaJSON, &businessKey, &manifestJSON, &prunedAt)
-	if err != nil || payload == nil || prunedAt != nil {
+	`, 1), head.Before.VersionID).Scan(&payload, &payloadPresent, &schemaDigest, &schemaJSON, &businessKey, &manifestJSON, &prunedAt)
+	if err != nil || !payloadPresent || prunedAt != nil {
 		return runtimedata.SourceEvaluationBase{}, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource head %s has missing or pruned version payload", head.Before.VersionID)
 	}
 	var manifest runtimedata.Manifest
@@ -693,7 +695,7 @@ func (o *Owner) loadSourceEvaluationBase(ctx context.Context, tx *sql.Tx, head r
 	}
 	base := runtimedata.SourceEvaluationBase{
 		State: "version", Head: head, Manifest: &manifest, BusinessKey: businessKey,
-		CanonicalSchema: append([]byte(nil), schemaJSON...), CanonicalJSONL: append([]byte(nil), payload...),
+		CanonicalSchema: append([]byte(nil), schemaJSON...), CanonicalJSONL: append([]byte{}, payload...),
 	}
 	if _, err := base.Validate(declaration); err != nil {
 		return runtimedata.SourceEvaluationBase{}, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource head %s payload failed immutable verification: %v", head.Before.VersionID, err)
@@ -1348,7 +1350,7 @@ func (o *Owner) LoadRunResourceAccess(ctx context.Context, runID string, declara
 			out = append(out, runtimedata.ResourceAccessItem{
 				Kind: "resource", Declaration: ref, VersionID: versionID, SchemaDigest: schemaDigest,
 				RowCount: version.Manifest.RowCount, MountPath: mountPath, BusinessKey: version.BusinessKey,
-				Schema: append([]byte(nil), version.CanonicalSchema...), Content: append([]byte(nil), version.CanonicalJSONL...),
+				Schema: append([]byte(nil), version.CanonicalSchema...), Content: bytes.Clone(version.CanonicalJSONL),
 			})
 		}
 		return nil
@@ -1358,7 +1360,7 @@ func (o *Owner) LoadRunResourceAccess(ctx context.Context, runID string, declara
 
 func (o *Owner) loadVersions(ctx context.Context, tx *sql.Tx, declaration runtimedata.Declaration) ([]runtimedata.Version, error) {
 	rows, err := tx.QueryContext(ctx, o.query(`
-		SELECT version_id, sequence_alias, manifest_json, COALESCE(business_key_field, ''), canonical_schema_bytes, canonical_jsonl, pruned_at
+		SELECT version_id, sequence_alias, manifest_json, COALESCE(business_key_field, ''), canonical_schema_bytes, canonical_jsonl, (canonical_jsonl IS NOT NULL), pruned_at
 		FROM resource_versions WHERE flow_path = %s AND event_name = %s ORDER BY sequence_alias
 	`, 2), declaration.Ref.FlowPath, declaration.Ref.EventName)
 	if err != nil {
@@ -1369,8 +1371,9 @@ func (o *Owner) loadVersions(ctx context.Context, tx *sql.Tx, declaration runtim
 	for rows.Next() {
 		var version runtimedata.Version
 		var manifestJSON []byte
+		var payloadPresent bool
 		var pruned any
-		if err := rows.Scan(&version.VersionID, &version.SequenceAlias, &manifestJSON, &version.BusinessKey, &version.CanonicalSchema, &version.CanonicalJSONL, &pruned); err != nil {
+		if err := rows.Scan(&version.VersionID, &version.SequenceAlias, &manifestJSON, &version.BusinessKey, &version.CanonicalSchema, &version.CanonicalJSONL, &payloadPresent, &pruned); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(manifestJSON, &version.Manifest); err != nil {
@@ -1389,6 +1392,12 @@ func (o *Owner) loadVersions(ctx context.Context, tx *sql.Tx, declaration runtim
 			return nil, fmt.Errorf("resource version %s immutable evidence is contradictory", version.VersionID)
 		}
 		if version.PrunedAt == nil {
+			if !payloadPresent {
+				return nil, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s has no payload or tombstone", version.VersionID)
+			}
+			if version.CanonicalJSONL == nil {
+				version.CanonicalJSONL = []byte{}
+			}
 			businessKey, err := schemaBusinessKey(version.CanonicalSchema, version.BusinessKey)
 			if err != nil {
 				return nil, err
@@ -1397,7 +1406,7 @@ func (o *Owner) loadVersions(ctx context.Context, tx *sql.Tx, declaration runtim
 			if len(defects) > 0 || compiled.VersionID != version.VersionID || !bytes.Equal(compiled.CanonicalJSONL, version.CanonicalJSONL) {
 				return nil, fmt.Errorf("resource version %s payload failed immutable verification", version.VersionID)
 			}
-		} else if version.CanonicalJSONL != nil {
+		} else if payloadPresent {
 			return nil, fmt.Errorf("resource version %s retains payload after prune", version.VersionID)
 		}
 		versions = append(versions, version)
