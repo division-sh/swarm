@@ -42,9 +42,11 @@ type durableInvariantRecord struct {
 }
 
 type managedEffectProofReference struct {
-	Adapter    string
-	LaunchSite string
-	Proof      string
+	Adapter       string
+	LaunchSite    string
+	Proof         string
+	ProofFile     string
+	PrimitiveKeys []string
 }
 
 func TestDurableInvariantProofReferencesConform(t *testing.T) {
@@ -59,8 +61,8 @@ func TestDurableInvariantProofReferencesConform(t *testing.T) {
 	}
 
 	registrations := effects.Registrations()
-	if len(registrations) != 21 {
-		problems = append(problems, fmt.Sprintf("managed-effect registration inventory has %d entries, want 21", len(registrations)))
+	if len(registrations) != 24 {
+		problems = append(problems, fmt.Sprintf("managed-effect registration inventory has %d entries, want 24", len(registrations)))
 	}
 	seenAdapters := make(map[string]struct{}, len(registrations))
 	for _, registration := range registrations {
@@ -69,9 +71,11 @@ func TestDurableInvariantProofReferencesConform(t *testing.T) {
 		}
 		seenAdapters[registration.Adapter] = struct{}{}
 		problems = append(problems, validateManagedEffectProof(rootDir, managedEffectProofReference{
-			Adapter:    registration.Adapter,
-			LaunchSite: registration.LaunchSite,
-			Proof:      registration.Proof,
+			Adapter:       registration.Adapter,
+			LaunchSite:    registration.LaunchSite,
+			Proof:         registration.Proof,
+			ProofFile:     registration.ProofFile,
+			PrimitiveKeys: registration.PrimitiveKeys,
 		})...)
 	}
 
@@ -354,12 +358,16 @@ func validateManagedEffectProof(rootDir string, reference managedEffectProofRefe
 	if len(pathProblems) > 0 {
 		return problems
 	}
-	launchAST, err := parser.ParseFile(token.NewFileSet(), launchFile, nil, parser.PackageClauseOnly)
+	packageFile, proofProblems := managedEffectProofPackageFile(rootDir, launchFile, reference)
+	if len(proofProblems) > 0 {
+		return append(problems, proofProblems...)
+	}
+	launchAST, err := parser.ParseFile(token.NewFileSet(), packageFile, nil, parser.PackageClauseOnly)
 	if err != nil {
-		return append(problems, fmt.Sprintf("managed-effect %q launch site cannot be parsed: %v", reference.Adapter, err))
+		return append(problems, fmt.Sprintf("managed-effect %q proof package cannot be parsed: %v", reference.Adapter, err))
 	}
 	launchPackage := launchAST.Name.Name
-	directory := filepath.Dir(launchFile)
+	directory := filepath.Dir(packageFile)
 	entries, err := os.ReadDir(directory)
 	if err != nil {
 		return append(problems, fmt.Sprintf("managed-effect %q proof package cannot be read: %v", reference.Adapter, err))
@@ -398,7 +406,48 @@ func validateManagedEffectProof(rootDir string, reference managedEffectProofRefe
 	if len(validMatches) != 1 || len(invalidMatches) > 0 {
 		return append(problems, fmt.Sprintf("managed-effect %q proof %s must resolve to exactly one runnable package-local declaration (valid=%d invalid=%d)", reference.Adapter, reference.Proof, len(validMatches), len(invalidMatches)))
 	}
+	if reference.ProofFile != "" && validMatches[0] != filepath.Join(rootDir, filepath.FromSlash(reference.ProofFile)) {
+		return append(problems, fmt.Sprintf("managed-effect %q proof %s is not declared in the exact proof file %s", reference.Adapter, reference.Proof, reference.ProofFile))
+	}
 	return problems
+}
+
+func managedEffectProofPackageFile(rootDir, launchFile string, reference managedEffectProofReference) (string, []string) {
+	if reference.ProofFile == "" {
+		for _, key := range reference.PrimitiveKeys {
+			parts := strings.Split(key, ":")
+			if len(parts) == 4 && (parts[2] == "sdk_send" || parts[2] == "sdk_logout") && filepath.Dir(filepath.Join(rootDir, parts[0])) != filepath.Dir(launchFile) {
+				return "", []string{fmt.Sprintf("managed-effect %q requires an exact proof file for its cross-package SDK primitive", reference.Adapter)}
+			}
+		}
+		return launchFile, nil
+	}
+	proofFile, problems := validateRepositoryPath(rootDir, reference.ProofFile, true)
+	if len(problems) > 0 {
+		return "", problems
+	}
+	if problem := validateExactRunnableTest(proofFile, reference.Proof); problem != "" {
+		return "", []string{fmt.Sprintf("managed-effect %q exact proof file: %s", reference.Adapter, problem)}
+	}
+	if len(reference.PrimitiveKeys) == 0 {
+		return "", []string{fmt.Sprintf("managed-effect %q explicit proof file requires a registered SDK primitive", reference.Adapter)}
+	}
+	var packageFile string
+	for _, key := range reference.PrimitiveKeys {
+		parts := strings.Split(key, ":")
+		if len(parts) != 4 || (parts[2] != "sdk_send" && parts[2] != "sdk_logout") {
+			return "", []string{fmt.Sprintf("managed-effect %q explicit proof file requires a registered SDK primitive, got %q", reference.Adapter, key)}
+		}
+		primitiveFile, problems := validateRepositoryPath(rootDir, parts[0], false)
+		if len(problems) > 0 {
+			return "", problems
+		}
+		if filepath.Dir(primitiveFile) != filepath.Dir(proofFile) {
+			return "", []string{fmt.Sprintf("managed-effect %q proof file must be in the registered SDK primitive owner's package", reference.Adapter)}
+		}
+		packageFile = primitiveFile
+	}
+	return packageFile, nil
 }
 
 func findLegacyInvariantProofShapes(root *yaml.Node) []string {
@@ -674,6 +723,71 @@ func TestManagedEffectProofReferenceMutationsFailClosed(t *testing.T) {
 	writeFixtureFile(t, rootDir, "platform/launch.go", "package platform\n")
 	writeFixtureFile(t, rootDir, "platform/proof_"+excludedGOOS+"_test.go", "package platform\nimport \"testing\"\nfunc TestPlatform(t *testing.T) {}\n")
 	assertProblemsContain(t, validateManagedEffectProof(rootDir, managedEffectProofReference{Adapter: "platform", LaunchSite: "platform/launch.go", Proof: "TestPlatform"}), "valid=0")
+}
+
+func TestManagedEffectCrossPackageProofReferencesFailClosed(t *testing.T) {
+	const sdkKey = "sdk/primitive.go:send:sdk_send:1"
+	const liveTest = "package sdk\nimport \"testing\"\nfunc TestLive(t *testing.T) {}\n"
+	excludedGOOS := "windows"
+	if build.Default.GOOS == excludedGOOS {
+		excludedGOOS = "linux"
+	}
+	for _, testCase := range []struct {
+		name      string
+		proofFile string
+		keys      []string
+		files     map[string]string
+		want      string
+	}{
+		{name: "exact SDK proof", proofFile: "sdk/proof_test.go", keys: []string{sdkKey}},
+		{name: "external SDK proof", proofFile: "sdk/proof_test.go", keys: []string{sdkKey}, files: map[string]string{"sdk/proof_test.go": strings.Replace(liveTest, "package sdk", "package sdk_test", 1)}},
+		{name: "inactive duplicate ignored", proofFile: "sdk/proof_test.go", keys: []string{sdkKey}, files: map[string]string{"sdk/duplicate_test.go": "//go:build managed_effect_proof_fixture_disabled\n\n" + liveTest}},
+		{name: "missing explicit path despite launch test", keys: []string{sdkKey}, want: "requires an exact proof file"},
+		{name: "missing proof file", proofFile: "sdk/missing_test.go", keys: []string{sdkKey}, want: "existing regular file"},
+		{name: "non-test file", proofFile: "sdk/primitive.go", keys: []string{sdkKey}, want: "_test.go"},
+		{name: "absolute path", proofFile: "/tmp/proof_test.go", keys: []string{sdkKey}, want: "repository-relative"},
+		{name: "traversal path", proofFile: "../proof_test.go", keys: []string{sdkKey}, want: "repository-relative"},
+		{name: "foreign proof package", proofFile: "foreign/proof_test.go", keys: []string{sdkKey}, want: "SDK primitive owner's package"},
+		{name: "launch package is not SDK owner", proofFile: "pkg/proof_test.go", keys: []string{sdkKey}, want: "SDK primitive owner's package"},
+		{name: "wrong exact file in SDK package", proofFile: "sdk/other_test.go", keys: []string{sdkKey}, files: map[string]string{"sdk/other_test.go": "package sdk\nimport \"testing\"\nfunc TestOther(t *testing.T) {}\n"}, want: "does not declare TestLive"},
+		{name: "wrong primitive package", proofFile: "sdk/proof_test.go", keys: []string{"foreign/primitive.go:send:sdk_send:1"}, want: "SDK primitive owner's package"},
+		{name: "one foreign primitive", proofFile: "sdk/proof_test.go", keys: []string{sdkKey, "foreign/primitive.go:send:sdk_send:1"}, want: "SDK primitive owner's package"},
+		{name: "missing primitive source", proofFile: "sdk/proof_test.go", keys: []string{"sdk/missing.go:send:sdk_send:1"}, want: "existing regular file"},
+		{name: "no primitive", proofFile: "sdk/proof_test.go", want: "requires a registered SDK primitive"},
+		{name: "non-SDK primitive", proofFile: "sdk/proof_test.go", keys: []string{"sdk/primitive.go:send:http_do:1"}, want: "requires a registered SDK primitive"},
+		{name: "malformed primitive", proofFile: "sdk/proof_test.go", keys: []string{"sdk/primitive.go"}, want: "requires a registered SDK primitive"},
+		{name: "inactive proof", proofFile: "sdk/proof_test.go", keys: []string{sdkKey}, files: map[string]string{"sdk/proof_test.go": "//go:build managed_effect_proof_fixture_disabled\n\n" + liveTest}, want: "excluded by the active Go build"},
+		{name: "inactive platform proof", proofFile: "sdk/proof_" + excludedGOOS + "_test.go", keys: []string{sdkKey}, files: map[string]string{"sdk/proof_" + excludedGOOS + "_test.go": liveTest}, want: "excluded by the active Go build"},
+		{name: "non-runnable proof", proofFile: "sdk/proof_test.go", keys: []string{sdkKey}, files: map[string]string{"sdk/proof_test.go": "package sdk\nfunc TestLive(t int) {}\n"}, want: "not receiver-free"},
+		{name: "method is not a proof", proofFile: "sdk/proof_test.go", keys: []string{sdkKey}, files: map[string]string{"sdk/proof_test.go": "package sdk\nimport \"testing\"\ntype S struct{}\nfunc (S) TestLive(t *testing.T) {}\n"}, want: "not receiver-free"},
+		{name: "foreign package clause", proofFile: "sdk/proof_test.go", keys: []string{sdkKey}, files: map[string]string{"sdk/proof_test.go": strings.Replace(liveTest, "package sdk", "package foreign", 1)}, want: "valid=0"},
+		{name: "duplicate exact declaration", proofFile: "sdk/proof_test.go", keys: []string{sdkKey}, files: map[string]string{"sdk/proof_test.go": liveTest + "func TestLive(t *testing.T) {}\n"}, want: "2 times"},
+		{name: "duplicate package declaration", proofFile: "sdk/proof_test.go", keys: []string{sdkKey}, files: map[string]string{"sdk/duplicate_test.go": liveTest}, want: "valid=2"},
+		{name: "duplicate external declaration", proofFile: "sdk/proof_test.go", keys: []string{sdkKey}, files: map[string]string{"sdk/external_test.go": strings.Replace(liveTest, "package sdk", "package sdk_test", 1)}, want: "valid=2"},
+		{name: "invalid sibling declaration", proofFile: "sdk/proof_test.go", keys: []string{sdkKey}, files: map[string]string{"sdk/invalid_test.go": "package sdk\nfunc TestLive(t int) {}\n"}, want: "invalid=1"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			rootDir := t.TempDir()
+			writeFixtureFile(t, rootDir, "pkg/launch.go", "package pkg\n")
+			writeFixtureFile(t, rootDir, "pkg/proof_test.go", strings.Replace(liveTest, "package sdk", "package pkg", 1))
+			writeFixtureFile(t, rootDir, "sdk/primitive.go", "package sdk\n")
+			writeFixtureFile(t, rootDir, "sdk/proof_test.go", liveTest)
+			writeFixtureFile(t, rootDir, "foreign/primitive.go", "package foreign\n")
+			writeFixtureFile(t, rootDir, "foreign/proof_test.go", strings.Replace(liveTest, "package sdk", "package foreign", 1))
+			for path, source := range testCase.files {
+				writeFixtureFile(t, rootDir, path, source)
+			}
+			problems := validateManagedEffectProof(rootDir, managedEffectProofReference{
+				Adapter: "fixture", LaunchSite: "pkg/launch.go", Proof: "TestLive",
+				ProofFile: testCase.proofFile, PrimitiveKeys: testCase.keys,
+			})
+			if testCase.want != "" {
+				assertProblemsContain(t, problems, testCase.want)
+			} else if len(problems) != 0 {
+				t.Fatalf("valid exact cross-package proof refused: %v", problems)
+			}
+		})
+	}
 }
 
 func parseYAMLFixture(t *testing.T, source string) *yaml.Node {
