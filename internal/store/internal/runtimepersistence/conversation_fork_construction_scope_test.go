@@ -19,7 +19,7 @@ func TestConversationForkHistoricalConstructionHasClosedConsumers(t *testing.T) 
 	want := map[string]map[string]int{
 		"CommitConversationForkConstructionForTest":     {"internal/store/internal/runtimepersistence/test_conversation_fork_source.go": 2},
 		"ConversationForkConstructionOccurrenceForTest": {"internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go": 1},
-		"InsertConstructionEntityStateDiff":             {"internal/store/internal/backend/pipelinepersistence/workflow_engine_mutation_commit.go": 2},
+		"InsertConstructionEntityStateDiff":             {"internal/store/internal/backend/pipelinepersistence/workflow_engine_mutation_commit.go": 1},
 		"ValidateBirthOccurrence":                       {"internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go": 1, "internal/store/internal/backend/mutationlog/construction_occurrence.go": 1},
 		"PrepareConversationForkConstructionForTest":    {"internal/store/storetest/conversation_fork.go": 1},
 	}
