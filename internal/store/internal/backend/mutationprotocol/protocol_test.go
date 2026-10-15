@@ -72,14 +72,19 @@ func TestAttemptResultUsesOnlyAcknowledgedRetry(t *testing.T) {
 	result := run(ctx, privateactivity.DialectSQLite, RevisionOnly, Ordinary, baseline, nil,
 		mutationTestRunner(t, db, false, true), func(ctx context.Context, attempt *Attempt) (string, error) {
 			attempts = append(attempts, attempt)
-			id, err := attempt.Identity()
+			id, err := attempt.Identity(ctx)
 			if err != nil || id == uuid.Nil {
 				t.Fatalf("live attempt identity = %s, %v", id, err)
 			}
-			if repeated, err := attempt.Identity(); err != nil || repeated != id {
+			if repeated, err := attempt.Identity(ctx); err != nil || repeated != id {
 				t.Fatalf("one attempt changed identity: %s -> %s, %v", id, repeated, err)
 			}
 			identities = append(identities, id)
+			for _, wrong := range []context.Context{context.Background(), context.WithValue(ctx, sqlAttemptKey{}, &Attempt{})} {
+				if _, err := attempt.Identity(wrong); err == nil || err.Error() != "mutation identity requires its exact attempt context" {
+					t.Fatalf("foreign context retained attempt identity: %v", err)
+				}
+			}
 			value := "rolled-back"
 			if len(attempts) == 2 {
 				value = "committed"
@@ -101,7 +106,7 @@ func TestAttemptResultUsesOnlyAcknowledgedRetry(t *testing.T) {
 		t.Fatalf("wrong durable attempt: %q, %v", got, err)
 	}
 	for _, attempt := range attempts {
-		if _, err := attempt.Identity(); err == nil {
+		if _, err := attempt.Identity(ctx); err == nil {
 			t.Fatal("retired attempt retained a live identity")
 		}
 		if err := attempt.WithSQL(ctx, func(context.Context, *sql.Tx) error { return nil }); err == nil {
