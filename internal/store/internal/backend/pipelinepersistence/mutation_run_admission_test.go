@@ -46,9 +46,9 @@ func missingMutationRunProof(t *testing.T, initial bool) {
 			_, writeErr = commitWorkflowEngineInitialValues(ctx, attempt, store, false, runtimepipeline.WorkflowEngineStateRecord{
 				EntityID: entityID, Transition: runtimepipeline.WorkflowEngineStateTransitionCreateStateAndCompanion,
 				InitialFields: []byte(`{"region":"west"}`), UpdatedAt: time.Now().UTC(),
-			}, before, false)
+			}, before, nil)
 		} else {
-			writeErr = insertWorkflowEngineStateDiff(ctx, attempt, store, false, entityID, before, after, runtimemutationlog.Writer{Type: "platform", ID: "hostile-proof", HandlerStep: "diff"}, time.Now().UTC(), false)
+			writeErr = insertWorkflowEngineStateDiff(ctx, attempt, store, false, runtimepipeline.WorkflowEngineStateRecord{EntityID: entityID, UpdatedAt: time.Now().UTC()}, before, after, runtimemutationlog.Writer{Type: "platform", ID: "hostile-proof", HandlerStep: "diff"}, nil)
 		}
 		if !errors.Is(writeErr, runtimerunlifecycle.ErrRunNotFound) {
 			t.Fatalf("writer error = %v, want ErrRunNotFound", writeErr)

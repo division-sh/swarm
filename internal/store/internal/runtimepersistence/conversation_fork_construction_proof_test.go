@@ -176,6 +176,41 @@ func TestConversationForkHistoricalClockDoesNotLeakToOrdinaryConstructionBothSto
 				before, after = born, born
 			}
 			assertConversationConstructionBirthClock(t, f.ctx, f.store, run, plan.Identity.EntityID, "ordinary", before, after)
+			state, err := fixture.Construction.Child.PersistenceRecord()
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutation := state.State
+			mutation.Transition = pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion
+			mutation.ExpectedState, mutation.ExpectedRevision = "after", 2
+			mutation.CurrentState = "after"
+			mutation.Fields = []byte(`{"name":"ordinary-after"}`)
+			mutation.Bookkeeping, mutation.Gates, mutation.Accumulator = []byte(`{}`), []byte(`{}`), []byte(`{}`)
+			mutation.UpdatedAt = born.Add(time.Hour)
+			before = time.Now().UTC().Truncate(time.Microsecond)
+			if _, err := f.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(f.ctx, pipeline.WorkflowEngineMutationCommand{State: mutation}); err != nil {
+				t.Fatal(err)
+			}
+			after = time.Now().UTC()
+			if backend == "sqlite" {
+				before, after = mutation.UpdatedAt, mutation.UpdatedAt
+			}
+			history, err := ObserveEntityMutationHistoryForTest(f.ctx, f.store, run)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := 0
+			for _, row := range history {
+				if row.EntityID == fixture.EntityID && row.Domain == "authored_field" && row.Path == "name" && string(row.NewValue) == `"ordinary-after"` {
+					found++
+					if row.CreatedAt.Before(before) || row.CreatedAt.After(after) {
+						t.Fatalf("ordinary subsequent mutation inherited historical clock: %v, want [%v,%v]", row.CreatedAt, before, after)
+					}
+				}
+			}
+			if found != 1 {
+				t.Fatalf("ordinary subsequent mutation count = %d, want1", found)
+			}
 		})
 	}
 }

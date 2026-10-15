@@ -97,6 +97,7 @@ type ClaimRetirement interface {
 }
 
 type Attempt struct {
+	identity        uuid.UUID
 	tx              *sql.Tx
 	dialect         privateactivity.Dialect
 	evidence        Evidence
@@ -118,6 +119,18 @@ type Attempt struct {
 }
 
 var _ runtimeactivity.Mutation = (*Attempt)(nil)
+
+// Identity names this live attempt without lending its transaction or authority.
+// A retried or completed attempt cannot reuse an earlier attempt's evidence.
+func (a *Attempt) Identity() (uuid.UUID, error) {
+	if err := a.requireActive(); err != nil {
+		return uuid.Nil, err
+	}
+	if a.identity == uuid.Nil {
+		a.identity = uuid.New()
+	}
+	return a.identity, nil
+}
 
 // WithSQL lends the native transaction only for the duration of a named
 // domain writer. It must not be retained or committed by the writer.

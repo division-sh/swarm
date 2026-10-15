@@ -122,28 +122,6 @@ func InsertEntityStateDiff(ctx context.Context, attempt *mutationprotocol.Attemp
 	return nil
 }
 
-// InsertConversationForkConstructionDiffForTest is used only by the fixed
-// conversation witness's atomic constructor. Ordinary PostgreSQL writers retain
-// Insert's wall clock; no context or later attempt inherits this occurrence.
-func InsertConversationForkConstructionDiffForTest(ctx context.Context, attempt *mutationprotocol.Attempt, runLifecycle ActiveRunSourceOwner, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer, occurredAt time.Time) error {
-	if attempt == nil {
-		return runtimemutationlog.ErrInvalidMutationLogWriter("mutation attempt is required")
-	}
-	if occurredAt.IsZero() {
-		return runtimemutationlog.ErrInvalidMutationLogWriter("historical construction occurred_at is required")
-	}
-	records, err := runtimemutationlog.BuildEntityStateDiffRecords(entityID, before, after, writer)
-	if err != nil {
-		return err
-	}
-	for _, record := range records {
-		if err := insertPostgresAt(ctx, attempt, runLifecycle, record, occurredAt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func InsertSQLite(ctx context.Context, attempt *mutationprotocol.Attempt, runLifecycle ActiveRunSourceOwner, rec runtimemutationlog.Record) error {
 	return insertSQLiteAt(ctx, attempt, runLifecycle, rec, time.Now().UTC())
 }
