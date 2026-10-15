@@ -1791,9 +1791,9 @@ func (s *PipelineSQLiteOwner) CommitInitialPipelineDispositionTx(
 }
 
 func declareEventRevisionFact(ctx context.Context, tx pipelineExecer, attempt *mutationprotocol.Attempt, eventID string, family privaterunforkrevision.Family, key string) error {
-	var storedEventID string
+	var storedEventID, eventName string
 	var runID sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT CAST(event_id AS TEXT), CAST(run_id AS TEXT) FROM events WHERE event_id=$1`, eventID).Scan(&storedEventID, &runID); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT CAST(event_id AS TEXT), CAST(run_id AS TEXT), event_name FROM events WHERE event_id=$1`, eventID).Scan(&storedEventID, &runID, &eventName); err != nil {
 		return err
 	}
 	if !runID.Valid || runID.String == "" {
@@ -1809,6 +1809,9 @@ func declareEventRevisionFact(ctx context.Context, tx pipelineExecer, attempt *m
 			return fmt.Errorf("committed replay scope revision key differs from stored event %s", storedEventID)
 		}
 		key = storedEventID
+	}
+	if !privaterunforkrevision.CapturesEvent(eventName) {
+		return nil
 	}
 	return attempt.AddFact(runID.String, family, key)
 }
