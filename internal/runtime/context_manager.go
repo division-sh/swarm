@@ -45,7 +45,6 @@ type BundleContext struct {
 	RuntimeInstanceID           string
 	PublicationGeneration       uint64
 	Source                      semanticview.Source
-	PlatformSpecPath            string
 	Runtime                     *Runtime
 	WorkOwner                   *worklifetime.RuntimeOccurrence
 	WorkspaceScopeKey           string
@@ -76,7 +75,6 @@ const (
 
 func (c BundleContext) normalized() BundleContext {
 	c.RuntimeInstanceID = strings.TrimSpace(c.RuntimeInstanceID)
-	c.PlatformSpecPath = strings.TrimSpace(c.PlatformSpecPath)
 	c.WorkspaceScopeKey = strings.TrimSpace(c.WorkspaceScopeKey)
 	c.PackInventoryDigest = strings.TrimSpace(c.PackInventoryDigest)
 	c.InstalledTriggerSubjects = packs.CloneSubjects(c.InstalledTriggerSubjects)

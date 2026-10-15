@@ -14,7 +14,6 @@ import (
 type TestSessionRequest struct {
 	Bundle           *runtimecontracts.WorkflowContractBundle
 	SourceRoot       string
-	PlatformSpecPath string
 	PlatformPackBase *packartifact.PlatformPackInventory
 	LiveBackend      string
 	ModelAliases     llmselection.ModelAliases

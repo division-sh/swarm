@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -95,7 +96,6 @@ type SourceArtifactSelectedContractSourceStore interface {
 
 type SourceArtifactSelectedContractSourceLoader struct {
 	RepoRoot          string
-	PlatformSpecPath  string
 	PlatformPackBases packartifact.PlatformPackBaseResolver
 	Store             SourceArtifactSelectedContractSourceStore
 }
@@ -183,7 +183,11 @@ func (l SourceArtifactSelectedContractSourceLoader) InspectRunForkSelectedContra
 	if err != nil {
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: decode DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, bundleHash, err)
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(strings.TrimSpace(l.RepoRoot), artifact, strings.TrimSpace(l.PlatformSpecPath), runtimecontracts.WorkflowContractLoadOptions{
+	specPath, err := platform.MaterializePlatformSpecFile()
+	if err != nil {
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: compile DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, bundleHash, err)
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(strings.TrimSpace(l.RepoRoot), artifact, specPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBases: l.PlatformPackBases, AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {

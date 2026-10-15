@@ -1726,7 +1726,7 @@ func canonicalSelectedContractExecutionStoreRequest(t *testing.T, ctx context.Co
 func captureSelectedStoreActivationRequest(t *testing.T, ctx context.Context, pg *PostgresStore, request runforkreadiness.MaterializeRequest, materialized runfork.RunForkMaterialization) runfork.RunForkSelectedContractExecutionActivateRequest {
 	t.Helper()
 	repo := canonicalrouting.RepoRoot(t)
-	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo), Store: pg}
+	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: pg}
 	loaded, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
 		SourceRunID: request.SourceRunID, BundleHash: request.SourceArtifactFact.BundleHash(), SourceArtifactFact: request.SourceArtifactFact, Selection: request.ContractSelection,
 	})

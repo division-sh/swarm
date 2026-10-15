@@ -17,11 +17,15 @@ type swarmWorkflowModule struct {
 	guardRegistry runtimepipeline.GuardRegistry
 }
 
-func NewSwarmWorkflowModule(RepoRoot, sourceRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
-	return NewSwarmWorkflowModuleWithPackBase(RepoRoot, sourceRoot, platformSpecPath, nil)
+func NewSwarmWorkflowModule(RepoRoot, sourceRoot string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+	return NewSwarmWorkflowModuleWithPackBase(RepoRoot, sourceRoot, nil)
 }
 
-func NewSwarmWorkflowModuleWithPackBase(RepoRoot, sourceRoot, platformSpecPath string, base *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+func NewSwarmWorkflowModuleWithPackBase(RepoRoot, sourceRoot string, base *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+	platformSpecPath, err := EmbeddedPlatformSpecPath()
+	if err != nil {
+		return nil, nil, err
+	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(RepoRoot, sourceRoot, platformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBase: base, AdmitPackInventory: packadmission.AdmitInventory,
 	})
@@ -35,38 +39,38 @@ func NewSwarmWorkflowModuleWithPackBase(RepoRoot, sourceRoot, platformSpecPath s
 	return module, bundle, nil
 }
 
-func NewSwarmWorkflowModuleWithRuntimeConfig(repoRoot, sourceRoot, platformSpecPath string, cfgResult RuntimeConfigLoadResult) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+func NewSwarmWorkflowModuleWithRuntimeConfig(repoRoot, sourceRoot string, cfgResult RuntimeConfigLoadResult) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 	base, err := LoadConfiguredPlatformPackBase(repoRoot, cfgResult)
 	if err != nil {
 		return nil, nil, err
 	}
-	return NewSwarmWorkflowModuleWithPackBase(repoRoot, sourceRoot, platformSpecPath, base)
+	return NewSwarmWorkflowModuleWithPackBase(repoRoot, sourceRoot, base)
 }
 
-func loadConfiguredCLIWorkflowModule(repoRoot string, opts CLISourcePlatformSpecPathOptions) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, CLISourcePlatformSpecPaths, error) {
+func loadConfiguredCLIWorkflowModule(repoRoot string, opts CLISourcePathOptions) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, CLISourcePaths, error) {
 	cfgResult, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{RepoRoot: repoRoot, ExplicitPath: opts.ConfigPath})
 	if err != nil {
-		return nil, nil, CLISourcePlatformSpecPaths{}, err
+		return nil, nil, CLISourcePaths{}, err
 	}
 	return loadCLIWorkflowModuleWithRuntimeConfig(repoRoot, opts, cfgResult)
 }
 
-func loadCLIWorkflowModuleWithRuntimeConfig(repoRoot string, opts CLISourcePlatformSpecPathOptions, cfgResult RuntimeConfigLoadResult) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, CLISourcePlatformSpecPaths, error) {
-	paths, err := resolveCLISourcePlatformSpecPathsFromConfig(repoRoot, opts, cfgResult.cli)
+func loadCLIWorkflowModuleWithRuntimeConfig(repoRoot string, opts CLISourcePathOptions, cfgResult RuntimeConfigLoadResult) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, CLISourcePaths, error) {
+	paths, err := resolveCLISourcePathsFromConfig(repoRoot, opts, cfgResult.cli)
 	if err != nil {
-		return nil, nil, CLISourcePlatformSpecPaths{}, err
+		return nil, nil, CLISourcePaths{}, err
 	}
 	sourceRoot, err := NormalizeSourceRoot(paths.SourceRoot)
 	if err != nil {
-		return nil, nil, CLISourcePlatformSpecPaths{}, err
+		return nil, nil, CLISourcePaths{}, err
 	}
 	base, err := LoadConfiguredPlatformPackBase(repoRoot, cfgResult)
 	if err != nil {
-		return nil, nil, CLISourcePlatformSpecPaths{}, err
+		return nil, nil, CLISourcePaths{}, err
 	}
-	module, bundle, err := NewSwarmWorkflowModuleWithPackBase(repoRoot, sourceRoot, paths.PlatformSpecPath, base)
+	module, bundle, err := NewSwarmWorkflowModuleWithPackBase(repoRoot, sourceRoot, base)
 	if err != nil {
-		return nil, nil, CLISourcePlatformSpecPaths{}, err
+		return nil, nil, CLISourcePaths{}, err
 	}
 	paths.SourceRoot = sourceRoot
 	return module, bundle, paths, nil

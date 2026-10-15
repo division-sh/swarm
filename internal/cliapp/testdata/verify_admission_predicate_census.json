@@ -177,7 +177,7 @@
     "owner": "internal/cliapp/local_preflight.go::RunServeLocalClaudeCLIPreflight",
     "audit_rows": "A15,A16,A17,A18,A27",
     "proof_families": "P13,P14,P15,P16",
-    "body_sha256": "d5a091ea711fb713b96eb6555c5cc3b943017537bc60d6f7491be6c76a812b40"
+    "body_sha256": "4f64db28049c459d3e8b969adbcdc96732a1c09b58700eb982c8f86852401b45"
   },
   {
     "owner": "internal/cliapp/local_preflight.go::WriteLocalPreflightText",
@@ -225,7 +225,7 @@
     "owner": "internal/cliapp/local_preflight.go::loadLocalPreflightSource",
     "audit_rows": "A15,A16,A17,A18,A27",
     "proof_families": "P13,P14,P15,P16",
-    "body_sha256": "2ae2155fa78b1812b86b4c06fda7a1b3b45c7cd8adce5de42bbccf206c514a8e"
+    "body_sha256": "19512713291b5aa5bc951a7bde52b2f2d31e716f080cabd01127faa5a37df01d"
   },
   {
     "owner": "internal/cliapp/local_preflight.go::localPreflightCommandSeverityForContractSecrets",
@@ -327,7 +327,7 @@
     "owner": "internal/cliapp/verify_deployment.go::inspectVerifyDeployment",
     "audit_rows": "A02,A11,A12,A13,A15,A18,A26,A27,A28",
     "proof_families": "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26",
-    "body_sha256": "031e7e0c6197af100bcee419960046deacf9aea879fc7c11a5ec1a0ec69120ff"
+    "body_sha256": "9ac90c3fbde69a69e0b31f6765a02df2d45bd5c1bd3d24955e527ea93fdc3c1a"
   },
   {
     "owner": "internal/cliapp/verify_deployment.go::inspectVerifyListeners",
@@ -399,7 +399,7 @@
     "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifyRecoverySnapshot",
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
     "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
-    "body_sha256": "6d39665146bbc7b923a08c9201c2c1aa2bbedd5746c253f97983d925357e48eb"
+    "body_sha256": "a8c47af4ac6e31641dd1300b8fd3754446daea60e41bca9b2310036a238dcdcc"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifyRetainedChannels",
@@ -411,13 +411,13 @@
     "owner": "internal/cliapp/verify_deployment_store.go::inspectVerifySelectedStore",
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
     "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
-    "body_sha256": "2f87c718cb54dade5ad38cba4bc1d0fc7b40d8caf6ad69b600be6a2e9855b354"
+    "body_sha256": "81e83601d715a4ad097df937196fa71dfd1270fb2c7d0296d87e186458a05567"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::prepareVerifySelectedStoreInspection",
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
     "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
-    "body_sha256": "0a6826e735ff9aa4ab736596e73837c74c2f1f9ab1e52a44c8623236e1ea95e5"
+    "body_sha256": "bff1d875b9561ca43fc1efa988c143ff5f9c44bad32a1a7a46d666bd07f20228"
   },
   {
     "owner": "internal/cliapp/verify_deployment_store.go::verifyAbsentSQLiteStoreCause",
@@ -429,7 +429,7 @@
     "owner": "internal/cliapp/verify_deployment_store.go::verifyRetainedSourceLoader",
     "audit_rows": "A10,A19,A20,A21,A22,A23,A24,A27",
     "proof_families": "P08,P17,P18,P19,P20,P21,P27,P28",
-    "body_sha256": "740cb389acdf87b5b3acbff11cdbfaec31a8d46bffb1b8bdc57b989a5bf765c7"
+    "body_sha256": "9dd8488d54123cb032f235fbfd86947db26d3cc370a7825a9e69f998ded1f464"
   },
   {
     "owner": "internal/cliapp/verify_deployment_workspace.go::inspectVerifyWorkspaceDependencies",
@@ -489,7 +489,7 @@
     "owner": "internal/cliapp/verify_runtime.go::runVerifyCommandWithOutput",
     "audit_rows": "A01,A28,A29,A30",
     "proof_families": "P01,P02,P23,P24,P27,P29",
-    "body_sha256": "b88fe80d441ae0598ace52d6d2b3c2ffb9961fb7558f6fded7d58e4e77240ad1"
+    "body_sha256": "e8fcdc47bb5025f7960a2c1fce2d2ebe12354a152b5bf32b173aa0388e32cca8"
   },
   {
     "owner": "internal/cliapp/verify_runtime.go::trimmedStringSlice",
@@ -2847,7 +2847,7 @@
     "owner": "internal/serveapp/main.go::Run",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "d1825b3df31983f69d71d1f5b0daf7f63c099381ea6b81e32634640642124259"
+    "body_sha256": "ec73e5f13f4e91d2ae4c7e8b00ccd6998e13472dba55c2a7f8fa5c9d9e34b086"
   },
   {
     "owner": "internal/serveapp/main.go::addrString",
@@ -2865,13 +2865,13 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "8c462f5b3386160df2a9fb561e362c4ea1fc2ae17d0b15ffde643ba333aaed17"
+    "body_sha256": "7877f29de6095029847a5b0be52ce8eb6acc1c4c979ed6be10d1b2ee9c3142a8"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "3867e41fa17b634dbde5a122ed2c0fe4f8ee38d1a833c301f93e3c07f064433a"
+    "body_sha256": "3722cd56fcde3a8db891a889dc9d97da7efeef7daebacb431129049a201b9ab8"
   },
   {
     "owner": "internal/serveapp/main.go::buildStores",
@@ -2919,7 +2919,7 @@
     "owner": "internal/serveapp/main.go::initializeServePlatformStateStores",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "c079505866fa465869dea229d913f2362ab358dbbaea5daf1988ce61a98a8809"
+    "body_sha256": "fccf145bb83d8edaa0d1b30aa2fd8ee068a96f6c001eca72c1a1d856e41b926b"
   },
   {
     "owner": "internal/serveapp/main.go::initializeStateStores",
@@ -2937,37 +2937,37 @@
     "owner": "internal/serveapp/main.go::loadBudgetRecoveryStageSource",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "87d31f865ff5d43bfb045277273963541e9cab4e7008b97a7d8fd21bda199d8c"
+    "body_sha256": "a800365d47cff7cc3dd5df279da7215c68a791c381cfaf99b239ef19f612efc8"
   },
   {
     "owner": "internal/serveapp/main.go::loadServePlatformSpecDocument",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "3e6b65afe48548754a4e4e5344b37d559a9e0d74a567f605ee2f7f4def73fad5"
+    "body_sha256": "1f6d637ad0f25a2434f5b0148ffa95736bddc3be662c5c824bd2eb9fc0275fb0"
   },
   {
     "owner": "internal/serveapp/main.go::loadServeRuntimeBundle",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "fc5c93cf238f7d716c4909ed563c241c0a355b333c24e99bb333ad9e2d5baabe"
+    "body_sha256": "6f822436bde95e08ac84949c286a824c202098354f54d34095c9780104f6b404"
   },
   {
     "owner": "internal/serveapp/main.go::loadServeRuntimeBundleFromArtifact",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "dd148977f1d00c92907693f6954152232e881c2f94ba64c515b79bf59dfb7fcc"
+    "body_sha256": "f72b06cdc6f8d2b8d260337600002e0502b040e2eb64819fba259b9c6ac7e646"
   },
   {
     "owner": "internal/serveapp/main.go::loadServeRuntimeBundles",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "d9e83dcb31492af325439b1ae23af451ec8f6680363437508d81fd4645e0dd41"
+    "body_sha256": "7f630b50e961fe1ecc8e5f9d88747c497232b0bdc39aa66e56efe568e1ea8b17"
   },
   {
     "owner": "internal/serveapp/main.go::materializeRuntimeBundle",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "5755530ba13174483d927427917f26ebe9b0c0f9f3d322362ab8d766837dd2c4"
+    "body_sha256": "c5b05798c10690ae78c1fcedbdbc2f36a85a016f30ba870ab29d5bceeb0476d0"
   },
   {
     "owner": "internal/serveapp/main.go::newAPIServer",
@@ -2985,7 +2985,7 @@
     "owner": "internal/serveapp/main.go::plannedServeRuntimeContexts",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "a70620225a22b1387e793e705dff4eb134aa2b286ba43d475c590ac953b72281"
+    "body_sha256": "8443da023341f2b1c6ad04f250dd40d0df695992b36b79e9c2a84517233d5b9f"
   },
   {
     "owner": "internal/serveapp/main.go::postgresDSNFromConfig",
@@ -3009,7 +3009,7 @@
     "owner": "internal/serveapp/main.go::prepareServeRuntimeContextSet",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "58e55ee861a2101d342192e667d6d11dfabebad9ef61cd324870e2e6ca8533cc"
+    "body_sha256": "382e9c28956c58d39ff63929020184d14f58d0811cb60108f4b17c1ce6d73756"
   },
   {
     "owner": "internal/serveapp/main.go::prepareServeRuntimeContexts",
@@ -3105,7 +3105,7 @@
     "owner": "internal/serveapp/main.go::serveConfigLoadDetail",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "848872457b5ec80393133fd5a5cb70df07e61484e953416ad8c41773ffc8a8b3"
+    "body_sha256": "f936b792e4556ad1bed115159bc7bae9e8d82872e8bcfeb7d63469a28fa5e791"
   },
   {
     "owner": "internal/serveapp/main.go::serveHTTPServer",
@@ -3154,12 +3154,6 @@
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
     "body_sha256": "d6b9f863a785397daa5b1e0645b7b2af7c61e3754f06040153d30b1870451cf6"
-  },
-  {
-    "owner": "internal/serveapp/main.go::servePreCatalogPlatformSpecPath",
-    "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
-    "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "271e1082041583536bc5d6ac3a6dc160774e413f45bbf994c8480f77fe2764f7"
   },
   {
     "owner": "internal/serveapp/main.go::serveReadyStandingIngress",

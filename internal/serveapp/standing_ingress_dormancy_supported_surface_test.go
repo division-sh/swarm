@@ -56,9 +56,8 @@ func TestDormantIngressDevPublishesNoAuthority(t *testing.T) {
 	root := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
 	disableChannelOnboardingBusinessConsumers(t, root)
 	opts := cliapp.ServeOptions{
-		SourceRoot: root, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
-		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "", "", channelOnboardingHostWorkspaceFields()),
-		Dev:        true, SelfCheck: true, Verbose: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SourceRoot: root, ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "", "", channelOnboardingHostWorkspaceFields()),
+		Dev: true, SelfCheck: true, Verbose: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		WorkspaceBackend: "host", WorkspaceBackendSet: true,
 	}
 	process := startServeRuntimeTestProcessAtRepo(t, root, opts)
@@ -106,8 +105,7 @@ func TestDormantIngressProvisionRestartSignedInputBothStores(t *testing.T) {
 			t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 			root := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
 			disableChannelOnboardingBusinessConsumers(t, root)
-			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath,
-				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
+			opts := cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
 				WorkspaceBackend: "host", WorkspaceBackendSet: true, StoreMode: backend, StoreModeSet: true}
 			var db *sql.DB
 			if backend == "sqlite" {
@@ -296,9 +294,8 @@ func TestDormantIngressDoesNotWaiveLiveModelReadiness(t *testing.T) {
 			var output bytes.Buffer
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
-			code := runFrom(ctx, root, cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
-				ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, backend, storePath, channelOnboardingHostWorkspaceFields()),
-				Dev:        dev, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", WorkspaceBackend: "host", WorkspaceBackendSet: true, Output: &output})
+			code := runFrom(ctx, root, cliapp.ServeOptions{SourceRoot: root, ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, backend, storePath, channelOnboardingHostWorkspaceFields()),
+				Dev: dev, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", WorkspaceBackend: "host", WorkspaceBackendSet: true, Output: &output})
 			if code == 0 || ctx.Err() != nil || !strings.Contains(output.String(), "provider_credential_missing component=llm-provider") || strings.Contains(output.String(), "[22/22]") {
 				t.Fatalf("dormant ingress waived an independently selected live model: exit=%d context=%v\n%s", code, ctx.Err(), output.String())
 			}
@@ -374,8 +371,7 @@ stages: []
 	var output bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	code := runFrom(ctx, root, cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
-		ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "outbound-readiness.sqlite"), channelOnboardingHostWorkspaceFields()),
+	code := runFrom(ctx, root, cliapp.ServeOptions{SourceRoot: root, ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "outbound-readiness.sqlite"), channelOnboardingHostWorkspaceFields()),
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", WorkspaceBackend: "host", WorkspaceBackendSet: true,
 		TestLLMRuntime: servedNoopLLMRuntime{}, Output: &output})
 	if code == 0 || ctx.Err() != nil || !strings.Contains(output.String(), "credential_key_exists @ telegram_bot_token") || !strings.Contains(output.String(), "required by tool telegram.send_message") || !strings.Contains(output.String(), "independent-notifier") || strings.Contains(output.String(), "[22/22]") {

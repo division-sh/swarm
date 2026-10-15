@@ -303,7 +303,7 @@ func TestRetirementClosureStoreRefusalHasNoMigrationAdvice(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := ResolveLocalRuntimeState(LocalRuntimeStateOptions{
-		RepoRoot: projectRoot, ResolvedPaths: CLISourcePlatformSpecPaths{SourceRoot: sourceRoot},
+		RepoRoot: projectRoot, ResolvedPaths: CLISourcePaths{SourceRoot: sourceRoot},
 		SwarmDir: CLISwarmDirResolution{Path: t.TempDir(), Source: "test"}, Config: &config.Config{}, EnforceLegacySQLite: true,
 	})
 	if err == nil {

@@ -156,7 +156,7 @@ func (f mutationProtocolJourneyFixture) start(t *testing.T, bootstrap bool) *mut
 	}
 	s := &mutationProtocolJourneyRuntime{selected: selected, process: worklifetime.NewProcess()}
 	t.Cleanup(func() { s.close(t) })
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(f.repo, f.root, filepath.Join(f.repo, "platform-spec.yaml"))
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(f.repo, f.root)
 	if err != nil {
 		t.Fatal(err)
 	}

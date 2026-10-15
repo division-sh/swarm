@@ -342,7 +342,7 @@ func assertCatalogVerifyDiagnostic(t *testing.T, repoRoot string, fixture testca
 	if strings.Contains(combined, want.Category) {
 		return
 	}
-	_, _, err := NewSwarmWorkflowModule(repoRoot, fixture.Root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	_, _, err := NewSwarmWorkflowModule(repoRoot, fixture.Root)
 	if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok && diagnostic.Code == want.Category {
 		return
 	}

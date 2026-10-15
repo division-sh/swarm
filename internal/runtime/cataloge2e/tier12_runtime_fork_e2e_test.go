@@ -288,9 +288,8 @@ func selectedContractForkFixtureSelection(t testing.TB, ctx context.Context, rep
 	bundle := loadFixtureBundle(t, fixtureRoot)
 	storetest.RequireBundleDataCatalog(t, ctx, selected, bundle)
 	loader := runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{
-		RepoRoot:         repoRoot,
-		PlatformSpecPath: platformSpecPathFromCatalogE2E(t),
-		Store:            selected,
+		RepoRoot: repoRoot,
+		Store:    selected,
 	}
 	selection := runfork.RunForkContractSelection{
 		Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: bundle.SourceArtifact.BundleHash(),

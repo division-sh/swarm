@@ -355,7 +355,7 @@ func TestVerifyDeploymentOptionsPreserveFrozenConfigAfterFileRemoval(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, bundle, _, err := loadCLIWorkflowModuleWithRuntimeConfig(root, CLISourcePlatformSpecPathOptions{SourceRoot: root}, cfg)
+	_, bundle, _, err := loadCLIWorkflowModuleWithRuntimeConfig(root, CLISourcePathOptions{SourceRoot: root}, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +382,7 @@ func TestVerifyConcreteModelObservationUsesSelectedDeploymentProfile(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, bundle, _, err := loadCLIWorkflowModuleWithRuntimeConfig(root, CLISourcePlatformSpecPathOptions{SourceRoot: root}, cfg)
+			_, bundle, _, err := loadCLIWorkflowModuleWithRuntimeConfig(root, CLISourcePathOptions{SourceRoot: root}, cfg)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -27,7 +27,7 @@ func TestVerifyAdmissionRetainsFrozenConfigThroughSourceLoading(t *testing.T) {
 	if err := os.Remove(configPath); err != nil {
 		t.Fatal(err)
 	}
-	_, bundle, paths, err := loadCLIWorkflowModuleWithRuntimeConfig(RepoRoot(), CLISourcePlatformSpecPathOptions{SourceRoot: root, ConfigPath: configPath}, configResult)
+	_, bundle, paths, err := loadCLIWorkflowModuleWithRuntimeConfig(RepoRoot(), CLISourcePathOptions{SourceRoot: root, ConfigPath: configPath}, configResult)
 	if err != nil {
 		t.Fatal(err)
 	}

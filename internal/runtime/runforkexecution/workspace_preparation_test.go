@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -240,7 +239,7 @@ func proveSelectedWorkspacePreparation(t *testing.T, backend, mode string, real 
 	process, _ := worklifetime.ProcessFromContext(ctx)
 	capability := selectedContractTestProcessCapability(t, ctx, selected)
 	repo := runForkExecutionRepoRoot(t)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: filepath.Join(repo, "internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp"), PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo)}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: filepath.Join(repo, "internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp")}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err != nil {
 		t.Fatal(err)
@@ -348,7 +347,7 @@ func proveSelectedWorkspacePreparation(t *testing.T, backend, mode string, real 
 	}
 	request := SelectedContractExecutionRequest{Owner: owner, SourceRunID: sourceRun, At: eventID,
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-		SourceLoader:      SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)},
+		SourceLoader:      SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)},
 		AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, Config: cfg, ProcessCapability: capability, Workspace: &preparationWorkspace{Lifecycle: lifecycle, trace: trace}}}
 	before := selectedPreparationDatabaseSnapshot(t, db, backend)
 	var sequence int64

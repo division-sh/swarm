@@ -435,8 +435,7 @@ func newChannelOnboardingE2EHarness(t *testing.T, backend servedparity.Backend, 
 	sourceRoot := writeStandingTelegramServeFixture(t, telegram.URL)
 	disableChannelOnboardingBusinessConsumers(t, sourceRoot)
 	opts := cliapp.ServeOptions{
-		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SourceRoot: sourceRoot, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, AbandonActiveRuns: true, Verbose: true,
 		WorkspaceBackend: "host", WorkspaceBackendSet: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
 	}

@@ -3,7 +3,6 @@ package serveapp
 import (
 	"encoding/base64"
 	"encoding/json"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -41,7 +40,7 @@ func TestSelectedForkPendingInputEvidenceBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()}
+				loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()}
 				request, _ := admitForkHistoricalSelectedRequest(t, ctx, family, loader, plan, rt.BundleHash, rt.ForkRuntime)
 				var revision int64
 				var original []byte

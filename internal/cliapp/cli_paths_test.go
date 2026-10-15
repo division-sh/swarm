@@ -23,7 +23,7 @@ func TestResolveCLISourcePlatformSpecPathsUsesExplicitSourceAndPlatformOwners(t 
 		"swarm_dir": filepath.Join(t.TempDir(), "state"),
 	}))
 
-	got, err := ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{
+	got, err := ResolveCLISourcePaths(repo, CLISourcePathOptions{
 		SourceRoot: sourceRoot,
 	})
 	if err != nil {
@@ -32,28 +32,9 @@ func TestResolveCLISourcePlatformSpecPathsUsesExplicitSourceAndPlatformOwners(t 
 	if got.SourceRoot != wantSource {
 		t.Fatalf("source path = %q, want %q", got.SourceRoot, wantSource)
 	}
-	embedded, err := EmbeddedPlatformSpecPath()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.PlatformSpecPath != embedded {
-		t.Fatalf("platform spec path = %q, want embedded %q", got.PlatformSpecPath, embedded)
-	}
-
-	got, err = ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{
-		SourceRoot:       sourceRoot,
-		PlatformSpecPath: "explicit-platform.yaml",
-	})
-	if err != nil {
-		t.Fatalf("resolve explicit platform path: %v", err)
-	}
-	if want := filepath.Join(repo, "explicit-platform.yaml"); got.PlatformSpecPath != want {
-		t.Fatalf("platform spec path = %q, want %q", got.PlatformSpecPath, want)
-	}
-
 	t.Run("omitted source is invocation cwd", func(t *testing.T) {
 		isolateCLIAPIConfigEnv(t)
-		got, err := ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{})
+		got, err := ResolveCLISourcePaths(repo, CLISourcePathOptions{})
 		if err != nil {
 			t.Fatalf("resolve omitted source: %v", err)
 		}
@@ -69,14 +50,11 @@ func TestResolveCLISourcePlatformSpecPathsEmbeddedDefaultUsesInvocationRoot(t *t
 	if err := os.WriteFile(filepath.Join(outsideRepo, "platform-spec.yaml"), []byte("not the embedded spec\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	sourceRoot := filepath.Join(t.TempDir(), "contracts")
-	if err := os.Mkdir(sourceRoot, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	sourceRoot := filepath.Join(RepoRoot(), "tests", "tier8-boot-verification", "test-boot-success")
 
 	chdirForTest(t, outsideRepo)
 
-	got, err := ResolveCLISourcePlatformSpecPaths(outsideRepo, CLISourcePlatformSpecPathOptions{
+	got, err := ResolveCLISourcePaths(outsideRepo, CLISourcePathOptions{
 		SourceRoot: sourceRoot,
 	})
 	if err != nil {
@@ -89,10 +67,14 @@ func TestResolveCLISourcePlatformSpecPathsEmbeddedDefaultUsesInvocationRoot(t *t
 	if err != nil {
 		t.Fatalf("embedded platform spec path: %v", err)
 	}
-	if got.PlatformSpecPath != want {
-		t.Fatalf("platform spec path = %q, want %q", got.PlatformSpecPath, want)
+	_, bundle, err := NewSwarmWorkflowModule(outsideRepo, got.SourceRoot)
+	if err != nil {
+		t.Fatalf("load source with embedded spec: %v", err)
 	}
-	data, err := os.ReadFile(got.PlatformSpecPath)
+	if bundle.Paths.PlatformSpecFile != want {
+		t.Fatalf("platform spec path = %q, want embedded %q", bundle.Paths.PlatformSpecFile, want)
+	}
+	data, err := os.ReadFile(bundle.Paths.PlatformSpecFile)
 	if err != nil {
 		t.Fatalf("read embedded platform spec materialization: %v", err)
 	}
@@ -104,20 +86,20 @@ func TestResolveCLISourcePlatformSpecPathsEmbeddedDefaultUsesInvocationRoot(t *t
 	}
 }
 
-func TestResolveCLISourcePlatformSpecPathsRejectsConfigOverrideBeforeExplicitOption(t *testing.T) {
+func TestResolveCLISourcePlatformSpecPathsRejectsConfigOverrideBeforeSourceLoad(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	path := writeCLIAPIConfigFile(t, map[string]string{"platform_spec_path": "must-not-be-read.yaml"})
-	_, err := ResolveCLISourcePlatformSpecPaths(t.TempDir(), CLISourcePlatformSpecPathOptions{
-		ConfigPath: path, PlatformSpecPath: "explicit.yaml",
+	_, err := ResolveCLISourcePaths(t.TempDir(), CLISourcePathOptions{
+		ConfigPath: path,
 	})
 	if err == nil || !strings.Contains(err.Error(), "`paths.platform_spec_path` at "+path+":2:3 is not a config key; the platform spec is embedded in `swarm`.") {
-		t.Fatalf("explicit selection bypassed invalid config admission: %v", err)
+		t.Fatalf("source selection bypassed invalid config admission: %v", err)
 	}
 }
 
 func TestResolveCLISourcePlatformSpecPathsRejectsMissingInvocationRoot(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	if _, err := ResolveCLISourcePlatformSpecPaths("", CLISourcePlatformSpecPathOptions{}); err == nil || !strings.Contains(err.Error(), "CLI invocation root is required") {
+	if _, err := ResolveCLISourcePaths("", CLISourcePathOptions{}); err == nil || !strings.Contains(err.Error(), "CLI invocation root is required") {
 		t.Fatalf("missing invocation root error = %v", err)
 	}
 }
@@ -130,11 +112,11 @@ func TestCLIContractPathResolutionRejectsUndelegatedContractsDir(t *testing.T) {
 	t.Setenv("SWARM_CONTRACTS_DIR", legacyContracts)
 
 	chdirForTest(t, t.TempDir())
-	if _, err := ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{SourceRoot: "."}); err == nil || !strings.Contains(err.Error(), "env/unknown_stale @ SWARM_CONTRACTS_DIR") {
+	if _, err := ResolveCLISourcePaths(repo, CLISourcePathOptions{SourceRoot: "."}); err == nil || !strings.Contains(err.Error(), "env/unknown_stale @ SWARM_CONTRACTS_DIR") {
 		t.Fatalf("unsupported source path environment: %v", err)
 	}
 	t.Setenv("SWARM_CONTRACTS_DIR", "")
-	got, err := ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{SourceRoot: "."})
+	got, err := ResolveCLISourcePaths(repo, CLISourcePathOptions{SourceRoot: "."})
 	if err != nil {
 		t.Fatalf("resolve supported source path: %v", err)
 	}
@@ -151,7 +133,7 @@ func TestResolveCLISourcePlatformSpecPathsFailClosedOnUnsupportedConfigKey(t *te
 	}
 	t.Setenv("SWARM_CONFIG", configPath)
 
-	_, err := ResolveCLISourcePlatformSpecPaths(t.TempDir(), CLISourcePlatformSpecPathOptions{})
+	_, err := ResolveCLISourcePaths(t.TempDir(), CLISourcePathOptions{})
 	if err == nil {
 		t.Fatal("resolve paths returned nil error")
 	}

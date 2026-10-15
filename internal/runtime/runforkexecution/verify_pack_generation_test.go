@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packartifact"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -75,7 +74,7 @@ func TestPublicVerifyRetainedForkUsesConfiguredPackGeneration(t *testing.T) {
 	}
 	base, dirs := configuredVerifyForkBase(t)
 	loader := admittedFixtureSelectedContractSourceLoader{
-		RepoRoot: repo, SourceRoot: project, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), PlatformPackBase: base,
+		RepoRoot: repo, SourceRoot: project, PlatformPackBase: base,
 	}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts})
 	if err != nil {

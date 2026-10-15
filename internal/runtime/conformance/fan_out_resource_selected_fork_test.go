@@ -145,9 +145,8 @@ func deploymentForkServerAt(t *testing.T, f *deploymentResourceFixture, owner ru
 		t.Fatalf("selected store %T lacks source artifact loader", f.selected)
 	}
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{
-		RepoRoot:         conformanceRepoRoot(t),
-		PlatformSpecPath: filepath.Join(conformanceRepoRoot(t), "platform-spec.yaml"),
-		Store:            artifacts,
+		RepoRoot: conformanceRepoRoot(t),
+		Store:    artifacts,
 	}
 	methods := apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{
 		Now:          now,
@@ -170,7 +169,6 @@ func deploymentForkServerAt(t *testing.T, f *deploymentResourceFixture, owner ru
 		},
 	})
 	handler, err := apiv1.NewHandler(apiv1.Options{
-		PlatformSpecPath: filepath.Join(conformanceRepoRoot(t), "platform-spec.yaml"),
 		AuthTokens:       []string{apiv1.DefaultLoopbackAPIToken},
 		ProcessWorkOwner: conformanceTestProcessOwner(t),
 		Handlers:         methods,
@@ -464,7 +462,7 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 	}
 	recovered, err := owner.RecoverSelectedForkContexts(f.ctx, effects.NewRecoveryRequest(time.Now().UTC(), executionposture.Live), runforkexecution.SelectedForkRecoveryEnvironment{
 		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
-			RepoRoot: conformanceRepoRoot(t), PlatformSpecPath: filepath.Join(conformanceRepoRoot(t), "platform-spec.yaml"), Store: artifacts,
+			RepoRoot: conformanceRepoRoot(t), Store: artifacts,
 		},
 		AgentRuntime: runforkexecution.SelectedContractAgentRuntimeOptions{
 			ExecutionPosture: executionposture.Live, ProcessCapability: f.topology.capability,

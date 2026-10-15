@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -42,8 +43,17 @@ func TestReleaseBinaryUsesEmbeddedPackInventoryWithoutAdjacentPackTree(t *testin
 			t.Fatalf("release pack inventory provider.%s = %#v, present=%t", provider, entry, ok)
 		}
 	}
+	expected := inventory
+	for _, root := range []string{releaseRoot, sourceRoot} {
+		if err := os.WriteFile(filepath.Join(root, "platform-spec.yaml"), []byte("hostile: [invalid YAML\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	relocatedRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(relocatedRoot, "platform-spec.yaml"), []byte("not an external spec\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	relocatedBinary := filepath.Join(relocatedRoot, "renamed-swarm")
 	if err := os.Rename(binaryPath, relocatedBinary); err != nil {
 		t.Fatalf("relocate release binary: %v", err)
@@ -53,6 +63,9 @@ func TestReleaseBinaryUsesEmbeddedPackInventoryWithoutAdjacentPackTree(t *testin
 		t.Fatalf("relocated bare-binary packs list failed: %v\n%s", err, output)
 	}
 	inventory = decodeReleasePackInventory(t, output)
+	if !reflect.DeepEqual(inventory, expected) {
+		t.Fatal("adjacent/project specs changed the compiled inventory or its exact identity")
+	}
 	if inventory.BaseMode != "embedded" || !strings.HasPrefix(inventory.EffectiveDigest, "sha256:") {
 		t.Fatalf("relocated release pack inventory = %#v", inventory)
 	}
@@ -81,6 +94,14 @@ func TestReleaseBinaryUsesEmbeddedPackInventoryWithoutAdjacentPackTree(t *testin
 		if show.Pack.ID != "provider.telegram" || show.Pack.Source != "embedded" || !strings.HasPrefix(show.Pack.ManifestHash, "sha256:") ||
 			!strings.Contains(show.EnvelopeYAML, "id: provider.telegram") || !strings.Contains(show.ManifestYAML, "provider: telegram") {
 			t.Fatalf("relocated bare-binary packs show = %#v", show)
+		}
+	}
+	for _, args := range [][]string{{"verify", sourceRoot, "--portable", "--json"}, {"describe", sourceRoot, "--json"}} {
+		command := exec.Command(relocatedBinary, args...)
+		command.Dir, command.Env = relocatedRoot, releaseProviderTriggerProcessEnv()
+		body, err := command.CombinedOutput()
+		if err != nil || !json.Valid(body) {
+			t.Fatalf("compiled %s selected an adjacent/project spec: %v\n%s", strings.Join(args, " "), err, body)
 		}
 	}
 }

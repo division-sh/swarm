@@ -202,8 +202,7 @@ func (f *deploymentResourceFixture) operatorServer(t *testing.T) *httptest.Serve
 		}},
 	)
 	handler, err := apiv1.NewHandler(apiv1.Options{
-		PlatformSpecPath: filepath.Join(conformanceRepoRoot(t), "platform-spec.yaml"),
-		AuthTokens:       []string{apiv1.DefaultLoopbackAPIToken}, Handlers: methods,
+		AuthTokens: []string{apiv1.DefaultLoopbackAPIToken}, Handlers: methods,
 	})
 	if err != nil {
 		t.Fatal(err)

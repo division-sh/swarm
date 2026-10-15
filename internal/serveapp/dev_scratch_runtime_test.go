@@ -335,8 +335,7 @@ func devScratchRuntimeOptions(t *testing.T, sourceRoot string) cliapp.ServeOptio
 	configPath := writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), "")
 	return cliapp.ServeOptions{
 		ConfigPath: configPath, SourceRoot: sourceRoot,
-		PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
-		APIListenAddr:    "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		Dev: true, NoFeed: true, SelfCheck: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}

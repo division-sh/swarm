@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -121,8 +120,8 @@ func testServeStartupAbortFailure(t *testing.T, backend string, reset bool, phas
 		writeServeRuntimeAgentSlugFixture(t, "startup-abort-third", "abort-third-agent"),
 	}
 	for _, root := range roots {
-		loaded, err := loadServeRuntimeBundle(ctx, repoRootForTest(), stores.SourceArtifactStore(), cliapp.CLISourcePlatformSpecPaths{
-			SourceRoot: root, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
+		loaded, err := loadServeRuntimeBundle(ctx, repoRootForTest(), stores.SourceArtifactStore(), cliapp.CLISourcePaths{
+			SourceRoot: root,
 		}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 		if err != nil {
 			t.Fatal(err)

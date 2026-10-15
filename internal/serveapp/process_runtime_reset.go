@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
@@ -26,13 +25,9 @@ func loadServeRecoveredResetSources(ctx context.Context, repo string, artifacts 
 	if len(plan.Sources) == 0 {
 		return nil, nil
 	}
-	spec, err := cliapp.EmbeddedPlatformSpecPath()
-	if err != nil {
-		return nil, err
-	}
 	var loaded []serveRuntimeBundle
 	for _, source := range plan.Sources {
-		bundle, err := loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, source.BundleHash, spec, packBases, materialize)
+		bundle, err := loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, source.BundleHash, packBases, materialize)
 		if err != nil {
 			for _, prior := range loaded {
 				err = errors.Join(err, prior.cleanup())

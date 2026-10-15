@@ -43,7 +43,7 @@ func issue2564ServeHarness(t *testing.T, backend, root string, mock bool) (*clia
 	t.Helper()
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
-	opts := &cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
+	opts := &cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 	if mock {
 		configureHostWorkspaceProofLifecycle(t)
 		opts.WorkspaceBackend, opts.WorkspaceBackendSet = workspace.BackendHost, true
@@ -62,7 +62,7 @@ func issue2564ServeHarness(t *testing.T, backend, root string, mock bool) (*clia
 			if err != nil {
 				return nil, err
 			}
-			if _, err := initializeServePlatformStateStores(ctx, owner.Schema(), filepath.Join(repoRootForTest(), defaultPlatformSpecPath)); err != nil {
+			if _, err := initializeServePlatformStateStores(ctx, owner.Schema()); err != nil {
 				return nil, errors.Join(err, owner.CloseUnactivated())
 			}
 			return owner, nil
