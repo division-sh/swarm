@@ -552,3 +552,11 @@ that final assertion. The 50ms pending-reuse negative, prompt cancellation and
 one-selection assertions remain. No production predicate or deadline changes.
 Disposable old-order RED/corrected-cut GREEN and final-head execution receipts
 are linked in the subsequent issue checkpoint; the earlier G3 RED is not waived.
+
+The permanent oracle also follows reviewer-g #2577/6204093823: after joining
+original.done, require original.err == nil and the non-nil retained connection
+to be that exact original attempt's connection, then Close unconditionally.
+A failed constructor is not evidence of a closed-original refusal. All existing
+cancellation, 50ms pending reuse, identity, post-close and one-selection checks
+remain unchanged. The single rehearsal stays held until B's shared-runtime
+landing is integrated and its checks plus fresh preflight pass.
