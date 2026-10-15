@@ -429,6 +429,338 @@ func (o channelObservation) CountChannelRejectedIntentPlansStorage(ctx context.C
 	}
 	return result, err
 }
+func (o channelObservation) CountChannelTerminalCurrentReceiptsStorage(ctx context.Context, card string) (int, error) {
+	var result int
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.CountChannelTerminalCurrentReceiptsStorageForTest(ctx, o.selected, card)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func (o channelObservation) CountChannelSettledActionIntentsStorage(ctx context.Context) (int, error) {
+	var result int
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.CountChannelSettledActionIntentsStorageForTest(ctx, o.selected)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func (o channelObservation) CountChannelSettledTextIntentsStorage(ctx context.Context) (int, error) {
+	var result int
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.CountChannelSettledTextIntentsStorageForTest(ctx, o.selected)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func (o channelObservation) ReadChannelResetRecordStorage(ctx context.Context) (string, error) {
+	var result string
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.ReadChannelResetRecordStorageForTest(ctx, o.selected)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func (o channelObservation) CountChannelRunIdentityStorage(ctx context.Context, run string) (int, error) {
+	var result int
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.CountChannelRunIdentityStorageForTest(ctx, o.selected, run)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func (o channelObservation) CountChannelSourceActivationsStorage(ctx context.Context, hash string) (int, error) {
+	var result int
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.CountChannelSourceActivationsStorageForTest(ctx, o.selected, hash)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func (o channelObservation) CountChannelSourceArtifactsStorage(ctx context.Context, hash string) (int, error) {
+	var result int
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.CountChannelSourceArtifactsStorageForTest(ctx, o.selected, hash)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func (o channelObservation) CountChannelStandingGenerationsStorage(ctx context.Context) (int, error) {
+	var result int
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.CountChannelStandingGenerationsStorageForTest(ctx, o.selected)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+
+type ChannelSourceSuccessorPlanStorage = private.ChannelSourceSuccessorPlanStorage
+
+func (o channelObservation) ReadChannelSourceSuccessorPlanStorage(ctx context.Context, card string) (ChannelSourceSuccessorPlanStorage, error) {
+	var result ChannelSourceSuccessorPlanStorage
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.ReadChannelSourceSuccessorPlanStorageForTest(ctx, o.selected, card)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func (o channelObservation) ReadChannelSourceNativeConsumerStateStorage(ctx context.Context, activation string) (string, error) {
+	var result string
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.ReadChannelSourceNativeConsumerStateStorageForTest(ctx, o.selected, activation)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func (o channelObservation) ReadChannelSourceForkFailureStorage(ctx context.Context, key string) (sql.NullString, error) {
+	var result sql.NullString
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.ReadChannelSourceForkFailureStorageForTest(ctx, o.selected, key)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func (o channelObservation) CountChannelForkSupersessionLineageStorage(ctx context.Context, run, event string) (int, error) {
+	var result int
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.CountChannelForkSupersessionLineageStorageForTest(ctx, o.selected, run, event)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func (o channelObservation) ReadChannelForkSupersessionPayloadStorage(ctx context.Context, run string) ([]byte, error) {
+	var result []byte
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.ReadChannelForkSupersessionPayloadStorageForTest(ctx, o.selected, run)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func (o channelObservation) CountChannelSourceRetiredCardStorage(ctx context.Context, run, card string) (int, error) {
+	var result int
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.CountChannelSourceRetiredCardStorageForTest(ctx, o.selected, run, card)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func (o channelObservation) ReadChannelSourceParentCardClockStorage(ctx context.Context, card string) ([3]string, error) {
+	var result [3]string
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.ReadChannelSourceParentCardClockStorageForTest(ctx, o.selected, card)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func (o channelObservation) CountChannelSourceCardDraftsStorage(ctx context.Context, card string) (int, error) {
+	var result int
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.CountChannelSourceCardDraftsStorageForTest(ctx, o.selected, card)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+
+type ChannelOnboardingOperationDiagnosticStorage = private.ChannelOnboardingOperationDiagnosticStorage
+
+func (o channelObservation) ReadChannelOnboardingOperationDiagnosticStorage(ctx context.Context, operation string) (ChannelOnboardingOperationDiagnosticStorage, error) {
+	var result ChannelOnboardingOperationDiagnosticStorage
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.ReadChannelOnboardingOperationDiagnosticStorageForTest(ctx, o.selected, operation)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+
+type ChannelOnboardingPublicationHandoffStorage = private.ChannelOnboardingPublicationHandoffStorage
+
+func (o channelObservation) ReadChannelOnboardingPublicationHandoffStorage(ctx context.Context, operation string) (ChannelOnboardingPublicationHandoffStorage, error) {
+	var result ChannelOnboardingPublicationHandoffStorage
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.ReadChannelOnboardingPublicationHandoffStorageForTest(ctx, o.selected, operation)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func (o channelObservation) ReadChannelOnboardingOperationPhysicalSurfaceStorage(ctx context.Context, operation string) (map[string]string, error) {
+	var result map[string]string
+	missing := false
+	err := o.selected.InspectSnapshot(ctx, func(ctx context.Context) error {
+		var err error
+		result, err = private.ReadChannelOnboardingOperationPhysicalSurfaceStorageForTest(ctx, o.selected, operation)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
 func (o channelObservation) ReadChannelPreservedPrincipalsStorage(ctx context.Context) ([][]any, error) {
 	var result [][]any
 	missing := false
@@ -708,6 +1040,25 @@ type ChannelProcessObservation interface {
 	CountChannelCurrentActivationsStorage(context.Context) (int, error)
 	ReadChannelFirstReceiptedDeliveryStorage(context.Context) (string, error)
 	CountChannelRejectedIntentPlansStorage(context.Context) (int, error)
+	CountChannelTerminalCurrentReceiptsStorage(context.Context, string) (int, error)
+	CountChannelSettledActionIntentsStorage(context.Context) (int, error)
+	CountChannelSettledTextIntentsStorage(context.Context) (int, error)
+	ReadChannelResetRecordStorage(context.Context) (string, error)
+	CountChannelRunIdentityStorage(context.Context, string) (int, error)
+	CountChannelSourceActivationsStorage(context.Context, string) (int, error)
+	CountChannelSourceArtifactsStorage(context.Context, string) (int, error)
+	CountChannelStandingGenerationsStorage(context.Context) (int, error)
+	ReadChannelSourceSuccessorPlanStorage(context.Context, string) (ChannelSourceSuccessorPlanStorage, error)
+	ReadChannelSourceNativeConsumerStateStorage(context.Context, string) (string, error)
+	ReadChannelSourceForkFailureStorage(context.Context, string) (sql.NullString, error)
+	CountChannelForkSupersessionLineageStorage(context.Context, string, string) (int, error)
+	ReadChannelForkSupersessionPayloadStorage(context.Context, string) ([]byte, error)
+	CountChannelSourceRetiredCardStorage(context.Context, string, string) (int, error)
+	ReadChannelSourceParentCardClockStorage(context.Context, string) ([3]string, error)
+	CountChannelSourceCardDraftsStorage(context.Context, string) (int, error)
+	ReadChannelOnboardingOperationDiagnosticStorage(context.Context, string) (ChannelOnboardingOperationDiagnosticStorage, error)
+	ReadChannelOnboardingPublicationHandoffStorage(context.Context, string) (ChannelOnboardingPublicationHandoffStorage, error)
+	ReadChannelOnboardingOperationPhysicalSurfaceStorage(context.Context, string) (map[string]string, error)
 	ReadChannelPreservedPrincipalsStorage(context.Context) ([][]any, error)
 	ReadChannelPreservedOperationsStorage(context.Context) ([][]any, error)
 	ReadChannelPreservedBindingsStorage(context.Context) ([][]any, error)

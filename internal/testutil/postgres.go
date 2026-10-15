@@ -51,6 +51,16 @@ func StartEmptyPostgresDSN(t *testing.T) string {
 
 func startPostgresDatabase(t *testing.T, useTemplate bool) (string, *sql.DB, func()) {
 	t.Helper()
+	sandbox, release := startPostgresSandbox(t, useTemplate)
+	dsn, err := sandbox.Connection.String()
+	if err != nil {
+		t.Fatalf("serialize Postgres test sandbox: %v", err)
+	}
+	return dsn, sandbox.DB, release
+}
+
+func startPostgresSandbox(t *testing.T, useTemplate bool) (*testpostgres.Sandbox, func()) {
+	t.Helper()
 	connection, err := testpostgres.ConnectionFromEnvironment()
 	if err != nil {
 		t.Fatal(err)
@@ -68,11 +78,6 @@ func startPostgresDatabase(t *testing.T, useTemplate bool) (string, *sql.DB, fun
 	if err != nil {
 		t.Fatalf("acquire Postgres test sandbox: %v", err)
 	}
-	dsn, err := sandbox.Connection.String()
-	if err != nil {
-		_ = sandbox.Release(context.Background())
-		t.Fatalf("serialize Postgres test sandbox: %v", err)
-	}
 	release := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -81,7 +86,7 @@ func startPostgresDatabase(t *testing.T, useTemplate bool) (string, *sql.DB, fun
 		}
 	}
 	t.Cleanup(release)
-	return dsn, sandbox.DB, release
+	return sandbox, release
 }
 
 func postgresManagerForConnection(ctx context.Context, connection testpostgres.Connection) (*testpostgres.Manager, error) {

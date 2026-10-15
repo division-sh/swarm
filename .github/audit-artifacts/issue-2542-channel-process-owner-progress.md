@@ -95,3 +95,11 @@ open; existing watchlist/landing obligations and the G+D+A rebase hold remain.
 The accepted signed predecessor is additionally verified on the authorized
 non-PR backup ref agent-b/backup-2542-accepted-20261015-7333184bec. This does not
 publish the developing carrier batch or trigger an integration qualification.
+
+## Subsequent Combined Checkpoint
+
+This owner-phase record is historical, not the final state of the four factories
+or empty-store administration. Their typed propagation and integrated accounting
+are recorded separately in issue-2542-channel-process-batch-proof.md, including
+the exact native projection residual and the runtime qualification holds. Earlier
+RED aggregates above remain RED; the later receipts do not rewrite this record.

@@ -309,24 +309,15 @@ func waitChannelAnchorDispatchEdit(t *testing.T, h *channelOnboardingE2EHarness,
 	}
 }
 
-func startChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool) (*channelOnboardingE2EHarness, *sql.DB, string) {
+func startChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool) (*channelOnboardingE2EHarness, storetest.ChannelProcessObservation, string) {
 	t.Helper()
 	return startChannelAnchorJourneyWithDraftTTL(t, backend, token, withSummary, 0)
 }
 
-func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration) (*channelOnboardingE2EHarness, *sql.DB, string) {
+func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration) (*channelOnboardingE2EHarness, storetest.ChannelProcessObservation, string) {
 	t.Helper()
 	h, hash := startChannelAnchorPublicJourney(t, backend, token, withSummary, draftTTL, nil)
-	driver := "sqlite"
-	if backend == servedparity.BackendExplicitPostgres {
-		driver = "postgres"
-	}
-	db, err := sql.Open(driver, h.storeDSN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return h, db, hash
+	return h, channelProcessStorageObservation(t, h), hash
 }
 
 func startChannelAnchorPublicJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration, configure func(*cliapp.ServeOptions)) (*channelOnboardingE2EHarness, string) {

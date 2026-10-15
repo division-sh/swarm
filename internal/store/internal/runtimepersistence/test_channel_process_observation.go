@@ -4,11 +4,15 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	admin "github.com/division-sh/swarm/internal/store/internal/adminpersistence"
 	channel "github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
 	onboarding "github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
 	decision "github.com/division-sh/swarm/internal/store/internal/backend/decisioncard"
 	effect "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
 	operator "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel"
+	fork "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
+	lifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
+	source "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
 	standing "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 	mailbox "github.com/division-sh/swarm/internal/store/internal/mailboxpersistence"
 )
@@ -481,6 +485,355 @@ func CountChannelRejectedIntentPlansStorageForTest(ctx context.Context, selected
 	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
 		result, err = channel.CountRejectedIntentPlansStorageTx(ctx, tx)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func CountChannelTerminalCurrentReceiptsStorageForTest(ctx context.Context, selected any, card string) (int, error) {
+	var result int
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = channel.CountTerminalCurrentReceiptsStorageTx(ctx, tx, card)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func CountChannelSettledActionIntentsStorageForTest(ctx context.Context, selected any) (int, error) {
+	var result int
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = operator.CountSettledChannelActionIntentsStorageTx(ctx, tx)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func CountChannelSettledTextIntentsStorageForTest(ctx context.Context, selected any) (int, error) {
+	var result int
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = operator.CountSettledChannelTextIntentsStorageTx(ctx, tx)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func ReadChannelResetRecordStorageForTest(ctx context.Context, selected any) (string, error) {
+	var result string
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = admin.ReadChannelResetRecordStorageTx(ctx, tx)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func CountChannelRunIdentityStorageForTest(ctx context.Context, selected any, run string) (int, error) {
+	var result int
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = lifecycle.CountRunIdentityStorageTx(ctx, tx, run)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func CountChannelSourceActivationsStorageForTest(ctx context.Context, selected any, hash string) (int, error) {
+	var result int
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = onboarding.CountSourceActivationsStorageTx(ctx, tx, hash)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func CountChannelSourceArtifactsStorageForTest(ctx context.Context, selected any, hash string) (int, error) {
+	var result int
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = source.CountChannelSourceArtifactsStorageTx(ctx, tx, hash)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func CountChannelStandingGenerationsStorageForTest(ctx context.Context, selected any) (int, error) {
+	var result int
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = standing.CountStandingGenerationsStorageTx(ctx, tx)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+
+type ChannelSourceSuccessorPlanStorage = channel.SourceSuccessorPlanStorage
+
+func ReadChannelSourceSuccessorPlanStorageForTest(ctx context.Context, selected any, card string) (ChannelSourceSuccessorPlanStorage, error) {
+	var result ChannelSourceSuccessorPlanStorage
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = channel.ReadSourceSuccessorPlanStorageTx(ctx, tx, card)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func ReadChannelSourceNativeConsumerStateStorageForTest(ctx context.Context, selected any, activation string) (string, error) {
+	var result string
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = channel.ReadSourceNativeConsumerStateStorageTx(ctx, tx, activation)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func ReadChannelSourceForkFailureStorageForTest(ctx context.Context, selected any, key string) (sql.NullString, error) {
+	var result sql.NullString
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = fork.ReadChannelSourceForkFailureStorageTx(ctx, tx, key)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func CountChannelSourceRetiredCardStorageForTest(ctx context.Context, selected any, run, card string) (int, error) {
+	var result int
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = decision.CountSourceRetiredCardStorageTx(ctx, tx, run, card)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func ReadChannelSourceParentCardClockStorageForTest(ctx context.Context, selected any, card string) ([3]string, error) {
+	var result [3]string
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = decision.ReadSourceParentCardClockStorageTx(ctx, tx, card)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func CountChannelSourceCardDraftsStorageForTest(ctx context.Context, selected any, card string) (int, error) {
+	var result int
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = decision.CountSourceCardDraftsStorageTx(ctx, tx, card)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+
+type ChannelOnboardingOperationDiagnosticStorage = onboarding.OnboardingOperationDiagnosticStorage
+
+func ReadChannelOnboardingOperationDiagnosticStorageForTest(ctx context.Context, selected any, operation string) (ChannelOnboardingOperationDiagnosticStorage, error) {
+	var result ChannelOnboardingOperationDiagnosticStorage
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = onboarding.ReadOnboardingOperationDiagnosticStorageTx(ctx, tx, operation)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+
+type ChannelOnboardingPublicationHandoffStorage = onboarding.OnboardingPublicationHandoffStorage
+
+func ReadChannelOnboardingPublicationHandoffStorageForTest(ctx context.Context, selected any, operation string) (ChannelOnboardingPublicationHandoffStorage, error) {
+	var result ChannelOnboardingPublicationHandoffStorage
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = onboarding.ReadOnboardingPublicationHandoffStorageTx(ctx, tx, operation)
+		if err == sql.ErrNoRows {
+			missing = true
+			return nil
+		}
+		return err
+	})
+	if err == nil && missing {
+		err = sql.ErrNoRows
+	}
+	return result, err
+}
+func ReadChannelOnboardingOperationPhysicalSurfaceStorageForTest(ctx context.Context, selected any, operation string) (map[string]string, error) {
+	var result map[string]string
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return result, err
+	}
+	missing := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = onboarding.ReadOnboardingOperationPhysicalSurfaceStorageTx(ctx, tx, operation)
 		if err == sql.ErrNoRows {
 			missing = true
 			return nil

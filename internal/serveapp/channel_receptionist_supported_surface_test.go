@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -52,11 +51,6 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 			}
 			intentIdentity := captureChannelIntentIdentity(t, h)
 			intentReader := openChannelAnchorObservation(t, h)
-			db, err := sql.Open(backendName, h.storeDSN)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
 			cardMessageID := waitChannelCardMessageID(t, channelAnchorStorageObservation(t, h), backendName, "telegram-ingress")
 			card := h.provider.Delivery(cardMessageID - 1)
 			if fmt.Sprint(card["chat_id"]) != "1001" {

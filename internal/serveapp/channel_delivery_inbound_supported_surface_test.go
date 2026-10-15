@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,8 +19,8 @@ import (
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
-	"github.com/division-sh/swarm/internal/store/storetest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/telegramapi"
 	"github.com/google/uuid"
@@ -411,7 +410,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + publicListen})
 	var configPath, observerDSN string
 	if backend == "postgres" {
-		dsn, _, _ := testutil.StartPostgres(t)
+		dsn := testutil.StartPostgresDSN(t)
 		observerDSN = dsn
 		configPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 	} else {
@@ -594,13 +593,6 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	}
 	cardMessages := map[string]int{}
 	if scenario == "draft_chooser" || scenario == "quoted_two" || scenario == "notice_uncertainty_readback" {
-		db, err := sql.Open(backend, observerDSN)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			_ = db.Close()
-		})
 		anchorReader := openChannelAnchorStorageAtLocation(t, backend, observerDSN)
 		cardMessages["telegram-ingress"] = waitChannelCardMessageID(t, anchorReader, backend, "telegram-ingress")
 		if scenario == "draft_chooser" || scenario == "quoted_two" {

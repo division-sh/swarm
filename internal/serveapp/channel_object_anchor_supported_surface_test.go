@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"sync"
@@ -13,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type objectChannelResponsePause struct {
@@ -39,7 +39,7 @@ func (p *objectChannelProvider) pauseBusinessResponse(t *testing.T) (<-chan stru
 func TestChannelLearnedObjectRealAnchorProducersPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
-			h, db, p, _, hash := startObjectChannelJourney(t, backend, canonicalrouting.CopyChannelLearnedObjectAnchorJourney(t), channelAnchorLLMRuntime{}, "object-provider-secret")
+			h, reader, p, _, hash := startObjectChannelJourney(t, backend, canonicalrouting.CopyChannelLearnedObjectAnchorJourney(t), channelAnchorLLMRuntime{}, "object-provider-secret")
 			for index, kind := range []decisioncard.AnchorKind{decisioncard.AnchorKindStageGate, decisioncard.AnchorKindHumanTask, decisioncard.AnchorKindProposedEffect} {
 				t.Run(string(kind), func(t *testing.T) {
 					flowInstance := "reviews"
@@ -82,8 +82,8 @@ func TestChannelLearnedObjectRealAnchorProducersPublicJourney(t *testing.T) {
 						waitObjectAnchorDispatch(t, h, card, true)
 						waitObjectMessageText(t, p, receipt, "Dispatch: succeeded")
 					}
-					waitObjectTerminalReceipt(t, db, p, card, receipt, "Decision: approve")
-					proveObjectRejectedControl(t, db, p, receipt, approve, fmt.Sprintf("anchor-stale-%d", index))
+					waitObjectTerminalReceipt(t, reader, p, card, receipt, "Decision: approve")
+					proveObjectRejectedControl(t, p, receipt, approve, fmt.Sprintf("anchor-stale-%d", index))
 					var count int
 					{
 						var err error
@@ -114,7 +114,7 @@ func TestChannelLearnedObjectRealAnchorProducersPublicJourney(t *testing.T) {
 	}
 }
 
-func proveObjectRejectedControl(t *testing.T, db *sql.DB, p *objectChannelProvider, receipt, token, occurrence string) {
+func proveObjectRejectedControl(t *testing.T, p *objectChannelProvider, receipt, token, occurrence string) {
 	t.Helper()
 	p.mu.Lock()
 	acknowledgments := len(p.calls["/v2/ack"])
@@ -207,7 +207,7 @@ func waitObjectAnchorDispatch(t *testing.T, h *channelOnboardingE2EHarness, card
 	}
 }
 
-func waitObjectTerminalReceipt(t *testing.T, db *sql.DB, p *objectChannelProvider, card, receipt, fragment string) {
+func waitObjectTerminalReceipt(t *testing.T, reader storetest.ChannelProcessObservation, p *objectChannelProvider, card, receipt, fragment string) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
@@ -216,9 +216,7 @@ func waitObjectTerminalReceipt(t *testing.T, db *sql.DB, p *objectChannelProvide
 		controls, _ := input["controls"].([]any)
 		terminal := len(controls) == 0 && strings.Contains(fmt.Sprint(input["body"]), fragment)
 		p.mu.Unlock()
-		var settled int
-		err := db.QueryRow(`SELECT COUNT(*) FROM channel_delivery_plans p JOIN channel_delivery_receipts r ON r.effect_operation_id=p.current_receipt_operation_id
-			WHERE p.source_id=$1 AND p.state='sent' AND r.state='sent' AND r.render_id=p.current_render_id`, card).Scan(&settled)
+		settled, err := reader.CountChannelTerminalCurrentReceiptsStorage(context.Background(), card)
 		if err != nil {
 			t.Fatal(err)
 		}

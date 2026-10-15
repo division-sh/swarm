@@ -110,6 +110,10 @@ func ValidateCurrent(root string, pins []runphysical.Pin) error {
 
 func EarlierSource(root, file, function, current string) (string, error) {
 	var err error
+	current, err = EarlierChannelProcessSource(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	current, err = EarlierStandingIngressSource(root, file, function, current)
 	if err != nil {
 		return "", err

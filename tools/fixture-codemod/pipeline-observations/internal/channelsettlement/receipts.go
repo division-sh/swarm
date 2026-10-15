@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/budgetdiagnostic"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 // This artifact comparison reverses only the approved embedded read role.
@@ -86,6 +87,7 @@ func Body(raw []byte, name string) (string, error) {
 
 func ValidateCurrent(root string, pins []runphysical.Pin) error {
 	files := map[string][]byte{}
+	var process []selectedreadrole.EntityToolPin
 	for _, pin := range pins {
 		if files[pin.File] == nil {
 			raw, err := os.ReadFile(filepath.Join(root, pin.File))
@@ -95,6 +97,18 @@ func ValidateCurrent(root string, pins []runphysical.Pin) error {
 			files[pin.File] = raw
 		}
 		current, err := Body(files[pin.File], pin.Function)
+		if err == nil && current != pin.After {
+			if process == nil {
+				process, err = selectedreadrole.ReadChannelProcessPins(root)
+				if err == nil {
+					err = selectedreadrole.ValidateChannelProcessCurrent(root, process)
+				}
+				if err != nil {
+					return err
+				}
+			}
+			current, err = selectedreadrole.ChannelProcessPrevious(process, pin.File, pin.Function, current)
+		}
 		if err != nil || current != pin.After {
 			return fmt.Errorf("channel settlement actual current source changed: %s: %v", pin.Function, err)
 		}
@@ -113,6 +127,12 @@ func EarlierSource(root, file, function, current string) (string, error) {
 		}
 		if err := ValidateCurrent(root, pins); err != nil {
 			return "", err
+		}
+		if current != pin.After {
+			current, err = selectedreadrole.EarlierChannelProcessSource(root, file, function, current)
+			if err != nil {
+				return "", err
+			}
 		}
 		if current != pin.After {
 			return "", fmt.Errorf("channel settlement supplied source is not its live endpoint: %s", function)

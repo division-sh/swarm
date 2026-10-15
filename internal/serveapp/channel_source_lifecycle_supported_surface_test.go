@@ -32,11 +32,10 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					sourceReader = p.sourceReader
 					deliveryReader = p.deps.DeliveryStore.SummarizeRun
 				})
-				h, db, hash := startChannelAnchorJourney(t, backend, "source-lifecycle-token", false)
-				storage := channelProcessStorageObservation(t, h)
+				h, storage, hash := startChannelAnchorJourney(t, backend, "source-lifecycle-token", false)
 				intentIdentity := captureChannelIntentIdentity(t, h)
-				var standingRun string
-				if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&standingRun); err != nil {
+				standingRun, err := storage.ReadChannelCurrentStandingRunStorage(context.Background())
+				if err != nil {
 					t.Fatal(err)
 				}
 				standingCard := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), standingRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
@@ -128,9 +127,11 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						t.Fatal(err)
 					}
 					waitSelectedChannelDeliverySendsSettled(t, channelSettlementStorageObservation(t, h))
-					for _, table := range []string{"operator_channel_action_intents", "operator_channel_text_intents"} {
-						var count int
-						if err := db.QueryRow(`SELECT COUNT(*) FROM ` + table + ` WHERE state='settled'`).Scan(&count); err != nil || count == 0 {
+					for table, read := range map[string]func(context.Context) (int, error){
+						"operator_channel_action_intents": storage.CountChannelSettledActionIntentsStorage,
+						"operator_channel_text_intents":   storage.CountChannelSettledTextIntentsStorage,
+					} {
+						if count, err := read(context.Background()); err != nil || count == 0 {
 							t.Fatalf("reset history proof has no settled %s: count=%d err=%v", table, count, err)
 						}
 					}
@@ -144,27 +145,29 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					params := map[string]any{"include_source_artifacts": clear, "idempotency_key": uuid.NewString()}
 					reset := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", params)
 					if reset.Error != nil {
-						var record string
-						readErr := db.QueryRow(`SELECT CAST(record AS TEXT) FROM runtime_reset_operations LIMIT 1`).Scan(&record)
+						record, readErr := storage.ReadChannelResetRecordStorage(context.Background())
 						t.Fatalf("public reset failed: %+v record=%s read=%v\n%s", reset.Error, record, readErr, h.process.outputString())
 					}
 					var oldRun, activations, artifacts int
-					for query, target := range map[string]*int{`SELECT COUNT(*) FROM runs WHERE run_id=$1`: &oldRun, `SELECT COUNT(*) FROM connected_channel_activations WHERE bundle_hash=$1`: &activations, `SELECT COUNT(*) FROM source_artifacts WHERE bundle_hash=$1`: &artifacts} {
+					for target, read := range map[*int]func(context.Context, string) (int, error){
+						&oldRun: storage.CountChannelRunIdentityStorage, &activations: storage.CountChannelSourceActivationsStorage, &artifacts: storage.CountChannelSourceArtifactsStorage,
+					} {
 						arg := hash
 						if target == &oldRun {
 							arg = seed.RunID
 						}
-						if err := db.QueryRow(query, arg).Scan(target); err != nil {
+						value, err := read(context.Background(), arg)
+						if err != nil {
 							t.Fatal(err)
 						}
+						*target = value
 					}
 					if oldRun != 0 || activations != 0 || (artifacts == 0) != clear {
 						t.Fatalf("reset authority/source mismatch: run=%d activation=%d artifact=%d", oldRun, activations, artifacts)
 					}
 					successorPlan := ""
 					if !clear {
-						var freshGenerations int
-						if err := db.QueryRow(`SELECT COUNT(*) FROM standing_service_generations`).Scan(&freshGenerations); err != nil || freshGenerations != 0 {
+						if freshGenerations, err := storage.CountChannelStandingGenerationsStorage(context.Background()); err != nil || freshGenerations != 0 {
 							t.Fatalf("reset created a standing generation without admitted ingress credentials: count=%d err=%v", freshGenerations, err)
 						}
 						stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
@@ -177,8 +180,8 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						}
 						h.stop(t)
 						h.start(t)
-						var successorRun string
-						if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&successorRun); err != nil {
+						successorRun, err := storage.ReadChannelCurrentStandingRunStorage(context.Background())
+						if err != nil {
 							t.Fatal(err)
 						}
 						freshCard := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), successorRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
@@ -187,10 +190,10 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						}
 						deadline := time.Now().Add(15 * time.Second)
 						for {
-							var state, render, receipt string
-							err := db.QueryRow(`SELECT delivery_id,state,COALESCE(CAST(current_render_id AS TEXT),''),COALESCE(CAST(current_receipt_operation_id AS TEXT),'') FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1 AND resend_generation=0`, freshCard).Scan(&successorPlan, &state, &render, &receipt)
+							plan, err := storage.ReadChannelSourceSuccessorPlanStorage(context.Background(), freshCard)
 							if err == nil {
-								if state != "planned" || render != "" || receipt != "" {
+								successorPlan = plan.DeliveryID
+								if plan.State != "planned" || plan.RenderID != "" || plan.ReceiptID != "" {
 									t.Fatal("successor card dispatched without a current activation")
 								}
 								break
@@ -255,16 +258,11 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						if qualified.SettingID != beforeNative[0] || len(h.provider.CommandWrites()) != writes {
 							t.Fatal("reconnect did not reuse acknowledged native installation")
 						}
-						var state string
-						if err := db.QueryRow(`SELECT state FROM channel_native_setting_consumers WHERE activation_id=$1`, beforeNative[6]).Scan(&state); err != nil || state != "retired" {
+						if state, err := storage.ReadChannelSourceNativeConsumerStateStorage(context.Background(), beforeNative[6]); err != nil || state != "retired" {
 							t.Fatalf("reconnect revived predecessor consumer: %s %v", state, err)
 						}
 					}
 				case "fork":
-					storeBackend := "sqlite"
-					if backend == servedparity.BackendExplicitPostgres {
-						storeBackend = "postgres"
-					}
 					waitServedRunDeliveryQuiescence(t, deliveryReader, seed.RunID)
 					requireServedOKJSONRPC(t, h.rpcEndpoint(), "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": uuid.NewString()})
 					frontier := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": uuid.NewString()})
@@ -272,8 +270,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					var fork apiv1.RunForkExecutionResult
 					response := requestServedJSONRPC(t, h.rpcEndpoint(), "run.fork", params)
 					if response.Error != nil {
-						var failure sql.NullString
-						readErr := db.QueryRow(`SELECT CAST(failure_json AS TEXT) FROM run_fork_operations WHERE idempotency_key=$1`, params["idempotency_key"]).Scan(&failure)
+						failure, readErr := storage.ReadChannelSourceForkFailureStorage(context.Background(), params["idempotency_key"].(string))
 						t.Fatalf("public fork failed: %+v failure=%s read=%v\n%s", response.Error, failure.String, readErr, h.process.outputString())
 					}
 					if err := json.Unmarshal(response.Result, &fork); err != nil {
@@ -287,17 +284,16 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 							t.Fatal(err)
 						}
 					}
-					if err := db.QueryRow(`SELECT COUNT(*) FROM events e
-						JOIN run_fork_selected_contract_executions x ON x.fork_event_id=e.source_event_id AND x.fork_run_id=e.run_id
-						WHERE e.run_id=$1 AND e.event_name='mailbox.card_superseded' AND x.source_event_id=$2`, fork.ForkRunID, frontier.EventID).Scan(&exactLineageCount); err != nil {
+					exactLineageCount, err = storage.CountChannelForkSupersessionLineageStorage(context.Background(), fork.ForkRunID, frontier.EventID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					if supersessionCount != 1 || exactLineageCount != supersessionCount {
 						t.Fatalf("fork stage exit lost its selected frontier: supersessions=%d exact=%d", supersessionCount, exactLineageCount)
 					}
 					child := waitChannelAnchorCardInState(t, channelAnchorStorageObservation(t, h), fork.ForkRunID, decisioncard.AnchorKindStageGate, "reviews", decisioncard.StatusPending)
-					var retiredEvent []byte
-					if err := db.QueryRow(`SELECT payload FROM events WHERE run_id=$1 AND event_name='mailbox.card_superseded'`, fork.ForkRunID).Scan(&retiredEvent); err != nil {
+					retiredEvent, err := storage.ReadChannelForkSupersessionPayloadStorage(context.Background(), fork.ForkRunID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					var retired struct {
@@ -306,15 +302,13 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					if err := json.Unmarshal(retiredEvent, &retired); err != nil || retired.CardID == "" || retired.CardID == child {
 						t.Fatalf("fork supersession has no exact predecessor: %s err=%v", retiredEvent, err)
 					}
-					var retiredCards int
-					if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE run_id=$1 AND card_id=$2 AND status='superseded'`, fork.ForkRunID, retired.CardID).Scan(&retiredCards); err != nil || retiredCards != 1 {
+					if retiredCards, err := storage.CountChannelSourceRetiredCardStorage(context.Background(), fork.ForkRunID, retired.CardID); err != nil || retiredCards != 1 {
 						t.Fatalf("fork stage exit lost exact predecessor card retirement: count=%d err=%v", retiredCards, err)
 					}
 					if child == card || fork.ForkRunID == seed.RunID {
 						t.Fatal("fork reused parent card/run identity")
 					}
-					rt := servedControlProofRuntime{Endpoint: h.rpcEndpoint(), DB: db, Backend: storeBackend, BundleHash: hash}
-					decision := lifecycleDecisionParamsForCard(t, rt.Endpoint, child, "approve")
+					decision := lifecycleDecisionParamsForCard(t, h.rpcEndpoint(), child, "approve")
 					refusal := requireServedJSONRPCError(t, h.rpcEndpoint(), "mailbox.decide", decision)
 					if refusal.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" {
 						t.Fatalf("fork acquired ordinary card mutation authority: %+v", refusal)
@@ -330,8 +324,8 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						t.Fatal("fork delivery reused parent control identity")
 					}
 					readParent := func() [3]string {
-						var state [3]string
-						if err := db.QueryRow(`SELECT status,COALESCE(verdict,''),CAST(updated_at AS TEXT) FROM decision_cards WHERE card_id=$1`, card).Scan(&state[0], &state[1], &state[2]); err != nil {
+						state, err := storage.ReadChannelSourceParentCardClockStorage(context.Background(), card)
+						if err != nil {
 							t.Fatal(err)
 						}
 						return state
@@ -382,7 +376,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					callback, signing, _ = h.provider.Registration()
 					postChannelSourceControl(t, callback, signing, child, childToken, childMessage)
 					var verdict string
-					var events, drafts int
+					var events int
 					replayedDecision, decisionErr := channelAnchorStorageObservation(t, h).ReadChannelAnchorDecisionStorage(context.Background(), child)
 					status, verdict = replayedDecision.Status, replayedDecision.Verdict
 					if err := decisionErr; err != nil || status != "pending" || verdict != "" {
@@ -395,7 +389,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 							t.Fatalf("fork restart emitted a decision: %d %v", events, err)
 						}
 					}
-					if err := db.QueryRow(`SELECT COUNT(*) FROM decision_card_input_drafts WHERE card_id=$1`, child).Scan(&drafts); err != nil || drafts != 0 {
+					if drafts, err := storage.CountChannelSourceCardDraftsStorage(context.Background(), child); err != nil || drafts != 0 {
 						t.Fatalf("upstream fork refusal created a draft: %d %v", drafts, err)
 					}
 					if readParent() != parentBefore {

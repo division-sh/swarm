@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 func TestChannelSettlementHistoryRefusesForeignEvidence(t *testing.T) {
@@ -69,6 +72,19 @@ func TestChannelSettlementLiveSourceRefusesForeignEvidence(t *testing.T) {
 			t.Fatal(err)
 		}
 		raw, err := os.ReadFile(filepath.Join(root, pin.File))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Exercise this older owner's warm-cache hostile control at its exact
+		// stage, after validating the complete later carrier transformation.
+		process, err := selectedreadrole.ReadChannelProcessPins(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := selectedreadrole.ValidateChannelProcessCurrent(root, process); err != nil {
+			t.Fatal(err)
+		}
+		raw, err = exec.Command("git", "-C", root, "show", selectedreadrole.ChannelProcessPredecessor+":"+pin.File).Output()
 		if err != nil {
 			t.Fatal(err)
 		}

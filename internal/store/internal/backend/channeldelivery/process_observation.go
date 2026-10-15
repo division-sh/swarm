@@ -145,3 +145,10 @@ func CountRejectedIntentPlansStorageTx(ctx context.Context, tx *sql.Tx) (int, er
 		ON p.source_id=i.publication_id WHERE i.disposition='entry_rejected'`).Scan(&result)
 	return result, err
 }
+
+func CountTerminalCurrentReceiptsStorageTx(ctx context.Context, tx *sql.Tx, card string) (int, error) {
+	var result int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM channel_delivery_plans p JOIN channel_delivery_receipts r ON r.effect_operation_id=p.current_receipt_operation_id
+		WHERE p.source_id=$1 AND p.state='sent' AND r.state='sent' AND r.render_id=p.current_render_id`, card).Scan(&result)
+	return result, err
+}

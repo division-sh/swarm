@@ -20,6 +20,7 @@ import (
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/imports"
 )
@@ -50,7 +51,7 @@ type projection struct {
 }
 
 func originalOverlay(root string) map[string][]byte {
-	raw, err := exec.Command("git", "-C",root,"archive", predecessor, "--", "internal/serveapp").Output()
+	raw, err := exec.Command("git", "-C", root, "archive", predecessor, "--", "internal/serveapp").Output()
 	must(err)
 	reader := tar.NewReader(bytes.NewReader(raw))
 	files := map[string][]byte{}
@@ -185,6 +186,11 @@ func destination(path string, afterBodies map[string]string, pins map[string]run
 		current := requestkey.Node(fn)
 		if current == pin.After {
 			continue
+		}
+		current, err = selectedreadrole.EarlierChannelProcessSource(".", path, fn.Name.Name, current)
+		must(err)
+		if current == pin.After {
+			continue // The exact later transform already includes this stage.
 		}
 		if current != pin.Before && !exactIntermediate(pin, current) {
 			panic("channel destination changed outside finite transform: " + fn.Name.Name)

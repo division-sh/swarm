@@ -63,6 +63,11 @@ func TestFamily145AgentSnapshotSupportEntriesStayFinite(t *testing.T) {
 }
 
 func earlierAgentSnapshotEventOwnerFile(root string, current []byte) ([]byte, error) {
+	var err error
+	current, err = earlierChannelProcessEventOwnerFile(root, current)
+	if err != nil {
+		return nil, err
+	}
 	if fmt.Sprintf("%x", sha256.Sum256(current)) != agentSnapshotEventOwnerAfter {
 		return nil, fmt.Errorf("agent snapshot event owner is not its complete current endpoint")
 	}
@@ -148,6 +153,10 @@ func TestFamily145AgentSnapshotCompleteHistoryPreservesAllEarlierRows(t *testing
 		actual := family145TransitionBytes
 		if recipes {
 			actual = recipeBytes
+		}
+		actual, err = selectedreadrole.BeforeChannelProcessHistory(root, actual, recipes)
+		if err != nil {
+			t.Fatal(err)
 		}
 		var have, want any
 		if json.Unmarshal(next, &want) != nil || json.Unmarshal(actual, &have) != nil || !reflect.DeepEqual(have, want) {

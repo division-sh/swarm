@@ -207,6 +207,13 @@ var standingIngressOwnerAdditions = []standingIngressOwnerAddition{
 }
 
 func earlierStandingIngressOwnerFile(root, file string, current []byte) ([]byte, error) {
+	if file == agentSnapshotEventOwner {
+		var err error
+		current, err = earlierChannelProcessEventOwnerFile(root, current)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if file == agentSnapshotEventOwner && fmt.Sprintf("%x", sha256.Sum256(current)) == agentSnapshotEventOwnerAfter {
 		var err error
 		current, err = earlierAgentSnapshotEventOwnerFile(root, current)

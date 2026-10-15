@@ -114,7 +114,7 @@ func debtServedSetupLiveSources(root string) ([]debtRunIdentitySourceBody, error
 			current, err = debtChannelSettlementSourcePrevious(root, pin.File, pin.Function, current)
 		}
 		if err != nil || current != pin.After {
-			return nil, fmt.Errorf("served setup actual current source changed: %s", pin.Function)
+			return nil, fmt.Errorf("served setup actual current source changed: %s: %v (actual=%s expected=%s)", pin.Function, err, debtBaselineChecksum([]byte(current)), debtBaselineChecksum([]byte(pin.After)))
 		}
 	}
 	return pins, nil

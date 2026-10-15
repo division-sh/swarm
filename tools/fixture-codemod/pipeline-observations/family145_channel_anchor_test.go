@@ -237,8 +237,9 @@ func TestFamily145ChannelAnchorOwnedInventoryHasNoRawCallerOrAlias(t *testing.T)
 		definitions += d
 		return nil
 	})
-	if err != nil || calls != 54 || definitions != 6 {
-		t.Fatalf("channel anchor complete inventory=%d/%d want54/6 err=%v", calls, definitions, err)
+	// The original 54 calls plus six calls in three exact native controls.
+	if err != nil || calls != 60 || definitions != 6 {
+		t.Fatalf("channel anchor complete inventory=%d/%d want54+6/6 err=%v", calls, definitions, err)
 	}
 }
 
@@ -264,6 +265,13 @@ func channelAnchorOwnedFile(t *testing.T, path string, file *ast.File) (int, int
 			if ok && channelanchor.Helpers[id.Name] != 0 {
 				calls++
 				allowed[id.Pos()] = true
+				native, err := channelProcessNativeControl("../../..", path, fn.Name.Name, requestkey.Node(fn))
+				if err != nil {
+					t.Error(err)
+				}
+				if native {
+					return true
+				}
 				current := family145ChannelDecisionPrevious(t, path, fn.Name.Name, sourceBlobPreviousDeclaration(t, path, fn.Name.Name, requestkey.Node(fn)))
 				if channelanchor.Previous(channelAnchorPins(t), path, fn.Name.Name, current) == current {
 					t.Error("channel anchor caller escaped exact chain:", path, fn.Name.Name)

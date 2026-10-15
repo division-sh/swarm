@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelanchor"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelintent"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 const predecessor = "3dc4108680367fcf0633aae75c8f7cdca2959961"
@@ -119,6 +120,8 @@ func filePins(path string) []pin {
 	must(err)
 	before, after := declarations(path, beforeBytes), declarations(path, afterBytes)
 	for key, current := range after {
+		current, err = selectedreadrole.EarlierChannelProcessSource(".", path, key, current)
+		must(err)
 		after[key], err = channelanchor.ReadPrevious(path, key, current)
 		must(err)
 	}

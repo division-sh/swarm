@@ -17,6 +17,7 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestChannelLearnedObjectInputPublicJourney(t *testing.T) {
@@ -109,7 +110,7 @@ func firstObjectDraftChoice(t *testing.T, p *objectChannelProvider, receipt stri
 	return ""
 }
 
-func startObjectChannelInputJourney(t *testing.T, backend servedparity.Backend, integerInput bool) (*channelOnboardingE2EHarness, *sql.DB, *objectChannelProvider, string, string) {
+func startObjectChannelInputJourney(t *testing.T, backend servedparity.Backend, integerInput bool) (*channelOnboardingE2EHarness, storetest.ChannelProcessObservation, *objectChannelProvider, string, string) {
 	t.Helper()
 	root := canonicalrouting.CopyChannelLearnedObjectJourney(t)
 	if integerInput {
@@ -118,7 +119,7 @@ func startObjectChannelInputJourney(t *testing.T, backend servedparity.Backend, 
 	return startObjectChannelJourney(t, backend, root, telegramPhraseBotLLMRuntime{}, "")
 }
 
-func startObjectChannelJourney(t *testing.T, backend servedparity.Backend, root string, llm runtimellm.Runtime, activityCredential string) (*channelOnboardingE2EHarness, *sql.DB, *objectChannelProvider, string, string) {
+func startObjectChannelJourney(t *testing.T, backend servedparity.Backend, root string, llm runtimellm.Runtime, activityCredential string) (*channelOnboardingE2EHarness, storetest.ChannelProcessObservation, *objectChannelProvider, string, string) {
 	t.Helper()
 	h := newChannelOnboardingE2EHarness(t, backend, true)
 	p := &objectChannelProvider{commands: map[string][]any{}, calls: map[string][]map[string]any{}}
@@ -140,15 +141,7 @@ func startObjectChannelJourney(t *testing.T, backend servedparity.Backend, root 
 	}
 	h.start(t)
 	t.Cleanup(func() { h.stop(t) })
-	driver := "sqlite"
-	if backend == servedparity.BackendExplicitPostgres {
-		driver = "postgres"
-	}
-	db, err := sql.Open(driver, h.storeDSN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	reader := channelProcessStorageObservation(t, h)
 	var begun channelonboarding.Result
 	requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.onboarding_start", map[string]any{
 		"provider": "mock", "verb": "connect", "provider_credential": "object-provider-secret", "save_proof": true, "client_language": "fr",
@@ -191,7 +184,7 @@ func startObjectChannelJourney(t *testing.T, backend servedparity.Backend, root 
 	if len(identity.SourceArtifacts) != 1 {
 		t.Fatalf("unexpected public source identity: %+v", identity)
 	}
-	return h, db, p, command, identity.SourceArtifacts[0].BundleHash
+	return h, reader, p, command, identity.SourceArtifacts[0].BundleHash
 }
 
 func postObjectChannelFact(t *testing.T, p *objectChannelProvider, id string, fact map[string]any) {

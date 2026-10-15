@@ -297,7 +297,7 @@ var files = []string{
 }
 
 func main() {
-	if captureAgentSnapshotCommand(os.Args) {
+	if captureRecentFamilyCommand(os.Args) {
 		return
 	}
 	if len(os.Args) == 2 && os.Args[1] == "-standing-ingress-capture" {

@@ -15,7 +15,7 @@ func TestChannelLearnedObjectHumanTemporalReceiptPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, transition := range []string{"defer_restart", "expire_restart", "stop_supersedes"} {
 			t.Run(string(backend)+"/"+transition, func(t *testing.T) {
-				h, db, p, _, hash := startObjectChannelJourney(t, backend, canonicalrouting.CopyChannelLearnedObjectAnchorJourney(t), channelAnchorLLMRuntime{}, "object-provider-secret")
+				h, reader, p, _, hash := startObjectChannelJourney(t, backend, canonicalrouting.CopyChannelLearnedObjectAnchorJourney(t), channelAnchorLLMRuntime{}, "object-provider-secret")
 				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "object-temporal-seed"})
 				gate := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
 				gateReceipt := waitObjectCardReceipt(t, channelSettlementStorageObservation(t, h), gate)
@@ -61,10 +61,10 @@ func TestChannelLearnedObjectHumanTemporalReceiptPublicJourney(t *testing.T) {
 				case "stop_supersedes":
 					requireServedJSONRPCResult(t, h.rpcEndpoint(), "run.stop", map[string]any{"run_id": seed.RunID, "idempotency_key": "object-temporal-stop"}, &result)
 					fragment = "The flow moved on. No action was taken."
-					waitObjectTerminalReceipt(t, db, p, gate, gateReceipt, fragment)
+					waitObjectTerminalReceipt(t, reader, p, gate, gateReceipt, fragment)
 				}
 				if transition != "defer_restart" {
-					waitObjectTerminalReceipt(t, db, p, card, receipt, fragment)
+					waitObjectTerminalReceipt(t, reader, p, card, receipt, fragment)
 				}
 				var afterSnapshot, afterInput, afterHash string
 				if err := func() error {
@@ -85,7 +85,7 @@ func TestChannelLearnedObjectHumanTemporalReceiptPublicJourney(t *testing.T) {
 				if afterSnapshot != snapshot || afterInput != input || afterHash != frozenHash {
 					t.Fatal("temporal transition/restart changed the frozen historical meaning")
 				}
-				proveObjectRejectedControl(t, db, p, receipt, approve, "temporal-stale")
+				proveObjectRejectedControl(t, p, receipt, approve, "temporal-stale")
 				var decisions int
 				{
 					var err error

@@ -33,6 +33,24 @@ import (
 
 type PublicationResultSourceStorage = eventrecord.PublicationResultSourceStorage
 
+func CountChannelForkSupersessionLineageStorageForTest(ctx context.Context, selected any, run, event string) (int, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return 0, err
+	}
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountChannelForkSupersessionLineageStorageTx(ctx, tx, run, event)
+	})
+}
+
+func ReadChannelForkSupersessionPayloadStorageForTest(ctx context.Context, selected any, run string) ([]byte, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) ([]byte, error) {
+		return eventrecord.ReadChannelForkSupersessionPayloadStorageTx(ctx, tx, run)
+	})
+}
+
 func corruptOperatorSnapshotEventTx(ctx context.Context, tx *sql.Tx, eventID string, postgres bool) error {
 	if postgres {
 		return eventrecordpostgres.CorruptOperatorSnapshotEventPayloadTx(ctx, tx, eventID)

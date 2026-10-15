@@ -35,7 +35,11 @@ func debtChannelSettlementLiveSources(root string) ([]debtRunIdentitySourceBody,
 				return nil, err
 			}
 		}
-		if files[pin.File][pin.Function] != pin.After {
+		current := files[pin.File][pin.Function]
+		if current != pin.After {
+			current, err = debtChannelProcessSourcePrevious(root, pin.File, pin.Function, current)
+		}
+		if err != nil || current != pin.After {
 			return nil, fmt.Errorf("channel settlement actual source changed: %s", pin.Function)
 		}
 	}
@@ -53,6 +57,12 @@ func debtChannelSettlementSourcePrevious(root, file, function, current string) (
 		}
 		if _, err := debtChannelSettlementLiveSources(root); err != nil {
 			return "", err
+		}
+		if current != pin.After {
+			current, err = debtChannelProcessSourcePrevious(root, file, function, current)
+			if err != nil {
+				return "", err
+			}
 		}
 		if pin.After != current {
 			return "", fmt.Errorf("channel settlement supplied historical instead of actual source: %s", function)

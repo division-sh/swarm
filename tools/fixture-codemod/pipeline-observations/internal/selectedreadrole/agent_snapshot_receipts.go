@@ -139,6 +139,10 @@ func ComposeAgentSnapshotHistory(root string, prior []byte, recipes bool) ([]byt
 }
 
 func EarlierAgentSnapshotHistory(root string, current []byte, recipes bool) ([]byte, error) {
+	current, err := BeforeChannelProcessHistory(root, current, recipes)
+	if err != nil {
+		return nil, err
+	}
 	prior, err := PriorAgentSnapshotHistory(root, recipes)
 	if err != nil {
 		return nil, err
@@ -158,6 +162,10 @@ func EarlierAgentSnapshotHistory(root string, current []byte, recipes bool) ([]b
 // that actually contains this exact family's appended rows is inverted here;
 // the older owner still authenticates its own complete expected inventory.
 func BeforeAgentSnapshotHistory(root string, current []byte, recipes bool) ([]byte, error) {
+	current, err := BeforeChannelProcessHistory(root, current, recipes)
+	if err != nil {
+		return nil, err
+	}
 	var rows []struct{ File, Function string }
 	if err := json.Unmarshal(current, &rows); err != nil {
 		return nil, err

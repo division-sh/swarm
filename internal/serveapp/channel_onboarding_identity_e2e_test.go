@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -458,7 +457,7 @@ func newChannelOnboardingE2EHarness(t *testing.T, backend servedparity.Backend, 
 		opts.ConfigPath = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, channelOnboardingHostWorkspaceFields())
 		opts.StoreMode = "sqlite"
 	case servedparity.BackendExplicitPostgres:
-		dsn, _, _ := testutil.StartPostgres(t)
+		dsn := testutil.StartPostgresDSN(t)
 		storeDSN = dsn
 		opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 		opts.StoreMode = "postgres"
@@ -577,43 +576,9 @@ func mustMarshalChannelOnboardingSurface(t *testing.T, value any) string {
 
 func channelOnboardingPersistedOperationSurface(t *testing.T, harness *channelOnboardingE2EHarness, operationID string) string {
 	t.Helper()
-	driver, placeholder := "sqlite", "?"
-	if harness.backend == servedparity.BackendExplicitPostgres {
-		driver, placeholder = "postgres", "$1"
-	}
-	db, err := sql.Open(driver, harness.storeDSN)
-	if err != nil {
-		t.Fatalf("open %s channel onboarding store: %v", harness.backend, err)
-	}
-	defer db.Close()
-	rows, err := db.QueryContext(context.Background(), "SELECT * FROM channel_onboarding_operations WHERE operation_id="+placeholder, operationID)
+	record, err := channelProcessStorageObservation(t, harness).ReadChannelOnboardingOperationPhysicalSurfaceStorage(context.Background(), operationID)
 	if err != nil {
 		t.Fatalf("query %s channel onboarding operation: %v", harness.backend, err)
-	}
-	defer rows.Close()
-	columns, err := rows.Columns()
-	if err != nil {
-		t.Fatalf("read %s channel onboarding columns: %v", harness.backend, err)
-	}
-	if !rows.Next() {
-		t.Fatalf("%s selected store has no channel onboarding operation %s", harness.backend, operationID)
-	}
-	values := make([]any, len(columns))
-	destinations := make([]any, len(columns))
-	for index := range values {
-		destinations[index] = &values[index]
-	}
-	if err := rows.Scan(destinations...); err != nil {
-		t.Fatalf("scan %s channel onboarding operation: %v", harness.backend, err)
-	}
-	record := make(map[string]string, len(columns))
-	for index, column := range columns {
-		switch value := values[index].(type) {
-		case []byte:
-			record[column] = string(value)
-		default:
-			record[column] = fmt.Sprint(value)
-		}
 	}
 	return mustMarshalChannelOnboardingSurface(t, record)
 }
@@ -629,28 +594,11 @@ type channelOnboardingPersistedHandoff struct {
 
 func channelOnboardingPersistedHandoffAtPublication(t *testing.T, harness *channelOnboardingE2EHarness, operationID string) channelOnboardingPersistedHandoff {
 	t.Helper()
-	driver, placeholder := "sqlite", "?"
-	if harness.backend == servedparity.BackendExplicitPostgres {
-		driver, placeholder = "postgres", "$1"
-	}
-	db, err := sql.Open(driver, harness.storeDSN)
+	out, err := channelProcessStorageObservation(t, harness).ReadChannelOnboardingPublicationHandoffStorage(context.Background(), operationID)
 	if err != nil {
-		t.Fatalf("open %s channel onboarding store: %v", harness.backend, err)
-	}
-	defer db.Close()
-	query := `SELECT operation.phase,operation.activation_revision,operation.runtime_instance_id,
-		activation.activation_revision,activation.runtime_instance_id,activation.status
-		FROM channel_onboarding_operations operation
-		JOIN connected_channel_activations activation ON activation.operation_id=operation.operation_id
-		WHERE operation.operation_id=` + placeholder + ` ORDER BY activation.activation_revision DESC LIMIT 1`
-	var out channelOnboardingPersistedHandoff
-	if err := db.QueryRowContext(context.Background(), query, operationID).Scan(
-		&out.OperationPhase, &out.OperationActivationRevision, &out.OperationRuntimeInstanceID,
-		&out.ActivationRevision, &out.ActivationRuntimeInstanceID, &out.ActivationStatus,
-	); err != nil {
 		t.Fatalf("query %s channel onboarding publication handoff: %v", harness.backend, err)
 	}
-	return out
+	return channelOnboardingPersistedHandoff(out)
 }
 
 type channelOnboardingClaimAdmission struct {

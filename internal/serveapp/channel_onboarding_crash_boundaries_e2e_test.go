@@ -1,7 +1,6 @@
 package serveapp
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -83,13 +82,6 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				if backend == servedparity.BackendExplicitPostgres {
 					driver = "postgres"
 				}
-				db, err := sql.Open(driver, harness.storeDSN)
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() {
-					_ = db.Close()
-				})
 				cardMessageID := waitChannelCardMessageID(t, channelAnchorStorageObservation(t, harness), driver, "telegram-ingress")
 				if boundary == channelonboarding.TestAfterCredentialWriteBeforeCheckpoint {
 					native := waitNativeQualification(t, harness, predecessor.Operation.OperationID, channelnative.QualificationQualified, time.Time{})
