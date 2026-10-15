@@ -234,11 +234,10 @@ func runServeConstructionDiscriminator(t *testing.T, backend, mode string, insid
 	}
 	logConstructionDiagnostic(t, f, attempt, "constructor_complete", first, originalWait, reuseWait, closeRan, closeJoined)
 	finalErr := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false)
-	wantNil := !insideWait && !publishBeforeProbe
 	t.Logf("phase=final_original_cache_use error_class=%s nil_result=%t close_ran=%t close_joined=%t one_selection=%t",
 		constructionDiagnosticErrorClass(finalErr), finalErr == nil, closeRan, closeJoined, f.selections.Load() == 1)
-	if (finalErr == nil) != wantNil || f.selections.Load() != 1 {
-		t.Fatal("new controlled outcome requires attribution; no repair authorized")
+	if finalErr == nil || errors.Is(finalErr, channelonboarding.ErrSessionPending) || f.selections.Load() != 1 {
+		t.Fatal("canceled original construction did not retain a settled refusal")
 	}
 	if connection := f.adapter.connection(f.op.OperationID); connection != nil {
 		if err := connection.Close(context.Background()); err != nil {
