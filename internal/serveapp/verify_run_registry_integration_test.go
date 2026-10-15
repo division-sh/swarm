@@ -69,6 +69,13 @@ func TestVerifyRunJobflowRegistryIntegrationBothStores(t *testing.T) {
 			// or intentional corruption. Already captured attempts still join.
 			copies.Stop()
 			registryProofCopyReceipt(t, copies)
+			logs, err := selected.(interface {
+				ListOperatorRuntimeLogs(context.Context, operatorread.OperatorRuntimeLogListOptions) (operatorread.OperatorRuntimeLogListResult, error)
+			}).ListOperatorRuntimeLogs(context.Background(), operatorread.OperatorRuntimeLogListOptions{RunID: runID, Limit: 100})
+			if err != nil {
+				t.Fatalf("observe completed registry diagnostics outside the cost window: %v", err)
+			}
+			t.Logf("Q1_Q2_REGISTRY_EXERCISE runtime_logs_first_100=%d", len(logs.Logs))
 			entities, entityIDs := registryProofBusinessResults(t, endpoint, runID, outputEvents, companies)
 			history := storetest.ObserveEntityMutationHistory(t, context.Background(), selected, runID)
 			for _, row := range history {
