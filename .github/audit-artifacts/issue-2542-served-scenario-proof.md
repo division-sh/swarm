@@ -3,8 +3,8 @@
 Track: FULL. Local checkpoint, not parent closure or merge approval.
 Predecessor: 07e3cce858308112e45070ec35d5c73983c81460.
 Governing approvals: issue comments6192298462 and6192732056. Catch-up method
-approved in6192622179, after actual #2672 merge; no further migration wave
-may start at that cutoff. The authoritative scenario-profile contract remains
+approved in6192622179, with the immediate pinned-master start condition amended
+by6193465504. No further migration wave starts before catch-up. The authoritative scenario-profile contract remains
 platform-spec.yaml's run_scenario_execution_profiles section; no platform
 semantics or schema changed in this wave.
 
@@ -70,6 +70,8 @@ GOTOOLCHAIN=go1.26.8 and GOMAXPROCS=2; focused roots only, no local tier.
 | Missing prerequisites and foreign event/run/template facts | execution-proven through the same corrected path | same native-controls race receipt; actual trigger execution rejects unrelated native delivery and lifecycle facts, zero provisional event/API receipt |
 | Closed/canceled/foreign fault ownership | execution-proven through the same corrected path | scenario-closed-fault-owner-race.log PASS8.822s; canceled removal retains responsibility, exact restoration precedes closed-owner refusal |
 | Delivery witnesses weakened to unrelated existence | reproduced and fixed | scenario-hostile-api-red.log and scenario-hostile-replay-red.log: each deliberate source overlay fails both stores at the exact prerequisite assertion; unmodified native proof green |
+| Wrong-template delivery/lifecycle witness | execution-proven through the same corrected path | scenario-wrong-template-race.log PASS49.189s: all three cuts on both stores refuse the wrong template with the exact prerequisite marker, no residue and no completed API receipt |
+| Fixed-witness consumer escape | execution-proven through the same corrected path | scenario-closed-witness-consumers.log PASS2.834s: canonical source walk and AST enumeration find exactly one use of each expression, only in its designated private fault owner |
 
 No timeout, workload, backend cell or assertion was weakened. The two hostile
 overlays reside outside the checkout; they did not change the candidate tree.
@@ -101,8 +103,13 @@ Existing holds194/155 remain uncredited, so proposed qualification-adjusted
 remaining4236/2455 ->4117/2376. Acceptance is reviewer-b's decision.
 
 Focused structural guards pass, including closed delivery SQL ownership,
-event-admitted persistence and replay/delivery separation. Pinned U1000 and
-signed complexity receipts are recorded in the follow-up checkpoint entry.
+event-admitted persistence and replay/delivery separation. Pinned U1000 v0.8.1
+passed for affected packages (scenario-unused-pinned.log, exit0). The signed
+b8427628ad complexity comparison against07e3cce858 passed with equal reviewed
+policy: no hotspot-count increase; cognitive557/cyclomatic259 at least30,
+maximum302/186 unchanged (scenario-complexity.log). Subsequent edits add only
+test controls and this audit, not authored declarations. The two added test
+files also pass the pinned cognitive check at the existing threshold.
 New proof function complexity was reduced by helper extraction, not a waiver.
 Unfiltered vet reports existing unkeyed-literal warnings in unchanged sourcefork,
 scenario-setup and standing diagnostic tests. Vet with composites disabled

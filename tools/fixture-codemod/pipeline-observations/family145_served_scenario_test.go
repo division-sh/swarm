@@ -5,7 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"go/ast"
 	"go/format"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +16,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
@@ -126,6 +130,48 @@ func TestFamily145ServedScenarioReadOwnerAndFixedWitnessConsumersAreClosed(t *te
 		raw, err := os.ReadFile(filepath.Join(root, cut.path))
 		if err != nil || strings.Count(string(raw), cut.witness) != 1 || strings.Contains(string(raw), "FROM event_deliveries") {
 			t.Fatalf("private trigger rebuilt/lost the canonical delivery witness: %s %v", cut.path, err)
+		}
+	}
+}
+
+func TestFamily145ServedScenarioFixedWitnessesNeverEscapePrivateFaultOwners(t *testing.T) {
+	root := filepath.Clean("../../..")
+	allowed := map[string]string{
+		"ReplayScopePriorDeliveryWitnessSQL":   "internal/store/internal/backend/pipelinepersistence/test_publication_replay_failure.go",
+		"APICompletionPriorDeliveryWitnessSQL": "internal/store/internal/apiidempotency/test_publication_completion_failure.go",
+	}
+	seen := map[string]int{}
+	err := checkoutsource.WalkDir(root, root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
+			return err
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok || allowed[selector.Sel.Name] == "" {
+				return true
+			}
+			seen[selector.Sel.Name]++
+			if filepath.ToSlash(relative) != allowed[selector.Sel.Name] {
+				t.Errorf("fixed private witness escaped its exact owner: %s in %s", selector.Sel.Name, relative)
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name := range allowed {
+		if seen[name] != 1 {
+			t.Fatalf("private witness %s consumers=%d want1", name, seen[name])
 		}
 	}
 }
