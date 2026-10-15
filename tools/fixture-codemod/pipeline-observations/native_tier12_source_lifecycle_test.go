@@ -57,6 +57,43 @@ func TestNativeTier12SourceLifecycleUsesCanonicalReaderAndExactFacts(t *testing.
 			strings.ReplaceAll(row.Before, "assertSourceRunLifecycle(t, h.db,", "assertSourceRunLifecycle(t, h.pg,") != row.After {
 			t.Fatal("Tier12 source/fork setup, PostgreSQL scope, cleanup, execution or source freeze assertions changed")
 		}
+		// Q2 excludes diagnostic history (review 6183283144). Preserve that
+		// historical rewrite; its successor adds only explicit business setup.
+		const anchor = "\tforkAt := sourceEventID\n"
+		const setup = `	// Source advancement needs a business event, not incidental runtime logs.
+	storetest.InsertRevisionedExistingRunRootEventRecord(t, h.ctx, h.pg, uuid.NewString(), sourceRunID, "source.after",
+		eventtest.Producer(events.EventProducerExternal, "cataloge2e"), []byte(` + "`{}`" + `),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, sourceRunID), sourceRunID), time.Now().UTC())
+`
+		if strings.Count(row.After, anchor) != 1 {
+			t.Fatal("historical cut anchor changed")
+		}
+		expected, err := canonicalFunction(strings.Replace(row.After, anchor, anchor+setup, 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		matches := func(candidate string) bool {
+			actual, err := canonicalFunction(candidate)
+			return err == nil && actual == expected
+		}
+		if !matches(row.Successor) || !matches(selectedCausalObservationBody(t, row.File, row.Function)) {
+			t.Fatal("source-advanced successor changed more than explicit post-cut business-event setup")
+		}
+		for _, edit := range [][2]string{
+			{setup, ""},
+			{"InsertRevisionedExistingRunRootEventRecord", "InsertExistingRunRootEventRecord"},
+			{"h.ctx, h.pg, uuid.NewString(), sourceRunID", "h.ctx, h.pg, uuid.NewString(), otherRunID"},
+			{`"source.after"`, `"platform.runtime_log"`},
+			{"!result.Activation.SourceAdvancedAfterFork", "false"},
+			{"sourceBefore, selectedContractSourceRunCounts", "sourceBefore, foreignRunCounts"},
+			{"assertUnsupportedHistoricalReplayFailsClosed(t, negativeFixtureRoot)", ""},
+			{"10 * time.Second", "11 * time.Second"},
+		} {
+			changed := strings.Replace(row.Successor, edit[0], edit[1], 1)
+			if changed == row.Successor || matches(changed) {
+				t.Fatalf("altered source-advanced setup or assertion accepted: %q", edit[0])
+			}
+		}
 	}
 	if matched != 2 {
 		t.Fatalf("source lifecycle recipes=%d, want2", matched)
