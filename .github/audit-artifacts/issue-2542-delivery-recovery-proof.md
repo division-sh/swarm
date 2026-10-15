@@ -186,8 +186,8 @@ Preservation controls and quality:
   TestHistoricalGeneratorsIntersectOwnedCheckoutWithImmutablePredecessorFiles
   (fork-companions, fork-notices, public-a2-endpoints, public-join and
   receiver-public-readback). See predecessor-preservation.jsonl, candidate
-  integrated-history.jsonl/historical-model.jsonl. No affected source file or
-  frozen generator manifest was edited, and the new read-file inverse restores
+  integrated-history.jsonl/historical-model.jsonl. No failing generator consumer
+  source or frozen generator manifest was edited; the new read-file inverse restores
   the exact prior file. This is narrow pre-batch attribution, NOT a waiver or
   claim that the older ledger is landing-ready. Reviewer disposition is open.
 - Final vet passes with -composites=false (the existing five unkeyed literals
@@ -196,7 +196,8 @@ Preservation controls and quality:
   signed-snapshot swarm-complexity evidence accompanies the checkpoint. No
   suppression, guard relaxation, budget or timeout change. git diff --check PASS.
 
-Wall-time split, rounded and non-additive where tests overlap editing: about
+Wall-time split, rounded phase estimates from command timestamps rather than
+instrumented CPU measurements (tests overlap editing): about
 35min owner/caller/codemod/control edits;13min focused native proof and bounded
 comparison work;12min history/guard integration, census, quality and audit.
 The batch started09:30:54Z. Exact end and signed SHA are in the issue checkpoint.
