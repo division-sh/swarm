@@ -42,7 +42,7 @@ func TestConversationConstructionOccurrenceRefusalsBothStores(t *testing.T) {
 			err = runSelectedFixtureMutation(ctx, selected, "capture construction occurrence", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 				ended = attempt
 				var err error
-				retained, err = privatemutationlog.ConversationForkConstructionOccurrenceForTest(txctx, attempt, fixture.Construction.Parent, fixture.Construction.Child)
+				retained, err = privatemutationlog.FixedForkConstructionOccurrenceForTest(txctx, attempt, fixture.Construction.Parent, fixture.Construction.Child, fixture.Construction.CreatingEvent)
 				return err
 			})
 			if err != nil {
@@ -54,7 +54,7 @@ func TestConversationConstructionOccurrenceRefusalsBothStores(t *testing.T) {
 			for _, name := range []string{"absent", "zero", "cross_attempt", "cross_context", "cross_run", "cross_source", "cross_entity", "wrong_time", "wrong_operation", "later_same_entity", "wrong_birth_value"} {
 				t.Run(name, func(t *testing.T) {
 					err := runSelectedFixtureMutation(ctx, selected, "construction occurrence refusal", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-						occurrence, err := privatemutationlog.ConversationForkConstructionOccurrenceForTest(txctx, attempt, fixture.Construction.Parent, fixture.Construction.Child)
+						occurrence, err := privatemutationlog.FixedForkConstructionOccurrenceForTest(txctx, attempt, fixture.Construction.Parent, fixture.Construction.Child, fixture.Construction.CreatingEvent)
 						if err != nil {
 							return err
 						}
@@ -113,7 +113,7 @@ func TestConversationConstructionOccurrenceRefusalsBothStores(t *testing.T) {
 				})
 			}
 			if err := runSelectedFixtureMutation(ctx, selected, "copied construction evidence", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-				occurrence, err := privatemutationlog.ConversationForkConstructionOccurrenceForTest(txctx, attempt, fixture.Construction.Parent, fixture.Construction.Child)
+				occurrence, err := privatemutationlog.FixedForkConstructionOccurrenceForTest(txctx, attempt, fixture.Construction.Parent, fixture.Construction.Child, fixture.Construction.CreatingEvent)
 				if err != nil {
 					return err
 				}

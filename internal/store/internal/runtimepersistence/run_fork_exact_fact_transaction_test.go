@@ -9,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
@@ -95,18 +98,50 @@ func TestRunForkExactFactsTransactionBothStores(t *testing.T) {
 
 func TestRunForkExactFactsFixedEventMaterializationBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, s exactFactStore) {
-		f := newExactFactFixture(t, s)
-		stateMutation, nameMutation := uuid.NewString(), uuid.NewString()
-		exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
-			seedRunForkRevisionMatrixEvent(t, ctx, tx, f.runID, f.eventID, f.at, s.postgres)
-			seedWorkflowHeaderProjectionFixture(t, ctx, tx, f.runID, f.entityID, "flow-a/1", "flow-a", "fork_entity", "ready", "{}", f.at)
-			mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE flow_instances SET name='Snapshot Entity' WHERE run_id=$1 AND entity_id=$2`, f.runID, f.entityID)
-			mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,name,fields,created_at,updated_at) VALUES ($1,$2,'flow-a/1','fork_entity','Snapshot Entity',$3,$4,$4)`, f.runID, f.entityID, `{"name":"Snapshot Entity"}`, f.at)
-			mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_mutations (mutation_id,run_id,entity_id,domain,path,new_value,caused_by_event,writer_type,writer_id,created_at) VALUES ($1,$2,$3,'lifecycle_state','',$4,$5,'platform','exact-fork',$6),($7,$2,$3,'authored_field','name',$8,$5,'platform','exact-fork',$6)`, stateMutation, f.runID, f.entityID, `"ready"`, f.eventID, f.at, nameMutation, `"Snapshot Entity"`)
-			compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID,
-				exactFactRef(t, runforkrevision.FamilyEvents, f.eventID), exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID),
-				exactFactRef(t, runforkrevision.FamilyEntityMutations, stateMutation), exactFactRef(t, runforkrevision.FamilyEntityMutations, nameMutation)), 1, true)
-		})
+		f := newRunForkRevisionMatrixFixture()
+		event := eventtest.ExistingRunRootIngress(f.eventID, "matrix.event", "revision-matrix", "", []byte(`{"matrix":true,"items":["matrix"]}`), 0, f.runID, events.EventEnvelope{Scope: events.EventScopeGlobal}, f.at)
+		native := prepareFixedForkHistoryFixture(t, s.selected.(agentFixtureFlowStore), "exact-facts", f.runID, f.entityID, event)
+		if err := runSelectedFixtureMutation(native.ctx, s.selected, "exact fixed construction and first event", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+			if err := commitSemanticEventFixtureWithRoutesStoryTx(ctx, s.selected.(eventCommitTxStore), attempt, event, nil); err != nil {
+				return err
+			}
+			if _, err := commitFixedForkHistoryFixture(ctx, attempt, native); err != nil {
+				return err
+			}
+			return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+				refs := []runforkrevision.FactRef{exactFactRef(t, runforkrevision.FamilyEvents, f.eventID),
+					exactFactRef(t, runforkrevision.FamilyCommittedReplayScopes, f.eventID),
+					exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.runID), exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID)}
+				rows, err := tx.QueryContext(ctx, `SELECT mutation_id FROM entity_mutations WHERE run_id=$1 ORDER BY mutation_id`, f.runID)
+				if err != nil {
+					return err
+				}
+				births := 0
+				for rows.Next() {
+					var id string
+					if err := rows.Scan(&id); err != nil {
+						rows.Close()
+						return err
+					}
+					refs = append(refs, exactFactRef(t, runforkrevision.FamilyEntityMutations, id))
+					births++
+				}
+				if err := rows.Err(); err != nil {
+					rows.Close()
+					return err
+				}
+				if err := rows.Close(); err != nil {
+					return err
+				}
+				if births < 3 {
+					t.Fatalf("native constructor omitted parent/child/name birth evidence: %d", births)
+				}
+				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, refs...), 1, true)
+				return nil
+			})
+		}); err != nil {
+			t.Fatal(err)
+		}
 		laterEvent, laterMutation := uuid.NewString(), uuid.NewString()
 		exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 			seedRunForkRevisionMatrixEvent(t, ctx, tx, f.runID, laterEvent, f.at.Add(time.Second), s.postgres)
@@ -116,7 +151,7 @@ func TestRunForkExactFactsFixedEventMaterializationBothStores(t *testing.T) {
 			compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID,
 				exactFactRef(t, runforkrevision.FamilyEvents, laterEvent), exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID), exactFactRef(t, runforkrevision.FamilyEntityMutations, laterMutation)), 2, true)
 		})
-		ctx := testAuthorActivityContext()
+		ctx := native.ctx
 		for _, point := range []struct {
 			event, name string
 			revision    int64
@@ -124,6 +159,10 @@ func TestRunForkExactFactsFixedEventMaterializationBothStores(t *testing.T) {
 			plan, err := s.selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: f.runID, At: point.event})
 			if err != nil || plan.ForkPoint.Revision != point.revision {
 				t.Fatalf("fixed event plan=%#v err=%v", plan.ForkPoint, err)
+			}
+			business := fixedForkBusinessEntity(t, plan, native)
+			if business.Fields["name"] != point.name {
+				t.Fatalf("fixed cut lost exact business name: %+v", business)
 			}
 			ids, ok := plan.HistoricalEventIDs(point.revision)
 			if !ok || len(ids) != int(point.revision) {
@@ -138,7 +177,7 @@ func TestRunForkExactFactsFixedEventMaterializationBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatalf("materialize exact fixed event: %v", err)
 			}
-			if child.ForkPoint.Revision != point.revision || child.MaterializedEntityCount != 1 {
+			if child.ForkPoint.Revision != point.revision || child.MaterializedEntityCount != 2 {
 				t.Fatalf("materialized cut=%#v", child)
 			}
 			var name, state, sourceRun, sourceEvent string
