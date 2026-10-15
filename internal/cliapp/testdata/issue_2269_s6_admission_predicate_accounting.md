@@ -160,3 +160,47 @@ genuinely read-only inspections and native proofs do not. Generation of the
 census itself provides no execution credit. Native installed seed bytes remain
 unobserved; this packet proves revocation and explicit complete reconstruction,
 not a live provider/capacity decision or integrated S6 recovery.
+
+## Private Native Claim Entry (A19/A28, P18/P24)
+
+Gate #2269/6198278319 and reviewer-b reservation #2542/6198482428
+replace only the pooled PostgreSQL writer's original observer start call with
+its context-aware start. The existing read-only exclusion stays outside this
+call. No verification caller sends the private claim intent. The measured
+`postgres.(*Backend).runTransactionOutcome` body therefore changes without
+changing A19 schema/read observations or A28 observation-versus-authority.
+All native SQL, COMMIT evidence, rollback/discard/close, and End-after-cleanup
+remain in that original owner. Retained PostgreSQL and SQLite scoped owners
+are unchanged; no custody/collector fingerprint or baseline is refreshed.
+
+The only new caller chain is the proof-only process operation
+`startupownership.ClaimAgentRecoveryDelivery` -> its original fixed session
+role -> the concrete delivery owner bound once during composition ->
+`delivery.claimDeliveryWithLease` -> the original mutation runner. A typed
+private synchronous intent binds exact event/run/route/authority and original
+observer. At the same native entry the observer validates private seed pointer,
+epoch, full process/source and live writer-free ownership, then revokes once
+under observer -> process locks. All locks are released before pool/SQL.
+The pre-SQL intent does NOT assert Pending/v0; the existing claim transaction
+still owns status/eligibility/profile and the actual result. There is no
+Manager/Pipeline, boot, slot/capacity or provider caller.
+
+The eight runtime registry findings are `typed-process-local`: seven private
+context reads/writes and the fixed-session claim role carry only this closed
+operation, not SQL/callback/count authority. The one native-store interface is
+`private-domain-adapter`: it delegates unchanged typed claim arguments to the
+original concrete delivery owner, never interprets eligibility or outcomes.
+Both assemblies bind exactly once before process acquisition. Their API adds
+neither a general transaction runner nor a capability-wide arbitrary operation.
+
+Execution witnesses for the changed writer body are the native-entry
+intervening-write, physical-outcome, held-original-writer, possession-lifetime
+and disposition roots in runtimepersistence. These use the original native
+writer/complete image and preserve full-table/profile/no-provider assertions.
+Existing PostgreSQL inspection/cancellation and verify controls re-establish
+P18/P24 on the unchanged read-only branch; the predicate's hostile controls
+remain binding. The existing real retained/scoped cleanup-error tests remain
+in their owners. The checked fixed-session ACK+cleanup-error test is explicitly
+UNIT-only per #2269/6198835158, not a physical checked-route cleanup receipt.
+Counterexample/working/final exact-head receipts are recorded separately in
+the checkpoint audit; generation alone supplies no execution or tier credit.

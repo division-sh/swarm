@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
@@ -152,6 +153,10 @@ func (s *DeliveryPostgresOwner) claimDeliveryWithLease(ctx context.Context, auth
 	if _, err := route.Identity(); err != nil {
 		return runtimedelivery.ClaimResult{}, err
 	}
+	ctx, err := runtimeownership.BindAgentRecoveryClaimIfPresent(ctx, s.backend.AgentRecoveryWriteObserver(), authority, event, route)
+	if err != nil {
+		return runtimedelivery.ClaimResult{}, err
+	}
 	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimedelivery.ClaimResult, error) {
 		var claimed runtimedelivery.ClaimResult
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -188,6 +193,10 @@ func (s *DeliverySQLiteOwner) claimDeliveryWithLease(ctx context.Context, author
 		return runtimedelivery.ClaimResult{}, err
 	}
 	if _, err := route.Identity(); err != nil {
+		return runtimedelivery.ClaimResult{}, err
+	}
+	ctx, err := runtimeownership.BindAgentRecoveryClaimIfPresent(ctx, s.backend.AgentRecoveryWriteObserver(), authority, event, route)
+	if err != nil {
 		return runtimedelivery.ClaimResult{}, err
 	}
 	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite claim delivery", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimedelivery.ClaimResult, error) {

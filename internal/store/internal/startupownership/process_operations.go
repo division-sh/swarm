@@ -16,6 +16,7 @@ type processOperations struct {
 
 	recoveryReader  startuprecovery.AgentRecoveryReader
 	recoverySession agentRecoverySeedFaultSession
+	recoveryClaims  agentRecoveryClaimOwner
 }
 
 func (p *processOperations) bindProcess(capability runtimeownership.ProcessCapability, session agentRecoverySeedFaultSession) {

@@ -74,6 +74,10 @@ func (o *AgentRecoveryWriteObserver) readSeedCheck(ctx context.Context, p *proce
 	defer o.mu.Unlock()
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return o.readSeedCheckLocked(ctx, p, authority)
+}
+
+func (o *AgentRecoveryWriteObserver) readSeedCheckLocked(ctx context.Context, p *processCapability, authority Authority) (agentRecoverySeedCheck, error) {
 	if err := ctx.Err(); err != nil {
 		return agentRecoverySeedCheck{}, err
 	}
