@@ -27,6 +27,16 @@ const rootForkPostCutBusinessSetup = `			if gate {
 			}
 `
 
+var q10ExplicitTargetOriginRead = publicationSuccessorEdit{
+	before: "\t\t\tvar childState, siblingState string\n" +
+		"\t\t\tif err := rt.DB.QueryRow(`SELECT current_state FROM entity_state WHERE run_id=$1 AND flow_instance='child'`, seed.RunID).Scan(&childState); err != nil {\n\t\t\t\tt.Fatal(err)\n\t\t\t}\n" +
+		"\t\t\tif err := rt.DB.QueryRow(`SELECT current_state FROM entity_state WHERE run_id=$1 AND flow_instance='sibling'`, seed.RunID).Scan(&siblingState); err != nil {\n\t\t\t\tt.Fatal(err)\n\t\t\t}\n" +
+		"\t\t\tif childState != \"done\" || siblingState != \"ready\" {\n\t\t\t\tt.Fatalf(\"unselected sibling executed: child=%s sibling=%s\", childState, siblingState)\n\t\t\t}",
+	after: "\t\t\t_, child := requireReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, \"child\", \"child\", childEntity)\n" +
+		"\t\t\t_, sibling := requireReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, \"sibling\", \"sibling\", siblingEntity)\n" +
+		"\t\t\tif child.CurrentState != \"done\" || sibling.CurrentState != \"ready\" {\n\t\t\t\tt.Fatalf(\"unselected sibling executed: child=%s sibling=%s\", child.CurrentState, sibling.CurrentState)\n\t\t\t}",
+}
+
 var exactOriginSuccessors = []struct {
 	name, predecessor string
 	priorSuccessor    bool
@@ -147,8 +157,15 @@ func TestExactOriginPublicationSuccessorsPreserveReviewedCuts(t *testing.T) {
 				t.Fatal("originating-publication row changed historical migration identity")
 			}
 			actual := selectedCausalObservationBody(t, selected.File, selected.Function)
+			current := selected.Successor
+			if target.name == "TestExplicitTargetRestrictsConnectedSiblingsBothStores" {
+				if selected.File != "internal/serveapp/selected_fork_pending_input_test.go" || strings.Count(current, q10ExplicitTargetOriginRead.before) != 1 {
+					t.Fatal("missing exact historical child/sibling stage read")
+				}
+				current = strings.Replace(current, q10ExplicitTargetOriginRead.before, q10ExplicitTargetOriginRead.after, 1)
+			}
 			got, err := canonicalFunction(actual)
-			want, wantErr := canonicalFunction(selected.Successor)
+			want, wantErr := canonicalFunction(current)
 			if err != nil || wantErr != nil || got != want {
 				t.Fatal("current source differs from reviewed successor")
 			}
@@ -247,8 +264,30 @@ func TestExactOriginPublicationSuccessorsPreserveReviewedCuts(t *testing.T) {
 			if !target.priorSuccessor && (err != nil || predecessor != canonical) {
 				t.Fatal("historical After changed")
 			}
-			if files, changes, err := prepareFiles("../../..", []recipe{*selected}); err != nil || len(files) != 0 || len(changes) != 0 {
+			currentGuard := *selected
+			currentGuard.Before, currentGuard.After, currentGuard.Successor = current, current, ""
+			if files, changes, err := prepareFiles("../../..", []recipe{currentGuard}); err != nil || len(files) != 0 || len(changes) != 0 {
 				t.Fatalf("current publication successor is not inert: %v", err)
+			}
+			if target.name == "TestExplicitTargetRestrictsConnectedSiblingsBothStores" {
+				for name, mutant := range map[string]string{
+					"historical_data_reader": selected.Successor,
+					"foreign_reader":         strings.Replace(current, "requireReceiverTargetState(t, rt.ReceiverStateReader,", "requireReceiverTargetState(t, foreignReader,", 1),
+					"foreign_run":            strings.Replace(current, "rt.ReceiverStateReader, seed.RunID,", "rt.ReceiverStateReader, foreignRun,", 1),
+					"foreign_child":          strings.Replace(current, `"child", "child", childEntity`, `"child", "child", siblingEntity`, 1),
+					"foreign_sibling":        strings.Replace(current, `"sibling", "sibling", siblingEntity`, `"sibling", "sibling", childEntity`, 1),
+					"lost_child_stage":       strings.Replace(current, `child.CurrentState != "done"`, `child.CurrentState != "ready"`, 1),
+					"lost_sibling_stage":     strings.Replace(current, `sibling.CurrentState != "ready"`, `sibling.CurrentState != "done"`, 1),
+				} {
+					t.Run("current/"+name, func(t *testing.T) {
+						if mutant == current {
+							t.Fatal("current target-reader hostile control did not change source")
+						}
+						if _, changed, err := rewriteFunction(selected.File, []byte("package proof\n"+mutant), currentGuard); err == nil || changed {
+							t.Fatal("foreign owner/identity or changed target-stage assertion admitted")
+						}
+					})
+				}
 			}
 		})
 	}
