@@ -191,10 +191,8 @@ func TestStartLocalRunServeConsumesPositionalSourceOwner(t *testing.T) {
 	if err := os.Mkdir(configContracts, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	configPlatform := filepath.Join(t.TempDir(), "config-platform.yaml")
 	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
-		"platform_spec_path": configPlatform,
-		"api_token_file":     writeCLIAPITokenFile(t, "test-token"),
+		"api_token_file": writeCLIAPITokenFile(t, "test-token"),
 	}))
 	server, _, _ := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
@@ -223,8 +221,12 @@ func TestStartLocalRunServeConsumesPositionalSourceOwner(t *testing.T) {
 	if want := mustInvocationRootForTest(configContracts).Path(); serveOpts.SourceRoot != want {
 		t.Fatalf("contracts path = %q, want %q", serveOpts.SourceRoot, want)
 	}
-	if serveOpts.PlatformSpecPath != configPlatform {
-		t.Fatalf("platform spec path = %q, want %q", serveOpts.PlatformSpecPath, configPlatform)
+	embedded, err := EmbeddedPlatformSpecPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if serveOpts.PlatformSpecPath != embedded {
+		t.Fatalf("platform spec path = %q, want embedded %q", serveOpts.PlatformSpecPath, embedded)
 	}
 	if serveOpts.APIListenAddr != "127.0.0.1:19001" {
 		t.Fatalf("api listen addr = %q, want API listener owner from --api-port", serveOpts.APIListenAddr)
@@ -250,10 +252,8 @@ func TestRunStartLocalServeUsesMCPListenerOwner(t *testing.T) {
 	if err := os.Mkdir(configContracts, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	configPlatform := filepath.Join(t.TempDir(), "config-platform.yaml")
 	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
-		"platform_spec_path": configPlatform,
-		"api_token_file":     writeCLIAPITokenFile(t, "test-token"),
+		"api_token_file": writeCLIAPITokenFile(t, "test-token"),
 	}))
 	server, _, _ := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {

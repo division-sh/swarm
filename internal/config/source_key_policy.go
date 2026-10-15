@@ -1,5 +1,7 @@
 package config
 
+const PlatformSpecPathConfigRemediation = "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
+
 // SourceKeyRule describes the existing swarm.yaml source policy.
 type SourceKeyRule struct {
 	Container       bool
@@ -93,7 +95,6 @@ func SourceKeyRules() map[string]SourceKeyRule {
 		"budget.human_tasks.categories_enabled":   {},
 		"paths":                                   section,
 		"paths.swarm_dir":                         {},
-		"paths.platform_spec_path":                {},
 		"paths.monitor_dir":                       {},
 	}
 }

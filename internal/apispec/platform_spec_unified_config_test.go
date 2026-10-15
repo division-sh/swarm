@@ -56,7 +56,7 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 	for _, phrase := range []string{"selected file", "source coordinates", "cannot delegate env", "secret-reference-only"} {
 		assertContainsScalar(t, mustMappingValue(t, document, "diagnostics"), phrase)
 	}
-	for _, phrase := range []string{"selected document's directory", "not a universal", "platform-spec path", "authored source root"} {
+	for _, phrase := range []string{"selected document's directory", "not a universal", "embedded platform spec is not a configurable path", "authored source root"} {
 		assertContainsScalar(t, mustMappingValue(t, document, "path_bases"), phrase)
 	}
 	doctor := mustMappingValue(t, authority, "doctor_selected_source")
@@ -93,14 +93,21 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 			t.Fatalf("section %s retains a source trust classification", sections.Content[i-1].Value)
 		}
 	}
-	paths := mustMappingValue(t, mustMappingValue(t, sections, "paths"), "keys")
-	for _, key := range []string{"agent_config_map_file", "verification_gates_file", "tooling_lock_file"} {
+	pathSection := mustMappingValue(t, sections, "paths")
+	paths := mustMappingValue(t, pathSection, "keys")
+	for _, key := range []string{"agent_config_map_file", "verification_gates_file", "tooling_lock_file", "platform_spec_path"} {
 		if got := scalarValue(mustMappingValue(t, paths, key)); got != "retired_rejected" {
 			t.Fatalf("paths.%s = %q, want retired_rejected", key, got)
 		}
 	}
-	if got := scalarValue(mustMappingValue(t, paths, "platform_spec_path")); got != "existing_platform_spec_path_owner" {
-		t.Fatalf("platform spec path authority changed: %q", got)
+	const teaching = "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
+	if got := scalarValue(mustMappingValue(t, pathSection, "platform_spec_path_remediation")); got != teaching {
+		t.Fatalf("platform spec path teaching = %q, want %q", got, teaching)
+	}
+	for _, key := range []string{"swarm_dir", "monitor_dir"} {
+		if got := scalarValue(mustMappingValue(t, paths, key)); got != "supported_path" {
+			t.Fatalf("deployment path %s changed: %q", key, got)
+		}
 	}
 
 	llm := mustMappingValue(t, sections, "llm")
@@ -261,7 +268,18 @@ func TestPlatformSpecUnifiedConfigSupersedesOldConfigCommitments(t *testing.T) {
 
 	pathConfig := mustMappingValue(t, foundations, "source_platform_spec_path_resolution")
 	assertContainsScalar(t, mustMappingValue(t, pathConfig, "scope"), "authored source root is owned by filesystem_source_model.local_root_selection")
-	assertContainsScalar(t, mustYAMLPath(t, pathConfig, "platform_spec_path", "rule"), "No environment or CLI flag source")
+	assertContainsScalar(t, mustYAMLPath(t, pathConfig, "platform_spec_path", "rule"), "No environment or public swarm CLI flag source")
+	accepted := mustYAMLPath(t, pathConfig, "platform_spec_path", "accepted_sources")
+	if hasMappingKey(accepted, "config_key") || scalarValue(mustMappingValue(t, accepted, "built_in_default")) != "embedded platform-spec.yaml" {
+		t.Fatal("platform spec default/source contract restored a config override")
+	}
+	const teaching = "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
+	if got := scalarValue(mustYAMLPath(t, pathConfig, "platform_spec_path", "remediation")); got != teaching {
+		t.Fatalf("path-resolution teaching = %q, want %q", got, teaching)
+	}
+	if got := scalarValue(mustYAMLPath(t, cliConfig, "rejected_keys", "paths.platform_spec_path")); got != teaching {
+		t.Fatalf("shared config teaching = %q, want %q", got, teaching)
+	}
 
 	sourceRoot := mustYAMLPath(t, root, "filesystem_source_model", "local_root_selection")
 	assertContainsScalar(t, mustMappingValue(t, sourceRoot, "rule"), "Omission and `.` select exactly the captured invocation directory")

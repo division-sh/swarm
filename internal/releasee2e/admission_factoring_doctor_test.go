@@ -130,7 +130,8 @@ func TestAdmissionFactoringDoctorReadback(t *testing.T) {
 	t.Run("failure-gates", func(t *testing.T) {
 		for _, tc := range []struct{ name, suffix, code string }{
 			{"invalid-pack", "platform:\n  packs:\n    platform_dirs: [missing-pack-directory]\n", "platform_pack_load_failed"},
-			{"invalid-admission", "paths:\n  platform_spec_path: invalid-spec.yaml\n", "platform_pack_load_failed"},
+			// #1801/6196686932: the override refuses at source admission, before spec readback.
+			{"invalid-admission", "paths:\n  platform_spec_path: invalid-spec.yaml\n", "config_load_failed"},
 			{"invalid-workspace", "workspace:\n  backend: invalid\n", "workspace_backend_invalid"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
@@ -146,13 +147,26 @@ func TestAdmissionFactoringDoctorReadback(t *testing.T) {
 					t.Fatalf("invalid doctor admission: %v %v\n%s", result.err, err, result.output)
 				}
 				found := 0
+				var refusal string
 				for _, finding := range report.Findings {
 					if finding.Code == tc.code && finding.Status == "failed" && finding.Severity == "blocker" {
 						found++
+						refusal = finding.Message
 					}
 				}
 				if found != 1 {
 					t.Fatalf("typed blocker %s count=%d\n%s", tc.code, found, result.output)
+				}
+				if tc.name == "invalid-admission" {
+					const teaching = "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
+					for _, want := range []string{config, `unknown config key "paths.platform_spec_path"`, teaching} {
+						if !strings.Contains(refusal, want) {
+							t.Fatalf("config retirement lost located teaching %q\n%s", want, result.output)
+						}
+					}
+					if len(report.CapabilitySubjects) != 0 || len(report.PackInventory.Packs) != 0 {
+						t.Fatalf("retired spec override reached installed readback\n%s", result.output)
+					}
 				}
 			})
 		}

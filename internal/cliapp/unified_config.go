@@ -375,9 +375,8 @@ func decodeUnifiedCLIConfig(node *yaml.Node) (cliCommandConfig, error) {
 			APITokenFile:  decoded.Serve.APITokenFile,
 		},
 		Paths: cliPathsConfig{
-			SwarmDir:         decoded.Paths.SwarmDir,
-			SwarmDirSet:      yamlPathExists(node, "paths", "swarm_dir"),
-			PlatformSpecPath: decoded.Paths.PlatformSpecPath,
+			SwarmDir:    decoded.Paths.SwarmDir,
+			SwarmDirSet: yamlPathExists(node, "paths", "swarm_dir"),
 		},
 	}, nil
 }
@@ -556,6 +555,9 @@ func unknownUnifiedConfigDiagnostic(path, file string, location yamlsource.Locat
 		allowed["pack"], allowed["destination"] = struct{}{}, struct{}{}
 	}
 	diagnostic := runtimecontracts.NewUndefinedFieldDiagnostic("config", key, allowed)
+	if path == "paths.platform_spec_path" {
+		diagnostic.Remediation = config.PlatformSpecPathConfigRemediation
+	}
 	diagnostic.Problem = fmt.Sprintf("unknown config key %q", path)
 	diagnostic.Location = runtimecontracts.LoaderDiagnosticLocation{File: file, YAMLPath: path, Line: location.Line, Column: location.Column}
 	return unifiedConfigDiagnostic{
