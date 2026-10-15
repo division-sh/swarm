@@ -205,8 +205,11 @@ func admitServeSessionProcessFixture(t *testing.T, selected startupownership.Sto
 
 // Only the SDK's external TLS/Noise peer is supplied. The actual production
 // adapter constructs and owns its SDK, selected reservation and runtime work.
-func serveBootstrapWireFixture(t *testing.T, mode string, owner *worklifetime.RuntimeOccurrence) <-chan struct{} {
+func serveBootstrapWireFixture(t *testing.T, mode string, owner *worklifetime.RuntimeOccurrence, authCuts ...*serveBootstrapAuthCut) <-chan struct{} {
 	t.Helper()
+	if len(authCuts) > 1 || len(authCuts) == 1 && authCuts[0] == nil {
+		t.Fatal("SDK peer requires at most one explicit authentication cut")
+	}
 	noise := whatsappfixture.NewNoiseServer(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	entered := make(chan struct{})
@@ -260,6 +263,16 @@ func serveBootstrapWireFixture(t *testing.T, mode string, owner *worklifetime.Ru
 			return
 		}
 		signalEntered()
+		var authCut *serveBootstrapAuthCut
+		if len(authCuts) == 1 && wire.ClientPayload().Username != nil {
+			authCut = authCuts[0]
+			authCut.heldOnce.Do(func() { close(authCut.held) })
+			select {
+			case <-authCut.release:
+			case <-ctx.Done():
+				return
+			}
+		}
 		if mode == "paired" {
 			if err := wire.Send(ctx, waBinary.Node{Tag: "success", Attrs: waBinary.Attrs{
 				"lid": types.NewJID("100000000001", types.HiddenUserServer), "t": time.Now().Unix(),
@@ -277,6 +290,12 @@ func serveBootstrapWireFixture(t *testing.T, mode string, owner *worklifetime.Ru
 				return
 			}
 			if node.Tag == "iq" {
+				// This exact socket's post-authentication IQ is emitted only
+				// after the pinned SDK sets IsLoggedIn, not after Noise alone.
+				if authCut != nil && node.AttrGetter().OptionalString("xmlns") == "encrypt" &&
+					node.AttrGetter().OptionalString("type") == "get" && node.GetChildByTag("count").Tag == "count" {
+					authCut.authOnce.Do(func() { close(authCut.authenticated) })
+				}
 				_ = wire.Send(ctx, waBinary.Node{Tag: "iq", Attrs: waBinary.Attrs{"id": node.Attrs["id"], "type": "result"}})
 			}
 		}
