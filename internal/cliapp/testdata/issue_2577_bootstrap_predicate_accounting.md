@@ -322,3 +322,28 @@ operation stays unchanged and does not inherit pending cleanup possession. A
 cross-connection destruction target is refused with no second responsibility.
 This is selected-store isolation proof, not an assertion that metadata alone
 grants native execution or that competing physical registrations are supported.
+
+## P01 Authorized Terminal Pairing Observation
+
+The bounded gate is #2577 comment 6198923816. This changes only the
+`ReadSessionPairing` consumer within A10/A27; all P08/P10/P21 and existing
+2577-native proof obligations remain. The four original public RED leaves
+identify execution-health `currentConnection` as the first refusal after a
+genuine unpaired QR transport ends. No business health is inferred from a
+retained pointer.
+
+| Owner / caller | Preserved or repaired predicate | Execution proof |
+| --- | --- | --- |
+| `serveSessionBootstrap.ReadSessionPairing`, called by onboarding result/list readback | Select the completed original attempt; construction/connect errors remain refusals; its private owner authorizes the selected principal, operation and coordinate | `TestReadinessPublicUnpairedQRWaitDiagnosticBothStores`, both stores, live exhaustion plus independent remote close |
+| `RuntimeConnection.PairingReadback` / `pairingQR.readAuthorized` | Same current-operation, source/runtime, principal and coordinate gates; only zero-code observed terminal state projects | `TestWhatsAppPairingTerminalReadbackIsObservedAndScoped` plus existing authorization/cancellation controls |
+| SDK disconnect handler / pairing QR owner | Actual disconnect records failed, or retains previously observed QR exhaustion as qr_expired; a dead socket or generic cancellation cannot invent expiry; malformed evidence remains an error; original strict failure cause is retained | The four served leaves plus terminal readback source-cancellation, retirement, malformed-batch and selected-store negatives |
+| `currentConnection`, `CheckBootstrap`, account admission and channel execution | Execution health stays strict; observation installs no account, standing activation or readiness | Every served terminal leaf refuses current/execution/account authority; `TestServeSessionBootstrapAttemptOutcomesBothStores` and `TestServeSessionPendingConstructionFailureRemainsARefusalBothStores` retain genuine transport/construction/retirement refusals |
+
+`2577-native-terminal-pairing` names this execution proof, not an exception to
+the census. At signed 6b2bf8e0a7, the focused packet passed all 369 test/subtest
+records under race x3, including every both-store public leaf three times. The
+original diagnostic aggregate stays RED classification evidence. The initial
+preflight then correctly caught this changed consumer fingerprint; regenerate
+only after the owner/caller and proof mapping above. This is not a claim of
+final qualification or physical interoperability; exact-head preflight, the
+agent-feasible live QR wait and normal hosted qualification remain separate.
