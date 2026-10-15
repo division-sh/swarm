@@ -82,12 +82,14 @@ func TestReceiverPublicationOrderingContrastBothStores(t *testing.T) {
 			if len(command.Activations) != 0 || len(command.Commit.DeliveryRoutes) != 2 || !reflect.DeepEqual(before, snapshot()) {
 				t.Fatal("mixed target preparation changed construction or durable state")
 			}
-			var actor events.DeliveryRoute
+			var actor, node events.DeliveryRoute
 			for _, route := range command.Commit.DeliveryRoutes {
 				if route.Recipient.IsAgent() {
 					actor = route
 				} else if !route.Recipient.IsNode() || !route.Target.ExistingEntity() || route.Target.Route() != targets["review"] || route.ConnectClaim.Empty() {
 					t.Fatalf("unexpected mixed node target: %#v", route)
+				} else {
+					node = route
 				}
 			}
 			actorTarget := targets["review"]
@@ -239,7 +241,12 @@ func TestReceiverPublicationOrderingContrastBothStores(t *testing.T) {
 			if !reflect.DeepEqual(exact, snapshot()) {
 				t.Fatal("readback/replay/changed-selector refusal changed durable evidence")
 			}
-			claimed, err := store.ClaimDelivery(f.ctx, original.Authority, stored.Event.Event(), actor)
+			t.Run("original_ordered_slice_oracle", func(t *testing.T) {
+				if !reflect.DeepEqual(stored.DeliveryRoutes, command.Commit.DeliveryRoutes) {
+					t.Errorf("readback changed selected delivery routes/dependency/claim: expected=%#v actual=%#v", command.Commit.DeliveryRoutes, stored.DeliveryRoutes)
+				}
+			})
+			claimed, err := store.ClaimDelivery(f.ctx, original.Authority, stored.Event.Event(), node)
 			if err != nil || claimed.Disposition != deliverylifecycle.ClaimAcquired {
 				t.Fatalf("real claim precondition: %+v err=%v", claimed, err)
 			}
@@ -248,11 +255,6 @@ func TestReceiverPublicationOrderingContrastBothStores(t *testing.T) {
 				t.Fatalf("already-claimed membership accepted or mutated state: %v", err)
 			}
 			t.Log("full native membership/envelope/claim/replay/conservation and fixture refusal controls PASS; timestamp tie explicitly injected")
-			t.Run("original_ordered_slice_oracle", func(t *testing.T) {
-				if !reflect.DeepEqual(stored.DeliveryRoutes, command.Commit.DeliveryRoutes) {
-					t.Errorf("readback changed selected delivery routes/dependency/claim: expected=%#v actual=%#v", command.Commit.DeliveryRoutes, stored.DeliveryRoutes)
-				}
-			})
 		})
 	}
 }
