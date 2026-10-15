@@ -16,7 +16,7 @@ import (
 
 func TestResourceReceiptFaultReconcilesCommitUncertaintyBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, kind := range []string{"receipt", "payload", "provenance", "clock", "added-provenance"} {
+		for _, kind := range []string{"receipt", "payload", "provenance", "clock", "added-provenance", "head-history"} {
 			for _, cut := range []string{"install_committed", "install_rolled_back", "restore_committed", "restore_rolled_back"} {
 				t.Run(backend+"/"+kind+"/"+cut, func(t *testing.T) {
 					proveResourceReceiptCommitCut(t, backend, kind, cut)
@@ -233,6 +233,18 @@ func captureResourceFaultControl(t *testing.T, ctx context.Context, selected any
 		fault, err = CaptureSourceClockRewriteForTest(ctx, selected, source, time.Unix(42, 0).UTC())
 	case "added-provenance":
 		fault, err = CaptureProvenanceReadArmForTest(ctx, selected, version, "normal_run", uuid.NewString(), time.Unix(42, 0).UTC())
+	case "head-history":
+		catalog := durableDataFixtureCatalog(t)
+		id := uuid.NewString()
+		result, checkErr := selected.(durableDataFixtureStore).ExecuteDataSourceOperation(ctx, runtimedata.SourceCommand{
+			Operation: "check", SourceInvocationID: id, Actor: "fixture", BundleHash: catalog.BundleHash,
+			Declaration: catalog.Declarations[0].Ref, ExpectedHead: runtimedata.VersionHead(runtimedata.VersionID(version)),
+			InputFormat: "jsonl", Input: []byte("{\"label\":\"exact\"}\n"),
+		})
+		if checkErr != nil || result.Outcome != "accepted" {
+			t.Fatalf("native non-mutating head receipt: %#v %v", result, checkErr)
+		}
+		fault, err = CaptureNonMutatingHeadHistoryForTest(ctx, selected, id)
 	default:
 		t.Fatalf("unknown resource fault control %q", kind)
 	}
