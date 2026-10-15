@@ -747,7 +747,7 @@
     "owner": "internal/channelonboarding/session_activity.go::ResolveSessionActivitySite",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "fbc8f33a3bb18d00b6bff7cd92c4850026dcd688e9d8c0de363014af5d97767a"
+    "body_sha256": "5d92d2824125777f26aee76ba75b8fd9b8f2a16f06d6a8d5914b65ceba25204a"
   },
   {
     "owner": "internal/channelonboarding/session_activity.go::compileSessionActivityDeclaration",
@@ -765,7 +765,7 @@
     "owner": "internal/channelonboarding/session_activity.go::sessionActivitySiteDeclared",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "ca3e3818d703c397446774a45be0b48cd99d77c8d3df2b9baa03280c9f59c0a8"
+    "body_sha256": "eeeecf2c350c1d154913ddc4e18dcbd07338d19f770900d67420dd6681d9df6d"
   },
   {
     "owner": "internal/channelonboarding/session_progress.go::*Service.prepareSessionPairing",
@@ -1521,13 +1521,19 @@
     "owner": "internal/runtime/activity_validation.go::activityRevisionConsumerExists",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "69e32ee7e714ea66725dae6db649564fa7f86c8ea0b4f3300f16ef92e0a87075"
+    "body_sha256": "3040fe0aa4461a438674e06160c15b324c392340b33d36429241313a9082b311"
   },
   {
     "owner": "internal/runtime/activity_validation.go::activitySiteContext",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "95148d842e3288244e198a03f4dba12ddf8db00e96413d3caa47895552aba258"
+    "body_sha256": "3b79083af8cbe41688514d6144042206cee628945974bd24f0b6226efa2e6087"
+  },
+  {
+    "owner": "internal/runtime/activity_validation.go::admitActivityResultEventName",
+    "audit_rows": "A10,A27",
+    "proof_families": "2577-authored-session-activity,P08,P10,P21",
+    "body_sha256": "896b0061c843731faa25ec72aa1e28cbac454eab077b21ebb8863122364679f6"
   },
   {
     "owner": "internal/runtime/activity_validation.go::normalizeStrings",
@@ -1539,7 +1545,7 @@
     "owner": "internal/runtime/activity_validation.go::rejectUnsupportedNestedActivityContexts",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "0cb126c21378d17b75425fb204488de7fd9e07f84e51ee594fa11311862ba73d"
+    "body_sha256": "7c7f6b9a908f71478988ad2ea899ef53e9fd74b8fb65ef872efa5b8840a36828"
   },
   {
     "owner": "internal/runtime/activity_validation.go::validateActivityInputAgainstToolSchema",
@@ -1551,19 +1557,19 @@
     "owner": "internal/runtime/activity_validation.go::validateActivityResultEventNameCollisions",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "f7b8816e2c672cd13c2f3ff4ae586683b708a4149de13acac1c636523efe70d0"
+    "body_sha256": "f34afb47aa41e87b71b6d7fdd84f49d0233d4a44f0ab530542d94a3e0453ad2f"
   },
   {
     "owner": "internal/runtime/activity_validation.go::validateActivitySpec",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "613b3a05a0c310297153fef9cec35116063db5e576e4371e07aa4e66de856cb7"
+    "body_sha256": "b15fc320f170cc67c0098325b7198eba9317cb2d3900733c6ece028a82c71283"
   },
   {
     "owner": "internal/runtime/activity_validation.go::validateActivityToolTransport",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "742397b14c9903473595a7780736830572f6e57b53c50f175052b9605d7b9585"
+    "body_sha256": "9db2a49001079f929edde1db2beedfd3f7474ff0e89c640623cc56e2172a7484"
   },
   {
     "owner": "internal/runtime/activity_validation.go::validateDurableActivitySurface",
@@ -1575,7 +1581,7 @@
     "owner": "internal/runtime/activity_validation.go::validateHandlerActivitySurface",
     "audit_rows": "A10,A27",
     "proof_families": "2577-authored-session-activity,P08,P10,P21",
-    "body_sha256": "953a7b88a317defad6b6dd6847475ff4293fb25aa6dde2b4da6c3f05581f1eef"
+    "body_sha256": "7f2af4c8ca52e47d840dc07539a5934e943cfcbb11cddd75aba9d7b839d5e0a7"
   },
   {
     "owner": "internal/runtime/bootverify/admission_report.go::AdmissionExecutionObligation.validIdentity",
