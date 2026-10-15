@@ -47,9 +47,12 @@ func proveMixedOwnedRecoveryImage(t *testing.T, ordinary agentClaimProfileFixtur
 		before := profileFixtureSnapshot(t, read)
 		original = readMixedOwnedRecoveryImage(t, read)
 		assertMixedOwnedRecoveryClasses(t, original, read, standing, selected)
+		assertConnectedAgentRecoveryImage(t, read, original)
 		assertRecoveryReadOwnerContextRefusal(t, ctx, foreign.(agentRecoveryReadOwners), "different selected store")
+		assertConnectedAgentRecoveryContextRefusal(t, ctx, foreign, "different selected store")
 		added := advanceMixedOwnedRecoveryImage(t, standing, selected, busy, pending.ID(), original.Head)
 		latest = readMixedOwnedRecoveryImage(t, ordinary)
+		assertConnectedAgentRecoveryImage(t, ordinary, latest)
 		written = profileFixtureSnapshot(t, ordinary)
 		if latest.Head.Revision == original.Head.Revision || !reflect.DeepEqual(latest.Process, original.Process) {
 			t.Fatal("outside native source-head replacement was not distinct or changed the process stamp")
@@ -89,6 +92,7 @@ func proveMixedOwnedRecoveryImage(t *testing.T, ordinary agentClaimProfileFixtur
 		if again := readMixedOwnedRecoveryImage(t, read); !reflect.DeepEqual(original, again) {
 			t.Fatal("owned mixed source/evidence image crossed its held native cut")
 		}
+		assertConnectedAgentRecoveryImage(t, read, original)
 		if after := profileFixtureSnapshot(t, read); !reflect.DeepEqual(before, after) {
 			t.Fatal("held mixed owned image changed complete application storage")
 		}
@@ -97,9 +101,11 @@ func proveMixedOwnedRecoveryImage(t *testing.T, ordinary agentClaimProfileFixtur
 		t.Fatal(err)
 	}
 	assertRecoveryReadOwnerContextRefusal(t, held, reader, "inspection snapshot is closed")
+	assertConnectedAgentRecoveryContextRefusal(t, held, ordinary.store, "inspection snapshot is closed")
 	if current := readMixedOwnedRecoveryImage(t, ordinary); !reflect.DeepEqual(current, latest) {
 		t.Fatal("closing the inspection hid the exact current mixed image")
 	}
+	assertConnectedAgentRecoveryImage(t, ordinary, latest)
 	assertAgentProfileProcessNoAttempts(t, ordinary)
 	if after := profileFixtureSnapshot(t, ordinary); !reflect.DeepEqual(written, after) {
 		t.Fatal("mixed owned observations or context refusal changed complete storage")
