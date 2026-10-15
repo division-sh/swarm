@@ -76,7 +76,9 @@ func newClientOccurrence(ctx context.Context, connectionID, occurrenceID string,
 		switch event.(type) {
 		case *events.Connected:
 			o.connectOnce.Do(func() { close(o.connected) })
-		case *events.Disconnected, *events.ManualLoginReconnect, *events.LoggedOut,
+		case *events.Disconnected:
+			o.fenceAfterDisconnect(true)
+		case *events.ManualLoginReconnect, *events.LoggedOut,
 			*events.StreamReplaced, *events.StreamError, *events.ConnectFailure,
 			*events.CATRefreshError, *events.ClientOutdated, *events.TemporaryBan:
 			o.fence()
@@ -330,6 +332,10 @@ func (o *clientOccurrence) reserveLogout(ctx context.Context) (context.Context, 
 }
 
 func (o *clientOccurrence) fence() {
+	o.fenceAfterDisconnect(false)
+}
+
+func (o *clientOccurrence) fenceAfterDisconnect(observed bool) {
 	o.mu.Lock()
 	if !o.fenced {
 		o.fenced = true
@@ -341,7 +347,7 @@ func (o *clientOccurrence) fence() {
 	pairing := o.pairing
 	o.mu.Unlock()
 	if pairing != nil {
-		pairing.stop()
+		pairing.stopAfterDisconnect(observed)
 	}
 	if callbacks != nil {
 		callbacks.fence()

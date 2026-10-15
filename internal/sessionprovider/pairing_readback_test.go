@@ -190,6 +190,83 @@ func TestWhatsAppPairingReadbackAuthorizationIsOriginalScopeOnly(t *testing.T) {
 	}
 }
 
+func TestWhatsAppPairingTerminalReadbackIsObservedAndScoped(t *testing.T) {
+	for _, cell := range []string{"exhausted", "remote_close", "foreign_principal", "foreign_coordinate", "retired_operation",
+		"store_failure", "caller_canceled", "source_canceled", "retired_occurrence", "malformed_batch"} {
+		t.Run(cell, func(t *testing.T) {
+			scope := pairingScopeFixture(t)
+			source, cancelSource := context.WithCancel(context.Background())
+			defer cancelSource()
+			q, err := newPairingQR(source, scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := q.join(context.Background()); err != nil {
+					t.Error(err)
+				}
+			})
+			principal := operatorchannel.Principal{ID: scope.PrincipalID, CreatedAt: time.Now().UTC()}
+			reader := &pairingReadbackFixture{op: channelonboarding.Operation{OperationID: scope.OperationID,
+				SessionConnectionID: scope.ConnectionID, PrincipalID: scope.PrincipalID, Provider: "whatsapp", Coordinate: scope.Coordinate,
+				Posture: channelonboarding.ActivationSessionConnection, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge,
+				Phase: channelonboarding.PhaseActivatingProvider, Revision: 1, RequestedAt: time.Now().UTC()}}
+			if err := q.handle(&events.QR{Codes: []string{"private code"}}); err != nil {
+				t.Fatal(err)
+			}
+			if cell != "remote_close" {
+				if err := q.handle(&events.QR{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if cell == "source_canceled" {
+				cancelSource()
+			}
+			if cell == "malformed_batch" {
+				if err := q.handle(&events.QR{Codes: []string{""}}); !errors.Is(err, errPairingBounds) {
+					t.Fatal("malformed batch was not refused")
+				}
+			}
+			q.stopAfterDisconnect(true)
+			<-q.done
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			coordinate := scope.Coordinate
+			switch cell {
+			case "foreign_principal":
+				principal.ID = uuid.NewString()
+			case "foreign_coordinate":
+				coordinate.ContextPublicationGeneration++
+			case "retired_operation":
+				reader.op.Phase = channelonboarding.PhaseRetired
+			case "store_failure":
+				reader.err = errors.New("selected store unavailable")
+			case "caller_canceled":
+				cancel()
+			case "retired_occurrence":
+				q.stop()
+			}
+			view, err := q.readAuthorized(ctx, principal, reader, coordinate)
+			if cell != "exhausted" && cell != "remote_close" {
+				if err == nil || view != (pairingQRSnapshot{}) {
+					t.Fatal("terminal observation bypassed refusal or returned pairing material")
+				}
+				return
+			}
+			want := pairingExpired
+			if cell == "remote_close" {
+				want = pairingFailed
+			}
+			if err != nil || view != (pairingQRSnapshot{Status: want}) {
+				t.Fatal("terminal observation changed its recorded meaning or retained QR material")
+			}
+			if _, err := q.read(scope); !errors.Is(err, errPairingStopped) || !errors.Is(err, errPairingFailed) {
+				t.Fatal("readback erased the original strict lifetime refusal or failure cause")
+			}
+		})
+	}
+}
+
 func TestWhatsAppPairingReadbackExpiryAndObservationDoNotGrantExecution(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		scope := pairingScopeFixture(t)
