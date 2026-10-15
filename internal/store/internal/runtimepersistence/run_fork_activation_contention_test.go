@@ -130,13 +130,23 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 					winnerPID := barrier.awaitWinner(t, ctx, observer, winner)
 					// PostgreSQL queues an observer lock ahead of the losing operation.
 					// SQLite holds the loser after a real BUSY rollback, before retry.
-					gate := barrier.queueGate(t, ctx, observer, f.runID, first, winnerPID)
+					gate := barrier.queueGate(t, ctx, observer, winnerPID)
 					loserStarted = true
 					go func() { defer close(loserFinished); loser <- invoke(loserCtx, second) }()
 					barrier.awaitContender(t, ctx, observer, winnerPID, gate, loser)
 					if outcome == "cancel_loser" {
 						cancelLoser()
 						barrier.resume()
+						got := awaitForkContentionResult(t, ctx, loser)
+						requireForkContentionCancellation(t, got.err)
+						select {
+						case <-loserFinished:
+						case <-ctx.Done():
+							t.Fatal("cancelled contender did not join: ", ctx.Err())
+						}
+						if gate != nil {
+							gate.cancelled = true
+						}
 					}
 					if outcome == "cancel_winner" {
 						cancelWinner()
@@ -155,7 +165,7 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 							t.Fatalf("winning transaction did not roll back at SQL barrier: %v", won.err)
 						}
 					}
-					barrier.awaitGate(t, ctx, gate)
+					barrier.awaitGate(t, ctx, observer, gate)
 					winnerOnly := snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres")
 					if outcome != "commit" && !reflect.DeepEqual(before, winnerOnly) {
 						for _, diagnostic := range forkContentionFailureDiagnostics(before, winnerOnly, won, loser) {
@@ -163,11 +173,13 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 						}
 						t.Fatal("rolled-back/cancelled winner changed complete source/child/application tables")
 					}
+					barrier.assertContenderFenced(t, ctx, observer, gate)
+					if outcome != "cancel_loser" && len(loser) != 0 {
+						t.Fatal("contender returned before the isolated snapshot gate opened")
+					}
 					barrier.openGate(t, gate)
 					barrier.resume()
 					if outcome == "cancel_loser" {
-						got := awaitForkContentionResult(t, ctx, loser)
-						requireForkContentionCancellation(t, got.err)
 						if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres")) {
 							t.Fatal("cancelled loser and rolled-back winner left durable effects")
 						}
@@ -776,12 +788,14 @@ func (b *forkContentionBarrier) awaitWinner(t *testing.T, ctx context.Context, d
 }
 
 type forkContentionGate struct {
-	tx       *sql.Tx
-	pid      int
-	acquired chan error
+	tx        *sql.Tx
+	pid       int
+	acquired  chan error
+	contender forkContentionWait
+	cancelled bool
 }
 
-func (b *forkContentionBarrier) queueGate(t *testing.T, ctx context.Context, db *sql.DB, run, first string, winnerPID int) *forkContentionGate {
+func (b *forkContentionBarrier) queueGate(t *testing.T, ctx context.Context, db *sql.DB, winnerPID int) *forkContentionGate {
 	t.Helper()
 	if b.backend == "sqlite" {
 		return nil
@@ -795,12 +809,11 @@ func (b *forkContentionBarrier) queueGate(t *testing.T, ctx context.Context, db 
 	if err := tx.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&g.pid); err != nil {
 		t.Fatal(err)
 	}
-	table := "runs"
-	if first == "writer" {
-		table = "run_fork_revision_heads"
-	}
+	// Every competing story/authority operation takes this native fence before
+	// domain rows. A wait on a different row does not order the two waiters.
 	go func() {
-		_, err := tx.ExecContext(ctx, `SELECT run_id FROM `+table+` WHERE run_id=$1 FOR UPDATE`, run)
+		var sequence int64
+		err := tx.QueryRowContext(ctx, `SELECT last_sequence FROM author_activity_order WHERE singleton_id = 1 FOR UPDATE`).Scan(&sequence)
 		g.acquired <- err
 	}()
 	forkContentionPoll(t, ctx, func() bool {
@@ -825,21 +838,31 @@ func (b *forkContentionBarrier) awaitContender(t *testing.T, ctx context.Context
 			t.Fatal("contender never reached SQLite write lock: ", ctx.Err())
 		}
 	}
+	b.awaitPostgresContender(t, ctx, db, winnerPID, gate, func() bool { return len(done) != 0 })
+}
+
+func (b *forkContentionBarrier) awaitPostgresContender(t *testing.T, ctx context.Context, db *sql.DB, winnerPID int, gate *forkContentionGate, returned func() bool) {
+	t.Helper()
 	forkContentionPoll(t, ctx, func() bool {
-		var waiting bool
-		if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND pid<>$1 AND $2=ANY(pg_blocking_pids(pid)))`, gate.pid, winnerPID).Scan(&waiting); err != nil {
+		if returned() {
+			t.Fatal("contender returned before its native PostgreSQL lock wait")
+		}
+		wait, err := forkContentionPostgresWait(ctx, db, winnerPID, gate.pid, 0)
+		if err == sql.ErrNoRows {
+			return false
+		}
+		if err != nil {
 			t.Fatal(err)
 		}
-		select {
-		case got := <-done:
-			t.Fatalf("contender returned before PostgreSQL lock wait: %#v", got)
-		default:
+		if gate.pid != 0 && (!wait.fenced || !strings.Contains(wait.query, "author_activity_order")) {
+			return false
 		}
-		return waiting
+		gate.contender = wait
+		return true
 	})
 }
 
-func (b *forkContentionBarrier) awaitGate(t *testing.T, ctx context.Context, gate *forkContentionGate) {
+func (b *forkContentionBarrier) awaitGate(t *testing.T, ctx context.Context, db *sql.DB, gate *forkContentionGate) {
 	t.Helper()
 	if gate == nil {
 		return
@@ -852,6 +875,22 @@ func (b *forkContentionBarrier) awaitGate(t *testing.T, ctx context.Context, gat
 	case <-ctx.Done():
 		t.Fatal("observer frontier gate: ", ctx.Err())
 	}
+	b.assertContenderFenced(t, ctx, db, gate)
+}
+
+func (b *forkContentionBarrier) assertContenderFenced(t *testing.T, ctx context.Context, db *sql.DB, gate *forkContentionGate) {
+	t.Helper()
+	if gate == nil || gate.cancelled {
+		return
+	}
+	if gate.contender.pid == 0 {
+		t.Fatal("observer gate has no identified native contender")
+	}
+	wait, err := forkContentionPostgresWait(ctx, db, 0, gate.pid, gate.contender.pid)
+	if err != nil || !wait.fenced || wait.transaction != gate.contender.transaction || !strings.Contains(wait.query, "author_activity_order") {
+		t.Fatalf("identified contender escaped observer fence: before=%+v after=%+v err=%v", gate.contender, wait, err)
+	}
+	t.Logf("observer_fence observer_pid=%d native_contender=%+v", gate.pid, wait)
 }
 func (b *forkContentionBarrier) openGate(t *testing.T, gate *forkContentionGate) {
 	t.Helper()
