@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/google/uuid"
@@ -25,7 +26,7 @@ func TestFanOutBarrierConsumesConstructedHeaderBothStores(t *testing.T) {
 				t.Run(backend+"/"+shape+"/"+cell, func(t *testing.T) {
 					files := map[string]string{"schema.yaml": "name: barrier-header\nstages:\n  work: {}\n"}
 					if shape == "fields" {
-						files["entities.yaml"] = "item:\n  label: text?\n"
+						files["entities.yaml"] = "item:\n  label: text?\n  accumulator:\n    type: text?\n    initial: 'business-only'\n"
 					}
 					f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 					base := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
@@ -57,12 +58,22 @@ func TestFanOutBarrierConsumesConstructedHeaderBothStores(t *testing.T) {
 					if _, err := f.db.ExecContext(ctx, `UPDATE flow_instances SET accumulator=$3 WHERE run_id=$1 AND entity_id=$2`, intent.runID, plan.Instance.EntityID, string(raw)); err != nil {
 						t.Fatal(err)
 					}
-					// Declared fields remain valid; the obsolete lifecycle shadow
-					// deliberately disagrees with the canonical header.
-					if shape == "fields" {
-						if _, err := f.db.ExecContext(ctx, `UPDATE entity_state SET accumulator='{}' WHERE run_id=$1 AND entity_id=$2`, intent.runID, plan.Instance.EntityID); err != nil {
-							t.Fatal(err)
-						}
+					owner, err := plan.Readiness.FlowIdentity()
+					if err != nil {
+						t.Fatal(err)
+					}
+					stored, found, err := f.workflows.Load(ctx, owner)
+					if err != nil || !found || stored.EntityID != plan.Instance.EntityID || stored.CurrentState != "work" ||
+						(shape == "fields" && stored.Fields["accumulator"] != "business-only") || (shape == "fieldless" && len(stored.Fields) != 0) {
+						t.Fatalf("independent barrier header/business witness: found=%t instance=%+v err=%v", found, stored, err)
+					}
+					carrier, err := engine.StateCarrierFromPersisted(stored.Fields, stored.Bookkeeping, stored.Gates, stored.StateBuckets)
+					if err != nil {
+						t.Fatal(err)
+					}
+					ownedLoop, found, err := loopruntime.Load(carrier.StateBuckets, ".", "retry")
+					if err != nil || !found || !ownedLoop.Generation().Equal(loop.Generation()) {
+						t.Fatalf("business field replaced header loop evidence: found=%t loop=%+v err=%v", found, ownedLoop, err)
 					}
 					var query string
 					switch cell {
@@ -109,6 +120,10 @@ func TestFanOutBarrierConsumesConstructedHeaderBothStores(t *testing.T) {
 					var count int
 					if err := f.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, intent.runID, plan.Instance.EntityID).Scan(&count); err != nil || (shape == "fieldless" && count != 0) || (shape == "fields" && count != 1) {
 						t.Fatalf("barrier changed declared field presence: count=%d err=%v", count, err)
+					}
+					after, found, err := f.workflows.Load(ctx, owner)
+					if err != nil || !found || !reflect.DeepEqual(after.Fields, stored.Fields) {
+						t.Fatalf("barrier changed business fields: found=%t instance=%+v err=%v", found, after, err)
 					}
 				})
 			}

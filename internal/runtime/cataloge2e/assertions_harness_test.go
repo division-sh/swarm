@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -433,7 +434,11 @@ func workflowStateDebugRows(selected catalogOperatorEventLister) (string, error)
 	}
 	out := []string{}
 	for _, row := range rows {
-		out = append(out, fmt.Sprintf("{entity_id:%s flow_instance:%s state:%s}", row.EntityID, row.FlowInstance, row.CurrentState))
+		state := "null"
+		if row.CurrentState != nil {
+			state = strconv.Quote(*row.CurrentState)
+		}
+		out = append(out, fmt.Sprintf("{entity_id:%s flow_instance:%s state:%s}", row.EntityID, row.FlowInstance, state))
 	}
 	if len(out) == 0 {
 		return "[]", nil

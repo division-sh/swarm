@@ -25,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type providerTriggerSmokeResponse struct {
@@ -213,8 +214,10 @@ func seedProviderTriggerSmokeRuntime(
 	agentID string,
 ) {
 	t.Helper()
+	fixtureSource := sourceartifactfixture.Require(t, ctx, sqliteStore)
+	fixtureBundleHash := fixtureSource.BundleHash()
 	now := time.Now().UTC()
-	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now})
+	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: fixtureBundleHash})
 	configBytes, err := json.Marshal(map[string]any{
 		"secrets": map[string]any{
 			"webhook_signing": map[string]string{
@@ -233,19 +236,8 @@ func seedProviderTriggerSmokeRuntime(
 	`, runID, flowInstance, entityID, entitySlug, string(configBytes), now, now, now); err != nil {
 		t.Fatalf("seed sqlite flow instance: %v", err)
 	}
-	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES (?, ?, ?, 'default', ?, 'Customer A', 'active',
-			'{}', '{}', '{}', 1, ?, ?, ?)
-	`, runID, entityID, flowInstance, entitySlug, now, now, now); err != nil {
+	if changed, err := storetest.AddWorkflowProjectionEmptyFields(ctx, sqliteStore, runID, entityID); err != nil || changed != 1 {
 		t.Fatalf("seed sqlite entity state: %v", err)
-	}
-	const fixtureBundleHash = "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	fixtureSource, err := runtimecorrelation.NewSourceArtifactFact(fixtureBundleHash)
-	if err != nil {
-		t.Fatalf("construct provider trigger fixture source: %v", err)
 	}
 	agentContext := runtimecorrelation.WithSourceArtifactFact(ctx, fixtureSource)
 	agentContext = runtimeauthoractivity.WithScope(agentContext, runtimeauthoractivity.BundleScope(

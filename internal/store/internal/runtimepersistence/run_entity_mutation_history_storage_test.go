@@ -18,9 +18,9 @@ func TestRunEntityMutationHistoryStoragePreservesWholeRunOrderAndNullBothStores(
 		t.Run(backend.name, func(t *testing.T) {
 			f, ctx := backend.open(t), testAuthorActivityContext()
 			run, foreignRun, entity, sibling := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-			seedEntityToolStorageWitness(t, f, run, entity)
-			seedEntityToolStorageWitness(t, f, run, sibling)
-			seedEntityToolStorageWitness(t, f, foreignRun, entity)
+			seedEntityToolStorageWitness(t, f, run, entity, false, true)
+			seedEntityToolStorageWitness(t, f, run, sibling, false, true)
+			seedEntityToolStorageWitness(t, f, foreignRun, entity, false, true)
 			probe, restore, err := InstallTransactionProbeForTest(f.store, transactiontest.Options{})
 			if err != nil {
 				t.Fatal(err)
@@ -88,7 +88,7 @@ func TestRunEntityMutationHistoryStorageRefusesRawInvalidCancelledClosedAndUnava
 			t.Run(backend.name+"/"+cut, func(t *testing.T) {
 				f, ctx := backend.open(t), testAuthorActivityContext()
 				run := uuid.NewString()
-				seedEntityToolStorageWitness(t, f, run, uuid.NewString())
+				seedEntityToolStorageWitness(t, f, run, uuid.NewString(), false, true)
 				switch cut {
 				case "invalid-run":
 					run = "bad"

@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -268,17 +269,16 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 		}
 		assertNestedExactBarrier(t, ctx, db, r.Key, "fired", fanoutbarrier.Summary{Total: 2, Succeeded: 2})
 	}
-	rows, err := db.QueryContext(ctx, `SELECT flow_instance,current_state,fields FROM entity_state WHERE run_id=$1`, runID)
+	rows, err := storetest.ReadWorkflowStateObservationRows(ctx, rt.selected)
 	if err != nil {
 		t.Fatal(err)
 	}
 	states := map[string]string{}
-	for rows.Next() {
-		var path, state string
-		var raw []byte
-		if err := rows.Scan(&path, &state, &raw); err != nil {
-			t.Fatal(err)
+	for _, row := range rows {
+		if row.RunID != runID {
+			continue
 		}
+		path, state, raw := row.FlowInstance, row.CurrentState, row.Fields
 		var fields map[string]any
 		if err := json.Unmarshal(raw, &fields); err != nil {
 			t.Fatal(err)
@@ -286,16 +286,14 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 		if task, ok := fields["task"].(string); ok {
 			account, _ := fields["account_id"].(string)
 			key := account + "/" + task
-			if state != "completed" || states[key] != "" || path == "" || fields["task_key"] != account+":"+task {
-				t.Fatalf("nested task state identity=%s path=%s state=%s duplicate=%s", key, path, state, states[key])
+			if state == nil || *state != "completed" || states[key] != "" || path == "" || fields["task_key"] != account+":"+task {
+				t.Fatalf("nested task state identity=%s path=%s state=%+v duplicate=%s", key, path, state, states[key])
 			}
 			states[key] = path
 		}
 	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil || len(states) != 2*len(accounts) {
-		t.Fatalf("nested actual task state count=%d err=%v", len(states), err)
+	if len(states) != 2*len(accounts) {
+		t.Fatalf("nested actual task state count=%d", len(states))
 	}
 	for _, account := range accounts {
 		for _, task := range []string{"prepare", "publish"} {

@@ -383,7 +383,7 @@ func seedActivityStoryAttempt(t *testing.T, fixture authorActivityReceiptFixture
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := fixture.db.Exec(`INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,current_state,gates,fields,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at) VALUES ($1,$2,$3,'default','review','{}','{}','{}',$4,1,$5,$5,$5)`, runID, record.EntityID, record.FlowInstance, string(raw), at); err != nil {
+		if _, err := fixture.db.Exec(`INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,fields,created_at,updated_at) VALUES ($1,$2,$3,'default','{}',$4,$4)`, runID, record.EntityID, record.FlowInstance, at); err != nil {
 			t.Fatal(err)
 		}
 		seedWorkflowHeaderProjectionFixture(t, ctx, fixture.db, runID, record.EntityID, record.FlowInstance, "flow", "default", "review", string(raw), at)

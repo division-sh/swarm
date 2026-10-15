@@ -359,25 +359,27 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 			query: `SELECT CAST(e.entity_id AS TEXT), e.flow_instance, e.entity_type, e.slug, e.name,
 				e.created_at, e.flow_config, e.construction_kind, e.stage_defined, e.flow_template, e.mode,
 				e.status, e.current_state, e.entered_state_at, e.updated_at, e.terminated_at, e.parent_instance, e.instance_key,
-				e.initial_materialization`,
+				e.initial_materialization, e.data_created_at, e.data_updated_at`,
 			// Revision projection preserves both explicit producer kinds. A constructed
 			// header owns metadata even without fields; an import with no header is a
 			// different persisted fact, never inferred runnable construction.
 			source: `(SELECT f.run_id, f.entity_id, f.instance_path AS flow_instance, f.entity_type, f.slug, f.name,
 				f.created_at, f.config AS flow_config, 'constructed' AS construction_kind, f.stage_defined, f.flow_template, f.mode,
 				f.status, f.current_state, f.entered_state_at, f.updated_at, f.terminated_at, f.parent_instance, f.instance_key,
-				i.projection AS initial_materialization
+				i.projection AS initial_materialization, d.created_at AS data_created_at, d.updated_at AS data_updated_at
 				FROM flow_instances f LEFT JOIN workflow_instance_initial_materializations i
 				ON i.run_id=f.run_id AND i.instance_path=f.instance_path AND i.entity_id=f.entity_id
+				LEFT JOIN entity_state d
+				ON d.run_id=f.run_id AND d.entity_id=f.entity_id AND d.flow_instance=f.instance_path AND d.entity_type=f.entity_type
 				UNION ALL
 				SELECT s.run_id, s.entity_id, s.flow_instance, s.entity_type, s.slug, s.name,
-					s.created_at, NULL AS flow_config, 'imported_state' AS construction_kind, FALSE AS stage_defined, NULL AS flow_template, NULL AS mode,
+					NULL AS created_at, NULL AS flow_config, 'imported_state' AS construction_kind, FALSE AS stage_defined, NULL AS flow_template, NULL AS mode,
 					NULL AS status, NULL AS current_state, NULL AS entered_state_at, NULL AS updated_at, NULL AS terminated_at, NULL AS parent_instance, NULL AS instance_key,
-					NULL AS initial_materialization
+					NULL AS initial_materialization, s.created_at AS data_created_at, s.updated_at AS data_updated_at
 				FROM entity_state s WHERE NOT EXISTS (
 					SELECT 1 FROM flow_instances f WHERE f.run_id = s.run_id AND f.instance_path = s.flow_instance
 				)) e`, runAlias: "e",
-			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "flow_config": valueJSON, "initial_materialization": valueJSON, "stage_defined": valueBool, "entered_state_at": valueTime, "updated_at": valueTime, "terminated_at": valueTime}, "entity_id", "flow_instance", "entity_type", "slug", "name", "created_at", "flow_config", "construction_kind", "stage_defined", "flow_template", "mode", "status", "current_state", "entered_state_at", "updated_at", "terminated_at", "parent_instance", "instance_key", "initial_materialization"),
+			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "flow_config": valueJSON, "initial_materialization": valueJSON, "stage_defined": valueBool, "entered_state_at": valueTime, "updated_at": valueTime, "terminated_at": valueTime, "data_created_at": valueTime, "data_updated_at": valueTime}, "entity_id", "flow_instance", "entity_type", "slug", "name", "created_at", "flow_config", "construction_kind", "stage_defined", "flow_template", "mode", "status", "current_state", "entered_state_at", "updated_at", "terminated_at", "parent_instance", "instance_key", "initial_materialization", "data_created_at", "data_updated_at"),
 		}
 	case FamilyEventDeliveries:
 		spec = projectionSpec{

@@ -20,7 +20,6 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -231,9 +230,6 @@ func (managedNativeDurableRoles) LoadWorkflowInstance(context.Context, runtimefl
 }
 func (managedNativeDurableRoles) ListWorkflowInstances(context.Context, string) ([]runtimepipeline.WorkflowInstance, error) {
 	return nil, nil
-}
-func (managedNativeDurableRoles) LoadWorkflowEntityState(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
-	return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, nil
 }
 func (managedNativeDurableRoles) ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error) {
 	return nil, nil

@@ -328,7 +328,10 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 			(seed.FlowInstance != "" && seed.FlowInstance != plan.Instance.StorageRef) {
 			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("scenario construction requires exact no-argument target and field contract")
 		}
-		if _, err := graph.ResolveStage(seed.CurrentState); err != nil {
+		if seed.CurrentState == nil {
+			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("constructed scenario seed requires an explicit stage")
+		}
+		if _, err := graph.ResolveStage(*seed.CurrentState); err != nil {
 			return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, err
 		}
 		fields := make(map[string]any, len(seed.Fields))
@@ -342,7 +345,7 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 		// Explicit scenario import is applied before A's entry planning. It does
 		// not supply constructor eligibility or create a business occurrence.
 		plan.Instance.Fields = fields
-		plan.Instance.CurrentState = seed.CurrentState
+		plan.Instance.CurrentState = *seed.CurrentState
 		plan.Instance.Gates = make(map[string]bool, len(seed.Gates))
 		for gate, value := range seed.Gates {
 			plan.Instance.Gates[gate] = value

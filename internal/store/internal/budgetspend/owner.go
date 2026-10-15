@@ -120,13 +120,12 @@ func (s *BudgetPostgresOwner) ListBudgetProjectionTargets(ctx context.Context) (
 		return nil, fmt.Errorf("postgres budget spend store is required")
 	}
 	rows, err := s.backend.QueryContext(ctx, `
-		SELECT es.run_id::text, es.entity_id::text, run.bundle_hash,
-		       COALESCE(fi.flow_template, ''), COALESCE(es.flow_instance, ''), COALESCE(es.current_state, '')
-		FROM entity_state es
-		JOIN runs run ON run.run_id = es.run_id
-		LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
+		SELECT fi.run_id::text, fi.entity_id::text, run.bundle_hash,
+		       fi.flow_template, fi.instance_path, fi.current_state
+		FROM flow_instances fi
+		JOIN runs run ON run.run_id = fi.run_id
 		WHERE run.status IN (`+storerunstate.ActiveStateSQLValues+`)
-		ORDER BY es.run_id::text ASC, es.created_at ASC, es.entity_id::text ASC
+		ORDER BY fi.run_id::text ASC, fi.created_at ASC, fi.entity_id::text ASC
 	`)
 	if err != nil {
 		return nil, fmt.Errorf("list postgres budget projection targets: %w", err)
@@ -254,14 +253,13 @@ func (s *BudgetSQLiteOwner) ListBudgetProjectionTargets(ctx context.Context) ([]
 		return nil, fmt.Errorf("sqlite budget spend store is required")
 	}
 	query := `
-		SELECT es.run_id, es.entity_id, run.bundle_hash,
-		       COALESCE(fi.flow_template, ''), COALESCE(es.flow_instance, ''), COALESCE(es.current_state, '')
-		FROM entity_state es
-		JOIN runs run ON run.run_id = es.run_id
-		LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance
+		SELECT fi.run_id, fi.entity_id, run.bundle_hash,
+		       fi.flow_template, fi.instance_path, fi.current_state
+		FROM flow_instances fi
+		JOIN runs run ON run.run_id = fi.run_id
 		WHERE run.status IN (` + storerunstate.ActiveStateSQLValues + `)
 	`
-	query += " ORDER BY es.run_id ASC, es.created_at ASC, es.entity_id ASC"
+	query += " ORDER BY fi.run_id ASC, fi.created_at ASC, fi.entity_id ASC"
 	rows, err := s.backend.QueryContext(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("list sqlite budget projection targets: %w", err)

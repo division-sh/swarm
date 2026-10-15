@@ -21,6 +21,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestShopifyLocalProviderToolSmoke(t *testing.T) {
@@ -64,7 +65,7 @@ func TestShopifyLocalProviderToolSmoke(t *testing.T) {
 
 	bus, err := runtimebus.NewEventBusWithOptions(sqliteStore, runtimebus.EventBusOptions{
 		PipelineObligations: sqliteStore.PipelineObligations(),
-		SourceArtifactFact:  mustServeTestEphemeralSourceArtifactFact(serveRuntimeTestBundleHash), ReceiverExecution: eventreceiver.NormalExecution(),
+		SourceArtifactFact:  sourceartifactfixture.Fact(), ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)

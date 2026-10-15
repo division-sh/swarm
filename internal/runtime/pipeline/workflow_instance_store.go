@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
@@ -69,14 +70,6 @@ type WorkflowInstance struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	InitialFieldValues map[string]any
-}
-
-// WorkflowEntityStatePersistenceReader owns exact state-row reads for an
-// admitted route and entity. Scenario setup can establish this state before a
-// flow_instances lifecycle row exists; declared-key acquisition therefore
-// selects this authority directly rather than inferring state from lifecycle.
-type WorkflowEntityStatePersistenceReader interface {
-	LoadWorkflowEntityState(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error)
 }
 
 type WorkflowEntityCollectionPersistenceReader interface {
@@ -320,7 +313,7 @@ type WorkflowLifecycleCompanionPersistenceRecord struct {
 	Config          json.RawMessage
 	TerminatedAt    time.Time
 	CreatedAt       time.Time
-	State           WorkflowEntityStatePersistenceRecord
+	State           WorkflowInstancePersistenceRecord
 	StageDefined    bool
 }
 
@@ -345,8 +338,15 @@ func (r WorkflowTargetPersistenceRecord) Validate(route runtimeflowidentity.Rout
 		if strings.TrimSpace(r.State.EntityType) == "" {
 			return fmt.Errorf("workflow target state requires exact entity contract")
 		}
-		if strings.TrimSpace(r.State.CurrentState) == "" || r.State.Revision <= 0 || r.State.CreatedAt.IsZero() || r.State.UpdatedAt.IsZero() {
-			return fmt.Errorf("workflow target state requires persisted state, revision, and times")
+		if r.State.CreatedAt.IsZero() || r.State.UpdatedAt.IsZero() || r.State.UpdatedAt.Before(r.State.CreatedAt) {
+			return fmt.Errorf("workflow target fields require valid authored-data clocks")
+		}
+		value, err := canonicaljson.Decode(r.State.Fields)
+		if err != nil {
+			return fmt.Errorf("admit workflow target fields: %w", err)
+		}
+		if value.Kind() != semanticvalue.KindObject {
+			return fmt.Errorf("workflow target fields require a persisted JSON object")
 		}
 	}
 	if r.Presence.HasLifecycleCompanion() {
@@ -415,26 +415,19 @@ type WorkflowTargetPersistenceReader interface {
 // Runtime consumers receive final semantic values and never select a backend,
 // query shape, transaction, or SQL executor.
 type WorkflowInstancePersistenceReader interface {
-	WorkflowEntityStatePersistenceReader
 	LoadWorkflowInstance(context.Context, runtimeflowidentity.RunScopedFlowInstance) (WorkflowInstance, bool, error)
 	ListWorkflowInstances(context.Context, string) ([]WorkflowInstance, error)
 }
 
 type WorkflowEntityStatePersistenceRecord struct {
-	EntityID       string
-	FlowInstance   string
-	EntityType     string
-	Slug           string
-	Name           string
-	CurrentState   string
-	Revision       int64
-	EnteredStageAt time.Time
-	Gates          json.RawMessage
-	Fields         json.RawMessage
-	Bookkeeping    json.RawMessage
-	Accumulator    json.RawMessage
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	EntityID     string
+	FlowInstance string
+	EntityType   string
+	Slug         string
+	Name         string
+	Fields       json.RawMessage
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 func FilterWorkflowEntityCollectionRecords(records []WorkflowEntityStatePersistenceRecord, owner WorkflowEntityCollectionOwner) ([]WorkflowEntityStatePersistenceRecord, error) {
@@ -448,28 +441,6 @@ func FilterWorkflowEntityCollectionRecords(records []WorkflowEntityStatePersiste
 		}
 	}
 	return out, nil
-}
-func DecodeWorkflowEntityStatePersistenceRecord(record WorkflowEntityStatePersistenceRecord, route runtimeflowidentity.Route, workflowName, workflowVersion, mode string) (WorkflowInstance, error) {
-	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
-	if !route.Valid() || strings.TrimSpace(record.FlowInstance) != route.InstancePath {
-		return WorkflowInstance{}, fmt.Errorf("workflow entity state row disagrees with admitted route")
-	}
-	payload, err := WorkflowInstanceHeaderPayloadForRoute(route, workflowVersion)
-	if err != nil {
-		return WorkflowInstance{}, fmt.Errorf("project workflow entity state control: %w", err)
-	}
-	config, err := canonicaljson.MarshalPreservingNumberKinds(payload)
-	if err != nil {
-		return WorkflowInstance{}, fmt.Errorf("encode workflow entity state control: %w", err)
-	}
-	return DecodeWorkflowInstancePersistenceRecord(WorkflowInstancePersistenceRecord{
-		EntityID: record.EntityID, WorkflowName: strings.TrimSpace(workflowName), WorkflowVersion: strings.TrimSpace(workflowVersion),
-		Mode:   strings.TrimSpace(mode),
-		Status: "active", CurrentState: record.CurrentState, Revision: record.Revision, EnteredStageAt: record.EnteredStageAt,
-		Gates: record.Gates, Fields: record.Fields, Bookkeeping: record.Bookkeeping, Accumulator: record.Accumulator,
-		Config: config, FlowInstance: record.FlowInstance, EntityType: record.EntityType,
-		Slug: record.Slug, Name: record.Name, CreatedAt: record.CreatedAt, UpdatedAt: record.UpdatedAt,
-	})
 }
 
 // WorkflowInstancePersistenceRecord is the exact backend-neutral row shape
@@ -671,7 +642,6 @@ type workflowInstanceStore struct {
 	decisionRoutes         WorkflowDecisionRouteOwner
 	instanceReader         WorkflowInstancePersistenceReader
 	instanceIndex          FlowInstanceIndexReader
-	entityStateReader      WorkflowEntityStatePersistenceReader
 	entityCollectionReader WorkflowEntityCollectionPersistenceReader
 	targetReader           WorkflowTargetPersistenceReader
 	deliverySignalMu       sync.RWMutex
@@ -732,7 +702,6 @@ type WorkflowPersistenceOwner interface {
 	StandingServicePersistence
 	WorkflowDecisionRouteOwner
 	WorkflowInstancePersistenceReader
-	WorkflowEntityStatePersistenceReader
 	WorkflowEntityCollectionPersistenceReader
 	WorkflowTargetPersistenceReader
 }
@@ -748,7 +717,7 @@ func NewWorkflowPersistence(owner WorkflowPersistenceOwner) WorkflowPersistence 
 		fanOutObligations: owner,
 		timerActivations:  owner, readiness: owner, standingServices: owner,
 		decisionRoutes: owner, instanceReader: owner, instanceIndex: owner,
-		entityStateReader: owner, entityCollectionReader: owner, targetReader: owner,
+		entityCollectionReader: owner, targetReader: owner,
 	}}
 }
 
@@ -772,7 +741,7 @@ func (p WorkflowPersistence) Valid() bool {
 		p.store.fanOutObligations != nil &&
 		p.store.timerOccurrences != nil && p.store.timerActivations != nil && p.store.readiness != nil &&
 		p.store.standingServices != nil && p.store.decisionRoutes != nil && p.store.instanceReader != nil &&
-		p.store.entityStateReader != nil && p.store.entityCollectionReader != nil && p.store.targetReader != nil && p.store.instanceIndex != nil
+		p.store.entityCollectionReader != nil && p.store.targetReader != nil && p.store.instanceIndex != nil
 }
 
 func (p WorkflowPersistence) LookupFlowInstance(ctx context.Context, request FlowInstanceLookupRequest) (FlowInstanceObservation, bool, error) {
@@ -843,13 +812,6 @@ func (s *workflowInstanceStore) LoadFlowConstructionPublication(ctx context.Cont
 		return FlowConstructionPublicationEvidence{}, errors.New("workflow persistence has no immutable construction receipt reader")
 	}
 	return reader.LoadFlowConstructionPublication(ctx, owner, entityID)
-}
-
-func (s *workflowInstanceStore) LoadEntityState(ctx context.Context, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error) {
-	if s == nil || s.entityStateReader == nil {
-		return WorkflowEntityStatePersistenceRecord{}, false, fmt.Errorf("workflow entity state reader is required")
-	}
-	return s.entityStateReader.LoadWorkflowEntityState(ctx, identity, entityID)
 }
 
 func (s *workflowInstanceStore) queryEntityCollection(ctx context.Context, owner WorkflowEntityCollectionOwner) ([]WorkflowEntityStatePersistenceRecord, error) {

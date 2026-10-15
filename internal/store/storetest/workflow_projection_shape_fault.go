@@ -49,16 +49,12 @@ func SetWorkflowProjectionSlashOnlyFlowPath(ctx context.Context, selected any, r
 	return private.SetWorkflowProjectionSlashOnlyFlowPathForTest(ctx, selected, run, key)
 }
 
-func SetWorkflowProjectionObsoleteFieldRows(ctx context.Context, selected any, run string) (int64, error) {
-	return private.SetWorkflowProjectionObsoleteFieldRowsForTest(ctx, selected, run)
-}
-
 func SetWorkflowProjectionPlatformBookkeeping(ctx context.Context, selected any, run, path string) (int64, error) {
 	return private.SetWorkflowProjectionPlatformBookkeepingForTest(ctx, selected, run, path)
 }
 
-func SetEntityProjectionPrivateBookkeeping(ctx context.Context, selected any, run, entity string) (int64, error) {
-	return private.SetEntityProjectionPrivateBookkeepingForTest(ctx, selected, run, entity)
+func AddWorkflowProjectionPrivateBookkeeping(ctx context.Context, selected any, run, path string) (int64, error) {
+	return private.AddWorkflowProjectionPrivateBookkeepingForTest(ctx, selected, run, path)
 }
 
 func SetWorkflowProjectionConflictingEntityType(ctx context.Context, selected any, run, entity string) (int64, error) {
@@ -91,6 +87,10 @@ func SetWorkflowProjectionNumericFlowPath(ctx context.Context, selected any, run
 
 func AddAmbiguousWorkflowProjectionFields(ctx context.Context, selected any, run, entity string) (int64, error) {
 	return private.AddAmbiguousWorkflowProjectionFieldsForTest(ctx, selected, run, entity)
+}
+
+func AddWorkflowProjectionEmptyFields(ctx context.Context, selected any, run, entity string) (int64, error) {
+	return private.AddWorkflowProjectionEmptyFieldsForTest(ctx, selected, run, entity)
 }
 
 func SetWorkflowTransitionEvidenceWire(ctx context.Context, selected any, run, path string, wire json.RawMessage) (int64, error) {

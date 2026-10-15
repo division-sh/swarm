@@ -237,7 +237,7 @@ func a2RepeatedFanOutSnapshot(t *testing.T, ctx context.Context, db *sql.DB, run
 		(SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1),
 		(SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1),
 		(SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1),
-		(SELECT COALESCE(SUM(revision),0) FROM entity_state WHERE run_id=$1),
+		(SELECT COALESCE(SUM(revision),0) FROM flow_instances WHERE run_id=$1),
 		(SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1),
 		(SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1),
 		(SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id=$1))`, runID).Scan(&got[0], &got[1], &got[2], &got[3], &got[4], &got[5], &got[6], &got[7]); err != nil {

@@ -94,7 +94,7 @@ func TestGuardTerminationHistoricalForkPreservesCauseBothStores(t *testing.T) {
 				if metadata == nil || metadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner || metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance || metadata.EntityType != guarded.EntityType || metadata.FlowInstance != guarded.StorageRef {
 					t.Fatalf("guard history lacks exact snapshot ownership: %+v", entity)
 				}
-				preserved = entity.CurrentState == "killed"
+				preserved = entity.CurrentState != nil && *entity.CurrentState == "killed"
 			}
 			if !preserved {
 				t.Fatalf("historical fork lost guard-terminated state: %+v", plan.Entities)
@@ -114,6 +114,9 @@ func TestGuardTerminationHistoricalForkPreservesCauseBothStores(t *testing.T) {
 				if metadata == nil || metadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner || metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance || metadata.FlowInstance != guarded.StorageRef || metadata.EntityType != guarded.EntityType {
 					t.Fatalf("historical guard cause lacks exact source ownership: %+v", entity)
 				}
+				if entity.CurrentState == nil {
+					t.Fatalf("historical guard cause lacks its actual lifecycle stage: %+v", entity)
+				}
 				fields, err := json.Marshal(entity.Fields)
 				if err != nil {
 					t.Fatalf("encode recorded guard fields: %v", err)
@@ -122,7 +125,7 @@ func TestGuardTerminationHistoricalForkPreservesCauseBothStores(t *testing.T) {
 					EntityID: entity.EntityID, FlowInstance: metadata.FlowInstance, EntityType: metadata.EntityType,
 					ParentInstance: metadata.ParentInstance, InstanceKey: metadata.InstanceKey, Mode: metadata.Mode,
 					Slug: metadata.Slug, Name: metadata.Name, WorkflowName: metadata.FlowTemplate,
-					CurrentState: entity.CurrentState, Config: metadata.FlowConfig, Fields: fields,
+					CurrentState: *entity.CurrentState, Config: metadata.FlowConfig, Fields: fields,
 					StageDefined: metadata.StageDefined,
 				})
 				if err != nil {
