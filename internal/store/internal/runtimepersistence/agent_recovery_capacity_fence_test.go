@@ -26,11 +26,17 @@ func TestAgentRecoveryCapacityPostFenceWriterRequiresCompleteReseedBothStores(t 
 				}
 				firstEntered, firstRelease := make(chan struct{}), make(chan struct{})
 				secondEntered, secondRelease := make(chan struct{}), make(chan struct{})
-				connector.arm(func(tx driver.Tx) error {
-					close(firstEntered)
-					<-firstRelease
-					return tx.Commit()
-				})
+				remove, err := startupownership.InstallAgentRecoverySeedFaultProbeForTest(process, &startupownership.AgentRecoverySeedFaultProbeForTest{AfterCheckProof: func() {
+					connector.arm(func(tx driver.Tx) error {
+						close(firstEntered)
+						<-firstRelease
+						return tx.Commit()
+					})
+				}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer remove()
 				type outcome struct {
 					result startupownership.AgentRecoveryCapacityClaimResult
 					err    error
@@ -96,6 +102,7 @@ func TestAgentRecoveryCapacityPostFenceWriterRequiresCompleteReseedBothStores(t 
 				unblockFirst()
 				accepted := <-firstDone
 				firstJoined = true
+				remove()
 				claim, native := accepted.result.NativeClaim()
 				if accepted.err != nil || !native || !claim.Acknowledged || claim.Disposition != deliverylifecycle.ClaimAcquired || accepted.result.Waiting() {
 					t.Fatalf("later writer changed fenced decision: %+v err=%v", accepted.result, accepted.err)

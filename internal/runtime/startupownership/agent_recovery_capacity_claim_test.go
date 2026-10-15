@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/core/identity/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
