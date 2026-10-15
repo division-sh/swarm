@@ -61,15 +61,18 @@ func TestSelectedForkIndependentOperationsExecuteDistinctChildrenBothStores(t *t
 				}
 				for _, child := range []string{first.Materialization.ForkRunID, second.Materialization.ForkRunID} {
 					stored, err := storetest.ReadSelectedExecutionStorage(ctx, selected, child)
-					if err != nil || stored.Occurrences != 1 {
+					if err != nil || stored.Occurrences != 1 || stored.RunStatus == "cancelled" || stored.RunStatus == "failed" {
 						t.Fatalf("independent child execution count: child=%s stored=%+v err=%v", child, stored, err)
 					}
+				}
+				if err := request.Owner.RetireSelectedContexts(ctx); err != nil {
+					t.Fatalf("join independently admitted child owners: %v", err)
 				}
 				request.Owner.ports.contexts.mu.Lock()
 				remaining := len(request.Owner.ports.contexts.entries)
 				request.Owner.ports.contexts.mu.Unlock()
-				if remaining != 2 {
-					t.Fatalf("independent invocation leaked or displaced its sibling: entries=%d", remaining)
+				if remaining != 0 {
+					t.Fatalf("independent invocations leaked after joined retirement: entries=%d", remaining)
 				}
 			})
 		}
