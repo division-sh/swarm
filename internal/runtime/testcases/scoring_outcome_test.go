@@ -3,11 +3,16 @@ package testcases
 import (
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 func TestGenericBundle_ScoringOutcomePatterns(t *testing.T) {
 	bundle := loadGenericSwarmBundle(t)
+	handler := mustHandler(t, bundle, "processing-node", "item.review_requested")
+	if len(handler.Rules) != 2 {
+		t.Fatalf("expected approval and default rejection rows, got %+v", handler.Rules)
+	}
 	approved := previewHandler(t, bundle, "processing-node", "item.review_requested", map[string]any{
 		"entity_id":    "item-123",
 		"score":        90.0,
@@ -21,8 +26,10 @@ func TestGenericBundle_ScoringOutcomePatterns(t *testing.T) {
 		Status:   "ready",
 		Metadata: map[string]any{},
 	}, nil)
-	if approved.RuleID != "approve" || approved.Stage != runtimepipeline.NormalizeWorkflowStateID("approved") {
-		t.Fatalf("expected approve rule execution, got %+v", approved)
+	approveRef, approveDeclared := handler.Rules[0].DeclarationIdentity()
+	approveFact, err := approved.RuleSelection.ResolvedFact()
+	if !approveDeclared || err != nil || approveFact.Context() != handlerselection.ContextRules || approveFact.Disposition() != handlerselection.DispositionSelected || !approveFact.Ref().Equal(approveRef) || approved.RuleID != "rules[0]: when payload.score >= 80.0" || approveFact.DisplayLabel() != approved.RuleID || approved.Stage != runtimepipeline.NormalizeWorkflowStateID("approved") {
+		t.Fatalf("expected exact approval row execution, got %+v (selection error: %v)", approved, err)
 	}
 	if !hasAll(approved.Emits, "processing/item.completed") {
 		t.Fatalf("expected approval emission, got %v", approved.Emits)
@@ -43,8 +50,10 @@ func TestGenericBundle_ScoringOutcomePatterns(t *testing.T) {
 		Status:   "ready",
 		Metadata: map[string]any{},
 	}, nil)
-	if rejected.RuleID != "reject" || rejected.Stage != runtimepipeline.NormalizeWorkflowStateID("rejected") {
-		t.Fatalf("expected reject rule execution, got %+v", rejected)
+	rejectRef, rejectDeclared := handler.Rules[1].DeclarationIdentity()
+	rejectFact, err := rejected.RuleSelection.ResolvedFact()
+	if !rejectDeclared || err != nil || rejectFact.Context() != handlerselection.ContextRules || rejectFact.Disposition() != handlerselection.DispositionSelected || !rejectFact.Ref().Equal(rejectRef) || rejected.RuleID != "rules[1]: default" || rejectFact.DisplayLabel() != rejected.RuleID || rejected.Stage != runtimepipeline.NormalizeWorkflowStateID("rejected") {
+		t.Fatalf("expected exact default rejection row execution, got %+v (selection error: %v)", rejected, err)
 	}
 	if !hasAll(rejected.Emits, "processing/item.rejected") {
 		t.Fatalf("expected rejection emission, got %v", rejected.Emits)
