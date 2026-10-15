@@ -340,6 +340,7 @@ func (a *Attempt) Finish(finalErr error) {
 	a.revisionMu.Lock()
 	revision := a.revision
 	a.revisionMu.Unlock()
+	revision.settle(a.acknowledged, a.commitAttempted, a.rollbackAttempted)
 	a.mutationMu.Lock()
 	mutation := a.mutation
 	a.mutationMu.Unlock()
