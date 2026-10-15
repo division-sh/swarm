@@ -27,8 +27,13 @@ func TestServeSessionHeldAuthenticationCheckpointBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			f := newServeBootstrapTestFixture(t, backend)
 			cut := &serveBootstrapAuthCut{held: make(chan struct{}), release: make(chan struct{}), authenticated: make(chan struct{})}
-			serveBootstrapWireFixture(t, "paired", f.owner, cut)
+			authenticated := serveBootstrapWireFixture(t, "paired", f.owner, cut)
 			accountRef := seedServePairedDevice(t, f)
+			select {
+			case <-authenticated:
+				t.Fatal("unpaired seed socket supplied paired login evidence")
+			default:
+			}
 			// A finite diagnostic bound, not a changed product or existing
 			// fixture deadline. Auth release and observation use channels.
 			ctx, cancel := context.WithTimeout(f.ctx, 20*time.Second)
@@ -40,6 +45,11 @@ func TestServeSessionHeldAuthenticationCheckpointBothStores(t *testing.T) {
 			case <-cut.held:
 			case <-ctx.Done():
 				t.Fatal("paired SDK socket did not reach the held authentication cut")
+			}
+			select {
+			case <-authenticated:
+				t.Fatal("Noise completion supplied held authentication evidence")
+			default:
 			}
 			current := f.adapter.connection(f.op.OperationID)
 			f.adapter.mu.Lock()
@@ -63,6 +73,7 @@ func TestServeSessionHeldAuthenticationCheckpointBothStores(t *testing.T) {
 				t.Fatal("read original private header")
 			}
 			close(cut.release)
+			awaitServePairedAuthenticationFixture(t, ctx, authenticated)
 			select {
 			case <-cut.authenticated:
 			case <-ctx.Done():
@@ -78,6 +89,20 @@ func TestServeSessionHeldAuthenticationCheckpointBothStores(t *testing.T) {
 				after.IdentityOperationID != "" || after.ActivationRevision != 0 || after.Coordinate.TargetGeneration != 0 ||
 				current != f.adapter.connection(f.op.OperationID) || f.selections.Load() != 2 || headerErr != nil || !bytes.Equal(header, retainedHeader) {
 				t.Fatal("released authentication changed responsibility, identity, header or checkpoint ownership")
+			}
+			if err := current.Close(ctx); err != nil {
+				t.Fatal("original authenticated socket did not join", err)
+			}
+			if err := awaitServeSessionBootstrapFixture(ctx, f.adapter, after, f.candidate, true); err != nil {
+				t.Fatal("distinct retained-account successor did not authenticate", err)
+			}
+			if f.adapter.connection(f.op.OperationID) == current || f.selections.Load() != 3 {
+				t.Fatal("successor did not construct one distinct authenticated socket")
+			}
+			select {
+			case <-authenticated:
+				t.Fatal("consumed first-socket evidence remained usable for a distinct successor")
+			default:
 			}
 		})
 	}
