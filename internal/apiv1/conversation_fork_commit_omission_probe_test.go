@@ -9,9 +9,15 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -49,12 +55,19 @@ func (o *forkCommitOmissionProbeOwner) CreateAPIConversationFork(ctx context.Con
 
 func newConversationForkCommitFixture(t *testing.T, backend string) (context.Context, forkCommitOmissionProbeStore, *sql.DB, time.Time, string, string) {
 	t.Helper()
-	ctx := testAuthorActivityContext(context.Background())
+	repo := pipeline.WorkflowRepoRoot()
+	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, canonicalrouting.CopyConversationForkHistory(t), contracts.DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact := mustAPITestSourceArtifactFact(bundle.SourceArtifact.BundleHash())
+	ctx := testAuthorActivityContextForSource(context.Background(), fact)
+	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	var selected forkCommitOmissionProbeStore
 	var db *sql.DB
 	runID, sessionID, turnID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	now := time.Now().UTC().Truncate(time.Second)
-	runFixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour)}
+	runFixture := storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()}
 	if backend == "sqlite" {
 		s := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 		selected, db = s, storetest.DatabaseForTest(s)
@@ -66,22 +79,28 @@ func newConversationForkCommitFixture(t *testing.T, backend string) (context.Con
 	storetest.RequireRun(t, ctx, selected, runFixture)
 	const agentID = "fork-commit-omission-source"
 	identity := sqliteAgentUsageIdentityForRun(t, runID, agentID)
-	if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{
+	if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, selected, manager.PersistedAgent{
 		Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 			Identity: identity, ID: agentID, Role: "researcher", Type: "managed", Model: "cheap",
 			ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowPath: "flow/a", Memory: agentmemory.Plan{Enabled: true},
 		}), Status: "active", StartedAt: now.Add(-5 * time.Minute),
-	}); err != nil {
+	}, fact); err != nil {
 		t.Fatal(err)
 	}
-	history := storetest.SeedConversationForkSource(t, ctx, selected, storetest.ConversationForkSourceFixture{
+	planner, err := newAPITestFlowConstructor(t, selected.(bus.EventStore), nil, bus.EventBusOptions{ContractBundle: semanticview.Wrap(bundle), SourceArtifactFact: fact})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := storetest.ConversationForkSourceFixture{
 		Identity: identity, RunID: runID, SessionID: sessionID, EntityID: uuid.NewString(),
 		Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), CreatedAt: now,
 		Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute),
-	})
+	}
+	fixture.Construction = storetest.PrepareConversationForkConstruction(t, ctx, selected, semanticview.Wrap(bundle), planner, fixture)
+	history := storetest.SeedConversationForkSource(t, ctx, selected, fixture)
 	storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
 		Store: selected, Selected: selected, Identity: identity, RunID: runID, SessionID: sessionID,
-		TurnID: turnID, Memory: agentmemory.Plan{Enabled: true}, Event: history[0], ParseOK: true, CreatedAt: now.Add(-2 * time.Minute),
+		TurnID: turnID, Memory: agentmemory.Plan{Enabled: true}, Event: history.Events[0], ParseOK: true, CreatedAt: now.Add(-2 * time.Minute),
 	})
 	return ctx, selected, db, now, sessionID, turnID
 }
