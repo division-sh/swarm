@@ -104,6 +104,7 @@ func proveAgentProfileRecoveryBeforeAttempt(t *testing.T, backend string) {
 	if !oldCapture {
 		t.Fatal("connected recovery substituted the current configuration for the original claim")
 	}
+	assertNativeAgentRecoveryOccupancy(t, f, map[string]int{original.ProfileID: 1, current.ProfileID: 1})
 	if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(before, after) {
 		t.Fatal("recovery enumeration/profile joins changed complete application storage")
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
@@ -48,11 +49,14 @@ func proveMixedOwnedRecoveryImage(t *testing.T, ordinary agentClaimProfileFixtur
 		original = readMixedOwnedRecoveryImage(t, read)
 		assertMixedOwnedRecoveryClasses(t, original, read, standing, selected)
 		assertConnectedAgentRecoveryImage(t, read, original)
+		counts := map[string]int{selection.BackendAnthropic: 2, selection.BackendOpenAICompatible: 1}
+		assertNativeAgentRecoveryOccupancy(t, read, counts)
 		assertRecoveryReadOwnerContextRefusal(t, ctx, foreign.(agentRecoveryReadOwners), "different selected store")
 		assertConnectedAgentRecoveryContextRefusal(t, ctx, foreign, "different selected store")
 		added := advanceMixedOwnedRecoveryImage(t, standing, selected, busy, pending.ID(), original.Head)
 		latest = readMixedOwnedRecoveryImage(t, ordinary)
 		assertConnectedAgentRecoveryImage(t, ordinary, latest)
+		assertNativeAgentRecoveryOccupancy(t, ordinary, counts)
 		written = profileFixtureSnapshot(t, ordinary)
 		if latest.Head.Revision == original.Head.Revision || !reflect.DeepEqual(latest.Process, original.Process) {
 			t.Fatal("outside native source-head replacement was not distinct or changed the process stamp")
@@ -93,6 +97,7 @@ func proveMixedOwnedRecoveryImage(t *testing.T, ordinary agentClaimProfileFixtur
 			t.Fatal("owned mixed source/evidence image crossed its held native cut")
 		}
 		assertConnectedAgentRecoveryImage(t, read, original)
+		assertNativeAgentRecoveryOccupancy(t, read, counts)
 		if after := profileFixtureSnapshot(t, read); !reflect.DeepEqual(before, after) {
 			t.Fatal("held mixed owned image changed complete application storage")
 		}
