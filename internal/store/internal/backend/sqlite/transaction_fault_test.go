@@ -30,6 +30,9 @@ type exitFaultConnector struct {
 	closeEntered, closeRelease       chan struct{}
 	rollbackEntered, rollbackRelease chan struct{}
 	closeOnce, rollbackOnce          sync.Once
+	constraintCleanupEntered         chan struct{}
+	constraintCleanupRelease         chan struct{}
+	constraintCleanupOnce            sync.Once
 }
 
 func (c *exitFaultConnector) Driver() driver.Driver { return &modernc.Driver{} }
@@ -65,6 +68,9 @@ func (c *exitFaultConn) BeginTx(ctx context.Context, opts driver.TxOptions) (dri
 	return &exitFaultTx{Tx: tx, owner: c.owner}, nil
 }
 func (c *exitFaultConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	if query == "PRAGMA ignore_check_constraints=OFF" && c.owner.constraintCleanupEntered != nil {
+		c.owner.constraintCleanupOnce.Do(func() { close(c.owner.constraintCleanupEntered); <-c.owner.constraintCleanupRelease })
+	}
 	return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
 }
 func (c *exitFaultConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {

@@ -45,13 +45,13 @@ func (s *nativeFreshnessBoundarySession) ReadAgentRecoverySeed(context.Context) 
 	return runtimeownership.AgentRecoverySeedRead{Process: stamp, SourceHead: plan, InProgressByProfile: map[string]int{}}, err
 }
 
-func newNativeFreshnessBoundarySession(t *testing.T, backend string) *nativeFreshnessBoundarySession {
+func newNativeFreshnessBoundarySession(t *testing.T, backend string, enforceConstraints ...bool) *nativeFreshnessBoundarySession {
 	t.Helper()
 	if backend == "postgres" {
 		session, _, _ := newPostgresGenerationMonitor(t, "")
 		return &nativeFreshnessBoundarySession{RetainedSession: session, postgres: session}
 	}
-	session, _ := newSQLiteProofSession(t, 2)
+	session, _ := newSQLiteProofSession(t, 2, enforceConstraints...)
 	return &nativeFreshnessBoundarySession{RetainedSession: session, sqlite: session}
 }
 
@@ -74,12 +74,17 @@ func (s *nativeFreshnessBoundarySession) read(ctx context.Context, operation fun
 
 func TestAgentRecoveryNativePreBindWriteMustJoinBothStores(t *testing.T) {
 	for _, entrance := range []struct {
-		backend  string
-		retained bool
-	}{{"sqlite", false}, {"postgres", false}, {"postgres", true}} {
+		backend    string
+		retained   bool
+		corruption string
+	}{{"sqlite", false, ""}, {"postgres", false, ""}, {"postgres", true, ""}, {"sqlite", false, "route"}, {"sqlite", false, "status"}} {
 		for _, rollback := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s/retained=%t/rollback=%t", entrance.backend, entrance.retained, rollback), func(t *testing.T) {
-				session := newNativeFreshnessBoundarySession(t, entrance.backend)
+			name := fmt.Sprintf("%s/retained=%t/rollback=%t", entrance.backend, entrance.retained, rollback)
+			if entrance.corruption != "" {
+				name += "/" + entrance.corruption
+			}
+			t.Run(name, func(t *testing.T) {
+				session := newNativeFreshnessBoundarySession(t, entrance.backend, entrance.corruption != "")
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
 				entered, release := make(chan struct{}), make(chan struct{})
@@ -92,7 +97,7 @@ func TestAgentRecoveryNativePreBindWriteMustJoinBothStores(t *testing.T) {
 				}
 				done := make(chan result, 1)
 				go func() {
-					ack, err := session.write(ctx, entrance.retained, func(context.Context, *sql.Tx) error {
+					operation := func(context.Context, *sql.Tx) error {
 						close(entered)
 						select {
 						case <-ctx.Done():
@@ -103,7 +108,18 @@ func TestAgentRecoveryNativePreBindWriteMustJoinBothStores(t *testing.T) {
 							return primary
 						}
 						return nil
-					})
+					}
+					var ack bool
+					var err error
+					if entrance.corruption != "" {
+						run := session.sqlite.owner.backend.RunAgentSnapshotStatusCorruptionForTest
+						if entrance.corruption == "route" {
+							run = session.sqlite.owner.backend.RunAgentSnapshotRouteCorruptionForTest
+						}
+						ack, err = run(ctx, operation)
+					} else {
+						ack, err = session.write(ctx, entrance.retained, operation)
+					}
 					done <- result{ack, err}
 				}()
 				joined := false
@@ -115,6 +131,9 @@ func TestAgentRecoveryNativePreBindWriteMustJoinBothStores(t *testing.T) {
 				})
 				select {
 				case <-entered:
+				case outcome := <-done:
+					joined = true
+					t.Fatalf("native pre-bind owner refused before the held cut: %+v", outcome)
 				case <-ctx.Done():
 					t.Fatal("native pre-bind write did not enter")
 				}
