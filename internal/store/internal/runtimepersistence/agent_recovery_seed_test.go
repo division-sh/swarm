@@ -60,6 +60,9 @@ func proveAgentRecoverySeedMalformedMember(t *testing.T, backend string, fault A
 	_, first, firstProfile := f.claim(t)
 	_, second, secondProfile := f.claim(t)
 	process, _ := agentRecoveryFixtureOwners(t, f)
+	if err := startupownership.SeedAgentRecovery(f.ctx, process); err != nil {
+		t.Fatalf("seed original complete image before the native corruption cut: %v", err)
+	}
 	before := profileFixtureSnapshot(t, f)
 	if err := ApplyAgentClaimProfileFaultForTest(f.ctx, f.store, second.Claim, secondProfile, fault, deliverylifecycle.Claim{}); err != nil {
 		t.Fatal(err)
