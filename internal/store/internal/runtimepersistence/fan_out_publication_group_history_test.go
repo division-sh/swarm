@@ -302,7 +302,7 @@ func TestFanOutPublicationGroupHistoryMaterializedForkBothStores(t *testing.T) {
 			requireCompleteRunForkRevision(t, f.ctx, fixture, child.ForkRunID)
 			f.requireForkPoint(t, f.events[0].ID(), published.revision)
 			f.requireLiveReceipts(t, f.eventIDs())
-			repeated, err := store.MaterializeRunFork(f.ctx, request)
+			repeated, err := store.RequireMaterializedRunFork(f.ctx, child.ForkRunID, request)
 			if err != nil || repeated.ForkRunID != child.ForkRunID || repeated.ForkPoint.Revision != published.revision {
 				t.Fatalf("exact materialization repeat: %+v err=%v", repeated, err)
 			}

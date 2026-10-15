@@ -82,6 +82,7 @@ func TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores(t
 			forks := f.store.(interface {
 				PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 				MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+				RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 			})
 			cutRequest := runfork.RunForkPlanRequest{SourceRunID: runID, At: marker.ID()}
 			cut, err := forks.PlanRunFork(f.ctx, cutRequest)
@@ -182,7 +183,7 @@ func TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores(t
 			if err != nil {
 				t.Fatal(err)
 			}
-			if replayed, err := forks.MaterializeRunFork(f.ctx, forkRequest); err != nil || replayed.ForkRunID != fork.ForkRunID {
+			if replayed, err := forks.RequireMaterializedRunFork(f.ctx, fork.ForkRunID, forkRequest); err != nil || replayed.ForkRunID != fork.ForkRunID {
 				t.Fatalf("exact fixed fork replay: %+v err=%v", replayed, err)
 			}
 			if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(before, after) {
@@ -200,7 +201,7 @@ func TestR7HistoricalDirectoryIgnoresPostCutConstructionAndLifecycleBothStores(t
 			if current := readFixed(); !reflect.DeepEqual(current, original) {
 				t.Fatal("current source progress changed the captured observation")
 			}
-			if replayed, err := forks.MaterializeRunFork(f.ctx, forkRequest); err == nil || replayed.ForkRunID != "" || !strings.Contains(err.Error(), "conflicts with persisted lifecycle state") {
+			if replayed, err := forks.RequireMaterializedRunFork(f.ctx, fork.ForkRunID, forkRequest); err == nil || replayed.ForkRunID != "" || !strings.Contains(err.Error(), "conflicts with persisted lifecycle state") {
 				t.Fatalf("source progress rewrote frozen fork eligibility: %+v err=%v", replayed, err)
 			}
 			if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(before, after) {
@@ -281,6 +282,7 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 	owner := f.store.(interface {
 		PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 		MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+		RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 	})
 	history, err := owner.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: marker.ID()})
 	if err != nil || len(history.Entities) != 2 {
@@ -362,7 +364,7 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 		t.Fatalf("historical projection fabricated fresh state/execution: fields=%d readiness=%d construction=%d", fields, readiness, construction)
 	}
 	before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
-	again, err := owner.MaterializeRunFork(f.ctx, request)
+	again, err := owner.RequireMaterializedRunFork(f.ctx, fork.ForkRunID, request)
 	if err != nil || again.ForkRunID != fork.ForkRunID || !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
 		t.Fatalf("exact materialize-only replay changed history: %+v %v", again, err)
 	}
@@ -386,7 +388,7 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 					t.Fatal(err)
 				}
 				before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
-				if _, err := owner.MaterializeRunFork(f.ctx, request); err == nil {
+				if _, err := owner.RequireMaterializedRunFork(f.ctx, fork.ForkRunID, request); err == nil {
 					t.Fatalf("exact replay accepted changed historical %s", fault.name)
 				}
 				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
@@ -402,7 +404,7 @@ func proveFlowConstructorHistoricalSnapshot(t *testing.T, backend string, staged
 		t.Fatal(err)
 	}
 	before = snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
-	if _, err := owner.MaterializeRunFork(f.ctx, request); err == nil || !strings.Contains(err.Error(), "missing expected entities") {
+	if _, err := owner.RequireMaterializedRunFork(f.ctx, fork.ForkRunID, request); err == nil || !strings.Contains(err.Error(), "missing expected entities") {
 		t.Fatalf("exact replay repaired missing historical header: %v", err)
 	}
 	if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
