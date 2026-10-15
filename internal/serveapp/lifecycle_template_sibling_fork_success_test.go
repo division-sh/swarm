@@ -101,6 +101,8 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := lifecycleStoredSnapshot(t, rt, runID)
+			cards := selected.RuntimeDeps().DecisionCards
+			preFreeze := readTemplateForkSourceEvidence(t, t.Context(), rt.ReceiverStateReader, cards, runID, siblings)
 			cut := requireLifecycleTemplatePendingCut(t, rt.BundleHash, selected, runID, frontier.EventID)
 			params := map[string]any{"source_run_id": runID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "template-fork"}
 			var fork, duplicate apiv1.RunForkExecutionResult
@@ -116,7 +118,20 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 			if err := json.Unmarshal(firstResponse.Result, &fork); err != nil {
 				t.Fatalf("decode run.fork result: %v\n%s", err, string(firstResponse.Result))
 			}
+			sourceHeader, err := selected.Runs().LoadRunHeader(t.Context(), runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			postFreeze := readTemplateForkSourceEvidence(t, t.Context(), rt.ReceiverStateReader, cards, runID, siblings)
+			frozenParents := requireTemplateForkFreezeDelta(t, preFreeze, postFreeze, sourceHeader, fork, siblings)
+			frozenSnapshot := lifecycleStoredSnapshot(t, rt, runID)
+			if frozenSnapshot == before {
+				t.Fatal("acknowledged freeze did not change its two original pending gate headers")
+			}
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
+			if lifecycleStoredSnapshot(t, rt, runID) != frozenSnapshot || !reflect.DeepEqual(postFreeze, readTemplateForkSourceEvidence(t, t.Context(), rt.ReceiverStateReader, cards, runID, siblings)) {
+				t.Fatal("duplicate fork acknowledgment changed validated frozen source evidence")
+			}
 			if fork.ForkRunID == "" || fork.ForkRunID == runID || !reflect.DeepEqual(fork, duplicate) || fork.ExecutedEventCount != 0 ||
 				fork.ForkRunStatus != runfork.RunForkActivatedStatus || fork.ForkEventID != frontier.EventID || fork.ForkRevision != cut.Revision ||
 				fork.ForkPointKind != string(cut.Kind) || fork.BundleHash != rt.BundleHash || fork.SourceRunID != runID {
@@ -160,6 +175,7 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 				child.gate = readLifecycleTemplateGate(t, rt, fork.ForkRunID, child.gateEntity, child.flow+"/sink")
 				projected, err := runfork.ProjectEntityOwnership(runID, fork.ForkRunID, parent.gateEntity, parent.gateInstance)
 				if err != nil || child.gateEntity != projected.Fork.EntityID || child.gateInstance != projected.Fork.FlowInstance ||
+					child.gate.Status != parent.gate.Status ||
 					child.gate.CardID == parent.gate.CardID || child.gate.ActivationID == parent.gate.ActivationID ||
 					child.gate.RoutesJSON != parent.gate.RoutesJSON || child.gate.BundleHash != parent.gate.BundleHash {
 					t.Fatalf("fork did not remint ownership while preserving exact frozen source: parent=%#v child=%#v", parent, child)
@@ -174,10 +190,10 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 			}
 			completeLifecycleTemplateSiblings(t, rt, fork.ForkRunID, children)
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
-			if lifecycleStoredSnapshot(t, rt, runID) != before {
+			if lifecycleStoredSnapshot(t, rt, runID) != frozenSnapshot {
 				t.Fatal("fork sibling verdict changed parent state/history")
 			}
-			for _, parent := range siblings {
+			for _, parent := range frozenParents {
 				requireLifecycleEventCount(t, rt, runID, parent.flow+"/sink/work.completed", 0)
 				pending := readLifecycleTemplateGate(t, rt, runID, parent.gateEntity, parent.flow+"/sink")
 				if !reflect.DeepEqual(pending, parent.gate) {
@@ -202,6 +218,13 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 				t.Fatalf("T17 replay duplicated or changed its exact completed delivery: %+v error=%v", current, err)
 			}
 			requireLifecycleEventCount(t, rt, fork.ForkRunID, "work.observed", 1)
+			if lifecycleStoredSnapshot(t, rt, runID) != frozenSnapshot || !reflect.DeepEqual(postFreeze, readTemplateForkSourceEvidence(t, t.Context(), rt.ReceiverStateReader, cards, runID, siblings)) {
+				t.Fatal("child decisions or late replay changed validated frozen source evidence")
+			}
+			finalSource, err := selected.Runs().LoadRunHeader(t.Context(), runID)
+			if err != nil || !reflect.DeepEqual(sourceHeader, finalSource) {
+				t.Fatalf("child decisions or replay changed the exact frozen source run: before=%+v after=%+v err=%v", sourceHeader, finalSource, err)
+			}
 		})
 	}
 }

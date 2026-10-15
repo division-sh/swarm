@@ -83,7 +83,40 @@ func requireHistoricalPlanningRun(ctx context.Context, tx *sql.Tx, run runlifecy
 	return nil
 }
 
-// Only the existing serialized planning reader enters this synchronous owner.
+// Evidence can share immutable reconstruction within its synchronous read, but
+// has no source with which to admit executable construction.
+func beginHistoricalEvidenceRead(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot) (context.Context, func() error, error) {
+	if err := ctx.Err(); err != nil {
+		return ctx, nil, err
+	}
+	if tx == nil || run.Validate() != nil {
+		return ctx, nil, fmt.Errorf("historical construction evidence requires its admitted read snapshot")
+	}
+	prior, err := historicalPlanningForTx(ctx, tx)
+	if err != nil {
+		return ctx, nil, err
+	}
+	if prior != nil {
+		done, err := beginHistoricalPlanningRead(ctx, tx, nil, run)
+		return ctx, done, err
+	}
+	scope := &historicalPlanningReconstruction{
+		tx: tx, run: run,
+		resolver: capturedConstructionResolver{tx: tx, snapshots: make(map[constructionCut]*runForkRevisionSnapshot), active: make(map[string]bool)},
+	}
+	ctx = context.WithValue(ctx, historicalPlanningContextKey{}, scope)
+	done, err := beginHistoricalPlanningRead(ctx, tx, nil, run)
+	if err != nil {
+		scope.closed.Store(true)
+		return ctx, nil, err
+	}
+	return ctx, func() error {
+		defer scope.closed.Store(true)
+		return done()
+	}, nil
+}
+
+// Each existing synchronous snapshot read enters this owner within its own TX.
 // Reject concurrent use rather than introducing another lock or SQL lifetime.
 func beginHistoricalPlanningRead(ctx context.Context, tx *sql.Tx, source semanticview.Source, run runlifecycle.Snapshot) (func() error, error) {
 	scope, err := historicalPlanningForTx(ctx, tx)

@@ -364,6 +364,32 @@ func testHistoricalConstructionBatchUsesFreshRunAndTransactionBothStores(t *test
 			if got, err := readHistoricalConstructionBatchTest(f.ctx, f.store, source, otherRun, []pipeline.WorkflowInstance{other, header}); err == nil || got != nil {
 				t.Fatalf("foreign physical header borrowed other run's authority: %+v %v", got, err)
 			}
+			if sourceCompatible {
+				index := f.store.(pipeline.FlowInstanceIndexReader)
+				fact := mustStoreTestSourceArtifactFact(f.bundle.SourceArtifact.BundleHash())
+				for _, expected := range []struct {
+					owner        flowidentity.RunScopedFlowInstance
+					construction pipeline.HistoricalFlowInstanceConstruction
+				}{{f.owner, first[0].Construction}, {otherOwner, second[0].Construction}} {
+					lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, expected.owner)
+					if err != nil {
+						t.Fatal(err)
+					}
+					observation, found, err := index.LookupFlowInstance(f.ctx, lookup)
+					construction, historical := observation.HistoricalConstruction()
+					if err != nil || !found || !historical || construction != expected.construction {
+						t.Fatalf("direct re-fork lookup crossed source/cut/run: %+v found=%t historical=%t error=%v", construction, found, historical, err)
+					}
+					scope, err := pipeline.NewFlowInstanceLookupScope(source, fact, expected.owner.RunID, nil, []flowidentity.RunScopedFlowInstance{expected.owner})
+					if err != nil {
+						t.Fatal(err)
+					}
+					listed, err := index.ListFlowInstances(f.ctx, scope)
+					if err != nil || len(listed) != 1 || !reflect.DeepEqual(listed[0], observation) {
+						t.Fatalf("direct re-fork list changed exact lookup evidence: %+v error=%v", listed, err)
+					}
+				}
+			}
 		})
 	}
 }

@@ -29,6 +29,11 @@ type servedBoundaryFixture struct {
 
 func startServedBoundaryFixture(t *testing.T, backend, sourceRoot string) (*serveRuntimeTestProcess, servedBoundaryFixture) {
 	t.Helper()
+	return newServedBoundaryFixtureLifetime(t, backend, sourceRoot)()
+}
+
+func newServedBoundaryFixtureLifetime(t *testing.T, backend, sourceRoot string) func() (*serveRuntimeTestProcess, servedBoundaryFixture) {
+	t.Helper()
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	var location string
@@ -54,16 +59,10 @@ func startServedBoundaryFixture(t *testing.T, backend, sourceRoot string) (*serv
 		return selected, err
 	}
 	t.Cleanup(func() { buildStoresForServe = previous })
-	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 	opts := cliapp.ServeOptions{
 		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
-		TestLifecycleProbe: probe, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-	}
-	// The receiver control already owns its exact publication observer. Let the
-	// existing process fixture bind it instead of replacing it with this probe.
-	if _, found := ownedMockLifecycleProbes.Load(t); found {
-		opts.TestLifecycleProbe = nil
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 	if backend == "sqlite" {
 		opts.ConfigPath = writeStoreBackendRuntimeConfig(t, backend, location)
@@ -71,21 +70,41 @@ func startServedBoundaryFixture(t *testing.T, backend, sourceRoot string) (*serv
 		opts.ConfigPath = writeServeRuntimeTestConfig(t)
 		opts.StoreMode, opts.StoreModeSet = "postgres", true
 	}
-	process := startServeRuntimeTestProcess(t, opts)
-	t.Cleanup(func() {
-		if code := process.stop(); code != 0 {
-			t.Errorf("served boundary shutdown returned %d\n%s", code, process.outputString())
+	var priorProcess *serveRuntimeTestProcess
+	return func() (*serveRuntimeTestProcess, servedBoundaryFixture) {
+		if priorProcess != nil {
+			priorProcess.mu.Lock()
+			stopped := priorProcess.stopped
+			priorProcess.mu.Unlock()
+			if !stopped {
+				t.Fatal("served boundary must join its previous process before reopening")
+			}
 		}
-	})
-	process.waitForReadyLine()
-	if selected == nil {
-		t.Fatal("served boundary lacks its original selected owner")
-	}
-	return process, servedBoundaryFixture{
-		Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc",
-		Backend:  backend, BundleHash: servedEventPublishFixtureBundleHash(t, sourceRoot),
-		Selected: selected, Runtime: servedTestProcessRuntime(t, process), Probe: probe,
-		ReceiverStateReader: requireReceiverProofStateReader(t, selected.RuntimeDeps().EventStore),
+		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
+		start := opts
+		start.TestLifecycleProbe = probe
+		// An existing receiver observer remains the exact process publication owner.
+		if _, found := ownedMockLifecycleProbes.Load(t); found {
+			start.TestLifecycleProbe = nil
+		}
+		selected = nil
+		process := startServeRuntimeTestProcess(t, start)
+		priorProcess = process
+		t.Cleanup(func() {
+			if code := process.stop(); code != 0 {
+				t.Errorf("served boundary shutdown returned %d\n%s", code, process.outputString())
+			}
+		})
+		process.waitForReadyLine()
+		if selected == nil {
+			t.Fatal("served boundary lacks its original selected owner")
+		}
+		return process, servedBoundaryFixture{
+			Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc",
+			Backend:  backend, BundleHash: servedEventPublishFixtureBundleHash(t, sourceRoot),
+			Selected: selected, Runtime: servedTestProcessRuntime(t, process), Probe: probe,
+			ReceiverStateReader: requireReceiverProofStateReader(t, selected.RuntimeDeps().EventStore),
+		}
 	}
 }
 
