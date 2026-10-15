@@ -16,7 +16,6 @@ type captureSource = capturedata.Source
 const maxCaptureEventBytes = capturedata.MaxCaptureEventBytes
 const maxPendingCaptureCount = capturedata.MaxPendingCaptureCount
 const maxPendingCaptureBytes = capturedata.MaxPendingCaptureBytes
-const captureProvenanceKey = capturedata.CaptureProvenanceKey
 
 var errCaptureConflict = capturedata.ErrCaptureConflict
 var errCaptureCapacity = capturedata.ErrCaptureCapacity
