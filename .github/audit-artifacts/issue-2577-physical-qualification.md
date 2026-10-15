@@ -364,3 +364,32 @@ After the session, perform the agreed explicit logout, verify Linked Devices and
 public retirement/readback, and remove disposable local evidence only after all
 work joins and the useful redacted receipts are retained. No production account
 or source is an acceptable cleanup target.
+
+## G3 Construction Cleanup Ordering
+
+The G3 RED at `3282706dc3` remains failed evidence: the third SQLite/bootstrap
+construction-cancellation leaf returned nil with exactly one selection. It is
+separate from the paired PostgreSQL pre-handshake residual, the preparation
+deadline REDs, and the earlier 600s aggregate interruption.
+
+The synchronized discriminator in #2577/6203651594 isolates a test cleanup gap:
+when cancellation is not cached, probing before constructor publication skips
+Close and permits ordinary reuse. Joining Close refuses that same reuse on both
+stores. It does not establish a production cancellation-cache defect or prove
+the historical RED's unrecorded ordering.
+
+Under reviewer-g's exact-join ruling #2577/6203748537, only the construction
+cancellation fixture changes: join the existing counted owner before probing
+the connection, join the SAME original attempt's done with the existing context,
+verify the retained attempt is unchanged, Close, retain post-close quiescence,
+and require a settled refusal rather than nil or Pending. The original 50ms
+reuse negative, cancellation bounds, one-selection assertion and all production
+owners remain unchanged.
+
+The disposable old-order RED and corrected-cut GREEN, the fresh G3 seven-root
+race x3 command, carry/source-path checks for G1/G2 and the four completed
+non-serve packages, affected guards, exact-head preflight and the single quiet
+SDK rehearsal are recorded separately in the signed issue checkpoint. A focused
+pass cannot erase either historical RED or grant hosted/readiness credit. A new
+refusal stops for attribution. This packet does not authorize a #2614 push or
+the user's sitting.
