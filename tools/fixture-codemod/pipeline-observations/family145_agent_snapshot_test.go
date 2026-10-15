@@ -26,7 +26,7 @@ var agentSnapshotSupportSources = map[string]string{
 	"internal/store/internal/backend/llmpersistence/test_operator_snapshot_barrier.go":       "45e20cc0b4447b06a753a161dd718caaea4521a25138302b658a6253541125ae",
 	"internal/store/internal/backend/llmpersistence/test_operator_snapshot_mutations.go":     "7787d35d5b52d6b4239db03e3bb37215b29d99d0e0d1f54dcfad619ae4536dfb",
 	"internal/store/internal/backend/sqlite/test_agent_snapshot_corruption.go":               "4644bdc2d88b4888df88afaac3541d67d4d8e18c034212316a7f5d888231abd3",
-	"internal/store/internal/runtimepersistence/test_operator_snapshot_corruption.go":        "f6984864fb0601ff1a662bc0d66c1d9e8fbce2d7f0850c661db0a0cd53ca145b",
+	"internal/store/internal/runtimepersistence/test_operator_snapshot_corruption.go":        "6559be5b69121990e7a4d1f09851d51eb79ea12e044c4b0379bafeac8dff3496",
 	"internal/store/internal/runtimepersistence/test_operator_snapshot_cut.go":               "4c57be61fa068f6ad67a62f54b32d2eddbd3013d78c959cba523b07dd6603e1e",
 	"internal/store/internal/runtimepersistence/test_operator_snapshot_read_barrier.go":      "3e0e28f853b0ed9dc50e82be99c36421fedebdb048bd5420011a157f224baaba",
 	"internal/store/storetest/operator_snapshot_corruption.go":                               "43ba82d999caeaddf3748302ef92601fa0d6d3802702ae1abd7f615ce0ba8625",

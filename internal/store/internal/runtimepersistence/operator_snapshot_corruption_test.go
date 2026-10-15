@@ -86,7 +86,7 @@ func proveOperatorSnapshotRestoration(t *testing.T, ctx context.Context, selecte
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { restoreOperatorSnapshotFault(t, fault) })
-	if err := fault.install(ctx, selected); err != nil {
+	if err := fault.installForTest(ctx, selected); err != nil {
 		t.Fatal(err)
 	}
 	after := forkReceiverFaultSnapshot(t, ctx, selected)
@@ -130,7 +130,7 @@ func proveOperatorSnapshotIndependentCleanup(t *testing.T, backend string) {
 			cancel()
 			t.Fatal(err)
 		}
-		if err := fault.install(caller, selected); err != nil {
+		if err := fault.installForTest(caller, selected); err != nil {
 			cancel()
 			t.Fatal(err)
 		}
@@ -146,7 +146,7 @@ func proveOperatorSnapshotIndependentCleanup(t *testing.T, backend string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fault.install(ctx, selected); err != nil {
+	if err := fault.installForTest(ctx, selected); err != nil {
 		t.Fatal(err)
 	}
 	if err := CorruptOperatorAgentConfigForTest(ctx, selected, identity); err != nil {
@@ -217,7 +217,7 @@ func proveOperatorSnapshotFaultRefusal(t *testing.T, ctx context.Context, select
 		missing := mustTestAgentIdentityForRun(identity.RunID, "missing-agent", "global")
 		_, err = captureOperatorAgentSnapshotFault(callCtx, selected, missing, route)
 	} else {
-		err = fault.install(callCtx, target)
+		err = fault.installForTest(callCtx, target)
 	}
 	if err == nil {
 		t.Fatal("invalid evidence installed a corruption")

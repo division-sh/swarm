@@ -42,7 +42,7 @@ func captureOperatorAgentSnapshotFault(ctx context.Context, selected any, identi
 	return fault, nil
 }
 
-func (f *operatorAgentSnapshotFault) install(ctx context.Context, selected any) error {
+func (f *operatorAgentSnapshotFault) installForTest(ctx context.Context, selected any) error {
 	if f == nil || f.row == nil || f.selected != selected {
 		return errors.New("operator snapshot fault belongs to another native owner")
 	}
@@ -96,15 +96,15 @@ func (f *operatorAgentSnapshotFault) cleanup() error {
 
 func RequireMalformedOperatorAgentRouteForTest(t testing.TB, ctx context.Context, selected any, identity agentidentity.Identity) {
 	t.Helper()
-	requireOperatorAgentSnapshotFault(t, ctx, selected, identity, true)
+	requireOperatorAgentSnapshotFaultForTest(t, ctx, selected, identity, true)
 }
 
 func RequireUnknownOperatorAgentStatusForTest(t testing.TB, ctx context.Context, selected any, identity agentidentity.Identity) {
 	t.Helper()
-	requireOperatorAgentSnapshotFault(t, ctx, selected, identity, false)
+	requireOperatorAgentSnapshotFaultForTest(t, ctx, selected, identity, false)
 }
 
-func requireOperatorAgentSnapshotFault(t testing.TB, ctx context.Context, selected any, identity agentidentity.Identity, route bool) {
+func requireOperatorAgentSnapshotFaultForTest(t testing.TB, ctx context.Context, selected any, identity agentidentity.Identity, route bool) {
 	t.Helper()
 	fault, err := captureOperatorAgentSnapshotFault(ctx, selected, identity, route)
 	if err != nil {
@@ -116,7 +116,7 @@ func requireOperatorAgentSnapshotFault(t testing.TB, ctx context.Context, select
 			t.Error(err)
 		}
 	})
-	if err := fault.install(ctx, selected); err != nil {
+	if err := fault.installForTest(ctx, selected); err != nil {
 		t.Fatalf("install fixed operator agent snapshot fault: %v", err)
 	}
 }
