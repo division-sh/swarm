@@ -2,6 +2,7 @@ package runforkpersistence
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ func TestQ10EmptyImportHistoricalMembershipAndClockProjection(t *testing.T) {
 	at := time.Unix(100, 0).UTC()
 	updated := at.Add(time.Minute)
 	reversed := at.Add(-time.Second)
-	for _, change := range []string{"exact", "missing_creation_clock", "missing_update_clock", "reversed_clocks", "lifecycle_history", "gate_history", "duplicate_birth"} {
+	for _, change := range []string{"exact", "missing_creation_clock", "missing_update_clock", "reversed_clocks", "lifecycle_history", "gate_history", "bookkeeping_history", "accumulator_history", "duplicate_birth"} {
 		t.Run(change, func(t *testing.T) {
 			fact := runForkRevisionEntityMetadata{EntityID: "entity-1", FlowInstance: "import/one", EntityType: "task", ConstructionKind: "imported_state", DataCreatedAt: &at, DataUpdatedAt: &updated}
 			snapshot := &runForkRevisionSnapshot{EntityMetadata: []runForkRevisionEntityMetadata{fact}}
@@ -28,10 +29,18 @@ func TestQ10EmptyImportHistoricalMembershipAndClockProjection(t *testing.T) {
 				snapshot.EntityMutations = []runForkRevisionEntityMutation{{EntityID: fact.EntityID, Domain: string(mutationlog.DomainLifecycleState), NewValue: []byte(`"unknown"`), CreatedAt: updated}}
 			case "gate_history":
 				snapshot.EntityMutations = []runForkRevisionEntityMutation{{EntityID: fact.EntityID, Domain: string(mutationlog.DomainGate), Path: "approved", NewValue: []byte(`true`), CreatedAt: updated}}
+			case "bookkeeping_history":
+				snapshot.EntityMutations = []runForkRevisionEntityMutation{{EntityID: fact.EntityID, Domain: string(mutationlog.DomainBookkeeping), Path: "step", NewValue: []byte(`"retained"`), CreatedAt: updated}}
+			case "accumulator_history":
+				snapshot.EntityMutations = []runForkRevisionEntityMutation{{EntityID: fact.EntityID, Domain: string(mutationlog.DomainAccumulator), Path: "total", NewValue: []byte(`7`), CreatedAt: updated}}
 			case "duplicate_birth":
 				snapshot.EntityMetadata = append(snapshot.EntityMetadata, fact)
 			}
+			history := strings.HasSuffix(change, "_history")
 			entities, err := loadRunForkEntityStates(snapshot)
+			if history && err != nil {
+				t.Fatalf("valid domain history failed before imported-owner admission: %v", err)
+			}
 			if err == nil {
 				var admission runForkMaterializedEntitySnapshotMetadataAdmission
 				entities, admission, err = attachRunForkMaterializedEntitySnapshotMetadata(snapshot, entities)
@@ -39,8 +48,16 @@ func TestQ10EmptyImportHistoricalMembershipAndClockProjection(t *testing.T) {
 					if change == "exact" {
 						t.Fatalf("genuine empty import refused: %+v", admission.Blockers)
 					}
+					if history {
+						if err != nil || len(entities) != 1 || entities[0].MaterializationMetadata != nil || len(admission.Blockers) != 1 || admission.Blockers[0].Code != runfork.RunForkBlockerEntitySnapshotMetadataUnproven || admission.Blockers[0].Message != "imported entity entity-1 cannot carry lifecycle history" {
+							t.Fatalf("imported domain history lost exact metadata-owner refusal: entities=%+v admission=%+v err=%v", entities, admission, err)
+						}
+					}
 					return
 				}
+			}
+			if history {
+				t.Fatalf("imported domain history did not reach its required metadata-owner blocker: %v", err)
 			}
 			if change != "exact" {
 				if err == nil {
