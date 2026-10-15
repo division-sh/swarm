@@ -244,7 +244,7 @@ func proveDockerRunnerAdmission(t *testing.T, capacity int) {
 		t.Fatalf("build runner: %v\n%s", err, output)
 	}
 	goBin := filepath.Join(root, "go")
-	if err := os.WriteFile(goBin, []byte("#!/bin/sh\nset -eu\ntest \"$1\" = test\nprintf '%s\\n' \"$SWARM_TEST_POSTGRES_DSN\" > \"$SWARM_TEST_PROCESS_PREFIX.dsn\"\ntouch \"$SWARM_TEST_PROCESS_PREFIX.started\"\nwhile [ ! -f \"$SWARM_TEST_PROCESS_PREFIX.release\" ]; do sleep .02; done\n"), 0o700); err != nil {
+	if err := os.WriteFile(goBin, []byte(registryFixtureGoHeader()+"test \"$1\" = test\nprintf '%s\\n' \"$SWARM_TEST_POSTGRES_DSN\" > \"$SWARM_TEST_PROCESS_PREFIX.dsn\"\ntouch \"$SWARM_TEST_PROCESS_PREFIX.started\"\nwhile [ ! -f \"$SWARM_TEST_PROCESS_PREFIX.release\" ]; do sleep .02; done\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	stateHome := filepath.Join(root, "state-home")
@@ -405,8 +405,7 @@ func TestSwarmTestJoinsDescendantAuthorityBeforeSettlement(t *testing.T) {
 	}
 
 	goBin := filepath.Join(root, "go")
-	fixture := `#!/bin/sh
-set -eu
+	fixture := registryFixtureGoHeader() + `
 test "$1" = test
 "$SWARM_TEST_DESCENDANT_HELPER" -test.run='^TestSwarmTestDescendantProcessFixture$' >/dev/null 2>&1 &
 case "$SWARM_TEST_DESCENDANT_MODE" in
@@ -708,6 +707,10 @@ esac
 			}
 		})
 	}
+}
+
+func registryFixtureGoHeader() string {
+	return fmt.Sprintf("#!/bin/sh\nset -eu\nif [ \"$1\" = env ]; then exec %q \"$@\"; fi\nif [ \"${2-}\" = -exec=/bin/true ]; then exit 0; fi\n", filepath.Join(runtime.GOROOT(), "bin", "go"))
 }
 
 func TestSwarmTestDescendantProcessFixture(t *testing.T) {

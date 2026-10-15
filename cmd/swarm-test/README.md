@@ -118,6 +118,23 @@ remain alongside it. The first failure or signal stops launching work, interrupt
 started workers, and waits for their existing descendant/service settlement.
 Compilation bytes may be shared; state and passing test credit may not.
 
+Before slot admission, eligible commands warm Go's build cache with the same
+arguments and `-exec=/bin/true`, through the existing joined native-process owner.
+No TestMain, test body, service or slot runs in that phase. Successful warm-up
+output is discarded; failure output goes to stderr as diagnostics, never JSON
+proof credit. Signals, failed builds and unresolved descendants refuse admission.
+The actual admitted command, runtime environment and result-cache semantics stay
+unchanged. Preflight uses its direct commands and does not recursively warm itself.
+
+Only a finite set of ordinary test/build flags is eligible. Unknown or ambiguous
+flags, nonempty effective GOFLAGS (including `go env -w`), executor/tool overrides,
+compile/output/profile/artifact/fuzz/work/dry-run forms and non-native or unsupported
+targets keep the original admitted path without warming. Build environment and
+toolchain are preserved; private DSN, lease and proof setup still follow admission.
+Warm-up prints its environment/build/cleanup and total time separately. Linking
+may repeat inside the slot: slot occupancy is not end-to-end latency, and neither
+existing timing ceilings nor command receipts subtract this extra work.
+
 The 30-minute local goal is a measurement target, not a relaxed test deadline or
 an assurance of success. Missing, failed, interrupted, and unstarted work earns no
 full qualification. A killed supervisor does not release authority still retained
