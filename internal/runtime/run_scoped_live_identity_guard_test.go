@@ -1,6 +1,10 @@
 package runtime
 
 import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	stdruntime "runtime"
@@ -150,16 +154,78 @@ func TestRunScopedLiveIdentityStructuralRatchet(t *testing.T) {
 		t.Error("supported describe text stopped rendering the canonical template identity projection")
 	}
 
-	testSQL := runScopedIdentityRead(t, root, "internal/store/testsql/event.go")
-	for _, required := range []string{
-		"WHERE run_id = NEW.run_id AND flow_template",
-		"fi.run_id = NEW.run_id",
-		"m.run_id = fi.run_id AND m.instance_path = fi.instance_path AND m.entity_id = fi.entity_id",
-		"r.run_id = fi.run_id AND r.instance_path = fi.instance_path",
-		"fi.run_id = (SELECT run_id FROM events",
-	} {
-		if !strings.Contains(testSQL, required) {
-			t.Errorf("test SQL failure injector stopped classifying exact run owner %q", required)
+	for _, owner := range runScopedPublicationFaultOwners() {
+		body := runScopedPublicationFaultBody(t, root, owner)
+		for _, required := range runScopedPublicationFaultPredicates(owner) {
+			if strings.Count(body, required) != 2 {
+				t.Errorf("%s must preserve both dialects' exact publication identity %q", owner.path, required)
+			}
+		}
+	}
+}
+
+type runScopedPublicationFaultOwner struct {
+	path, function, run, event string
+}
+
+func runScopedPublicationFaultOwners() []runScopedPublicationFaultOwner {
+	return []runScopedPublicationFaultOwner{
+		{"internal/store/internal/backend/delivery/lifecycle.go", "SetPublicationMaterializationFailureTx", "NEW.run_id", "NEW.event_id"},
+		{"internal/store/internal/backend/pipelinepersistence/test_publication_replay_failure.go", "SetPublicationReplayFailureTx", "(SELECTrun_idFROMeventsWHEREevent_id=NEW.event_id)", "NEW.event_id"},
+		{"internal/store/internal/apiidempotency/test_publication_completion_failure.go", "SetPublicationCompletionFailureTx", "(SELECTrun_idFROMeventsWHEREevent_id=NEW.resource_id", "NEW.resource_id"},
+	}
+}
+
+func runScopedPublicationFaultPredicates(owner runScopedPublicationFaultOwner) []string {
+	return []string{
+		"WHEREfi.run_id=" + owner.run,
+		"ANDfi.flow_template='%s'",
+		"JOINworkflow_instance_initial_materializationsmONm.run_id=fi.run_idANDm.instance_path=fi.instance_pathANDm.entity_id=fi.entity_id",
+		"JOINflow_instance_runtime_readinessrONr.run_id=fi.run_idANDr.instance_path=fi.instance_path",
+		"WHEREes.run_id=fi.run_idANDes.flow_instance=fi.instance_pathANDes.entity_id=fi.entity_idANDes.entity_type=fi.entity_type",
+		"SELECT1FROMeventsWHEREevent_id=" + owner.event,
+	}
+}
+
+func runScopedPublicationFaultBody(t *testing.T, root string, owner runScopedPublicationFaultOwner) string {
+	t.Helper()
+	source := runScopedIdentityRead(t, root, owner.path)
+	positions := token.NewFileSet()
+	file, err := parser.ParseFile(positions, owner.path, source, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if ok && function.Name.Name == owner.function && function.Body != nil {
+			body := source[positions.Position(function.Body.Pos()).Offset:positions.Position(function.Body.End()).Offset]
+			return strings.Join(strings.Fields(body), "")
+		}
+	}
+	t.Fatalf("publication fault owner %s.%s disappeared", owner.path, owner.function)
+	return ""
+}
+
+func TestRunScopedPublicationFaultGuardRejectsLostIdentityInEitherDialect(t *testing.T) {
+	root := runScopedIdentityRepoRoot(t)
+	for _, owner := range runScopedPublicationFaultOwners() {
+		body := runScopedPublicationFaultBody(t, root, owner)
+		for _, required := range runScopedPublicationFaultPredicates(owner) {
+			for _, dialect := range []string{"sqlite", "postgres"} {
+				t.Run(fmt.Sprintf("%s/%s/%s", owner.function, dialect, required), func(t *testing.T) {
+					if count := strings.Count(body, required); count != 2 {
+						t.Fatalf("control has %d native predicates, want 2", count)
+					}
+					index := strings.Index(body, required)
+					if dialect == "postgres" {
+						index = strings.LastIndex(body, required)
+					}
+					changed := body[:index] + "foreign_identity" + body[index+len(required):]
+					if strings.Count(changed, required) == 2 {
+						t.Fatal("lost native identity passed the publication fault guard")
+					}
+				})
+			}
 		}
 	}
 }

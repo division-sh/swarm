@@ -68,3 +68,26 @@ Final exact signed-head native unused, independent complexity, source/history
 controls and the read-only real ratchet/preflight are external receipts to the
 combined checkpoint. No duplicate local tier, normal push, PR or hosted dispatch
 is part of this boundary.
+
+## Reached structural-guard repair
+
+The first preflight refused a moving origin/master comparison before proof work.
+The next stable comparison reached TestRunScopedLiveIdentityStructuralRatchet,
+which still searched the removed testsql installers for five run-identity facts.
+The accepted6193917683 migration moved those facts into the three exact private
+materialization/replay/API-completion fault owners. No production predicate is
+changed to satisfy the guard.
+
+The guard now extracts each original function with the Go parser and requires
+both dialects' run, template, materialization entity identity and runtime
+readiness predicates, plus the exact publication event and entity-state scope.
+It cannot satisfy one owner's check with another function or file. Thirty-six
+hostile controls delete each of six predicates separately from either dialect;
+all refuse. The original structural root and controls PASS0.144s. An intermediate
+overbroad event-token count failed; its corrected token names the exact event
+existence query rather than counting distinct lifecycle subqueries as copies.
+
+This is an integration oracle repair within the settled selected-owner contract,
+not a guard waiver, accounting exception or new semantic owner. Its signed-head
+preflight and native unused receipts must be taken after this source change;
+the earlier interrupted native analysis is not credited as a pass.
