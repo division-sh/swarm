@@ -58,7 +58,11 @@ func TestSessionActivityLaunchUsesAuthoredCustomerNotMailboxDestination(t *testi
 	intent.ChannelActivationGeneration = publication.Generation()
 	intent.Owner = activityidentity.MustNodeOwner(site.Node)
 	intent.HandlerEventKey = site.HandlerEventKey
-	intent.ActivityID = contracts.ActivityResultEventsForSite(site).ActivityID
+	resultEvents, err := contracts.ActivityResultEventsForSite(site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent.ActivityID = resultEvents.ActivityID
 	intent.WorkflowVersion = "fixture-version"
 	intent.RoutingSource = eventtest.RootRoutingSource(intent.EntityID.String())
 	input := map[string]any{"destination": "15551234571@s.whatsapp.net", "text": "authored customer reply"}
@@ -145,7 +149,11 @@ func TestSessionActivityPreparationFreezesAndRefusesReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	pc := &PipelineCoordinator{module: staticSemanticWorkflowModule{source: source}, channelActivations: owner}
-	intent.Tool, intent.ActivityID = toolID, contracts.ActivityResultEventsForSite(site).ActivityID
+	resultEvents, err := contracts.ActivityResultEventsForSite(site)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent.Tool, intent.ActivityID = toolID, resultEvents.ActivityID
 	intent.Owner, intent.HandlerEventKey = activityidentity.MustNodeOwner(site.Node), site.HandlerEventKey
 	intent.PlanGeneration, intent.ChannelActivationGeneration = plangeneration.Generation{}, channelonboarding.ChannelActivationGeneration{}
 	fact, err := correlation.NewSourceArtifactFact(activation.Coordinate.BundleHash)
@@ -201,6 +209,25 @@ func TestSessionActivityProjectionRejectsMissingAndAmbiguousDeclarations(t *test
 	publication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{activation})
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, name := range []string{"missing_site_kind", "handler_with_rule_position", "rule_without_position", "unknown_site_kind"} {
+		t.Run(name, func(t *testing.T) {
+			changed := site
+			switch name {
+			case "missing_site_kind":
+				changed.Kind = 0
+			case "handler_with_rule_position":
+				changed.RuleIndex = 0
+			case "rule_without_position":
+				changed.Kind = contracts.ActivitySiteRule
+			case "unknown_site_kind":
+				changed.Kind = contracts.ActivitySiteKind(255)
+			}
+			projection, err := channelonboarding.CompileSessionActivityTarget(base, activation.Coordinate.BundleHash, changed, publication)
+			if err == nil || projection.AuthoredToolID() != "" {
+				t.Fatalf("unqualified activity identity selected a native session: %#v, %v", projection, err)
+			}
+		})
 	}
 	for _, name := range []string{"missing", "foreign_provider", "duplicate", "raw", "unknown_kind", "foreign_pack", "empty_pack"} {
 		t.Run(name, func(t *testing.T) {
@@ -327,6 +354,37 @@ func TestSessionActivityProjectionJoinsExactDeclarationAndIngress(t *testing.T) 
 	if _, err := channelonboarding.CompileSessionActivityTarget(source, activation.Coordinate.BundleHash, site, empty); err == nil {
 		t.Fatal("missing activation selected an ambient session")
 	}
+	t.Run("explicit_rule_site", func(t *testing.T) {
+		handler := contracts.SystemNodeEventHandler{Rules: []contracts.HandlerRuleEntry{{
+			Activity: contracts.ActivitySpec{ID: "rule_reply", Tool: toolID},
+		}}}
+		schema, _ := source.FlowSchemaByID(".")
+		ruleSource := semanticviewtest.WrapRootAgents(&contracts.WorkflowContractBundle{
+			Nodes: map[string]contracts.SystemNodeContract{site.Node.NodeID(): {
+				EventHandlers: map[string]contracts.SystemNodeEventHandler{site.HandlerEventKey: handler},
+			}},
+			Tools:      map[string]contracts.ToolSchemaEntry{toolID: declaration},
+			RootSchema: &schema,
+		})
+		sites := contracts.ActivitySitesForNode(site.Node, map[string]contracts.SystemNodeEventHandler{site.HandlerEventKey: handler})
+		if len(sites) != 1 {
+			t.Fatalf("explicit rule activity sites = %d, want 1", len(sites))
+		}
+		ruleSite := sites[0]
+		events, err := contracts.ActivityResultEventsForSite(ruleSite)
+		if err != nil || events.ActivityID != "rule_reply" {
+			t.Fatalf("explicit rule identity changed: %#v, %v", events, err)
+		}
+		resolved, err := channelonboarding.ResolveSessionActivitySite(ruleSource, site.Node, site.HandlerEventKey, toolID, events.ActivityID)
+		if err != nil || resolved.Kind != contracts.ActivitySiteRule || resolved.RuleRef != ruleSite.RuleRef {
+			t.Fatalf("exact rule declaration was not retained: %#v, %v", resolved, err)
+		}
+		projection, err := channelonboarding.CompileSessionActivityTarget(ruleSource, activation.Coordinate.BundleHash, resolved, publication)
+		if err != nil || projection.Activation().OnboardingOperationID != activation.OnboardingOperationID ||
+			projection.PrivateTarget().ToolID() != private.ToolID() || !projection.PublicationGeneration().Equal(publication.Generation()) {
+			t.Fatalf("explicit rule lost its native target: %#v, %v", projection, err)
+		}
+	})
 }
 
 func TestSessionActivityProjectionKeepsDeclarationAndChannelResultMappingDistinct(t *testing.T) {
