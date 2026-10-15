@@ -261,7 +261,12 @@ func TestIssue2567VerifyLocalProjectFirstUse(t *testing.T) {
 	root, home := issue2567VerifySource(t), t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	writeRuntimeConfigText(t, filepath.Join(root, "swarm.yaml"), "serve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\n")
+	configPath := filepath.Join(root, ".swarm", "swarm.yaml")
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configBody := "serve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\n"
+	writeRuntimeConfigText(t, configPath, configBody)
 	var out, errOut bytes.Buffer
 	if code := executeRootCommand(context.Background(), root, []string{"verify", ".", "--json"}, &out, &errOut); code != 0 {
 		t.Fatalf("first project verify exit=%d: %s %s", code, &out, &errOut)
@@ -278,12 +283,19 @@ func TestIssue2567VerifyLocalProjectFirstUse(t *testing.T) {
 			found = observation.NotRunCause.Path == wantStore
 		}
 	}
-	if !result.OK || result.AdmissionComplete || !found {
+	if !result.OK || result.AdmissionComplete || result.ValidationScope != "deployment" || result.LiveReadiness != "not_evaluated" || !found {
 		t.Fatalf("wrong first-use project result: %s", &out)
 	}
-	for _, path := range []string{filepath.Join(root, ".swarm"), filepath.Join(home, ".swarm")} {
+	for _, path := range []string{filepath.Dir(wantStore), filepath.Join(home, ".swarm")} {
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Fatalf("verify created %s: %v", path, err)
 		}
+	}
+	entries, err := os.ReadDir(filepath.Dir(configPath))
+	if err != nil || len(entries) != 1 || entries[0].Name() != "swarm.yaml" {
+		t.Fatalf("verify added deployment-directory state: %v %v", entries, err)
+	}
+	if raw, err := os.ReadFile(configPath); err != nil || string(raw) != configBody {
+		t.Fatalf("verify changed selected config: %q %v", raw, err)
 	}
 }
