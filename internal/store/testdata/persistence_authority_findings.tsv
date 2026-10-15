@@ -1388,6 +1388,8 @@ typed-process-local	interface-method	typed	internal/runtime/startupownership/sta
 typed-process-local	interface-method	typed	internal/runtime/startupownership/startupownership.go	SessionTerminalOwner	method:SelectedStoreSessionTerminal	func(github.com/division-sh/swarm/internal/runtime/startupownership.TerminalResult)
 typed-process-local	interface-method	typed	internal/runtime/startupownership/startupownership.go	Store	method:AcquireProcessCapability	func(context.Context, github.com/division-sh/swarm/internal/runtime/startupownership.AcquireRequest) (github.com/division-sh/swarm/internal/runtime/startupownership.ProcessCapability, error)
 typed-process-local	callback-type	typed	internal/runtime/startupownership/test_agent_recovery_seed_probe.go	(*github.com/division-sh/swarm/internal/runtime/startupownership.AgentRecoverySeedFaultProbeForTest).observe	param:observe	func()
+typed-process-local	callback-type	typed	internal/runtime/startupownership/test_agent_recovery_seed_probe.go	AgentRecoverySeedFaultProbeForTest	field:AfterCheckCapture	func()
+typed-process-local	callback-type	typed	internal/runtime/startupownership/test_agent_recovery_seed_probe.go	AgentRecoverySeedFaultProbeForTest	field:AfterCheckProof	func()
 typed-process-local	callback-type	typed	internal/runtime/startupownership/test_agent_recovery_seed_probe.go	AgentRecoverySeedFaultProbeForTest	field:BeforePublication	func()
 typed-process-local	callback-type	typed	internal/runtime/startupownership/test_agent_recovery_seed_probe.go	AgentRecoverySeedFaultProbeForTest	field:InsideRead	func()
 typed-process-local	callback-type	typed	internal/runtime/startupownership/test_agent_recovery_seed_probe.go	InstallAgentRecoverySeedFaultProbeForTest	result:#1	func()
