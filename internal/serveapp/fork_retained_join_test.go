@@ -3,6 +3,7 @@ package serveapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -19,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 // Ordinary materialization retains its exact blockers. Selected preparation
@@ -241,9 +244,15 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 		t.Fatal("retained join success requires the original selected store owner")
 	}
 	ctx := servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
+	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: request.SourceRunID, At: request.At, ExpectedBundleHash: rt.BundleHash,
-		ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+		ContractSelection: selection,
+		ForkOperation: &runfork.ForkOperationRequest{
+			OperationID: uuid.NewString(), Actor: "retained-join-proof", IdempotencyKey: "retained-join-materialization",
+			TransportHash: "retained-join-proof", SourceRunID: request.SourceRunID, ForkEventID: request.At,
+			TargetBundleHash: rt.BundleHash, ContractSelection: selection,
+		},
 		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 			RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore(),
 		},
@@ -261,7 +270,7 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 	if err != nil {
 		t.Fatal(err)
 	}
-	materializer, ok := owner.Availability().(issue642TimerStagedMaterializer)
+	materializer, ok := owner.Availability().(runforkexecution.SelectedContractForkLifecycle)
 	if !ok {
 		t.Fatal("retained join success requires the canonical selected materialization owner")
 	}
@@ -314,7 +323,31 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 	if sourceFirstErr != nil {
 		t.Fatalf("read source after first retained join materialization: %v", sourceFirstErr)
 	}
-	again, err := materializer.MaterializeRunForkForSelectedContractExecution(ctx, admitted)
+	operation, semanticHash, err := admitted.ForkOperation.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack, found, err := materializer.LoadForkOperation(ctx, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
+	if err != nil || !found || ack.Validate() != nil || ack.Status != runfork.ForkOperationMaterialized || ack.Result != nil ||
+		ack.ForkRunID != child.ForkRunID || child.SelectedContractBinding == nil || ack.BindingID != child.SelectedContractBinding.BindingID ||
+		ack.SemanticHash != semanticHash || !reflect.DeepEqual(ack.Request, operation) {
+		t.Fatalf("retained join lacks its exact materialized operation ACK: %+v err=%v", ack, err)
+	}
+	childBefore, err := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, ack.ForkRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, freshErr := materializer.MaterializeRunForkForSelectedContractExecution(ctx, admitted)
+	var replay *runfork.ForkOperationReplayRequiredError
+	if freshErr == nil {
+		t.Fatal("fresh materialization silently reused a durable operation")
+	} else if !errors.As(freshErr, &replay) || !failures.OnlyBranches(freshErr, func(branch error) bool { return branch == replay }) ||
+		replay.OperationID != operation.OperationID || replay.ForkRunID != ack.ForkRunID {
+		t.Fatalf("fresh materialization lost its exact operation replay refusal: %T %v", freshErr, freshErr)
+	}
+	readback := admitted
+	readback.ForkOperation = nil
+	again, err := materializer.RequireMaterializedRunForkForSelectedContractExecution(ctx, ack.ForkRunID, readback)
 	_, repeated := readNativeRetainedRootJoins(t, rt.ReceiverStateReader, child.ForkRunID)
 	sourceAfter, sourceErr := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, request.SourceRunID)
 	if err != nil {
@@ -322,6 +355,9 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 	}
 	if again.ForkRunID != child.ForkRunID {
 		t.Errorf("repeated materialization changed child identity: first=%s repeated=%s", child.ForkRunID, again.ForkRunID)
+	}
+	if again.ForkRunStatus != runfork.RunForkMaterializedStatus {
+		t.Errorf("materialization readback activated the child: %+v", again)
 	}
 	if !reflect.DeepEqual(childJoins, repeated) {
 		t.Errorf("repeated materialization changed child join rows: first=%+v repeated=%+v", childJoins, repeated)
@@ -342,6 +378,14 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 				t.Errorf("retained join source gained table family: %s %+v", table, sourceAfter[table])
 			}
 		}
+	}
+	stableACK, found, ackErr := materializer.LoadForkOperation(ctx, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
+	if ackErr != nil || !found || !reflect.DeepEqual(ack, stableACK) {
+		t.Errorf("materialization replay changed its immutable ACK: %+v -> %+v err=%v", ack, stableACK, ackErr)
+	}
+	childAfter, childErr := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, ack.ForkRunID)
+	if childErr != nil || !reflect.DeepEqual(childBefore, childAfter) {
+		t.Errorf("materialization-only readback executed child work: %+v -> %+v err=%v", childBefore, childAfter, childErr)
 	}
 	if err := prepared.Close(); err != nil {
 		t.Fatalf("join retained join preparation: %v", err)

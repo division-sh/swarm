@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -86,6 +87,13 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 				t.Fatalf("execute actual original start: %+v error=%v", result, err)
 			}
 			child := result.Materialization.ForkRunID
+			t.Cleanup(func() {
+				if t.Failed() {
+					var diagnosis json.RawMessage
+					requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": child}, &diagnosis)
+					t.Logf("original-start child failure: %s", diagnosis)
+				}
+			})
 			requireServedRunStatus(t, rt.Endpoint, child, "completed")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, child)
 			requireLifecycleFlowEntity(t, rt, child, "", "done")
