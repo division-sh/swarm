@@ -1077,20 +1077,31 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 		}
 	}
 	for key, want := range map[string]string{
-		"flag":        "--config <path>",
-		"environment": "SWARM_CONFIG",
-		"xdg_default": "swarm/swarm.yaml",
+		"flag":               "--config <path>",
+		"environment":        "SWARM_CONFIG",
+		"deployment_default": "invocation-root .swarm/swarm.yaml when present",
+		"absent_default":     "built-in defaults",
 	} {
 		if !strings.Contains(spec.CLIConfigFile.AcceptedSources[key], want) {
 			t.Fatalf("cli config accepted source %q missing %q:\n%s", key, want, spec.CLIConfigFile.AcceptedSources[key])
 		}
 	}
+	if _, retained := spec.CLIConfigFile.AcceptedSources["xdg_default"]; retained {
+		t.Fatal("user-global config remains an implicit accepted source")
+	}
 	for key, want := range map[string]string{
-		"${XDG_CONFIG_HOME:-$HOME/.config}/swarm/config.yaml": "Not admitted",
-		"executable_adjacent_config.yaml":                     "Not admitted",
+		"root_swarm_yaml":                 "metadata-only",
+		"user_global_swarm_yaml":          "swarm/swarm.yaml",
+		"user_global_config_yaml":         "swarm/config.yaml",
+		"executable_adjacent_config_yaml": "executable-adjacent config.yaml",
 	} {
-		if !strings.Contains(spec.CLIConfigFile.RejectedSources[key], want) {
-			t.Fatalf("cli config rejected source %q missing %q:\n%s", key, want, spec.CLIConfigFile.RejectedSources[key])
+		if !strings.Contains(spec.CLIConfigFile.IgnoredImplicitSources[key], want) {
+			t.Fatalf("cli config ignored source %q missing %q:\n%s", key, want, spec.CLIConfigFile.IgnoredImplicitSources[key])
+		}
+	}
+	for _, want := range []string{"not probed", "cannot", "block or influence", "explicit selector", "without restoring implicit discovery"} {
+		if !strings.Contains(spec.CLIConfigFile.IgnoredSourceRule, want) {
+			t.Fatalf("cli config ignored-source rule missing %q:\n%s", want, spec.CLIConfigFile.IgnoredSourceRule)
 		}
 	}
 	for _, key := range []string{"connection.api_server", "connection.api_token_file"} {
@@ -4065,11 +4076,12 @@ type cliAPIConnectionAuthConfigSpec struct {
 		} `yaml:"built_in_loopback_default"`
 	} `yaml:"api_token"`
 	CLIConfigFile struct {
-		AcceptedSources  map[string]string `yaml:"accepted_sources"`
-		RejectedSources  map[string]string `yaml:"rejected_sources"`
-		AcceptedKeys     map[string]string `yaml:"accepted_keys"`
-		SharedNonAPIKeys map[string]string `yaml:"shared_non_api_keys"`
-		RejectedKeys     map[string]string `yaml:"rejected_keys"`
+		AcceptedSources        map[string]string `yaml:"accepted_sources"`
+		IgnoredImplicitSources map[string]string `yaml:"ignored_implicit_sources"`
+		IgnoredSourceRule      string            `yaml:"ignored_source_rule"`
+		AcceptedKeys           map[string]string `yaml:"accepted_keys"`
+		SharedNonAPIKeys       map[string]string `yaml:"shared_non_api_keys"`
+		RejectedKeys           map[string]string `yaml:"rejected_keys"`
 	} `yaml:"cli_config_file"`
 	ServeListenerEnvConfigBoundary struct {
 		RejectedPorts               map[string]string `yaml:"rejected_ports"`
