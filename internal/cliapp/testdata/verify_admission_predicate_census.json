@@ -1779,7 +1779,7 @@
     "owner": "internal/runtime/runtime.go::AuthorActivityEventDescriptors",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "9218a9c14c6a3ce30d8ad5de30e4dc9fb65d3271233da75ff20ccfa12b4a8952"
+    "body_sha256": "1fbd4e630c4e0569d49b64d418e4fe070861b619caf4e2d7da04f2d35eb8d47f"
   },
   {
     "owner": "internal/runtime/runtime.go::CanonicalBootProgressName",
@@ -1810,6 +1810,12 @@
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
     "body_sha256": "8ceb54088d56e9e8def3e0493795351cfb99da9e614f2971ba28450424c1d125"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::authoredCreationEventKeys",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "41c858203ed4f57a0961000e12d41375fa25857973d15c01ae7bd5afed444dba"
   },
   {
     "owner": "internal/runtime/runtime.go::bindRuntimeStorePayloadAdmitter",
