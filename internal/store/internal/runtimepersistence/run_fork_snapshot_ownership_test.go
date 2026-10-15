@@ -302,7 +302,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			for _, phase := range []string{"initial", "exact_replay"} {
 				t.Run(phase, func(t *testing.T) {
-					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type", "empty_import_missing_creation_clock", "empty_import_missing_update_clock", "empty_import_zero_creation_clock", "empty_import_zero_update_clock", "empty_import_reversed_clocks"} {
+					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type", "empty_import_missing_birth", "empty_import_missing_creation_clock", "empty_import_missing_update_clock", "empty_import_zero_creation_clock", "empty_import_zero_update_clock", "empty_import_reversed_clocks"} {
 						t.Run(invalid, func(t *testing.T) {
 							f := newSnapshotOwnershipFixture(t, backend, false, false)
 							emptyImport := strings.HasPrefix(invalid, "empty_import_")
@@ -413,8 +413,8 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								if err == nil {
 									_, err = f.db.ExecContext(f.ctx, `INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) VALUES ($1,$2,'entity_metadata',$3,'{}',FALSE)`, f.runID, latest.ForkPoint.Revision, key)
 								}
-							} else if invalid == "missing" {
-								_, err = f.db.ExecContext(f.ctx, `UPDATE run_fork_fact_revisions SET fact='{}', present=FALSE WHERE run_id=$1 AND revision <= $2 AND family='entity_metadata' AND fact_key=$3`, f.runID, plan.ForkPoint.Revision, f.entityID)
+							} else if invalid == "missing" || invalid == "empty_import_missing_birth" {
+								_, err = f.db.ExecContext(f.ctx, `UPDATE run_fork_fact_revisions SET fact='{}', present=FALSE WHERE run_id=$1 AND revision <= $2 AND family='entity_metadata' AND fact_key=$3`, f.runID, plan.ForkPoint.Revision, metadataEntityID)
 							} else {
 								_, err = f.db.ExecContext(f.ctx, `UPDATE run_fork_fact_revisions SET fact=$1 WHERE run_id=$2 AND revision=$3 AND family='entity_metadata' AND fact_key=$4`, string(encoded), f.runID, revision, metadataEntityID)
 							}
@@ -445,10 +445,19 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								t.Fatal(err)
 							}
 							if emptyImport {
-								_, err := inspector.InspectRunMutationDrift(f.ctx, f.runID)
-								var historyErr *mutationlog.HistoryError
-								if !errors.As(err, &historyErr) || historyErr.RunID != f.runID || historyErr.Code != "invalid_mutation_history" || historyErr.Reason != "data-only historical birth requires admitted identity and data clocks" {
-									t.Fatalf("forged empty-import birth did not produce the exact oracle history refusal: %v", err)
+								report, err := inspector.InspectRunMutationDrift(f.ctx, f.runID)
+								if invalid == "empty_import_missing_birth" {
+									want := mutationlog.DriftReport{RunID: f.runID, EntitiesChecked: wantEntities, Rows: []mutationlog.DriftRow{{
+										Kind: "entity_presence", EntityID: metadataEntityID, FoldedPresent: false, StoredPresent: true, FoldedType: "entity", StoredType: "entity",
+									}}}
+									if err != nil || !reflect.DeepEqual(report, want) {
+										t.Fatalf("missing empty-import birth hid membership or reported imprecise drift: got=%+v want=%+v err=%v", report, want, err)
+									}
+								} else {
+									var historyErr *mutationlog.HistoryError
+									if !errors.As(err, &historyErr) || historyErr.RunID != f.runID || historyErr.Code != "invalid_mutation_history" || historyErr.Reason != "data-only historical birth requires admitted identity and data clocks" {
+										t.Fatalf("forged empty-import birth did not produce the exact oracle history refusal: %v", err)
+									}
 								}
 							}
 							got, planErr := f.store.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: f.runID, At: f.eventID})
