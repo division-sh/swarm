@@ -497,13 +497,31 @@ existing synthetic SDK account. That setup RED is retained; the corrected
 presence check preserves the original fixture and does not change any product
 deadline. The existing failed paired-resume receipt remains failed evidence.
 
-Proposed fixture-only follow-up, NOT YET IMPLEMENTED: let the existing paired
-peer's returned signal identify its exact post-auth SDK count IQ (all current
-paired callers discard the handshake signal), then wait at the four immediate
-checkpoint callers in channel_session_restore_test.go. The fifth consumer,
-pairedServeSessionObserver in channel_session_readiness_test.go, already
-polls checkpoints inside 5s; replace that poll with the same bounded milestone
-wait and one unchanged checkpoint, preserving its bound and assertions. Keep
-other peer modes and the explicit held-before-auth negative unchanged. This
-requires reviewer-g's ruling plus RED-to-GREEN before qualification/rehearsal;
-it grants no production readiness or account authority from a peer signal.
+Reviewer-g's bounded fixture-wait gate
+[#2577/6202592663](https://github.com/division-sh/swarm/issues/2577#issuecomment-6202592663)
+authorizes the implemented test-only correction. The paired peer signals only
+the login socket's post-auth encrypt/get/count IQ, not the unpaired seed socket
+or Noise completion. Its single buffered token is consumed once, not a closed
+channel reusable for a distinct successor. All non-paired peer modes retain
+their previous signal semantics. No product checkpoint, scope rule, deadline,
+SDK implementation or implicit reconnect changes.
+
+| Fixture consumer | Milestone consumption and unchanged oracle |
+| --- | --- |
+| TestServeSessionResumePublicationRebindBothStores | One bounded first-login wait, then the original checkpoint and publication/candidate/single-successor assertions |
+| TestServeSessionExplicitResumeRetainsPairedIdentityBothStores | One bounded first-login wait, then the original checkpoint, reservation/account/header/revision/no-identity and repeated-resume assertions |
+| TestServeSessionResumePreservesObservationErrorWithoutReconnectBothStores | One bounded first-login wait, then the original checkpoint and selected-read-error/no-reconnect assertions |
+| TestServeSessionConcurrentResumeConstructsOneSuccessorBothStores | One bounded first-login wait, then the original checkpoint and concurrent exact-one-successor assertions |
+| pairedServeSessionObserver and its four readiness consumers | The existing 5s bound now contains one milestone wait and one real checkpoint, replacing the mutating 5ms checkpoint poll; missing login or false checkpoint still fails |
+| TestServeSessionHeldAuthenticationCheckpointBothStores | Preserve the explicit pre-auth false/nil checkpoint; release auth, consume the real milestone and require the original true checkpoint and all identity/header/account assertions; unpaired/held signals refuse and a distinct authenticated successor cannot reuse consumed evidence |
+
+A disposable old-immediate-oracle assertion failed deterministically at the
+held cut on BOTH stores: transport/bootstrap complete, checkpoint false/nil;
+after release the unchanged checkpoint was true/nil on both. No other assertion
+failed. Wrapper exit 1 is expected RED evidence, not qualification. Raw SHA256
+2b83aeef9c4c5770925a2e22e0234ab0451c95fe95f8d2b234327820440481f7;
+stderr SHA256 3653aaf9fa541aa42d496f629bb931f8b798eb03ea0fda25eb7c2d491f751513.
+The disposable assertion is not retained in product/test source. Fresh corrected
+both-store race, affected guards and exact-head preflight must pass before the
+single quiet real-SDK rehearsal. A fixture milestone alone grants no production
+readiness, account authority, hosted credit or sitting approval.
