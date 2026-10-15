@@ -353,7 +353,7 @@ func commitWorkflowEngineMutationLog(
 	postgres bool,
 	record runtimepipeline.WorkflowEngineStateRecord,
 	before runtimemutationlog.EntityStateProjection,
-	historicalConversationFixture bool,
+	occurrence *privatemutationlog.ConstructionOccurrence,
 	attribution ...*runtimemutationlog.Writer,
 ) error {
 	if record.Transition.PreservesState() {
@@ -371,10 +371,10 @@ func commitWorkflowEngineMutationLog(
 	if len(attribution) != 0 && attribution[0] != nil {
 		writer = *attribution[0]
 	}
-	return insertWorkflowEngineStateDiff(ctx, attempt, store, postgres, record.EntityID, before, after, writer, record.UpdatedAt, historicalConversationFixture)
+	return insertWorkflowEngineStateDiff(ctx, attempt, store, postgres, record, before, after, writer, occurrence)
 }
 
-func insertWorkflowEngineStateDiff(ctx context.Context, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer, occurredAt time.Time, historicalConversationFixture bool) error {
+func insertWorkflowEngineStateDiff(ctx context.Context, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool, record runtimepipeline.WorkflowEngineStateRecord, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer, occurrence *privatemutationlog.ConstructionOccurrence) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if postgres {
 			selected, ok := store.(*PipelinePostgresOwner)
@@ -384,18 +384,22 @@ func insertWorkflowEngineStateDiff(ctx context.Context, attempt *mutationprotoco
 			owner := activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 				return selected.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
 			})
-			if historicalConversationFixture {
-				return privatemutationlog.InsertConversationForkConstructionDiffForTest(ctx, attempt, owner, entityID, before, after, writer, occurredAt)
+			if occurrence != nil {
+				return privatemutationlog.InsertConstructionEntityStateDiff(ctx, attempt, owner, record, before, after, writer, occurrence, true)
 			}
-			return privatemutationlog.InsertEntityStateDiff(ctx, attempt, owner, entityID, before, after, writer)
+			return privatemutationlog.InsertEntityStateDiff(ctx, attempt, owner, record.EntityID, before, after, writer)
 		}
 		selected, ok := store.(*PipelineSQLiteOwner)
 		if !ok {
 			return fmt.Errorf("workflow engine SQLite mutation requires SQLite selected store")
 		}
-		return privatemutationlog.InsertSQLiteEntityStateDiff(ctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+		owner := activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 			return selected.RunLifecycleSQLiteOwner.RequireActiveSourceTx(ctx, tx, runID)
-		}), entityID, before, after, writer, occurredAt)
+		})
+		if occurrence != nil {
+			return privatemutationlog.InsertConstructionEntityStateDiff(ctx, attempt, owner, record, before, after, writer, occurrence, false)
+		}
+		return privatemutationlog.InsertSQLiteEntityStateDiff(ctx, attempt, owner, record.EntityID, before, after, writer, record.UpdatedAt)
 	})
 }
 
@@ -406,7 +410,7 @@ func commitWorkflowEngineInitialValues(
 	postgres bool,
 	record runtimepipeline.WorkflowEngineStateRecord,
 	before runtimemutationlog.EntityStateProjection,
-	historicalConversationFixture bool,
+	occurrence *privatemutationlog.ConstructionOccurrence,
 ) (runtimemutationlog.EntityStateProjection, error) {
 	decision, err := decideWorkflowEngineState(record.Transition)
 	if err != nil {
@@ -444,7 +448,7 @@ func commitWorkflowEngineInitialValues(
 		next.Fields = copyWorkflowEngineProjectionMap(adjusted.Fields)
 		next.Fields[field] = initial[field]
 		writer := runtimemutationlog.Writer{Type: "platform", ID: "entity_initial_value", HandlerStep: "create_entity"}
-		if err := insertWorkflowEngineStateDiff(ctx, attempt, store, postgres, record.EntityID, adjusted, next, writer, record.UpdatedAt, historicalConversationFixture); err != nil {
+		if err := insertWorkflowEngineStateDiff(ctx, attempt, store, postgres, record, adjusted, next, writer, occurrence); err != nil {
 			return runtimemutationlog.EntityStateProjection{}, err
 		}
 		adjusted = next
@@ -519,7 +523,7 @@ func commitWorkflowEngineMutation(
 			if err := commitWorkflowEngineState(txctx, attempt, postgres, command.State); err != nil {
 				return err
 			}
-			before, err = commitWorkflowEngineInitialValues(txctx, attempt, store, postgres, command.State, before, false)
+			before, err = commitWorkflowEngineInitialValues(txctx, attempt, store, postgres, command.State, before, nil)
 			if err != nil {
 				return err
 			}
@@ -532,7 +536,7 @@ func commitWorkflowEngineMutation(
 					return err
 				}
 			}
-			if err := commitWorkflowEngineMutationLog(txctx, attempt, store, postgres, command.State, before, false, command.Writer); err != nil {
+			if err := commitWorkflowEngineMutationLog(txctx, attempt, store, postgres, command.State, before, nil, command.Writer); err != nil {
 				return err
 			}
 			for index, proposed := range command.ProposedEffects {
