@@ -819,6 +819,13 @@ func (b *forkContentionBarrier) queueGate(t *testing.T, ctx context.Context, db 
 	// Every competing story/authority operation takes this native fence before
 	// domain rows. A wait on a different row does not order the two waiters.
 	go func() {
+		// Stabilize the observer across versions of the updated singleton row.
+		// EXCLUSIVE conflicts with the writer's FOR UPDATE relation lock but
+		// permits the complete snapshot's ordinary ACCESS SHARE reads.
+		if _, err := tx.ExecContext(ctx, `LOCK TABLE author_activity_order IN EXCLUSIVE MODE`); err != nil {
+			g.acquired <- err
+			return
+		}
 		var sequence int64
 		err := tx.QueryRowContext(ctx, `SELECT last_sequence FROM author_activity_order WHERE singleton_id = 1 FOR UPDATE`).Scan(&sequence)
 		g.acquired <- err
