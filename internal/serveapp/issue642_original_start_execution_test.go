@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,15 +22,15 @@ import (
 func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			var selected *selectedStoreOwner
-			previous := projectRuntimePersistenceForServe
-			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
-				selected = owner
-				return previous(owner)
+			nativeBackend := "sqlite"
+			if backend == servedparity.BackendExplicitPostgres {
+				nativeBackend = "postgres"
 			}
-			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+			forkRuntime := captureServedForkRuntimeOptions(t)
 			publication := newExactOriginPublicationProbe(t)
-			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyExample(t, canonicalrouting.RootIngress))
+			_, rt := startServedBoundaryFixture(t, nativeBackend, canonicalrouting.CopyExample(t, canonicalrouting.RootIngress))
+			selected := rt.Selected
+			deliveries := selected.RuntimeDeps().DeliveryStore.SummarizeRun
 			var started struct {
 				RunID string `json:"run_id"`
 			}
@@ -46,7 +47,7 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			}
 			initial := receipt.RunCreation.EventID
 			requireServedRunStatus(t, rt.Endpoint, started.RunID, "completed")
-			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
+			waitServedRunDeliveryQuiescence(t, deliveries, started.RunID)
 			if err := waitExactOriginPublications(t.Context(), publication, initial); err != nil {
 				t.Fatal(err)
 			}
@@ -70,18 +71,20 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			}
 			baseline := rt.Runtime.Options.ProcessWorkOwner.ActiveCount()
 			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
-			result, err := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
+			operation := runfork.ForkOperationRequest{
+				OperationID: uuid.NewString(), Actor: "original-first-turn-proof", IdempotencyKey: uuid.NewString(),
+				TransportHash: "original-first-turn-proof", SourceRunID: started.RunID, AtStart: true,
+				TargetBundleHash: rt.BundleHash, ContractSelection: selection,
+			}
+			request := runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: started.RunID, AtStart: true, ExpectedBundleHash: rt.BundleHash,
 				ContractSelection: selection,
-				ForkOperation: &runfork.ForkOperationRequest{
-					OperationID: uuid.NewString(), Actor: "original-first-turn-proof", IdempotencyKey: uuid.NewString(),
-					TransportHash: "original-first-turn-proof", SourceRunID: started.RunID, AtStart: true,
-					TargetBundleHash: rt.BundleHash, ContractSelection: selection,
-				},
+				ForkOperation:     &operation,
 				SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 					RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore(),
-				}, AgentRuntime: rt.ForkRuntime,
-			})
+				}, AgentRuntime: *forkRuntime,
+			}
+			result, err := family.Execute(ctx, request)
 			if err != nil || !result.Activation.Activated || result.Activation.SourceFrozen ||
 				result.Materialization.ForkPoint != plan.ForkPoint || result.Materialization.ForkRunID == "" {
 				t.Fatalf("execute actual original start: %+v error=%v", result, err)
@@ -95,7 +98,7 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 				}
 			})
 			requireServedRunStatus(t, rt.Endpoint, child, "completed")
-			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, child)
+			waitServedRunDeliveryQuiescence(t, deliveries, child)
 			_, childHeader := requireReceiverTargetState(t, rt.ReceiverStateReader, child, ".", child, child)
 			if childHeader.CurrentState != "done" {
 				t.Fatalf("exact first-turn child did not reach done: %+v", childHeader)
@@ -119,6 +122,38 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			childStart, err := family.Plan(ctx, runfork.RunForkPlanRequest{SourceRunID: child, AtStart: true})
 			if err != nil || childStart.EventCountAtFork != 0 || len(childStart.PendingWork) != 0 || childStart.StartFirstTurn != nil {
 				t.Fatalf("child start copied source historical execution: %+v error=%v", childStart, err)
+			}
+			ack, found, err := family.Operations().LoadForkOperationByID(ctx, operation.OperationID)
+			if err != nil || !found || ack.Validate() != nil || ack.Status != runfork.ForkOperationActivated || ack.Result == nil ||
+				ack.ForkRunID != child || !ack.Request.AtStart || ack.Request.ForkEventID != "" || ack.Request.ResolvedPoint == nil || *ack.Request.ResolvedPoint != plan.ForkPoint {
+				t.Fatalf("first-turn operation lost its immutable original-start ACK: %+v error=%v", ack, err)
+			}
+			childBefore, err := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, child)
+			if err != nil {
+				t.Fatal(err)
+			}
+			replay, err := family.Execute(ctx, request)
+			if err != nil || !replay.Activation.Activated || replay.Materialization.ForkRunID != ack.Result.ForkRunID ||
+				replay.Materialization.ForkPoint != ack.Result.ForkPoint || replay.Materialization.ForkRunStatus != ack.Result.ForkRunStatus ||
+				!reflect.DeepEqual(replay.Materialization.DataPins, ack.Result.DataPins) || replay.ExecutedEventCount != ack.Result.ExecutedEventCount ||
+				replay.Activation.SourceRunStatus != ack.Result.SourceRunStatus || replay.Activation.SourceFrozen != ack.Result.SourceFrozen {
+				t.Fatalf("original-start retry reinterpreted the recorded outcome: result=%+v ACK=%+v error=%v", replay, ack.Result, err)
+			}
+			tamperedOperation := operation
+			tamperedOperation.AllowSourceFreeze = !operation.AllowSourceFreeze
+			tamperedRequest := request
+			tamperedRequest.ForkOperation = &tamperedOperation
+			tamperedRequest.AllowSourceFreeze = tamperedOperation.AllowSourceFreeze
+			if _, err := family.Execute(ctx, tamperedRequest); err == nil || !strings.Contains(err.Error(), "original invocation semantics") {
+				t.Fatalf("same operation accepted changed invocation semantics or hit the wrong refusal: %v", err)
+			}
+			ackAfter, found, err := family.Operations().LoadForkOperationByID(ctx, operation.OperationID)
+			if err != nil || !found || !reflect.DeepEqual(ackAfter, ack) {
+				t.Fatalf("retry or tamper changed the durable original-start operation: %+v error=%v", ackAfter, err)
+			}
+			childAfter, err := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, child)
+			if err != nil || !reflect.DeepEqual(childAfter, childBefore) {
+				t.Fatalf("retry or refused tamper changed the completed child: %v", err)
 			}
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
