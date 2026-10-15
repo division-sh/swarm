@@ -150,6 +150,10 @@ func TestGeneratedUnifiedConfigExampleOmitsSplitUnsupportedAndPlaintextSecrets(t
 		"llm.openai_compatible.default_model",
 		"llm.openai_compatible.low_cost_model",
 		"prompts_dir",
+		"platform_spec_path",
+		"tooling_lock_file",
+		"verification_gates_file",
+		"agent_config_map_file",
 		"claude-3-5-sonnet",
 		".swarm/dev.db",
 		"sharding",
@@ -304,7 +308,7 @@ func TestUnifiedConfigIgnoresProjectConnectionAndPaths(t *testing.T) {
 		}
 		writeRuntimeConfigText(t, filepath.Join(repo, "swarm.yaml"), "paths:\n  platform_spec_path: contracts-link\n")
 		loaded, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo})
-		if err != nil || loaded.CLI.Paths.PlatformSpecPath != "" || loaded.Path != "" {
+		if err != nil || loaded.CLI != (cliCommandConfig{}) || loaded.Path != "" {
 			t.Fatalf("ignored project path affected defaults: %+v, error=%v", loaded.CLI.Paths, err)
 		}
 	})

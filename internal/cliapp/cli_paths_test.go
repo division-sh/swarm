@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/platform"
 )
 
 func TestResolveCLISourcePlatformSpecPathsUsesExplicitSourceAndPlatformOwners(t *testing.T) {
@@ -17,9 +19,8 @@ func TestResolveCLISourcePlatformSpecPathsUsesExplicitSourceAndPlatformOwners(t 
 		t.Fatal(err)
 	}
 	wantSource := mustInvocationRootForTest(sourceRoot).Path()
-	configPlatform := filepath.Join(t.TempDir(), "config-platform.yaml")
 	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
-		"platform_spec_path": configPlatform,
+		"swarm_dir": filepath.Join(t.TempDir(), "state"),
 	}))
 
 	got, err := ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{
@@ -31,8 +32,12 @@ func TestResolveCLISourcePlatformSpecPathsUsesExplicitSourceAndPlatformOwners(t 
 	if got.SourceRoot != wantSource {
 		t.Fatalf("source path = %q, want %q", got.SourceRoot, wantSource)
 	}
-	if got.PlatformSpecPath != configPlatform {
-		t.Fatalf("platform spec path = %q, want %q", got.PlatformSpecPath, configPlatform)
+	embedded, err := EmbeddedPlatformSpecPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.PlatformSpecPath != embedded {
+		t.Fatalf("platform spec path = %q, want embedded %q", got.PlatformSpecPath, embedded)
 	}
 
 	got, err = ResolveCLISourcePlatformSpecPaths(repo, CLISourcePlatformSpecPathOptions{
@@ -61,6 +66,9 @@ func TestResolveCLISourcePlatformSpecPathsUsesExplicitSourceAndPlatformOwners(t 
 func TestResolveCLISourcePlatformSpecPathsEmbeddedDefaultUsesInvocationRoot(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	outsideRepo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outsideRepo, "platform-spec.yaml"), []byte("not the embedded spec\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	sourceRoot := filepath.Join(t.TempDir(), "contracts")
 	if err := os.Mkdir(sourceRoot, 0o755); err != nil {
 		t.Fatal(err)
@@ -90,6 +98,20 @@ func TestResolveCLISourcePlatformSpecPathsEmbeddedDefaultUsesInvocationRoot(t *t
 	}
 	if !bytes.Contains(data, []byte("cli_specification:")) {
 		t.Fatalf("materialized platform spec missing cli_specification")
+	}
+	if !bytes.Equal(data, platform.PlatformSpecYAML()) {
+		t.Fatal("default spec differs from the binary's embedded bytes")
+	}
+}
+
+func TestResolveCLISourcePlatformSpecPathsRejectsConfigOverrideBeforeExplicitOption(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	path := writeCLIAPIConfigFile(t, map[string]string{"platform_spec_path": "must-not-be-read.yaml"})
+	_, err := ResolveCLISourcePlatformSpecPaths(t.TempDir(), CLISourcePlatformSpecPathOptions{
+		ConfigPath: path, PlatformSpecPath: "explicit.yaml",
+	})
+	if err == nil || !strings.Contains(err.Error(), `unknown config key "paths.platform_spec_path"`) || !strings.Contains(err.Error(), path) {
+		t.Fatalf("explicit selection bypassed invalid config admission: %v", err)
 	}
 }
 
