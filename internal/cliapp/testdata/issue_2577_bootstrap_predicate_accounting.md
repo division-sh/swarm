@@ -54,14 +54,16 @@ contexts did. `sessionBusinessSemanticFixture` now compiles its existing exact
 default artifact through `LoadWorkflowContractBundleFromArtifact`.
 `whatsappPublicationComponentSource` reads, decodes and compiles its original
 selected artifact through the same owner. Neither attaches a requested hash to
-handwritten semantics or changes persisted source identity. The real compiler's
+handwritten semantics or rewrites an existing persisted source. The real compiler's
 structural root and static declarations are retained. Provider-declaration
 overlays remain explicit isolated component inputs, not source-loading proof.
 `TestSessionPublicationFixtureUsesItsAdmittedArtifact` checks the canonical
 lookup boundary positively and rejects a foreign artifact.
-The store-only proof selects that same valid fixture artifact before reserving
-its standing responsibility. Its former generic standing artifact contained a
-retired `agents.yaml` wrapper; it is not compiled as a workaround or migrated.
+The store-only proof selects its own valid, isolated root artifact before
+reserving its standing responsibility. Reusing the default artifact would collide
+with that store fixture's already registered default event catalog. Its former
+generic standing artifact contained a retired `agents.yaml` wrapper; it is not
+compiled as a workaround or migrated.
 The shared standing fixture, production parser and all rollback/replay assertions
 are unchanged.
 
