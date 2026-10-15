@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -45,6 +46,40 @@ func TestWorkflowInstanceReadRejectsUnexpectedFieldRow(t *testing.T) {
 	record.EntityType = "review_subject"
 	if _, err := DecodeWorkflowInstancePersistenceRecord(record); err == nil || !strings.Contains(err.Error(), "missing its declared field row") {
 		t.Fatalf("declared field row absence accepted: %v", err)
+	}
+	record.Fields = []byte(`{"current_state":"business-stage","gates":"business-gates","bookkeeping":"business-bookkeeping","accumulator":"business-accumulator"}`)
+	record.StageDefined = true
+	before, err := DecodeWorkflowInstancePersistenceRecord(record)
+	if err != nil {
+		t.Fatalf("valid paired record rejected: %v", err)
+	}
+	for _, tc := range []struct{ domain, want string }{
+		{"fields", "entity_state.fields must be a JSON object"},
+		{"bookkeeping", "flow_instances.bookkeeping must be a JSON object"},
+		{"gates", "flow_instances.gates must be an object of booleans"},
+		{"accumulator", "flow_instances.accumulator must be a JSON object"},
+	} {
+		t.Run(tc.domain, func(t *testing.T) {
+			invalid := record
+			switch tc.domain {
+			case "fields":
+				invalid.Fields = []byte(`[]`)
+			case "bookkeeping":
+				invalid.Bookkeeping = []byte(`[]`)
+			case "gates":
+				invalid.Gates = []byte(`[]`)
+			case "accumulator":
+				invalid.Accumulator = []byte(`[]`)
+			}
+			_, err := DecodeWorkflowInstancePersistenceRecord(invalid)
+			var corruption *FlowInstanceConstructionCorruption
+			if !errors.As(err, &corruption) || corruption.FlowID != "review" || corruption.InstancePath != "review/inst-1" || corruption.Cause == nil || corruption.Cause.Error() != tc.want {
+				t.Fatalf("malformed %s lost its exact owner/identity: got=%v want=%s", tc.domain, err, tc.want)
+			}
+			if after, err := DecodeWorkflowInstancePersistenceRecord(record); err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("malformed %s changed supported readback: %+v %v", tc.domain, after, err)
+			}
+		})
 	}
 }
 
@@ -518,7 +553,7 @@ func VerifyWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapesForTes
 				return fixture.NumericGate(ctx, testPipelineRunID, key)
 			},
 			mutateKey:    "storage",
-			wantContains: "entity_state.gates must be an object of booleans",
+			wantContains: "flow_instances.gates must be an object of booleans",
 		},
 		{
 			name: "accumulator not object",
@@ -526,7 +561,7 @@ func VerifyWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapesForTes
 				return fixture.AccumulatorArray(ctx, testPipelineRunID, key)
 			},
 			mutateKey:    "storage",
-			wantContains: "entity_state.accumulator must be a JSON object",
+			wantContains: "flow_instances.accumulator must be a JSON object",
 		},
 		{
 			name: "control metadata malformed",
