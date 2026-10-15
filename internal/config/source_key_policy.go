@@ -1,5 +1,39 @@
 package config
 
+import (
+	"fmt"
+	"strings"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+)
+
+const PlatformSpecPathConfigRefusal = "`paths.platform_spec_path` at %s:%d:%d is not a config key; the platform spec is embedded in `swarm`."
+
+// SourceKeyError preserves typed vocabulary evidence while applying the ruled
+// embedded-spec teaching instead of suggesting a nonexistent config or flag.
+func SourceKeyError(diagnostic *runtimecontracts.LoaderDiagnostic) error {
+	if strings.TrimPrefix(diagnostic.Location.YAMLPath, "config.") != "paths.platform_spec_path" {
+		return diagnostic
+	}
+	diagnostic.Remediation = ""
+	return platformSpecPathConfigError{diagnostic: diagnostic}
+}
+
+type platformSpecPathConfigError struct {
+	diagnostic *runtimecontracts.LoaderDiagnostic
+}
+
+func (e platformSpecPathConfigError) Error() string {
+	location := e.diagnostic.Location
+	file := location.File
+	if file == "" {
+		file = "<config>"
+	}
+	return fmt.Sprintf(PlatformSpecPathConfigRefusal, file, location.Line, location.Column)
+}
+
+func (e platformSpecPathConfigError) Unwrap() error { return e.diagnostic }
+
 // SourceKeyRule describes the existing swarm.yaml source policy.
 type SourceKeyRule struct {
 	Container       bool
@@ -93,7 +127,6 @@ func SourceKeyRules() map[string]SourceKeyRule {
 		"budget.human_tasks.categories_enabled":   {},
 		"paths":                                   section,
 		"paths.swarm_dir":                         {},
-		"paths.platform_spec_path":                {},
 		"paths.monitor_dir":                       {},
 	}
 }

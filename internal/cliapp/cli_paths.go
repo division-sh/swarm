@@ -31,7 +31,7 @@ func ResolveCLISourcePlatformSpecPaths(invocationRootPath string, opts CLISource
 	return resolveCLISourcePlatformSpecPathsFromConfig(invocationRootPath, opts, cfg)
 }
 
-func resolveCLISourcePlatformSpecPathsFromConfig(invocationRootPath string, opts CLISourcePlatformSpecPathOptions, cfg cliCommandConfig) (CLISourcePlatformSpecPaths, error) {
+func resolveCLISourcePlatformSpecPathsFromConfig(invocationRootPath string, opts CLISourcePlatformSpecPathOptions, _ cliCommandConfig) (CLISourcePlatformSpecPaths, error) {
 	var err error
 	invocationRootPath, err = requireInvocationRootPath(invocationRootPath)
 	if err != nil {
@@ -41,11 +41,7 @@ func resolveCLISourcePlatformSpecPathsFromConfig(invocationRootPath string, opts
 	if err != nil {
 		return CLISourcePlatformSpecPaths{}, err
 	}
-	configPlatformSpecPath := strings.TrimSpace(cfg.Paths.PlatformSpecPath)
-	platformSpecPath := firstNonEmpty(
-		opts.PlatformSpecPath,
-		configPlatformSpecPath,
-	)
+	platformSpecPath := strings.TrimSpace(opts.PlatformSpecPath)
 	if platformSpecPath == "" {
 		embedded, err := EmbeddedPlatformSpecPath()
 		if err != nil {

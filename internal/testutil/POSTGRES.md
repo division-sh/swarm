@@ -128,6 +128,13 @@ command, uses tmpfs plus `fsync=off`, `synchronous_commit=off`, and
 `full_page_writes=off`, and tears the service down on every observable exit.
 Durable labeled state reconciles a service left by abrupt runner death.
 
+The runner reuses a locally available `postgres:16` image and pulls it only when
+a successful local image listing confirms it is missing. Docker listing or
+inspection failures refuse provisioning; they do not trigger a network fallback.
+The inspected immutable image ID remains bound to the service record and creator
+checks. Provisioning keeps its three-minute budget, including any cold pull.
+This is not an automatic refresh of an already-present tag.
+
 Direct package tests with no explicit DSN fail closed and point to this runner
 or the host setup above. If Docker is missing or unavailable, the runner points
 back to this guide and retains the underlying executable, socket, startup, or

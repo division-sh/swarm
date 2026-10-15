@@ -31,7 +31,7 @@ func TestConfigCurrentVocabularySuggestionsFollowSourcePolicy(t *testing.T) {
 		{"<<: {max_concurrent_agent: 2}", func() any { return &RuntimeConfig{} }, []string{"max_concurrent_agents", "event_poll_interval"}, []string{"fan_out_workers", "recovery_on_startup"}},
 		{"llm: {claude_cli: {retrie: 2}}", func() any { return &Config{} }, []string{"retries", "no_session_persistence", "use_tmux"}, []string{"command", "timeout"}},
 		{"database: {<<: {passwor: secret}}", func() any { return &Config{} }, []string{"password"}, []string{"password_env", "password_file"}},
-		{"paths: {unrecognized: file}", func() any { return &Config{} }, []string{"agent_config_map_file", "verification_gates_file", "tooling_lock_file"}, []string{"swarm_dir", "monitor_dir", "platform_spec_path"}},
+		{"paths: {unrecognized: file}", func() any { return &Config{} }, []string{"agent_config_map_file", "verification_gates_file", "tooling_lock_file", "platform_spec_path"}, []string{"swarm_dir", "monitor_dir"}},
 	} {
 		t.Run(row.source, func(t *testing.T) {
 			target := row.target()
@@ -74,6 +74,7 @@ func TestConfigSourceRejectsExcludedDeclaredFieldsBeforeProjection(t *testing.T)
 		{"paths.agent_config_map_file", "swarm_dir"},
 		{"paths.verification_gates_file", "monitor_dir"},
 		{"paths.tooling_lock_file", "swarm_dir"},
+		{"paths.platform_spec_path", "monitor_dir"},
 	} {
 		parts := strings.Split(row.path, ".")
 		key := parts[len(parts)-1]
@@ -93,7 +94,12 @@ func TestConfigSourceRejectsExcludedDeclaredFieldsBeforeProjection(t *testing.T)
 						if !ok || !strings.Contains(diagnostic.Problem, key) || slices.Contains(diagnostic.ValidOptions, key) || !slices.Contains(diagnostic.ValidOptions, row.supported) || diagnostic.Location.File != file || diagnostic.Location.Line == 0 || diagnostic.Location.Column == 0 {
 							t.Fatalf("excluded field admitted or misdiagnosed: error=%v diagnostic=%#v", err, diagnostic)
 						}
-						if !strings.Contains(err.Error(), "Valid fields:") || strings.Contains(err.Error(), "RETIRED") {
+						if row.path == "paths.platform_spec_path" {
+							want := fmt.Sprintf("`paths.platform_spec_path` at <config>:%d:%d is not a config key; the platform spec is embedded in `swarm`.", diagnostic.Location.Line, diagnostic.Location.Column)
+							if err.Error() != want || diagnostic.Remediation != "" {
+								t.Fatalf("embedded-spec refusal differs from ruling6197217312: %v", err)
+							}
+						} else if !strings.Contains(err.Error(), "Valid fields:") || strings.Contains(err.Error(), "RETIRED") {
 							t.Fatalf("not current-vocabulary rejection: %v", err)
 						}
 					}
@@ -110,6 +116,32 @@ func TestConfigSourceRejectsExcludedDeclaredFieldsBeforeProjection(t *testing.T)
 				})
 			}
 		}
+	}
+}
+
+func TestConfigPlatformSpecOverrideRefusalTeachesEmbeddedDefault(t *testing.T) {
+	for _, source := range []string{
+		"paths:\n  platform_spec_path: elsewhere.yaml\n",
+		"paths:\n  platform_spec_path: null\n",
+		"paths:\n  platform_spec_path: ''\n",
+		"paths:\n  <<: {platform_spec_path: elsewhere.yaml}\n",
+	} {
+		t.Run(source, func(t *testing.T) {
+			before := Config{Runtime: RuntimeConfig{RecoveryOnStartup: true}}
+			got := before
+			err := decodeConfigSourceTest(source, &got)
+			diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err)
+			if !ok || diagnostic.Remediation != "" || diagnostic.Location.Line != 2 || diagnostic.Location.Column == 0 || slices.Contains(diagnostic.ValidOptions, "platform_spec_path") {
+				t.Fatalf("missing exact typed retirement teaching/location: error=%v diagnostic=%#v", err, diagnostic)
+			}
+			want := fmt.Sprintf("`paths.platform_spec_path` at <config>:2:%d is not a config key; the platform spec is embedded in `swarm`.", diagnostic.Location.Column)
+			if err.Error() != want {
+				t.Fatalf("refusal = %q, want %q", err.Error(), want)
+			}
+			if !reflect.DeepEqual(got, before) {
+				t.Fatal("refused config mutated the projection target")
+			}
+		})
 	}
 }
 
@@ -161,7 +193,7 @@ func TestConfigCustomReadersAreStrictWithoutOuterDecoder(t *testing.T) {
 
 func TestConfigSourcePreservesSupportedAliasesPresenceAndOpenMaps(t *testing.T) {
 	var cfg Config
-	source := "runtime: {<<: {fan_out_workers: 2, recovery_on_startup: false}}\nworkspace: {<<: {image: '', allow_exec_on_host: false}, backend: host}\nllm: {models: {business_model: {provider: model}}, provider_limits: {provider: {<<: {max_concurrency: 2}}}}\nconnection: {api_server: localhost}\nbudget: {human_tasks: {categories_enabled: [support]}}\n"
+	source := "runtime: {<<: {fan_out_workers: 2, recovery_on_startup: false}}\nworkspace: {<<: {image: '', allow_exec_on_host: false}, backend: host}\nllm: {models: {business_model: {provider: model}}, provider_limits: {provider: {<<: {max_concurrency: 2}}}}\nconnection: {api_server: localhost}\nbudget: {human_tasks: {categories_enabled: [support]}}\npaths: {swarm_dir: state, monitor_dir: monitor}\n"
 	if err := decodeConfigSourceTest(source, &cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +201,7 @@ func TestConfigSourcePreservesSupportedAliasesPresenceAndOpenMaps(t *testing.T) 
 		t.Fatalf("lost values/presence: %#v %#v", cfg.Runtime, cfg.Workspace)
 	}
 	var cli CLISourceConfig
-	if err := yaml.Unmarshal([]byte(source), &cli); err != nil || cli.Connection.APIServer != "localhost" {
+	if err := yaml.Unmarshal([]byte(source), &cli); err != nil || cli.Connection.APIServer != "localhost" || cli.Paths.SwarmDir != "state" || cli.Paths.MonitorDir != "monitor" {
 		t.Fatalf("CLI source=%#v error=%v", cli, err)
 	}
 	for _, source := range []string{"runtime: {<<: {fan_out_workers: 1}, fan_out_workers: 2}", "workspace: {image: a, image: b}"} {

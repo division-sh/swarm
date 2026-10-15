@@ -193,7 +193,7 @@ func unifiedConfigProjectionDiagnostic(err error, path string) unifiedConfigDiag
 		diagnostic.Key = strings.TrimPrefix(located.Location.YAMLPath, "config.")
 		diagnostic.Line, diagnostic.Column = located.Location.Line, located.Location.Column
 		diagnostic.ValidOptions = located.ValidOptions
-		diagnostic.Message = fmt.Sprintf("decode swarm.yaml config %s: %v", path, &located)
+		diagnostic.Message = fmt.Sprintf("decode swarm.yaml config %s: %v", path, config.SourceKeyError(&located))
 		if located.Location.Line > 0 && located.Code != "contract_loader.undefined_field" {
 			diagnostic.Message += fmt.Sprintf(" (line %d, column %d)", located.Location.Line, located.Location.Column)
 		}
@@ -375,9 +375,8 @@ func decodeUnifiedCLIConfig(node *yaml.Node) (cliCommandConfig, error) {
 			APITokenFile:  decoded.Serve.APITokenFile,
 		},
 		Paths: cliPathsConfig{
-			SwarmDir:         decoded.Paths.SwarmDir,
-			SwarmDirSet:      yamlPathExists(node, "paths", "swarm_dir"),
-			PlatformSpecPath: decoded.Paths.PlatformSpecPath,
+			SwarmDir:    decoded.Paths.SwarmDir,
+			SwarmDirSet: yamlPathExists(node, "paths", "swarm_dir"),
 		},
 	}, nil
 }
@@ -539,9 +538,10 @@ func unknownUnifiedConfigDiagnostic(path, file string, location yamlsource.Locat
 	diagnostic := runtimecontracts.NewUndefinedFieldDiagnostic("config", key, allowed)
 	diagnostic.Problem = fmt.Sprintf("unknown config key %q", path)
 	diagnostic.Location = runtimecontracts.LoaderDiagnosticLocation{File: file, YAMLPath: path, Line: location.Line, Column: location.Column}
+	message := config.SourceKeyError(diagnostic).Error()
 	return unifiedConfigDiagnostic{
 		Kind: unifiedConfigDiagnosticUnknownKey, Path: file, Key: path,
-		Message: diagnostic.Error(), Remediation: diagnostic.Remediation,
+		Message: message, Remediation: diagnostic.Remediation,
 		Line: location.Line, Column: location.Column, ValidOptions: diagnostic.ValidOptions,
 	}
 }

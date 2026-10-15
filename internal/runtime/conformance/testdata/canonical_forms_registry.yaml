@@ -428,18 +428,19 @@ rows:
     corpus: {condition: 0, when: 1, else: 1, default: 0}
 
   - id: handler.emit_action_activity
-    ruled: mechanical-ratified
+    ruled: sugar
     paths: "emit, activity, activity.approval, on_success.emit"
     owners: [projectNodeEmitValue, projectNodeActivityValue, projectNodeOnSuccessValue]
     information:
       fact: [event/tool/decision identity]
       choice: [from, fields, input, approval]
     spelling:
-      canonical_candidate: mapping_when_payload_or_options_exist_else_scalar
-      retired_duplicates: [emit_mapping_with_event_only]
+      canonical_candidate: scalar_emit_is_sugar_for_single_key_event_mapping_both_retained
+      retired_duplicates: []
       already_retired: [all_authored_handler_actions]
       distinct_overrides: [mapping_with_fields_or_options]
     corpus: {emit_scalar: 0, emit_mapping: 19, action_rows: 2, activity_rows: 0}
+    sugar_lowering: "projectNodeEmitValue (internal/runtime/contracts/workflow_contract_nodes_value.go:182-220) lowers scalar emit and the single-key {event: <event>} mapping to the same EmitSpec. #2287 USER ruling6196779785 retains both; mappings with from or fields and the separate activity/approval grammars are unchanged."
     action_retirement: "#2307: action_rows above is historical at census_head, not current authority; emit specialization and activity/tool grammar remain separate, open owners."
 
   - id: handler.guard_gate_clear
@@ -471,17 +472,18 @@ rows:
     corpus: {expression_alias_uses: 0}
 
   - id: handler.data_write
-    ruled: mechanical-ratified
+    ruled: sugar
     paths: "data_accumulation.writes[], data_accumulation.source_event"
-    owners: [projectNodeDataWriteValue, projectNodeDataAccumulationValue]
+    owners: [projectNodeDataWriteValue, projectNodeDataAccumulationValue, hydrateWorkflowDataWrite]
     information:
       fact: [source and target paths]
       choice: [operation, value, key, index]
     spelling:
-      canonical_candidate: scalar_for_direct_same_field_else_operation_mapping
-      retired_duplicates: ["scalar field versus {field: field}", "expression versus value:{cel:...}"]
+      canonical_candidate: scalar_write_is_sugar_for_same_path_source_target_mapping_both_retained
+      retired_duplicates: ["{field: x}", "expression versus value:{cel:...}"]
       distinct_overrides: [source_to_different_target, operation_mapping]
     corpus: {write_lists: 7, scalar_write_rows: 19, mapping_write_rows: 0}
+    sugar_lowering: "projectNodeDataWriteValue -> hydrateWorkflowDataWrite (internal/runtime/contracts/workflow_contract_yaml_rules.go:45) admits bare x and {source_field: x, target_field: x} as the same direct write, per #2287 USER ruling6197401134. Both stay; the internal Field slot remains until D's #2293 work. Different-path mappings, target_path, literals, computed values, operations and existing refusals are unchanged."
 
   - id: handler.collection_compute
     ruled: mechanical-ratified

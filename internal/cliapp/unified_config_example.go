@@ -49,8 +49,6 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("budget.human_tasks.auto_expire_hours", "168", "Human task auto-expiration window in hours."),
 		e("budget.human_tasks.categories_enabled", `["ops"]`, "Human task categories covered by the budget."),
 
-		e("paths.platform_spec_path", "platform-spec.yaml", "Platform spec path override."),
-
 		e("connection.api_server", "http://127.0.0.1:8081", "CLI API target for this deployment."),
 		e("connection.api_token_file", ".swarm/api-token", "CLI API bearer-token file reference; never inline the token."),
 		e("serve.api_token_file", ".swarm/serve-api-token", "Serve API bearer-token file reference; never inline the token."),

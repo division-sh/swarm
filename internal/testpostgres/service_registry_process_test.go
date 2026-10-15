@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -18,6 +19,65 @@ import (
 	"testing"
 	"time"
 )
+
+func TestServiceCreatorKeepsCapturedImageAuthority(t *testing.T) {
+	// RunCreator normally runs in a subprocess; restore its umask in this protocol test.
+	oldMask := syscall.Umask(0o077)
+	defer syscall.Umask(oldMask)
+	for _, change := range []string{"unchanged", "disappeared", "tag_moved", "daemon_changed", "spec_changed"} {
+		t.Run(change, func(t *testing.T) {
+			registry, record := testRegistryRecord(t, ServiceCreatorStarting)
+			record.ImageID = "sha256:" + strings.Repeat("a", 64)
+			record.SpecHash = serviceSpecHash(record.ImageID)
+			if change == "spec_changed" {
+				record.SpecHash = "changed-spec"
+			}
+			record.Labels = serviceLabels(record.OwnerID, record.DaemonID, record.RunnerID, record.LeaseID, record.SpecHash)
+			if err := registry.putRecord(record); err != nil {
+				t.Fatal(err)
+			}
+			fake := registry.docker.(*fakeDocker)
+			fake.outputs["info --format {{.ID}}"] = []byte(record.DaemonID)
+			const inspect = "image inspect --format {{.Id}} postgres:16"
+			fake.outputs[inspect] = []byte(record.ImageID)
+			switch change {
+			case "disappeared":
+				fake.errors[inspect] = errors.New("No such image: postgres:16")
+			case "tag_moved":
+				fake.outputs[inspect] = []byte("sha256:" + strings.Repeat("b", 64))
+			case "daemon_changed":
+				fake.outputs["info --format {{.ID}}"] = []byte("another-daemon")
+			}
+			var create string
+			fake.beforeCall = func(call string) {
+				if strings.HasPrefix(call, "create ") {
+					create = call
+					fake.errors[call] = errors.New("stop at exact Docker create")
+				}
+			}
+			creator := holdServiceTestLock(t, registry.creatorPath(record.LeaseID))
+			fd, err := syscall.Dup(int(creator.File().Fd()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = registry.RunCreator(context.Background(), record.LeaseID, uintptr(fd))
+			after, readErr := registry.record(record.LeaseID)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if change == "unchanged" {
+				if err != nil || !strings.Contains(create, " "+record.ImageID+" -c ") || strings.Contains(create, " postgres:16 ") || after.State != ServiceCreateFailed || !strings.Contains(after.CreateError, "stop at exact Docker create") {
+					t.Fatalf("creator did not use captured immutable image: create=%q state=%s err=%v", create, after.State, err)
+				}
+			} else if err == nil || create != "" || !reflect.DeepEqual(record, after) {
+				t.Fatalf("changed identity crossed creator fence: create=%q before=%+v after=%+v err=%v", create, record, after, err)
+			}
+			if containsCall(fake.calls, "pull ") {
+				t.Fatal("creator attempted an image substitution")
+			}
+		})
+	}
+}
 
 func TestCreatorFenceSurvivesRunnerDeathUntilTerminalHandoff(t *testing.T) {
 	python, err := exec.LookPath("python3")
@@ -184,7 +244,7 @@ func proveDockerRunnerAdmission(t *testing.T, capacity int) {
 		t.Fatalf("build runner: %v\n%s", err, output)
 	}
 	goBin := filepath.Join(root, "go")
-	if err := os.WriteFile(goBin, []byte("#!/bin/sh\nset -eu\ntest \"$1\" = test\nprintf '%s\\n' \"$SWARM_TEST_POSTGRES_DSN\" > \"$SWARM_TEST_PROCESS_PREFIX.dsn\"\ntouch \"$SWARM_TEST_PROCESS_PREFIX.started\"\nwhile [ ! -f \"$SWARM_TEST_PROCESS_PREFIX.release\" ]; do sleep .02; done\n"), 0o700); err != nil {
+	if err := os.WriteFile(goBin, []byte(registryFixtureGoHeader()+"test \"$1\" = test\nprintf '%s\\n' \"$SWARM_TEST_POSTGRES_DSN\" > \"$SWARM_TEST_PROCESS_PREFIX.dsn\"\ntouch \"$SWARM_TEST_PROCESS_PREFIX.started\"\nwhile [ ! -f \"$SWARM_TEST_PROCESS_PREFIX.release\" ]; do sleep .02; done\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	stateHome := filepath.Join(root, "state-home")
@@ -345,8 +405,7 @@ func TestSwarmTestJoinsDescendantAuthorityBeforeSettlement(t *testing.T) {
 	}
 
 	goBin := filepath.Join(root, "go")
-	fixture := `#!/bin/sh
-set -eu
+	fixture := registryFixtureGoHeader() + `
 test "$1" = test
 "$SWARM_TEST_DESCENDANT_HELPER" -test.run='^TestSwarmTestDescendantProcessFixture$' >/dev/null 2>&1 &
 case "$SWARM_TEST_DESCENDANT_MODE" in
@@ -650,6 +709,10 @@ esac
 	}
 }
 
+func registryFixtureGoHeader() string {
+	return fmt.Sprintf("#!/bin/sh\nset -eu\nif [ \"$1\" = env ]; then exec %q \"$@\"; fi\nif [ \"${2-}\" = -exec=/bin/true ]; then exit 0; fi\n", filepath.Join(runtime.GOROOT(), "bin", "go"))
+}
+
 func TestSwarmTestDescendantProcessFixture(t *testing.T) {
 	mode := os.Getenv("SWARM_TEST_DESCENDANT_MODE")
 	if mode == "" {
@@ -791,10 +854,12 @@ def load():
     with open(path("inspect.json")) as f: return json.load(f)
 with open(path("commands.log"), "a") as f: f.write(" ".join(args) + "\n")
 if args[0] == "pull": sys.exit(0)
+if args == ["image", "ls", "--no-trunc", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}", "postgres:16"]:
+    print("postgres:16 sha256:" + "a" * 64); sys.exit(0)
 if args[:3] == ["info", "--format", "{{.ID}}"]:
     print("daemon-id"); sys.exit(0)
 if args[:4] == ["image", "inspect", "--format", "{{.Id}}"]:
-    print("image-id"); sys.exit(0)
+    print("sha256:" + "a" * 64); sys.exit(0)
 if args[0] == "ps":
     if os.path.exists(path("inspect.json")):
         value = load()[0]
@@ -812,7 +877,7 @@ if args[0] == "create":
     for i, value in enumerate(args):
         if value == "--label":
             key, label_value = args[i + 1].split("=", 1); labels[key] = label_value
-    value = {"Id":"container-id", "Name":"/" + name, "Image":"image-id", "Config":{"Labels":labels}, "State":{"Running":False}}
+    value = {"Id":"container-id", "Name":"/" + name, "Image":"sha256:" + "a" * 64, "Config":{"Labels":labels}, "State":{"Running":False}}
     with open(path("inspect.json"), "w") as f: json.dump([value], f)
     print("container-id"); sys.exit(0)
 if args[0] == "inspect":
