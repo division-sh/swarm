@@ -173,6 +173,85 @@ func TestSourceSetHeadNativeFaultRefusesBothStores(t *testing.T) {
 	}
 }
 
+func TestSourceSetWriterRefusesMismatchedHeadBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newAgentClaimProfileFixture(t, backend)
+			capability, err := agentfixture.ProcessCapability(t, f.ctx, f.store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, found, err := capability.CurrentSourceSet(f.ctx)
+			if err != nil || !found {
+				t.Fatalf("writer fault requires its native source head: %+v found=%t err=%v", plan, found, err)
+			}
+			replay := agenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), ExpectedRevision: plan.Revision, Plan: plan}
+			committed, err := capability.RestoreSourceSet(f.ctx, replay)
+			if err != nil || committed.Replayed || committed.CurrentRevision != plan.Revision || committed.PreviousRevision != plan.Revision {
+				t.Fatalf("valid native commit: %+v err=%v", committed, err)
+			}
+			empty, err := agenttopology.EmptySourceSetPlan()
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := profileFixtureSnapshot(t, f)
+			receipt, err := ApplySourceSetHeadFaultForTest(f.ctx, f.store, plan, SourceSetHeadRevisionMismatch)
+			if err != nil {
+				t.Fatal(err)
+			}
+			restored := false
+			defer func() {
+				if !restored {
+					if err := RestoreSourceSetHeadFaultForTest(f.ctx, f.store, receipt); err != nil {
+						t.Error(err)
+					}
+				}
+			}()
+			faulted := profileFixtureSnapshot(t, f)
+			assertSourceHeadFaultOnlyColumn(t, before, faulted, "revision")
+			wantReplay := committed
+			wantReplay.Replayed = true
+			actual, err := capability.RestoreSourceSet(f.ctx, replay)
+			if err != nil || !reflect.DeepEqual(actual, wantReplay) {
+				t.Fatalf("exact operation replay consulted the damaged current head: %+v err=%v", actual, err)
+			}
+			conflict := replay
+			conflict.Plan = empty
+			actual, err = capability.RestoreSourceSet(f.ctx, conflict)
+			if err == nil || !strings.Contains(err.Error(), "operation conflicts with stored request") || !reflect.DeepEqual(actual, agenttopology.SourceSetCommitResult{}) {
+				t.Fatalf("operation conflict lost its replay fence: %+v err=%v", actual, err)
+			}
+			if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(faulted, after) {
+				t.Fatal("operation replay/conflict changed the damaged head or operation history")
+			}
+			for _, expected := range []string{plan.Revision, empty.Revision} {
+				actual, err = capability.RestoreSourceSet(f.ctx, agenttopology.SourceSetCommitRequest{
+					OperationID: uuid.NewString(), ExpectedRevision: expected, Plan: empty,
+				})
+				if err == nil || !strings.Contains(err.Error(), "stored revision differs from decoded plan") || !reflect.DeepEqual(actual, agenttopology.SourceSetCommitResult{}) {
+					t.Fatalf("direct source-set commit accepted/reclassified a mismatched head: %+v err=%v", actual, err)
+				}
+				if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(faulted, after) {
+					t.Fatal("refused direct commit changed the physical head or added an operation receipt")
+				}
+			}
+			if err := RestoreSourceSetHeadFaultForTest(f.ctx, f.store, receipt); err != nil {
+				t.Fatal(err)
+			}
+			restored = true
+			if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(before, after) {
+				t.Fatal("writer fault restoration changed complete application storage")
+			}
+			if _, err := capability.RestoreSourceSet(f.ctx, agenttopology.SourceSetCommitRequest{
+				OperationID: uuid.NewString(), ExpectedRevision: plan.Revision, Plan: empty,
+			}); err != nil {
+				t.Fatalf("restored native head rejected its legal replacement: %v", err)
+			}
+			assertRecoveryReadImage(t, f.ctx, f.store.(agentRecoveryReadOwners), empty, true, nil)
+		})
+	}
+}
+
 func proveSourceSetHeadNativeFault(t *testing.T, f, foreign agentClaimProfileFixture, plan agenttopology.SourceSetPlan,
 	locked func(context.Context) (agenttopology.SourceSetPlan, bool, error), fault SourceSetHeadFault) {
 	t.Helper()
