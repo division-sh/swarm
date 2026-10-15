@@ -23,7 +23,7 @@ var operatorSnapshotFixtureScopes = map[string]string{
 	"internal/store/internal/runtimepersistence/test_operator_snapshot_read_barrier.go":      `InitializeOperatorSnapshotReadBarrierForTest PrepareOperatorSnapshotReadsForTest ReadOperatorSnapshotAcrossCutForTest readOperatorSnapshotSQLiteCut readOperatorSnapshotPostgresCut`,
 	"internal/store/internal/runtimepersistence/test_event_support.go":                       `corruptOperatorSnapshotEventTx CorruptOperatorSnapshotEventForTest`,
 	"internal/store/internal/backend/agentpersistence/test_operator_snapshot_corruption.go":  `OperatorSnapshotCorruption CaptureOperatorSnapshotRouteCorruptionTx CaptureOperatorSnapshotStatusCorruptionTx captureOperatorSnapshotCorruptionTx readRow InstallTx RestoreTx replaceValue VerifyEnforcementTx requireOperatorSnapshotSingleFieldDelta`,
-	"internal/store/internal/backend/agentpersistence/test_operator_snapshot_mutations.go":   `SetOperatorSnapshotAgentActiveTx CorruptOperatorSnapshotSubscriptionsTx CorruptOperatorSnapshotConfigTx`,
+	"internal/store/internal/backend/agentpersistence/test_operator_snapshot_mutations.go":   `SetOperatorSnapshotAgentActiveTx CorruptOperatorSnapshotSubscriptionsTx CorruptOperatorSnapshotConfigTx mutateOperatorSnapshotAgentTx`,
 	"internal/store/internal/backend/llmpersistence/test_operator_snapshot_barrier.go":       `HoldOperatorSessionSnapshotTx RestoreOperatorSessionSnapshotTx HoldOperatorTurnSnapshotTx RestoreOperatorTurnSnapshotTx`,
 	"internal/store/internal/backend/llmpersistence/test_operator_snapshot_mutations.go":     `ReplaceOperatorSnapshotSessionTx ReplaceOperatorSnapshotTurnSummaryTx CorruptOperatorSnapshotTurnBlocksTx replaceOperatorSnapshotTurnBlocksTx CorruptOperatorSnapshotSessionStateTx`,
 	"internal/store/internal/backend/delivery/lifecycle.go":                                  `SettleOperatorSnapshotDeliveryTx CorruptOperatorSnapshotDeliveryRouteTx HoldOperatorDeliverySnapshotTx RestoreOperatorDeliverySnapshotTx`,
@@ -31,6 +31,44 @@ var operatorSnapshotFixtureScopes = map[string]string{
 	"internal/store/internal/backend/eventrecord/sqlite/adapter.go":                          `CorruptOperatorSnapshotEventPayloadTx`,
 	"internal/store/internal/backend/sqlite/transaction.go":                                  `runTransactionOnceOutcome runTransactionWithConnectionScope prepareTransactionConnectionScope cleanupTransactionConnectionScope transactionConnectionScope`,
 	"internal/store/internal/backend/sqlite/test_agent_snapshot_corruption.go":               `runAgentSnapshotCorruption RunAgentSnapshotRouteCorruptionForTest RunAgentSnapshotStatusCorruptionForTest`,
+}
+
+type operatorSnapshotFixtureDeclaration struct {
+	path, receiver, name string
+}
+
+var operatorSnapshotAgentWriteDeclarations = map[operatorSnapshotFixtureDeclaration]int{
+	{"internal/store/internal/backend/agentpersistence/test_operator_snapshot_corruption.go", "*OperatorSnapshotCorruption", "replaceValue"}: 1,
+	{"internal/store/internal/backend/agentpersistence/test_operator_snapshot_mutations.go", "", "mutateOperatorSnapshotAgentTx"}:            1,
+}
+
+func operatorSnapshotDeclaration(path string, fn *ast.FuncDecl) operatorSnapshotFixtureDeclaration {
+	identity := operatorSnapshotFixtureDeclaration{path: path, name: fn.Name.Name}
+	if fn.Recv == nil {
+		return identity
+	}
+	identity.receiver = "foreign receiver"
+	if len(fn.Recv.List) != 1 {
+		return identity
+	}
+	if pointer, ok := fn.Recv.List[0].Type.(*ast.StarExpr); ok {
+		if name, ok := pointer.X.(*ast.Ident); ok {
+			identity.receiver = "*" + name.Name
+		}
+	}
+	return identity
+}
+
+func operatorSnapshotOwnsFunction(path string, fn *ast.FuncDecl) bool {
+	if !strings.Contains(" "+operatorSnapshotFixtureScopes[path]+" ", " "+fn.Name.Name+" ") {
+		return false
+	}
+	for identity := range operatorSnapshotAgentWriteDeclarations {
+		if identity.path == path && identity.name == fn.Name.Name {
+			return identity == operatorSnapshotDeclaration(path, fn)
+		}
+	}
+	return true
 }
 
 func isOperatorSnapshotFixtureReference(name string) bool {
@@ -57,12 +95,15 @@ func operatorSnapshotConsumerViolations(path string, source []byte) ([]string, e
 	for _, declaration := range file.Decls {
 		scope := "package initializer"
 		var definition *ast.Ident
+		owned := false
 		switch node := declaration.(type) {
 		case *ast.FuncDecl:
 			scope, definition = node.Name.Name, node.Name
+			owned = operatorSnapshotOwnsFunction(path, node)
 		case *ast.GenDecl:
 			if node.Tok == token.TYPE && len(node.Specs) == 1 {
 				scope = node.Specs[0].(*ast.TypeSpec).Name.Name
+				owned = strings.Contains(allowed, " "+scope+" ")
 			}
 		}
 		ast.Inspect(declaration, func(node ast.Node) bool {
@@ -70,7 +111,7 @@ func operatorSnapshotConsumerViolations(path string, source []byte) ([]string, e
 			if !ok || id == definition || !isOperatorSnapshotFixtureReference(id.Name) {
 				return true
 			}
-			if !strings.Contains(allowed, " "+scope+" ") {
+			if !owned {
 				violations = append(violations, fmt.Sprintf("%s/%s consumes fixture-only %s", path, scope, id.Name))
 			}
 			return true
@@ -114,6 +155,7 @@ func TestOperatorSnapshotFixtureConsumerGuardRejectsProductionAndInitializerEsca
 		`func serve(){ storetest.OperatorSnapshotTerminalization(identity) }`,
 		`func serve(){ backend.RunAgentSnapshotRouteCorruptionForTest(ctx,callback) }`,
 		`func serve(){ backend.runTransactionWithConnectionScope(ctx,nil,0,scope,callback) }`,
+		`func serve(){ backend.mutateOperatorSnapshotAgentTx(ctx,tx,identity,assignment,value) }`,
 		`var escape=storetest.OperatorSnapshotSessionReplacement`,
 		`var escape=func(){ storetest.RequireMalformedOperatorAgentRoute(t,ctx,store,identity) }()`,
 		`func serve(cut storetest.OperatorSnapshotCut){ use(cut) }`,

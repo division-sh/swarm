@@ -129,3 +129,36 @@ operator-snapshot fault definitions as ordinary production agents writers.
 No file-name exclusion or production-writer allowance is added; that exact role
 composition is recorded for reviewer disposition. No hold or migration credit
 is released by these inventory/quality repairs.
+
+## Authorized exact topology-role continuation
+
+Reviewer6200267441 accepts signedadb7a8fa90 for local stacking and authorizes
+this finite repair. The topology guard still requires exactly two production
+CAS write literals in the original lifecycle owner. Separately, it requires
+one write in each exact private fault declaration: the pointer-receiver
+OperatorSnapshotCorruption.replaceValue method and the package-level
+mutateOperatorSnapshotAgentTx helper, in their original repository paths.
+
+Both guards consume the same declaration/receiver identities and the existing
+fixture scope inventory. Only the already-existing mutation helper is added
+to that inventory; its three wrappers and all original consumers remain.
+Authorization calls are counted inside every declaration, including fixtures.
+No whole-file exclusion, production allowance, new SQL or runtime port exists.
+Controls reject ordinary-function and initializer writes in either file,
+additional/missing writes, foreign receivers/names and production fixture use.
+The controls are children of the original root, preserving all85 static roots.
+
+The topology and existing closed-consumer roots PASS1.067s; complete active-plan
+binding plus hostile ownership-envelope controls PASS11.684s; affected vet
+passes. Exact signed-head complexity/unused receipts are recorded externally
+with this continuation. Previous runtime/census/history receipts carry without
+relabelling; no credit, baseline, collector or hold changes are claimed.
+Preflight remains incomplete for the previously disclosed completion/qualification
+items; this repair is not a preflight or integration-completion claim.
+
+Next pinned absorb inputs are frozen here, not imported by this guard repair:
+master53788da133 (#2670) adds only the release workflow versus pinned7956 and
+does not intersect B's source; E's complete G-accepted owner/fixture packet is
+4d175b5b225c17f1ddd11d303cefa6b17a769028, verdict6199970116. Compose them together
+at the next boundary with exact common-source/custody reconciliation. No
+capacity, dispatcher, launch, boot wiring or S6 integration/merge is authorized.
