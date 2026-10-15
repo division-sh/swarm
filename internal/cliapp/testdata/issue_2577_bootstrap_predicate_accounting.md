@@ -525,3 +525,14 @@ The disposable assertion is not retained in product/test source. Fresh corrected
 both-store race, affected guards and exact-head preflight must pass before the
 single quiet real-SDK rehearsal. A fixture milestone alone grants no production
 readiness, account authority, hosted credit or sitting approval.
+
+The corrected ten-root control passes race, count 1 on both stores: 30
+test/subtest PASS, zero fail/skip, joined wrapper exit zero. Native package
+14.409s, serve package 92.309s. It includes the explicit held negative,
+released checkpoint, distinct-successor signal refusal, four immediate callers
+and four readiness consumers. Raw SHA256
+bda61420073e3fdf0fb0acb99902012835d45e418d1eada6cc1703d03c549729;
+stderr SHA256 744a5f38901a875b3df29a94310db42fa70f970917729d44202c30f24a6f1efb.
+These are focused iteration receipts, not final-head qualification or a quiet
+physical rehearsal. Final-head race/guards/preflight and rehearsal receipts
+are named in the subsequent signed issue checkpoint without rewriting history.
