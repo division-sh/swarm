@@ -273,7 +273,7 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 					t.Fatalf("successful receiving engine retained failure: %+v", current.Failure)
 				}
 				settlement := current
-				assertForkEngineRows(t, db, runID, claim.RunID(), target.EntityID, sourceConsumer, beforeRevision+1, missing)
+				assertForkEngineRows(t, ctx, selected, runID, claim.RunID(), target.EntityID, sourceConsumer, beforeRevision+1, missing)
 				resumeSettled()
 				if missing {
 					committedRows["entity_state"]--
@@ -321,7 +321,7 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 						t.Fatalf("postactivation retirement changed committed %s rows: %d != %d", table, got, want)
 					}
 				}
-				assertForkEngineRows(t, db, runID, claim.RunID(), target.EntityID, sourceConsumer, beforeRevision+1, missing)
+				assertForkEngineRows(t, ctx, selected, runID, claim.RunID(), target.EntityID, sourceConsumer, beforeRevision+1, missing)
 				current, err = deps.DeliveryStore.Snapshot(ctx, claim.DeliveryID())
 				if err != nil || current.EventID != observed.id || current.Status != want || !current.MatchesSettlementClaim(claim) ||
 					current.ReasonCode != settlement.ReasonCode || !reflect.DeepEqual(current.Failure, settlement.Failure) {
@@ -479,23 +479,60 @@ func forkEngineMarker(t *testing.T, raw string) any {
 	return fields["marker"]
 }
 
-func assertForkEngineRows(t *testing.T, db *sql.DB, sourceRun, childRun, receiver, sourceBefore string, wantRevision int64, missing bool) {
+func assertForkEngineRows(t *testing.T, ctx context.Context, selected *storeselected.Owner, sourceRun, childRun, receiver, sourceBefore string, wantRevision int64, missing bool) {
 	t.Helper()
-	var fields string
-	var revision int64
-	err := db.QueryRow(`SELECT CAST(fields AS TEXT),revision FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, childRun, receiver).Scan(&fields, &revision)
-	if missing {
-		if err != sql.ErrNoRows {
-			t.Fatalf("required-state failure recreated the receiver: %s err=%v", fields, err)
+	child, err := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, childRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, sourceRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := func(snapshot map[string]storetest.SelectedForkStorageTableSnapshot, path, entity string) (fields string, revision int64, found bool) {
+		rows, err := storetest.DecodeSelectedForkSnapshotRows(snapshot["entity_state"])
+		if err != nil {
+			t.Fatal(err)
 		}
-	} else if err != nil || forkEngineMarker(t, fields) != "consumer-engine" || revision != wantRevision {
-		t.Fatalf("engine did not write receiving entity exactly once: %s revision=%d want=%d err=%v", fields, revision, wantRevision, err)
+		for _, row := range rows {
+			flow, err := row["flow_instance"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			id, err := row["entity_id"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if flow != path || entity != "" && id != entity {
+				continue
+			}
+			if found {
+				t.Fatalf("receiver state is not unique: flow=%s entity=%s", path, entity)
+			}
+			fields, err = row["fields"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(row["revision"].Value, &revision); err != nil {
+				t.Fatal(err)
+			}
+			found = true
+		}
+		return fields, revision, found
 	}
-	if err := db.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance='producer'`, childRun).Scan(&fields); err != nil || forkEngineMarker(t, fields) != "producer-owned" {
-		t.Fatalf("engine borrowed producer state: %s err=%v", fields, err)
+	fields, revision, found := state(child, "consumer", receiver)
+	if missing {
+		if found {
+			t.Fatalf("required-state failure recreated the receiver: %s", fields)
+		}
+	} else if !found || forkEngineMarker(t, fields) != "consumer-engine" || revision != wantRevision {
+		t.Fatalf("engine did not write receiving entity exactly once: %s revision=%d want=%d found=%t", fields, revision, wantRevision, found)
 	}
-	if err := db.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance='consumer'`, sourceRun).Scan(&fields); err != nil || fields != sourceBefore {
-		t.Fatalf("engine mutated source receiver: %s err=%v", fields, err)
+	if fields, _, found := state(child, "producer", ""); !found || forkEngineMarker(t, fields) != "producer-owned" {
+		t.Fatalf("engine borrowed producer state: %s found=%t", fields, found)
+	}
+	if fields, _, found := state(source, "consumer", ""); !found || fields != sourceBefore {
+		t.Fatalf("engine mutated source receiver: %s found=%t", fields, found)
 	}
 }
 
