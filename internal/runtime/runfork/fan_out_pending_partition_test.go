@@ -443,7 +443,6 @@ func TestFanOutPendingPartitionDeploymentRetainedAdmission(t *testing.T) {
 						SourceDeliveryIDs: []string{deliveryID}, Phase: phase, InheritedDisposition: disposition}},
 				}}}
 				if phase == RunForkDeploymentPendingReceiver {
-					plan.PendingWork[0].ContinuationHandoffAt = &now
 					plan.PendingWork = append(plan.PendingWork, RunForkPendingWork{EventID: eventID, SubscriberType: "platform",
 						SubscriberID: "pipeline", ReceiptOutcome: "success", ReceiptAt: &now})
 				}

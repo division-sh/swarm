@@ -150,3 +150,18 @@ func ReadWorkflowEnginePhysicalCountsForTest(ctx context.Context, tx *sql.Tx) (W
 	}
 	return out, nil
 }
+
+type ActivityForkEntityStorage struct {
+	Flow, EntityType, Stage string
+	Fields, Accumulator     []byte
+}
+
+func ReadActivityForkEntityStorageTx(ctx context.Context, tx *sql.Tx, runID, entityID string) (ActivityForkEntityStorage, error) {
+	var out ActivityForkEntityStorage
+	err := tx.QueryRowContext(ctx, `SELECT flow_instance,entity_type,current_state,fields,accumulator FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, entityID).
+		Scan(&out.Flow, &out.EntityType, &out.Stage, &out.Fields, &out.Accumulator)
+	if err != nil {
+		return ActivityForkEntityStorage{}, err
+	}
+	return out, nil
+}

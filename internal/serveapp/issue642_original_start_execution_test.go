@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -52,7 +54,7 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			if !ok {
 				t.Fatal("start execution requires the actual selected fork family")
 			}
-			ctx := servedControlProofAuthorActivityContext(t, rt)
+			ctx := servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
 			plan, err := family.Plan(ctx, runfork.RunForkPlanRequest{SourceRunID: started.RunID, AtStart: true})
 			if err != nil || plan.ForkPoint.Kind != runfork.RunForkPointRunStart || plan.ForkPoint.Revision != 1 ||
 				plan.ForkPoint.EventID != "" || plan.StartFirstTurn == nil || plan.EventCountAtFork != 0 || len(plan.PendingWork) != 0 {
@@ -62,7 +64,10 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			if !found || first.ID() != initial || first.RunID() != started.RunID || first.Type() != "item.received" {
 				t.Fatalf("start first turn substituted its immutable origin: %+v", plan.StartFirstTurn.Coordinates())
 			}
-			before := readServedForkRecipientSourceDomain(t, rt, started.RunID)
+			before, err := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, started.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			baseline := rt.Runtime.Options.ProcessWorkOwner.ActiveCount()
 			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 			result, err := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
@@ -82,9 +87,19 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 				t.Fatalf("execute actual original start: %+v error=%v", result, err)
 			}
 			child := result.Materialization.ForkRunID
+			t.Cleanup(func() {
+				if t.Failed() {
+					var diagnosis json.RawMessage
+					requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": child}, &diagnosis)
+					t.Logf("original-start child failure: %s", diagnosis)
+				}
+			})
 			requireServedRunStatus(t, rt.Endpoint, child, "completed")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, child)
-			requireLifecycleFlowEntity(t, rt, child, "", "done")
+			_, childHeader := requireReceiverTargetState(t, rt.ReceiverStateReader, child, ".", child, child)
+			if childHeader.CurrentState != "done" {
+				t.Fatalf("exact first-turn child did not reach done: %+v", childHeader)
+			}
 			page, err := selected.Observability().ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{
 				Filter: operatorread.OperatorEventListFilter{RunID: child}, Limit: 10, ExcludeRuntimeLogs: true,
 			})
@@ -110,7 +125,11 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			if err := family.RetireSelectedContexts(cleanup); err != nil || rt.Runtime.Options.ProcessWorkOwner.ActiveCount() != baseline {
 				t.Fatalf("first-turn execution did not join its own retained work: %v", err)
 			}
-			if after := readServedForkRecipientSourceDomain(t, rt, started.RunID); !reflect.DeepEqual(before, after) {
+			after, err := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, started.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(before, after) {
 				t.Fatal("selected first turn changed original source execution/history")
 			}
 		})

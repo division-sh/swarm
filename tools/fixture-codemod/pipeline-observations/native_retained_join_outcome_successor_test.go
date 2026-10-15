@@ -82,6 +82,19 @@ func proveRetainedJoinTypedReaderSource(t *testing.T) {
 var retainedJoinR7Reviewed string
 
 func validateRetainedJoinSuccessor(row recipe, candidate string) error {
+	// The one native handoff is reversible to the previously checked caller.
+	// Authenticate its complete finite endpoint before using that predecessor.
+	if _, err := fixtureSetupCurrentEndpoint2617(row, candidate); err != nil {
+		return err
+	}
+	var pins []fixtureSetupSuccessor2617
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
+		return err
+	}
+	if len(pins) != 47 || !sameReviewedRecipeKey(row, pins[43].Original) {
+		return fmt.Errorf("native retained join has no exact predecessor")
+	}
+	candidate = pins[43].Original.Successor
 	predecessor := strings.TrimSuffix(retainedJoinR7Reviewed, "\n")
 	if fmt.Sprintf("%x", sha256.Sum256([]byte(predecessor))) != "9fe6d8918d3fc2716ec8db18d7415b6445afa8da23014a4b20965f6a85155867" {
 		return fmt.Errorf("reviewed R7 predecessor changed")
@@ -177,7 +190,9 @@ func TestRetainedJoinOutcomeSuccessorPreservesReviewedCaller(t *testing.T) {
 				t.Fatal("archived future-capability oracle changed")
 			}
 			for _, mutation := range []struct{ name, before, after string }{
-				{"missing_success_return", "requireServedRetainedJoinForkSuccess(t, rt, selected, request, current, sourceJoins)", "omitSuccessAssertions()"},
+				{"missing_success_return", "requireServedRetainedJoinForkSuccess(t, ctx, rt.ReceiverStateReader, rt.BundleHash, rt.ForkRuntime, selected, request, current, sourceJoins)", "omitSuccessAssertions()"},
+				{"foreign_success_reader", "requireServedRetainedJoinForkSuccess(t, ctx, rt.ReceiverStateReader,", "requireServedRetainedJoinForkSuccess(t, ctx, foreignReader,"},
+				{"foreign_success_scope", "servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)", "servedRuntimeProofAuthorActivityContext(t, foreignRuntime, rt.BundleHash)"},
 				{"wrong_success_selection", "if success {", "if !success {"},
 				{"missing_first", retainedJoinSuccessorEdits[0].block, ""},
 				{"duplicate_first", retainedJoinSuccessorEdits[0].block, strings.Repeat(retainedJoinSuccessorEdits[0].block, 2)},
