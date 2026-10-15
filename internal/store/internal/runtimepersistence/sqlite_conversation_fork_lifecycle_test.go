@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -18,15 +19,17 @@ import (
 )
 
 func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
-	ctx := testAuthorActivityContext()
+	bundle := conversationForkConstructionBundle(t)
+	ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
 	s := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	if _, err := s.backend.ExecContext(ctx, `PRAGMA journal_mode = WAL`); err != nil {
 		t.Fatalf("enable production SQLite journal mode: %v", err)
 	}
 	now := activeConversationForkTestClock()
-	source := seedSQLiteConversationForkSource(t, s, now)
+	source := seedSQLiteConversationForkSource(t, s, now, bundle)
 	entityID := uuid.NewString()
-	if err := seedConversationForkChatEntityForTest(ctx, s, source.runID, entityID, source.turn1At); err != nil {
+	construction := prepareNativeConversationForkConstruction(t, ctx, s, bundle, ConversationForkSourceFixture{RunID: source.runID, EntityID: entityID, Turn1At: source.turn1At, kind: conversationForkNativeChat})
+	if err := seedConversationForkChatEntityForTest(ctx, s, source.runID, entityID, source.turn1At, construction); err != nil {
 		t.Fatalf("seed closed conversation projection: %v", err)
 	}
 
@@ -100,10 +103,7 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	if prepared.Snapshot.SourceTurn.TurnID != source.turn1ID || prepared.Snapshot.SnapshotOwner != runfork.ConversationForkChatSnapshotOwner {
 		t.Fatalf("prepared snapshot = %#v", prepared.Snapshot)
 	}
-	if len(prepared.Snapshot.EntitySnapshot) != 1 {
-		t.Fatalf("SQLite snapshot entities = %#v", prepared.Snapshot.EntitySnapshot)
-	}
-	entity := prepared.Snapshot.EntitySnapshot[0]
+	entity := requireConversationForkConstructedSnapshot(t, prepared.Snapshot.EntitySnapshot, source, entityID)
 	if entity.EntityID != entityID || entity.CurrentState == nil || *entity.CurrentState != "draft" || entity.Fields["name"] != "Before" {
 		t.Fatalf("SQLite reconstructed entity = %#v", entity)
 	}
@@ -225,7 +225,7 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	proveQ10ConversationDataOnlyCuts(t, ctx, s, source, entityID, now)
 }
 
-func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base time.Time) conversationForkSourceFixture {
+func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base time.Time, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
 	t.Helper()
 	source := conversationForkSourceFixture{
 		runID:      uuid.NewString(),
@@ -239,10 +239,16 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 		turn1At:    base.Add(-2 * time.Minute),
 		turn2At:    base.Add(-1 * time.Minute),
 	}
-	ctx := testAuthorActivityContext()
-	requireRunFixtureForTest(t, ctx, s, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+	run := semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: source.runID, BundleHash: source.bundleHash, StartedAt: base.Add(-3 * time.Minute),
-	})
+	}
+	if len(historical) != 0 {
+		run.Artifact = historical[0].SourceArtifact
+		source.bundleHash = run.Artifact.BundleHash()
+		run.BundleHash = source.bundleHash
+	}
+	ctx := testAuthorActivityContextForBundle(source.bundleHash)
+	requireRunFixtureForTest(t, ctx, s, run)
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()
 	if err != nil {
