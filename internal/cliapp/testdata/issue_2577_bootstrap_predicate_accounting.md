@@ -467,3 +467,43 @@ exit zero. Raw receipt SHA256
 An initial local hardening attempt incorrectly allowed only a get and rejected
 the CLI's existing explicit retry; that test-only setup RED is retained and
 corrected to the existing get-then-retry contract, without a production edit.
+
+### Paired Bootstrap Transport Versus Login Cut
+
+Reviewer-g #2577/6202241187 authorizes a deterministic diagnostic, not a
+production repair or qualification repeat. TestWhatsAppHeldAuthenticationCheckpointBothStores
+records actual private-owner booleans: before auth, current/live/non-fenced,
+non-closed/non-retiring, transport and bootstrap complete, SDK logged-in=false,
+checkpoint ok=false with nil error. After releasing the genuine SDK success
+frame and joining its existing connected milestone, only login/checkpoint
+become true. No account or session values are logged.
+
+TestServeSessionHeldAuthenticationCheckpointBothStores independently exercises
+the REAL outer ResumeSession with an empty retained account. Its bootstrap
+attempt completes while the paired socket's auth-success frame is held;
+checkpoint is false/nil. After release, the exact socket's SDK post-auth count
+IQ is the fixture milestone, and the unchanged checkpoint owner returns true.
+Original operation, coordinate, reservation, revision transition, account,
+private header, no identity/activation and no extra selection are asserted.
+The native control records SDK booleans directly; the outer control uses the
+real protocol milestone and does not claim access to private SDK fields.
+
+Both roots pass race, count 1, both stores (6 test/subtest PASS, zero fail/skip,
+joined wrapper exit zero). Raw SHA256
+1e4489f0a79f1c6b54bd67fb8d1a81b9897af105de9f698982269d1f07464630.
+The first outer diagnostic failed to enter its test-only hold because it
+tested a numeric username value rather than optional-field presence for the
+existing synthetic SDK account. That setup RED is retained; the corrected
+presence check preserves the original fixture and does not change any product
+deadline. The existing failed paired-resume receipt remains failed evidence.
+
+Proposed fixture-only follow-up, NOT YET IMPLEMENTED: let the existing paired
+peer's returned signal identify its exact post-auth SDK count IQ (all current
+paired callers discard the handshake signal), then wait at the four immediate
+checkpoint callers in channel_session_restore_test.go. The fifth consumer,
+pairedServeSessionObserver in channel_session_readiness_test.go, already
+polls checkpoints inside 5s; replace that poll with the same bounded milestone
+wait and one unchanged checkpoint, preserving its bound and assertions. Keep
+other peer modes and the explicit held-before-auth negative unchanged. This
+requires reviewer-g's ruling plus RED-to-GREEN before qualification/rehearsal;
+it grants no production readiness or account authority from a peer signal.
