@@ -404,6 +404,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								if err := commitSemanticPipelineProcessedEventFixture(f.ctx, f.store, marker); err != nil {
 									t.Fatal(err)
 								}
+								sourceCounts := snapshotOwnershipCounts(t, f, f.runID)
 								physicalBefore, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
 								if err != nil {
 									t.Fatal(err)
@@ -436,6 +437,12 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								clean, err := inspector.InspectRunMutationDrift(f.ctx, valid.ForkRunID)
 								if err != nil || !reflect.DeepEqual(clean, mutationlog.DriftReport{RunID: valid.ForkRunID, EntitiesChecked: wantEntities, Rows: []mutationlog.DriftRow{}}) {
 									t.Fatalf("earlier imported member lost clean native fork oracle: %+v %v", clean, err)
+								}
+								if after := snapshotOwnershipCounts(t, f, f.runID); after != sourceCounts {
+									t.Fatalf("earlier valid materialization changed source counts: before=%v after=%v", sourceCounts, after)
+								}
+								if after := readSnapshotOwnershipEntity(t, f, f.runID); !reflect.DeepEqual(after, sourceEntityBefore) {
+									t.Fatalf("earlier valid materialization rewound source state: before=%+v after=%+v", sourceEntityBefore, after)
 								}
 								if phase == "exact_replay" {
 									if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(physicalBefore, after) {
