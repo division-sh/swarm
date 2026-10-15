@@ -62,7 +62,7 @@ hard:
 
 func TestCommittedUnitCommandBudgetsAreExactAndDeclared(t *testing.T) {
 	budget, proof := committedTimingPolicies(t)
-	want := map[string]float64{"broad-03": 300, "catalog-required-verify": 360, "conformance-2394-core": 300, "conformance-2394-reporter": 480, "serveapp-i-reporter-all-commit": 780, "persistence-authority-debt-census": 600}
+	want := map[string]float64{"broad-03": 300, "catalog-required-verify": 360, "conformance-2394-core": 300, "conformance-2394-reporter": 480, "serveapp-i-reporter-all-commit": 780, "persistence-authority-debt-census": 600, "store-runtime-full-03-i-l": 335}
 	if len(budget.Hard.UnitCommandSeconds) != len(want) {
 		t.Fatalf("unit command budgets = %v, want only named units", budget.Hard.UnitCommandSeconds)
 	}
@@ -142,6 +142,68 @@ func TestCommittedBroadCommandBudgetBoundariesAndIsolation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestStoreRuntimeIToLBudgetBoundariesAndIsolation(t *testing.T) {
+	budget, proof := committedTimingPolicies(t)
+	plan := committedBroadBudgetPlan(t, proof)
+	const id = "store-runtime-full-03-i-l"
+	original := budget
+	original.Hard.UnitCommandSeconds = make(map[string]CommandBudget)
+	for name, value := range budget.Hard.UnitCommandSeconds {
+		if name != id {
+			original.Hard.UnitCommandSeconds[name] = value
+		}
+	}
+	for _, tc := range []struct {
+		name                    string
+		seconds, siblingSeconds float64
+		status                  BudgetStatus
+	}{
+		{"retained primary", 325, 312, BudgetPass},
+		{"at baseline", 335, 312, BudgetPass},
+		{"at ceiling", 435.5, 312, BudgetPass},
+		{"above ceiling", 435.501, 312, BudgetFail},
+		{"sibling above unchanged ceiling", 335, 312.001, BudgetFail},
+	} {
+		for _, advisory := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/advisory=%t", tc.name, advisory), func(t *testing.T) {
+				var evidence []CommandEvidence
+				for _, unit := range plan.Units {
+					seconds := 10.0
+					if unit.ID == id {
+						seconds = tc.seconds
+					} else if unit.ID == "store-runtime-full-03" {
+						seconds = tc.siblingSeconds
+					}
+					evidence = append(evidence, timingTestEvidence(plan, unit.ID, AttemptPrimary, seconds))
+				}
+				opts := EvaluationOptions{Plan: plan, WorkflowRunID: 1, WorkflowAttempt: 1, AdvisoryTiming: advisory}
+				result, prior := EvaluateBudget(budget, opts, evidence), EvaluateBudget(original, opts, evidence)
+				want := tc.status
+				if advisory && want == BudgetFail {
+					want = BudgetWarn
+				}
+				if result.Status != want || len(result.Surfaces) != len(plan.Units) {
+					t.Fatalf("result = %+v, want %s and every planned surface", result, want)
+				}
+				found := false
+				for i, surface := range result.Surfaces {
+					if surface.Surface == id {
+						found = true
+						if surface.LimitSeconds != 335 || surface.BufferedCeilingSeconds != 435.5 || surface.PrimarySeconds == nil || *surface.PrimarySeconds != tc.seconds {
+							t.Fatalf("surface = %+v, want 335s/435.5s and unchanged primary", surface)
+						}
+					} else if !reflect.DeepEqual(surface, prior.Surfaces[i]) {
+						t.Fatalf("unrelated surface changed: %+v, prior %+v", surface, prior.Surfaces[i])
+					}
+				}
+				if !found {
+					t.Fatal("budget evaluation omitted the isolated unit")
+				}
+			})
+		}
 	}
 }
 
