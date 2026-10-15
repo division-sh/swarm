@@ -7,6 +7,27 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
+func TestNodeRuleFieldOptionsPreserveExactContextVocabulary(t *testing.T) {
+	for _, context := range []handlerRuleDecodeContext{"", handlerRuleDecodeContextRules, handlerRuleDecodeContextOnComplete, "unrecognized"} {
+		t.Run(string(context), func(t *testing.T) {
+			got := nodeRuleFieldOptions(context)
+			wantCount := len(ruleFieldOptions)
+			if context != handlerRuleDecodeContextOnComplete {
+				wantCount--
+			}
+			if len(got) != wantCount {
+				t.Fatalf("context %q fields=%d, want %d", context, len(got), wantCount)
+			}
+			for key := range ruleFieldOptions {
+				_, present := got[key]
+				if want := key != "condition" || context == handlerRuleDecodeContextOnComplete; present != want {
+					t.Fatalf("context %q field %q presence=%t, want %t", context, key, present, want)
+				}
+			}
+		})
+	}
+}
+
 func TestProjectNodeRuleRowsValuePreservesOrderAndContext(t *testing.T) {
 	snapshot, err := yamlsource.Load([]byte(`worker:
   event_handlers:
