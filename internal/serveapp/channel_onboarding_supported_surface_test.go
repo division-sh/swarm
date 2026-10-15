@@ -1093,11 +1093,10 @@ func channelOnboardingHostWorkspaceFields() []string {
 
 func writeChannelOnboardingPostgresRuntimeConfig(t *testing.T, dsn string) string {
 	t.Helper()
-	connection, err := testpostgres.ParseConnection(dsn)
+	parameters, err := testpostgres.ParseConnectionParameters(dsn)
 	if err != nil {
 		t.Fatalf("parse channel onboarding PostgreSQL DSN: %v", err)
 	}
-	parameters := connection.Parameters()
 	t.Setenv("PGPASSWORD", parameters.Password)
 	configText := fmt.Sprintf(`runtime:
   recovery_on_startup: false
