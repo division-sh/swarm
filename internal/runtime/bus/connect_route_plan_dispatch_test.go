@@ -3263,28 +3263,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionFailsClosedForA
 	}
 }
 
-type concurrentPlanFinalizationBarrier struct {
-	*testFlowInstanceActivationOwner
-	mu       sync.Mutex
-	arrivals int
-	ready    chan struct{}
-}
-
-func (o *concurrentPlanFinalizationBarrier) FinalizeCommittedFlowInstanceActivation(ctx context.Context, committed runtimepipeline.CommittedFlowInstanceActivation) error {
-	o.mu.Lock()
-	o.arrivals++
-	if o.arrivals == 2 {
-		close(o.ready)
-	}
-	o.mu.Unlock()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-o.ready:
-	}
-	return o.testFlowInstanceActivationOwner.FinalizeCommittedFlowInstanceActivation(ctx, committed)
-}
-
 func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameKeyConverges(t *testing.T) {
 	source := connectRoutePlanCarriedKeyResolutionSource(t, runtimecontracts.FlowInputResolutionModeSelectOrCreate)
 	base := &connectRoutePlanLifecycleStore{
@@ -3294,7 +3272,8 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameK
 	// This collaborator proof covers two future-owner plans and compiled target
 	// convergence, not native immutable constructor election. The latter requires
 	// TestA9ConcurrentKeyedIngressElectionBothStores's real stores and barriers.
-	owner := &concurrentPlanFinalizationBarrier{testFlowInstanceActivationOwner: newTestFlowInstanceActivationOwner(store.Activate), ready: make(chan struct{})}
+	eventIDs := []string{uuid.NewString(), uuid.NewString()}
+	owner := newConcurrentPlanPreparationBarrier(newTestFlowInstanceActivationOwner(store.Activate), [2]string{eventIDs[0], eventIDs[1]})
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: source, Durable: DurableDependencies{RunLifecycle: &publicationRunPreflightTestStore{runID: busInternalTestRunID}},
 		TemplateInstancePlanner: owner,
@@ -3305,7 +3284,6 @@ func TestEventBusPublish_ConnectRoutePlanSelectOrCreateResolutionConcurrentSameK
 	installConnectionSourceConstruction(t, eb, source, "producer")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	eventIDs := []string{uuid.NewString(), uuid.NewString()}
 	errs := make(chan error, len(eventIDs))
 	var wg sync.WaitGroup
 	for _, eventID := range eventIDs {
