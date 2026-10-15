@@ -55,6 +55,10 @@ func q10CurrentEndpointRecipe(row recipe, pin fixtureSetupSuccessor2617) (recipe
 	if !reflect.DeepEqual(row, pin.Original) || row.Removed || len(pin.Edits) == 0 {
 		return recipe{}, fmt.Errorf("Q10 endpoint changed original history or identity")
 	}
+	reversed, err := reverseReviewedSuccessor2617(pin.Candidate, pin.Edits)
+	if err != nil {
+		return recipe{}, fmt.Errorf("Q10 endpoint failed exact historical reversal: %w", err)
+	}
 	if err := validateRecipeSnapshots(row); err != nil {
 		return recipe{}, err
 	}
@@ -70,9 +74,8 @@ func q10CurrentEndpointRecipe(row recipe, pin fixtureSetupSuccessor2617) (recipe
 	if err != nil || current == want {
 		return recipe{}, fmt.Errorf("Q10 endpoint is not a distinct complete function")
 	}
-	reversed, err := reverseReviewedSuccessor2617(pin.Candidate, pin.Edits)
-	if err != nil || reversed != want {
-		return recipe{}, fmt.Errorf("Q10 endpoint failed exact historical reversal: %v", err)
+	if reversed != want {
+		return recipe{}, fmt.Errorf("Q10 endpoint failed exact historical reversal")
 	}
 	row.Successor = pin.Candidate
 	return row, nil
