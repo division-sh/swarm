@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -27,6 +28,7 @@ type agentProfileProcessEvidence struct {
 	Process  startupownership.Authority
 	State    manager.AgentLifecycleState
 	Attempts SelectedForkStorageTableSnapshot
+	Standing *runlifecycle.StandingRestartDisposition
 }
 
 func TestAgentFirstClaimProfileProcessTakeoverBeforeAttemptBothStores(t *testing.T) {
@@ -71,7 +73,14 @@ func openAgentProfileProcessStore(t *testing.T, backend, location string) agentF
 }
 
 func runAgentProfileProcessPredecessor(t *testing.T, backend, location string) {
-	f := admitAgentClaimProfileFixture(t, testAuthorActivityContext(), openAgentProfileProcessStore(t, backend, location))
+	selected := openAgentProfileProcessStore(t, backend, location)
+	var f agentClaimProfileFixture
+	if os.Getenv("SWARM_S6_PROFILE_PROCESS_STANDING") == "1" {
+		standing := newStandingAgentProfileProcessFixture(t, selected)
+		f = startStandingAgentProfileProcessFixture(t, standing)
+	} else {
+		f = admitAgentClaimProfileFixture(t, testAuthorActivityContext(), selected)
+	}
 	claimed := claimAgentProfileRecoveryEvent(t, f)
 	profile, err := ReadFirstAgentClaimProfileForTest(f.ctx, f.store, claimed.Snapshot)
 	if err != nil {
@@ -89,11 +98,20 @@ func runAgentProfileProcessPredecessor(t *testing.T, backend, location string) {
 	if err != nil || !found {
 		t.Fatalf("predecessor lifecycle: found=%t err=%v", found, err)
 	}
+	var standing *runlifecycle.StandingRestartDisposition
+	if os.Getenv("SWARM_S6_PROFILE_PROCESS_STANDING") == "1" {
+		disposition, err := selected.(runlifecycle.StandingRestartDispositionReader).StandingRunRestartDisposition(f.ctx, profile.Identity.RunID)
+		if err != nil || disposition.Validate() != nil || !disposition.Executable() || disposition.RunID != profile.Identity.RunID {
+			t.Fatalf("predecessor standing generation: %+v err=%v", disposition, err)
+		}
+		standing = &disposition
+	}
 	assertAgentProfileProcessNoAttempts(t, f)
 	output := os.NewFile(3, "agent-profile-claim-evidence")
 	if err := json.NewEncoder(output).Encode(agentProfileProcessEvidence{
 		Profile: profile, Process: authority, State: state,
 		Attempts: profileFixtureSnapshot(t, f)["event_delivery_attempts"],
+		Standing: standing,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +121,7 @@ func runAgentProfileProcessPredecessor(t *testing.T, backend, location string) {
 	<-t.Context().Done()
 }
 
-func killAgentProfileProcessAtClaim(t *testing.T, backend, location string) agentProfileProcessEvidence {
+func killAgentProfileProcessAtClaim(t *testing.T, backend, location string, environment ...string) agentProfileProcessEvidence {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 40*time.Second)
 	defer cancel()
@@ -116,6 +134,7 @@ func killAgentProfileProcessAtClaim(t *testing.T, backend, location string) agen
 	var output bytes.Buffer
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestAgentFirstClaimProfileProcessTakeoverBeforeAttemptBothStores$", "-test.timeout=40s")
 	cmd.Env = append(os.Environ(), "SWARM_S6_PROFILE_PROCESS_BACKEND="+backend, "SWARM_S6_PROFILE_PROCESS_LOCATION="+location)
+	cmd.Env = append(cmd.Env, environment...)
 	cmd.ExtraFiles, cmd.Stdout, cmd.Stderr = []*os.File{write}, &output, &output
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
