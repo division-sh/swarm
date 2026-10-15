@@ -12013,6 +12013,12 @@ tool_model:
         QR material, and diagnostics never include it. QR expiry, PairSuccess and Connected remain separate facts;
         none grants executable session authority. Isolated supplied-operation/authentication fixtures are not a
         qualified authenticated public session-onboarding journey.
+        Authenticated pairing readback may use the original completed connection attempt without requiring
+        execution health. After an observed SDK disconnect, the same authorized owner may retain a zero-code
+        terminal observation: qr_expired requires observed QR exhaustion; an independent disconnect reports
+        failure, never expiry. Execution-health admission stays strict. Runtime or source retirement, caller
+        cancellation, scope mismatch, store errors, malformed evidence and construction or connect failure remain
+        refusals rather than synthesized terminal observations; the original failure cause stays private.
       session_outbound_encoding_component: >
         Pure WhatsApp text encoding preserves the exact canonical selected PN, LID or group destination and refuses
         missing, device-qualified, broadcast, newsletter or noncanonical targets. A reply additionally requires the
