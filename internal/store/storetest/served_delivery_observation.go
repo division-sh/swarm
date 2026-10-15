@@ -77,3 +77,10 @@ func ReadServedDeliveryStatusCount(ctx context.Context, selected any, eventID, s
 func ReadServedRunDebugSummary(ctx context.Context, selected any, runID string) (string, error) {
 	return private.ReadServedRunDebugSummaryForTest(ctx, selected, runID)
 }
+
+type SelectedDeploymentForkDiagnosticCell = private.SelectedDeploymentForkDiagnosticCell
+type SelectedDeploymentForkDiagnosticSection = private.SelectedDeploymentForkDiagnosticSection
+
+func ReadSelectedDeploymentForkDiagnostics(ctx context.Context, selected any, runID string) ([]SelectedDeploymentForkDiagnosticSection, error) {
+	return private.ReadSelectedDeploymentForkDiagnosticsForTest(ctx, selected, runID)
+}

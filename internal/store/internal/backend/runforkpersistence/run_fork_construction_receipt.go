@@ -21,17 +21,30 @@ import (
 
 // Materialization records the child's immutable birth in its initial revision.
 // Neither the live header nor the physical receipt being compared chooses it.
-func readRunForkReceiverBirthTx(ctx context.Context, tx *sql.Tx, forkRunID string, header pipeline.WorkflowInstance) (time.Time, error) {
+type runForkReceiverBirth struct {
+	owner     flowidentity.RunScopedFlowInstance
+	header    pipeline.WorkflowInstanceRecordedHeader
+	createdAt time.Time
+}
+
+func readRunForkReceiverBirthTx(ctx context.Context, tx *sql.Tx, forkRunID string, header pipeline.WorkflowInstance) (runForkReceiverBirth, error) {
 	owner, err := flowidentity.NewRunScopedFlowInstance(forkRunID,
 		flowidentity.StoredRoute(header.WorkflowName, header.InstanceID, header.StorageRef))
 	if err != nil {
-		return time.Time{}, err
+		return runForkReceiverBirth{}, err
 	}
 	initial, err := ReadConstructedEntityAtRevisionTx(ctx, tx, owner, header.EntityID, 1)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("read original fork receiver birth: %w", err)
+		return runForkReceiverBirth{}, fmt.Errorf("read original fork receiver birth: %w", err)
 	}
-	return initial.MaterializationMetadata.CreatedAt, nil
+	recorded, err := pipeline.DecodeWorkflowInstanceRecordedHeader(owner.Route, initial.MaterializationMetadata.FlowConfig)
+	if err != nil {
+		return runForkReceiverBirth{}, fmt.Errorf("decode original fork receiver birth: %w", err)
+	}
+	if recorded.WorkflowVersion() == "" || initial.MaterializationMetadata.CreatedAt.IsZero() {
+		return runForkReceiverBirth{}, fmt.Errorf("read original fork receiver birth: incomplete construction")
+	}
+	return runForkReceiverBirth{owner: owner, header: recorded, createdAt: initial.MaterializationMetadata.CreatedAt}, nil
 }
 
 func runForkConstructionOccurrenceOwed(plan runfork.RunForkPlan, entity runfork.RunForkEntityState) (bool, error) {

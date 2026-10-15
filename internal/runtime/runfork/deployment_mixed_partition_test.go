@@ -32,7 +32,6 @@ func TestReviewerDeploymentMixedPartitionRetainsTerminalRows(t *testing.T) {
 	pending.ClaimVersion, pending.RetryCount = 0, 0
 	pending.ActiveSessionID, pending.StartedAt = "", nil
 	now := time.Unix(100, 0).UTC()
-	pending.ContinuationHandoffAt = &now
 	terminal := append([]RunForkPendingWork(nil), plan.PendingWork[2:5]...)
 	plan.PendingWork = []RunForkPendingWork{pending, {EventID: original.SourceEventID,
 		SubscriberType: "platform", SubscriberID: "pipeline", ReceiptOutcome: "success", ReceiptAt: &now}}

@@ -3,7 +3,6 @@ package conformance
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -229,20 +228,7 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 						t.Fatalf("R3b receiver claim did not reach the held gate at T: %v", waitCtx.Err())
 					}
 				}
-				var deliveryID, deliveryStatus string
-				var handoffStamped bool
-				var pipelineReceipts, attempts int
-				err := f.db.QueryRowContext(f.ctx, `SELECT CAST(d.delivery_id AS TEXT),d.status,d.continuation_handoff_at IS NOT NULL,
-					(SELECT COUNT(*) FROM event_receipts r WHERE r.event_id=d.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline' AND r.outcome='success'),
-					(SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id)
-					FROM event_deliveries d WHERE d.run_id=$1 AND d.event_id=$2`, sourceRunID, pointEventID).
-					Scan(&deliveryID, &deliveryStatus, &handoffStamped, &pipelineReceipts, &attempts)
-				if err != nil {
-					if err == sql.ErrNoRows {
-						t.Fatal("R3b dispatch completed without persisted receiver delivery")
-					}
-					t.Fatal(err)
-				}
+				deliveryID, deliveryStatus, handoffStamped, pipelineReceipts, attempts := selectedDeploymentPendingReceiverCut(t, f.ctx, f.selected, sourceRunID, pointEventID)
 				if deliveryID == "" || deliveryStatus != "pending" || pipelineReceipts != 1 || !handoffStamped || attempts != 0 || gate.deferred.Load() == 0 {
 					t.Fatalf("R3b requires settled pipeline, stamped handoff and unclaimed receiver at T: delivery=%q status=%q receipt=%d handoff=%t attempts=%d deferred=%d", deliveryID, deliveryStatus, pipelineReceipts, handoffStamped, attempts, gate.deferred.Load())
 				}
@@ -290,7 +276,7 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 				}
 				defer func() {
 					if t.Failed() {
-						logSelectedDeploymentForkFailure(t, f.db, result.ForkRunID)
+						logSelectedDeploymentForkFailure(t, f.selected, result.ForkRunID)
 					}
 				}()
 				// Activation acknowledgment precedes retained publication. Observe
@@ -351,18 +337,12 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 				if changedPin {
 					kind = "committed"
 				}
-				var newFeedOutcomes, exactContinued int
-				if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*), COUNT(CASE WHEN o.outcome_kind='continued'
-				AND CAST(o.source_event_id AS TEXT)=$3 AND CAST(o.event_id AS TEXT)=$4
-				AND o.inherited_disposition IS NULL AND o.failure IS NULL
-				AND EXISTS(SELECT 1 FROM run_fork_selected_contract_executions x WHERE x.fork_run_id=o.run_id
-					AND x.fork_event_id=o.event_id AND x.source_event_id=o.source_event_id AND x.source_run_id=$5)
-				AND EXISTS(SELECT 1 FROM events e WHERE e.event_id=o.event_id AND e.run_id=o.run_id AND e.created_at=o.created_at)
-				AND EXISTS(SELECT 1 FROM event_deliveries d WHERE d.event_id=o.event_id AND d.run_id=o.run_id AND d.status='delivered')
-				THEN 1 END) FROM fan_out_outcomes o WHERE o.run_id=$1 AND o.outcome_kind=$2`,
-					result.ForkRunID, kind, pointEventID, page.Events[0].EventID, sourceRunID).Scan(&newFeedOutcomes, &exactContinued); err != nil {
+				correspondence, err := storetest.ReadSelectedFanOutOutcomeCorrespondence(f.ctx, f.selected,
+					result.ForkRunID, kind, pointEventID, page.Events[0].EventID, sourceRunID)
+				if err != nil {
 					t.Fatal(err)
 				}
+				newFeedOutcomes, exactContinued := correspondence.Outcomes, correspondence.ExactContinued
 				if newFeedOutcomes != 1 || exactContinued != map[bool]int{false: 1, true: 0}[changedPin] {
 					t.Fatalf("fixed-T fork ordinal evidence: kind=%s outcomes=%d exact continued=%d", kind, newFeedOutcomes, exactContinued)
 				}
@@ -409,4 +389,60 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 			})
 		}
 	}
+}
+
+func selectedDeploymentPendingReceiverCut(t *testing.T, ctx context.Context, selected any, runID, eventID string) (string, string, bool, int, int) {
+	t.Helper()
+	snapshot, err := storetest.ReadSelectedForkSourceDomain(ctx, selected, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := func(table string) []map[string]storetest.SelectedForkSnapshotCell {
+		t.Helper()
+		decoded, err := storetest.DecodeSelectedForkSnapshotRows(snapshot[table])
+		if err != nil {
+			t.Fatalf("R3b %s snapshot: %v", table, err)
+		}
+		return decoded
+	}
+	text := func(row map[string]storetest.SelectedForkSnapshotCell, column string) string {
+		t.Helper()
+		cell, found := row[column]
+		if !found {
+			t.Fatalf("R3b snapshot lacks column %s", column)
+		}
+		value, err := cell.Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value
+	}
+	var deliveries []map[string]storetest.SelectedForkSnapshotCell
+	for _, row := range rows("event_deliveries") {
+		if text(row, "run_id") == runID && text(row, "event_id") == eventID {
+			deliveries = append(deliveries, row)
+		}
+	}
+	if len(deliveries) != 1 {
+		t.Fatalf("R3b dispatch requires exactly one persisted receiver delivery, got %d", len(deliveries))
+	}
+	delivery := deliveries[0]
+	deliveryID, status := text(delivery, "delivery_id"), text(delivery, "status")
+	handoff, found := delivery["continuation_handoff_at"]
+	if !found {
+		t.Fatal("R3b snapshot lacks the continuation handoff column")
+	}
+	receipts, attempts := 0, 0
+	for _, row := range rows("event_receipts") {
+		if text(row, "event_id") == eventID && text(row, "subscriber_type") == "platform" &&
+			text(row, "subscriber_id") == "pipeline" && text(row, "outcome") == "success" {
+			receipts++
+		}
+	}
+	for _, row := range rows("event_delivery_attempts") {
+		if text(row, "delivery_id") == deliveryID {
+			attempts++
+		}
+	}
+	return deliveryID, status, string(handoff.Value) != "null", receipts, attempts
 }

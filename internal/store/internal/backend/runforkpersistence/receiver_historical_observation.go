@@ -68,6 +68,7 @@ type historicalFlowInstanceConstructionCut struct {
 	plan  runfork.RunForkPlan
 	route flowidentity.Route
 	key   string
+	birth runForkReceiverBirth
 }
 
 func loadHistoricalFlowInstanceConstructionCutTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instance pipeline.WorkflowInstance) (historicalFlowInstanceConstructionCut, bool, error) {
@@ -94,7 +95,7 @@ func loadHistoricalFlowInstanceConstructionCutTx(ctx context.Context, tx *sql.Tx
 	if err != nil {
 		return historicalFlowInstanceConstructionCut{}, false, err
 	}
-	if !born.Equal(instance.CreatedAt) {
+	if !born.createdAt.Equal(instance.CreatedAt) {
 		return historicalFlowInstanceConstructionCut{}, false, &pipeline.FlowInstanceConstructionCorruption{RunID: run.RunID, FlowID: instance.WorkflowName, InstancePath: instance.StorageRef, Cause: fmt.Errorf("historical header contradicts its original materialization birth")}
 	}
 	state, err := loadRunForkConstructedEntityState(snapshot, metadata.EntityID)
@@ -108,7 +109,7 @@ func loadHistoricalFlowInstanceConstructionCutTx(ctx context.Context, tx *sql.Tx
 		return historicalFlowInstanceConstructionCut{}, false, fmt.Errorf("read captured historical construction: %w", err)
 	}
 	return historicalFlowInstanceConstructionCut{
-		plan: plan, route: fixed.Route(), key: metadata.InstanceKey,
+		plan: plan, route: fixed.Route(), key: metadata.InstanceKey, birth: born,
 	}, true, nil
 }
 
@@ -123,7 +124,11 @@ func (cut historicalFlowInstanceConstructionCut) project(run runlifecycle.Snapsh
 		return pipeline.HistoricalFlowInstanceConstruction{}, false, &pipeline.FlowInstanceConstructionCorruption{RunID: run.RunID, FlowID: instance.WorkflowName, InstancePath: instance.StorageRef, Cause: err}
 	}
 	recorded, err := pipeline.DecodeWorkflowInstanceRecordedHeader(fixed.Route(), metadata.FlowConfig)
-	if err != nil || header != projected || instance.InstanceKey != cut.key || instance.Mode != metadata.Mode || instance.EntityType != metadata.EntityType || instance.WorkflowVersion != recorded.WorkflowVersion() {
+	// The source cut, child birth and physical header retain one captured
+	// construction version; selected executable readiness is independent.
+	if err != nil || recorded.WorkflowVersion() == "" || header != projected || instance.InstanceKey != cut.key || instance.Mode != metadata.Mode || instance.EntityType != metadata.EntityType ||
+		cut.birth.owner.RunID != run.RunID || cut.birth.owner.Route != projected.Route() || cut.birth.header.ParentRoute() != projected.ParentRoute ||
+		cut.birth.createdAt.IsZero() || !cut.birth.createdAt.Equal(instance.CreatedAt) || cut.birth.header.WorkflowVersion() != recorded.WorkflowVersion() || instance.WorkflowVersion != recorded.WorkflowVersion() {
 		return pipeline.HistoricalFlowInstanceConstruction{}, false, &pipeline.FlowInstanceConstructionCorruption{RunID: run.RunID, FlowID: instance.WorkflowName, InstancePath: instance.StorageRef, Cause: errors.Join(fmt.Errorf("header contradicts its exact projected historical construction"), err)}
 	}
 	return pipeline.HistoricalFlowInstanceConstruction{
@@ -224,7 +229,7 @@ func readProjectedReceiverConstructionReceiptTx(ctx context.Context, tx *sql.Tx,
 	if err != nil {
 		return pipeline.FlowConstructionReceipt{}, false, err
 	}
-	expected, err := projectRunForkConstructionReceiptTx(ctx, tx, plan, run.RunID, *selected, born)
+	expected, err := projectRunForkConstructionReceiptTx(ctx, tx, plan, run.RunID, *selected, born.createdAt)
 	if err != nil {
 		return pipeline.FlowConstructionReceipt{}, false, err
 	}
