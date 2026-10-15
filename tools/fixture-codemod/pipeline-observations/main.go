@@ -14,8 +14,11 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
+
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
@@ -163,6 +166,10 @@ func prepareFiles(root string, recipes []recipe) ([]pendingFile, []recipe, error
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", path, err)
 		}
+		current, err = nativeEntryCurrentRecipes(root, path, source, current)
+		if err != nil {
+			return nil, nil, err
+		}
 		result, applied, err := rewriteSource(path, source, current)
 		if err != nil {
 			return nil, nil, err
@@ -173,6 +180,37 @@ func prepareFiles(root string, recipes []recipe) ([]pendingFile, []recipe, error
 		}
 	}
 	return files, changed, nil
+}
+
+func nativeEntryCurrentRecipes(root, path string, source []byte, rows []recipe) ([]recipe, error) {
+	prior, err := selectedreadrole.NativeEntry2542HistoricalSource(root, path, source)
+	if err != nil || bytes.Equal(prior, source) {
+		return rows, err
+	}
+	var originals []recipe
+	if err := json.Unmarshal(recipeBytes, &originals); err != nil {
+		return nil, err
+	}
+	immutable := map[string]recipe{}
+	for _, row := range originals {
+		if row.File == path {
+			immutable[row.Function] = row
+		}
+	}
+	current := append([]recipe(nil), rows...)
+	for index, row := range current {
+		before, err := selectedreadrole.Body(prior, row.Function)
+		expected, parseErr := canonicalFunction(row.After)
+		if !reflect.DeepEqual(immutable[row.Function], row) || err != nil || parseErr != nil || before != expected {
+			return nil, fmt.Errorf("native-entry recipe is not its unchanged signed predecessor: %s", row.Function)
+		}
+		actual, err := selectedreadrole.Body(source, row.Function)
+		if err != nil {
+			return nil, err
+		}
+		current[index].After = actual
+	}
+	return current, nil
 }
 
 func validateRecipeSnapshots(row recipe) error {

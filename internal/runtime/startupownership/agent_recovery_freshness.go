@@ -41,6 +41,14 @@ func (o *AgentRecoveryWriteObserver) ObserveWriteStart() *AgentRecoveryWriteObse
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if o.process != nil {
+		o.process.mu.Lock()
+		defer o.process.mu.Unlock()
+	}
+	return o.startWriteLocked()
+}
+
+func (o *AgentRecoveryWriteObserver) startWriteLocked() *AgentRecoveryWriteObservation {
 	if o.epoch == math.MaxUint64 || o.active == math.MaxUint64 {
 		o.invalid = true
 	} else {
@@ -48,9 +56,7 @@ func (o *AgentRecoveryWriteObserver) ObserveWriteStart() *AgentRecoveryWriteObse
 		o.active++
 	}
 	if o.process != nil {
-		o.process.mu.Lock()
 		o.process.agentRecoverySeed = nil
-		o.process.mu.Unlock()
 	}
 	return &AgentRecoveryWriteObservation{observer: o}
 }

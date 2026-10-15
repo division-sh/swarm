@@ -26,7 +26,7 @@ var debtCatchUpFreshnessDeclarationPins = map[string]string{
 }
 
 func TestPersistenceAuthorityDebtFreshnessCatchUpSourceIsExact(t *testing.T) {
-	root := persistenceAuthorityRepoRoot(t)
+	root := debtCatchUpHistoricalArchive(t, debtCatchUpNativeEntryLane)
 	if actual, err := debtCollectorDigest(root); err != nil || actual != debtCatchUpFreshnessCollectorTo {
 		t.Errorf("common descendant collector=%s expected=%s error=%v", actual, debtCatchUpFreshnessCollectorTo, err)
 	}
@@ -112,7 +112,7 @@ func proveFreshnessCatchUpNativeComposition(t *testing.T, root string) {
 }
 
 func TestPersistenceAuthorityDebtFreshnessCatchUpForwardAndForeignProvenance(t *testing.T) {
-	root := persistenceAuthorityRepoRoot(t)
+	root := debtCatchUpHistoricalArchive(t, debtCatchUpNativeEntryLane)
 	raw, err := os.ReadFile(filepath.Join(root, debtBaselinePath))
 	if err != nil {
 		t.Fatal(err)
@@ -137,7 +137,7 @@ func TestPersistenceAuthorityDebtFreshnessCatchUpForwardAndForeignProvenance(t *
 }
 
 func TestPersistenceAuthorityDebtFreshnessCatchUpReconcilesActualOrigins(t *testing.T) {
-	root := persistenceAuthorityRepoRoot(t)
+	root := debtCatchUpHistoricalArchive(t, debtCatchUpNativeEntryLane)
 	findings := debtLoadPersistenceAuthorityFindings(t, root)
 	findings = append(findings, debtSelectedBoundaryFindings(t, root)...)
 	actual := authorityDebtSites(findings)
@@ -166,7 +166,7 @@ func TestPersistenceAuthorityDebtFreshnessCatchUpReconcilesActualOrigins(t *test
 }
 
 func TestPersistenceAuthorityDebtFreshnessCatchUpRefusesChangedCurrentSource(t *testing.T) {
-	root := persistenceAuthorityRepoRoot(t)
+	root := debtCatchUpHistoricalArchive(t, debtCatchUpNativeEntryLane)
 	copy := debtCatchUpSourceCopyFrom(t, root)
 	var paths []string
 	for path := range debtCatchUpFreshnessNativePins {

@@ -12,8 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
-
-	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 )
 
 // This finite inverse serves historical transformation receipts only. Current
@@ -112,6 +110,11 @@ func catchUp2542LaneLedger(root string, current []byte) ([]byte, error) {
 }
 
 func CatchUp2542HistoricalSource(root, path string, current []byte) ([]byte, error) {
+	var err error
+	current, err = NativeEntry2542HistoricalSource(root, path, current)
+	if err != nil {
+		return nil, err
+	}
 	packet, err := readCatchUp2542Packet()
 	if err != nil {
 		return nil, err
@@ -136,6 +139,11 @@ func CatchUp2542HistoricalSource(root, path string, current []byte) ([]byte, err
 }
 
 func CatchUp2542HistoricalFunction(root, path, name, current string) (string, error) {
+	var err error
+	current, err = nativeEntry2542HistoricalFunction(root, path, name, current)
+	if err != nil {
+		return "", err
+	}
 	packet, err := readCatchUp2542Packet()
 	if err != nil {
 		return "", err
@@ -167,7 +175,7 @@ func CatchUp2542HistoricalFunction(root, path, name, current string) (string, er
 		return current, nil
 	}
 	actual, err := Body(raw, fn.Name.Name)
-	if err != nil || actual != requestkey.Node(fn) {
+	if err != nil || actual != current {
 		return current, nil
 	}
 	prior, err := CatchUp2542HistoricalSource(root, path, raw)

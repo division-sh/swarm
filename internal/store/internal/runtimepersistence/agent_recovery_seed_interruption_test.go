@@ -60,6 +60,9 @@ func TestAgentRecoverySeedNativeInterruptionFencesLateSuccessBothStores(t *testi
 				if err := startupownership.SeedAgentRecovery(f.ctx, process); err == nil || strings.Contains(err.Error(), "already installed") {
 					t.Fatalf("terminal owner exposed an installed/partial seed instead of refusing authority: %v", err)
 				}
+				if err := startupownership.CheckAgentRecoverySeed(f.ctx, process); err == nil {
+					t.Fatal("native original-session loss left its private seed checkable")
+				}
 				if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(before, after) {
 					t.Fatal("native interruption/late refusal changed complete durable storage")
 				}

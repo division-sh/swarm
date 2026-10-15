@@ -60,6 +60,12 @@ func proveAgentRecoverySeedMalformedMember(t *testing.T, backend string, fault A
 	_, first, firstProfile := f.claim(t)
 	_, second, secondProfile := f.claim(t)
 	process, _ := agentRecoveryFixtureOwners(t, f)
+	if err := startupownership.SeedAgentRecovery(f.ctx, process); err != nil {
+		t.Fatalf("seed original complete image before the native corruption cut: %v", err)
+	}
+	if err := startupownership.CheckAgentRecoverySeed(f.ctx, process); err != nil {
+		t.Fatalf("healthy original seed check: %v", err)
+	}
 	before := profileFixtureSnapshot(t, f)
 	if err := ApplyAgentClaimProfileFaultForTest(f.ctx, f.store, second.Claim, secondProfile, fault, deliverylifecycle.Claim{}); err != nil {
 		t.Fatal(err)
@@ -76,6 +82,9 @@ func proveAgentRecoverySeedMalformedMember(t *testing.T, backend string, fault A
 		}
 		if err := process.ProveCurrent(f.ctx); err != nil {
 			t.Fatalf("malformed image fenced native possession: %v", err)
+		}
+		if err := startupownership.CheckAgentRecoverySeed(f.ctx, process); err == nil {
+			t.Fatal("missing/corrupt immutable profile validated a private seed")
 		}
 	}
 	assertAgentProfileRecoveryCapture(t, f, first.Snapshot, firstProfile)
@@ -115,6 +124,9 @@ func TestAgentRecoverySeedSourceRefusalCanRecoverBothStores(t *testing.T) {
 			if err := process.ProveCurrent(f.ctx); err != nil {
 				t.Fatalf("source refusal fenced native possession: %v", err)
 			}
+			if err := startupownership.CheckAgentRecoverySeed(f.ctx, process); err == nil {
+				t.Fatal("corrupt source head validated a private seed")
+			}
 			if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(corrupt, after) {
 				t.Fatal("source refusal changed complete durable storage")
 			}
@@ -127,6 +139,9 @@ func TestAgentRecoverySeedSourceRefusalCanRecoverBothStores(t *testing.T) {
 			}
 			if err := startupownership.SeedAgentRecovery(f.ctx, process); err != nil {
 				t.Fatalf("source refusal installed a partial seed or lost its owner: %v", err)
+			}
+			if err := startupownership.CheckAgentRecoverySeed(f.ctx, process); err != nil {
+				t.Fatalf("restored complete source seed did not validate: %v", err)
 			}
 			if err := startupownership.SeedAgentRecovery(f.ctx, process); err == nil || !strings.Contains(err.Error(), "already installed") {
 				t.Fatalf("restored complete image reseeded: %v", err)
@@ -150,6 +165,9 @@ func TestAgentRecoverySeedValidEmptyNativeImageBothStores(t *testing.T) {
 			before := profileFixtureSnapshot(t, f)
 			if err := startupownership.SeedAgentRecovery(f.ctx, process); err != nil {
 				t.Fatalf("valid empty native census refused: %v", err)
+			}
+			if err := startupownership.CheckAgentRecoverySeed(f.ctx, process); err != nil {
+				t.Fatalf("valid complete-empty native seed did not validate: %v", err)
 			}
 			if err := startupownership.SeedAgentRecovery(f.ctx, process); err == nil || !strings.Contains(err.Error(), "already installed") {
 				t.Fatalf("empty census was treated as failure/uninitialized: %v", err)

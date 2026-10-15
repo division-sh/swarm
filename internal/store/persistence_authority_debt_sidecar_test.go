@@ -163,11 +163,16 @@ func debtCatchUpSignedBaseline(root, ref, collector string) (authorityDebtBaseli
 
 func debtCatchUpCollectorSource(root string) error {
 	actual, err := debtCollectorDigest(root)
-	if err != nil || (actual != debtCatchUpCollectorTo && actual != debtCatchUpFreshnessCollectorTo) {
+	if err != nil || (actual != debtCatchUpCollectorTo && actual != debtCatchUpFreshnessCollectorTo && actual != debtCatchUpNativeEntryCollectorTo) {
 		return fmt.Errorf("joined collector is not its exact enumerated source: %s: %v", actual, err)
 	}
 	if actual == debtCatchUpFreshnessCollectorTo {
 		if err := debtCatchUpFreshnessOwnerSource(root); err != nil {
+			return err
+		}
+	}
+	if actual == debtCatchUpNativeEntryCollectorTo {
+		if err := debtCatchUpNativeEntryOwnerSource(root); err != nil {
 			return err
 		}
 	}
@@ -309,6 +314,81 @@ func debtCatchUpFreshnessOwnerSource(root string) error {
 	return nil
 }
 
+func debtCatchUpNativeEntryCollectorTransition(base, current string, trusted, head authorityDebtBaseline, proofs ...debtDeliveryRetirementProof) bool {
+	if current != debtCatchUpNativeEntryCollectorTo || head.Collector != current || trusted.Collector != base ||
+		trusted.BootstrapSource != debtBootstrapSource || head.BootstrapSource != debtBootstrapSource || len(proofs) != 1 {
+		return false
+	}
+	ref := ""
+	switch base {
+	case debtCatchUpFreshnessCollectorTo:
+		ref = debtCatchUpNativeEntryLane
+	case debtProcessLeaseFreshnessCollectorTo:
+		ref = debtCatchUpNativeEntryInput
+	case debtProcessLeaseCollectorTo:
+		ref = debtCatchUpNativeEntryMaster
+	default:
+		return false
+	}
+	root := proofs[0].Root
+	if debtCatchUpCollectorSource(root) != nil {
+		return false
+	}
+	original, _, err := debtCatchUpSignedBaseline(root, ref, base)
+	if err != nil || !debtSitesEqual(trusted.Sites, original.Sites) {
+		return false
+	}
+	return debtCatchUpNativeEntryPredecessors(root, proofs[0].Actual, head.Sites) == nil
+}
+
+func debtCatchUpNativeEntryPredecessors(root string, actual, head map[string]authorityDebtSite) error {
+	for _, input := range [][2]string{{debtCatchUpNativeEntryLane, debtCatchUpFreshnessCollectorTo}, {debtCatchUpNativeEntryInput, debtProcessLeaseFreshnessCollectorTo}} {
+		prior, _, err := debtCatchUpSignedBaseline(root, input[0], input[1])
+		if err != nil {
+			return err
+		}
+		failures := authorityDebtRatchet(actual, head, prior.Sites, prior.Sites, debtDeliveryRetirementProof{Root: root, Actual: actual})
+		if len(failures) != 0 {
+			return fmt.Errorf("native-entry composition exceeds signed predecessor %s: %v", input[0], failures)
+		}
+	}
+	return nil
+}
+
+func debtCatchUpNativeEntryOwnerSource(root string) error {
+	if digest, err := debtProcessLeaseCustodyDigest(root); err != nil || digest != debtProcessLeaseCustodyPin {
+		return fmt.Errorf("native-entry custody lacks its reviewed native owner: %s: %v", digest, err)
+	}
+	for path, want := range debtCatchUpNativeEntryNativePins {
+		raw, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil || debtBaselineChecksum(raw) != want {
+			return fmt.Errorf("native-entry owner/assertion source changed: %s: %v", path, err)
+		}
+	}
+	return nil
+}
+
+func debtCatchUpNativeEntryUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, historical bool, prior error) (authorityDebtBaseline, error) {
+	if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+		return baseline, prior
+	}
+	if _, err := debtParseCollectorMetadata(metadata, data, debtCatchUpFreshnessCollectorTo); err != nil {
+		return baseline, err
+	}
+	if baseline.Collector != debtCacheCollectorFrom {
+		return baseline, fmt.Errorf("historical TSV collector header changed")
+	}
+	original, _, err := debtCatchUpSignedBaseline(root, debtCatchUpNativeEntryLane, debtCatchUpFreshnessCollectorTo)
+	if err != nil || !debtSitesEqual(baseline.Sites, original.Sites) {
+		return baseline, fmt.Errorf("native-entry refresh lacks its exact signed predecessor: %v", err)
+	}
+	if err := debtCatchUpCollectorSource(root); err != nil {
+		return baseline, err
+	}
+	baseline.Collector = debtCatchUpNativeEntryCollectorTo
+	return baseline, nil
+}
+
 func debtCollectorMetadataBytes(metadata debtCollectorMetadata) ([]byte, error) {
 	data, err := json.MarshalIndent(metadata, "", "  ")
 	return append(data, '\n'), err
@@ -414,6 +494,8 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 func debtSourceUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, collector string, historical bool, prior error) (authorityDebtBaseline, error, bool) {
 	var owner func(string, []byte, []byte, authorityDebtBaseline, bool, error) (authorityDebtBaseline, error)
 	switch collector {
+	case debtCatchUpNativeEntryCollectorTo:
+		owner = debtCatchUpNativeEntryUnrefreshedBaseline
 	case debtCatchUpCollectorTo:
 		owner = debtCatchUpUnrefreshedBaseline
 	case debtWorkflowStateCollectorTo:

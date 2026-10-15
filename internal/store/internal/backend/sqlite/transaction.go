@@ -55,7 +55,10 @@ func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, opera
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	write := b.agentRecoveryWrites.ObserveWriteStart()
+	write, err := b.agentRecoveryWrites.ObserveWriteStartContext(ctx)
+	if err != nil {
+		return false, err
+	}
 	defer write.End()
 	label = mutationLabel(label)
 	var recoveryDeadline time.Time
