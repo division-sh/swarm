@@ -162,6 +162,7 @@ func TestRunScopedLiveIdentityStructuralRatchet(t *testing.T) {
 			}
 		}
 	}
+	proveRunScopedPublicationFaultGuardRejectsLostIdentityInEitherDialect(t)
 }
 
 type runScopedPublicationFaultOwner struct {
@@ -206,7 +207,8 @@ func runScopedPublicationFaultBody(t *testing.T, root string, owner runScopedPub
 	return ""
 }
 
-func TestRunScopedPublicationFaultGuardRejectsLostIdentityInEitherDialect(t *testing.T) {
+func proveRunScopedPublicationFaultGuardRejectsLostIdentityInEitherDialect(t *testing.T) {
+	t.Helper()
 	root := runScopedIdentityRepoRoot(t)
 	for _, owner := range runScopedPublicationFaultOwners() {
 		body := runScopedPublicationFaultBody(t, root, owner)

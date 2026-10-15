@@ -306,7 +306,7 @@ search_dimensions:
       - internal/store/internal/operatorsurface/operator_observability_read_surface.go
     canonical_layer: public_projection_non_authority
   - id: delivery_target_route
-    pattern: 'delivery_target_route'
+    pattern: 'delivery_target_route|\bCorruptDeliveryConformanceRoute\b'
     minimum_matching_files: 7
     required_paths:
       - platform-spec.yaml
@@ -1724,7 +1724,10 @@ seam_families:
       - tools/fixture-codemod/pipeline-observations/recipes.json
       - tools/fixture-codemod/pipeline-observations/family144-transitions.json
       - tools/fixture-codemod/pipeline-observations/native_unstamped_delivery_test.go
-    search_dimensions: [descriptor_evidence, direct_delivery_path, flow_owned_subscription_pattern_authority, live_agent_subscription_route_authority, route_plan_source_reason]
+      - tools/fixture-codemod/pipeline-observations/family145-receiver-publication-readback-preimages.json
+      - tools/fixture-codemod/pipeline-observations/family145-transitions.json
+      - tools/fixture-codemod/migrate-bus-outbox/main.go
+    search_dimensions: [descriptor_evidence, direct_delivery_path, flow_owned_subscription_pattern_authority, live_agent_subscription_route_authority, route_plan_source_reason, connect_route_plan]
     notes: >
       Immutable before/after recipes and the nine exact family144 signature
       transitions retain historical route spellings as reviewed proof inputs,
@@ -1733,6 +1736,10 @@ seam_families:
       publication. TestPersistenceAuthorityDebtRunFixtureSignatureTransitionIsExact
       preserves every original occurrence; finite codemod source/hostility
       controls preserve workloads and current original-owner consumption.
+      The family145 records retain exact historical source coordinates;
+      migrate-bus-outbox is the finite AST transform of named native fixture
+      consumers, not an executable runtime route interpreter. Ruling6199773804
+      adds only these exact source records and this transform to the inventory.
       No classified source string grants runtime routing or storage permission.
   - id: native_selected_pipeline_route_proof_consumers
     layer: test_fixture_semantics

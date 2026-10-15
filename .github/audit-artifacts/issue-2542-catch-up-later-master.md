@@ -91,3 +91,41 @@ This is an integration oracle repair within the settled selected-owner contract,
 not a guard waiver, accounting exception or new semantic owner. Its signed-head
 preflight and native unused receipts must be taken after this source change;
 the earlier interrupted native analysis is not credited as a pass.
+
+## Approved finite inventory composition
+
+Reviewer6199773804 authorizes exactly the reached route/source-record repairs.
+The existing retained-source family gains two finite JSON records and the named
+outbox AST transform, plus the connect-route-plan dimension. All old paths,
+minimums and production-consumer counterexamples survive. The delivery-target
+search additionally matches only the exact CorruptDeliveryConformanceRoute
+identifier; every required path stays. Controls reject removal of the required
+conformance path, absence of its port and a similarly prefixed foreign port.
+The old source-field digest remains, with one exact new d49b27d4 Successor tuple
+appended. All nineteen candidate occurrences and duplicate/source/field controls
+remain. No history record, classification ceiling or raw authority is added.
+
+The new publication-fault hostile checks run inside the original structural
+root, not as another independent core root. This restores the unchanged85-root
+owner inventory while retaining all36 adversarial cells in that root.
+Runtime/conformance/served/planner affected controls PASS0.273s/33.863s/14.924s/
+12.279s. Five external expected-value literals gain their explicit field names;
+their values/order/assertions do not change. Diagnostic display policies PASS
+race1.224s; unfiltered whole-repository vet now passes. No vet check is disabled.
+
+At signed predecessor e140429978 the native default/race/issue2413 unused matrix
+passes (845.38s launcher wall), and the ordinary read-only real ratchet passes
+633.03s against actual7956:3806/2152, unchangedd3a09746, excluded66. These are
+predecessor receipts, not relabeled as executions of the following source delta.
+The continuation ran every previously unstarted package selection non-fail-fast;
+its shell footer was interrupted by editing its scratch script, so no aggregate
+or vet credit is taken from that driver. Standalone unfiltered vet is the clean
+receipt. Per-package failures are all retained.
+
+Preflight is still incomplete. The strict registry/effective-method completion
+roots remain RED on retained unclassified authority (unknown/stale are empty).
+An additional reached topology guard still counts two already-registered
+operator-snapshot fault definitions as ordinary production agents writers.
+No file-name exclusion or production-writer allowance is added; that exact role
+composition is recorded for reviewer disposition. No hold or migration credit
+is released by these inventory/quality repairs.

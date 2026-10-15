@@ -88,7 +88,7 @@ func standingDisplayCases() []standingDisplayCase {
 			[][]driver.Value{{"a", int64(2)}, {nil, int64(3)}, {"z", int64(4)}},
 			func(ctx context.Context, tx *sql.Tx, pg bool) (any, error) {
 				return eventrecord.ReadStandingEventNameDiagnosticsTx(ctx, tx, pg)
-			}, []eventrecord.StandingEventNameDiagnostic{{"a", 2}, {"z", 4}}},
+			}, []eventrecord.StandingEventNameDiagnostic{{Name: "a", Count: 2}, {Name: "z", Count: 4}}},
 		{"logs", [2]string{`SELECT payload FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at`, `SELECT payload::text FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at`},
 			[][]driver.Value{{`{"z": 2, "a":1}`}, {nil}, {`{"a":1}`}},
 			func(ctx context.Context, tx *sql.Tx, pg bool) (any, error) {
@@ -98,7 +98,7 @@ func standingDisplayCases() []standingDisplayCase {
 			[][]driver.Value{{"e1", "s", ""}, {nil, "s", "done"}, {"e2", "s", "done"}},
 			func(ctx context.Context, tx *sql.Tx, pg bool) (any, error) {
 				return delivery.ReadStandingDeliveryDiagnosticsTx(ctx, tx, pg)
-			}, []delivery.StandingDeliveryDiagnostic{{"e1", "s", ""}, {"e2", "s", "done"}}},
+			}, []delivery.StandingDeliveryDiagnostic{{EventID: "e1", Subscriber: "s", Status: ""}, {EventID: "e2", Subscriber: "s", Status: "done"}}},
 	}
 }
 

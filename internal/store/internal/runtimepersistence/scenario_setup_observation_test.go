@@ -41,7 +41,7 @@ func TestScenarioSetupPhysicalObservationsKeepExactScopeAndIndependentReads(t *t
 		t.Fatalf("exact run header: %+v/%v", run, err)
 	}
 	entity, err := ReadPostgresScenarioSetupEntityStorageForTest(ctx, fixture.store, runID, entityID)
-	want := PostgresScenarioSetupEntityStorage{"operating", "product", "waiting", "seeded", "true"}
+	want := PostgresScenarioSetupEntityStorage{FlowInstance: "operating", EntityType: "product", CurrentState: "waiting", Note: "seeded", ReviewReady: "true"}
 	if err != nil || entity != want {
 		t.Fatalf("exact entity JSON text: %+v/%v", entity, err)
 	}

@@ -649,6 +649,8 @@ var family145ReferenceSnapshots = []struct{ corpus, function, field, digest stri
 	{"recipes.json", "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority", "Before", "0095c88157da39be35aba627ff3991757f724e15a0d0c95b3843670d92b05c1f"},
 	{"recipes.json", "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority", "After", "8bd9808550c6259b25b91fa5ac5fa8f102ea2706ed1dc538a7c73d580258368f"},
 	{"recipes.json", "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority", "Successor", "91095150b46600d260565161d127d1d47bf017e10379e79e960fc6428ab01662"},
+	// Ruling6199773804: retain the old tuple; the composed source has the same one occurrence.
+	{"recipes.json", "TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority", "Successor", "d49b27d43a4c2f09824e5c62a9d7dd0f2c89cec633fc9c4161ebb97bce19f0da"},
 	{"recipes.json", "TestDataShowCLIReadFamilyAcrossSelectedStores", "Before", "a26913c407b7fe2b278d6ee991f092d6881d947256eca14510f3ccf67e8ffaeb"},
 	{"recipes.json", "TestDataShowCLIReadFamilyAcrossSelectedStores", "After", "a6af0a0d3cdceef57df96324ec9a187db0e963888f7172946806f3e34d7b64f5"},
 	{"recipes.json", "TestRuntimeLogFilterSupportedConsumersBothStores", "Before", "e155647b462d71fda709645ec1b7de4af90e5700b9a18c24ccf20aeaa532b237"},
