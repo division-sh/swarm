@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -299,17 +302,40 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			for _, phase := range []string{"initial", "exact_replay"} {
 				t.Run(phase, func(t *testing.T) {
-					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type"} {
+					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type", "empty_import_missing_creation_clock", "empty_import_missing_update_clock", "empty_import_zero_creation_clock", "empty_import_zero_update_clock", "empty_import_reversed_clocks"} {
 						t.Run(invalid, func(t *testing.T) {
 							f := newSnapshotOwnershipFixture(t, backend, false, false)
+							emptyImport := strings.HasPrefix(invalid, "empty_import_")
+							metadataEntityID, wantEntities := f.entityID, 2
+							importedAt := f.state.CreatedAt.Add(time.Second)
+							if emptyImport {
+								metadataEntityID, wantEntities = uuid.NewString(), 3
+								if _, err := f.store.SetupScenarioEntities(f.ctx, runtimepipeline.ScenarioSetupRequest{
+									RunID: f.runID, CreatedAt: importedAt,
+									Entities: []runtimepipeline.ScenarioSetupEntityRequest{{Alias: "empty", EntityID: metadataEntityID, FlowInstance: "owner/import", EntityType: "review_item", Fields: map[string]any{}}},
+								}); err != nil {
+									t.Fatal(err)
+								}
+								f.eventID = uuid.NewString()
+								marker := eventtest.ExistingRunRootIngress(f.eventID, "fork.metadata_context", "metadata-proof", "", []byte(`{}`), 0, f.runID, events.EventEnvelope{}, time.Now().UTC())
+								if err := commitSemanticPipelineProcessedEventFixture(f.ctx, f.store, marker); err != nil {
+									t.Fatal(err)
+								}
+							}
 							plan := f.plan(t)
-							if len(plan.Entities) != 2 {
+							if len(plan.Entities) != wantEntities {
 								t.Fatalf("constructed parent and child headers: %#v", plan.Entities)
 							}
 							var child runfork.RunForkEntityState
 							for _, entity := range plan.Entities {
 								if entity.EntityID == f.entityID {
 									child = entity
+								}
+								if emptyImport && entity.EntityID == metadataEntityID {
+									meta := entity.MaterializationMetadata
+									if !reflect.DeepEqual(entity.Fields, map[string]any{}) || entity.CurrentState != nil || entity.EnteredStateAt != nil || entity.Gates != nil || entity.Bookkeeping != nil || entity.Accumulator != nil || meta == nil || meta.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState || meta.DataCreatedAt == nil || meta.DataUpdatedAt == nil || !meta.DataCreatedAt.Equal(importedAt) || !meta.DataUpdatedAt.Equal(importedAt) {
+										t.Fatalf("genuine empty import lost birth or invented lifecycle: %+v", entity)
+									}
 								}
 							}
 							if child.EntityID != f.entityID {
@@ -331,12 +357,21 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 							f.advance(t)
 							sourceEntityBefore := readSnapshotOwnershipEntity(t, f, f.runID)
 							latest, err := f.store.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: f.runID})
-							if err != nil || len(latest.Entities) != 2 {
+							if err != nil || len(latest.Entities) != wantEntities {
 								t.Fatalf("latest source plan: %#v, %v", latest, err)
+							}
+							inspector := f.store.(interface {
+								InspectRunMutationDrift(context.Context, string) (mutationlog.DriftReport, error)
+							})
+							if emptyImport {
+								report, err := inspector.InspectRunMutationDrift(f.ctx, f.runID)
+								if err != nil || report.EntitiesChecked != wantEntities || len(report.Rows) != 0 {
+									t.Fatalf("genuine empty import was not a clean native oracle member: %+v %v", report, err)
+								}
 							}
 							var raw []byte
 							var revision int64
-							if err := f.db.QueryRowContext(f.ctx, `SELECT revision, fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='entity_metadata' AND fact_key=$2 AND revision <= $3 ORDER BY revision DESC LIMIT 1`, f.runID, f.entityID, plan.ForkPoint.Revision).Scan(&revision, &raw); err != nil {
+							if err := f.db.QueryRowContext(f.ctx, `SELECT revision, fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='entity_metadata' AND fact_key=$2 AND revision <= $3 ORDER BY revision DESC LIMIT 1`, f.runID, metadataEntityID, plan.ForkPoint.Revision).Scan(&revision, &raw); err != nil {
 								t.Fatal(err)
 							}
 							var fact map[string]any
@@ -355,6 +390,18 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 							if invalid == "duplicate_type" {
 								fact["entity_type"] = "foreign_type"
 							}
+							switch invalid {
+							case "empty_import_missing_creation_clock":
+								fact["data_created_at"] = nil
+							case "empty_import_missing_update_clock":
+								fact["data_updated_at"] = nil
+							case "empty_import_zero_creation_clock":
+								fact["data_created_at"] = time.Time{}
+							case "empty_import_zero_update_clock":
+								fact["data_updated_at"] = time.Time{}
+							case "empty_import_reversed_clocks":
+								fact["data_updated_at"] = importedAt.Add(-time.Second)
+							}
 							encoded, err := json.Marshal(fact)
 							if err != nil {
 								t.Fatal(err)
@@ -369,7 +416,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 							} else if invalid == "missing" {
 								_, err = f.db.ExecContext(f.ctx, `UPDATE run_fork_fact_revisions SET fact='{}', present=FALSE WHERE run_id=$1 AND revision <= $2 AND family='entity_metadata' AND fact_key=$3`, f.runID, plan.ForkPoint.Revision, f.entityID)
 							} else {
-								_, err = f.db.ExecContext(f.ctx, `UPDATE run_fork_fact_revisions SET fact=$1 WHERE run_id=$2 AND revision=$3 AND family='entity_metadata' AND fact_key=$4`, string(encoded), f.runID, revision, f.entityID)
+								_, err = f.db.ExecContext(f.ctx, `UPDATE run_fork_fact_revisions SET fact=$1 WHERE run_id=$2 AND revision=$3 AND family='entity_metadata' AND fact_key=$4`, string(encoded), f.runID, revision, metadataEntityID)
 							}
 							if err != nil {
 								t.Fatal(err)
@@ -384,16 +431,39 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								err = runforkrevision.ValidateCompleteSQLite(f.ctx, tx, f.runID)
 							}
 							_ = tx.Rollback()
-							if err != nil {
+							if emptyImport {
+								want := fmt.Sprintf("run %s has unsupported unrevisioned entity_metadata facts; recreate the store and retry", f.runID)
+								if err == nil || err.Error() != want {
+									t.Fatalf("forged import birth escaped native revision validation: %v", err)
+								}
+							} else if err != nil {
 								t.Fatalf("latest projection must remain valid despite historical corruption: %v", err)
 							}
 							before := snapshotOwnershipCounts(t, f, f.runID)
+							physicalBefore, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+							if err != nil {
+								t.Fatal(err)
+							}
+							if emptyImport {
+								_, err := inspector.InspectRunMutationDrift(f.ctx, f.runID)
+								var historyErr *mutationlog.HistoryError
+								if !errors.As(err, &historyErr) || historyErr.RunID != f.runID || historyErr.Code != "invalid_mutation_history" || historyErr.Reason != "data-only historical birth requires admitted identity and data clocks" {
+									t.Fatalf("forged empty-import birth did not produce the exact oracle history refusal: %v", err)
+								}
+							}
 							got, planErr := f.store.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: f.runID, At: f.eventID})
 							if planErr == nil && !runForkTestHasPlanBlocker(got, runfork.RunForkBlockerEntitySnapshotMetadataUnproven) {
 								t.Fatalf("invalid historical metadata admitted: %#v", got)
 							}
-							if _, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID}); err == nil {
-								t.Fatal("invalid historical metadata materialized")
+							wantImportRefusal := fmt.Sprintf("run %s has unsupported unrevisioned entity_metadata facts; recreate the store and retry", f.runID)
+							if emptyImport && (planErr == nil || planErr.Error() != wantImportRefusal) {
+								t.Fatalf("empty import planning refused for the wrong reason: %v", planErr)
+							}
+							if _, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID}); err == nil || (emptyImport && err.Error() != wantImportRefusal) {
+								t.Fatalf("invalid historical metadata materialized or refused for the wrong reason: %v", err)
+							}
+							if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(physicalBefore, after) {
+								t.Fatalf("invalid historical admission changed source, fork or ledger evidence: %v", err)
 							}
 							if after := snapshotOwnershipCounts(t, f, f.runID); after != before {
 								t.Fatalf("invalid admission changed source: before=%v after=%v", before, after)
