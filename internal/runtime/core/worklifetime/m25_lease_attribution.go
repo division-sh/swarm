@@ -1,6 +1,7 @@
 package worklifetime
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime"
@@ -38,10 +39,15 @@ func (t *m25LeaseTrace) finish() {
 	t.finished, t.settle = time.Now(), m25LeaseCaller()
 }
 
-func (g *gate) reportM25LeaseTraces(transientOnly bool) {
+func (g *gate) reportM25LeaseTraces(ctx context.Context, transientOnly bool) {
 	g.mu.Lock()
 	var out strings.Builder
 	now := time.Now()
+	active := g.active
+	if transientOnly {
+		active = g.activeTransient
+	}
+	fmt.Fprintf(&out, "M25-WAIT gate=%p transient_only=%t active=%d observed=%s context_error=%v\n", g, transientOnly, active, now.UTC().Format(time.RFC3339Nano), ctx.Err())
 	for index, trace := range g.m25Traces {
 		if transientOnly && !trace.transient {
 			continue
@@ -55,4 +61,9 @@ func (g *gate) reportM25LeaseTraces(transientOnly bool) {
 	}
 	g.mu.Unlock()
 	fmt.Fprint(os.Stderr, out.String())
+	if ctx.Err() != nil && active != 0 {
+		stack := make([]byte, 1<<20)
+		n := runtime.Stack(stack, true)
+		fmt.Fprintf(os.Stderr, "M25-FAILED-WAIT-STACK gate=%p bytes=%d truncated=%t\n%s", g, n, n == len(stack), stack[:n])
+	}
 }
