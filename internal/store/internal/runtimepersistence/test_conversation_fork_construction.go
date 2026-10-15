@@ -16,13 +16,9 @@ import (
 )
 
 type ConversationForkConstruction struct {
-	Parent *pipeline.FlowInstanceActivationPlan
-	Child  pipeline.FlowInstanceActivationPlan
-}
-
-func conversationForkConstructionEvent(fixture ConversationForkSourceFixture) events.Event {
-	id := uuid.NewSHA1(uuid.MustParse(fixture.EntityID), []byte("conversation-fork-construction")).String()
-	return eventtest.ExistingRunRootIngress(id, "flow/conversation.created", "conversation-construction-fixture", "", []byte(`{"name":"Before"}`), 0, fixture.RunID, events.EventEnvelope{}, fixture.Turn1At.Add(-30*time.Second))
+	Parent        *pipeline.FlowInstanceActivationPlan
+	Child         pipeline.FlowInstanceActivationPlan
+	CreatingEvent events.Event
 }
 
 // PrepareConversationForkConstructionForTest derives, rather than fabricates,
@@ -41,7 +37,8 @@ func PrepareConversationForkConstructionForTest(ctx context.Context, selected an
 		return ConversationForkConstruction{}, err
 	}
 	child.EntityID = fixture.EntityID
-	event := conversationForkConstructionEvent(fixture)
+	id := uuid.NewSHA1(uuid.MustParse(fixture.EntityID), []byte("conversation-fork-construction")).String()
+	event := eventtest.ExistingRunRootIngress(id, "flow/conversation.created", "conversation-construction-fixture", "", []byte(`{"name":"Before"}`), 0, fixture.RunID, events.EventEnvelope{}, fixture.Turn1At.Add(-30*time.Second))
 	childPlan, err := planner.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{
 		ContractBundle: source, Instance: child, ConstructorInput: "conversation.created", ResolvedKey: "Before",
 		TriggerEvent: event, OccurredAt: event.CreatedAt(),
@@ -63,7 +60,7 @@ func PrepareConversationForkConstructionForTest(ctx context.Context, selected an
 	if err != nil {
 		return ConversationForkConstruction{}, err
 	}
-	result := ConversationForkConstruction{Child: childPlan}
+	result := ConversationForkConstruction{Child: childPlan, CreatingEvent: event}
 	if !found {
 		parent, err := planner.PrepareFlowInstanceActivation(ctx, pipeline.FlowInstanceActivationRequest{ContractBundle: source, Instance: root, OccurredAt: event.CreatedAt()})
 		if err != nil {
