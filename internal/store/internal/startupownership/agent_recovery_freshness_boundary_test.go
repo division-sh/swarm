@@ -77,16 +77,38 @@ func TestAgentRecoveryNativePreBindWriteMustJoinBothStores(t *testing.T) {
 		backend    string
 		retained   bool
 		corruption string
-	}{{"sqlite", false, ""}, {"postgres", false, ""}, {"postgres", true, ""}, {"sqlite", false, "route"}, {"sqlite", false, "status"}} {
+		installed  bool
+	}{{"sqlite", false, "", false}, {"postgres", false, "", false}, {"postgres", true, "", false}, {"sqlite", false, "route", false}, {"sqlite", false, "status", false}, {"sqlite", false, "", true}, {"postgres", false, "", true}} {
 		for _, rollback := range []bool{false, true} {
 			name := fmt.Sprintf("%s/retained=%t/rollback=%t", entrance.backend, entrance.retained, rollback)
 			if entrance.corruption != "" {
 				name += "/" + entrance.corruption
 			}
+			if entrance.installed {
+				name += "/installed"
+			}
 			t.Run(name, func(t *testing.T) {
 				session := newNativeFreshnessBoundarySession(t, entrance.backend, entrance.corruption != "")
 				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 				defer cancel()
+				var process runtimeownership.ProcessCapability
+				var previousReads int32
+				if entrance.installed {
+					var err error
+					process, err = runtimeownership.NewProcessCapability(session)
+					if err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() {
+						if err := process.Release(context.WithoutCancel(ctx)); err != nil {
+							t.Error(err)
+						}
+					})
+					if err := runtimeownership.SeedAgentRecovery(ctx, process); err != nil {
+						t.Fatal(err)
+					}
+					previousReads = 1
+				}
 				entered, release := make(chan struct{}), make(chan struct{})
 				var once sync.Once
 				unblock := func() { once.Do(func() { close(release) }) }
@@ -137,17 +159,27 @@ func TestAgentRecoveryNativePreBindWriteMustJoinBothStores(t *testing.T) {
 				case <-ctx.Done():
 					t.Fatal("native pre-bind write did not enter")
 				}
-				process, err := runtimeownership.NewProcessCapability(session)
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() {
-					unblock()
-					if err := process.Release(context.WithoutCancel(ctx)); err != nil {
-						t.Error(err)
+				if process == nil {
+					var err error
+					process, err = runtimeownership.NewProcessCapability(session)
+					if err != nil {
+						t.Fatal(err)
 					}
-				})
-				if err := runtimeownership.SeedAgentRecovery(ctx, process); err == nil || !strings.Contains(err.Error(), "complete fresh reconstruction") || session.reads.Load() != 0 {
+				}
+				if !entrance.installed {
+					t.Cleanup(func() {
+						unblock()
+						if err := process.Release(context.WithoutCancel(ctx)); err != nil {
+							t.Error(err)
+						}
+					})
+				}
+				if entrance.installed {
+					if err := process.ProveCurrent(ctx); err != nil {
+						t.Fatalf("original pooled write lost native possession: %v", err)
+					}
+				}
+				if err := runtimeownership.SeedAgentRecovery(ctx, process); err == nil || !strings.Contains(err.Error(), "complete fresh reconstruction") || session.reads.Load() != previousReads {
 					t.Fatalf("binding forgot its already-active native write: %v reads=%d", err, session.reads.Load())
 				}
 				unblock()
@@ -156,7 +188,7 @@ func TestAgentRecoveryNativePreBindWriteMustJoinBothStores(t *testing.T) {
 				if outcome.ack != !rollback || rollback && !errors.Is(outcome.err, primary) || !rollback && outcome.err != nil {
 					t.Fatalf("observer changed native acknowledgment/error: %+v", outcome)
 				}
-				if err := runtimeownership.SeedAgentRecovery(ctx, process); err != nil || session.reads.Load() != 1 {
+				if err := runtimeownership.SeedAgentRecovery(ctx, process); err != nil || session.reads.Load() != previousReads+1 {
 					t.Fatalf("joined native write prevented explicit reconstruction: %v reads=%d", err, session.reads.Load())
 				}
 				if err := session.read(ctx, func(context.Context, *sql.Tx) error { return nil }); err != nil {
@@ -165,8 +197,11 @@ func TestAgentRecoveryNativePreBindWriteMustJoinBothStores(t *testing.T) {
 				if err := process.ProveCurrent(ctx); err != nil {
 					t.Fatal(err)
 				}
-				if err := runtimeownership.SeedAgentRecovery(ctx, process); err == nil || !strings.Contains(err.Error(), "already installed") || session.reads.Load() != 1 {
+				if err := runtimeownership.SeedAgentRecovery(ctx, process); err == nil || !strings.Contains(err.Error(), "already installed") || session.reads.Load() != previousReads+1 {
 					t.Fatalf("read-only native inspection/proof invalidated the seed: %v reads=%d", err, session.reads.Load())
+				}
+				if entrance.installed {
+					t.Log("DIAGNOSTIC: native possession passes while the original pooled write is held; installed seed revoked and explicit reconstruction refuses until original commit/rollback and cleanup join; seed payload UNIT only, no consumer or capacity claim")
 				}
 				t.Log("real pre-bind native write and outcome; synthetic seed payload only, no complete-image or capacity claim")
 			})
