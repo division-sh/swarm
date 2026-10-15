@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"runtime"
 	"strconv"
 	"strings"
@@ -20,7 +21,7 @@ func precompileTestArgs(ctx context.Context, args []string, diagnostics io.Write
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if preflightDescendantJoinMode != "native" || os.Getenv("GOFLAGS") != "" || !precompileArgsSupported(args) {
+	if !precompileAvailable() || os.Getenv("GOFLAGS") != "" || !precompileArgsSupported(args) {
 		return nil
 	}
 	started := time.Now()
@@ -55,6 +56,14 @@ func precompileTestArgs(ctx context.Context, args []string, diagnostics io.Write
 		return precompileFailure(ctx, "compile tests", err, diagnostics, &stdout, &stderr)
 	}
 	return ctx.Err()
+}
+
+func precompileAvailable() bool {
+	if preflightDescendantJoinMode != "native" {
+		return false
+	}
+	_, err := exec.LookPath("/bin/true")
+	return err == nil
 }
 
 func precompileFailure(ctx context.Context, phase string, err error, diagnostics io.Writer, stdout, stderr *bytes.Buffer) error {

@@ -18,6 +18,7 @@ import (
 
 func precompileRealGoFixture(t *testing.T) (string, string) {
 	t.Helper()
+	requirePrecompileSupport(t)
 	root, state := t.TempDir(), filepath.Join(t.TempDir(), "state")
 	t.Setenv("XDG_STATE_HOME", state)
 	t.Setenv("SWARM_TEST_POSTGRES_DSN", signalFixtureStateDSN)

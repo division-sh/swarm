@@ -128,12 +128,15 @@ unchanged. Preflight uses its direct commands and does not recursively warm itse
 
 Only a finite set of ordinary test/build flags is eligible. Unknown or ambiguous
 flags, nonempty effective GOFLAGS (including `go env -w`), executor/tool overrides,
-compile/output/profile/artifact/fuzz/work/dry-run forms and non-native or unsupported
-targets keep the original admitted path without warming. Build environment and
+compile/output/profile/artifact/fuzz/work/dry-run forms, a missing fixed no-op
+executor, and non-native or unsupported targets keep the original admitted path
+without warming. Build environment and
 toolchain are preserved; private DSN, lease and proof setup still follow admission.
 Warm-up prints its environment/build/cleanup and total time separately. Linking
 may repeat inside the slot: slot occupancy is not end-to-end latency, and neither
-existing timing ceilings nor command receipts subtract this extra work.
+existing timing ceilings nor command receipts subtract this extra work. Compilation
+outside admission can also add host CPU pressure; this is not a new compiler
+concurrency limit or a guaranteed queue-latency improvement.
 
 The 30-minute local goal is a measurement target, not a relaxed test deadline or
 an assurance of success. Missing, failed, interrupted, and unstarted work earns no

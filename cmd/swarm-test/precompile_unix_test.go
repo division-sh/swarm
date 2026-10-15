@@ -23,6 +23,7 @@ import (
 
 func precompileRunnerFixture(t *testing.T, warm string) (string, string) {
 	t.Helper()
+	requirePrecompileSupport(t)
 	chdirSwarmRepoRoot(t)
 	root := t.TempDir()
 	state := filepath.Join(root, "state", "swarm", "test-postgres")
