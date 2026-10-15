@@ -71,7 +71,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 			if !opened.NewRunCreated || opened.RunID == "" || opened.EventID == "" {
 				t.Fatalf("supported root ingress did not create the join run: %+v", opened)
 			}
-			a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 0, 0, true)
+			a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 0, true)
 			created := requireA2PortfolioEntity(t, rt, opened.RunID, opened.RunID)
 			if created.Entity.CurrentState != "dispatching" {
 				t.Fatalf("actual root creation did not enter dispatching: %+v", created)
@@ -82,7 +82,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 				"run_id": opened.RunID, "event_name": "order.dispatched", "source_event_id": opened.EventID,
 				"payload": map[string]any{}, "idempotency_key": "a2-m37-dispatch",
 			})
-			a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 0, 0, true)
+			a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 0, true)
 			initialEntity, initial := a2ReadJoinPublicObligation(t, rt, opened.RunID)
 			entry, found, err := workflowlifecycle.LoadStageEntry(initialEntity.Bookkeeping)
 			if err != nil || !found || entry != initial.JoinRef().StageEntry() || entry.EventID != dispatched.EventID || entry.Cause != "delivery" {
@@ -108,7 +108,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 				return result
 			}
 			first := publish("op-b", "a2-m37-b", false)
-			a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 0, 0, true)
+			a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 0, true)
 			partialEntity, partial := a2ReadJoinPublicObligation(t, rt, opened.RunID)
 			a2RequireJoinPublicIdentity(t, initial, partial)
 			if partial.Status != joinruntime.StatusOpen || partial.Completed() != 1 || !reflect.DeepEqual(partial.Missing(), []string{"op-a"}) {
@@ -125,7 +125,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 				t.Fatal("real platform.join_complete did not reach the existing handler-start hook")
 			}
 			// Only the held continuation may still lack its pipeline receipt.
-			pendingDiagnosis := a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 1, 1, false)
+			pendingDiagnosis := a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 1, false)
 			pendingEntity, pending := a2ReadJoinPublicObligation(t, rt, opened.RunID)
 			a2RequireJoinPublicIdentity(t, initial, pending)
 			if pendingEntity.Entity.CurrentState != "awaiting" || pending.Status != joinruntime.StatusClosed || pending.CloseReason != joinruntime.CloseReasonComplete ||
@@ -147,7 +147,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 			a2RequireJoinPublicTrace(t, rt, opened.RunID, completion)
 
 			late := publish("op-a", "a2-m37-late", false)
-			lateDiagnosis := a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 1, 1, false, late.EventID)
+			lateDiagnosis := a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 1, false, late.EventID)
 			lateEvent := a2ReadJoinPublicEvent(t, rt, late.EventID)
 			a2RequireJoinPublicLateFailure(t, lateEvent, pendingEntity, initial.JoinRef())
 			unchangedEntity, unchanged := a2ReadJoinPublicObligation(t, rt, opened.RunID)
@@ -166,7 +166,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 			unblock()
 			// Join firing is not a promise that the whole run has terminated.
 			// Assert active-work agreement and compare the actual header/diagnosis.
-			firedDiagnosis := a2WaitJoinPublicRun(t, rt, opened.RunID, "", 0, 0, true, late.EventID)
+			firedDiagnosis := a2WaitJoinPublicRun(t, rt, opened.RunID, "", 0, true, late.EventID)
 			if firedDiagnosis.Run.Status != "running" && firedDiagnosis.Run.Status != "completed" || firedDiagnosis.Run.Failure != nil {
 				t.Fatalf("typed late refusal incorrectly failed the containing run: %+v", firedDiagnosis)
 			}
@@ -375,8 +375,10 @@ func a2JoinPublicFailureSettled(failed []operatorread.RunDebugFailureDelivery, e
 		len(delivery.DeadLetters) == 1 && delivery.DeadLetters[0].DeliveryID == delivery.DeliveryID
 }
 
-func a2WaitJoinPublicRun(t *testing.T, rt servedControlProofRuntime, runID, status string, active, unsettled int, ready bool, failedEventID ...string) a2JoinPublicDiagnosis {
+func a2WaitJoinPublicRun(t *testing.T, rt servedControlProofRuntime, runID, status string, active int, ready bool, failedEventID ...string) a2JoinPublicDiagnosis {
 	t.Helper()
+	// This fixture holds exactly one continuation; all other phases are settled.
+	unsettled := active
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var last, previous a2JoinPublicDiagnosis
 	stable := 0
