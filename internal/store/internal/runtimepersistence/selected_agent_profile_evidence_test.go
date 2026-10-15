@@ -173,6 +173,7 @@ func TestSelectedAgentClaimReadsOriginalPreparationWithoutOrdinaryCaptureBothSto
 			if err != nil || !reflect.DeepEqual(beforeRetained, afterRetained) {
 				t.Fatalf("retained observation/refusal mutated native state: err=%v", err)
 			}
+			proveMixedOwnedRecoveryImage(t, ordinary, f, foreignOwner)
 		})
 	}
 }
