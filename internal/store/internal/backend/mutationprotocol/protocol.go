@@ -122,8 +122,14 @@ var _ runtimeactivity.Mutation = (*Attempt)(nil)
 
 // Identity names this live attempt without lending its transaction or authority.
 // A retried or completed attempt cannot reuse an earlier attempt's evidence.
-func (a *Attempt) Identity() (uuid.UUID, error) {
+func (a *Attempt) Identity(ctx context.Context) (uuid.UUID, error) {
 	if err := a.requireActive(); err != nil {
+		return uuid.Nil, err
+	}
+	if ctx == nil || ctx.Value(sqlAttemptKey{}) != a {
+		return uuid.Nil, errors.New("mutation identity requires its exact attempt context")
+	}
+	if err := ctx.Err(); err != nil {
 		return uuid.Nil, err
 	}
 	if a.identity == uuid.Nil {
