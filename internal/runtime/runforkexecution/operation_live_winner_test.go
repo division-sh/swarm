@@ -286,6 +286,11 @@ func abandonSelectedOperationPreparation(t *testing.T, ctx context.Context, requ
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if err := prepared.Close(); err != nil {
+			t.Error("close abandoned preparation:", err)
+		}
+	}()
 	materialized, acknowledged, err := request.Owner.materializePrepared(ctx, prepared)
 	if !acknowledged || err != nil {
 		t.Fatal("materialize exact operation:", err)
