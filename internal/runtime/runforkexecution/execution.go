@@ -75,13 +75,17 @@ func (o SelectedContractExecutionOwner) ResumeRecoveredSelectedFork(ctx context.
 }
 
 func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExecutionRequest) (out SelectedContractExecutionResult, finalErr error) {
+	return executeSelectedContractRunFork(ctx, req, nil)
+}
+
+func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExecutionRequest, reserved *selectedContractOperation) (out SelectedContractExecutionResult, finalErr error) {
 	if req.Recovery == nil && req.ForkOperation != nil {
-		result, found, err := req.Owner.replaySelectedForkOperation(ctx, *req.ForkOperation)
+		result, found, err := req.Owner.replaySelectedForkOperation(ctx, req)
 		if found || err != nil {
 			return result, err
 		}
 	}
-	prepared, err := req.Owner.Prepare(ctx, req)
+	prepared, err := req.Owner.prepareWithOperation(ctx, req, reserved)
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, err
 	}
