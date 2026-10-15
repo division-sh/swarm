@@ -45,6 +45,16 @@ func TestGateRecoveryHelperCallersPropagateOnlyOriginalTypedOwner(t *testing.T) 
 		}
 		callers++
 		current := row
+		switch row.File + "/" + row.Function {
+		case "internal/runtime/pipeline/selection_retry_cas_external_test.go/TestSelectionRetryAfterRealCASConflictBothStores",
+			"internal/runtime/pipeline/prospective_publication_external_test.go/TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStores":
+			source, err := q10FixtureSetupCurrentSource(row)
+			if err != nil {
+				t.Fatal(err)
+			}
+			current.Successor = source
+		}
+		row.Successor = current.Successor
 		row = historicalMechanicalRecipe(t, row)
 		want := gateRecoveryCallerHandoff(t, row.Before)
 		got := formattedNativeReadNode(projectionShapeFunction(t, row.After))
