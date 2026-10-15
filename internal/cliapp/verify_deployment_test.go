@@ -44,7 +44,7 @@ func TestVerifyDeploymentDiscoveryAndPortableOverride(t *testing.T) {
 				case "project":
 					writeRuntimeConfigText(t, filepath.Join(root, "swarm.yaml"), configBody)
 				case "user_global":
-					writeRuntimeConfigText(t, ignoredUserGlobalConfigPath(t), "runtime: null\n")
+					writeSingleDeploymentConfig(t, ignoredUserGlobalConfigPath(t), "runtime: null\n")
 				case "deployment":
 					configPath = filepath.Join(root, ".swarm", "swarm.yaml")
 					if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
