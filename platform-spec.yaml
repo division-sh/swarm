@@ -40878,8 +40878,14 @@ process_local_work_lifetime_authority:
       attempt still excludes competing publication, joins exact predecessors and publishes successors last; it is
       itself joined by Manager shutdown. A coalesced successor contributes its admitted source coordinate, not its
       caller cancellation or occurrence: it executes under the existing attempt lease with that exact source scope.
-      Failures after that handoff remain visible to the owning join. No new replay
-      permission or retry registry follows from this process-local separation.
+      Failures after that handoff remain visible to the owning join, with one exact terminal-disposition exception.
+      An accepted predecessor-dependent readiness attempt still joins and returns its unchanged executable-readiness
+      refusal. When every error branch is the canonical lifecycle-conflict / agent-lifecycle /
+      verify_executable_readiness / agent_execution_not_ready with captured manager_phase=shutting_down, that refusal
+      alone is not a fatal terminal completion. Any independent joined failure and lease settlement error remains
+      visible. This grants no admission success, durable readiness or creation completion, general cancellation
+      exemption, or inference from the current Manager phase. No new replay permission or retry registry follows
+      from this process-local separation.
     accepted_claim_settlement: >
       Execution cancellation does not release an accepted claim's process-local settlement lease. The exact existing
       claim heartbeat retains its occurrence until its handler settles or explicitly returns the claim and joins the
