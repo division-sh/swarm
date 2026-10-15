@@ -44,6 +44,96 @@ func selectedCapabilityReadCases() []selectedCapabilityReadCase {
 		{"model_aliases", func(ctx context.Context, owner any, id string) (any, error) {
 			return ReadSelectedCompletionModelAliasStorageForTest(ctx, owner, id, "claude_cli")
 		}, SelectedCompletionModelAliasStorage{}, false, false},
+		{"provider_failure", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadSelectedExecutionFailureStorageForTest(ctx, owner, id)
+		}, SelectedExecutionFailureStorage{}, true, false},
+		{"active_selected_attempts", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountSelectedExecutionActiveAttemptsStorageForTest(ctx, owner, id)
+		}, 0, false, false},
+		{"root_flow_headers", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountSelectedExecutionRootFlowHeadersStorageForTest(ctx, owner, id)
+		}, 0, false, false},
+		{"root_entity_rows", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountSelectedExecutionRootEntityRowsStorageForTest(ctx, owner, id)
+		}, 0, false, false},
+		{"event_receipts", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountEventReceiptStorageForTest(ctx, owner, id)
+		}, 0, false, false},
+		{"event_mapping", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountSelectedExecutionEventMappingStorageForTest(ctx, owner, id, id, id, id)
+		}, 0, false, false},
+		{"node_failure", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadSelectedNodeDeliveryFailureStorageForTest(ctx, owner, id, id)
+		}, SelectedNodeDeliveryFailureStorage{}, true, false},
+		{"subscriber_deliveries", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountRunEventSubscriberDeliveriesStorageForTest(ctx, owner, id, id, "source-agent-that-must-not-route")
+		}, 0, false, false},
+		{"fork_event", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadSelectedExecutionEventStorageForTest(ctx, owner, id)
+		}, SelectedExecutionEventStorage{}, true, false},
+		{"follow_ups", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadSelectedExecutionFollowUpCountsForTest(ctx, owner, id, id)
+		}, SelectedExecutionFollowUpCounts{}, false, false},
+		{"run_payloads", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadSelectedExecutionPayloadsStorageForTest(ctx, owner, id)
+		}, [][]byte(nil), false, false},
+		{"agent_follow_ups", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountSelectedAgentFollowUpStorageForTest(ctx, owner, id, id)
+		}, 0, false, false},
+		{"named_agent", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountRunNamedAgentStorageForTest(ctx, owner, id, "test-agent")
+		}, 0, false, false},
+		{"agent_deliveries", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountRunEventAgentDeliveriesStorageForTest(ctx, owner, id, id, "test-agent")
+		}, 0, false, false},
+		{"delivered_agent_attempts", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountDeliveredAgentAttemptsStorageForTest(ctx, owner, id, "test-agent")
+		}, 0, false, false},
+		{"latest_receipt_failure", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadLatestReceiptFailureStorageForTest(ctx, owner)
+		}, "", true, false},
+		{"latest_dead_letter_failure", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadLatestDeadLetterFailureStorageForTest(ctx, owner)
+		}, "", true, false},
+		{"latest_selected_agent_failure", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadPostgresSelectedAgentDeliveryFailureStorageForTest(ctx, owner, id)
+		}, "", true, true},
+		{"delivery_attempt_array", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadPostgresRunDeliveryAttemptArrayStorageForTest(ctx, owner, id)
+		}, "", false, true},
+		{"delivery_timeline", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadPostgresSelectedForkDeliveryTimelineStorageForTest(ctx, owner, id)
+		}, "", false, true},
+		{"route_timeline", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadPostgresSelectedForkRouteTimelineStorageForTest(ctx, owner, id)
+		}, "", false, true},
+		{"event_timeline", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadPostgresSelectedForkEventTimelineStorageForTest(ctx, owner, id)
+		}, "", false, true},
+		{"runtime_log_array", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadPostgresRunRuntimeLogArrayStorageForTest(ctx, owner, id)
+		}, "", false, true},
+		{"typed_local_runtime_diagnostics", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountPostgresSelectedForkLocalRuntimeDiagnosticsStorageForTest(ctx, owner, id, id, "owner")
+		}, 0, false, true},
+		{"cancelled_branch_evidence", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountPostgresSelectedForkCancelledBranchEvidenceStorageForTest(ctx, owner, id, id, id, "policy")
+		}, 0, false, true},
+		{"source_session_union", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountForkOrSourceSessionStorageForTest(ctx, owner, id, id)
+		}, 0, false, false},
+		{"source_audit_union", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountForkOrSourceConversationAuditStorageForTest(ctx, owner, id, id)
+		}, 0, false, false},
+		{"source_turn_union", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountForkOrSourceTurnStorageForTest(ctx, owner, id, id)
+		}, 0, false, false},
+		{"active_source_subscriber", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountForkSourceSubscriberActiveDeliveriesStorageForTest(ctx, owner, id)
+		}, 0, false, false},
+		{"source_timer_status", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadSelectedForkSourceTimerStatusForTest(ctx, owner, id, id)
+		}, "", true, false},
 	}
 }
 
@@ -58,18 +148,20 @@ func TestSelectedCapabilityReadPortsKeepIndependentCutsAndStrictAbsenceBothStore
 			}
 			defer restore()
 			for _, tc := range selectedCapabilityReadCases() {
-				got, err := tc.read(f.ctx, f.store, state.Identity.RunID)
-				refused := backend == "sqlite" && tc.postgresOnly
-				if (err != nil) != (tc.absent || refused) || !reflect.DeepEqual(got, tc.empty) {
-					t.Fatalf("%s borrowed unrelated construction or changed absence: %+v %v", tc.name, got, err)
-				}
-				if tc.absent && !errors.Is(err, sql.ErrNoRows) {
-					t.Fatalf("%s changed exact missing-row error: %v", tc.name, err)
-				}
+				t.Run(tc.name, func(t *testing.T) {
+					got, err := tc.read(f.ctx, f.store, state.Identity.RunID)
+					refused := backend == "sqlite" && tc.postgresOnly
+					if (err != nil) != (tc.absent || refused) || !reflect.DeepEqual(got, selectedCapabilityEmptyResult(tc, refused)) {
+						t.Fatalf("%s borrowed unrelated construction or changed absence: %+v %v", tc.name, got, err)
+					}
+					if tc.absent && !refused && !errors.Is(err, sql.ErrNoRows) {
+						t.Fatalf("%s changed exact missing-row error: %v", tc.name, err)
+					}
+				})
 			}
-			wantBegun, wantCommitted := int64(8), int64(5)
+			wantBegun, wantCommitted := int64(38), int64(28)
 			if backend == "sqlite" {
-				wantBegun, wantCommitted = 6, 3
+				wantBegun, wantCommitted = 28, 19
 			}
 			if counts := probe.Snapshot(); counts.Active != 0 || int64(counts.Total.Begun) != wantBegun || int64(counts.Total.ReadCommits) != wantCommitted || counts.Total.WriteCommits != 0 {
 				t.Fatalf("capability evidence joined separate cuts or wrote storage: %+v", counts)
@@ -80,6 +172,13 @@ func TestSelectedCapabilityReadPortsKeepIndependentCutsAndStrictAbsenceBothStore
 			}
 		})
 	}
+}
+
+func selectedCapabilityEmptyResult(tc selectedCapabilityReadCase, refused bool) any {
+	if !refused && (tc.name == "delivery_attempt_array" || tc.name == "runtime_log_array") {
+		return "[]"
+	}
+	return tc.empty
 }
 
 func TestSelectedCapabilityReadPortsRefuseRawInvalidCancelledAndClosedOwnersBothStores(t *testing.T) {

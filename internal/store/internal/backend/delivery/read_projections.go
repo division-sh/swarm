@@ -3417,3 +3417,92 @@ func CountUnsettledStandingDeliveriesStorageTx(ctx context.Context, tx *sql.Tx) 
 	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE status IN ('pending', 'failed', 'in_progress')`).Scan(&count)
 	return count, err
 }
+
+type SelectedNodeDeliveryFailureStorage struct {
+	Status, Reason string
+	Failure        []byte
+}
+
+func ReadSelectedNodeDeliveryFailureStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID string) (SelectedNodeDeliveryFailureStorage, error) {
+	var out SelectedNodeDeliveryFailureStorage
+	err := tx.QueryRowContext(ctx, `SELECT status, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), '')
+		FROM event_deliveries WHERE run_id=$1 AND event_id=$2 AND subscriber_type='node'`, runID, eventID).
+		Scan(&out.Status, &out.Reason, &out.Failure)
+	return out, err
+}
+
+func CountRunEventSubscriberDeliveriesStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID, subscriberID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries
+		WHERE run_id=$1 AND event_id=$2 AND subscriber_id=$3`, runID, eventID, subscriberID).Scan(&count)
+	return count, err
+}
+
+func CountForkSourceSubscriberActiveDeliveriesStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries
+		WHERE run_id=$1 AND subscriber_id='validation-coordinator' AND status='in_progress'`, runID).Scan(&count)
+	return count, err
+}
+
+func CountRunEventAgentDeliveriesStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID, agentID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries
+		WHERE run_id=$1 AND event_id=$2 AND subscriber_type='agent' AND subscriber_id=$3`, runID, eventID, agentID).Scan(&count)
+	return count, err
+}
+
+func CountDeliveredAgentAttemptsStorageTx(ctx context.Context, tx *sql.Tx, eventID, agentID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts o
+		JOIN event_deliveries d ON d.delivery_id=o.delivery_id
+		WHERE o.closure_kind='settled' AND d.event_id=$1 AND d.subscriber_type='agent'
+		AND d.subscriber_id=$2 AND o.outcome='delivered'`, eventID, agentID).Scan(&count)
+	return count, err
+}
+
+func ReadLatestDeadLetterFailureStorageTx(ctx context.Context, tx *sql.Tx) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(CAST(failure AS TEXT),'') FROM dead_letters
+		WHERE failure IS NOT NULL ORDER BY created_at DESC LIMIT 1`).Scan(&out)
+	return out, err
+}
+
+func ReadPostgresSelectedAgentDeliveryFailureStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(jsonb_build_object(
+		'status',d.status,'reason',d.reason_code,'failure',d.failure,
+		'attempt_outcome',a.outcome,'attempt_failure',a.failure)::text,'')
+		FROM event_deliveries d LEFT JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id
+		WHERE d.run_id=$1::uuid AND d.subscriber_type='agent'
+		ORDER BY d.created_at DESC,a.claim_version DESC LIMIT 1`, runID).Scan(&out)
+	return out, err
+}
+
+func ReadPostgresRunDeliveryAttemptArrayStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(jsonb_agg(jsonb_build_object(
+		'subscriber',d.subscriber_id,'status',d.status,'reason',d.reason_code,'failure',d.failure,
+		'attempt_outcome',a.outcome,'attempt_failure',a.failure) ORDER BY d.created_at)::text,'[]')
+		FROM event_deliveries d LEFT JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id
+		WHERE d.run_id=$1::uuid`, runID).Scan(&out)
+	return out, err
+}
+
+func ReadPostgresSelectedForkDeliveryTimelineStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(string_agg(
+		e.event_name || ':' || COALESCE(d.subscriber_type,'-') || '/' || COALESCE(d.subscriber_id,'-') || ':' || COALESCE(d.status,'-'),
+		';' ORDER BY e.created_at,e.event_id,d.delivery_id),'')
+		FROM events e LEFT JOIN event_deliveries d ON d.event_id=e.event_id WHERE e.run_id=$1::uuid`, runID).Scan(&out)
+	return out, err
+}
+
+func ReadPostgresSelectedForkRouteTimelineStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(string_agg(
+		e.event_name || ':' || COALESCE(e.flow_instance,'-') || ':' || COALESCE(d.delivery_target_route::text,'-') || ':' || COALESCE(d.delivery_payload_projection::text,'-'),
+		';' ORDER BY e.created_at,e.event_id,d.delivery_id),'')
+		FROM events e JOIN event_deliveries d ON d.event_id=e.event_id WHERE e.run_id=$1::uuid`, runID).Scan(&out)
+	return out, err
+}

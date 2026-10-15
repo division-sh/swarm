@@ -81,6 +81,11 @@ func ValidateDurableResourceCurrent(root string, pins []EntityToolPin) error {
 }
 
 func EarlierDurableResourceSource(root, file, function, current string) (string, error) {
+	var err error
+	current, err = EarlierSelectedForkExecutionSource(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	pins, err := ReadDurableResourcePins(root)
 	if err != nil {
 		return "", err
@@ -170,6 +175,11 @@ func appendDurableResourceTransition(rows []map[string]any, pin EntityToolPin) (
 }
 
 func EarlierDurableResourceHistory(root string, current []byte, recipes bool) ([]byte, error) {
+	var err error
+	current, err = BeforeSelectedForkExecutionHistory(root, current, recipes)
+	if err != nil {
+		return nil, err
+	}
 	prior, err := PriorDurableResourceHistory(root, recipes)
 	if err != nil {
 		return nil, err
@@ -188,6 +198,11 @@ func EarlierDurableResourceHistory(root string, current []byte, recipes bool) ([
 // Older owners still validate their complete predecessor. Peel this stage only
 // when one of its exact new endpoints is actually present in the supplied ledger.
 func BeforeDurableResourceHistory(root string, current []byte, recipes bool) ([]byte, error) {
+	var err error
+	current, err = BeforeSelectedForkExecutionHistory(root, current, recipes)
+	if err != nil {
+		return nil, err
+	}
 	var rows []map[string]any
 	if err := json.Unmarshal(current, &rows); err != nil {
 		return nil, err

@@ -100,6 +100,10 @@ func TestFamily145DurableResourceAppendOnlyHistoryAndHostileInputs(t *testing.T)
 		if recipes {
 			actual = recipeBytes
 		}
+		actual, err = selectedreadrole.BeforeSelectedForkExecutionHistory(root, actual, recipes)
+		if err != nil {
+			t.Fatal(err)
+		}
 		var have, want any
 		if json.Unmarshal(actual, &have) != nil || json.Unmarshal(expected, &want) != nil || !reflect.DeepEqual(have, want) {
 			t.Fatal("history differs from the complete exact durable resource composition")

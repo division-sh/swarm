@@ -33,6 +33,60 @@ import (
 
 type PublicationResultSourceStorage = eventrecord.PublicationResultSourceStorage
 
+func ReadPostgresSelectedForkEventTimelineStorageForTest(ctx context.Context, selected any, runID string) (string, error) {
+	if owner, ok := selected.(*PostgresStore); !ok || owner == nil {
+		return "", fmt.Errorf("selected execution diagnostic requires its original PostgreSQL owner")
+	}
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return eventrecord.ReadPostgresSelectedForkEventTimelineStorageTx(ctx, tx, runID)
+	})
+}
+
+func ReadPostgresRunRuntimeLogArrayStorageForTest(ctx context.Context, selected any, runID string) (string, error) {
+	if owner, ok := selected.(*PostgresStore); !ok || owner == nil {
+		return "", fmt.Errorf("selected execution diagnostic requires its original PostgreSQL owner")
+	}
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return eventrecord.ReadPostgresRunRuntimeLogArrayStorageTx(ctx, tx, runID)
+	})
+}
+
+func CountPostgresSelectedForkLocalRuntimeDiagnosticsStorageForTest(ctx context.Context, selected any, runID, sourceEventID, lineageOwner string) (int, error) {
+	if owner, ok := selected.(*PostgresStore); !ok || owner == nil {
+		return 0, fmt.Errorf("selected execution diagnostic requires its original PostgreSQL owner")
+	}
+	return readFanOutSemanticStorage(ctx, selected, []string{runID, sourceEventID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountPostgresSelectedForkLocalRuntimeDiagnosticsStorageTx(ctx, tx, runID, sourceEventID, lineageOwner)
+	})
+}
+
+type SelectedExecutionEventStorage = eventrecord.SelectedExecutionEventStorage
+type SelectedExecutionFollowUpCounts = eventrecord.SelectedExecutionFollowUpCounts
+
+func ReadSelectedExecutionEventStorageForTest(ctx context.Context, selected any, eventID string) (SelectedExecutionEventStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{eventID}, func(ctx context.Context, tx *sql.Tx) (SelectedExecutionEventStorage, error) {
+		return eventrecord.ReadSelectedExecutionEventStorageTx(ctx, tx, eventID)
+	})
+}
+
+func ReadSelectedExecutionFollowUpCountsForTest(ctx context.Context, selected any, runID, sourceEventID string) (SelectedExecutionFollowUpCounts, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID, sourceEventID}, func(ctx context.Context, tx *sql.Tx) (SelectedExecutionFollowUpCounts, error) {
+		return eventrecord.ReadSelectedExecutionFollowUpCountsTx(ctx, tx, runID, sourceEventID)
+	})
+}
+
+func ReadSelectedExecutionPayloadsStorageForTest(ctx context.Context, selected any, runID string) ([][]byte, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) ([][]byte, error) {
+		return eventrecord.ReadSelectedExecutionPayloadsStorageTx(ctx, tx, runID)
+	})
+}
+
+func CountSelectedAgentFollowUpStorageForTest(ctx context.Context, selected any, runID, sourceEventID string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID, sourceEventID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return eventrecord.CountSelectedAgentFollowUpStorageTx(ctx, tx, runID, sourceEventID)
+	})
+}
+
 func CountChannelForkSupersessionLineageStorageForTest(ctx context.Context, selected any, run, event string) (int, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return 0, err

@@ -49,6 +49,10 @@ func captureRecentFamilyCommand(args []string) bool {
 		return false
 	}
 	switch args[1] {
+	case "-selected-fork-execution-capture":
+		captureSelectedForkExecution()
+	case "-selected-fork-execution-history":
+		composeSelectedForkExecutionHistory()
 	case "-durable-resource-capture":
 		captureDurableResource()
 	case "-durable-resource-history":

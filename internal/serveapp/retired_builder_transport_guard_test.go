@@ -228,7 +228,8 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 	const recipePath = "tools/fixture-codemod/pipeline-observations/recipes.json"
 	recipes, recipeErr := os.ReadFile(filepath.Join(repoRootForTest(), recipePath))
 	recipeCandidates, scanErr := retiredBuilderCandidates(recipePath, recipes)
-	if recipeErr != nil || scanErr != nil || len(recipeCandidates) != 18 {
+	// Ruling6186734979 already pins the nineteenth historical tuple above.
+	if recipeErr != nil || scanErr != nil || len(recipeCandidates) != 19 {
 		t.Fatalf("exact runtime factory snapshot inventory changed: %+v, %v, %v", recipeCandidates, recipeErr, scanErr)
 	}
 	for _, candidate := range recipeCandidates {
@@ -238,7 +239,7 @@ func TestRetiredBuilderNegativeControlReferenceCountRemainsExact(t *testing.T) {
 	}
 	extraRecipe := append(append([]byte(nil), recipes...), []byte("\n\"After\": \"func foreignFactory() { builder() }\"\n")...)
 	extraCandidates, extraErr := retiredBuilderCandidates(recipePath, extraRecipe)
-	if extraErr != nil || len(extraCandidates) != 19 || isExplicitUnrelatedBuilderText(recipePath, extraCandidates[18].text) {
+	if extraErr != nil || len(extraCandidates) != 20 || isExplicitUnrelatedBuilderText(recipePath, extraCandidates[19].text) {
 		t.Fatalf("foreign snapshot text escaped exact inventory: %+v, %v", extraCandidates, extraErr)
 	}
 	const transitionPath = "tools/fixture-codemod/pipeline-observations/family144-transitions.json"
