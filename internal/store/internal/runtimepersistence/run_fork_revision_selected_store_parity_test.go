@@ -163,6 +163,7 @@ func TestRunForkPlannerSelectedStoreParity(t *testing.T) {
 type runForkSelectedLifecycleStore interface {
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+	RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 	ActivateRunFork(context.Context, runfork.RunForkActivateRequest) (runfork.RunForkActivation, error)
 }
 
@@ -292,7 +293,7 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 	if materialized.ForkRunStatus != runfork.RunForkMaterializedStatus || materialized.MaterializedEntityCount != 1 || !materialized.ExecutionReady {
 		t.Fatalf("selected-store materialization = %#v", materialized)
 	}
-	repeated, err := selected.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID})
+	repeated, err := selected.RequireMaterializedRunFork(ctx, materialized.ForkRunID, runfork.RunForkMaterializeRequest{SourceRunID: runID, At: eventID})
 	if err != nil {
 		t.Fatalf("repeat exact fork materialization: %v", err)
 	}

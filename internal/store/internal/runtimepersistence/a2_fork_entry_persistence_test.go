@@ -250,7 +250,7 @@ func TestA2ForkStageEntryPersistenceOnBothStores(t *testing.T) {
 						t.Fatal("materialized accumulator lost exact business admission/history")
 					}
 					before := snapshotOwnershipCounts(t, f, result.ForkRunID)
-					again, err := f.store.MaterializeRunFork(f.ctx, request)
+					again, err := f.store.RequireMaterializedRunFork(f.ctx, result.ForkRunID, request)
 					if err != nil || again.ForkRunID != result.ForkRunID || snapshotOwnershipCounts(t, f, result.ForkRunID) != before {
 						t.Fatalf("fork exact replay changed history: %#v %v", again, err)
 					}

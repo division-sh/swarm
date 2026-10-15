@@ -152,6 +152,7 @@ func (o StartupRecovery) Availability() runbundle.ActiveAvailabilityReader {
 type runForkPlannerMaterializer interface {
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 	MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+	RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 }
 
 // RunFork is the opaque selected-contract runtime family owner.
@@ -257,6 +258,13 @@ func (o RunFork) Materialize(ctx context.Context, req runfork.RunForkMaterialize
 		return runfork.RunForkMaterialization{}, errors.New("selected run.fork runtime owner is required")
 	}
 	return o.planner.MaterializeRunFork(ctx, req)
+}
+
+func (o RunFork) RequireMaterialized(ctx context.Context, forkRunID string, req runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error) {
+	if o.planner == nil {
+		return runfork.RunForkMaterialization{}, errors.New("selected run.fork runtime owner is required")
+	}
+	return o.planner.RequireMaterializedRunFork(ctx, forkRunID, req)
 }
 
 func (o RunFork) Activate(ctx context.Context, req runtimerunforkexecution.SelectedContractActivationGateRequest) (runtimerunforkexecution.SelectedContractActivationGateResult, error) {
