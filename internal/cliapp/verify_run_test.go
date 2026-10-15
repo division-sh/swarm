@@ -32,7 +32,7 @@ func TestVerifyRunPublicAdmissionBothStores(t *testing.T) {
 			ctx := context.Background()
 			root := issue2567VerifySource(t)
 			config := filepath.Join(t.TempDir(), "swarm.yaml")
-			_, bundle, err := NewSwarmWorkflowModule(RepoRoot(), root, filepath.Join(RepoRoot(), "platform-spec.yaml"))
+			_, bundle, err := NewSwarmWorkflowModule(RepoRoot(), root)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -86,7 +86,6 @@ func TestVerifyLoadsSameEmbeddedInventoryOutsideCheckout(t *testing.T) {
 	opts := defaultVerifyCommandOptions()
 	opts.portable = true
 	opts.sourceRoot = root
-	opts.platformSpecPath = filepath.Join(RepoRoot(), defaultPlatformSpecPath)
 	for _, repo := range []string{RepoRoot(), t.TempDir()} {
 		var out, errOut bytes.Buffer
 		if code := runVerifyCommandWithOutput(context.Background(), repo, opts, &out, &errOut); code != 0 {
@@ -106,7 +105,6 @@ func TestVerifyProjectsExplicitConfiguredInventoryWithoutStandingIngress(t *test
 	opts := defaultVerifyCommandOptions()
 	opts.portable = true
 	opts.sourceRoot = root
-	opts.platformSpecPath = filepath.Join(RepoRoot(), defaultPlatformSpecPath)
 	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"))
 	emptyRepo := t.TempDir()
 	var textOut, textErr bytes.Buffer
@@ -141,7 +139,6 @@ func TestVerifyConfiguredInventoryProjectsUnsignedWarningAndReadback(t *testing.
 	opts := defaultVerifyCommandOptions()
 	opts.portable = true
 	opts.sourceRoot = writeInboundAdmissionPolicyMatrixFixture(t)
-	opts.platformSpecPath = filepath.Join(RepoRoot(), defaultPlatformSpecPath)
 	opts.configPath = writeInboundAdmissionRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "verify.sqlite"))
 	emptyRepo := t.TempDir()
 

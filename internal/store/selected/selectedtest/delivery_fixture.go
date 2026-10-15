@@ -3,6 +3,10 @@ package selectedtest
 import (
 	"context"
 	"errors"
+	"path/filepath"
+	"testing"
+	"time"
+
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -29,9 +33,6 @@ import (
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
-	"path/filepath"
-	"testing"
-	"time"
 )
 
 type SelectedDeliveryFixtureStore interface {
@@ -117,7 +118,7 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 	root := selectedDeliverySourceRoot(t, ctx, semanticview.Wrap(bundle), source, input)
 	storetest.CommitNativeDeliveryPublication(t, ctx, owner, storetest.AdmitNativeDeliveryEvent(t, input), []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}}, normal, &root)
 	finished := make(chan error, 1)
-	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: owner}
+	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: owner}
 	go func() {
 		_, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, runforkexecution.SelectedContractExecutionRequest{
 			Owner:       fork,

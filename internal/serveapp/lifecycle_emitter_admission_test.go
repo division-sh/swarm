@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
@@ -63,14 +62,13 @@ func testServedLifecycleEmitterDanglingAdmission(t *testing.T, backend servedpar
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			opts := cliapp.ServeOptions{
-				ConfigPath:       config,
-				SourceRoot:       root,
-				PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
-				APIListenAddr:    "127.0.0.1:0",
-				MCPListenAddr:    "127.0.0.1:0",
-				SelfCheck:        true,
-				Verbose:          true,
-				Output:           &out,
+				ConfigPath:    config,
+				SourceRoot:    root,
+				APIListenAddr: "127.0.0.1:0",
+				MCPListenAddr: "127.0.0.1:0",
+				SelfCheck:     true,
+				Verbose:       true,
+				Output:        &out,
 				TestRuntimeContextsReadyHook: func(*runtimepkg.RuntimeContextManager) {
 					published.Store(true)
 				},

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -57,7 +56,6 @@ func proveNativeAgentRestartAPICompletionLoss(t *testing.T, selected storetest.A
 		}
 	}()
 	handler, err := apiv1.NewHandler(apiv1.Options{
-		PlatformSpecPath: filepath.Join("..", "..", "..", "platform-spec.yaml"),
 		ProcessWorkOwner: process, AuthTokens: []string{apiv1.DefaultLoopbackAPIToken},
 		Handlers: apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{
 			Controller: owner, Idempotency: idempotency,

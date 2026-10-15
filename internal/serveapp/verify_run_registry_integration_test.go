@@ -50,8 +50,7 @@ func TestVerifyRunJobflowRegistryIntegrationBothStores(t *testing.T) {
 			var selected any
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected = p.deps.EventStore })
 			process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-				SourceRoot: root, ConfigPath: configPath, PlatformSpecPath: defaultPlatformSpecPath,
-				SwarmDir: t.TempDir(), SwarmDirSet: true,
+				SourceRoot: root, ConfigPath: configPath, SwarmDir: t.TempDir(), SwarmDirSet: true,
 				APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
 				TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 			})

@@ -7,51 +7,40 @@ import (
 	"strings"
 )
 
-type CLISourcePlatformSpecPathOptions struct {
-	SourceRoot       string
-	PlatformSpecPath string
-	ConfigPath       string
+type CLISourcePathOptions struct {
+	SourceRoot string
+	ConfigPath string
 }
 
-type CLISourcePlatformSpecPaths struct {
-	SourceRoot       string
-	PlatformSpecPath string
+type CLISourcePaths struct {
+	SourceRoot string
 }
 
-func ResolveCLISourcePlatformSpecPaths(invocationRootPath string, opts CLISourcePlatformSpecPathOptions) (CLISourcePlatformSpecPaths, error) {
+func ResolveCLISourcePaths(invocationRootPath string, opts CLISourcePathOptions) (CLISourcePaths, error) {
 	var err error
 	invocationRootPath, err = requireInvocationRootPath(invocationRootPath)
 	if err != nil {
-		return CLISourcePlatformSpecPaths{}, err
+		return CLISourcePaths{}, err
 	}
 	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: invocationRootPath, ExplicitPath: opts.ConfigPath})
 	if err != nil {
-		return CLISourcePlatformSpecPaths{}, err
+		return CLISourcePaths{}, err
 	}
-	return resolveCLISourcePlatformSpecPathsFromConfig(invocationRootPath, opts, cfg)
+	return resolveCLISourcePathsFromConfig(invocationRootPath, opts, cfg)
 }
 
-func resolveCLISourcePlatformSpecPathsFromConfig(invocationRootPath string, opts CLISourcePlatformSpecPathOptions, _ cliCommandConfig) (CLISourcePlatformSpecPaths, error) {
+func resolveCLISourcePathsFromConfig(invocationRootPath string, opts CLISourcePathOptions, _ cliCommandConfig) (CLISourcePaths, error) {
 	var err error
 	invocationRootPath, err = requireInvocationRootPath(invocationRootPath)
 	if err != nil {
-		return CLISourcePlatformSpecPaths{}, err
+		return CLISourcePaths{}, err
 	}
 	sourceRoot, err := ResolveSourceRoot(invocationRootPath, opts.SourceRoot)
 	if err != nil {
-		return CLISourcePlatformSpecPaths{}, err
+		return CLISourcePaths{}, err
 	}
-	platformSpecPath := strings.TrimSpace(opts.PlatformSpecPath)
-	if platformSpecPath == "" {
-		embedded, err := EmbeddedPlatformSpecPath()
-		if err != nil {
-			return CLISourcePlatformSpecPaths{}, fmt.Errorf("resolve embedded platform spec: %w", err)
-		}
-		platformSpecPath = embedded
-	}
-	return CLISourcePlatformSpecPaths{
-		SourceRoot:       sourceRoot,
-		PlatformSpecPath: ResolvePath(invocationRootPath, platformSpecPath),
+	return CLISourcePaths{
+		SourceRoot: sourceRoot,
 	}, nil
 }
 

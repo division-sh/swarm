@@ -49,7 +49,6 @@ func TestServingInternalAndExternalStopKeepLeaseUntilJoinOrDeathBothStores(t *te
 		defer stop()
 		opts := cliapp.DefaultServeOptions()
 		opts.ConfigPath, opts.SourceRoot = request.Config, filepath.Join(request.Repo, "tests/tier8-boot-verification/test-boot-success")
-		opts.PlatformSpecPath = filepath.Join(request.Repo, "platform-spec.yaml")
 		opts.SwarmDir, opts.SwarmDirSet = request.SwarmDir, true
 		opts.APIListenAddr, opts.MCPListenAddr = "127.0.0.1:0", "127.0.0.1:0"
 		opts.Output, opts.ErrorOutput = os.Stdout, os.Stderr

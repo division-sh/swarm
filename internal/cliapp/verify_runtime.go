@@ -47,15 +47,14 @@ type verifyFindingOutput struct {
 }
 
 type verifyCommandOptions struct {
-	sourceRoot       string
-	platformSpecPath string
-	configPath       string
-	swarmDir         cliSwarmDirOptions
-	portable         bool
-	runID            string
-	runRequested     bool
-	output           cliOutputOptions
-	logging          cliLoggingOptions
+	sourceRoot   string
+	configPath   string
+	swarmDir     cliSwarmDirOptions
+	portable     bool
+	runID        string
+	runRequested bool
+	output       cliOutputOptions
+	logging      cliLoggingOptions
 }
 
 func defaultVerifyCommandOptions() verifyCommandOptions {
@@ -97,16 +96,14 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		}
 		return refuse("runtime_configuration", "internal/cliapp.LoadRuntimeConfigWithOptions", subject, err, nil)
 	}
-	resolvedPaths, err := resolveCLISourcePlatformSpecPathsFromConfig(repo, CLISourcePlatformSpecPathOptions{
-		SourceRoot:       opts.sourceRoot,
-		PlatformSpecPath: opts.platformSpecPath,
-		ConfigPath:       opts.configPath,
+	resolvedPaths, err := resolveCLISourcePathsFromConfig(repo, CLISourcePathOptions{
+		SourceRoot: opts.sourceRoot,
+		ConfigPath: opts.configPath,
 	}, configResult.cli)
 	if err != nil {
-		return refuse("source_path_selection", "internal/cliapp.resolveCLISourcePlatformSpecPathsFromConfig", "project:"+repo, err, nil)
+		return refuse("source_path_selection", "internal/cliapp.resolveCLISourcePathsFromConfig", "project:"+repo, err, nil)
 	}
 	resolvedContractsPath := resolvedPaths.SourceRoot
-	resolvedPlatformSpecPath := resolvedPaths.PlatformSpecPath
 	sourceRoot, err := NormalizeSourceRoot(resolvedContractsPath)
 	if err != nil {
 		return refuse("source_directory", "internal/cliapp.NormalizeSourceRoot", "source:"+resolvedContractsPath, err, nil)
@@ -119,7 +116,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 	if err != nil {
 		return refuse("source_loading", "internal/packartifact.NewPlatformPackBaseGenerationOwner", "source:"+sourceRoot, err, nil)
 	}
-	if _, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, resolvedPlatformSpecPath, base); err != nil {
+	if _, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, base); err != nil {
 		return refuse("source_loading", "internal/cliapp.NewSwarmWorkflowModuleWithPackBase", "source:"+sourceRoot, err, nil)
 	} else {
 		packReadback := packInventoryReadbackFromInventory(bundle.PackInventory)

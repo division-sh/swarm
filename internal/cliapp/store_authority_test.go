@@ -275,14 +275,14 @@ func runStoreAuthorityCommandWithStore(t *testing.T, configPath, backend string,
 
 func bootstrapStoreAuthoritySQLite(t *testing.T, configPath, sqlitePath, ownerID string) {
 	t.Helper()
-	paths, err := ResolveCLISourcePlatformSpecPaths(RepoRoot(), CLISourcePlatformSpecPathOptions{
+	paths, err := ResolveCLISourcePaths(RepoRoot(), CLISourcePathOptions{
 		ConfigPath: configPath,
 		SourceRoot: filepath.Join(RepoRoot(), "tests", "tier8-boot-verification", "test-boot-success"),
 	})
 	if err != nil {
 		t.Fatalf("resolve selected-store schema paths: %v", err)
 	}
-	_, bundle, err := NewSwarmWorkflowModule(RepoRoot(), paths.SourceRoot, paths.PlatformSpecPath)
+	_, bundle, err := NewSwarmWorkflowModule(RepoRoot(), paths.SourceRoot)
 	if err != nil {
 		t.Fatalf("load selected-store schema source: %v", err)
 	}

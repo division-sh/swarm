@@ -40,20 +40,23 @@ func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testi
 	t.Setenv("SWARM_TOOL_GATEWAY_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "")
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
+	invocation := t.TempDir()
+	if err := os.WriteFile(filepath.Join(invocation, "platform-spec.yaml"), []byte("hostile: [invalid YAML\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	var out bytes.Buffer
-	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-		ConfigPath:       writeDoctorClaudeConfig(t, dockerBin),
-		SourceRoot:       doctorAgentContractsPath,
-		PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode:        "not-a-store",
-		APIListenAddr:    "127.0.0.1:0",
-		MCPListenAddr:    "127.0.0.1:0",
-		SelfCheck:        true,
-		Verbose:          true,
-		Output:           &out,
-		Dev:              true,
-		LocalRun:         true,
+	code := runFrom(context.Background(), invocation, cliapp.ServeOptions{
+		ConfigPath:    writeDoctorClaudeConfig(t, dockerBin),
+		SourceRoot:    filepath.Join(repoRootForTest(), doctorAgentContractsPath),
+		StoreMode:     "not-a-store",
+		APIListenAddr: "127.0.0.1:0",
+		MCPListenAddr: "127.0.0.1:0",
+		SelfCheck:     true,
+		Verbose:       true,
+		Output:        &out,
+		Dev:           true,
+		LocalRun:      true,
 	})
 	if code == 0 {
 		t.Fatalf("Run unexpectedly succeeded\noutput:\n%s", out.String())
@@ -88,17 +91,16 @@ func TestRunServeRuntimeRejectsDeclaredDevelopmentPackInventoryBeforeStoreSelect
 
 	var out bytes.Buffer
 	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
-		ConfigPath:       configPath,
-		SourceRoot:       doctorAgentContractsPath,
-		PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode:        "not-a-store",
-		APIListenAddr:    "127.0.0.1:0",
-		MCPListenAddr:    "127.0.0.1:0",
-		SelfCheck:        true,
-		Verbose:          true,
-		Output:           &out,
-		Dev:              true,
-		LocalRun:         true,
+		ConfigPath:    configPath,
+		SourceRoot:    doctorAgentContractsPath,
+		StoreMode:     "not-a-store",
+		APIListenAddr: "127.0.0.1:0",
+		MCPListenAddr: "127.0.0.1:0",
+		SelfCheck:     true,
+		Verbose:       true,
+		Output:        &out,
+		Dev:           true,
+		LocalRun:      true,
 	})
 	if code != 1 {
 		t.Fatalf("Run code = %d, want config load failure\noutput:\n%s", code, out.String())

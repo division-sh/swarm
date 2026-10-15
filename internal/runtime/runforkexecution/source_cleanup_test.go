@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -189,14 +188,14 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 				process, _ := worklifetime.ProcessFromContext(ctx)
 				capability := selectedContractTestProcessCapability(t, ctx, selected)
 				repo := runForkExecutionRepoRoot(t)
-				fixture := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple"), PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo)}
+				fixture := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")}
 				loaded, err := fixture.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 				if err != nil {
 					t.Fatal(err)
 				}
 				runID, eventID := uuid.NewString(), uuid.NewString()
 				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, runID, eventID)
-				base := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)}
+				base := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}
 				sibling, err := base.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: runID, Selection: runforkadmission.SelectedContractSelection(loaded.Source)})
 				if err != nil {
 					t.Fatal(err)

@@ -83,7 +83,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 			t.Fatal(err)
 		}
 		writeStandingCandidateFile(t, schemaPath, string(raw))
-		_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), contractsRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+		_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), contractsRoot)
 		if err != nil {
 			t.Fatalf("load standing fixture: %v", err)
 		}
@@ -200,7 +200,7 @@ func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 
 func TestProcessIngressIndexRequiresSelectedScope(t *testing.T) {
 	root := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +243,7 @@ func TestProcessIngressIndexRequiresSelectedScope(t *testing.T) {
 
 func TestProcessIngressConstructionObservationRequiresExactOwner(t *testing.T) {
 	root := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), root)
 	if err != nil {
 		t.Fatal(err)
 	}

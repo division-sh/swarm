@@ -1008,9 +1008,8 @@ func assertNotifyAllChildrenFanOutRunStatus(t *testing.T, ctx context.Context, s
 	}
 	const token = "numeric-fan-out-status-token"
 	handler, err := apiv1.NewHandler(apiv1.Options{
-		PlatformSpecPath: filepath.Join(conformanceRepoRoot(t), "platform-spec.yaml"),
-		AuthTokens:       []string{token},
-		Handlers:         apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: runs}),
+		AuthTokens: []string{token},
+		Handlers:   apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: runs}),
 	})
 	if err != nil {
 		t.Fatalf("construct run.diagnose API: %v", err)

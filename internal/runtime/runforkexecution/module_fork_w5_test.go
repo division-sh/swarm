@@ -13,7 +13,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -64,7 +63,7 @@ func TestW5ToolsPinnedModuleRunsThroughSelectedForkBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo)}
+			loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root}
 			loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 			if err != nil {
 				t.Fatal(err)

@@ -87,7 +87,7 @@ func TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores(t *testi
 				}
 			}
 			assertEntry(semanticview.Wrap(loaded))
-			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: reloaded}
+			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: reloaded}
 			forkSource, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{SourceRunID: runID, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}})
 			if err != nil {
 				t.Fatal(err)

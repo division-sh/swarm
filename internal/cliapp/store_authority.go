@@ -57,7 +57,7 @@ func inspectSelectedStoreAuthority(ctx context.Context, root InvocationRoot, cmd
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
-	selection, err := resolveAuthorityStoreSelection(root, cmd, cfgResult, CLISourcePlatformSpecPaths{}, opts.storeMode, cmd.Flags().Changed("store"))
+	selection, err := resolveAuthorityStoreSelection(root, cmd, cfgResult, CLISourcePaths{}, opts.storeMode, cmd.Flags().Changed("store"))
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
@@ -115,7 +115,7 @@ func constructAuthorityInspectionStore(ctx context.Context, selection storebacke
 	return storeselected.OpenAuthorityInspection(ctx, request)
 }
 
-func resolveAuthorityStoreSelection(root InvocationRoot, cmd *cobra.Command, admitted RuntimeConfigLoadResult, paths CLISourcePlatformSpecPaths, storeMode string, storeModeSet bool) (storebackend.Selection, error) {
+func resolveAuthorityStoreSelection(root InvocationRoot, cmd *cobra.Command, admitted RuntimeConfigLoadResult, paths CLISourcePaths, storeMode string, storeModeSet bool) (storebackend.Selection, error) {
 	if blockers := unifiedConfigBlockers(admitted.Diagnostics); len(blockers) > 0 {
 		return storebackend.Selection{}, unifiedConfigError{Diagnostics: blockers}
 	}
