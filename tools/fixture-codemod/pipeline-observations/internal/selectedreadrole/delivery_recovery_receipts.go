@@ -20,8 +20,8 @@ const DeliveryRecoveryPredecessor = "3bb704336cdbce8e70a17e0190de6b96b453707a"
 const DeliveryRecoveryPath = "tools/fixture-codemod/pipeline-observations/family145-delivery-recovery-preimages.json"
 const DeliveryRecoveryFile = "internal/runtime/conformance/delivery_lifecycle_conformance_test.go"
 const DeliveryRecoveryStartupFile = "internal/runtime/node_delivery_startup_recovery_test.go"
-const deliveryRecoveryFileDigest = "1e221c35c91c84395fed5548d78c49f84cd11d4fb86cd092e039668a580ccbee"
-const deliveryRecoveryDigest = "35f207281bd7a9de6425f36ad8386f3b354e3d5b0756945d87cf8b3ceda5d90a"
+const deliveryRecoveryFileDigest = "1251641db3f6d30732ac90f9d3b4d58726bd04717ec38f73a812450b73a81c0f"
+const deliveryRecoveryDigest = "375a5ec3d99170811825c11a522ad34e69f984f3392c9c6e18fee0a05ec070ec"
 const deliveryRecoveryDeclarationCount = 22
 
 func ReadDeliveryRecoveryPins(root string) ([]EntityToolPin, error) {

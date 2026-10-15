@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 // Check today's owner first, then give unchanged mechanical oracles their
@@ -57,7 +59,15 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 	if count != 24 {
 		t.Fatalf("mechanical repair target count=%d, want24", count)
 	}
-	digest, err := mechanicalReceiptDigest(rows)
+	prior, err := selectedreadrole.BeforeDeliveryRecoveryHistory(filepath.Clean("../../.."), recipeBytes, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var originalRows []recipe
+	if err := json.Unmarshal(prior, &originalRows); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := mechanicalReceiptDigest(originalRows)
 	if err != nil || digest != "1574d0e845b717b7f1697ae94d29f64596c6e7fb9b439ee62d6e4bb57e600be5" {
 		t.Fatalf("source-pinned mechanical/current receipts changed: %s/%v", digest, err)
 	}

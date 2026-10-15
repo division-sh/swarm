@@ -14,13 +14,34 @@ func InstallNodeRecoveryPoisonFaultTx(ctx context.Context, tx *sql.Tx, postgres 
 	}
 	query := fmt.Sprintf(`CREATE TRIGGER fail_node_recovery_poison_update BEFORE UPDATE ON entity_state WHEN OLD.entity_id = '%s' BEGIN SELECT RAISE(ABORT, 'injected node recovery poison mutation'); END`, entityID)
 	if postgres {
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`CREATE FUNCTION fail_node_recovery_poison_update_fn() RETURNS trigger AS $$ BEGIN IF OLD.entity_id = '%s'::uuid THEN RAISE EXCEPTION 'injected node recovery poison mutation'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql`, entityID)); err != nil {
+		if err := InstallNodeRecoveryPoisonFunctionFaultTx(ctx, tx, entityID); err != nil {
 			return err
 		}
 		query = `CREATE TRIGGER fail_node_recovery_poison_update BEFORE UPDATE ON entity_state FOR EACH ROW EXECUTE FUNCTION fail_node_recovery_poison_update_fn()`
 	}
 	_, err = tx.ExecContext(ctx, query)
 	return err
+}
+
+func InstallNodeRecoveryPoisonFunctionFaultTx(ctx context.Context, tx *sql.Tx, entityID string) error {
+	parsed, err := uuid.Parse(entityID)
+	if err != nil || parsed.String() != entityID {
+		return fmt.Errorf("poison fault requires an exact canonical entity")
+	}
+	_, err = tx.ExecContext(ctx, fmt.Sprintf(`CREATE FUNCTION fail_node_recovery_poison_update_fn() RETURNS trigger AS $$ BEGIN IF OLD.entity_id = '%s'::uuid THEN RAISE EXCEPTION 'injected node recovery poison mutation'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql`, entityID))
+	return err
+}
+
+func CountNodeRecoveryPoisonFaultObjectsTx(ctx context.Context, tx *sql.Tx, postgres bool) (int, error) {
+	query := `SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='fail_node_recovery_poison_update'`
+	if postgres {
+		query = `SELECT
+	(SELECT COUNT(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname='fail_node_recovery_poison_update_fn')+
+	(SELECT COUNT(*) FROM pg_trigger WHERE tgname='fail_node_recovery_poison_update' AND NOT tgisinternal)`
+	}
+	var out int
+	err := tx.QueryRowContext(ctx, query).Scan(&out)
+	return out, err
 }
 
 func RemoveNodeRecoveryPoisonFaultTx(ctx context.Context, tx *sql.Tx, postgres bool) error {

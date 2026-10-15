@@ -939,6 +939,11 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 	} {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx, selected := backend.setup(t)
+			t.Cleanup(func() {
+				if err := storetest.RemoveNodeRecoveryPoisonFault(context.WithoutCancel(ctx), selected); err != nil {
+					t.Errorf("remove node recovery poison mutation: %v", err)
+				}
+			})
 			bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyArtifactActionResultDelivery(t, "template", false))
 			source := semanticview.Wrap(bundle)
 			var pc *runtimepipeline.PipelineCoordinator
@@ -1027,11 +1032,6 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 
 func installNodeRecoveryPoisonMutation(t *testing.T, ctx context.Context, selected any, entityID string) {
 	t.Helper()
-	t.Cleanup(func() {
-		if err := storetest.RemoveNodeRecoveryPoisonFault(context.WithoutCancel(ctx), selected); err != nil {
-			t.Errorf("remove node recovery poison mutation: %v", err)
-		}
-	})
 	if err := storetest.InstallNodeRecoveryPoisonFault(ctx, selected, entityID); err != nil {
 		t.Fatalf("install node recovery poison mutation: %v", err)
 	}

@@ -143,6 +143,10 @@ func TestFamily145SelectedForkExecutionAppendOnlyHistoryAndUntouchedSiblings(t *
 		if recipes {
 			actual = recipeBytes
 		}
+		actual, err = selectedreadrole.BeforeDeliveryRecoveryHistory(root, actual, recipes)
+		if err != nil {
+			t.Fatal(err)
+		}
 		expected, err := selectedreadrole.ComposeSelectedForkExecutionHistory(root, prior, recipes)
 		if err != nil {
 			t.Fatal(err)

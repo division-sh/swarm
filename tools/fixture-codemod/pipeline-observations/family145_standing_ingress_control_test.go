@@ -207,6 +207,11 @@ var standingIngressOwnerAdditions = []standingIngressOwnerAddition{
 }
 
 func earlierStandingIngressOwnerFile(root, file string, current []byte) ([]byte, error) {
+	var err error
+	current, err = earlierDeliveryRecoveryOwnerFile(root, file, current)
+	if err != nil {
+		return nil, err
+	}
 	if file == agentSnapshotEventOwner {
 		var err error
 		current, err = earlierChannelProcessEventOwnerFile(root, current)

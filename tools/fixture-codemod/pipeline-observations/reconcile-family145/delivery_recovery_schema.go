@@ -113,6 +113,7 @@ func rewriteDeliveryRecoverySchema() {
 	if len(calls) != 14 {
 		panic("current schema probe inventory changed")
 	}
+	seen := map[string]bool{}
 	for i := len(calls) - 1; i >= 0; i-- {
 		call := calls[i]
 		if len(call.Args) != 6 {
@@ -124,6 +125,10 @@ func rewriteDeliveryRecoverySchema() {
 		}
 		name, err := strconv.Unquote(literal.Value)
 		must(err)
+		if seen[name] {
+			panic("duplicate current schema probe")
+		}
+		seen[name] = true
 		row, ok := sources[name]
 		if !ok {
 			panic("foreign current schema probe")
@@ -142,8 +147,9 @@ func rewriteDeliveryRecoverySchema() {
 	}
 	raw, err = format.Source(raw)
 	must(err)
+	owner := deliverySchemaOwner(sources)
+	must(os.WriteFile("internal/store/internal/backend/delivery/adapter.go", owner, 0644))
 	must(os.WriteFile(deliveryConformanceFile, raw, 0644))
-	appendDeliverySchemaCatalog(sources)
 }
 
 func deliverySchemaCurrentMatches(call *ast.CallExpr, row deliverySchemaSource) bool {
@@ -172,7 +178,7 @@ func deliverySchemaCurrentMatches(call *ast.CallExpr, row deliverySchemaSource) 
 	return true
 }
 
-func appendDeliverySchemaCatalog(sources map[string]deliverySchemaSource) {
+func deliverySchemaOwner(sources map[string]deliverySchemaSource) []byte {
 	var names []string
 	for name := range sources {
 		names = append(names, name)
@@ -184,12 +190,12 @@ func appendDeliverySchemaCatalog(sources map[string]deliverySchemaSource) {
 	for _, name := range names {
 		fmt.Fprintf(&out, "%s DeliveryConstraintCase = %q\n", deliverySchemaRewrites[name].constant, name)
 	}
-	fmt.Fprintln(&out, ")\nvar deliveryConstraintQueries = map[DeliveryConstraintCase]struct{postgres,sqlite string}{")
+	fmt.Fprintln(&out, ")\nfunc deliveryConstraintQueries() map[DeliveryConstraintCase]struct{postgres,sqlite string}{ return map[DeliveryConstraintCase]struct{postgres,sqlite string}{")
 	for _, name := range names {
 		row := sources[name]
 		fmt.Fprintf(&out, "%s:{%q,%q},\n", deliverySchemaRewrites[name].constant, deliverySchemaPostgresSQL(row), row.sqlite)
 	}
-	fmt.Fprintln(&out, "}\nfunc deliveryConstraintArguments(postgres bool, input DeliveryConstraintInput)([]any,error){switch input.Case{")
+	fmt.Fprintln(&out, "}}\nfunc deliveryConstraintArguments(postgres bool, input DeliveryConstraintInput)([]any,error){switch input.Case{")
 	for _, name := range names {
 		rule := deliverySchemaRewrites[name]
 		var args []string
@@ -202,16 +208,16 @@ func appendDeliverySchemaCatalog(sources map[string]deliverySchemaSource) {
 		}
 		fmt.Fprintf(&out, "return []any{%s},nil\n", strings.Join(args, ","))
 	}
-	fmt.Fprintln(&out, "};return nil,fmt.Errorf(\"unknown delivery constraint probe %q\",input.Case)}")
+	out.WriteString("};return nil,fmt.Errorf(\"unknown delivery constraint probe %q\",input.Case)}\n")
 	const path = "internal/store/internal/backend/delivery/adapter.go"
 	raw, err := os.ReadFile(path)
 	must(err)
-	if bytes.Contains(raw, []byte("var deliveryConstraintQueries")) {
+	if bytes.Contains(raw, []byte("func deliveryConstraintQueries")) {
 		panic("schema catalog already exists; refusing duplicate rewrite")
 	}
 	raw, err = format.Source(append(raw, out.Bytes()...))
 	must(err)
-	must(os.WriteFile(path, raw, 0644))
+	return raw
 }
 
 func deliverySchemaPostgresSQL(row deliverySchemaSource) string {
