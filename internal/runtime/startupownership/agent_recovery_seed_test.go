@@ -240,3 +240,22 @@ func TestAgentRecoverySeedConcurrentDuplicateCannotOverwrite(t *testing.T) {
 		t.Fatalf("concurrent duplicate changed the seed: errors=%v / %v reads=%d seed=%#v", one, two, calls.Load(), p.agentRecoverySeed)
 	}
 }
+
+func TestAgentRecoverySeedTerminalLossRevokesInstalledObservation(t *testing.T) {
+	p, session, read := newAgentRecoverySeedCapability(t)
+	var calls atomic.Int32
+	session.read = func(context.Context) (AgentRecoverySeedRead, error) {
+		calls.Add(1)
+		return read, nil
+	}
+	if err := SeedAgentRecovery(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	p.SelectedStoreSessionTerminal(TerminalResult{Cause: TerminalOwnershipUnprovable})
+	if p.agentRecoverySeed != nil {
+		t.Fatal("terminal process retained its formerly installed private observation")
+	}
+	if err := SeedAgentRecovery(context.Background(), p); err == nil || calls.Load() != 1 {
+		t.Fatal("terminal process re-read/reseeded after revocation")
+	}
+}
