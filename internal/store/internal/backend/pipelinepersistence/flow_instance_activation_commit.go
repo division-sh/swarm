@@ -101,8 +101,8 @@ func (s *PipelineSQLiteOwner) CommitFlowInstanceActivationsTx(ctx context.Contex
 
 // The finite historical witnesses supply admitted plans and the original event,
 // and commit through the same constructor under their original live attempt.
-func commitFixedForkConstructionForTest(ctx context.Context, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool, parent *runtimepipeline.FlowInstanceActivationPlan, plan runtimepipeline.FlowInstanceActivationPlan, event events.Event) (runtimepipeline.CommittedFlowInstanceActivation, error) {
-	occurrence, err := privatemutationlog.FixedForkConstructionOccurrenceForTest(ctx, attempt, parent, plan, event)
+func commitFixedForkConstructionForTest(ctx context.Context, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool, parent *runtimepipeline.FlowInstanceActivationPlan, plan runtimepipeline.FlowInstanceActivationPlan, event events.AdmittedEvent) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	occurrence, err := privatemutationlog.FixedForkConstructionOccurrenceForTest(ctx, attempt, parent, plan, event.Event())
 	if err != nil {
 		return runtimepipeline.CommittedFlowInstanceActivation{}, err
 	}
@@ -117,11 +117,11 @@ func commitFixedForkConstructionForTest(ctx context.Context, attempt *mutationpr
 	return committed[len(committed)-1], nil
 }
 
-func (s *PipelinePostgresOwner) CommitFixedForkConstructionForTest(ctx context.Context, attempt *mutationprotocol.Attempt, parent *runtimepipeline.FlowInstanceActivationPlan, plan runtimepipeline.FlowInstanceActivationPlan, event events.Event) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+func (s *PipelinePostgresOwner) CommitFixedForkConstructionForTest(ctx context.Context, attempt *mutationprotocol.Attempt, parent *runtimepipeline.FlowInstanceActivationPlan, plan runtimepipeline.FlowInstanceActivationPlan, event events.AdmittedEvent) (runtimepipeline.CommittedFlowInstanceActivation, error) {
 	return commitFixedForkConstructionForTest(ctx, attempt, s, true, parent, plan, event)
 }
 
-func (s *PipelineSQLiteOwner) CommitFixedForkConstructionForTest(ctx context.Context, attempt *mutationprotocol.Attempt, parent *runtimepipeline.FlowInstanceActivationPlan, plan runtimepipeline.FlowInstanceActivationPlan, event events.Event) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+func (s *PipelineSQLiteOwner) CommitFixedForkConstructionForTest(ctx context.Context, attempt *mutationprotocol.Attempt, parent *runtimepipeline.FlowInstanceActivationPlan, plan runtimepipeline.FlowInstanceActivationPlan, event events.AdmittedEvent) (runtimepipeline.CommittedFlowInstanceActivation, error) {
 	return commitFixedForkConstructionForTest(ctx, attempt, s, false, parent, plan, event)
 }
 

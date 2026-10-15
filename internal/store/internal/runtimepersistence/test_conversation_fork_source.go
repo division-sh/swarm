@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -64,9 +65,17 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 			}
 			switch store := selected.(type) {
 			case *PostgresStore:
-				result.Construction, err = store.pipelinePostgresOwner.CommitFixedForkConstructionForTest(ctx, attempt, fixture.Construction.Parent, fixture.Construction.Child, input)
+				prepared, found, loadErr := store.eventPostgresOwner.LoadPreparedPublishEventTx(ctx, tx, input.ID())
+				if loadErr != nil || !found {
+					return errors.Join(loadErr, fmt.Errorf("fixed construction requires its persisted creating event"))
+				}
+				result.Construction, err = store.pipelinePostgresOwner.CommitFixedForkConstructionForTest(ctx, attempt, fixture.Construction.Parent, fixture.Construction.Child, prepared.Event)
 			case *SQLiteRuntimeStore:
-				result.Construction, err = store.pipelineSQLiteOwner.CommitFixedForkConstructionForTest(ctx, attempt, fixture.Construction.Parent, fixture.Construction.Child, input)
+				prepared, found, loadErr := store.eventSQLiteOwner.LoadPreparedPublishEventTx(ctx, tx, input.ID())
+				if loadErr != nil || !found {
+					return errors.Join(loadErr, fmt.Errorf("fixed construction requires its persisted creating event"))
+				}
+				result.Construction, err = store.pipelineSQLiteOwner.CommitFixedForkConstructionForTest(ctx, attempt, fixture.Construction.Parent, fixture.Construction.Child, prepared.Event)
 			}
 			if err != nil {
 				return err
