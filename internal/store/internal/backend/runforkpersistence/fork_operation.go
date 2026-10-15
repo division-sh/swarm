@@ -12,11 +12,68 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 )
+
+type selectedForkOperationReplay struct {
+	operationID string
+	forkRunID   string
+}
+
+func (e *selectedForkOperationReplay) Error() string {
+	return "selected materialization observed a durable fork operation"
+}
+
+func requireFreshForkOperationTx(ctx context.Context, tx *sql.Tx, request *runfork.ForkOperationRequest, postgres bool) error {
+	if request == nil {
+		return nil
+	}
+	canonical, semanticHash, err := request.Canonical()
+	if err != nil {
+		return err
+	}
+	var record runfork.ForkOperationRecord
+	var found bool
+	if canonical.IdempotencyKey != "" {
+		record, found, err = lookupForkOperationTx(ctx, tx, canonical.Actor, canonical.IdempotencyKey, canonical.TransportHash, postgres, true)
+		if err != nil {
+			return err
+		}
+		if found && (record.Request.SourceRunID != canonical.SourceRunID || record.Request.ForkEventID != canonical.ForkEventID) {
+			return fmt.Errorf("fork operation key disagrees with original source coordinates")
+		}
+		if found && record.Request.OperationID != canonical.OperationID {
+			return &selectedForkOperationReplay{operationID: record.Request.OperationID, forkRunID: record.ForkRunID}
+		}
+	}
+	if !found {
+		record, found, err = loadForkOperationByIDTx(ctx, tx, canonical.OperationID, postgres)
+		if err != nil || !found {
+			return err
+		}
+	}
+	if record.Request.Actor != canonical.Actor || record.Request.IdempotencyKey != canonical.IdempotencyKey ||
+		record.Request.TransportHash != canonical.TransportHash || record.SemanticHash != semanticHash ||
+		(canonical.ResolvedPoint != nil && (!sameSelectedForkPointIdentity(*record.Request.ResolvedPoint, *canonical.ResolvedPoint) ||
+			record.Request.ResolvedPoint.Input != canonical.ResolvedPoint.Input)) {
+		return fmt.Errorf("fork invocation disagrees with its durable operation")
+	}
+	return &selectedForkOperationReplay{operationID: record.Request.OperationID, forkRunID: record.ForkRunID}
+}
+
+func selectedForkOperationReplayAfterAbort(ctx context.Context, committed bool, err error, replay *selectedForkOperationReplay) error {
+	// The callback returned this exact refusal before COMMIT. Admit continuation
+	// only after native settlement, without an independent cancellation or cleanup
+	// failure; an unacknowledged outcome alone never proves rollback.
+	if !committed && replay != nil && ctx.Err() == nil && failures.OnlyBranches(err, func(branch error) bool { return branch == replay }) {
+		return &runfork.ForkOperationReplayRequiredError{OperationID: replay.operationID, ForkRunID: replay.forkRunID}
+	}
+	return err
+}
 
 func requireForkOperationMaterializationRequest(operation *runfork.ForkOperationRequest, sourceRunID string, point runfork.RunForkPoint, targetBundleHash string, selection runfork.RunForkContractSelection, overrides []durabledata.ExplicitPin) error {
 	if operation == nil {
