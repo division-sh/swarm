@@ -1,0 +1,429 @@
+name: Release
+# Never read, hash or package the checkout's .swarm state. Archives contain only
+# the built executable and the explicit LICENSE/README allowlist.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version for an artifact-only rehearsal (no tag or release is created)
+        required: true
+        default: v0.7.0-rc.0
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  prepare:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      sha: ${{ steps.metadata.outputs.sha }}
+      built: ${{ steps.metadata.outputs.built }}
+      previous: ${{ steps.metadata.outputs.previous }}
+      prerelease: ${{ steps.metadata.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          clean: false
+      - name: Resolve immutable build metadata
+        id: metadata
+        env:
+          VERSION: ${{ github.event_name == 'push' && github.ref_type == 'tag' && github.ref_name || inputs.version }}
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import datetime
+          import json
+          import os
+          import re
+          import subprocess
+
+          number = r'(?:0|[1-9][0-9]*)'
+          identifier = r'(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+          semver = re.compile(rf'v{number}\.{number}\.{number}(?:-({identifier}(?:\.{identifier})*))?')
+          version = os.environ['VERSION']
+          match = semver.fullmatch(version)
+          if match is None:
+              raise SystemExit('version must be a plain vX.Y.Z tag or have a prerelease suffix, without build metadata')
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          sha = git('rev-parse', 'HEAD')
+          if os.environ['EVENT'] == 'push' and os.environ['REF_TYPE'] == 'tag':
+              if git('rev-parse', '--verify', f'refs/tags/{version}^{{commit}}') != sha:
+                  raise SystemExit('tag does not identify this build commit')
+              subprocess.run(['git', 'merge-base', '--is-ancestor', sha,
+                              'refs/remotes/origin/' + os.environ['DEFAULT_BRANCH']], check=True)
+          pages = json.loads(subprocess.check_output([
+              'gh', 'api', '--paginate', '--slurp',
+              'repos/' + os.environ['GITHUB_REPOSITORY'] + '/releases?per_page=100'], text=True))
+          releases = [release for page in pages for release in page if not release['draft']]
+          previous = ''
+          for release in sorted(releases, key=lambda r: r['published_at'] or '', reverse=True):
+              tag = release['tag_name']
+              if tag == version or semver.fullmatch(tag) is None:
+                  continue
+              point = subprocess.run(['git', 'rev-parse', '--verify', f'refs/tags/{tag}^{{commit}}'],
+                                     text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+              if point.returncode == 0 and subprocess.run(
+                  ['git', 'merge-base', '--is-ancestor', point.stdout.strip(), sha]).returncode == 0:
+                  previous = tag
+                  break
+          built = datetime.datetime.fromtimestamp(int(git('show', '-s', '--format=%ct', sha)),
+                                                  datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+          values = {'version': version, 'sha': sha, 'built': built, 'previous': previous,
+                    'prerelease': str(match.group(1) is not None).lower()}
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as output:
+              for key, value in values.items():
+                  output.write(f'{key}={value}\n')
+          PY
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            goos: linux
+            goarch: amd64
+          - runner: macos-15
+            goos: darwin
+            goarch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    env:
+      # Wasmtime uses a C API: each binary must be built and started natively.
+      CGO_ENABLED: '1'
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+      BUILT: ${{ needs.prepare.outputs.built }}
+      # Explicit metadata avoids VCS worktree scans, including ignored local state.
+      GOFLAGS: -buildvcs=false
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+          clean: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Build on the actual target platform
+        run: |
+          set -euo pipefail
+          test "$(go env GOHOSTOS)" = "$GOOS"
+          test "$(go env GOHOSTARCH)" = "$GOARCH"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(go env GOVERSION)" = "$(awk '$1 == "toolchain" {print $2}' go.mod)"
+          go mod download
+          go mod verify
+          mkdir -p "$RUNNER_TEMP/release-stage" "$RUNNER_TEMP/release-assets"
+          go build -trimpath -mod=readonly \
+            -ldflags="-X main.binaryVersion=$VERSION -X main.binaryCommit=$SOURCE_SHA -X main.binaryDate=$BUILT" \
+            -o "$RUNNER_TEMP/release-stage/swarm" ./cmd/swarm
+          test ! -L LICENSE
+          test ! -L README.md
+          cp LICENSE README.md "$RUNNER_TEMP/release-stage/"
+      - name: Include linked dependency license texts in LICENSE
+        run: |
+          set -euo pipefail
+          go list -deps -f '{{with .Module}}{{if .Version}}{{.Path}}{{"\t"}}{{.Version}}{{"\t"}}{{.Dir}}{{end}}{{end}}' ./cmd/swarm \
+            | LC_ALL=C sort -u > "$RUNNER_TEMP/release-modules.tsv"
+          export MODULE_CACHE="$(go env GOMODCACHE)" GOROOT="$(go env GOROOT)"
+          python3 - <<'PY'
+          import os
+          import pathlib
+
+          temp = pathlib.Path(os.environ['RUNNER_TEMP'])
+          cache = pathlib.Path(os.environ['MODULE_CACHE']).resolve()
+          with (temp / 'release-stage/LICENSE').open('a', encoding='utf-8') as output:
+              output.write('\n\n--- Go toolchain license ---\n')
+              output.write((pathlib.Path(os.environ['GOROOT']) / 'LICENSE').read_text(encoding='utf-8'))
+              for line in (temp / 'release-modules.tsv').read_text(encoding='utf-8').splitlines():
+                  if not line.strip():
+                      continue
+                  name, version, directory = line.split('\t')
+                  root = pathlib.Path(directory).resolve()
+                  if cache not in root.parents:
+                      raise SystemExit('dependency license path is outside the module cache')
+                  notices = sorted(p for p in root.iterdir() if not p.is_symlink() and p.is_file()
+                                   and p.name.upper().startswith(('LICENSE', 'NOTICE', 'COPYING')))
+                  if not notices:
+                      raise SystemExit('missing dependency license: ' + name)
+                  for notice in notices:
+                      output.write(f'\n\n--- {name}@{version}: {notice.name} ---\n')
+                      output.write(notice.read_text(encoding='utf-8'))
+          PY
+      - name: Start the binary outside the checkout and package only the allowlist
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release-smoke/home" "$RUNNER_TEMP/release-smoke/work"
+          cd "$RUNNER_TEMP/release-smoke/work"
+          HOME="$RUNNER_TEMP/release-smoke/home" "$RUNNER_TEMP/release-stage/swarm" version --json \
+            > "$RUNNER_TEMP/release-version.json"
+          jq -e --arg version "$VERSION" --arg sha "$SOURCE_SHA" --arg built "$BUILT" \
+            --arg goos "$GOOS" --arg goarch "$GOARCH" \
+            '.binary_version == $version and .commit == $sha and .built == $built and .goos == $goos and .goarch == $goarch' \
+            "$RUNNER_TEMP/release-version.json"
+          tar -C "$RUNNER_TEMP/release-stage" -czf "$RUNNER_TEMP/release-assets/swarm_${VERSION}_${GOOS}_${GOARCH}.tar.gz" \
+            swarm LICENSE README.md
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ runner.temp }}/release-assets/swarm_${{ needs.prepare.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  verify:
+    needs: [prepare, build]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      VERIFY_MANIFEST: 'false'
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: ${{ runner.temp }}/release-assets
+      - name: Assert the exact archive and member allowlists before checksumming
+        run: &verify_assets |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import os
+          import pathlib
+          import re
+          import tarfile
+
+          assets = pathlib.Path(os.environ['RUNNER_TEMP']) / 'release-assets'
+          expected = {f'swarm_{os.environ["VERSION"]}_{target}.tar.gz' for target in ('linux_amd64', 'darwin_arm64')}
+          verify = os.environ['VERIFY_MANIFEST'] == 'true'
+          if {p.name for p in assets.iterdir()} != (expected | {'SHA256SUMS'} if verify else expected):
+              raise SystemExit('unexpected or missing release asset')
+          for name in sorted(expected):
+              archive = assets / name
+              if archive.is_symlink() or not archive.is_file():
+                  raise SystemExit('release archive must be a regular file')
+              with tarfile.open(archive, 'r:gz') as package:
+                  members = package.getmembers()
+                  if len(members) != 3 or {m.name for m in members} != {'swarm', 'LICENSE', 'README.md'}:
+                      raise SystemExit('archive violates the binary/LICENSE/README allowlist')
+                  if any(not m.isfile() or m.size <= 0 for m in members):
+                      raise SystemExit('archive contains an empty or non-regular member')
+                  if not package.getmember('swarm').mode & 0o111:
+                      raise SystemExit('release binary is not executable')
+          manifest = assets / 'SHA256SUMS'
+          provided = {}
+          if verify:
+              if manifest.is_symlink() or not manifest.is_file():
+                  raise SystemExit('checksum manifest must be a regular file')
+              lines = manifest.read_text(encoding='ascii').splitlines()
+              if len(lines) != len(expected):
+                  raise SystemExit('checksum manifest must contain exactly the two archives')
+              for line in lines:
+                  digest, name = line.split('  ', 1)
+                  if name not in expected or name in provided or re.fullmatch('[0-9a-f]{64}', digest) is None:
+                      raise SystemExit('checksum manifest violates the archive allowlist')
+                  provided[name] = digest
+          # Hash only validated archive paths, never paths supplied by a manifest.
+          computed = {}
+          for name in sorted(expected):
+              digest = hashlib.sha256()
+              with (assets / name).open('rb') as archive:
+                  for block in iter(lambda: archive.read(1024 * 1024), b''):
+                      digest.update(block)
+              computed[name] = digest.hexdigest()
+          if verify:
+              if computed != provided:
+                  raise SystemExit('release archive checksum mismatch')
+          else:
+              manifest.write_text(''.join(f'{digest}  {name}\n' for name, digest in computed.items()), encoding='ascii')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-candidate
+          path: |
+            ${{ runner.temp }}/release-assets/swarm_${{ needs.prepare.outputs.version }}_linux_amd64.tar.gz
+            ${{ runner.temp }}/release-assets/swarm_${{ needs.prepare.outputs.version }}_darwin_arm64.tar.gz
+            ${{ runner.temp }}/release-assets/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+      - name: Rehearsal receipt
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          printf '%s\n' 'Artifact-only rehearsal: both native smoke tests and archive allowlists passed. No tag or release was created.' >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [prepare, verify]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    # Native builds remain parallel; serialize the verified publication boundary
+    # across tags so an older hotfix cannot race a newer stable promotion.
+    concurrency:
+      group: release-publication
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
+      PREVIOUS: ${{ needs.prepare.outputs.previous }}
+      PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+      VERIFY_MANIFEST: 'true'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          clean: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-candidate
+          path: ${{ runner.temp }}/release-assets
+      - name: Recheck the exact archive, member and manifest allowlists
+        run: *verify_assets
+      - name: Verify tag and summarize the release range
+        run: |
+          set -euo pipefail
+          git ls-remote --tags origin "refs/tags/$VERSION" "refs/tags/$VERSION^{}" > "$RUNNER_TEMP/release-tag.txt"
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import re
+          import subprocess
+
+          temp = pathlib.Path(os.environ['RUNNER_TEMP'])
+          tag = os.environ['VERSION']
+          rows = dict(line.split()[::-1] for line in (temp / 'release-tag.txt').read_text().splitlines())
+          actual = rows.get(f'refs/tags/{tag}^{{}}', rows.get(f'refs/tags/{tag}'))
+          if actual != os.environ['SOURCE_SHA']:
+              raise SystemExit('remote release tag moved or is absent')
+          selection = os.environ['SOURCE_SHA']
+          if os.environ['PREVIOUS']:
+              selection = os.environ['PREVIOUS'] + '..' + selection
+          commits = set(subprocess.check_output(['git', 'rev-list', selection], text=True).splitlines())
+          for sha in commits:
+              if re.fullmatch('[0-9a-f]{40,64}', sha) is None:
+                  raise SystemExit('release range has an invalid object id')
+          owner, repository = os.environ['GITHUB_REPOSITORY'].split('/')
+          # Count merged PRs by their exact merge commit, not by subjects or dates.
+          query = '''query($owner: String!, $repo: String!, $endCursor: String) {
+            repository(owner: $owner, name: $repo) {
+              pullRequests(first: 100, states: MERGED, after: $endCursor) {
+                nodes { number mergeCommit { oid } }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          }'''
+          pages = json.loads(subprocess.check_output([
+              'gh', 'api', 'graphql', '--paginate', '--slurp', '-f', 'query=' + query,
+              '-f', 'owner=' + owner, '-f', 'repo=' + repository], text=True))
+          if not isinstance(pages, list) or not pages:
+              raise SystemExit('missing merged-PR inventory pages')
+          merged = set()
+          for page in pages:
+              nodes = page['data']['repository']['pullRequests']['nodes']
+              if not isinstance(nodes, list):
+                  raise SystemExit('invalid merged-PR inventory nodes')
+              for pr in nodes:
+                  if (type(pr['number']) is not int or pr['number'] <= 0
+                          or re.fullmatch('[0-9a-f]{40,64}', pr['mergeCommit']['oid']) is None):
+                      raise SystemExit('invalid merged-PR range evidence')
+                  if pr['mergeCommit']['oid'] in commits:
+                      merged.add(pr['number'])
+          previous = os.environ['PREVIOUS']
+          url = 'https://github.com/' + os.environ['GITHUB_REPOSITORY']
+          compare = url + '/compare/' + previous + '...' + tag if previous else url + '/commits/' + tag
+          summary = [
+              '## Release summary\n\n',
+              f'Range: {previous or "(no previous release; initial history)"} -> {tag}\n\n',
+              f'Commits: {len(commits)}\n\n',
+              f'Merged pull requests (merge commit in range): {len(merged)}\n\n',
+              f'[Compare changes]({compare})\n',
+              '\n## Native binary requirements\n\n',
+              '- Linux amd64: built with CGO on Ubuntu 22.04; requires a compatible '
+              'glibc runtime (libc, libm and the x86-64 dynamic loader) and libgcc_s.so.1. '
+              'This is not a static or musl/Alpine binary.\n',
+              '- macOS arm64: built and smoke-tested natively on the macOS 15 arm64 runner.\n',
+          ]
+          (temp / 'release-notes.md').write_text(''.join(summary), encoding='utf-8')
+          PY
+      - name: Publish only the complete verified asset set
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/release-assets"
+          test "$(printf '%s\n' * | LC_ALL=C sort)" = "$(printf '%s\n' SHA256SUMS "swarm_${VERSION}_darwin_arm64.tar.gz" "swarm_${VERSION}_linux_amd64.tar.gz" | LC_ALL=C sort)"
+          flags=(--draft --verify-tag --title "Swarm $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md")
+          if test "$PRERELEASE" = true; then flags+=(--prerelease); fi
+          gh release create "$VERSION" "${flags[@]}"
+          gh release upload "$VERSION" SHA256SUMS "swarm_${VERSION}_linux_amd64.tar.gz" "swarm_${VERSION}_darwin_arm64.tar.gz"
+          mkdir -p "$RUNNER_TEMP/release-downloaded"
+          gh release download "$VERSION" --dir "$RUNNER_TEMP/release-downloaded" --pattern SHA256SUMS \
+            --pattern "swarm_${VERSION}_linux_amd64.tar.gz" --pattern "swarm_${VERSION}_darwin_arm64.tar.gz"
+          cd "$RUNNER_TEMP/release-downloaded"
+          for file in SHA256SUMS "swarm_${VERSION}_linux_amd64.tar.gz" "swarm_${VERSION}_darwin_arm64.tar.gz"; do
+            cmp "$file" "$RUNNER_TEMP/release-assets/$file"
+          done
+          assets=$(gh release view "$VERSION" --json assets --jq '[.assets[].name] | sort | join("\n")')
+          test "$assets" = "$(printf '%s\n' SHA256SUMS "swarm_${VERSION}_darwin_arm64.tar.gz" "swarm_${VERSION}_linux_amd64.tar.gz" | LC_ALL=C sort)"
+          git ls-remote --tags origin "refs/tags/$VERSION" "refs/tags/$VERSION^{}" > "$RUNNER_TEMP/release-final-tag.txt"
+          cmp "$RUNNER_TEMP/release-final-tag.txt" "$RUNNER_TEMP/release-tag.txt"
+          latest=$(python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+
+          plain = re.compile(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)')
+          version = plain.fullmatch(os.environ['VERSION'])
+          latest = False
+          if os.environ['PRERELEASE'] == 'false' and version is not None:
+              pages = json.loads(subprocess.check_output([
+                  'gh', 'api', '--paginate', '--slurp',
+                  'repos/' + os.environ['GITHUB_REPOSITORY'] + '/releases?per_page=100'], text=True))
+              if not isinstance(pages, list) or not pages or any(not isinstance(page, list) for page in pages):
+                  raise SystemExit('missing or invalid published-release inventory pages')
+              for page in pages:
+                  for release in page:
+                      if (not isinstance(release['tag_name'], str) or type(release['draft']) is not bool
+                              or type(release['prerelease']) is not bool):
+                          raise SystemExit('invalid published-release metadata')
+              published = [plain.fullmatch(release['tag_name']) for page in pages for release in page
+                           if not release['draft'] and not release['prerelease']]
+              latest = all(tuple(map(int, version.groups())) >= tuple(map(int, other.groups()))
+                           for other in published if other is not None)
+          print(str(latest).lower())
+          PY
+          )
+          gh release edit "$VERSION" --draft=false --latest="$latest"
