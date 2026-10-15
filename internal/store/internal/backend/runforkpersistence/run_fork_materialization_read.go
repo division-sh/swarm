@@ -116,7 +116,7 @@ func requireMaterializedRunForkSnapshot(ctx context.Context, tx *sql.Tx, postgre
 	if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
-	if err := requireExactMaterializedRunForkFanOut(ctx, tx, postgres, forkRunID, plan, refs, req.OriginalLoopCarriage, identity.SourceArtifactFact.BundleHash(), data, pins); err != nil {
+	if err := requireExactMaterializedRunForkFanOut(ctx, tx, postgres, false, forkRunID, plan, refs, req.OriginalLoopCarriage, identity.SourceArtifactFact.BundleHash(), data, pins); err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
 	materialization.DataPins = pins
