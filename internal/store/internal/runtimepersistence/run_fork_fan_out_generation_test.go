@@ -196,7 +196,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					}
 					captureFanOutBarrierForkRevision(t, ctx, fixture.db, runID, backend.name == "postgres")
 					forkOwner := fixture.store.(selectedActivityProjectionStore)
-					var materialize func() (runfork.RunForkMaterialization, error)
+					var materializeRequest runfork.RunForkMaterializeRequest
 					if selectedExecution {
 						if _, err := forkOwner.(selectedSourceArtifactStore).EnsureSourceArtifact(ctx, bundle.SourceArtifact); err != nil {
 							t.Fatal(err)
@@ -224,12 +224,9 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						}
 						return
 					} else {
-						request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), OriginalLoopCarriage: original}
-						materialize = func() (runfork.RunForkMaterialization, error) {
-							return fixture.store.(runForkSelectedLifecycleStore).MaterializeRunFork(ctx, request)
-						}
+						materializeRequest = runfork.RunForkMaterializeRequest{SourceRunID: runID, At: point.ID(), OriginalLoopCarriage: original}
 					}
-					child, err := materialize()
+					child, err := fixture.store.(runForkSelectedLifecycleStore).MaterializeRunFork(ctx, materializeRequest)
 					if err != nil {
 						t.Fatalf("fork actual intent/barrier: %v", err)
 					}
@@ -250,11 +247,8 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 							t.Fatal(err)
 						}
 						captureFanOutBarrierForkRevision(t, ctx, fixture.db, firstChild, backend.name == "postgres")
-						request := runfork.RunForkMaterializeRequest{SourceRunID: firstChild, At: checkpoint.ID(), OriginalLoopCarriage: original}
-						materialize = func() (runfork.RunForkMaterialization, error) {
-							return fixture.store.(runForkSelectedLifecycleStore).MaterializeRunFork(ctx, request)
-						}
-						child, err = materialize()
+						materializeRequest = runfork.RunForkMaterializeRequest{SourceRunID: firstChild, At: checkpoint.ID(), OriginalLoopCarriage: original}
+						child, err = fixture.store.(runForkSelectedLifecycleStore).MaterializeRunFork(ctx, materializeRequest)
 						if err != nil {
 							t.Fatalf("fork inherited intent a second time: %v", err)
 						}
@@ -285,7 +279,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 						t.Fatalf("barrier kept source generation: %#v", childJoin.Generation())
 					}
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-					if _, err := materialize(); err != nil {
+					if _, err := fixture.store.(runForkSelectedLifecycleStore).RequireMaterializedRunFork(ctx, child.ForkRunID, materializeRequest); err != nil {
 						t.Fatalf("repeat exact fan-out materialization: %v", err)
 					}
 					if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
