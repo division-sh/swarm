@@ -42,7 +42,7 @@ func ConversationForkConstructionOccurrenceForTest(ctx context.Context, attempt 
 		}
 		plans = append(plans, *parent)
 	}
-	id, err := attempt.Identity()
+	id, err := attempt.Identity(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -110,7 +110,7 @@ func (o *ConstructionOccurrence) ValidateBirthOccurrence(ctx context.Context, at
 	if o == nil {
 		return fmt.Errorf("construction occurrence evidence is required")
 	}
-	id, err := attempt.Identity()
+	id, err := attempt.Identity(ctx)
 	if err != nil {
 		return err
 	}

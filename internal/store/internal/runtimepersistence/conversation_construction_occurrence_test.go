@@ -51,7 +51,7 @@ func TestConversationConstructionOccurrenceRefusalsBothStores(t *testing.T) {
 			if err := retained.ValidateBirthOccurrence(ctx, ended, record.State); err == nil || err.Error() != "mutation attempt is not active" {
 				t.Fatalf("completed attempt retained occurrence: %v", err)
 			}
-			for _, name := range []string{"absent", "zero", "cross_attempt", "cross_run", "cross_source", "cross_entity", "wrong_time", "wrong_operation", "later_same_entity", "wrong_birth_value"} {
+			for _, name := range []string{"absent", "zero", "cross_attempt", "cross_context", "cross_run", "cross_source", "cross_entity", "wrong_time", "wrong_operation", "later_same_entity", "wrong_birth_value"} {
 				t.Run(name, func(t *testing.T) {
 					err := runSelectedFixtureMutation(ctx, selected, "construction occurrence refusal", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 						occurrence, err := privatemutationlog.ConversationForkConstructionOccurrenceForTest(txctx, attempt, fixture.Construction.Parent, fixture.Construction.Child)
@@ -70,6 +70,8 @@ func TestConversationConstructionOccurrenceRefusalsBothStores(t *testing.T) {
 							occurrence, want = &privatemutationlog.ConstructionOccurrence{}, "belongs to another attempt/run/source"
 						case "cross_attempt":
 							occurrence, want = retained, "belongs to another attempt/run/source"
+						case "cross_context":
+							writeCtx, want = ctx, "mutation identity requires its exact attempt context"
 						case "cross_run":
 							writeCtx, want = correlation.WithRunID(txctx, uuid.NewString()), "belongs to another attempt/run/source"
 						case "cross_source":
