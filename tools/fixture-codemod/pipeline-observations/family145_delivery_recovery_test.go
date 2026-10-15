@@ -32,6 +32,11 @@ var deliveryRecoveryReadDeclarations = []string{
 }
 
 func earlierDeliveryRecoveryOwnerFile(root, file string, current []byte) ([]byte, error) {
+	var err error
+	current, err = earlierServedScenarioOwnerFile(root, file, current)
+	if err != nil {
+		return nil, err
+	}
 	if file != deliveryRecoveryReadOwner {
 		return current, nil
 	}
@@ -205,6 +210,10 @@ func TestFamily145DeliveryRecoveryAppendOnlyHistoryAndImmutableSiblings(t *testi
 		actual := family145TransitionBytes
 		if recipes {
 			actual = recipeBytes
+		}
+		actual, err = selectedreadrole.BeforeServedScenarioHistory(root, actual, recipes)
+		if err != nil {
+			t.Fatal(err)
 		}
 		expected, err := selectedreadrole.ComposeDeliveryRecoveryHistory(root, prior, recipes)
 		if err != nil {

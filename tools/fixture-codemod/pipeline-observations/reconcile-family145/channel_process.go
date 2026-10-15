@@ -49,6 +49,10 @@ func captureRecentFamilyCommand(args []string) bool {
 		return false
 	}
 	switch args[1] {
+	case "-served-scenario-capture":
+		captureServedScenario()
+	case "-served-scenario-history":
+		composeServedScenarioHistory()
 	case "-delivery-recovery-schema":
 		rewriteDeliveryRecoverySchema()
 	case "-delivery-recovery-capture":

@@ -34,8 +34,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storetest "github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testsql"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 const templateInstanceDeliveryRunID = "99999999-9999-4999-8999-999999999901"
@@ -402,14 +400,20 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRoute(t *testing.T) {
 	bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyTemplateConnectRollback(t))
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := seedRuntimeTestRun(t, pg)
-	testsql.InstallPostgresEventDeliveryFailureAfterFlowMaterialization(t, ctx, db, testsql.EventCorruptionClaim{
-		Invariant: "store.event_record.named_operation_atomicity",
-		Reason:    "prove late delivery failure rolls back the event and connect-created lifecycle facts",
-	}, "consumer")
+	fault, err := storetest.NewPublicationFailure(pg, storetest.PublicationAfterMaterialization, "consumer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := fault.RestoreForTest(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := fault.InstallForTest(ctx); err != nil {
+		t.Fatal(err)
+	}
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle: source,

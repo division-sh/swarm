@@ -20,6 +20,11 @@ const debtPublicRollbackCollectorFrom = "4e3e2cb0469e008c3b2e7c516c1152a60b00589
 const debtPublicRollbackCollectorTo = "8a438d3af7d1e741ea460c6d0216c55a9c4e106ef0c996abff744c11d6de3cf2"
 
 func debtPublicRollbackSourcePrevious(root, file, function, current string) (string, error) {
+	var err error
+	current, err = debtServedScenarioSourcePrevious(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	for _, pin := range debtPublicRollbackPins {
 		if pin.File != file || pin.Function != function || debtBaselineChecksum([]byte(current)) != pin.CurrentSHA256 {
 			continue

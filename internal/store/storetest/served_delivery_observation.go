@@ -36,6 +36,14 @@ type DeliveryAttemptDiagnosticRow = private.DeliveryAttemptDiagnosticRow
 
 type EventDeliveryDiagnosticRow = private.EventDeliveryDiagnosticRow
 
+func CountGlobalDeliveredNodeRowsStorage(ctx context.Context, selected any, nodeID string) (int, error) {
+	return private.CountGlobalDeliveredNodeRowsStorageForTest(ctx, selected, nodeID)
+}
+
+func ReadCanonicalRoutingSQLiteDiagnostic(ctx context.Context, selected any) (string, error) {
+	return private.ReadCanonicalRoutingSQLiteDiagnosticForTest(ctx, selected)
+}
+
 type NodeDeliveryDiagnosticStorage = private.NodeDeliveryDiagnosticStorage
 
 func ReadNodeDeliveryTargetEncoding(ctx context.Context, selected any, eventID, nodeID string) (string, error) {

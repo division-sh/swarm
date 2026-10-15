@@ -141,6 +141,11 @@ func validateDeliveryRecoveryCarrier(root string, current []byte) error {
 }
 
 func EarlierDeliveryRecoverySource(root, file, function, current string) (string, error) {
+	var err error
+	current, err = EarlierServedScenarioSource(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	if file != DeliveryRecoveryFile && file != DeliveryRecoveryStartupFile {
 		return current, nil
 	}
@@ -251,6 +256,11 @@ func EarlierDeliveryRecoveryHistory(root string, current []byte, recipes bool) (
 // Older owners still validate their complete predecessor. Peel this stage only
 // when one of its exact new endpoints is actually present in the supplied ledger.
 func BeforeDeliveryRecoveryHistory(root string, current []byte, recipes bool) ([]byte, error) {
+	var err error
+	current, err = BeforeServedScenarioHistory(root, current, recipes)
+	if err != nil {
+		return nil, err
+	}
 	var rows []map[string]any
 	if err := json.Unmarshal(current, &rows); err != nil {
 		return nil, err

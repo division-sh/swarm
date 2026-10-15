@@ -115,7 +115,10 @@ func debtServedSetupLiveSources(root string) ([]debtRunIdentitySourceBody, error
 				return nil, err
 			}
 		}
-		current, err := debtStandingControlSourcePrevious(root, pin.File, pin.Function, files[pin.File][pin.Function])
+		current, err := debtServedScenarioSourcePrevious(root, pin.File, pin.Function, files[pin.File][pin.Function])
+		if err == nil {
+			current, err = debtStandingControlSourcePrevious(root, pin.File, pin.Function, current)
+		}
 		if err == nil {
 			current, err = debtSelectedReadRoleSourcePrevious(root, pin.File, pin.Function, current)
 		}
@@ -143,6 +146,10 @@ func debtServedSetupVerifiedPredecessors(root string) (map[[2]string]string, err
 
 func debtServedSetupSourcePrevious(root, file, function, current string) (string, error) {
 	var err error
+	current, err = debtServedScenarioSourcePrevious(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	current, err = debtStandingControlSourcePrevious(root, file, function, current)
 	if err == nil {
 		current, err = debtSelectedReadRoleSourcePrevious(root, file, function, current)

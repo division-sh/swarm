@@ -21,7 +21,46 @@ import (
 	runstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
+	"github.com/google/uuid"
 )
+
+func SetPublicationMaterializationFailureTx(ctx context.Context, tx *sql.Tx, postgres bool, id uuid.UUID, template string, enabled bool) error {
+	name := "publication_materialization_" + strings.ReplaceAll(id.String(), "-", "")
+	statements := []string{"DROP TRIGGER IF EXISTS " + name}
+	if postgres {
+		statements = []string{"DROP TRIGGER IF EXISTS " + name + " ON event_deliveries", "DROP FUNCTION IF EXISTS " + name + "()"}
+	}
+	if enabled {
+		template = strings.ReplaceAll(template, "'", "''")
+		statements = []string{fmt.Sprintf(`CREATE TRIGGER %s BEFORE INSERT ON event_deliveries BEGIN
+SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM events WHERE event_id=NEW.event_id AND run_id=NEW.run_id)
+THEN RAISE(ABORT,'materialization fault prerequisite: exact publication event absent') END;
+SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM flow_instances fi
+JOIN entity_state es ON es.run_id=fi.run_id AND es.flow_instance=fi.instance_path
+JOIN routing_rules rr ON rr.run_id=fi.run_id AND rr.flow_instance=fi.instance_path
+WHERE fi.run_id=NEW.run_id AND fi.flow_template='%s')
+THEN RAISE(ABORT,'materialization fault prerequisite: exact lifecycle absent') END;
+SELECT RAISE(ABORT,'injected delivery route persistence failure'); END`, name, template)}
+		if postgres {
+			statements = []string{fmt.Sprintf(`CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+IF NOT EXISTS (SELECT 1 FROM events WHERE event_id=NEW.event_id AND run_id=NEW.run_id) THEN
+RAISE EXCEPTION 'materialization fault prerequisite: exact publication event absent'; END IF;
+IF NOT EXISTS (SELECT 1 FROM flow_instances fi
+JOIN entity_state es ON es.run_id=fi.run_id AND es.flow_instance=fi.instance_path
+JOIN routing_rules rr ON rr.run_id=fi.run_id AND rr.flow_instance=fi.instance_path
+WHERE fi.run_id=NEW.run_id AND fi.flow_template='%s') THEN
+RAISE EXCEPTION 'materialization fault prerequisite: exact lifecycle absent'; END IF;
+RAISE EXCEPTION 'injected delivery route persistence failure'; END $$`, name, template),
+				fmt.Sprintf(`CREATE TRIGGER %s BEFORE INSERT ON event_deliveries FOR EACH ROW EXECUTE FUNCTION %s()`, name, name)}
+		}
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 var (
 	postgresDeliveryAdapter = mustDeliveryAdapter(DialectPostgres)

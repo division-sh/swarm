@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicrollback"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 //go:embed family145-public-rollback-preimages.json
@@ -107,7 +108,11 @@ func TestFamily145PublicRollbackWholeRuleKeepsAllSevenCutsAndBothCallers(t *test
 			t.Fatal("rollback predecessor is not complete signed source:", pin.Function, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || requestKeyDeclaration(t, current, pin.Function) != pin.After {
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, err := selectedreadrole.EarlierServedScenarioSource(filepath.Clean("../../.."), pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))
+		if err != nil || body != pin.After {
 			t.Fatal("rollback current source escaped its exact whole rule:", pin.Function, err)
 		}
 		after, err := runphysical.Transform(publicrollback.Rules[index], pin.Before)

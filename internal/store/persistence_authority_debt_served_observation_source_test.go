@@ -210,6 +210,11 @@ func debtServedObservationNativeSource(root string) error {
 }
 
 func debtServedObservationNativePrevious(path string, raw []byte) ([]byte, error) {
+	var err error
+	raw, err = debtServedScenarioNativePrevious(path, raw)
+	if err != nil {
+		return nil, err
+	}
 	current, previous, functions, imports := debtServedObservationNativeCut(path)
 	if current == "" {
 		return raw, nil

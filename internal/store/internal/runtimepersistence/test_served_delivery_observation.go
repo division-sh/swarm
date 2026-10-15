@@ -21,6 +21,19 @@ type TemplateReceiptDiagnosticStorage = pipelinepersistence.TemplateReceiptDiagn
 
 type TemplateDeliveryDiagnosticStorage = delivery.TemplateDeliveryDiagnosticStorage
 
+func CountGlobalDeliveredNodeRowsStorageForTest(ctx context.Context, selected any, nodeID string) (int, error) {
+	return readFanOutSemanticStorage(ctx, selected, nil, func(ctx context.Context, tx *sql.Tx) (int, error) {
+		return delivery.CountGlobalDeliveredNodeRowsStorageTx(ctx, tx, nodeID)
+	})
+}
+
+func ReadCanonicalRoutingSQLiteDiagnosticForTest(ctx context.Context, selected any) (string, error) {
+	if owner, ok := selected.(*SQLiteRuntimeStore); !ok || owner == nil {
+		return "", fmt.Errorf("canonical SQLite routing diagnostic requires its original SQLite owner")
+	}
+	return readFanOutSemanticStorage(ctx, selected, nil, delivery.ReadCanonicalRoutingSQLiteDiagnosticTx)
+}
+
 func CountExactRunEventDeliveryStorageForTest(ctx context.Context, selected any, runID, eventID string) (int, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{runID, eventID}, func(ctx context.Context, tx *sql.Tx) (int, error) {
 		return delivery.CountExactRunEventDeliveryStorageTx(ctx, tx, runID, eventID)

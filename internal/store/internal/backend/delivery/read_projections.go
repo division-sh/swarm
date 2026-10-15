@@ -3580,3 +3580,82 @@ func ReadPostgresSelectedForkRouteTimelineStorageTx(ctx context.Context, tx *sql
 		FROM events e JOIN event_deliveries d ON d.event_id=e.event_id WHERE e.run_id=$1::uuid`, runID).Scan(&out)
 	return out, err
 }
+
+func CountGlobalDeliveredNodeRowsStorageTx(ctx context.Context, tx *sql.Tx, nodeID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE subscriber_type='node' AND subscriber_id=$1 AND status='delivered'`, nodeID).Scan(&count)
+	return count, err
+}
+
+// These two closed expressions are consumed only by the private replay/API
+// fault installers. Their trigger-local identities cannot be supplied by callers.
+func ReplayScopePriorDeliveryWitnessSQL(postgres bool) string {
+	if postgres {
+		return `EXISTS (SELECT 1 FROM event_deliveries WHERE event_id=NEW.event_id::uuid)`
+	}
+	return `EXISTS (SELECT 1 FROM event_deliveries WHERE event_id=NEW.event_id)`
+}
+
+func APICompletionPriorDeliveryWitnessSQL(postgres bool) string {
+	if postgres {
+		return `EXISTS (SELECT 1 FROM event_deliveries WHERE event_id=NEW.resource_id::uuid)`
+	}
+	return `EXISTS (SELECT 1 FROM event_deliveries WHERE event_id=NEW.resource_id)`
+}
+
+func CountPublicationMaterializationFaultObjectsTx(ctx context.Context, tx *sql.Tx, postgres bool, id uuid.UUID) (int, error) {
+	name := "publication_materialization_" + strings.ReplaceAll(id.String(), "-", "")
+	var count int
+	query := `SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name=$1`
+	if postgres {
+		query = `SELECT (SELECT COUNT(*) FROM pg_trigger WHERE tgname=$1) + (SELECT COUNT(*) FROM pg_proc WHERE proname=$1 AND pronamespace=current_schema()::regnamespace)`
+	}
+	err := tx.QueryRowContext(ctx, query, name).Scan(&count)
+	return count, err
+}
+
+// Preserve the original best-effort diagnostic, including its ordered prefix
+// when a later diagnostic query fails. This text is never execution authority.
+func ReadCanonicalRoutingSQLiteDiagnosticTx(ctx context.Context, tx *sql.Tx) (string, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT e.event_name,
+		       COALESCE(e.flow_instance, ''),
+		       COALESCE((SELECT r.outcome FROM event_receipts r
+		                 WHERE r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline'), ''),
+		       COALESCE((SELECT r.reason_code || ':' || r.side_effects FROM event_receipts r
+		                 WHERE r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline'), ''),
+		       COALESCE((SELECT group_concat(d.subscriber_type || '/' || d.subscriber_id || '=' || d.status || '@' || d.delivery_context, ',')
+		                 FROM event_deliveries d WHERE d.event_id = e.event_id), '')
+		FROM events e
+		WHERE e.event_name <> 'platform.runtime_log'
+		ORDER BY e.created_at, e.event_id
+	`)
+	if err != nil {
+		return "query canonical routing debug: " + err.Error(), nil
+	}
+	defer rows.Close()
+	var lines []string
+	for rows.Next() {
+		var name, flow, outcome, detail, deliveries string
+		if err := rows.Scan(&name, &flow, &outcome, &detail, &deliveries); err != nil {
+			return "scan canonical routing debug: " + err.Error(), nil
+		}
+		lines = append(lines, fmt.Sprintf("event=%s flow=%s pipeline=%s detail=%s deliveries=%s", name, flow, outcome, detail, deliveries))
+	}
+	if err := rows.Err(); err != nil {
+		return "read canonical routing debug: " + err.Error(), nil
+	}
+	deadRows, err := tx.QueryContext(ctx, `SELECT original_event, failure FROM dead_letters ORDER BY created_at`)
+	if err != nil {
+		return strings.Join(lines, "\n") + "\nquery dead letters: " + err.Error(), nil
+	}
+	defer deadRows.Close()
+	for deadRows.Next() {
+		var name, failure string
+		if err := deadRows.Scan(&name, &failure); err != nil {
+			return strings.Join(lines, "\n") + "\nscan dead letters: " + err.Error(), nil
+		}
+		lines = append(lines, fmt.Sprintf("dead_letter event=%s failure=%s", name, failure))
+	}
+	return strings.Join(lines, "\n"), nil
+}

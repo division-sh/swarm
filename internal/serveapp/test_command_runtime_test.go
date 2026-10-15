@@ -3,7 +3,6 @@ package serveapp
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -32,10 +31,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
-	"github.com/division-sh/swarm/internal/store"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testsql"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/gorilla/websocket"
 
@@ -370,13 +367,8 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 			captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
 				reader = requireReceiverProofStateReader(t, persistence.deps.EventStore)
 			})
-			endpoint, db, bundleHash := startPublicInputRollbackRuntime(t, backend)
-			claim := testsql.EventCorruptionClaim{Invariant: "public_input.selected_store_atomicity", Reason: "prove root-connected private template lifecycle and publication facts roll back on late delivery failure"}
-			if backend == servedparity.BackendExplicitPostgres {
-				testsql.InstallPostgresEventDeliveryFailureAfterFlowMaterialization(t, context.Background(), db, claim, "telegram-chat")
-			} else {
-				testsql.InstallSQLiteEventDeliveryFailureAfterFlowMaterialization(t, context.Background(), db, claim, "telegram-chat")
-			}
+			endpoint, rt, bundleHash := startPublicInputRollbackRuntime(t, backend)
+			installPublicInputPublicationFailure(t, reader, rt, storetest.PublicationAfterMaterialization)
 			idempotencyKey := "public-input-rollback-" + string(backend)
 			response := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{"bundle_hash": bundleHash, "event_name": "inbound.telegram.text_message", "payload": map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42", "provider_message_reference": 1, "text": "rollback proof"}, "idempotency_key": idempotencyKey})
 			if response.Error == nil {
@@ -390,6 +382,7 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 				t.Fatalf("expected rollback, publication=%s readback=%s error=%#v", response.Result, readback.Result, readback.Error)
 			}
 			rpcErr := response.Error
+			requirePublicInputPublicationFailureMarker(t, rpcErr, "injected delivery route persistence failure")
 			if code, _ := rpcErr.Data["code"].(string); code != apiv1.EventPublishFailedCode {
 				t.Fatalf("%s event.publish error = %#v, want %s", backend, rpcErr, apiv1.EventPublishFailedCode)
 			}
@@ -404,21 +397,12 @@ func TestRootConnectedTemplatePublicationRollbackIsAtomicAcrossSelectedStores(t 
 
 func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcrossSelectedStores(t *testing.T) {
 	stages := []struct {
-		name    string
-		install func(testing.TB, context.Context, *sql.DB, testsql.EventCorruptionClaim, string, servedparity.Backend)
-	}{{name: "replay_scope", install: func(t testing.TB, ctx context.Context, db *sql.DB, claim testsql.EventCorruptionClaim, flow string, backend servedparity.Backend) {
-		if backend == servedparity.BackendExplicitPostgres {
-			testsql.InstallPostgresReplayScopeFailureAfterDelivery(t, ctx, db, claim, flow)
-		} else {
-			testsql.InstallSQLiteReplayScopeFailureAfterDelivery(t, ctx, db, claim, flow)
-		}
-	}}, {name: "api_completion", install: func(t testing.TB, ctx context.Context, db *sql.DB, claim testsql.EventCorruptionClaim, flow string, backend servedparity.Backend) {
-		if backend == servedparity.BackendExplicitPostgres {
-			testsql.InstallPostgresAPICompletionFailureAfterPublication(t, ctx, db, claim, flow)
-		} else {
-			testsql.InstallSQLiteAPICompletionFailureAfterPublication(t, ctx, db, claim, flow)
-		}
-	}}}
+		name, marker string
+		cut          storetest.PublicationFailureCut
+	}{
+		{name: "replay_scope", cut: storetest.PublicationBeforeReplayScope, marker: "injected committed replay-scope persistence failure"},
+		{name: "api_completion", cut: storetest.PublicationBeforeAPICompletion, marker: "injected API idempotency completion persistence failure"},
+	}
 	for _, backend := range servedparity.RequiredBackends {
 		for _, stage := range stages {
 			backend, stage := backend, stage
@@ -427,11 +411,11 @@ func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcro
 				captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
 					reader = requireReceiverProofStateReader(t, persistence.deps.EventStore)
 				})
-				endpoint, db, bundleHash := startPublicInputRollbackRuntime(t, backend)
-				claim := testsql.EventCorruptionClaim{Invariant: "public_input.selected_store_atomicity", Reason: "prove rollback at " + stage.name + " after prior publication facts exist"}
-				stage.install(t, context.Background(), db, claim, "telegram-chat", backend)
+				endpoint, rt, bundleHash := startPublicInputRollbackRuntime(t, backend)
+				installPublicInputPublicationFailure(t, reader, rt, stage.cut)
 				idempotencyKey := "public-input-" + stage.name + "-" + string(backend)
 				rpcErr := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{"bundle_hash": bundleHash, "event_name": "inbound.telegram.text_message", "payload": map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42", "provider_message_reference": 1, "text": "late rollback proof"}, "idempotency_key": idempotencyKey})
+				requirePublicInputPublicationFailureMarker(t, rpcErr, stage.marker)
 				if code, _ := rpcErr.Data["code"].(string); code != apiv1.EventPublishFailedCode {
 					t.Fatalf("%s/%s event.publish error = %#v, want %s", backend, stage.name, rpcErr, apiv1.EventPublishFailedCode)
 				}
@@ -445,7 +429,7 @@ func TestRootConnectedTemplatePublicationRollsBackAfterDeliveryAndCompletionAcro
 	}
 }
 
-func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend) (string, *sql.DB, string) {
+func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend) (string, *runtimepkg.Runtime, string) {
 	t.Helper()
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
@@ -455,7 +439,6 @@ func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend)
 	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
 	sourceRoot := writePublicTelegramMockApprovalScenarioFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
-	var db *sql.DB
 	opts := cliapp.ServeOptions{
 		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
@@ -465,29 +448,18 @@ func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend)
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		stubServeRuntimeWorkspaceLifecycle(t)
-		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			stores, err := oldBuildStores(ctx, selection, cfg)
-			if err == nil {
-				db = selectedStoreDatabaseForTest(t, stores)
-			}
-			return stores, err
-		}
-		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "public-input-rollback.sqlite"))
 	case servedparity.BackendExplicitPostgres:
-		_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+		stubServeRuntimeWorkspaceLifecycle(t)
+		installScenarioPostgresRuntime(t)
 		opts.ConfigPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
 		opts.StoreMode = storebackend.BackendPostgres.String()
 		opts.StoreModeSet = true
 	default:
 		t.Fatalf("unsupported backend %q", backend)
 	}
-	endpoint, _ := startOwnedMockLifecycleFollowUpRuntime(t, opts)
-	if db == nil {
-		t.Fatalf("%s selected database is required", backend)
-	}
-	return endpoint, db, bundleHash
+	endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, opts)
+	return endpoint, rt, bundleHash
 }
 
 func publicInputFailureIdentity(t *testing.T, rpcErr *servedJSONRPCError) (string, string) {
@@ -668,6 +640,8 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 
 func runServedDerivedScenarioProof(t *testing.T, backend servedparity.Backend, authored bool) {
 	t.Helper()
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
 	t.Setenv("PATH", t.TempDir())
@@ -708,9 +682,7 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 `)
 	}
 
-	var db *sql.DB
 	var configPath string
-	var postgresDSN string
 	platformSpecPath := filepath.Join(repoRootForTest(), defaultPlatformSpecPath)
 	opts := cliapp.ServeOptions{
 		SourceRoot: sourceRoot, PlatformSpecPath: platformSpecPath,
@@ -721,18 +693,10 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		stubServeRuntimeWorkspaceLifecycle(t)
-		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			stores, err := oldBuildStores(ctx, selection, cfg)
-			if err == nil {
-				db = selectedStoreDatabaseForTest(t, stores)
-			}
-			return stores, err
-		}
-		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 		configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "derived-scenario.sqlite"))
 	case servedparity.BackendExplicitPostgres:
-		postgresDSN, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+		stubServeRuntimeWorkspaceLifecycle(t)
+		installScenarioPostgresRuntime(t)
 		configPath = writeMockAgentRuntimeConfig(t, storebackend.BackendPostgres.String(), "")
 		opts.StoreMode = storebackend.BackendPostgres.String()
 		opts.StoreModeSet = true
@@ -745,7 +709,7 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 	process.waitForReadyLine()
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 	rt := servedTestProcessRuntime(t, process)
-	if db == nil || rt == nil || rt.Options.WorkflowModule == nil {
+	if reader == nil || rt == nil || rt.Options.WorkflowModule == nil {
 		t.Fatalf("%s derived scenario runtime is incomplete", backend)
 	}
 
@@ -762,7 +726,7 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 	if err != nil {
 		t.Fatal(err)
 	}
-	beforeMismatch := loadScenarioMutationCounts(t, db, backend)
+	beforeMismatch := loadScenarioMutationCounts(t, reader, backend)
 	rpcErr := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
 		"bundle_hash": bundleHash, "event_name": "fulfillment.requested",
 		"payload":         map[string]any{"order_id": "must-not-publish"},
@@ -775,7 +739,7 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 	if code, _ := rpcErr.Data["code"].(string); code != apiv1.BundleMismatchCode {
 		t.Fatalf("%s mismatched effective source error = %#v", backend, rpcErr)
 	}
-	if afterPublish := loadScenarioMutationCounts(t, db, backend); afterPublish != beforeMismatch {
+	if afterPublish := loadScenarioMutationCounts(t, reader, backend); afterPublish != beforeMismatch {
 		t.Fatalf("%s mismatched event.publish mutated state: before=%+v after=%+v", backend, beforeMismatch, afterPublish)
 	}
 	setupRunID := "00000000-0000-4000-8000-000000000201"
@@ -795,7 +759,7 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 	if code, _ := rpcErr.Data["code"].(string); code != apiv1.BundleMismatchCode {
 		t.Fatalf("%s mismatched setup effective source error = %#v", backend, rpcErr)
 	}
-	if afterSetup := loadScenarioMutationCounts(t, db, backend); afterSetup != beforeMismatch {
+	if afterSetup := loadScenarioMutationCounts(t, reader, backend); afterSetup != beforeMismatch {
 		t.Fatalf("%s mismatched test.setup_entities mutated state: before=%+v after=%+v", backend, beforeMismatch, afterSetup)
 	}
 
@@ -823,8 +787,8 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 	if !strings.Contains(stdout.String(), wantOutput) || strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("%s derived output stdout=%q stderr=%q", backend, stdout.String(), stderr.String())
 	}
-	requireExactScenarioExecutionProfile(t, db, backend, rt.EffectiveSourceIdentity)
-	beforeRestart := loadExactScenarioExecutionProfileRecord(t, db, backend)
+	requireExactScenarioExecutionProfile(t, reader, backend, rt.EffectiveSourceIdentity)
+	beforeRestart := loadExactScenarioExecutionProfileRecord(t, reader, backend)
 	if authored {
 		if beforeRestart.profileID != "authored-stage-profile" {
 			t.Fatalf("%s lost authored identity: %s", backend, beforeRestart.profileID)
@@ -897,28 +861,19 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 	if code := process.stop(); code != 0 {
 		t.Fatalf("%s first derived runtime stop code = %d\n%s", backend, code, process.outputString())
 	}
-	if backend == servedparity.BackendExplicitPostgres {
-		reopened, err := store.NewPostgresStore(postgresDSN)
-		if err != nil {
-			t.Fatalf("reopen PostgreSQL derived runtime store: %v", err)
-		}
-		t.Cleanup(func() { _ = storetest.DatabaseForTest(reopened).Close() })
-		priorBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			storetest.BootstrapPostgresRuntimeStore(t, reopened)
-			return openSelectedPostgresOwner(t, postgresDSN, storetest.DatabaseForTest(reopened), cfg), nil
-		}
-		t.Cleanup(func() { buildStoresForServe = priorBuildStores })
-		db = storetest.DatabaseForTest(reopened)
-	}
+	previousReader := reader
+	reader = nil
 	restarted := startOwnedMockLifecycleTestProcess(t, repoRootForTest(), retainedRoot, opts)
 	restarted.waitForReadyLine()
+	if reader == nil || reader == previousReader {
+		t.Fatalf("%s restart did not capture a fresh selected reader", backend)
+	}
 	restartedEndpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, restarted.outputString()) + "/v1/rpc"
 	restartedRuntime := servedTestProcessRuntime(t, restarted)
 	if !restartedRuntime.EffectiveSourceIdentity.Equal(rt.EffectiveSourceIdentity) {
 		t.Fatalf("%s restart effective identity changed: before=%s after=%s", backend, rt.EffectiveSourceIdentity.Digest(), restartedRuntime.EffectiveSourceIdentity.Digest())
 	}
-	afterRestart := loadExactScenarioExecutionProfileRecord(t, db, backend)
+	afterRestart := loadExactScenarioExecutionProfileRecord(t, reader, backend)
 	if beforeRestart.runID != afterRestart.runID || beforeRestart.profileID != afterRestart.profileID || beforeRestart.profileDigest != afterRestart.profileDigest || beforeRestart.effectiveDigest != afterRestart.effectiveDigest || !bytes.Equal(beforeRestart.raw, afterRestart.raw) {
 		t.Fatalf("%s restart changed exact scenario execution profile", backend)
 	}
@@ -928,8 +883,8 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 	if run["run_id"] != beforeRestart.runID {
 		t.Fatalf("%s restarted run readback = %#v, want original run", backend, resumed)
 	}
-	finalRecord := loadExactScenarioExecutionProfileRecord(t, db, backend)
-	if !bytes.Equal(beforeRestart.raw, finalRecord.raw) || beforeRestart.profileDigest != finalRecord.profileDigest || scenarioExecutionProfileCount(t, db, backend) != 1 {
+	finalRecord := loadExactScenarioExecutionProfileRecord(t, reader, backend)
+	if !bytes.Equal(beforeRestart.raw, finalRecord.raw) || beforeRestart.profileDigest != finalRecord.profileDigest || scenarioExecutionProfileCount(t, reader, backend) != 1 {
 		t.Fatalf("%s restarted execution changed or duplicated durable scenario profile", backend)
 	}
 }
@@ -977,12 +932,12 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 		t.Fatalf("%s verify code=%d stdout=%s stderr=%s", archetype, code, verifyOut.String(), verifyErr.String())
 	}
 	oldBuildStores := buildStoresForServe
-	var db *sql.DB
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	var privateStorePath string
 	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 		stores, err := oldBuildStores(ctx, selection, cfg)
 		if err == nil {
-			db = selectedStoreDatabaseForTest(t, stores)
 			privateStorePath = selection.SQLitePath
 		}
 		return stores, err
@@ -1012,7 +967,7 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 			if err != nil {
 				return err
 			}
-			requireExactScenarioExecutionProfile(t, db, servedparity.BackendDefaultSQLite, projection.Identity())
+			requireExactScenarioExecutionProfile(t, reader, servedparity.BackendDefaultSQLite, projection.Identity())
 			return nil
 		})
 	}
@@ -1027,10 +982,13 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	if elapsed := time.Since(started); elapsed >= 60*time.Second {
 		t.Fatalf("journey took %s", elapsed)
 	}
-	if privateStorePath == "" || db == nil {
+	if privateStorePath == "" || reader == nil {
 		t.Fatal("private store was not exercised")
 	}
-	if err := db.Ping(); err == nil {
+	if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		_, err := storetest.CountScenarioPhysicalProfiles(ctx, reader)
+		return err
+	}); err == nil {
 		t.Fatal("test returned before store close")
 	}
 	for _, path := range []string{filepath.Dir(privateStorePath), filepath.Join(sourceRoot, ".swarm"), filepath.Join(sourceRoot, "swarm.yaml"), filepath.Join(sourceRoot, "swarm.live.yaml")} {
@@ -1050,10 +1008,14 @@ func scaffoldConformanceArchetype(t *testing.T, archetype string) string {
 	return destination
 }
 
-func scenarioExecutionProfileCount(t *testing.T, db *sql.DB, backend servedparity.Backend) int {
+func scenarioExecutionProfileCount(t *testing.T, reader receiverProofStateReader, backend servedparity.Backend) int {
 	t.Helper()
 	var count int
-	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM run_scenario_execution_profiles`).Scan(&count); err != nil {
+	if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.CountScenarioPhysicalProfiles(ctx, reader)
+		return err
+	}); err != nil {
 		t.Fatalf("%s count scenario execution profiles: %v", backend, err)
 	}
 	return count
@@ -1063,29 +1025,34 @@ type scenarioMutationCounts struct {
 	Runs, Events, EntityState, Profiles int
 }
 
-func loadScenarioMutationCounts(t *testing.T, db *sql.DB, backend servedparity.Backend) scenarioMutationCounts {
+func loadScenarioMutationCounts(t *testing.T, reader receiverProofStateReader, backend servedparity.Backend) scenarioMutationCounts {
 	t.Helper()
 	var counts scenarioMutationCounts
 	queries := []struct {
 		name string
 		out  *int
+		read func(context.Context, any) (int, error)
 	}{
-		{name: "runs", out: &counts.Runs},
-		{name: "events", out: &counts.Events},
-		{name: "entity_state", out: &counts.EntityState},
-		{name: "run_scenario_execution_profiles", out: &counts.Profiles},
+		{name: "runs", out: &counts.Runs, read: storetest.CountPhysicalRuns},
+		{name: "events", out: &counts.Events, read: storetest.CountPhysicalEventsStorage},
+		{name: "entity_state", out: &counts.EntityState, read: storetest.CountPhysicalEntities},
+		{name: "run_scenario_execution_profiles", out: &counts.Profiles, read: storetest.CountScenarioPhysicalProfiles},
 	}
 	for _, query := range queries {
-		if err := db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM "+query.name).Scan(query.out); err != nil {
+		if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+			var err error
+			*query.out, err = query.read(ctx, reader)
+			return err
+		}); err != nil {
 			t.Fatalf("%s count %s: %v", backend, query.name, err)
 		}
 	}
 	return counts
 }
 
-func requireExactScenarioExecutionProfile(t *testing.T, db *sql.DB, backend servedparity.Backend, identity scenarioexecution.EffectiveSourceIdentity) {
+func requireExactScenarioExecutionProfile(t *testing.T, reader receiverProofStateReader, backend servedparity.Backend, identity scenarioexecution.EffectiveSourceIdentity) {
 	t.Helper()
-	record := loadExactScenarioExecutionProfileRecord(t, db, backend)
+	record := loadExactScenarioExecutionProfileRecord(t, reader, backend)
 	profile, err := scenarioexecution.DecodeProfile(record.raw, record.profileDigest)
 	if err != nil {
 		t.Fatalf("%s decode exact scenario profile: %v", backend, err)
@@ -1100,13 +1067,17 @@ type scenarioExecutionProfileRecord struct {
 	raw                                              []byte
 }
 
-func loadExactScenarioExecutionProfileRecord(t *testing.T, db *sql.DB, backend servedparity.Backend) scenarioExecutionProfileRecord {
+func loadExactScenarioExecutionProfileRecord(t *testing.T, reader receiverProofStateReader, backend servedparity.Backend) scenarioExecutionProfileRecord {
 	t.Helper()
-	var record scenarioExecutionProfileRecord
-	if err := db.QueryRowContext(context.Background(), `SELECT run_id, profile_id, profile_digest, effective_source_digest, profile_bytes FROM run_scenario_execution_profiles`).Scan(&record.runID, &record.profileID, &record.profileDigest, &record.effectiveDigest, &record.raw); err != nil {
+	var row storetest.ScenarioPhysicalProfile
+	if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		row, err = storetest.ReadScenarioPhysicalProfile(ctx, reader)
+		return err
+	}); err != nil {
 		t.Fatalf("%s load scenario execution profile: %v", backend, err)
 	}
-	return record
+	return scenarioExecutionProfileRecord{runID: row.RunID, profileID: row.ProfileID, profileDigest: row.ProfileDigest, effectiveDigest: row.EffectiveSourceDigest, raw: row.Bytes}
 }
 
 func servedTestProcessRuntime(t *testing.T, process *serveRuntimeTestProcess) *runtimepkg.Runtime {
@@ -1143,7 +1114,6 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 	t.Cleanup(provider.Close)
 	sourceRoot := writeGeneratedTelegramScenarioFixture(t, provider.URL)
 
-	var db *sql.DB
 	var configPath string
 	var runtimeContexts *runtimepkg.RuntimeContextManager
 	opts := cliapp.ServeOptions{
@@ -1162,20 +1132,10 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 	case servedparity.BackendDefaultSQLite:
 		stubServeRuntimeWorkspaceLifecycle(t)
 		sqlitePath := filepath.Join(t.TempDir(), "generated-input.sqlite")
-		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			stores, err := oldBuildStores(ctx, selection, cfg)
-			if err == nil {
-				db = selectedStoreDatabaseForTest(t, stores)
-			}
-			return stores, err
-		}
-		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 		configPath = writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
 	case servedparity.BackendExplicitPostgres:
-		_, db, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
-			return serveRuntimeWorkspaceStub{}
-		})
+		stubServeRuntimeWorkspaceLifecycle(t)
+		installScenarioPostgresRuntime(t)
 		configPath = writeServeRuntimeTestConfig(t)
 		opts.StoreMode = storebackend.BackendPostgres.String()
 		opts.StoreModeSet = true
@@ -1184,8 +1144,8 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 	}
 	opts.ConfigPath = configPath
 	endpoint, rt := startOwnedMockLifecycleFollowUpRuntime(t, opts)
-	if db == nil {
-		t.Fatalf("%s served database is required", backend)
+	if reader == nil {
+		t.Fatalf("%s served selected reader is required", backend)
 	}
 	if rt == nil || rt.Options.WorkflowModule == nil {
 		t.Fatalf("%s admitted runtime workflow module is required", backend)
@@ -1230,7 +1190,7 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 		t.Fatalf("%s provider transport calls = %d, want zero", backend, got)
 	}
 
-	eventID, runID, payload := loadGeneratedTelegramEvent(t, db, backend)
+	eventID, runID, payload := loadGeneratedTelegramEvent(t, reader, backend)
 	wantPayload := map[string]any{
 		"conversation_reference":     "0",
 		"conversation_scope":         "direct",
@@ -1411,14 +1371,22 @@ func requirePublicMockApprovalEvents(t *testing.T, endpoint, runID string) {
 	}
 }
 
-func loadGeneratedTelegramEvent(t *testing.T, db *sql.DB, backend servedparity.Backend) (eventID, runID string, payload map[string]any) {
+func loadGeneratedTelegramEvent(t *testing.T, reader receiverProofStateReader, backend servedparity.Backend) (eventID, runID string, payload map[string]any) {
 	t.Helper()
-	query := `SELECT event_id, run_id, payload FROM events WHERE event_name = ? ORDER BY created_at DESC LIMIT 1`
-	if backend == servedparity.BackendExplicitPostgres {
-		query = `SELECT event_id::text, run_id::text, payload::text FROM events WHERE event_name = $1 ORDER BY created_at DESC LIMIT 1`
-	}
 	var raw string
-	if err := db.QueryRowContext(context.Background(), query, "inbound.telegram.text_message").Scan(&eventID, &runID, &raw); err != nil {
+	if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		eventID, err = storetest.ReadLatestNamedEventIdentityStorage(ctx, reader, "inbound.telegram.text_message", "")
+		if err != nil {
+			return err
+		}
+		runID, err = storetest.ReadServedEventRunIDStorage(ctx, reader, eventID)
+		if err != nil {
+			return err
+		}
+		raw, err = storetest.ReadTemplateEventPayloadText(ctx, reader, eventID)
+		return err
+	}); err != nil {
 		t.Fatalf("%s load generated Telegram event: %v", backend, err)
 	}
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
@@ -1458,17 +1426,9 @@ func TestInternalLifecycleScenariosPreserveCanonicalRoutingPathsSQLite(t *testin
 			stubServeRuntimeWorkspaceLifecycle(t)
 			sourceRoot := canonicalrouting.ExampleRoot(t, test.example)
 			sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
-			oldBuildStores := buildStoresForServe
-			t.Cleanup(func() { buildStoresForServe = oldBuildStores })
-			var servedDB *sql.DB
+			var reader receiverProofStateReader
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 			replyContextObserved := make(chan string, 1)
-			buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-				stores, err := oldBuildStores(ctx, selection, cfg)
-				if err == nil {
-					servedDB = selectedStoreDatabaseForTest(t, stores)
-				}
-				return stores, err
-			}
 			configPath := writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath)
 			options := cliapp.ServeOptions{
 				ConfigPath:              configPath,
@@ -1507,10 +1467,10 @@ func TestInternalLifecycleScenariosPreserveCanonicalRoutingPathsSQLite(t *testin
 			default:
 			}
 			if code != 0 {
-				t.Fatalf("code = %d stderr=%s stdout=%s provider_reply_context=%q\n%s", code, stderr.String(), stdout.String(), observedReplyContext, canonicalRoutingSQLiteDebug(t, servedDB))
+				t.Fatalf("code = %d stderr=%s stdout=%s provider_reply_context=%q\n%s", code, stderr.String(), stdout.String(), observedReplyContext, canonicalRoutingSQLiteDebug(t, reader))
 			}
-			if servedDB == nil {
-				t.Fatal("served SQLite database is required for canonical routing proof")
+			if reader == nil {
+				t.Fatal("served SQLite reader is required for canonical routing proof")
 			}
 			if !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") {
 				t.Fatalf("stdout missing supported scenario success:\n%s", stdout.String())
@@ -1520,67 +1480,35 @@ func TestInternalLifecycleScenariosPreserveCanonicalRoutingPathsSQLite(t *testin
 			}
 			for nodeID, minimum := range test.deliveredNodes {
 				var count int
-				if err := servedDB.QueryRowContext(context.Background(), `
-					SELECT COUNT(*)
-					FROM event_deliveries
-					WHERE subscriber_type = 'node' AND subscriber_id = ? AND status = 'delivered'
-				`, nodeID).Scan(&count); err != nil {
+				if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+					var err error
+					count, err = storetest.CountGlobalDeliveredNodeRowsStorage(ctx, reader, nodeID)
+					return err
+				}); err != nil {
 					t.Fatalf("count delivered node/%s: %v", nodeID, err)
 				}
 				if count < minimum {
-					t.Fatalf("delivered node/%s rows = %d, want at least %d\n%s", nodeID, count, minimum, canonicalRoutingSQLiteDebug(t, servedDB))
+					t.Fatalf("delivered node/%s rows = %d, want at least %d\n%s", nodeID, count, minimum, canonicalRoutingSQLiteDebug(t, reader))
 				}
 			}
 		})
 	}
 }
 
-func canonicalRoutingSQLiteDebug(t *testing.T, db *sql.DB) string {
+func canonicalRoutingSQLiteDebug(t *testing.T, reader receiverProofStateReader) string {
 	t.Helper()
-	if db == nil {
+	if reader == nil {
 		return "served SQLite database unavailable"
 	}
-	rows, err := db.QueryContext(context.Background(), `
-		SELECT e.event_name,
-		       COALESCE(e.flow_instance, ''),
-		       COALESCE((SELECT r.outcome FROM event_receipts r
-		                 WHERE r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline'), ''),
-		       COALESCE((SELECT r.reason_code || ':' || r.side_effects FROM event_receipts r
-		                 WHERE r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline'), ''),
-		       COALESCE((SELECT group_concat(d.subscriber_type || '/' || d.subscriber_id || '=' || d.status || '@' || d.delivery_context, ',')
-		                 FROM event_deliveries d WHERE d.event_id = e.event_id), '')
-		FROM events e
-		WHERE e.event_name <> 'platform.runtime_log'
-		ORDER BY e.created_at, e.event_id
-	`)
-	if err != nil {
+	var diagnostic string
+	if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		diagnostic, err = storetest.ReadCanonicalRoutingSQLiteDiagnostic(ctx, reader)
+		return err
+	}); err != nil {
 		return "query canonical routing debug: " + err.Error()
 	}
-	defer rows.Close()
-	var lines []string
-	for rows.Next() {
-		var eventName, flowInstance, pipelineOutcome, pipelineDetail, deliveries string
-		if err := rows.Scan(&eventName, &flowInstance, &pipelineOutcome, &pipelineDetail, &deliveries); err != nil {
-			return "scan canonical routing debug: " + err.Error()
-		}
-		lines = append(lines, fmt.Sprintf("event=%s flow=%s pipeline=%s detail=%s deliveries=%s", eventName, flowInstance, pipelineOutcome, pipelineDetail, deliveries))
-	}
-	if err := rows.Err(); err != nil {
-		return "read canonical routing debug: " + err.Error()
-	}
-	deadRows, err := db.QueryContext(context.Background(), `SELECT original_event, failure FROM dead_letters ORDER BY created_at`)
-	if err != nil {
-		return strings.Join(lines, "\n") + "\nquery dead letters: " + err.Error()
-	}
-	defer deadRows.Close()
-	for deadRows.Next() {
-		var eventName, failure string
-		if err := deadRows.Scan(&eventName, &failure); err != nil {
-			return strings.Join(lines, "\n") + "\nscan dead letters: " + err.Error()
-		}
-		lines = append(lines, fmt.Sprintf("dead_letter event=%s failure=%s", eventName, failure))
-	}
-	return strings.Join(lines, "\n")
+	return diagnostic
 }
 
 func writeScenarioRunnerFixture(t *testing.T) string {
