@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -19,43 +20,59 @@ import (
 func TestAgentClaimProfileRecoveryScanHasAuthorityScopedMembershipBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			first := newAgentClaimProfileFixture(t, backend)
-			retained := claimAgentProfileRecoveryEvent(t, first)
-			original, err := ReadFirstAgentClaimProfileForTest(first.ctx, first.store, retained.Snapshot)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := ExpireExactDeliveryClaimFaultForTest(first.ctx, first.store, retained.Claim); err != nil {
-				t.Fatal(err)
-			}
-			next := newAgentProfileMembershipActor(t, first)
-			if next.authority.Equal(first.authority) || next.source != first.source ||
-				next.route.AgentIdentity.RunID == first.route.AgentIdentity.RunID {
-				t.Fatal("membership counterexample requires actual distinct actor/run and successor grant on the same source")
-			}
-			busy := claimAgentProfileRecoveryEvent(t, next)
-			pending := publishAgentProfileRecoveryEvent(t, next)
-			pendingID, err := deliverylifecycle.DeliveryID(pending.ID(), next.route)
-			if err != nil {
-				t.Fatal(err)
-			}
-			due := claimAgentProfileRecoveryEvent(t, next)
-			dueSnapshot := prepareStandingProfileInspectionClaim(t, next, due, deliverylifecycle.ClaimAcquired)
-			future := claimAgentProfileRecoveryEvent(t, next)
-			futureSnapshot := prepareStandingProfileInspectionClaim(t, next, future, deliverylifecycle.ClaimDeferred)
-			terminal := claimAgentProfileRecoveryEvent(t, next)
-			if _, err := next.store.SettleFailure(next.ctx, terminal.Claim, deliverylifecycle.Settlement{
-				Disposition: deliverylifecycle.FailureDeadLetter, ReasonCode: "membership_terminal_control", Failure: testRetryableFailure(),
-				RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation(),
-			}); err != nil {
-				t.Fatal(err)
-			}
-			proveAgentProfileMembershipBoundary(t, next, retained.Snapshot, original,
-				map[string]deliverylifecycle.ClaimDisposition{busy.Snapshot.DeliveryID: deliverylifecycle.ClaimBusy,
-					pendingID: deliverylifecycle.ClaimAcquired, dueSnapshot.DeliveryID: deliverylifecycle.ClaimAcquired,
-					futureSnapshot.DeliveryID: deliverylifecycle.ClaimDeferred}, terminal.Snapshot.DeliveryID)
+			m := newAgentProfileMembershipFixture(t, backend)
+			proveAgentProfileMembershipBoundary(t, m.current, m.retained.Snapshot, m.original, m.continuations, m.terminalID)
 		})
 	}
+}
+
+type agentProfileMembershipFixture struct {
+	current       agentClaimProfileFixture
+	retained      deliverylifecycle.ClaimedObligation
+	original      deliverylifecycle.AgentClaimProfile
+	busy          deliverylifecycle.ClaimedObligation
+	pending       events.Event
+	continuations map[string]deliverylifecycle.ClaimDisposition
+	terminalID    string
+}
+
+func newAgentProfileMembershipFixture(t *testing.T, backend string) agentProfileMembershipFixture {
+	t.Helper()
+	first := newAgentClaimProfileFixture(t, backend)
+	retained := claimAgentProfileRecoveryEvent(t, first)
+	original, err := ReadFirstAgentClaimProfileForTest(first.ctx, first.store, retained.Snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ExpireExactDeliveryClaimFaultForTest(first.ctx, first.store, retained.Claim); err != nil {
+		t.Fatal(err)
+	}
+	next := newAgentProfileMembershipActor(t, first)
+	if next.authority.Equal(first.authority) || next.source != first.source ||
+		next.route.AgentIdentity.RunID == first.route.AgentIdentity.RunID {
+		t.Fatal("membership counterexample requires actual distinct actor/run and successor grant on the same source")
+	}
+	busy := claimAgentProfileRecoveryEvent(t, next)
+	pending := publishAgentProfileRecoveryEvent(t, next)
+	pendingID, err := deliverylifecycle.DeliveryID(pending.ID(), next.route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	due := claimAgentProfileRecoveryEvent(t, next)
+	dueSnapshot := prepareStandingProfileInspectionClaim(t, next, due, deliverylifecycle.ClaimAcquired)
+	future := claimAgentProfileRecoveryEvent(t, next)
+	futureSnapshot := prepareStandingProfileInspectionClaim(t, next, future, deliverylifecycle.ClaimDeferred)
+	terminal := claimAgentProfileRecoveryEvent(t, next)
+	if _, err := next.store.SettleFailure(next.ctx, terminal.Claim, deliverylifecycle.Settlement{
+		Disposition: deliverylifecycle.FailureDeadLetter, ReasonCode: "membership_terminal_control", Failure: testRetryableFailure(),
+		RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return agentProfileMembershipFixture{current: next, retained: retained, original: original, busy: busy, pending: pending,
+		continuations: map[string]deliverylifecycle.ClaimDisposition{busy.Snapshot.DeliveryID: deliverylifecycle.ClaimBusy,
+			pendingID: deliverylifecycle.ClaimAcquired, dueSnapshot.DeliveryID: deliverylifecycle.ClaimAcquired,
+			futureSnapshot.DeliveryID: deliverylifecycle.ClaimDeferred}, terminalID: terminal.Snapshot.DeliveryID}
 }
 
 func newAgentProfileMembershipActor(t *testing.T, first agentClaimProfileFixture) agentClaimProfileFixture {
