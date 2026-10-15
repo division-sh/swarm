@@ -95,6 +95,18 @@ func (r ForkOperationRequest) BindResolvedPoint(point RunForkPoint) (ForkOperati
 
 type ForkOperationStatus string
 
+// ForkOperationReplayRequiredError reports a clean materialization abort after
+// observing a durable operation. It is not execution authority: the owner must
+// reload the original request and admit its live outcome or native recovery.
+type ForkOperationReplayRequiredError struct {
+	OperationID string
+	ForkRunID   string
+}
+
+func (e *ForkOperationReplayRequiredError) Error() string {
+	return "run.fork requires continuation of its durable operation"
+}
+
 type ForkOperationKeyConflictError struct {
 	OriginalRequestHash    string
 	ConflictingRequestHash string

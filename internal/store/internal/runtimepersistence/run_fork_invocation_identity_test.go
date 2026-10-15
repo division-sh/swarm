@@ -1,8 +1,10 @@
 package runtimepersistence
 
 import (
+	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,6 +124,101 @@ func TestSelectedForkFreshInvocationsAtSameCutHaveIndependentChildrenBothStores(
 				}
 				requireForkWorkflowOwnershipPreserved(t, fixture.db, request.SourceRunID, child.ForkRunID)
 			}
+			reader := fixture.store.(interface {
+				LoadForkOperationByID(context.Context, string) (runfork.ForkOperationRecord, bool, error)
+			})
+			seen := map[string]bool{first.ForkRunID: true, second.ForkRunID: true}
+			for _, key := range []string{"independent-first", "independent-second", "", ""} {
+				operation := runfork.ForkOperationRequest{
+					OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: key,
+					TransportHash: "sha256:same-source-request", SourceRunID: request.SourceRunID, ForkEventID: request.At,
+					TargetBundleHash: request.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection,
+				}
+				attempt := request
+				attempt.ForkOperation = &operation
+				child, err := owner.MaterializeRunForkForSelectedContractExecution(ctx, attempt)
+				if err != nil || child.ForkRunID == "" || seen[child.ForkRunID] {
+					t.Fatalf("independent operation reused a child: key=%q child=%+v err=%v", key, child, err)
+				}
+				seen[child.ForkRunID] = true
+				if child.SourceRunID != first.SourceRunID || child.ForkPoint != first.ForkPoint {
+					t.Fatalf("operation identity changed fixed provenance: child=%+v first=%+v", child, first)
+				}
+				record, found, err := reader.LoadForkOperationByID(ctx, operation.OperationID)
+				if err != nil || !found || record.ForkRunID != child.ForkRunID || child.SelectedContractBinding == nil ||
+					record.BindingID != child.SelectedContractBinding.BindingID || record.Request.OperationID != operation.OperationID ||
+					record.Request.IdempotencyKey != key || record.Status != runfork.ForkOperationMaterialized {
+					t.Fatalf("operation did not durably bind its acknowledged child: record=%+v child=%+v found=%t err=%v", record, child, found, err)
+				}
+				requireForkWorkflowOwnershipPreserved(t, fixture.db, request.SourceRunID, child.ForkRunID)
+			}
+		})
+	}
+}
+
+func TestSelectedForkKeyElectionRefusesLosingPreparationWithoutMutationBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			ctx, request := forkWorkflowOwnershipRequest(t, fixture, backend.name == "postgres")
+			owner := fixture.store.(forkWorkflowOwnershipStore)
+			operation := runfork.ForkOperationRequest{
+				OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "selected-winner",
+				TransportHash: "sha256:original-request", SourceRunID: request.SourceRunID, ForkEventID: request.At,
+				TargetBundleHash: request.SourceArtifactFact.BundleHash(), ContractSelection: request.ContractSelection,
+			}
+			request.ForkOperation = &operation
+			winner, err := owner.MaterializeRunForkForSelectedContractExecution(ctx, request)
+			if err != nil {
+				t.Fatalf("winning selected preparation: %v", err)
+			}
+			before := historicalContextDatabaseRows(t, fixture.db, backend.name == "postgres")
+			for _, change := range []string{"same_invocation", "late_winner", "latest_bundle_changed", "different_transport"} {
+				t.Run(change, func(t *testing.T) {
+					candidate := operation
+					if change != "same_invocation" {
+						candidate.OperationID = uuid.NewString()
+					}
+					if change == "latest_bundle_changed" {
+						candidate.TargetBundleHash = "sha256:later-source-alias"
+					}
+					if change == "different_transport" {
+						candidate.TransportHash = "sha256:changed-request"
+					}
+					attempt := request
+					attempt.ForkOperation = &candidate
+					got, err := owner.MaterializeRunForkForSelectedContractExecution(ctx, attempt)
+					var replay *runfork.ForkOperationReplayRequiredError
+					if got.ForkRunID != "" || err == nil {
+						t.Fatalf("losing preparation acknowledged a child: got=%+v err=%v", got, err)
+					}
+					if change == "different_transport" {
+						var conflict *runfork.ForkOperationKeyConflictError
+						if !errors.As(err, &conflict) || errors.As(err, &replay) {
+							t.Fatalf("changed request became continuation: %v", err)
+						}
+					} else if !errors.As(err, &replay) || replay.OperationID != operation.OperationID || replay.ForkRunID != winner.ForkRunID {
+						t.Fatalf("clean losing preparation lost durable winner: replay=%+v err=%v", replay, err)
+					}
+					historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, fixture.db, backend.name == "postgres"))
+				})
+			}
+		})
+	}
+}
+
+func TestSelectedDeploymentForkRequiresDurableInvocationBeforeMutationBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			ctx, request := forkWorkflowOwnershipRequest(t, fixture, backend.name == "postgres")
+			request.Preparation.ForkPoint = runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 4}
+			before := historicalContextDatabaseRows(t, fixture.db, backend.name == "postgres")
+			got, err := fixture.store.(forkWorkflowOwnershipStore).MaterializeRunForkForSelectedContractExecution(ctx, request)
+			if err == nil || !strings.Contains(err.Error(), "deployment revision fork requires a durable invocation") || got.ForkRunID != "" {
+				t.Fatalf("deployment revision bypassed durable invocation admission: got=%+v err=%v", got, err)
+			}
+			historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, fixture.db, backend.name == "postgres"))
 		})
 	}
 }

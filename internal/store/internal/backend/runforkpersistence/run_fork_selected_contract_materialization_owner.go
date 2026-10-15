@@ -28,24 +28,6 @@ import (
 	"github.com/google/uuid"
 )
 
-func selectedRunForkMaterializationID(sourceRunID string, point runfork.RunForkPoint, operation *runfork.ForkOperationRequest) (string, error) {
-	if err := point.Validate(); err != nil {
-		return "", err
-	}
-	if point.Kind == runfork.RunForkPointEvent {
-		return deterministicRunForkMaterializationID(sourceRunID, point.EventID), nil
-	}
-	if operation == nil {
-		return "", fmt.Errorf("deployment revision fork requires a durable invocation")
-	}
-	id, err := uuid.Parse(operation.OperationID)
-	if err != nil || id == uuid.Nil || id.String() != operation.OperationID {
-		return "", fmt.Errorf("deployment revision fork requires a canonical operation ID")
-	}
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("swarm:run-fork-deployment-materialization:%s:%d:%s",
-		sourceRunID, point.Revision, operation.OperationID))).String(), nil
-}
-
 // runForkSelectedContractMaterializationPort is deliberately operation-specific.
 // It exposes persistence mechanics while the materialization lifecycle executes
 // once in materializeRunForkForSelectedContractExecution.
@@ -84,14 +66,27 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
+	if err := req.Preparation.ForkPoint.Validate(); err != nil {
+		return runfork.RunForkMaterialization{}, err
+	}
+	if req.Preparation.ForkPoint.Kind != runfork.RunForkPointEvent && req.ForkOperation == nil {
+		return runfork.RunForkMaterialization{}, fmt.Errorf("deployment revision fork requires a durable invocation")
+	}
 	var refusal *runfork.RunForkMaterialization
+	var replay *selectedForkOperationReplay
+	forkRunID := uuid.NewString()
 
 	var changes privaterunlifecycle.ChannelCardChanges
 	committed, err := port.runMutation(ctx, func(txctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt) error {
 		changes = privaterunlifecycle.ChannelCardChanges{}
 		materialization = runfork.RunForkMaterialization{}
 		refusal = nil
+		replay = nil
 		if err := proveSelectedPreparationForMutationTx(txctx, tx, req.Preparation, !port.postgres); err != nil {
+			return err
+		}
+		if err := requireFreshForkOperationTx(txctx, tx, req.ForkOperation, port.postgres); err != nil {
+			errors.As(err, &replay)
 			return err
 		}
 		sourceRunID := strings.TrimSpace(req.SourceRunID)
@@ -137,10 +132,6 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			return fmt.Errorf("selected preparation differs from transaction's effective source")
 		}
 		replayAdmission := runfork.RunForkSelectedContractReplayResumeAdmission(plan)
-		forkRunID, err := selectedRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint, forkOperation)
-		if err != nil {
-			return err
-		}
 		routeRecovery, err := prepareRunForkSelectedContractRouteResolution(plan, forkRunID, selection, req.FrontierAdmission, req.RouteTopology, req.RecipientPlanning)
 		if err != nil {
 			return err
@@ -339,7 +330,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if refusal != nil {
 			return *refusal, err
 		}
-		return runfork.RunForkMaterialization{}, err
+		return runfork.RunForkMaterialization{}, selectedForkOperationReplayAfterAbort(ctx, committed, err, replay)
 	}
 	if port.publishChannelChanges != nil {
 		err = errors.Join(err, port.publishChannelChanges(committed, changes.Changed))
