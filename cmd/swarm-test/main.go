@@ -141,6 +141,14 @@ func runTestArgs(testArgs []string, output io.Writer, completion bool, workloadP
 		}
 	}()
 
+	if err := precompileTestArgs(queueCtx, testArgs, os.Stderr, runPreflightProcess); err != nil {
+		stopSignalRelay()
+		fmt.Fprintf(os.Stderr, "precompile before test admission: %v\n", err)
+		if value := receivedSignal.Load(); value != 0 {
+			return receivedSignalExitCode(value)
+		}
+		return 1
+	}
 	lease, err := admission.Acquire(queueCtx, testpostgres.RunCommand{
 		Args: command, FallbackDuration: fallback, ModelOnlyETA: completion,
 	}, capacity)

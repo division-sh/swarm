@@ -73,8 +73,7 @@ func TestSwarmTestSettlementTimeoutFailsClosed(t *testing.T) {
 	release := filepath.Join(root, "descendant-release")
 	finished := filepath.Join(root, "descendant-finished")
 	goBin := filepath.Join(root, "go")
-	script := `#!/bin/sh
-set -eu
+	script := precompileFixtureGoHeader() + `
 (
   trap '' INT TERM HUP
   touch "$SWARM_TEST_TIMEOUT_DESCENDANT_STARTED"
