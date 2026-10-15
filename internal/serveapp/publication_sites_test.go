@@ -287,17 +287,21 @@ func requirePublicationSiteReadback(t *testing.T, rt servedControlProofRuntime, 
 			if err := rt.DB.QueryRow(`SELECT s.selection_context,s.disposition,s.flow_path,s.declaration_family,s.semantic_path,s.display_label FROM event_delivery_handler_rule_selections s JOIN event_deliveries d ON d.delivery_id=s.delivery_id WHERE d.run_id=$1 AND d.event_id=$2 AND d.subscriber_id=$3`, runID, r.cause, producer.Key()).Scan(&selectionContext, &disposition, &selectedFlow, &selectedFamily, &semanticPath, &label); err != nil {
 				t.Fatalf("publication lacks exact selected-rule cause: %v", err)
 			}
-			placement, context, index, wantLabel := "rules", "handler_rules", 0, "positive"
+			placement, context, index, predicate := "rules", "handler_rules", 0, "when payload.choice > 0"
 			if family == "completion" || family == "completefanout" {
 				placement, context = "on_complete", "handler_on_complete"
+				predicate = "condition payload.choice > 0"
 			}
 			if family == "success" {
-				wantLabel = "selected"
+				predicate = "when true"
 			} else if strings.Contains(family, "fanout") {
-				wantLabel = "dispatch"
+				predicate = "default"
 			} else if value == 20 {
-				index, wantLabel = 1, "otherwise"
+				index, predicate = 1, "default"
 			}
+			// Rulings6148375122/6169683113: labels project position and
+			// predicate text; predicate-less final rows display as default.
+			wantLabel := fmt.Sprintf("%s[%d]: %s", placement, index, predicate)
 			wantPath := fmt.Sprintf("nodes[%q].handlers[%q].%s[%d]", family, family+".requested", placement, index)
 			if selectionContext != context || disposition != "selected" || selectedFlow != flow || selectedFamily != "handler_rule" || semanticPath != wantPath || label != wantLabel {
 				t.Fatalf("selected publication cause: %s %s %s %s %s %s; want %s %s %s", selectionContext, disposition, selectedFlow, selectedFamily, semanticPath, label, context, wantPath, wantLabel)
