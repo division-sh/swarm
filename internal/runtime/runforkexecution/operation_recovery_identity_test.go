@@ -2,7 +2,7 @@ package runforkexecution
 
 import (
 	"context"
-	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -41,7 +41,7 @@ func TestSelectedOperationReplayRetainsOriginalLatestCutBothStores(t *testing.T)
 			request.ForkOperation, request.ExpectedBundleHash = &replay, replay.TargetBundleHash
 			result, err := ExecuteSelectedContractRunFork(ctx, request)
 			if err != nil || !result.Activation.Activated || result.Materialization.ForkRunID != materialized.ForkRunID ||
-				!result.Materialization.ForkPoint.SameIdentity(materialized.ForkPoint) || !reflect.DeepEqual(result.Materialization.DataPins, materialized.DataPins) {
+				!result.Materialization.ForkPoint.SameIdentity(materialized.ForkPoint) || !slices.Equal(result.Materialization.DataPins, materialized.DataPins) {
 				t.Fatalf("replay adopted the later source/losing selection: result=%+v err=%v", result, err)
 			}
 			record, found, err := request.Owner.ports.fork.LoadForkOperation(ctx, replay.Actor, replay.IdempotencyKey, replay.TransportHash)
