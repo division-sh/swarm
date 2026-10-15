@@ -183,8 +183,12 @@ func proveOrdinaryForkClaimEntrances(t *testing.T, f ordinaryForkPredecessorFixt
 	if err != nil || claim.Disposition != want {
 		t.Fatalf("ordinary-fork direct claim: %+v %v", claim, err)
 	}
-	if scenario == "dual_evidence" && (claim.Invariant == nil || !strings.Contains(claim.Invariant.Error(), "contradictory historical and native construction evidence")) {
-		t.Fatalf("dual evidence did not reach the specific history/native guard: %+v", claim)
+	if scenario == "dual_evidence" {
+		var corruption *pipeline.FlowInstanceConstructionCorruption
+		if !errors.As(claim.Invariant, &corruption) || corruption.RunID != f.owner.RunID || corruption.FlowID != f.owner.Route.ScopeKey || corruption.InstancePath != f.owner.Route.InstancePath ||
+			!strings.Contains(claim.Invariant.Error(), "flow construction receipt contradicts exact receiver or creating publication") {
+			t.Fatalf("copied source receipt did not reach exact stored-receipt corruption: %+v", claim)
+		}
 	}
 	if scenario == "missing_cut" && (!errors.Is(claim.Invariant, sql.ErrNoRows) || !strings.Contains(claim.Invariant.Error(), "read admitted historical instance cut")) {
 		t.Fatalf("missing cut did not reach fixed-snapshot refusal: %+v", claim)

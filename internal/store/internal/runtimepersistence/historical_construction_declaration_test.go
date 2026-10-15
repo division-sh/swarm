@@ -113,11 +113,27 @@ func TestHistoricalDeclarationBatchKeepsListAndPlanningAuthorityBothStores(t *te
 			}
 			before := forkReceiverFaultSnapshot(t, f.ctx, f.store)
 			planning := f.store.(pipeline.FlowInstancePlanningSnapshotOwner)
+			var escaped context.Context
 			if err := planning.WithFlowInstancePlanningSnapshot(f.ctx, scope, func(ctx context.Context, reader pipeline.FlowInstanceIndexReader) error {
+				escaped = ctx
 				for range 2 {
 					got, err := reader.ListFlowInstances(ctx, scope)
 					if err != nil || !reflect.DeepEqual(got, original) {
 						return errors.Join(errors.New("planning declaration/cached observation changed"), err)
+					}
+				}
+				// A direct entry owns a new transaction, not this caller's resolver.
+				if got, err := index.ListFlowInstances(ctx, scope); err != nil || !reflect.DeepEqual(got, original) {
+					return errors.Join(errors.New("direct list borrowed the enclosing planning lifetime"), err)
+				}
+				for _, observation := range original {
+					request, err := pipeline.NewExactFlowInstanceLookup(source, fact, observation.Owner())
+					if err != nil {
+						return err
+					}
+					got, found, err := index.LookupFlowInstance(ctx, request)
+					if err != nil || !found || !reflect.DeepEqual(got, observation) {
+						return errors.Join(errors.New("direct lookup borrowed the enclosing planning lifetime"), err)
 					}
 				}
 				wrongOwner := f.owner
@@ -137,6 +153,28 @@ func TestHistoricalDeclarationBatchKeepsListAndPlanningAuthorityBothStores(t *te
 				return nil
 			}); err != nil {
 				t.Fatal(err)
+			}
+			// Even an ended caller scope must not select a previous transaction.
+			for range 2 {
+				got, err := index.ListFlowInstances(escaped, scope)
+				if err != nil || !reflect.DeepEqual(got, original) {
+					t.Fatalf("fresh direct list reused an ended reconstruction: %+v %v", got, err)
+				}
+				for _, observation := range original {
+					request, err := pipeline.NewExactFlowInstanceLookup(source, fact, observation.Owner())
+					if err != nil {
+						t.Fatal(err)
+					}
+					scalar, found, err := index.LookupFlowInstance(escaped, request)
+					if err != nil || !found || !reflect.DeepEqual(scalar, observation) {
+						t.Fatalf("fresh direct lookup reused an ended reconstruction: %+v %t %v", scalar, found, err)
+					}
+				}
+			}
+			cancelled, cancel := context.WithCancel(escaped)
+			cancel()
+			if got, err := index.ListFlowInstances(cancelled, scope); !errors.Is(err, context.Canceled) || got != nil {
+				t.Fatalf("direct list hid cancellation: %+v %v", got, err)
 			}
 			if after := forkReceiverFaultSnapshot(t, f.ctx, f.store); !reflect.DeepEqual(before, after) {
 				t.Fatal("planning admission/refusals changed durable state")

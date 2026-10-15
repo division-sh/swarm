@@ -355,7 +355,9 @@ func TestD1HistoricalConstructionReuseRefusesNativeConflictBothStores(t *testing
 			}
 			before := forkReceiverFaultSnapshot(t, f.ctx, f.store)
 			invalid, found, err := index.LookupFlowInstance(f.ctx, lookup)
-			if err == nil || found || invalid.Valid() || !strings.Contains(err.Error(), "conflicting native and historical construction evidence") {
+			var corruption *pipeline.FlowInstanceConstructionCorruption
+			if !errors.As(err, &corruption) || found || invalid.Valid() || corruption.RunID != f.owner.RunID || corruption.InstancePath != f.owner.Route.InstancePath ||
+				!strings.Contains(err.Error(), "flow construction receipt contradicts exact receiver or creating publication") {
 				t.Fatalf("native conflict did not reach the historical-construction refusal: found=%t observation=%+v err=%v", found, invalid, err)
 			}
 			if current, err := ReadReceiverHistoricalEntityStateForTest(f.ctx, f.store, f.sourceOwner, f.sourceEntity, f.cutRevision); err != nil || !reflect.DeepEqual(current, captured) {
