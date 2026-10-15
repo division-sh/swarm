@@ -244,11 +244,11 @@ func commitDecisionCardGateState(
 	if err := commitWorkflowEngineState(ctx, attempt, postgres, record); err != nil {
 		return err
 	}
-	before, err = commitWorkflowEngineInitialValues(ctx, attempt, store, postgres, record, before)
+	before, err = commitWorkflowEngineInitialValues(ctx, attempt, store, postgres, record, before, false)
 	if err != nil {
 		return err
 	}
-	return commitWorkflowEngineMutationLog(ctx, attempt, store, postgres, record, before)
+	return commitWorkflowEngineMutationLog(ctx, attempt, store, postgres, record, before, false)
 }
 
 var _ runtimepipeline.DecisionCardMutationOwner = (*PipelinePostgresOwner)(nil)

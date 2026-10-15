@@ -6310,6 +6310,12 @@ engine:
           ambiguous or foreign construction fails closed. Valid fixed historical headers consume their admitted fixed
           provenance without requiring a nonexistent fresh constructor receipt. Original committed deliveries and replay
           retain their exact identities rather than reselecting against today's instance inventory.
+          The closed conversation-history test fixture instead constructs its actual source-bound parent and child
+          through the manager-prepared native committer in one selected transaction. Only this finite fixture may
+          hand its already-admitted construction occurrence to the existing PostgreSQL mutation writer; mutation
+          created_at and matching author-activity occurrence MUST agree. Missing or conflicting fixture time rejects
+          without partial effects. Ordinary PostgreSQL writers retain their wall-clock policy, SQLite retains its
+          existing occurrence policy, and no runtime option, ambient clock override or general backdating port exists.
           A deployment feed remains declaration-owned and carries no concrete sender. An admitted selected-root feed's
           genuine local consumers bind through the exact run-root construction observed by the same native index;
           declaration admission or an output export does not invent a receiver or suppress those consumers.
