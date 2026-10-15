@@ -58,19 +58,39 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 	if count != 24 {
 		t.Fatalf("mechanical repair target count=%d, want24", count)
 	}
-	digest, err := mechanicalReceiptDigest(rows)
+	var pins []fixtureSetupSuccessor2617
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 40 {
+		t.Fatalf("finite fixture receipt packet changed: %v", err)
+	}
+	// Reverse only Q1's appended wait/setup edits before checking the complete
+	// original digest, including every earlier live successor and assertion.
+	archived := append([]recipe(nil), rows...)
+	retryPin, retryRestored := pins[39], 0
+	for index, row := range archived {
+		if !sameReviewedRecipeKey(row, retryPin.Original) {
+			continue
+		}
+		history := row
+		history.Successor = retryPin.Original.Successor
+		body, err := reverseReviewedSuccessor2617(row.Successor, retryPin.Edits)
+		if err != nil || body != retryPin.Original.Successor || row.Successor != retryPin.Candidate || !reflect.DeepEqual(history, retryPin.Original) {
+			t.Fatalf("Q1 successor changed historical mechanical evidence: %s/%v", row.Function, err)
+		}
+		archived[index] = retryPin.Original
+		retryRestored++
+	}
+	if retryRestored != 1 {
+		t.Fatalf("exact Q1 mechanical predecessor count=%d, want1", retryRestored)
+	}
+	digest, err := mechanicalReceiptDigest(archived)
 	if err != nil || digest != "637fcb76a19075ffc1dd93fc6a189652be2a50f2b199647d67cc0ffd58885fed" {
 		t.Fatalf("source-pinned mechanical/current receipts changed: %s/%v", digest, err)
 	}
 	// Retain the complete predecessor digest, including its old live Successors.
 	// Only the two appended #2287 join-presentation receipts may reverse it.
-	var pins []fixtureSetupSuccessor2617
-	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 39 {
-		t.Fatalf("finite presentation receipt packet changed: %v", err)
-	}
-	prior := append([]recipe(nil), rows...)
+	prior := append([]recipe(nil), archived...)
 	restored := 0
-	for _, pin := range pins[36:] {
+	for _, pin := range pins[36:39] {
 		if pin.Original.Mechanical == nil {
 			continue
 		}
