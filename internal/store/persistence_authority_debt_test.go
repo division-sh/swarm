@@ -500,6 +500,20 @@ func debtCollectorDigest(root string) (string, error) {
 		return "", err
 	}
 	fmt.Fprintf(hash, "%s\x00%s\x00", rolePath, canonical.Bytes())
+	prior := hex.EncodeToString(hash.Sum(nil))
+	const nativePath = "internal/store/persistence_authority_debt_native_fixture_test.go"
+	file, err = parser.ParseFile(token.NewFileSet(), filepath.Join(root, nativePath), nil, parser.AllErrors)
+	if os.IsNotExist(err) && (prior == debtFixtureRoleCollectorTo || prior == debtForkProofCollectorTo || prior == debtProcessLeaseCollectorTo) {
+		return prior, nil // Exact immutable predecessors predate this classification.
+	}
+	if err != nil {
+		return "", err
+	}
+	canonical.Reset()
+	if err := format.Node(&canonical, token.NewFileSet(), file); err != nil {
+		return "", err
+	}
+	fmt.Fprintf(hash, "%s\x00%s\x00", nativePath, canonical.Bytes())
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
@@ -863,6 +877,10 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
+	if base == debtProcessLeaseCollectorTo && trusted.Collector == base &&
+		current == debtNativeFixtureCollectorTo && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
+		return nil // #642/6190983544 + 6191476293: exact fixture/custody policy, no baseline edit.
+	}
 	if base == debtForkProofCollectorFrom && current == debtForkProofCollectorTo &&
 		trusted.Collector == base && head.Collector == current &&
 		debtForkProofCollectorTransition(trusted.Sites, head.Sites) {
@@ -1009,7 +1027,7 @@ func debtSelectedBoundarySource(path string, file *ast.File) []authorityFinding 
 		imports[alias] = name
 		switch name {
 		case "github.com/division-sh/swarm/internal/store/selected":
-			if !selectedConsumer {
+			if !selectedConsumer && !debtReviewedNativeSelectedImport(path, alias, file) {
 				add(file.Name.Name, "import:"+name, "selected owner outside process construction/inspection roles")
 			}
 		case "github.com/division-sh/swarm/internal/store/construction":
