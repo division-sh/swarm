@@ -17,6 +17,65 @@ type factInsertCall struct {
 	args  []any
 }
 
+func TestRevisionEventHistorySubmittedJSONBothDialects(t *testing.T) {
+	for _, postgres := range []bool{false, true} {
+		for _, failed := range []bool{false, true} {
+			t.Run(fmt.Sprintf("postgres_%v/failed_%v", postgres, failed), func(t *testing.T) {
+				var slot transactiontest.Slot
+				collector, stop, err := slot.Install(transactiontest.Options{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer stop()
+				a := slot.Begin(false, false)
+				a.Begun()
+				families := []Family{FamilyEvents, FamilyEventDeliveries, FamilyCommittedReplayScopes, FamilyEventReceipts, FamilyDeadLetters}
+				var facts []revisionFactInsert
+				for _, family := range families {
+					facts = append(facts, revisionFactInsert{family, "key", []byte(`{ "submitted" : "` + string(family) + `" }`), true})
+				}
+				recorder := &factInsertRecorder{err: errors.New("injected ledger refusal")}
+				if failed {
+					recorder.failAt = 1
+				}
+				writeErr := insertRevisionFacts(transactiontest.WithAttempt(context.Background(), a), recorder, postgres, "run", 1, facts)
+				if failed != errors.Is(writeErr, recorder.err) || len(recorder.calls) != 1 {
+					t.Fatalf("submission outcome: err=%v calls=%d", writeErr, len(recorder.calls))
+				}
+				if failed {
+					a.RollbackAttempted()
+				} else {
+					a.BeforeCommit()
+					a.Committed()
+				}
+				a.Finish(writeErr)
+				got := collector.Snapshot().Total.JSONCopies
+				counts := []transactiontest.CopyCounts{got.Events, got.EventDeliveries, got.CommittedReplayScopes, got.EventReceipts, got.DeadLetters}
+				for i, observed := range counts {
+					var length uint64
+					switch body := recorder.calls[0].args[6*i+4].(type) {
+					case string:
+						length = uint64(len(body))
+					case []byte:
+						length = uint64(len(body))
+					default:
+						t.Fatalf("unexpected submitted JSON type %T", body)
+					}
+					want := transactiontest.CopyCounts{Calls: 1, Copies: 1, SubmittedBytes: length}
+					if failed {
+						want.FailedCalls, want.FailedBytes = 1, length
+					} else {
+						want.SucceededCalls, want.SucceededBytes, want.CommittedBytes = 1, length, length
+					}
+					if observed != want {
+						t.Errorf("%s submitted receipt=%+v want=%+v", families[i], observed, want)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestRevisionMetadataSubmittedJSONBothDialects(t *testing.T) {
 	for _, postgres := range []bool{false, true} {
 		for _, fail := range []bool{false, true} {

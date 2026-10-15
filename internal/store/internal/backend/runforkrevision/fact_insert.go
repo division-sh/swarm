@@ -44,8 +44,12 @@ func insertRevisionFacts(ctx context.Context, tx revisionSQL, postgres bool, run
 			}
 		}
 		write := transactiontest.BeginEntityMetadataJSON(ctx, metadataBytes, metadataCopies)
+		history := beginEventHistoryWrites(ctx, batch)
 		_, err := tx.ExecContext(ctx, query.String(), args...)
 		write.End(err)
+		for _, observed := range history {
+			observed.End(err)
+		}
 		if err != nil {
 			if len(batch) == 1 {
 				fact := batch[0]
@@ -59,4 +63,24 @@ func insertRevisionFacts(ctx context.Context, tx revisionSQL, postgres bool, run
 		}
 	}
 	return nil
+}
+
+func beginEventHistoryWrites(ctx context.Context, facts []revisionFactInsert) []*transactiontest.JSONCopyWrite {
+	if !transactiontest.RevisionEnabled(ctx) {
+		return nil
+	}
+	var writes []*transactiontest.JSONCopyWrite
+	for _, family := range []Family{FamilyEvents, FamilyEventDeliveries, FamilyCommittedReplayScopes, FamilyEventReceipts, FamilyDeadLetters} {
+		length, copies := 0, 0
+		for _, fact := range facts {
+			if fact.family == family {
+				length += len(fact.fact)
+				copies++
+			}
+		}
+		if copies != 0 {
+			writes = append(writes, transactiontest.BeginEventHistoryJSON(ctx, string(family), length, copies))
+		}
+	}
+	return writes
 }
