@@ -2,6 +2,7 @@ package sessionprovider
 
 import (
 	"context"
+	"errors"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -40,6 +41,12 @@ func (q *pairingQR) readAuthorized(ctx context.Context, principal operatorchanne
 	result, err := q.read(q.scope)
 	if ctx.Err() != nil {
 		return pairingQRSnapshot{}, errPairingStopped
+	}
+	// read remains a strict lifetime refusal and retains the original cause.
+	// Only its explicit, zero-code SDK terminal observation is public readback.
+	if errors.Is(err, errPairingStopped) && result.Code == "" &&
+		(result.Status == pairingExpired || result.Status == pairingFailed) {
+		return result, nil
 	}
 	return result, err
 }
