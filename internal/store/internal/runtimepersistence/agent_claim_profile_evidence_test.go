@@ -187,12 +187,21 @@ func TestAgentFirstClaimProfileRetainsOriginalAcrossReplacementAndReclaimBothSto
 			if err != nil || captured != original || captured.ProfileID == profile.ID {
 				t.Fatalf("replacement changed original claim capture: %+v err=%v", captured, err)
 			}
+			assertNativeAgentRecoveryOccupancy(t, f, map[string]int{original.ProfileID: 1})
 			if err := ExpireExactDeliveryClaimFaultForTest(f.ctx, f.store, first.Claim); err != nil {
 				t.Fatal(err)
 			}
 			nextAuthority, err := deliverylifecycle.NewNormalExecutionAuthority(f.source, state.ProcessBinding.GenerationGrantID, state.ProcessBinding.RuntimeGeneration)
 			if err != nil {
 				t.Fatal(err)
+			}
+			admitted := admitAgentClaimProfileAuthority(t, f.ctx, f.store, f.source)
+			if !admitted.Equal(nextAuthority) {
+				t.Fatal("fixture admitted a different grant than the existing replacement")
+			}
+			afterAdmission, found, err := f.store.LoadAgentLifecycleState(f.ctx, f.route.AgentIdentity)
+			if err != nil || !found || !reflect.DeepEqual(state, afterAdmission) {
+				t.Fatalf("fixture grant admission changed the replacement agent: %+v want=%+v found=%t err=%v", afterAdmission, state, found, err)
 			}
 			if err := f.store.ActivateDeliveryAuthority(f.ctx, nextAuthority); err != nil {
 				t.Fatal(err)
@@ -206,6 +215,7 @@ func TestAgentFirstClaimProfileRetainsOriginalAcrossReplacementAndReclaimBothSto
 			if err != nil || captured != original {
 				t.Fatalf("reclaim replaced immutable first capture: %+v err=%v", captured, err)
 			}
+			assertNativeAgentRecoveryOccupancy(t, f, map[string]int{original.ProfileID: 1})
 			before := profileFixtureSnapshot(t, f)
 			for _, claim := range []deliverylifecycle.Claim{first.Claim, next.Claim} {
 				if err := ApplyAgentClaimProfileFaultForTest(f.ctx, f.store, claim, original, AgentClaimProfileMissing, deliverylifecycle.Claim{}); err == nil {

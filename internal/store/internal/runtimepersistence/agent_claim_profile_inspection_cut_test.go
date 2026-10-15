@@ -73,8 +73,15 @@ func proveStandingProfileInspectionCut(t *testing.T, backend string, want delive
 		assertStandingProfileInspectionStableClaim(t, read, stable.Snapshot, stableProfile)
 		assertStandingProfileInspectionDeliveries(t, read, first.Snapshot, stable.Snapshot, pending, want)
 		assertStandingProfileInspectionRefusals(t, read, foreign.store, first.Snapshot, pending)
+		count := 1
+		if first.Snapshot.Status == deliverylifecycle.StatusInProgress {
+			count++
+		}
+		assertNativeAgentRecoveryOccupancy(t, read, map[string]int{profile.ProfileID: count})
 		advanceStandingProfileInspectionWriter(t, f, first, profile, pending, want)
 		written = profileFixtureSnapshot(t, f)
+		assertNativeAgentRecoveryOccupancy(t, f, map[string]int{profile.ProfileID: 2})
+		assertNativeAgentRecoveryOccupancy(t, read, map[string]int{profile.ProfileID: count})
 		assertStandingProfileInspectionEvidence(t, read, first.Snapshot, profile, authority, disposition)
 		assertStandingProfileInspectionStableClaim(t, read, stable.Snapshot, stableProfile)
 		assertStandingProfileInspectionDeliveries(t, read, first.Snapshot, stable.Snapshot, pending, want)

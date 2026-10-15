@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/google/uuid"
 )
@@ -80,6 +81,7 @@ func assertNativeAgentRecoveryImageRefusal(t *testing.T, f agentClaimProfileFixt
 	if err == nil || !reflect.DeepEqual(image, startuprecovery.AgentRecoveryImage{}) {
 		t.Fatalf("failed native evidence exposed a partial recovery image: %+v err=%v", image, err)
 	}
+	assertNativeAgentRecoveryOccupancyRefusal(t, f)
 	if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(before, after) {
 		t.Fatal("native connected recovery refusal changed complete application storage")
 	}
@@ -152,6 +154,7 @@ func proveAgentRecoveryNonAgentAndTerminalExclusion(t *testing.T, f agentClaimPr
 	if terminal == 0 {
 		t.Fatal("terminal exclusion control lacks real terminal history")
 	}
+	assertNativeAgentRecoveryOccupancy(t, f, map[string]int{selection.BackendAnthropic: 2, selection.BackendOpenAICompatible: 1})
 	if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(before, after) {
 		t.Fatal("non-agent/terminal classification changed complete application storage")
 	}
@@ -208,6 +211,11 @@ func proveAgentRecoveryExactNativeGenerationJoin(t *testing.T, f agentClaimProfi
 		reader.profileReads == 0 || !reflect.DeepEqual(image, startuprecovery.AgentRecoveryImage{}) {
 		t.Fatalf("hostile membership generation bypassed canonical exact native evidence: %+v profileReads=%d err=%v", image, reader.profileReads, err)
 	}
+	candidate, err := startuprecovery.InspectAgentRecoveryOccupancyCandidate(f.ctx, reader)
+	if err == nil || !strings.Contains(err.Error(), "first agent profile differs from exact delivery/source authority") || !reflect.DeepEqual(candidate, startuprecovery.AgentRecoveryOccupancyCandidate{}) {
+		t.Fatalf("foreign expected generation exposed occupancy: %+v err=%v", candidate, err)
+	}
+	proveDuplicateAgentRecoveryOccupancyRefusal(t, f)
 	if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(before, after) {
 		t.Fatal("refused expected-generation input changed complete native storage")
 	}
@@ -218,5 +226,9 @@ func assertConnectedAgentRecoveryContextRefusal(t *testing.T, ctx context.Contex
 	image, err := inspectNativeAgentRecoveryImage(t, agentClaimProfileFixture{ctx: ctx, store: owner})
 	if err == nil || !strings.Contains(err.Error(), reason) || !reflect.DeepEqual(image, startuprecovery.AgentRecoveryImage{}) {
 		t.Fatalf("%s inspection exposed partial connected evidence: %+v err=%v", reason, image, err)
+	}
+	candidate, err := startuprecovery.InspectAgentRecoveryOccupancyCandidate(ctx, owner.(startuprecovery.AgentRecoveryReader))
+	if err == nil || !strings.Contains(err.Error(), reason) || !reflect.DeepEqual(candidate, startuprecovery.AgentRecoveryOccupancyCandidate{}) {
+		t.Fatalf("%s inspection exposed partial occupancy: %+v err=%v", reason, candidate, err)
 	}
 }
