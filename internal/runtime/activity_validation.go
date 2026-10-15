@@ -207,23 +207,28 @@ func validateActivityResultEventNameCollisions(source semanticview.Source) []err
 				eventTypes = append(eventTypes, resultEvents.RevisionRequested, resultEvents.Rejected)
 			}
 			for _, eventType := range eventTypes {
-				normalized := eventidentity.Normalize(eventType)
-				if normalized == "" {
-					continue
+				if err := admitActivityResultEventName(eventType, context, authored, generated); err != nil {
+					errs = append(errs, err)
 				}
-				if owner, ok := authored[normalized]; ok {
-					errs = append(errs, fmt.Errorf("%s: generated activity result event %q collides with %s %q", context, normalized, owner, normalized))
-					continue
-				}
-				if previous, ok := generated[normalized]; ok {
-					errs = append(errs, fmt.Errorf("%s: generated activity result event %q collides with generated result event from %s", context, normalized, previous))
-					continue
-				}
-				generated[normalized] = context
 			}
 		}
 	}
 	return errs
+}
+
+func admitActivityResultEventName(eventType, context string, authored, generated map[string]string) error {
+	normalized := eventidentity.Normalize(eventType)
+	if normalized == "" {
+		return nil
+	}
+	if owner, ok := authored[normalized]; ok {
+		return fmt.Errorf("%s: generated activity result event %q collides with %s %q", context, normalized, owner, normalized)
+	}
+	if previous, ok := generated[normalized]; ok {
+		return fmt.Errorf("%s: generated activity result event %q collides with generated result event from %s", context, normalized, previous)
+	}
+	generated[normalized] = context
+	return nil
 }
 
 func activitySiteContext(site runtimecontracts.ActivitySite) string {
