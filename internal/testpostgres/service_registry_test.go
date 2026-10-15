@@ -616,6 +616,8 @@ func TestServiceRegistryOwnerIDFirstCreationIsAtomic(t *testing.T) {
 	}
 }
 
+const testServiceOwnerID = "11111111-1111-4111-8111-111111111111"
+
 func testRegistryRecord(t *testing.T, state ServiceState) (*ServiceRegistry, ServiceRecord) {
 	t.Helper()
 	root := t.TempDir()
@@ -627,11 +629,14 @@ func testRegistryRecord(t *testing.T, state ServiceState) (*ServiceRegistry, Ser
 	if err := registry.initialize(); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(root, "owner-id"), []byte(testServiceOwnerID+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	record := ServiceRecord{
-		Version: 1, State: state, OwnerID: "owner", DaemonID: "daemon", ImageID: "image",
+		Version: 1, State: state, OwnerID: testServiceOwnerID, DaemonID: "daemon", ImageID: "image",
 		RunnerID: "runner", LeaseID: "lease", Name: "swarm-test-postgres-v1-runner",
 		CIDFile: filepath.Join(root, "handoff", "lease.cid"), SpecHash: "hash",
-		Labels: serviceLabels("owner", "daemon", "runner", "lease", "hash"),
+		Labels: serviceLabels(testServiceOwnerID, "daemon", "runner", "lease", "hash"),
 	}
 	if err := registry.putRecord(record); err != nil {
 		t.Fatal(err)
@@ -712,7 +717,7 @@ func dockerWithContainers(t *testing.T, values ...dockerInspect) *fakeDocker {
 }
 
 func testDockerInspect(id, leaseID, runnerID string) dockerInspect {
-	labels := serviceLabels("owner", "daemon", runnerID, leaseID, "hash")
+	labels := serviceLabels(testServiceOwnerID, "daemon", runnerID, leaseID, "hash")
 	var result dockerInspect
 	result.ID = id
 	result.Name = "/swarm-test-postgres-v1-" + runnerID
