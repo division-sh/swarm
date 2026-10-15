@@ -1,11 +1,43 @@
 package delivery
 
 import (
+	"math"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
+
+func TestCommittedRetryDueUsesCommonUpwardMicrosecondPrecision(t *testing.T) {
+	completed := time.Date(2026, 10, 15, 12, 0, 0, 999999000, time.UTC)
+	for _, test := range []struct {
+		delay time.Duration
+		want  time.Duration
+	}{
+		{time.Nanosecond, time.Microsecond},
+		{499 * time.Nanosecond, time.Microsecond},
+		{500 * time.Nanosecond, time.Microsecond},
+		{999 * time.Nanosecond, time.Microsecond},
+		{time.Microsecond, time.Microsecond},
+		{1001 * time.Nanosecond, 2 * time.Microsecond},
+		{1500 * time.Nanosecond, 2 * time.Microsecond},
+		{2 * time.Microsecond, 2 * time.Microsecond},
+		{13 * time.Microsecond, 13 * time.Microsecond},
+		{23 * time.Millisecond, 23 * time.Millisecond},
+	} {
+		t.Run(test.delay.String(), func(t *testing.T) {
+			got := committedRetryDue(completed, test.delay)
+			if !got.Equal(completed.Add(test.want)) || got.Before(completed.Add(test.delay)) || !got.After(completed) {
+				t.Fatalf("committed due: completed=%s delay=%s got=%s want=%s", completed, test.delay, got, completed.Add(test.want))
+			}
+		})
+	}
+	requested := completed.Add(time.Duration(math.MaxInt64))
+	got := committedRetryDue(completed, time.Duration(math.MaxInt64))
+	if got.Before(requested) || got.Sub(requested) >= time.Microsecond || got.Nanosecond()%int(time.Microsecond) != 0 {
+		t.Fatalf("maximum duration overflowed during rounding: requested=%s got=%s", requested, got)
+	}
+}
 
 func TestCommittedRetryDueOutcomeDecoding(t *testing.T) {
 	settled := time.Date(2026, 10, 15, 12, 0, 0, 123456000, time.UTC)
