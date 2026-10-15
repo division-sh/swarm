@@ -227,6 +227,9 @@ func TestAgentFirstClaimProfileFaultCASBothStores(t *testing.T) {
 				_, first, expected := f.claim(t)
 				_, other, _ := f.claim(t)
 				before := profileFixtureSnapshot(t, f)
+				if image, err := inspectNativeAgentRecoveryImage(t, f); err != nil || len(image.Members) != 2 {
+					t.Fatalf("healthy native capture image: %+v err=%v", image, err)
+				}
 				for _, refusal := range []string{"invalid_variant", "wrong_capture", "foreign_claim", "canceled", "wrong_owner", "unexpected_foreign"} {
 					t.Run(refusal, func(t *testing.T) {
 						ctx, owner, claim, capture, fault, foreign := f.ctx, any(f.store), first.Claim, expected, AgentClaimProfileCorrupt, deliverylifecycle.Claim{}
@@ -266,6 +269,7 @@ func TestAgentFirstClaimProfileFaultCASBothStores(t *testing.T) {
 				if _, err := ReadFirstAgentClaimProfileForTest(f.ctx, f.store, first.Snapshot); err == nil {
 					t.Fatal("missing/corrupt/foreign durable profile was accepted")
 				}
+				assertNativeAgentRecoveryImageRefusal(t, f)
 				if err := ApplyAgentClaimProfileFaultForTest(f.ctx, f.store, first.Claim, expected, variant, foreign); err == nil {
 					t.Fatal("stale original capture CAS was accepted")
 				}

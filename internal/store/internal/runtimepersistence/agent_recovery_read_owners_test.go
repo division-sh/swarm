@@ -307,6 +307,7 @@ func proveSourceSetHeadNativeFault(t *testing.T, f, foreign agentClaimProfileFix
 			t.Fatalf("native mismatch lost canonical decoder reason: %v", err)
 		}
 	}
+	assertNativeAgentRecoveryImageRefusal(t, f)
 	foreignBefore := profileFixtureSnapshot(t, foreign)
 	if err := RestoreSourceSetHeadFaultForTest(foreign.ctx, foreign.store, receipt); err == nil {
 		t.Fatal("foreign native owner restored the source head")

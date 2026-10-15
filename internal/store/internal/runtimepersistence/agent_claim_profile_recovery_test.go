@@ -91,6 +91,19 @@ func proveAgentProfileRecoveryBeforeAttempt(t *testing.T, backend string) {
 	}
 	assertAgentProfileRecoveryLifecycle(t, f, state)
 	assertAgentProfileRecoveryInventory(t, f, first, second, pendingID, original, current, retryProfile)
+	image, err := inspectNativeAgentRecoveryImage(t, f)
+	if err != nil || len(image.Members) != 4 {
+		t.Fatalf("reopened immutable recovery image: %+v err=%v", image, err)
+	}
+	oldCapture := false
+	for _, member := range image.Members {
+		if member.Delivery.DeliveryID == first.Snapshot.DeliveryID {
+			oldCapture = member.FirstClaim != nil && *member.FirstClaim == original && member.Lifecycle.ConfigRevision == state.ConfigRevision && member.Lifecycle.ConfigRevision != original.ConfigurationRevision
+		}
+	}
+	if !oldCapture {
+		t.Fatal("connected recovery substituted the current configuration for the original claim")
+	}
 	if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(before, after) {
 		t.Fatal("recovery enumeration/profile joins changed complete application storage")
 	}
@@ -106,6 +119,7 @@ func proveAgentProfileRecoveryBeforeAttempt(t *testing.T, backend string) {
 	if capture, err := ReadFirstAgentClaimProfileForTest(f.ctx, f.store, actual); err == nil || capture != (deliverylifecycle.AgentClaimProfile{}) {
 		t.Fatalf("recovery accepted corrupt capture or substituted current configuration: %+v err=%v", capture, err)
 	}
+	assertNativeAgentRecoveryImageRefusal(t, f)
 	if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(corrupted, after) {
 		t.Fatal("corrupt recovery evidence refusal changed complete application storage")
 	}

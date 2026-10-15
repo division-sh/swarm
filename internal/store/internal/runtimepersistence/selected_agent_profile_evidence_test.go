@@ -174,6 +174,8 @@ func TestSelectedAgentClaimReadsOriginalPreparationWithoutOrdinaryCaptureBothSto
 				t.Fatalf("retained observation/refusal mutated native state: err=%v", err)
 			}
 			proveMixedOwnedRecoveryImage(t, ordinary, f, foreignOwner)
+			proveAgentRecoveryNonAgentAndTerminalExclusion(t, ordinary)
+			proveAgentRecoveryExactNativeGenerationJoin(t, ordinary)
 		})
 	}
 }
@@ -251,6 +253,9 @@ func proveSelectedAgentPreparationFault(t *testing.T, ctx context.Context, selec
 		return value
 	}
 	before := storage()
+	if image, err := inspectNativeAgentRecoveryImage(t, agentClaimProfileFixture{ctx: ctx, store: selected}); err != nil || len(image.Members) != 1 {
+		t.Fatalf("healthy selected preparation image: %+v err=%v", image, err)
+	}
 	foreignBefore, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, foreignOwner)
 	if err != nil {
 		t.Fatal(err)
@@ -307,6 +312,7 @@ func proveSelectedAgentPreparationFault(t *testing.T, ctx context.Context, selec
 	if actor, err := read(ctx, snapshot); err == nil || actor != (runfork.SelectedForkPreparedActor{}) {
 		t.Fatalf("corrupt selected preparation escaped: %+v err=%v", actor, err)
 	}
+	assertNativeAgentRecoveryImageRefusal(t, agentClaimProfileFixture{ctx: ctx, store: selected})
 	if next, err := ApplySelectedAgentPreparationFaultForTest(ctx, selected, snapshot, fault); err == nil || next != nil {
 		t.Fatalf("changed original evidence accepted another fault: %v err=%v", next, err)
 	}
