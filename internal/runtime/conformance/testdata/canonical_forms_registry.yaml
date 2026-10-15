@@ -428,18 +428,19 @@ rows:
     corpus: {condition: 0, when: 1, else: 1, default: 0}
 
   - id: handler.emit_action_activity
-    ruled: mechanical-ratified
+    ruled: sugar
     paths: "emit, activity, activity.approval, on_success.emit"
     owners: [projectNodeEmitValue, projectNodeActivityValue, projectNodeOnSuccessValue]
     information:
       fact: [event/tool/decision identity]
       choice: [from, fields, input, approval]
     spelling:
-      canonical_candidate: mapping_when_payload_or_options_exist_else_scalar
-      retired_duplicates: [emit_mapping_with_event_only]
+      canonical_candidate: scalar_emit_is_sugar_for_single_key_event_mapping_both_retained
+      retired_duplicates: []
       already_retired: [all_authored_handler_actions]
       distinct_overrides: [mapping_with_fields_or_options]
     corpus: {emit_scalar: 0, emit_mapping: 19, action_rows: 2, activity_rows: 0}
+    sugar_lowering: "projectNodeEmitValue (internal/runtime/contracts/workflow_contract_nodes_value.go:182-220) lowers scalar emit and the single-key {event: <event>} mapping to the same EmitSpec. #2287 USER ruling6196779785 retains both; mappings with from or fields and the separate activity/approval grammars are unchanged."
     action_retirement: "#2307: action_rows above is historical at census_head, not current authority; emit specialization and activity/tool grammar remain separate, open owners."
 
   - id: handler.guard_gate_clear

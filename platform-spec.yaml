@@ -4396,6 +4396,7 @@ handler_specification:
     emit:
       field: emit
       type: 'scalar event name OR object: {event, from, fields}'
+      sugar: 'The scalar `emit: <event>` is sugar for the single-key mapping `emit: {event: <event>}`; both forms remain supported.'
       purpose: Publish the selected follow-up event for this emit site. Handler top-level emit is allowed only when the handler
         has no nested emit sites. Nested emit sites are selected on_complete emit, rules emit, join outcome emit,
         and fan_out emit.
