@@ -43,7 +43,7 @@ operating/11111111-1111-4111-8111-111111111111/opco.product_initialization_reque
 operating/inst-1/opco.product_initialization_requested operating/opco.product_initialization_requested pipeline.start
 platform.agent_failed platform.boot platform.budget_threshold_crossed platform.paused platform.recovery_failed
 platform.run_stalled platform.runtime_log producer/account.ready producer/audit.seen producer/deploy.done
-producer/scan.requested producer/ticket.ready producer/validation.requested producer/work.ready review/inst-1/task.started
+producer/scan.requested producer/ticket.ready producer/validation.requested producer/work.ready
 review/task.started root.ready scan.requested task.completed task.failed task.requested task.started test.duplicate_route
 test.identity_route test.new test.old test.retained test.route_generation test.route_generation_ack
 test.route_generation_mutation test.tokenless thing.created validate.requested validation.requested

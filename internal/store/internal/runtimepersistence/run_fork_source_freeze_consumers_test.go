@@ -10,12 +10,14 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -107,11 +109,21 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 				"", []byte(`{}`), 0, fixture.sourceRun, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, fixture.forkedAt.Add(-time.Minute),
 			)
 			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("freeze-agent"), AgentIdentity: mustTestAgentIdentityForRun(fixture.sourceRun, "freeze-agent", "fixture/freeze-agent")}
+			var agentStore agentfixture.Store = fixture.sqlite
+			if fixture.postgres != nil {
+				agentStore = fixture.postgres
+			}
+			agentCtx := correlation.WithRunID(ctx, fixture.sourceRun)
+			source := mustStoreTestSourceArtifactFact(fixture.sourceBundleHash)
+			record := agentFixtureStaticRecord(t, route.AgentIdentity)
+			record.Config = resolveNativeClaimFixtureActor(t, record.Config)
+			if err := agentfixture.UpsertStaticForSource(t, agentCtx, agentStore, record, source); err != nil {
+				t.Fatal(err)
+			}
+			authority := admitAgentClaimProfileAuthority(t, agentCtx, agentStore, source)
+			commitSelectedReceiverClaimEvent(t, agentCtx, agentStore.(agentFixtureFlowStore), event, route, authority)
 			var claim runtimedelivery.Claim
 			if fixture.postgres != nil {
-				if err := commitSemanticEventFixtureWithAgents(ctx, fixture.postgres, event, []string{"freeze-agent"}); err != nil {
-					t.Fatal(err)
-				}
 				claimed, err := claimDeliveryFixture(ctx, fixture.postgres, event, route)
 				if err != nil {
 					t.Fatal(err)
@@ -121,9 +133,6 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 					t.Fatalf("settle source delivery before freeze: %v", err)
 				}
 			} else {
-				if err := commitSemanticEventFixtureWithAgents(ctx, fixture.sqlite, event, []string{"freeze-agent"}); err != nil {
-					t.Fatal(err)
-				}
 				claimed, err := claimDeliveryFixture(ctx, fixture.sqlite, event, route)
 				if err != nil {
 					t.Fatal(err)

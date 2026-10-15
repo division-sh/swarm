@@ -53,7 +53,7 @@ func TestRebuildPendingCreationConsumesCompiledReceiverOccurrence(t *testing.T) 
 	if plan == nil || plan.EventType != current.EventType || plan.RunID != current.RunID || plan.ParentEventID != current.ParentEventID || !plan.CreatedAt.Equal(current.CreatedAt) || string(plan.Payload) != string(current.Payload) {
 		t.Fatalf("rebuild changed exact occurrence or lineage: current=%+v rebuilt=%+v", current, plan)
 	}
-	if proof := semanticview.ResolveFlowEventProof(source, "worker-flow", plan.EventType); !proof.HasSchema || proof.Local != "worker.inspect.requested" || proof.IsAuthored(source) {
+	if proof := semanticview.ResolveFlowEventProof(source, "worker-flow", plan.EventType); !proof.HasSchema || proof.Local != "worker.inspect.requested" || !proof.IsAuthored(source) {
 		t.Fatalf("rebuilt occurrence lacks its compiled receiver proof: %+v", proof)
 	}
 	for _, invalid := range []map[string]any{{}, {"worker_id": 17}, {"worker_id": "worker-001", "unexpected": true}} {

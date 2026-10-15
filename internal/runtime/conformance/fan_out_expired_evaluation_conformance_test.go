@@ -189,7 +189,7 @@ func TestFanOutProductionCallerM35ExpiredEvaluationOnBothBackends(t *testing.T) 
 					close(gate.recover)
 				}
 			}()
-			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{
+			runtime := newNotifyAllChildrenRuntime(t, selected, source, time.Now, notifyAllChildrenRuntimeOptions{
 				fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 					gate.PipelineCoordinator = pc
 					return gate
@@ -276,7 +276,7 @@ func TestFanOutProductionCallerM35ExpiredEvaluationOnBothBackends(t *testing.T) 
 			if err != nil || summary.Cursor != 1 || summary.Committed != 1 || summary.SemanticRejected != 0 || summary.Owed != 0 {
 				t.Fatalf("fresh production recovery: summary=%+v err=%v", summary, err)
 			}
-			registrations := loadNotifyAllChildrenNumericRegistrations(t, ctx, selected, db, runID)
+			registrations := loadNotifyAllChildrenNumericRegistrations(t, ctx, selected, runID)
 			if len(registrations) != 1 || registrations["expired-then-fresh"].EngRoles != 7 {
 				t.Fatalf("fresh production publication: %+v", registrations)
 			}

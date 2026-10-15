@@ -37,12 +37,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 	for _, variant := range []struct {
 		backend servedparity.Backend
 		mode    string
-	}{
-		{servedparity.BackendDefaultSQLite, "normal"},
-		{servedparity.BackendDefaultSQLite, "held_diagnostic"},
-		{servedparity.BackendExplicitPostgres, "normal"},
-		{servedparity.BackendExplicitPostgres, "held_diagnostic"},
-	} {
+	}{{servedparity.BackendDefaultSQLite, "normal"}, {servedparity.BackendDefaultSQLite, "held_diagnostic"}, {servedparity.BackendExplicitPostgres, "normal"}, {servedparity.BackendExplicitPostgres, "held_diagnostic"}} {
 		backend, mode := variant.backend, variant.mode
 		t.Run(string(backend)+"/"+mode, func(t *testing.T) {
 			probe := lifecycletest.New(t)
@@ -56,7 +51,9 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			var unblock func()
 			if mode == "held_diagnostic" {
 				release := make(chan struct{})
-				unblock = sync.OnceFunc(func() { close(release) })
+				unblock = sync.OnceFunc(func() {
+					close(release)
+				})
 				t.Cleanup(unblock)
 				entered = make(chan string, 1)
 				rt.Runtime.Bus.SetLoggerHook(&snapshotPublicationLogBarrier{logger: rt.Runtime.Logger, entered: entered, release: release})
@@ -114,10 +111,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
 					t.Fatal("original publication diagnostic did not enter the barrier")
 				}
-				other := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-					"event_name": "right.work.requested", "bundle_hash": rt.BundleHash,
-					"payload": map[string]any{"seed": true}, "idempotency_key": "other-tree-seed",
-				})
+				other := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "right.work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "other-tree-seed"})
 				if other.RunID == seed.RunID || other.EventID == seed.EventID {
 					t.Fatal("negative control reused the original publication")
 				}
@@ -150,29 +144,29 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			var gateEntities []string
 			for _, side := range []string{"left", "right"} {
 				prefix := "outer/" + side + "/"
-				entityID := requireLifecycleFlowEntity(t, rt, runID, prefix, "waiting")
+				entityID := requireLifecycleFlowEntity(t, rt.ReceiverStateReader, runID, prefix, "waiting")
 				publish := func(event, key string, payload map[string]any) servedEventPublishRPCResult {
 					return requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": side + "." + event, "run_id": runID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": side + "-" + key})
 				}
 				started := publish("loop.start", "start", map[string]any{"seed": true})
-				requireLifecycleFlowEntity(t, rt, runID, prefix, "drafting")
+				requireLifecycleFlowEntity(t, rt.ReceiverStateReader, runID, prefix, "drafting")
 				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, entityID), started.EventID, "waiting", "drafting")
 				for attempt := 1; attempt <= 2; attempt++ {
-					loop := readLifecycleLoop(t, rt, runID, entityID)
+					loop := readLifecycleLoop(t, rt.Endpoint, runID, entityID)
 					payload := map[string]any{"revision_id": loop.RevisionID}
 					admit := publish("loop.admit", fmt.Sprintf("admit-%d", attempt), payload)
-					requireLifecycleFlowEntity(t, rt, runID, prefix, "review")
+					requireLifecycleFlowEntity(t, rt.ReceiverStateReader, runID, prefix, "review")
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, entityID), admit.EventID, "drafting", "review")
 					repeated := publish("loop.repeat", fmt.Sprintf("repeat-%d", attempt), payload)
 					state := "drafting"
 					if attempt == 2 {
 						state = "escaped"
 					}
-					requireLifecycleFlowEntity(t, rt, runID, prefix, state)
+					requireLifecycleFlowEntity(t, rt.ReceiverStateReader, runID, prefix, state)
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, runID, entityID), repeated.EventID, "review", state)
 				}
-				closed := readLifecycleLoop(t, rt, runID, entityID)
-				gateEntity := requireLifecycleFlowEntity(t, rt, runID, prefix+"sink/", "review")
+				closed := readLifecycleLoop(t, rt.Endpoint, runID, entityID)
+				gateEntity := requireLifecycleFlowEntity(t, rt.ReceiverStateReader, runID, prefix+"sink/", "review")
 				gateEntities = append(gateEntities, gateEntity)
 				var entity operatorread.OperatorEntityFull
 				requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": gateEntity}, &entity)
@@ -198,7 +192,7 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				if len(cards.Items) != 1 {
 					t.Fatalf("nested gate cards=%#v", cards)
 				}
-				decision := lifecycleDecisionParamsForCard(t, rt, cards.Items[0].DecisionCard.CardID, "approve")
+				decision := lifecycleDecisionParamsForCard(t, rt.Endpoint, cards.Items[0].DecisionCard.CardID, "approve")
 				decision["idempotency_key"] = side + "-decide"
 				decisions = append(decisions, decision)
 			}
@@ -223,8 +217,8 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 			}
 			for index, side := range []string{"left", "right"} {
 				prefix := "outer/" + side + "/"
-				requireLifecycleFlowEntity(t, rt, runID, prefix+"sink/", "approved")
-				final := requireLifecycleFlowEntity(t, rt, runID, prefix+"sink/final/", "done")
+				requireLifecycleFlowEntity(t, rt.ReceiverStateReader, runID, prefix+"sink/", "approved")
+				final := requireLifecycleFlowEntity(t, rt.ReceiverStateReader, runID, prefix+"sink/final/", "done")
 				var entity operatorread.OperatorEntityFull
 				requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": final}, &entity)
 				if entity.Fields["result"] != side {
@@ -238,23 +232,23 @@ func TestServedCompiledTransitionNestedCarrierCollisionOnBothStores(t *testing.T
 				if !ok || compiled.FlowID() != prefix+"sink" || compiled.Edge().DecisionID != "review_decision" || compiled.Edge().Verdict != "approve" {
 					t.Fatalf("nested gate borrowed sibling cause=%#v", compiled)
 				}
-				requireLifecycleEventCount(t, rt, runID, prefix+"loop.escaped", 1)
-				requireLifecycleEventCount(t, rt, runID, prefix+"sink/work.completed", 1)
+				requireLifecycleEventCount(t, rt.ReceiverStateReader, runID, prefix+"loop.escaped", 1)
+				requireLifecycleEventCount(t, rt.ReceiverStateReader, runID, prefix+"sink/work.completed", 1)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
-			var entities int
-			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, runID).Scan(&entities); err != nil {
+			entities, err := readServedRunFieldRows(rt.ReceiverStateReader, runID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if entities != 6 {
 				t.Fatalf("nested source/gate/final recipients=%d", entities)
 			}
-			before := lifecycleStoredSnapshot(t, rt, runID)
+			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, runID)
 			for _, params := range decisions {
 				var result map[string]any
 				requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &result)
 			}
-			if lifecycleStoredSnapshot(t, rt, runID) != before {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, runID) != before {
 				t.Fatal("duplicate sibling verdict changed history or consumer state")
 			}
 		})

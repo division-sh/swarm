@@ -22,6 +22,8 @@ func TestProofBatchProvidesHistoricalCorpusInputsBeforeExecution(t *testing.T) {
 	for _, tc := range []proofHistoryCase{
 		{name: "selected renamed unit", pkg: corpus, selected: true},
 		{name: "store transition", pkg: "github.com/division-sh/swarm/internal/store", selected: true},
+		{name: "codemod composition", pkg: "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations", selected: true},
+		{name: "shared receipt helper", pkg: "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole", selected: true},
 		{name: "already complete", pkg: corpus, selected: true, present: true},
 		{name: "foreign package", pkg: "other/scripts/rewrite-stages-2566", selected: true},
 		{name: "unselected corpus", pkg: corpus},
@@ -148,11 +150,11 @@ func proofHistoryInputs(t *testing.T) map[string][]string {
 
 func TestProofHistoryInputsMatchPinnedSourceConsumers(t *testing.T) {
 	files := map[string][]string{
-		"github.com/division-sh/swarm/internal/store":              {"internal/store/persistence_authority_debt_run_fixture_transition_test.go"},
 		"github.com/division-sh/swarm/scripts/rewrite-stages-2566": {"scripts/rewrite-stages-2566/current_entries_test.go", "scripts/rewrite-stages-2566/embedded_entries.go", "scripts/rewrite-stages-2566/intent.json"},
 	}
 	inputs := proofHistoryInputs(t)
-	if len(inputs) != len(files) {
+	expected := proofHistorySourceConsumers(t, testTimingRepoRoot(t))
+	if len(inputs) != len(files)+len(expected) {
 		t.Fatal("historical consumer package inventory changed")
 	}
 	pinned := regexp.MustCompile(`"([0-9a-f]{40})(?:"|:)`)
@@ -172,8 +174,11 @@ func TestProofHistoryInputsMatchPinnedSourceConsumers(t *testing.T) {
 			want = append(want, commit)
 		}
 		sort.Strings(want)
+		expected[pkg] = want
+	}
+	for pkg, want := range expected {
 		if !slices.Equal(inputs[pkg], want) {
-			t.Fatalf("%s pinned inputs=%v, source consumers require %v", pkg, inputs[pkg], want)
+			t.Errorf("%s pinned inputs=%v, source consumers require %v", pkg, inputs[pkg], want)
 		}
 	}
 }

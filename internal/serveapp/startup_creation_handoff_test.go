@@ -29,7 +29,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -231,13 +230,9 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 					t.Fatalf("finalize canonical source root: %v", err)
 				}
 				trigger := eventtest.InExecutionMode(eventtest.RuntimeControl(uuid.NewString(), "worker.requested", "test", "", json.RawMessage(`{"instance_id":"startup-worker"}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC()), executionmode.Mock)
-				dialect := authoractivityfixture.DialectSQLite
-				if backend == "postgres" {
-					dialect = authoractivityfixture.DialectPostgres
-				}
 				// Seed the exact causal precondition without dispatching the connect
 				// edge: this proof interrupts construction before its finalizer.
-				storetest.InsertCanonicalEventRecord(t, activationCtx, db, dialect, trigger)
+				storetest.InsertNativeCanonicalEventRecord(t, activationCtx, persistence.deps.EventStore, trigger)
 				worker, err := flowidentity.KeyedChild(loaded.source, rootPlan.Identity, "worker", "startup-worker")
 				if err != nil {
 					t.Fatal(err)

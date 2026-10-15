@@ -2,7 +2,6 @@ package tools_test
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,19 +10,15 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
 
@@ -60,7 +55,7 @@ accounts:
   score: numeric
   priority: integer
 `)
-	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	sourceCtx := seedEntityToolSourceRun(t, sqliteStore, bundle)
 	fixture := sourceCtx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
 	actor = entityToolFixtureActor(t, fixture.source, actor, entityToolTestRunID, "review", "review/inst-1")
@@ -170,10 +165,10 @@ func TestEntityTools_ReadImportedCanonicalEntityContractOnBothStores(t *testing.
 			bundle := loadWave1EntityToolBundle(t, actor, "review", "account_record", "", "account_record:\n  status: text\n")
 			var entityStore runtimetools.EntityPersistence
 			if backend == "sqlite" {
-				selected := newSQLiteRuntimeToolStoreForTest(t)
+				selected := storetest.StartSQLiteRuntimeStore(t)
 				entityStore = selected
 			} else {
-				selected := newPostgresHumanTaskToolStoreForTest(t)
+				selected := storetest.StartPostgresRuntimeStore(t)
 				entityStore = selected
 			}
 			ctx := runtimetools.WithActor(seedEntityToolSourceRun(t, entityStore, bundle), actor)
@@ -204,7 +199,7 @@ func TestEntityTools_ReadImportedCanonicalEntityContractOnBothStores(t *testing.
 }
 
 func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
-	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	bundle := loadWave1EntityToolBundle(t, models.AgentConfig{ID: "tester", Role: "operator"}, "review", "account", "types:\n  Brief:\n    summary: text\n", "account:\n  business_brief: Brief\n  tags: [text]\n")
 	ctx := seedEntityToolSourceRun(t, sqliteStore, bundle)
 	entityID := seedImportedEntityForToolTest(t, ctx, map[string]any{
@@ -230,7 +225,7 @@ func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
 func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	actor := models.AgentConfig{ExecutionMode: "live", ID: "validation-orchestrator", Role: "validation_orchestrator", Tools: []string{"save_entity_field"}}
 	bundle := loadRoleScopedEntityToolBundle(t, actor)
-	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
+	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	ctx := seedEntityToolSourceRun(t, sqliteStore, bundle)
 	fixture := ctx.Value(entityToolImportFixtureKey{}).(entityToolImportFixture)
 	actor = entityToolFixtureActor(t, fixture.source, actor, entityToolTestRunID, "validation", "validation/inst-1")
@@ -291,8 +286,8 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 		name  string
 		store humanTaskToolStore
 	}{
-		{name: "postgres", store: newPostgresHumanTaskToolStoreForTest(t)},
-		{name: "sqlite", store: newSQLiteRuntimeToolStoreForTest(t)},
+		{name: "postgres", store: storetest.StartPostgresRuntimeStore(t)},
+		{name: "sqlite", store: storetest.StartSQLiteRuntimeStore(t)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			const flowPath = "gateway/provider"
@@ -460,43 +455,4 @@ func seedReplyToolContext(t *testing.T, persistence humanTaskToolStore) (context
 	ctx := runtimebus.WithInboundEvent(runtimecorrelation.WithRunID(unmanagedToolTestContext(), runID), inbound)
 	ctx = events.WithDeliveryContext(ctx, events.DeliveryContext{Reply: &events.ReplyContextRef{ID: record.ID}})
 	return ctx, record.ID, requestEventID
-}
-
-func newPostgresHumanTaskToolStoreForTest(t *testing.T) *store.PostgresStore {
-	t.Helper()
-	selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
-	return selected
-}
-
-func newSQLiteRuntimeToolStoreForTest(t *testing.T) *store.SQLiteRuntimeStore {
-	t.Helper()
-	source, err := yamlsource.LoadFile(runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
-	if err != nil {
-		t.Fatalf("read platform spec: %v", err)
-	}
-	var spec runtimecontracts.PlatformSpecDocument
-	spec, err = runtimecontracts.AdmitPlatformSpecValue(source.Document(runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot())).Root())
-	if err != nil {
-		t.Fatalf("unmarshal platform spec: %v", err)
-	}
-	plans, err := store.GeneratePlatformTableDDLs(spec)
-	if err != nil {
-		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
-	}
-	sqliteStore, err := store.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "dev.db"))
-	if err != nil {
-		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := sqliteStore.Close(); err != nil {
-			t.Fatalf("close sqlite runtime store: %v", err)
-		}
-	})
-	if err := sqliteStore.BootstrapSchema(unmanagedToolTestContext(), store.SchemaBootstrapRequest{
-		PlatformPlans: plans,
-		Origin:        store.RuntimeStoreOrigin{SwarmVersion: "tools-test", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC()},
-	}); err != nil {
-		t.Fatalf("BootstrapSchema: %v", err)
-	}
-	return sqliteStore
 }

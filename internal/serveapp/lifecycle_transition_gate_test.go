@@ -12,15 +12,15 @@ func TestServedCompiledGateAdvanceOnlyOnBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleGateAdvanceOnly(t))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "advance-only"})
-			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
+			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "review")
 			initial := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 			if len(initial) != 1 || initial[0].To != "review" || initial[0].TriggerEventID != seed.EventID {
 				t.Fatalf("gate initial entry=%#v", initial)
 			}
-			params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+			params := lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, "approve")
 			var result map[string]any
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &result)
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "approved")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "approved")
 			requireServedEntityReadback(t, rt.Endpoint, seed.RunID, entityID, "approved")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
@@ -31,12 +31,12 @@ func TestServedCompiledGateAdvanceOnlyOnBothStores(t *testing.T) {
 			if !ok || compiled.FlowID() != "." || compiled.Edge().Source != "gate" || compiled.Edge().DecisionID != "review_decision" || compiled.Edge().Verdict != "approve" || history[0].From != "review" || history[0].To != "approved" {
 				t.Fatalf("advance-only cause=%#v", compiled)
 			}
-			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &result)
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 				t.Fatal("duplicate advance-only verdict mutated history")
 			}
-			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 0)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.completed", 0)
 		})
 	}
 }

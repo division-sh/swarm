@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"testing"
 )
 
@@ -33,8 +34,11 @@ func validateRuntime02RequiredEvidence(policy Policy) error {
 			children[root] = cells
 		}
 	}
-	// Pin the approved evidence mapping and order while preserving complete-root
-	// ownership. Retired route resources are not executable proof obligations.
+	if err := separateNewForkWitnessEvidence(children); err != nil {
+		return err
+	}
+	// This source-pinned digest preserves every original named backend/fault
+	// cell and its order without maintaining another execution inventory.
 	data, err := json.Marshal(children)
 	if err != nil {
 		return err
@@ -42,6 +46,24 @@ func validateRuntime02RequiredEvidence(policy Policy) error {
 	actual := fmt.Sprintf("%x", sha256.Sum256(data))
 	if actual != runtime02RequiredEvidence {
 		return fmt.Errorf("approved full-02 required evidence changed: %s", actual)
+	}
+	return nil
+}
+
+// New owner proofs add obligations without changing the original split's
+// immutable evidence digest. Only these exact cells leave that comparison.
+func separateNewForkWitnessEvidence(children map[string][]string) error {
+	for _, root := range []string{
+		"TestDynamicFlowRuntimeReadinessStorageFaultsKeepNativeScopeBothStores",
+		"TestForkReceiverCompanionStoragePreservesWholeRowsAndSeparateCutsBothStores",
+		"TestForkReceiverCompanionStorageRefusesRawCancelledClosedAndPartialReadsBothStores",
+		"TestForkReceiverNoticeStoragePreservesCompleteSourceScopedRowsBothStores",
+		"TestForkReceiverNoticeStorageRefusesInvalidCancelledClosedAndPartialEvidenceBothStores",
+	} {
+		if !slices.Equal(children[root], []string{"sqlite", "postgres"}) {
+			return fmt.Errorf("new fork witness proof lost exact both-store evidence: %s", root)
+		}
+		delete(children, root)
 	}
 	return nil
 }
@@ -113,5 +135,21 @@ func TestRuntimeFlowSplitRejectsCoverageAndEvidenceDrift(t *testing.T) {
 				t.Fatal("changed backend/fault execution obligations were accepted")
 			}
 		})
+	}
+	for _, root := range []string{
+		"TestForkReceiverCompanionStoragePreservesWholeRowsAndSeparateCutsBothStores",
+		"TestForkReceiverCompanionStorageRefusesRawCancelledClosedAndPartialReadsBothStores",
+		"TestForkReceiverNoticeStoragePreservesCompleteSourceScopedRowsBothStores",
+		"TestForkReceiverNoticeStorageRefusesInvalidCancelledClosedAndPartialEvidenceBothStores",
+	} {
+		for _, cells := range [][]string{nil, {"sqlite"}, {"postgres"}, {"sqlite", "postgres", "foreign"}} {
+			policy := loadPersistenceDebtPolicy(t)
+			unit := policy.Units["store-runtime-full-02"]
+			unit.RequiredChildren[root] = cells
+			policy.Units["store-runtime-full-02"] = unit
+			if validateRuntime02RequiredEvidence(policy) == nil {
+				t.Fatal("new fork witness obligation lost or broadened backend evidence:", root, cells)
+			}
+		}
 	}
 }
