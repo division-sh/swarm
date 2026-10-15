@@ -128,11 +128,15 @@ func verifyActivityResultHandlerNativeCASRetry(t *testing.T, ruleActivity bool) 
 			commitKeylessConstructorComponent(t, ctx, selected, pc, source)
 			bus.SetInterceptors(pc)
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "source.requested", "operator", "", []byte(`{"url":"https://example.com/m25"}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+			t.Logf("Q10-M25-PHASE phase=initial event=%s started=%s", event.ID(), time.Now().UTC().Format(time.RFC3339Nano))
 			if err := bus.PublishAcknowledged(ctx, event); err != nil {
 				t.Fatal(err)
 			}
+			t.Logf("Q10-M25-PHASE phase=initial event=%s acknowledged=%s", event.ID(), time.Now().UTC().Format(time.RFC3339Nano))
 			wait, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
+			deadline, _ := wait.Deadline()
+			t.Logf("Q10-M25-PHASE phase=initial event=%s wait_started=%s deadline=%s", event.ID(), time.Now().UTC().Format(time.RFC3339Nano), deadline.UTC().Format(time.RFC3339Nano))
 			if err := bus.WaitForQuiescence(wait); err != nil {
 				t.Fatal(err)
 			}
@@ -178,6 +182,7 @@ func verifyActivityResultHandlerNativeCASRetry(t *testing.T, ruleActivity bool) 
 					t.Fatal(err)
 				}
 			}
+			t.Logf("Q10-M25-PHASE phase=replay event=%s wait_started=%s deadline=%s", event.ID(), time.Now().UTC().Format(time.RFC3339Nano), deadline.UTC().Format(time.RFC3339Nano))
 			if err := bus.WaitForQuiescence(wait); err != nil {
 				t.Fatal(err)
 			}
