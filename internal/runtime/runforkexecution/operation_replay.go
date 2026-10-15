@@ -11,8 +11,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
-func (o SelectedContractExecutionOwner) replaySelectedForkOperation(ctx context.Context, request runfork.ForkOperationRequest) (_ SelectedContractExecutionResult, found bool, finalErr error) {
-	canonical, _, err := request.Canonical()
+func (o SelectedContractExecutionOwner) replaySelectedForkOperation(ctx context.Context, request SelectedContractExecutionRequest) (_ SelectedContractExecutionResult, found bool, finalErr error) {
+	canonical, _, err := request.ForkOperation.Canonical()
 	if err != nil {
 		return SelectedContractExecutionResult{}, false, err
 	}
@@ -21,10 +21,10 @@ func (o SelectedContractExecutionOwner) replaySelectedForkOperation(ctx context.
 		return SelectedContractExecutionResult{}, false, err
 	}
 	observer := &PreparedSelectedFork{owner: o, operation: operation}
-	defer func() { finalErr = errors.Join(finalErr, o.disposePreparation(observer)) }()
+	defer func() { finalErr = errors.Join(finalErr, o.completePreparation(observer)) }()
 	ctx = operation.PreparationContext()
 	for {
-		record, exists, live, err := o.observeSelectedForkOperation(ctx, canonical)
+		record, exists, live, err := o.observeSelectedForkOperation(ctx, canonical, operation)
 		if err != nil || !exists {
 			return SelectedContractExecutionResult{}, exists, err
 		}
@@ -36,9 +36,8 @@ func (o SelectedContractExecutionOwner) replaySelectedForkOperation(ctx context.
 				record.Status, record.Failure.Code, record.Failure.Reason)
 		case runfork.ForkOperationMaterialized:
 			if !live {
-				// Absence of a local owner is not an execution grant. A successor
-				// must consume the exact native recovery disposition first.
-				return SelectedContractExecutionResult{}, true, fmt.Errorf("selected fork operation %s requires exact native recovery before continuation", record.Request.OperationID)
+				result, err := o.recoverSelectedForkOperation(ctx, record, operation, request)
+				return result, true, err
 			}
 		}
 		// Read the durable outcome, not the context's retirement signal: an
@@ -53,7 +52,7 @@ func (o SelectedContractExecutionOwner) replaySelectedForkOperation(ctx context.
 	}
 }
 
-func (o SelectedContractExecutionOwner) observeSelectedForkOperation(ctx context.Context, request runfork.ForkOperationRequest) (runfork.ForkOperationRecord, bool, bool, error) {
+func (o SelectedContractExecutionOwner) observeSelectedForkOperation(ctx context.Context, request runfork.ForkOperationRequest, operation *selectedContractOperation) (runfork.ForkOperationRecord, bool, bool, error) {
 	contexts := o.ports.contexts
 	contexts.mu.Lock()
 	defer contexts.mu.Unlock()
@@ -103,6 +102,24 @@ func (o SelectedContractExecutionOwner) observeSelectedForkOperation(ctx context
 		}
 		return record, true, true, nil
 	}
+	// Reuse this admitted operation's existing inventory entry. The reservation
+	// closes the native-recovery-to-bind gap without granting execution authority.
+	entry := contexts.entries[operation]
+	if entry == nil || entry.retiring {
+		return runfork.ForkOperationRecord{}, false, false, worklifetime.ErrRetired
+	}
+	binding, err := o.ports.fork.RequireRunForkSelectedContractBinding(ctx, record.ForkRunID)
+	if err != nil {
+		return runfork.ForkOperationRecord{}, false, false, err
+	}
+	if err := validateSelectedContractExecutionBinding(record.ForkRunID, binding); err != nil {
+		return runfork.ForkOperationRecord{}, false, false, err
+	}
+	if binding.BindingID != record.BindingID || binding.SourceRunID != record.Request.SourceRunID ||
+		!sameSelectedForkPointIdentity(binding.ForkPoint, *record.Request.ResolvedPoint) || binding.ContractSelection != record.Request.ContractSelection {
+		return runfork.ForkOperationRecord{}, false, false, errors.New("selected recovery reservation differs from its durable operation binding")
+	}
+	entry.binding, entry.recoveryReserved = binding, true
 	return record, true, false, nil
 }
 

@@ -105,7 +105,7 @@ func (o SelectedContractExecutionOwner) RecoverSelectedForkContexts(ctx context.
 			if err != nil {
 				return results, errors.Join(diagnostics, err)
 			}
-			result, err = o.settleRecoveredSelectedCancellations(runCtx, runcontrol.SelectedForkRecoveryRequest{Entry: entry, Process: process.LeaseStamp(), Effects: req}, result, environment)
+			result, err = o.settleRecoveredSelectedCancellations(runCtx, runcontrol.SelectedForkRecoveryRequest{Entry: entry, Process: process.LeaseStamp(), Effects: req}, result, environment, nil)
 			if err != nil {
 				return append(results, result), errors.Join(diagnostics, err)
 			}
