@@ -18346,6 +18346,8 @@ platform_tables:
         parent-interrupted or settled attempt. An ended attempt is not necessarily a delivery settlement: parent
         terminalization closes interrupted version N and atomically creates a separate settled version N+1. Only
         closure_kind=settled is public delivery-outcome evidence; older settled retry versions remain visible.
+        A retry_scheduled settlement retains its original absolute retry_eligible_at in this same row and transaction.
+        Later claims and lease expiry do not rewrite that committed decision. Other outcomes and closures have no retry due.
       rule_selection: Exact selections observed by unsuccessful attempts are deliberately not persisted in this ledger.
       ddl: |
         CREATE TABLE event_delivery_attempts (
@@ -18374,6 +18376,7 @@ platform_tables:
             side_effects     JSONB NOT NULL DEFAULT '[]',
             duration_ms      BIGINT CHECK (duration_ms IS NULL OR duration_ms >= 0),
             completed_at     TIMESTAMPTZ,
+            retry_eligible_at TIMESTAMPTZ,
             PRIMARY KEY (delivery_id, claim_version),
             UNIQUE (delivery_id, claim_version, open_marker),
             UNIQUE (delivery_id, claim_version, closure_kind),
@@ -18387,6 +18390,7 @@ platform_tables:
             CHECK ((open_marker = TRUE AND outcome IS NULL AND completed_at IS NULL) OR (open_marker = FALSE AND outcome IS NOT NULL AND completed_at IS NOT NULL)),
             CHECK ((closure_kind = 'open' AND open_marker = TRUE AND outcome IS NULL AND completed_at IS NULL AND duration_ms IS NULL) OR (closure_kind = 'lease_expired' AND open_marker = FALSE AND outcome = 'lease_expired' AND completed_at IS NOT NULL AND duration_ms IS NULL) OR (closure_kind = 'parent_interrupted' AND open_marker = FALSE AND outcome = 'terminalized' AND completed_at IS NOT NULL AND duration_ms IS NOT NULL) OR (closure_kind = 'settled' AND open_marker = FALSE AND outcome IS NOT NULL AND outcome IN ('delivered', 'retry_scheduled', 'dead_letter', 'terminalized', 'canceled') AND completed_at IS NOT NULL AND duration_ms IS NOT NULL)),
             CHECK (outcome <> 'canceled' OR (failure IS NULL AND reason_code IN ('terminate', 'turn_timeout'))),
+            CHECK ((retry_eligible_at IS NULL AND (outcome IS NULL OR outcome <> 'retry_scheduled')) OR (closure_kind = 'settled' AND outcome IS NOT NULL AND outcome = 'retry_scheduled' AND completed_at IS NOT NULL AND retry_eligible_at IS NOT NULL AND retry_eligible_at > completed_at)),
             CHECK (completed_at IS NULL OR completed_at >= started_at),
             INDEX idx_delivery_attempts_open (lease_expires_at) WHERE outcome IS NULL
         );
@@ -20786,12 +20790,25 @@ run_model:
         missing or contradictory evidence for a connected route cannot be repaired from current delivery or topology rows.
         Planning and stamped frontier/history recipient consumers retain that validated evidence. Historical evidence never
         grants a live delivery lease or permits copying a source worker capability into a new fork-local delivery.
-        Historical delivery facts exclude live lease expiry and physical update/continuation-handoff stamps. Those coordinates
+        Historical delivery facts use a separate HistoricalFact type, never a live delivery Snapshot. They exclude live
+        lease expiry, physical update/continuation-handoff stamps, physical retry eligibility, session identifiers and start timestamps. Those coordinates
         remain in the current delivery owner for execution fencing and dispatch, not in fork history. Deployment pending
         publication versus pending receiver phase is determined solely by the exact retained successful platform/pipeline
         receipt; missing, duplicate or contradictory receipts cannot authorize the receiver phase.
         Delivery admission and semantic settlement times remain historical facts; the physical updated_at clock is not
-        reconstructed or substituted from them, and historical delivery readback leaves that physical clock unset.
+        reconstructed or substituted from them, and historical delivery readback has no physical clock field.
+        The required source_execution_at_cut object retains all three explicit boolean refusal predicates: in_progress,
+        started and session_bound. Missing or null predicates are invalid, not false. Started is derived from persisted
+        delivery start presence, not merely the current attempt; session_bound is the same-transaction open-attempt
+        binding presence. In-progress requires started; a session binding requires in-progress. These cut predicates
+        preserve the existing refusal and narrow same-source emitter decisions; they authorize no live work.
+        Retry history retains a separate committed retry_decision (claim_version, settled_at, eligible_at), selected from
+        the greatest settled generation across all outcomes. It survives later open or lease-expired attempts and is
+        never reconstructed from a later clock or policy default. A terminal delivery, including unclaimed queued
+        cancellation, has no current retry decision even if an older retry attempt survives. First claim and changes to
+        the captured status/start/session-bound predicates still contribute history; renewed leases, unchanged reclaim,
+        worker tokens and a different nonempty session identifier alone do not. Still-consumed session/turn/audit
+        families and exact terminal/dead-letter relationships remain; this is partial Q1 retirement.
         Historical delivery facts omit live claim generations. Only an exact settled outcome records settled_claim_version,
         including zero for cancellation before a claim; historical readback restores that outcome coordinate but never
         grants live execution authority. Pending, in-progress and retry-scheduled history retains its lifecycle classification
@@ -20972,10 +20989,11 @@ run_model:
       to classify exactly one narrow selected-revision active delivery/session coupling case as lineage/no-action and branch-divergence
       evidence: the delivery fact present in the selected revision is in progress for the source event referenced by the selected event
       source_event_id, the selected event was produced by the same agent subscriber, and that revision has no
-      active_session_id, receipt, receipt outcome, or settled_at. The policy does not
+      source_execution_at_cut.session_bound, receipt, receipt outcome, or settled_at, and its captured started predicate
+      is true. The policy does not
       authorize copying source delivery rows, sessions, turns, audits, provider session IDs, transcripts, receipts,
       outcomes, or conversation audits into the fork and does not let a later source terminal outcome suppress or decide
-      selected fork execution. Unrelated in-flight deliveries, active_session_id coupling, partial receipt/outcome state,
+      selected fork execution. Unrelated in-flight deliveries, captured session-bound coupling, partial receipt/outcome state,
       fork-local pre-existing conversation rows, post-revision source conversation facts outside the source-advanced
       conversation-history owner, non-agent replay, timers, routes, retry/idempotency, follow-up policy, restart recovery,
       and operator surfaces remain fail-closed or split siblings unless separately approved.'
@@ -21005,7 +21023,7 @@ run_model:
       source agent_sessions, agent_turns, and agent_conversation_audits present in the selected revision as lineage/no-action evidence
       only. This policy is selected-contract execution only and is not session, turn, or audit reconstruction. It applies
       only when selected-contract execution regenerates fresh fork-local work through canonical owners and no pending or
-      in-progress source delivery in the selected revision requires live session continuity through active_session_id, partial
+      in-progress source delivery in the selected revision requires session continuity through source_execution_at_cut.session_bound, partial
       receipt/outcome state, or equivalent active execution evidence, except for the separately owned same-source
       selected-event emission case admitted by runtime.run_fork.selected_contract_execution.active_source_delivery_conversation_coupling_policy.
       Source session, turn, audit, provider-session,
@@ -21601,11 +21619,12 @@ run_model:
         consumes replay_resume_admission delivery_in_progress_history evidence and selected-event source-event causality to
         admit only the same-source delivery selected-event emission case: the source delivery is in progress in the selected revision, belongs to
         the selected event source_event_id, and its agent subscriber produced the selected event, with no
-        active_session_id, receipt, receipt outcome, or settled_at in that revision. This owner may demote that delivery fact from a
+        source_execution_at_cut.session_bound, receipt, receipt outcome, or settled_at in that revision; the required
+        source_execution_at_cut.started predicate remains true. This owner may demote that delivery fact from a
         generic delivery_history_unproven blocker to lineage/no-action evidence and may allow the session/turn/audit
         lineage policy to classify source conversation rows present in the selected revision. It records the admitted case as selected-contract
         branch-divergence evidence. It must not copy source delivery/session/turn/audit rows, use source terminal outcomes
-        committed after the selected revision as fork suppressors, or admit unrelated active deliveries, active_session_id coupling, post-revision source
+        committed after the selected revision as fork suppressors, or admit unrelated active deliveries, captured session-bound coupling, post-revision source
         conversation facts, fork-local pre-existing rows, non-agent replay, timers, routes, retry/idempotency, follow-up
         policy, restart recovery, or operator surfaces.'
       3i_contract_swap_boot_resume_admission: 'For fixed-event forks with selected or swapped contracts, full boot/resume

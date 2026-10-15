@@ -77,7 +77,7 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 		},
 		RetryReady: func(t *testing.T, event events.Event, route events.DeliveryRoute) {
 			t.Helper()
-			if err := storetest.MakeManagerRetryEligible(ctx, selected, event, route); err != nil {
+			if err := storetest.WaitManagerRetryDecision(ctx, selected, event, route); err != nil {
 				t.Fatal(err)
 			}
 		},
