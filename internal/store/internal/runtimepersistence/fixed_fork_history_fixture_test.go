@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -169,11 +170,28 @@ func prepareFixedForkHistoryFixture(t *testing.T, selected agentFixtureFlowStore
 }
 
 func commitFixedForkHistoryFixture(ctx context.Context, attempt *mutationprotocol.Attempt, f fixedForkHistoryFixture) (pipeline.CommittedFlowInstanceActivation, error) {
+	var prepared runtimebus.PreparedPublishEvent
+	if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var found bool
+		var err error
+		switch selected := f.selected.(type) {
+		case *PostgresStore:
+			prepared, found, err = selected.eventPostgresOwner.LoadPreparedPublishEventTx(ctx, tx, f.construction.CreatingEvent.ID())
+		case *SQLiteRuntimeStore:
+			prepared, found, err = selected.eventSQLiteOwner.LoadPreparedPublishEventTx(ctx, tx, f.construction.CreatingEvent.ID())
+		}
+		if err != nil || !found {
+			return errors.Join(err, fmt.Errorf("fixed construction requires its persisted creating event"))
+		}
+		return nil
+	}); err != nil {
+		return pipeline.CommittedFlowInstanceActivation{}, err
+	}
 	switch selected := f.selected.(type) {
 	case *PostgresStore:
-		return selected.pipelinePostgresOwner.CommitFixedForkConstructionForTest(ctx, attempt, f.construction.Parent, f.construction.Child, f.construction.CreatingEvent)
+		return selected.pipelinePostgresOwner.CommitFixedForkConstructionForTest(ctx, attempt, f.construction.Parent, f.construction.Child, prepared.Event)
 	case *SQLiteRuntimeStore:
-		return selected.pipelineSQLiteOwner.CommitFixedForkConstructionForTest(ctx, attempt, f.construction.Parent, f.construction.Child, f.construction.CreatingEvent)
+		return selected.pipelineSQLiteOwner.CommitFixedForkConstructionForTest(ctx, attempt, f.construction.Parent, f.construction.Child, prepared.Event)
 	default:
 		return pipeline.CommittedFlowInstanceActivation{}, fmt.Errorf("fixed fork fixture requires native selected store, got %T", f.selected)
 	}
