@@ -715,6 +715,7 @@ typed-process-local	callback-type	typed	internal/runtime/manager/agent_manager.g
 typed-process-local	callback-type	typed	internal/runtime/manager/agent_manager.go	AgentManager	field:runtimeIngressSafetyPause	func(context.Context, string, *github.com/division-sh/swarm/internal/runtime/failures.Envelope) error
 typed-process-local	callback-type	typed	internal/runtime/manager/agent_manager.go	AgentManager	field:runtimeShutdownAdmissionClosed	func() bool
 typed-process-local	callback-type	typed	internal/runtime/manager/agent_manager.go	AgentManager	field:testAfterDynamicFlowReadinessAdmission	func()
+typed-process-local	callback-type	typed	internal/runtime/manager/agent_manager.go	AgentManager	field:testBeforeDynamicFlowAgentReadiness	func()
 typed-process-local	callback-type	typed	internal/runtime/manager/agent_manager.go	AgentManager	field:workspaceGatewayAdmission	func(context.Context, github.com/division-sh/swarm/internal/runtime/core/actors.AgentConfig) error
 typed-process-local	callback-type	typed	internal/runtime/manager/agent_manager.go	NewAgentManager	param:factory	github.com/division-sh/swarm/internal/runtime/manager.AgentFactory
 typed-process-local	callback-type	typed	internal/runtime/manager/agent_manager.go	NewAgentManagerWithOptions	param:factory	github.com/division-sh/swarm/internal/runtime/manager.AgentFactory
