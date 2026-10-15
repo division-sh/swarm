@@ -71,6 +71,7 @@ func TestReceiverPublicationExplicitTargetsBothStores(t *testing.T) {
 			store := f.store.(interface {
 				CommitPublication(context.Context, bus.PublicationCommand) (bus.CommittedPublication, error)
 				LoadPreparedPublishEvent(context.Context, string) (bus.PreparedPublishEvent, bool, error)
+				DeliverySnapshotsForEvent(context.Context, string) ([]deliverylifecycle.Snapshot, error)
 				deliverylifecycle.Store
 			})
 			snapshot := func() map[string]SelectedForkStorageTableSnapshot {
@@ -171,6 +172,13 @@ func TestReceiverPublicationExplicitTargetsBothStores(t *testing.T) {
 							}
 							if validationErr := stored.Validate(); validationErr != nil {
 								t.Fatalf("validate stored selected publication: %v", validationErr)
+							}
+							snapshots, err := store.DeliverySnapshotsForEvent(ctx, event.ID())
+							if err != nil || len(snapshots) != wantRoutes {
+								t.Fatalf("read selected delivery snapshots: count=%d err=%v", len(snapshots), err)
+							}
+							for position, snapshot := range snapshots {
+								t.Logf("selected publication snapshot: position=%d delivery=%s created_at=%s identity=%#v route=%#v", position, snapshot.DeliveryID, snapshot.CreatedAt.Format(time.RFC3339Nano), snapshot.RouteIdentity, snapshot.Route)
 							}
 							t.Logf("selected publication routes (including actor, construction dependency and connect claim): expected=%#v actual=%#v", command.Commit.DeliveryRoutes, stored.DeliveryRoutes)
 							t.Logf("selected publication normalized envelope: expected=%#v actual=%#v", projected.NormalizedEnvelope(), stored.Event.Event().NormalizedEnvelope())
