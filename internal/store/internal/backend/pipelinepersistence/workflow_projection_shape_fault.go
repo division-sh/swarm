@@ -61,6 +61,34 @@ func AddWorkflowProjectionPrivateBookkeepingForTest(ctx context.Context, tx *sql
 	return workflowProjectionFaultResult(tx.ExecContext(ctx, query, run, path))
 }
 
+// Fixed hostile value maps never replace the actual constructed coordinates.
+func SetWorkflowProjectionIdentityLookalikesForTest(ctx context.Context, tx *sql.Tx, postgres bool, run, entity, path string) (int64, error) {
+	if postgres {
+		return workflowProjectionFaultResult(tx.ExecContext(ctx, `WITH authored AS (
+			UPDATE entity_state es
+			SET fields = '{"entity_id":"authored-lookalike","flow_instance":"authored/lookalike"}'::jsonb
+			WHERE es.run_id=$1::uuid AND es.entity_id=$2::uuid AND es.flow_instance=$3
+			  AND EXISTS (SELECT 1 FROM flow_instances fi WHERE fi.run_id=es.run_id
+			    AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance AND fi.entity_type=es.entity_type)
+			RETURNING run_id, entity_id, flow_instance
+		)
+		UPDATE flow_instances fi
+		SET bookkeeping = '{"entity_id":"bookkeeping-lookalike","flow_instance":"bookkeeping/lookalike"}'::jsonb
+		FROM authored
+		WHERE fi.run_id=authored.run_id AND fi.entity_id=authored.entity_id AND fi.instance_path=authored.flow_instance`, run, entity, path))
+	}
+	if _, err := workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE entity_state
+		SET fields = '{"entity_id":"authored-lookalike","flow_instance":"authored/lookalike"}'
+		WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3
+		  AND EXISTS (SELECT 1 FROM flow_instances fi WHERE fi.run_id=entity_state.run_id
+		    AND fi.entity_id=entity_state.entity_id AND fi.instance_path=entity_state.flow_instance AND fi.entity_type=entity_state.entity_type)`, run, entity, path)); err != nil {
+		return 0, err
+	}
+	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE flow_instances
+		SET bookkeeping = '{"entity_id":"bookkeeping-lookalike","flow_instance":"bookkeeping/lookalike"}'
+		WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, run, entity, path))
+}
+
 func SetWorkflowProjectionConflictingEntityTypeForTest(ctx context.Context, tx *sql.Tx, run, entity string) (int64, error) {
 	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE entity_state SET entity_type = 'wrong_entity_type' WHERE run_id = $1 AND entity_id = $2`, run, entity))
 }
