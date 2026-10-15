@@ -240,7 +240,7 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 	if !ok {
 		t.Fatal("retained join success requires the original selected store owner")
 	}
-	ctx := servedControlProofAuthorActivityContext(t, rt)
+	ctx := servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
 	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: request.SourceRunID, At: request.At, ExpectedBundleHash: rt.BundleHash,
 		ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
@@ -265,7 +265,13 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 	if !ok {
 		t.Fatal("retained join success requires the canonical selected materialization owner")
 	}
-	sourceBefore := readServedForkRecipientSourceDomain(t, rt, request.SourceRunID)
+	sourceBefore, err := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, request.SourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sourceBefore) != 7 {
+		t.Fatalf("retained join source witness lost table families: %+v", sourceBefore)
+	}
 	before := snapshotForkReceiverApplication(t, rt)
 	child, err := materializer.MaterializeRunForkForSelectedContractExecution(ctx, admitted)
 	if err != nil {
@@ -304,11 +310,38 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 			t.Fatalf("expected exactly one historical child generation %+v, got%d", want, matches)
 		}
 	}
+	sourceAfterFirst, sourceFirstErr := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, request.SourceRunID)
+	if sourceFirstErr != nil {
+		t.Fatalf("read source after first retained join materialization: %v", sourceFirstErr)
+	}
 	again, err := materializer.MaterializeRunForkForSelectedContractExecution(ctx, admitted)
 	_, repeated := readNativeRetainedRootJoins(t, rt.ReceiverStateReader, child.ForkRunID)
-	if err != nil || again.ForkRunID != child.ForkRunID || !reflect.DeepEqual(childJoins, repeated) ||
-		!reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, request.SourceRunID)) {
-		t.Fatalf("repeated materialization changed child/source history: %v", err)
+	sourceAfter, sourceErr := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, request.SourceRunID)
+	if err != nil {
+		t.Errorf("repeated retained join materialization: %v", err)
+	}
+	if again.ForkRunID != child.ForkRunID {
+		t.Errorf("repeated materialization changed child identity: first=%s repeated=%s", child.ForkRunID, again.ForkRunID)
+	}
+	if !reflect.DeepEqual(childJoins, repeated) {
+		t.Errorf("repeated materialization changed child join rows: first=%+v repeated=%+v", childJoins, repeated)
+	}
+	if sourceErr != nil {
+		t.Fatalf("read source after repeated retained join materialization: %v", sourceErr)
+	}
+	if !reflect.DeepEqual(sourceBefore, sourceAfter) {
+		for table, original := range sourceBefore {
+			current, present := sourceAfter[table]
+			if !present || !reflect.DeepEqual(original, current) {
+				t.Errorf("retained join source table changed: table=%s present=%t columns=%q -> %q rows=%q -> %q; after-first=%+v",
+					table, present, original.Columns, current.Columns, original.Rows, current.Rows, sourceAfterFirst[table])
+			}
+		}
+		for table := range sourceAfter {
+			if _, present := sourceBefore[table]; !present {
+				t.Errorf("retained join source gained table family: %s %+v", table, sourceAfter[table])
+			}
+		}
 	}
 	if err := prepared.Close(); err != nil {
 		t.Fatalf("join retained join preparation: %v", err)
