@@ -182,7 +182,7 @@ func TestReceiverPublicationExplicitTargetsBothStores(t *testing.T) {
 							}
 							t.Logf("selected publication routes (including actor, construction dependency and connect claim): expected=%#v actual=%#v", command.Commit.DeliveryRoutes, stored.DeliveryRoutes)
 							t.Logf("selected publication normalized envelope: expected=%#v actual=%#v", projected.NormalizedEnvelope(), stored.Event.Event().NormalizedEnvelope())
-							if !reflect.DeepEqual(stored.DeliveryRoutes, command.Commit.DeliveryRoutes) {
+							if !receiverPublicationRoutesEqual(command.Commit.DeliveryRoutes, stored.DeliveryRoutes) {
 								t.Errorf("readback changed selected delivery routes/dependency/claim: expected=%#v actual=%#v", command.Commit.DeliveryRoutes, stored.DeliveryRoutes)
 							}
 							if !reflect.DeepEqual(stored.Event.Event().NormalizedEnvelope(), projected.NormalizedEnvelope()) {
@@ -201,7 +201,7 @@ func TestReceiverPublicationExplicitTargetsBothStores(t *testing.T) {
 								t.Fatalf("original public selector cannot replay stored actor: %v", err)
 							}
 							replay := replayed[0].(bus.EnginePublicationPlan).PublicationCommand()
-							if len(replay.Activations) != 0 || !reflect.DeepEqual(replay.Commit.DeliveryRoutes, command.Commit.DeliveryRoutes) {
+							if len(replay.Activations) != 0 || !receiverPublicationRoutesEqual(command.Commit.DeliveryRoutes, replay.Commit.DeliveryRoutes) {
 								t.Fatal("replay reselected a sibling or replaced original dependency/claim")
 							}
 							duplicate, err := store.CommitPublication(ctx, replay)
