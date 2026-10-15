@@ -48,11 +48,7 @@ func projectForkDeploymentCarriage(obligation runfork.RunForkFanOutObligation, t
 		return forkDeploymentCarriage{}, fmt.Errorf("fork deployment source does not match exact child pin")
 	}
 	if target.VersionID != intent.Source.VersionID {
-		status := fanoutobligation.StatusOpen
-		if target.RowCount == 0 {
-			status = fanoutobligation.StatusClosed
-		}
-		return forkDeploymentCarriage{status: status}, nil
+		return freshForkDeploymentCarriage(target)
 	}
 	if target.SchemaDigest != intent.Request.Deployment.SchemaDigest || target.RowCount != intent.Request.Cardinality {
 		return forkDeploymentCarriage{}, fmt.Errorf("fork deployment unchanged version contradicts source schema or cardinality")
@@ -62,6 +58,17 @@ func projectForkDeploymentCarriage(obligation runfork.RunForkFanOutObligation, t
 		outcomes: obligation.Outcomes, pendingDeployment: obligation.PendingDeployment,
 		sourceRunID: intent.Request.Key.RunID,
 	}, nil
+}
+
+func freshForkDeploymentCarriage(target runtimedata.PinnedSource) (forkDeploymentCarriage, error) {
+	if target.RowCount < 0 {
+		return forkDeploymentCarriage{}, fmt.Errorf("fork deployment child pin has negative cardinality")
+	}
+	status := fanoutobligation.StatusOpen
+	if target.RowCount == 0 {
+		status = fanoutobligation.StatusClosed
+	}
+	return forkDeploymentCarriage{status: status}, nil
 }
 
 func requireForkResourceSourcePinAgreement(plan runfork.RunForkPlan, pins []runtimedata.Pin) error {

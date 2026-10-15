@@ -50,12 +50,14 @@ func requireExactMaterializedRunForkDeploymentFeeds(ctx context.Context, tx *sql
 		if err != nil {
 			return err
 		}
-		carriage := forkDeploymentCarriage{}
+		var carriage forkDeploymentCarriage
 		if source, present := sourceByDeclaration[pin.Declaration]; present {
 			carriage, err = projectForkDeploymentCarriage(source, target)
-			if err != nil {
-				return err
-			}
+		} else {
+			carriage, err = freshForkDeploymentCarriage(target)
+		}
+		if err != nil {
+			return err
 		}
 		cursor, err := requireRunForkDeploymentFeedRowTx(ctx, tx, key, targetBundleHash, target, carriage)
 		if err != nil {
