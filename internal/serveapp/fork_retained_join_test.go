@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/failures"
@@ -359,8 +361,8 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 	if again.ForkRunStatus != runfork.RunForkMaterializedStatus {
 		t.Errorf("materialization readback activated the child: %+v", again)
 	}
-	if !reflect.DeepEqual(childJoins, repeated) {
-		t.Errorf("repeated materialization changed child join rows: first=%+v repeated=%+v", childJoins, repeated)
+	if err := compareRetainedJoinActivations(childJoins, repeated); err != nil {
+		t.Errorf("repeated materialization changed child join rows: %v; first=%+v repeated=%+v", err, childJoins, repeated)
 	}
 	if sourceErr != nil {
 		t.Fatalf("read source after repeated retained join materialization: %v", sourceErr)
@@ -389,6 +391,84 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 	}
 	if err := prepared.Close(); err != nil {
 		t.Fatalf("join retained join preparation: %v", err)
+	}
+}
+
+func compareRetainedJoinActivations(first, repeated []joinruntime.Activation) error {
+	if len(first) != len(repeated) {
+		return fmt.Errorf("join cardinality changed: %d -> %d", len(first), len(repeated))
+	}
+	index := func(activations []joinruntime.Activation) (map[string]joinruntime.Activation, error) {
+		byKey := make(map[string]joinruntime.Activation, len(activations))
+		for _, activation := range activations {
+			key := activation.Key()
+			if key == "" {
+				return nil, errors.New("retained join has an empty activation key")
+			}
+			if _, duplicate := byKey[key]; duplicate {
+				return nil, fmt.Errorf("duplicate retained join activation key %q", key)
+			}
+			byKey[key] = activation
+		}
+		return byKey, nil
+	}
+	before, err := index(first)
+	if err != nil {
+		return err
+	}
+	after, err := index(repeated)
+	if err != nil {
+		return err
+	}
+	for key, activation := range before {
+		reloaded, found := after[key]
+		if !found || !reflect.DeepEqual(activation, reloaded) {
+			return fmt.Errorf("retained join activation %q changed (present=%t)", key, found)
+		}
+	}
+	return nil
+}
+
+func TestRetainedJoinComparisonRequiresExactUniqueActivations(t *testing.T) {
+	at := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+	makeActivation := func(id string) joinruntime.Activation {
+		ref, err := timeridentity.NewJoinRef(identitytest.RootNode(t, "join"), "item.done", "review", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ref, err = ref.BindStageEntry(timeridentity.StageEntryRef{RunID: "run", FlowScope: ".", InstanceID: "one", InstancePath: ".", EntityID: "entity", Stage: "review", Cause: "construction"}, loopruntime.Activation{}.Generation())
+		if err != nil {
+			t.Fatal(err)
+		}
+		activation, err := joinruntime.NewActivation(ref, []string{"member"}, nil, at, at.Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return activation
+	}
+	first, second, extra := makeActivation("first"), makeActivation("second"), makeActivation("extra")
+	changed := first
+	changed.DeadlineAt = changed.DeadlineAt.Add(time.Microsecond)
+	for _, test := range []struct {
+		name          string
+		before, after []joinruntime.Activation
+		wantError     bool
+	}{
+		{"permutation", []joinruntime.Activation{first, second}, []joinruntime.Activation{second, first}, false},
+		{"duplicate_before", []joinruntime.Activation{first, first}, []joinruntime.Activation{first, second}, true},
+		{"duplicate_after", []joinruntime.Activation{first, second}, []joinruntime.Activation{first, first}, true},
+		{"missing", []joinruntime.Activation{first, second}, []joinruntime.Activation{first}, true},
+		{"extra", []joinruntime.Activation{first}, []joinruntime.Activation{first, second}, true},
+		{"replaced_key", []joinruntime.Activation{first, second}, []joinruntime.Activation{first, extra}, true},
+		{"changed_value_same_key", []joinruntime.Activation{first, second}, []joinruntime.Activation{changed, second}, true},
+		{"empty_key_before", []joinruntime.Activation{{}}, []joinruntime.Activation{first}, true},
+		{"empty_key_after", []joinruntime.Activation{first}, []joinruntime.Activation{{}}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := compareRetainedJoinActivations(test.before, test.after); (err != nil) != test.wantError {
+				t.Fatalf("exact retained join comparison error=%v, want error=%t", err, test.wantError)
+			}
+		})
 	}
 }
 
