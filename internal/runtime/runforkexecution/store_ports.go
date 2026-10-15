@@ -39,6 +39,8 @@ type SelectedDeploymentFanOutStore interface {
 // binding, and cleanup for one selected-contract fork.
 type SelectedContractForkLifecycle interface {
 	SelectedDeploymentFanOutStore
+	LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
+	LoadForkOperationByID(context.Context, string) (runfork.ForkOperationRecord, bool, error)
 	FailMaterializedSelectedContractExecutionFork(context.Context, string, runfork.ForkOperationFailure) error
 	ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)
 	RecoverSelectedFork(context.Context, runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error)
