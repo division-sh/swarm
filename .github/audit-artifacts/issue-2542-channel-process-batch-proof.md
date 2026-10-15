@@ -14,18 +14,24 @@ collector fingerprint is unchanged, b5bdd1d92df22693c570dab217a46c8a184f37085f49
 These are physical removals, not an unconditional claim that all250 are qualified.
 Existing mock78/62 and numeric-fork9/8 holds remain outside accepted credit.
 
-Qualification is not inferred from a physical deletion. Proposed independently
-green credit is180/136; the source-lifecycle/history dependency57/50, selected
-binding caller9/7 and learned-object caller4/3 remain uncredited,70/60 total.
+Qualification is not inferred from a physical deletion. Reviewer-b6184610797
+accepted162/122; the source-lifecycle/history dependency57/50, selected binding
+caller9/7, learned-object caller4/3, render-fault caller12/9 and abrupt-input
+caller6/5 remain uncredited,88/74 total pending the bounded repair review.
 The source subgroup comprises
 TestChannelSourceLifecyclePublicJourney41/39, readChannelNativeHistory3/2,
 readChannelSourceHistory3/2, readChannelPreservedHistory8/6 and
 requireChannelPreservedHistory2/1. The exact selected root is
-TestChannelSelectedForkInputBoundaryMatrix9/7. Subject to reviewer acceptance,
-the adjusted residual is4803/2918, not the physical4646/2788; cumulative accepted
-would be1830/1504. TestChannelLearnedObjectPublicJourney is the exact4/3 held
+TestChannelSelectedForkInputBoundaryMatrix9/7. With the prior87/70 holds, the
+adjusted residual is4821/2932, not the physical4646/2788; cumulative accepted
+is1812/1490. TestChannelLearnedObjectPublicJourney is the exact4/3 held
 caller. The binding-reader helper's both-store direct-cell receipts remain
 separate from the uncompleted complete caller matrix.
+The newly held6/5 declaration is proveChannelInputCommitDeath, consumed by
+TestChannelInputAbruptProcessDeathPublicJourney; its shared readers' independently
+executed credit remains separate. The12/9 render declaration is
+TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates. Physical
+baseline and historical Before/After records are not changed by these holds.
 
 The receipt uses the SAME retained366ef25c98c0ec629354038246e7a30b214d7971
 integration base as the accepted agent-snapshot checkpoint, with a local push
@@ -173,7 +179,7 @@ Additional original caller receipts, all race/GOMAXPROCS2 unless stated:
 | --- | --- |
 | Object anchor factory callers | object-carrier-anchor-original-race: original3 anchors on both stores PASS58.689s. |
 | Object temporal factory callers | object-carrier-original-temporal-race: original6 temporal/restart cells PASS148.473s. |
-| Input authority/restart | original-remaining-callers-race: all4 authority/restart cells PASS225.640s; interrupted-input-pg-race: PostgreSQL plain partial true/false PASS50.643s. Original SQLite plain/chosen partial cells also pass; the10m combined command remains RED, not a complete abrupt-input matrix receipt. |
+| Input authority/restart | original-remaining-callers-race: all4 authority/restart cells PASS225.640s; interrupted-input-pg-race: PostgreSQL plain partial true/false PASS50.643s. Abrupt-input: SQLite plain true/false and chosen true PASS; SQLite chosen false FAIL. PostgreSQL chosen and both backends' skip cells lack proof. The filtered PostgreSQL root and10m combined command do not establish the complete12-cell matrix. The changed proveChannelInputCommitDeath6/5 stays qualification-held, without inherited/introduced attribution or another retry. |
 | Diagnostic persistence | original-remaining-callers-race: TestChannelDeliverySettlementDiagnosticBothStores PASS58.060s. |
 | Public operation surface and exact handoff | onboarding-surface-handoff-race: original E2E14 activation/publication cut and E2E18 no-ingress root both stores PASS56.159s. |
 | Uncertain notice/readback | uncertain-notice-race: TestChannelDeliveryUncertainNoticeSummaryReadbackE2E both stores PASS118.591s. |

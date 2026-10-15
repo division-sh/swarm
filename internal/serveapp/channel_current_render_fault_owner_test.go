@@ -57,9 +57,17 @@ func TestChannelCurrentRenderFaultPreservesScopeCancellationAndRestorationBothSt
 			if err := fault.RestoreForTest(context.Background()); err != nil {
 				t.Fatal(err)
 			}
+			assertChannelRenderFaultCleanupReplay(t, fault)
 			assertChannelRenderStorageUnchanged(t, reader, card, before)
 			proveChannelRenderFaultRefusesSuccessor(t, h, selected, reader, card, before)
 		})
+	}
+}
+
+func assertChannelRenderFaultCleanupReplay(t *testing.T, fault *storetest.ChannelCurrentRenderFault) {
+	t.Helper()
+	if err := fault.RestoreForTest(context.Background()); err != nil {
+		t.Fatalf("completed cleanup was not replay-safe: %v", err)
 	}
 }
 
@@ -112,6 +120,9 @@ func proveChannelRenderFaultRefusesSuccessor(t *testing.T, h *channelOnboardingE
 	}
 	if err := stale.InstallForTest(context.Background()); err == nil {
 		t.Fatal("stale capture overwrote a successor render")
+	}
+	if err := stale.RestoreForTest(context.Background()); err != nil {
+		t.Fatalf("unchanged retained original required a destructive cleanup: %v", err)
 	}
 	assertChannelRenderStorageUnchanged(t, reader, card, successor)
 	retained, err := reader.ReadChannelRenderStorage(context.Background(), before.RenderID)

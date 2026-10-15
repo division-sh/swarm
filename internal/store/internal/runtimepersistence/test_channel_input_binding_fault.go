@@ -10,10 +10,10 @@ import (
 )
 
 type ChannelInputBindingFault struct {
-	mu        sync.Mutex
-	selected  any
-	row       *runforkpersistence.ChannelInputBindingContradiction
-	installed bool
+	mu              sync.Mutex
+	selected        any
+	row             *runforkpersistence.ChannelInputBindingContradiction
+	cleanupRequired bool
 }
 
 func CaptureChannelInputBindingFaultForTest(ctx context.Context, selected any, run string) (*ChannelInputBindingFault, error) {
@@ -38,14 +38,14 @@ func (f *ChannelInputBindingFault) InstallForTest(ctx context.Context) error {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.installed {
+	if f.cleanupRequired {
 		return errors.New("channel binding fault is already installed")
 	}
-	err := runWorkflowProjectionFault(ctx, f.selected, f.row.InstallTx)
-	if err == nil {
-		f.installed = true
-	}
-	return err
+	return runWorkflowProjectionFault(ctx, f.selected, func(ctx context.Context, tx *sql.Tx) error {
+		// A lost COMMIT acknowledgement cannot discharge cleanup responsibility.
+		f.cleanupRequired = true
+		return f.row.InstallTx(ctx, tx)
+	})
 }
 
 func (f *ChannelInputBindingFault) RestoreForTest(ctx context.Context) error {
@@ -54,12 +54,12 @@ func (f *ChannelInputBindingFault) RestoreForTest(ctx context.Context) error {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if !f.installed {
+	if !f.cleanupRequired {
 		return nil
 	}
 	err := runWorkflowProjectionFault(ctx, f.selected, f.row.RestoreTx)
 	if err == nil {
-		f.installed = false
+		f.cleanupRequired = false
 	}
 	return err
 }

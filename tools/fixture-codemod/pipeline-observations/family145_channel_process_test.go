@@ -19,8 +19,8 @@ import (
 const channelProcessEventOwnerAfter = "f18887031dea8a98c73666305a23e48b1125d0641f72c802c7f68aaff23097fd"
 
 var channelProcessNativeControls = map[string]struct{ function, digest string }{
-	"internal/serveapp/channel_current_render_fault_owner_test.go": {"TestChannelCurrentRenderFaultPreservesScopeCancellationAndRestorationBothStores", "81e7523f7ea30f22c4e5adee5d57d9fa700dfcc40e74bc6c1cbdc48ce3788ae4"},
-	"internal/serveapp/channel_input_binding_fault_owner_test.go":  {"TestChannelInputBindingFaultKeepsOrdinaryRunAndExactReceiptBothStores", "c2c96e344117cdb942aa3ced65a3b83b1e531a3eac9046d9f3eaed10ede7479c"},
+	"internal/serveapp/channel_current_render_fault_owner_test.go": {"TestChannelCurrentRenderFaultPreservesScopeCancellationAndRestorationBothStores", "fa08c7ea241f025383957914f4ad6bcbe009d3af0efecef248540906eeda5e6d"},
+	"internal/serveapp/channel_input_binding_fault_owner_test.go":  {"TestChannelInputBindingFaultKeepsOrdinaryRunAndExactReceiptBothStores", "2bc566196cd4d9f5eb159758df8298c39ad82c443e8d1a8fa69d8ca424785364"},
 	"internal/serveapp/channel_process_history_owner_test.go":      {"TestChannelProcessHistoryKeepsNativeFactsAndIndependentTemporalCutsBothStores", "9896600d7df74fa50531bd499deb3b5e17e8b5977d220a2402a105a27d2c21a4"},
 }
 

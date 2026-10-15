@@ -43,6 +43,23 @@ func (r *ChannelInputBindingContradiction) InstallTx(ctx context.Context, tx *sq
 }
 
 func (r *ChannelInputBindingContradiction) RestoreTx(ctx context.Context, tx *sql.Tx) error {
+	if r == nil || tx == nil {
+		return errors.New("channel binding cleanup requires its captured ordinary run")
+	}
+	_, err := loadRunForkSelectedContractBinding(ctx, tx, r.run)
+	if errors.Is(err, sql.ErrNoRows) {
+		ordinary, err := runlifecycle.ReadServedSetupRunStorageTx(ctx, tx, r.run)
+		if err != nil {
+			return err
+		}
+		if ordinary != r.ordinary {
+			return errors.New("channel binding cleanup refused a changed ordinary run")
+		}
+		return nil
+	}
+	if err != nil {
+		return err
+	}
 	return r.applyTx(ctx, tx, false)
 }
 

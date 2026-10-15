@@ -57,8 +57,19 @@ func (r *CurrentRenderCorruption) InstallTx(ctx context.Context, tx *sql.Tx) err
 }
 
 func (r *CurrentRenderCorruption) RestoreTx(ctx context.Context, tx *sql.Tx) error {
-	if r == nil {
+	if r == nil || tx == nil {
 		return errors.New("current render fault requires its captured native row")
+	}
+	// The transaction may have rolled back, or a previous restore may have
+	// committed without acknowledgement. Retained history is safe to leave intact
+	// even after the current plan advances; restoring still requires the live CAS.
+	var original bool
+	err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM channel_delivery_renders
+		WHERE render_id=$1 AND delivery_id=$2 AND CAST(render_input AS TEXT)=$3
+		AND CAST(source_revision AS TEXT)=$4 AND projection_version=$5 AND render_hash=$6 AND CAST(created_at AS TEXT)=$7)`,
+		r.render, r.plan, r.input, r.sourceRevision, r.version, r.hash, r.created).Scan(&original)
+	if err != nil || original {
+		return err
 	}
 	return r.replaceTx(ctx, tx, "{}", r.input)
 }

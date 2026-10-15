@@ -48,6 +48,7 @@ func TestChannelInputBindingFaultKeepsOrdinaryRunAndExactReceiptBothStores(t *te
 			if err := stale.InstallForTest(context.Background()); err == nil {
 				t.Fatal("stale capture replaced the current binding")
 			}
+			assertChannelBindingForeignCleanupRefused(t, stale, selected, seed.RunID, binding)
 			if err := first.RestoreForTest(ctx); !errors.Is(err, context.Canceled) {
 				t.Fatalf("cancelled cleanup removed a receipt: %v", err)
 			}
@@ -61,6 +62,16 @@ func TestChannelInputBindingFaultKeepsOrdinaryRunAndExactReceiptBothStores(t *te
 			assertChannelBindingFaultCounts(t, selected, 0)
 			proveChannelBindingCleanupCannotRemoveReplacement(t, selected, seed.RunID, first, binding.BindingID)
 		})
+	}
+}
+
+func assertChannelBindingForeignCleanupRefused(t *testing.T, fault *storetest.ChannelInputBindingFault, selected any, run string, binding runfork.RunForkSelectedContractBinding) {
+	t.Helper()
+	if err := fault.RestoreForTest(context.Background()); err == nil {
+		t.Fatal("foreign installed receipt was accepted as this capture's cleanup")
+	}
+	if after := readChannelBindingFaultReceipt(t, selected, run); after != binding {
+		t.Fatal("uncertain cleanup changed a foreign installed receipt")
 	}
 }
 
