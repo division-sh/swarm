@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/engine"
@@ -149,7 +150,7 @@ func TestReceiverPublicationOrderingContrastBothStores(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(projected.NormalizedEnvelope(), stored.Event.Event().NormalizedEnvelope()) {
 				t.Fatalf("initial readback changed exact envelope: err=%v expected=%#v actual=%#v", err, projected.NormalizedEnvelope(), stored.Event.Event().NormalizedEnvelope())
 			}
-			if !receiverPublicationRoutesEqualForDiagnostic(command.Commit.DeliveryRoutes, stored.DeliveryRoutes) {
+			if !receiverPublicationRoutesEqual(command.Commit.DeliveryRoutes, stored.DeliveryRoutes) {
 				t.Fatalf("initial publication lost route membership/full values: expected=%#v actual=%#v", command.Commit.DeliveryRoutes, stored.DeliveryRoutes)
 			}
 			snapshots, err := store.DeliverySnapshotsForEvent(f.ctx, event.ID())
@@ -241,9 +242,12 @@ func TestReceiverPublicationOrderingContrastBothStores(t *testing.T) {
 			if !reflect.DeepEqual(exact, snapshot()) {
 				t.Fatal("readback/replay/changed-selector refusal changed durable evidence")
 			}
-			t.Run("original_ordered_slice_oracle", func(t *testing.T) {
-				if !reflect.DeepEqual(stored.DeliveryRoutes, command.Commit.DeliveryRoutes) {
-					t.Errorf("readback changed selected delivery routes/dependency/claim: expected=%#v actual=%#v", command.Commit.DeliveryRoutes, stored.DeliveryRoutes)
+			t.Run("ordered_slice_false_negative", func(t *testing.T) {
+				if reflect.DeepEqual(stored.DeliveryRoutes, command.Commit.DeliveryRoutes) {
+					t.Fatal("injected timestamp tie must oppose preparation order")
+				}
+				if !receiverPublicationRoutesEqual(command.Commit.DeliveryRoutes, stored.DeliveryRoutes) {
+					t.Fatal("order-only counterexample changed complete route membership")
 				}
 			})
 			claimed, err := store.ClaimDelivery(f.ctx, original.Authority, stored.Event.Event(), node)
@@ -259,31 +263,34 @@ func TestReceiverPublicationOrderingContrastBothStores(t *testing.T) {
 	}
 }
 
-// A diagnostic of full membership, not a replacement for the original oracle.
-func receiverPublicationRoutesEqualForDiagnostic(expected, actual []events.DeliveryRoute) bool {
+// Preparation order is incidental; every unique route must retain all its values.
+func receiverPublicationRoutesEqual(expected, actual []events.DeliveryRoute) bool {
 	if len(expected) != len(actual) {
 		return false
 	}
-	for index, want := range expected {
-		if _, err := want.Identity(); err != nil {
+	members := make(map[events.DeliveryRouteIdentity]events.DeliveryRoute, len(expected))
+	for _, route := range expected {
+		id, err := route.Identity()
+		if err != nil {
 			return false
 		}
-		for _, prior := range expected[:index] {
-			if events.SameDeliveryRouteIdentity(prior, want) {
-				return false
-			}
-		}
-		matches := 0
-		for _, got := range actual {
-			if reflect.DeepEqual(want, got) {
-				matches++
-			}
-		}
-		if matches != 1 {
+		if _, duplicate := members[id]; duplicate {
 			return false
 		}
+		members[id] = route
 	}
-	return true
+	for _, route := range actual {
+		id, err := route.Identity()
+		if err != nil {
+			return false
+		}
+		want, found := members[id]
+		if !found || !reflect.DeepEqual(want, route) {
+			return false
+		}
+		delete(members, id)
+	}
+	return len(members) == 0
 }
 
 func assertReceiverPublicationOrderingHostility(t *testing.T, routes []events.DeliveryRoute) {
@@ -291,7 +298,7 @@ func assertReceiverPublicationOrderingHostility(t *testing.T, routes []events.De
 	for _, hostile := range [][]events.DeliveryRoute{
 		{routes[0]}, {routes[0], routes[0]}, {routes[0], routes[1], routes[1]},
 	} {
-		if receiverPublicationRoutesEqualForDiagnostic(routes, hostile) || receiverPublicationRoutesEqualForDiagnostic(hostile, hostile) && len(hostile) == 2 {
+		if receiverPublicationRoutesEqual(routes, hostile) || receiverPublicationRoutesEqual(hostile, routes) || receiverPublicationRoutesEqual(hostile, hostile) && len(hostile) == 2 {
 			t.Fatal("diagnostic membership comparison lost cardinality/duplicate detection")
 		}
 	}
@@ -306,8 +313,60 @@ func assertReceiverPublicationOrderingHostility(t *testing.T, routes []events.De
 				mutate(&hostile[index])
 			}
 		}
-		if receiverPublicationRoutesEqualForDiagnostic(routes, hostile) {
+		if receiverPublicationRoutesEqual(routes, hostile) || receiverPublicationRoutesEqual(hostile, routes) {
 			t.Fatal("diagnostic membership comparison ignored actor/dependency/connect claim")
 		}
+	}
+}
+
+func TestReceiverPublicationRouteMembershipRequiresFullValues(t *testing.T) {
+	target := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: "review", EntityID: eventtest.UUID("2677-membership-header")})
+	routes := make([]events.DeliveryRoute, 0, 2)
+	for _, name := range []string{"first", "second"} {
+		node, err := identity.AdmitExecutableNodeDeclaration("review", name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		routes = append(routes, events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: target})
+	}
+	changed := append([]events.DeliveryRoute(nil), routes...)
+	// Identity normalization omits empty joins. Full-value equality must not.
+	changed[0].Context.Joins = []events.JoinAdmissionReceipt{}
+	wantID, err := routes[0].Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	changedID, err := changed[0].Identity()
+	if err != nil || changedID != wantID || reflect.DeepEqual(routes[0], changed[0]) {
+		t.Fatalf("same-identity changed-value precondition: err=%v", err)
+	}
+	if err := events.ValidateDeliveryRoutes(changed); err != nil {
+		t.Fatalf("same-identity control must retain valid route values: %v", err)
+	}
+	for _, cell := range []struct {
+		name             string
+		expected, actual []events.DeliveryRoute
+		equal            bool
+	}{
+		{"identical", routes, routes, true},
+		{"permutation", routes, []events.DeliveryRoute{routes[1], routes[0]}, true},
+		{"missing_actual", routes, routes[:1], false},
+		{"missing_expected", routes[:1], routes, false},
+		{"extra_actual", routes, []events.DeliveryRoute{routes[0], routes[1], routes[1]}, false},
+		{"extra_expected", []events.DeliveryRoute{routes[0], routes[1], routes[1]}, routes, false},
+		{"duplicate_actual", routes, []events.DeliveryRoute{routes[0], routes[0]}, false},
+		{"duplicate_expected", []events.DeliveryRoute{routes[0], routes[0]}, routes, false},
+		{"duplicate_both", []events.DeliveryRoute{routes[0], routes[0]}, []events.DeliveryRoute{routes[0], routes[0]}, false},
+		{"invalid_actual", routes, []events.DeliveryRoute{routes[0], {}}, false},
+		{"invalid_expected", []events.DeliveryRoute{routes[0], {}}, routes, false},
+		{"invalid_both", []events.DeliveryRoute{{}}, []events.DeliveryRoute{{}}, false},
+		{"same_identity_changed_actual", routes, changed, false},
+		{"same_identity_changed_expected", changed, routes, false},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			if got := receiverPublicationRoutesEqual(cell.expected, cell.actual); got != cell.equal {
+				t.Fatalf("complete unique route membership: got=%t want=%t", got, cell.equal)
+			}
+		})
 	}
 }
