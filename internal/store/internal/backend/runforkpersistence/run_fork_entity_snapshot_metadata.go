@@ -103,24 +103,12 @@ func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnap
 	}
 	flowInstance := strings.TrimSpace(sourceState.FlowInstance)
 	entityType := strings.TrimSpace(sourceState.EntityType)
+	if err := validateRunForkMaterializedEntityLifecycle(sourceState, entity); err != nil {
+		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, err.Error(), false
+	}
 	source := runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState
-	switch sourceState.ConstructionKind {
-	case "constructed":
+	if sourceState.ConstructionKind == "constructed" {
 		source = runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance
-		if len(sourceState.FlowConfig) == 0 || sourceState.CreatedAt.IsZero() || sourceState.UpdatedAt.IsZero() || sourceState.EnteredStateAt.IsZero() || sourceState.Status == "" ||
-			sourceState.CurrentState == "" || entity.CurrentState == nil || sourceState.CurrentState != *entity.CurrentState || sourceState.FlowTemplate == "" || (sourceState.Mode != "static" && sourceState.Mode != "template") ||
-			(sourceState.Status == "terminated") != !sourceState.TerminatedAt.IsZero() {
-			return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove constructed header metadata for entity %s", entityID), false
-		}
-	case "imported_state":
-		if entityType == "" {
-			return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization imported state has no entity type for %s", entityID), false
-		}
-		if entity.CurrentState != nil || entity.EnteredStateAt != nil || entity.Gates != nil || entity.Bookkeeping != nil || entity.Accumulator != nil {
-			return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("imported entity %s cannot carry lifecycle history", entityID), false
-		}
-	default:
-		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization has unknown construction evidence for entity %s", entityID), false
 	}
 	if flowInstance == "" {
 		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-revision flow_instance/entity_type metadata for entity %s", entityID), false
@@ -155,6 +143,28 @@ func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnap
 		DataCreatedAt:          sourceState.DataCreatedAt,
 		DataUpdatedAt:          sourceState.DataUpdatedAt,
 	}, "", true
+}
+
+func validateRunForkMaterializedEntityLifecycle(source *runForkRevisionEntityMetadata, entity runfork.RunForkEntityState) error {
+	entityID := strings.TrimSpace(entity.EntityID)
+	switch source.ConstructionKind {
+	case "constructed":
+		if len(source.FlowConfig) == 0 || source.CreatedAt.IsZero() || source.UpdatedAt.IsZero() || source.EnteredStateAt.IsZero() || source.Status == "" ||
+			source.CurrentState == "" || entity.CurrentState == nil || source.CurrentState != *entity.CurrentState || source.FlowTemplate == "" || (source.Mode != "static" && source.Mode != "template") ||
+			(source.Status == "terminated") != !source.TerminatedAt.IsZero() {
+			return fmt.Errorf("fork materialization cannot prove constructed header metadata for entity %s", entityID)
+		}
+	case "imported_state":
+		if strings.TrimSpace(source.EntityType) == "" {
+			return fmt.Errorf("fork materialization imported state has no entity type for %s", entityID)
+		}
+		if entity.CurrentState != nil || entity.EnteredStateAt != nil || entity.Gates != nil || entity.Bookkeeping != nil || entity.Accumulator != nil {
+			return fmt.Errorf("imported entity %s cannot carry lifecycle history", entityID)
+		}
+	default:
+		return fmt.Errorf("fork materialization has unknown construction evidence for entity %s", entityID)
+	}
+	return nil
 }
 
 // The relational parent foreign key requires the admitted parent header first.

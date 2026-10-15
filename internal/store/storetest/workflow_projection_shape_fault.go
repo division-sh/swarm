@@ -57,6 +57,10 @@ func AddWorkflowProjectionPrivateBookkeeping(ctx context.Context, selected any, 
 	return private.AddWorkflowProjectionPrivateBookkeepingForTest(ctx, selected, run, path)
 }
 
+func SetWorkflowProjectionIdentityLookalikes(ctx context.Context, selected any, run, entity, path string) (int64, error) {
+	return private.SetWorkflowProjectionIdentityLookalikesForTest(ctx, selected, run, entity, path)
+}
+
 func SetWorkflowProjectionConflictingEntityType(ctx context.Context, selected any, run, entity string) (int64, error) {
 	return private.SetWorkflowProjectionConflictingEntityTypeForTest(ctx, selected, run, entity)
 }

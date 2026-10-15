@@ -8,7 +8,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
 type conversationForkFixtureKind uint8
@@ -25,12 +24,10 @@ type conversationForkFixtureStatement struct {
 }
 
 // These are fixed historical witnesses, not caller-authored history or SQL.
-func conversationForkProjectionStatements(fixture ConversationForkSourceFixture, kind conversationForkFixtureKind, dialect authoractivityfixture.Dialect) ([]conversationForkFixtureStatement, error) {
+func conversationForkProjectionStatements(fixture ConversationForkSourceFixture, postgres bool) ([]conversationForkFixtureStatement, error) {
+	kind := fixture.kind
 	if kind != conversationForkServedSource && kind != conversationForkNativeChat && kind != conversationForkDataOnlyChat {
 		return nil, fmt.Errorf("unknown conversation fixture kind")
-	}
-	if dialect != authoractivityfixture.DialectPostgres && dialect != authoractivityfixture.DialectSQLite {
-		return nil, fmt.Errorf("unknown conversation fixture dialect")
 	}
 	bornAt, advancedAt := fixture.Turn1At.Add(-30*time.Second), fixture.Turn1At.Add(10*time.Second)
 	path, fields, gates, bookkeeping, accumulator := "flow/forkchat", `{"name":"After"}`, `{}`, `{}`, `{}`
@@ -54,13 +51,13 @@ func conversationForkProjectionStatements(fixture ConversationForkSourceFixture,
 			return nil, err
 		}
 		query := `INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, mode, config, status, stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?,'flow/forkchat','forkchat',?,'default','static',?,'active',TRUE,'after',?,?,?,2,?,?,?)`
-		if dialect == authoractivityfixture.DialectPostgres {
+		if postgres {
 			query = `INSERT INTO flow_instances (run_id, instance_path, flow_template, entity_id, entity_type, mode, config, status, stage_defined, current_state, gates, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid,'flow/forkchat','forkchat',$2::uuid,'default','static',$3::jsonb,'active',TRUE,'after',$4::jsonb,$5::jsonb,$6::jsonb,2,$7,$8,$9)`
 		}
 		statements = append(statements, conversationForkFixtureStatement{query, []any{fixture.RunID, fixture.EntityID, string(config), gates, bookkeeping, accumulator, advancedAt, bornAt, advancedAt}})
 	}
 	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES (?,?,?,'default',?,?,?)`
-	if dialect == authoractivityfixture.DialectPostgres {
+	if postgres {
 		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES ($1::uuid,$2::uuid,$3,'default',$4::jsonb,$5,$6)`
 	}
 	statements = append(statements, conversationForkFixtureStatement{query, []any{fixture.RunID, fixture.EntityID, path, fields, advancedAt, advancedAt}})
@@ -101,7 +98,7 @@ func conversationForkProjectionStatements(fixture ConversationForkSourceFixture,
 	}
 	mutations = append(mutations, mutation{mutationlog.DomainAuthoredField, "name", `"Before"`, `"After"`, advancedAt})
 	query = `INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at) VALUES (?,?,?,?,?,?,'platform','test',?)`
-	if dialect == authoractivityfixture.DialectPostgres {
+	if postgres {
 		query = `INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5::jsonb,$6::jsonb,'platform','test',$7)`
 	}
 	for _, row := range mutations {
@@ -110,5 +107,35 @@ func conversationForkProjectionStatements(fixture ConversationForkSourceFixture,
 		}
 		statements = append(statements, conversationForkFixtureStatement{query, []any{fixture.RunID, fixture.EntityID, string(row.domain), row.path, row.old, row.new, row.at}})
 	}
+	if kind == conversationForkServedSource {
+		session, err := conversationForkSessionStatement(fixture, postgres)
+		if err != nil {
+			return nil, err
+		}
+		statements = append([]conversationForkFixtureStatement{session}, statements...)
+	}
 	return statements, nil
+}
+
+func conversationForkSessionStatement(fixture ConversationForkSourceFixture, postgres bool) (conversationForkFixtureStatement, error) {
+	identity, err := fixture.Identity.StorageFields()
+	if err != nil {
+		return conversationForkFixtureStatement{}, err
+	}
+	query := `INSERT INTO agent_sessions (
+		session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+		flow_scope_key, flow_instance_id, flow_instance,
+		memory_enabled, status, created_at, updated_at
+	) VALUES (?,?,?,?,?,?,?,?,?,1,'active',?,?)`
+	at := fixture.CreatedAt.Add(-3 * time.Minute)
+	args := []any{fixture.SessionID, fixture.RunID, identity.AgentID, identity.NameOwner, identity.NameSource, identity.RoutePresence, identity.FlowScopeKey, identity.FlowInstanceID, identity.FlowInstancePath, at, at}
+	if postgres {
+		query = `INSERT INTO agent_sessions (
+			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
+			flow_scope_key, flow_instance_id, flow_instance,
+			memory_enabled, status, created_at, updated_at
+		) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'active',$10,$10)`
+		args = args[:10]
+	}
+	return conversationForkFixtureStatement{query, args}, nil
 }
