@@ -12,14 +12,19 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
 // This fixture models only the private post-entry state. It does not acquire
 // a database fence, claim a delivery or provide native COMMIT evidence.
 func agentRecoveryCapacityDecisionUnit(t *testing.T, counts map[string]int, limits map[string]config.LLMProviderLimitPolicy) (*agentRecoveryClaimIntent, context.Context, events.Event, events.DeliveryRoute, deliverylifecycle.AgentClaimProfile) {
+	return agentRecoveryCapacityDecisionBackendUnit(t, processbinding.PostgresLeaseBackend, counts, limits)
+}
+
+func agentRecoveryCapacityDecisionBackendUnit(t *testing.T, backend string, counts map[string]int, limits map[string]config.LLMProviderLimitPolicy) (*agentRecoveryClaimIntent, context.Context, events.Event, events.DeliveryRoute, deliverylifecycle.AgentClaimProfile) {
 	t.Helper()
-	p, session, authority, event, route := newAgentRecoveryClaimCapability(t)
+	p, session, authority, event, route := newAgentRecoveryClaimCapabilityForBackend(t, backend)
 	cfg := agentRecoveryCapacityConfig()
 	cfg.LLM.ProviderLimits = limits
 	if err := BindAgentRecoveryProfilePolicy(t.Context(), p, cfg); err != nil {
@@ -58,13 +63,9 @@ func agentRecoveryCapacityDecisionUnit(t *testing.T, counts map[string]int, limi
 		t.Fatal(err)
 	}
 	t.Cleanup(write.End)
-	// UNIT state setup only. The native owner must later record these exact
-	// coordinates at its original single start hook, not at a second observer.
-	session.writes.mu.Lock()
-	p.mu.Lock()
-	intent.capacity.write, intent.capacity.epoch = write, session.writes.epoch
-	p.mu.Unlock()
-	session.writes.mu.Unlock()
+	if intent.capacity.write != write || intent.capacity.epoch != observed.epoch+1 {
+		t.Fatal("original checked start did not retain its exact outer observation")
+	}
 	id, err := deliverylifecycle.DeliveryID(event.ID(), route)
 	if err != nil {
 		t.Fatal(err)

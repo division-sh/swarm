@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -18,12 +19,13 @@ import (
 
 type agentRecoveryClaimSessionProbe struct {
 	*agentRecoverySeedSessionProbe
-	invoke  func(context.Context, deliverylifecycle.ExecutionAuthority, events.Event, events.DeliveryRoute) (deliverylifecycle.ClaimResult, error)
-	entries int
-	entered context.Context
-	outcome *deliverylifecycle.ClaimResult
-	err     error
-	cleanup func()
+	invoke          func(context.Context, deliverylifecycle.ExecutionAuthority, events.Event, events.DeliveryRoute) (deliverylifecycle.ClaimResult, error)
+	entries         int
+	entered         context.Context
+	outcome         *deliverylifecycle.ClaimResult
+	err             error
+	cleanup         func()
+	capacityWaiting bool
 }
 
 func (s *agentRecoveryClaimSessionProbe) ClaimAgentRecoveryDelivery(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (deliverylifecycle.ClaimResult, error) {
@@ -31,6 +33,11 @@ func (s *agentRecoveryClaimSessionProbe) ClaimAgentRecoveryDelivery(ctx context.
 		return s.invoke(ctx, authority, event, route)
 	}
 	return s.enter(ctx, authority, event, route)
+}
+
+func (s *agentRecoveryClaimSessionProbe) TryClaimAgentRecoveryDelivery(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (deliverylifecycle.ClaimResult, bool, error) {
+	claim, err := s.ClaimAgentRecoveryDelivery(ctx, authority, event, route)
+	return claim, s.capacityWaiting, err
 }
 
 func (s *agentRecoveryClaimSessionProbe) enter(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (deliverylifecycle.ClaimResult, error) {
@@ -61,8 +68,13 @@ func (s *agentRecoveryClaimSessionProbe) enter(ctx context.Context, authority de
 }
 
 func newAgentRecoveryClaimCapability(t *testing.T) (*processCapability, *agentRecoveryClaimSessionProbe, deliverylifecycle.ExecutionAuthority, events.Event, events.DeliveryRoute) {
+	return newAgentRecoveryClaimCapabilityForBackend(t, processbinding.SQLiteLeaseBackend)
+}
+
+func newAgentRecoveryClaimCapabilityForBackend(t *testing.T, backend string) (*processCapability, *agentRecoveryClaimSessionProbe, deliverylifecycle.ExecutionAuthority, events.Event, events.DeliveryRoute) {
 	t.Helper()
 	base, plan := testRetainedSession(t)
+	base.authority.Backend = backend
 	reader := &agentRecoverySeedSessionProbe{retainedSessionProbe: base, writes: &AgentRecoveryWriteObserver{}}
 	reader.read = func(context.Context) (AgentRecoverySeedRead, error) {
 		return AgentRecoverySeedRead{Process: base.authority, SourceHead: plan, InProgressByProfile: map[string]int{}}, nil

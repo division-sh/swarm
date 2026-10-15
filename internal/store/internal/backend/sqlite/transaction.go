@@ -281,7 +281,10 @@ type transactionConnectionScope interface {
 }
 
 func (b *Backend) runTransactionWithConnectionScope(ctx context.Context, opts *sql.TxOptions, permitWait time.Duration, scope transactionConnectionScope, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
-	write := b.observeWritableAgentRecovery(opts)
+	write, err := b.observeWritableAgentRecovery(ctx, opts)
+	if err != nil {
+		return false, err
+	}
 	defer write.End()
 	poolStarted := time.Now()
 	conn, err := b.db.Conn(ctx)
@@ -374,11 +377,11 @@ func (b *Backend) runTransactionWithConnectionScope(ctx context.Context, opts *s
 // A failed cleanup or an uncertain commit never grants busy-policy replay.
 type transactionTerminationError struct{ error }
 
-func (b *Backend) observeWritableAgentRecovery(opts *sql.TxOptions) *runtimestartupownership.AgentRecoveryWriteObservation {
+func (b *Backend) observeWritableAgentRecovery(ctx context.Context, opts *sql.TxOptions) (*runtimestartupownership.AgentRecoveryWriteObservation, error) {
 	if opts != nil && opts.ReadOnly {
-		return nil
+		return nil, nil
 	}
-	return b.agentRecoveryWrites.ObserveWriteStart()
+	return b.agentRecoveryWrites.ObserveSQLiteCapacityInnerStartContext(ctx)
 }
 
 func prepareTransactionConnectionScope(scope transactionConnectionScope, ctx context.Context, conn *sql.Conn) error {

@@ -13,27 +13,29 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
-func (a *Adapter) profileForClaimTx(ctx context.Context, tx *sql.Tx, event events.Event, record deliveryRecord) ([]byte, error) {
+func (a *Adapter) profileForClaimTx(ctx context.Context, tx *sql.Tx, event events.Event, record deliveryRecord) ([]byte, deliverylifecycle.AgentClaimProfile, error) {
+	var absent deliverylifecycle.AgentClaimProfile
 	if !record.Route.Recipient.IsAgent() || record.Authority.Kind() != deliverylifecycle.ExecutionAuthorityNormalRuntime {
-		return nil, nil
+		return nil, absent, nil
 	}
 	// The isolated mechanics fixture has no actor-admission owner and cannot
 	// authorize a provider launch. Native selected-store assemblies require it.
 	if a.receiverExecution == nil {
-		return nil, nil
+		return nil, absent, nil
 	}
 	if record.ClaimVersion > 0 {
 		_, err := readFirstAgentClaimProfileTx(ctx, tx, record.Snapshot)
-		return nil, err
+		return nil, absent, err
 	}
 	profile, err := a.receiverExecution.ReadReceiverClaimProfileTx(ctx, tx, event, record.Route, record.Authority)
 	if err != nil {
-		return nil, err
+		return nil, absent, err
 	}
 	if !profile.MatchesFirstAdmission(event, record.Route, record.Authority) {
-		return nil, fmt.Errorf("first agent profile differs from admitted claim identity")
+		return nil, absent, fmt.Errorf("first agent profile differs from admitted claim identity")
 	}
-	return canonicaljson.MarshalPreservingNumberKinds(profile)
+	raw, err := canonicaljson.MarshalPreservingNumberKinds(profile)
+	return raw, profile, err
 }
 
 // This is historical claim evidence, not live-generation authorization.

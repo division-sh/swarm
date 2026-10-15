@@ -241,21 +241,43 @@ func (s *DeliveryPostgresOwner) ClaimDelivery(ctx context.Context, authority run
 }
 
 func (s *DeliveryPostgresOwner) claimDeliveryWithLease(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute, lease time.Duration) (runtimedelivery.ClaimResult, error) {
+	outcome, err := s.claimDeliveryAttempt(ctx, authority, event, route, lease, false)
+	return outcome.claim, err
+}
+
+type agentCapacityClaimOutcome struct {
+	claim   runtimedelivery.ClaimResult
+	waiting bool
+}
+
+func bindAgentRecoveryClaimEntry(ctx context.Context, writes *runtimeownership.AgentRecoveryWriteObserver, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute, capacity bool) (context.Context, error) {
+	if capacity {
+		return runtimeownership.BindAgentRecoveryCapacityClaimIntent(ctx, writes, authority, event, route)
+	}
+	return runtimeownership.BindAgentRecoveryClaimIfPresent(ctx, writes, authority, event, route)
+}
+
+func (s *DeliveryPostgresOwner) TryClaimAgentRecoveryDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimResult, bool, error) {
+	outcome, err := s.claimDeliveryAttempt(ctx, authority, event, route, runtimedelivery.DefaultLeaseTTL, true)
+	return outcome.claim, outcome.waiting, err
+}
+
+func (s *DeliveryPostgresOwner) claimDeliveryAttempt(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute, lease time.Duration, capacity bool) (agentCapacityClaimOutcome, error) {
 	if route.Normalized().Recipient.Empty() {
-		return runtimedelivery.ClaimResult{}, fmt.Errorf("delivery recipient is required")
+		return agentCapacityClaimOutcome{}, fmt.Errorf("delivery recipient is required")
 	}
 	if err := authority.Validate(); err != nil {
-		return runtimedelivery.ClaimResult{}, err
+		return agentCapacityClaimOutcome{}, err
 	}
 	if _, err := route.Identity(); err != nil {
-		return runtimedelivery.ClaimResult{}, err
+		return agentCapacityClaimOutcome{}, err
 	}
-	ctx, err := runtimeownership.BindAgentRecoveryClaimIfPresent(ctx, s.backend.AgentRecoveryWriteObserver(), authority, event, route)
+	ctx, err := bindAgentRecoveryClaimEntry(ctx, s.backend.AgentRecoveryWriteObserver(), authority, event, route, capacity)
 	if err != nil {
-		return runtimedelivery.ClaimResult{}, err
+		return agentCapacityClaimOutcome{}, err
 	}
-	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimedelivery.ClaimResult, error) {
-		var claimed runtimedelivery.ClaimResult
+	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (agentCapacityClaimOutcome, error) {
+		var outcome agentCapacityClaimOutcome
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			transactiontest.Mark(txctx, transactiontest.DeliveryClaim)
 			runID, err := postgresDeliveryAdapter.RunIDExact(txctx, tx, event, route)
@@ -267,15 +289,19 @@ func (s *DeliveryPostgresOwner) claimDeliveryWithLease(ctx context.Context, auth
 					return err
 				}
 			}
-			claimed, err = s.receiverAdapter.ClaimExactResultWithRenewal(txctx, attempt, authority, event, route, lease)
+			if capacity {
+				outcome, err = s.receiverAdapter.claimExactResultWithCapacity(txctx, attempt, authority, event, route, lease)
+			} else {
+				outcome.claim, err = s.receiverAdapter.ClaimExactResultWithRenewal(txctx, attempt, authority, event, route, lease)
+			}
 			return err
 		})
-		return claimed, err
+		return outcome, err
 	})
-	claimed, acknowledged := result.Value()
-	claimed.Acknowledged = acknowledged
-	claimed.Renewal.Acknowledged = acknowledged && claimed.Disposition == runtimedelivery.ClaimAcquired
-	return claimed, result.Err()
+	outcome, acknowledged := result.Value()
+	outcome.claim.Acknowledged = acknowledged
+	outcome.claim.Renewal.Acknowledged = acknowledged && outcome.claim.Disposition == runtimedelivery.ClaimAcquired
+	return outcome, result.Err()
 }
 
 func (s *DeliverySQLiteOwner) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
@@ -283,21 +309,31 @@ func (s *DeliverySQLiteOwner) ClaimDelivery(ctx context.Context, authority runti
 }
 
 func (s *DeliverySQLiteOwner) claimDeliveryWithLease(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute, lease time.Duration) (runtimedelivery.ClaimResult, error) {
+	outcome, err := s.claimDeliveryAttempt(ctx, authority, event, route, lease, false)
+	return outcome.claim, err
+}
+
+func (s *DeliverySQLiteOwner) TryClaimAgentRecoveryDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimResult, bool, error) {
+	outcome, err := s.claimDeliveryAttempt(ctx, authority, event, route, runtimedelivery.DefaultLeaseTTL, true)
+	return outcome.claim, outcome.waiting, err
+}
+
+func (s *DeliverySQLiteOwner) claimDeliveryAttempt(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute, lease time.Duration, capacity bool) (agentCapacityClaimOutcome, error) {
 	if route.Normalized().Recipient.Empty() {
-		return runtimedelivery.ClaimResult{}, fmt.Errorf("delivery recipient is required")
+		return agentCapacityClaimOutcome{}, fmt.Errorf("delivery recipient is required")
 	}
 	if err := authority.Validate(); err != nil {
-		return runtimedelivery.ClaimResult{}, err
+		return agentCapacityClaimOutcome{}, err
 	}
 	if _, err := route.Identity(); err != nil {
-		return runtimedelivery.ClaimResult{}, err
+		return agentCapacityClaimOutcome{}, err
 	}
-	ctx, err := runtimeownership.BindAgentRecoveryClaimIfPresent(ctx, s.backend.AgentRecoveryWriteObserver(), authority, event, route)
+	ctx, err := bindAgentRecoveryClaimEntry(ctx, s.backend.AgentRecoveryWriteObserver(), authority, event, route, capacity)
 	if err != nil {
-		return runtimedelivery.ClaimResult{}, err
+		return agentCapacityClaimOutcome{}, err
 	}
-	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite claim delivery", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimedelivery.ClaimResult, error) {
-		var claimed runtimedelivery.ClaimResult
+	result := mutationprotocol.RunSQLite(ctx, s.backend, "sqlite claim delivery", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (agentCapacityClaimOutcome, error) {
+		var outcome agentCapacityClaimOutcome
 		err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 			transactiontest.Mark(txctx, transactiontest.DeliveryClaim)
 			runID, err := sqliteDeliveryAdapter.RunIDExact(txctx, tx, event, route)
@@ -309,15 +345,19 @@ func (s *DeliverySQLiteOwner) claimDeliveryWithLease(ctx context.Context, author
 					return err
 				}
 			}
-			claimed, err = s.receiverAdapter.ClaimExactResultWithRenewal(txctx, attempt, authority, event, route, lease)
+			if capacity {
+				outcome, err = s.receiverAdapter.claimExactResultWithCapacity(txctx, attempt, authority, event, route, lease)
+			} else {
+				outcome.claim, err = s.receiverAdapter.ClaimExactResultWithRenewal(txctx, attempt, authority, event, route, lease)
+			}
 			return err
 		})
-		return claimed, err
+		return outcome, err
 	})
-	claimed, acknowledged := result.Value()
-	claimed.Acknowledged = acknowledged
-	claimed.Renewal.Acknowledged = acknowledged && claimed.Disposition == runtimedelivery.ClaimAcquired
-	return claimed, result.Err()
+	outcome, acknowledged := result.Value()
+	outcome.claim.Acknowledged = acknowledged
+	outcome.claim.Renewal.Acknowledged = acknowledged && outcome.claim.Disposition == runtimedelivery.ClaimAcquired
+	return outcome, result.Err()
 }
 
 func (s *DeliveryPostgresOwner) ScanDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, cursor runtimedelivery.ContinuationCursor, limit int) (runtimedelivery.ContinuationPage, error) {

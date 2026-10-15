@@ -31,6 +31,7 @@ type agentRecoveryWriteObserverOwner interface {
 type AgentRecoveryWriteObservation struct {
 	observer *AgentRecoveryWriteObserver
 	ended    atomic.Bool
+	capacity *agentRecoveryCapacityAttempt
 }
 
 // ObserveWriteStart precedes native pool/session/mutation admission. Even a

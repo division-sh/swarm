@@ -11,6 +11,7 @@ import (
 
 type agentRecoveryClaimOwner interface {
 	ClaimDelivery(context.Context, deliverylifecycle.ExecutionAuthority, events.Event, events.DeliveryRoute) (deliverylifecycle.ClaimResult, error)
+	TryClaimAgentRecoveryDelivery(context.Context, deliverylifecycle.ExecutionAuthority, events.Event, events.DeliveryRoute) (deliverylifecycle.ClaimResult, bool, error)
 }
 
 func BindPostgresAgentRecoveryClaims(owner *StartupPostgresOwner, claims *delivery.DeliveryPostgresOwner) error {
@@ -53,4 +54,22 @@ func (s *postgresSession) ClaimAgentRecoveryDelivery(ctx context.Context, author
 
 func (s *sqliteSession) ClaimAgentRecoveryDelivery(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (deliverylifecycle.ClaimResult, error) {
 	return s.owner.claimAgentRecoveryDelivery(ctx, authority, event, route)
+}
+
+func (p *processOperations) tryClaimAgentRecoveryDelivery(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (deliverylifecycle.ClaimResult, bool, error) {
+	p.mu.Lock()
+	claims := p.recoveryClaims
+	p.mu.Unlock()
+	if claims == nil {
+		return deliverylifecycle.ClaimResult{}, false, errors.New("original session has no assembled capacity claim owner")
+	}
+	return claims.TryClaimAgentRecoveryDelivery(ctx, authority, event, route)
+}
+
+func (s *postgresSession) TryClaimAgentRecoveryDelivery(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (deliverylifecycle.ClaimResult, bool, error) {
+	return s.owner.tryClaimAgentRecoveryDelivery(ctx, authority, event, route)
+}
+
+func (s *sqliteSession) TryClaimAgentRecoveryDelivery(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (deliverylifecycle.ClaimResult, bool, error) {
+	return s.owner.tryClaimAgentRecoveryDelivery(ctx, authority, event, route)
 }

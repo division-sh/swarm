@@ -22,6 +22,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	. "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
@@ -642,7 +643,7 @@ func (a *Adapter) persistExactObligation(ctx context.Context, tx *sql.Tx, obliga
 
 func (a *Adapter) ClaimExactResult(ctx context.Context, attempt *mutationprotocol.Attempt, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (ClaimResult, error) {
 	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (ClaimResult, error) {
-		return a.claimExactResultTx(ctx, tx, attempt, authority, event, route, leaseTTL, false)
+		return a.claimExactResultTx(ctx, tx, attempt, authority, event, route, leaseTTL, false, nil)
 	})
 }
 
@@ -650,11 +651,19 @@ func (a *Adapter) ClaimExactResult(ctx context.Context, attempt *mutationprotoco
 // transaction, before any other writer can change its persisted authority.
 func (a *Adapter) ClaimExactResultWithRenewal(ctx context.Context, attempt *mutationprotocol.Attempt, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (ClaimResult, error) {
 	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (ClaimResult, error) {
-		return a.claimExactResultTx(ctx, tx, attempt, authority, event, route, leaseTTL, true)
+		return a.claimExactResultTx(ctx, tx, attempt, authority, event, route, leaseTTL, true, nil)
 	})
 }
 
-func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration, renew bool) (ClaimResult, error) {
+func (a *Adapter) claimExactResultWithCapacity(ctx context.Context, attempt *mutationprotocol.Attempt, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration) (agentCapacityClaimOutcome, error) {
+	var waiting bool
+	claim, err := withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (ClaimResult, error) {
+		return a.claimExactResultTx(ctx, tx, attempt, authority, event, route, leaseTTL, true, &waiting)
+	})
+	return agentCapacityClaimOutcome{claim: claim, waiting: waiting}, err
+}
+
+func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, authority ExecutionAuthority, event events.Event, route events.DeliveryRoute, leaseTTL time.Duration, renew bool, capacityWait *bool) (ClaimResult, error) {
 	if tx == nil {
 		return ClaimResult{}, fmt.Errorf("delivery claim transaction is required")
 	}
@@ -750,10 +759,24 @@ func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *m
 		result.Snapshot = snapshotAt(record, now)
 		return result, nil
 	}
-	claimed, err := a.claimLocked(ctx, tx, attempt, event, record, leaseTTL)
+	if capacityWait != nil && !firstOrdinaryAgentClaim(record) {
+		return ClaimResult{}, fmt.Errorf("capacity claim requires an ordinary unclaimed Pending agent delivery")
+	}
+	claimed, err := a.claimLocked(ctx, tx, attempt, event, record, leaseTTL, capacityWait)
 	if err != nil {
 		return ClaimResult{}, err
 	}
+	if capacityWait != nil && *capacityWait {
+		return ClaimResult{}, nil
+	}
+	return a.finishClaimAcquisition(ctx, tx, claimed, leaseTTL, renew, previous)
+}
+
+func firstOrdinaryAgentClaim(record deliveryRecord) bool {
+	return record.Status == StatusPending && record.ClaimVersion == 0 && record.Route.Recipient.IsAgent() && record.Authority.Kind() == ExecutionAuthorityNormalRuntime
+}
+
+func (a *Adapter) finishClaimAcquisition(ctx context.Context, tx *sql.Tx, claimed ClaimedObligation, leaseTTL time.Duration, renew bool, previous ClaimDisposition) (ClaimResult, error) {
 	var renewal ClaimCommit
 	if renew {
 		updated, err := a.renewAcquiredClaim(ctx, tx, claimed, leaseTTL)
@@ -1212,7 +1235,7 @@ func (a *Adapter) RunIDExact(ctx context.Context, q queryer, event events.Event,
 	return runID, nil
 }
 
-func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, event events.Event, record deliveryRecord, leaseTTL time.Duration) (ClaimedObligation, error) {
+func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, event events.Event, record deliveryRecord, leaseTTL time.Duration, capacityWait *bool) (ClaimedObligation, error) {
 	if leaseTTL <= 0 {
 		leaseTTL = DefaultLeaseTTL
 	}
@@ -1233,9 +1256,15 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutation
 	default:
 		return ClaimedObligation{}, fmt.Errorf("%w: terminal delivery reached claim mutation", ErrConflict)
 	}
-	profile, err := a.profileForClaimTx(ctx, tx, event, record)
+	profile, admittedProfile, err := a.profileForClaimTx(ctx, tx, event, record)
 	if err != nil {
 		return ClaimedObligation{}, err
+	}
+	if capacityWait != nil {
+		*capacityWait, err = runtimeownership.DecideAgentRecoveryCapacityClaim(ctx, record.Authority, event, record.Route, admittedProfile)
+		if err != nil || *capacityWait {
+			return ClaimedObligation{}, err
+		}
 	}
 	token := uuid.NewString()
 	version := record.ClaimVersion + 1

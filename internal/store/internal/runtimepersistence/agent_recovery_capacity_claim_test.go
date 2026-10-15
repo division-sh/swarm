@@ -12,11 +12,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 )
 
-// The pre-fix candidate calls the accepted freshness-only entry. Keep its
-// native RED: that operation makes no profile-capacity decision.
+// The original RED used the freshness-only entry. The assertions below are
+// unchanged; this candidate now invokes the original owner's capacity role.
 func claimAgentRecoveryCapacityCandidate(ctx context.Context, process startupownership.ProcessCapability, f agentClaimProfileFixture, event events.Event) (bool, deliverylifecycle.ClaimResult, error) {
-	claim, err := startupownership.ClaimAgentRecoveryDelivery(ctx, process, f.authority, event, f.route)
-	return false, claim, err
+	result, err := startupownership.TryClaimAgentRecoveryDelivery(ctx, process, f.authority, event, f.route)
+	claim, _ := result.NativeClaim()
+	return result.Waiting(), claim, err
 }
 
 func bindAgentRecoveryCapacityPolicy(t *testing.T, process startupownership.ProcessCapability, profile string, limit int) {

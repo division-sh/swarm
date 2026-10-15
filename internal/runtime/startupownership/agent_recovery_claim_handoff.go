@@ -129,5 +129,13 @@ func (o *AgentRecoveryWriteObserver) ObserveWriteStartContext(ctx context.Contex
 	if current != intent.observation || o.epoch == math.MaxUint64 || o.active == math.MaxUint64 {
 		return nil, errAgentRecoverySeedChanged
 	}
-	return o.startWriteLocked(), nil
+	if capacity := intent.capacity; capacity != nil && (capacity.write != nil || capacity.policy == nil || capacity.policy != p.agentRecoveryPolicy) {
+		return nil, errAgentRecoverySeedChanged
+	}
+	write := o.startWriteLocked()
+	if intent.capacity != nil {
+		write.capacity = intent.capacity
+		intent.capacity.write, intent.capacity.epoch = write, o.epoch
+	}
+	return write, nil
 }

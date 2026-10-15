@@ -6,12 +6,14 @@ import (
 	"math"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
 type agentRecoveryCapacityAttempt struct {
 	policy  *agentRecoveryProfilePolicy
 	write   *AgentRecoveryWriteObservation
+	inner   *AgentRecoveryWriteObservation
 	epoch   uint64
 	decided bool
 }
@@ -78,6 +80,22 @@ func (intent *agentRecoveryClaimIntent) capacitySeedCurrentLocked() bool {
 
 func (capacity *agentRecoveryCapacityAttempt) ownsWriteLocked(observed agentRecoverySeedCheck) bool {
 	o := observed.writes
-	return capacity.write != nil && capacity.write.observer == o && !capacity.write.ended.Load() &&
-		observed.epoch != math.MaxUint64 && capacity.epoch == observed.epoch+1 && o.epoch == capacity.epoch && o.active == 1 && !capacity.decided
+	if !capacity.outerIdentityCurrentLocked(observed) {
+		return false
+	}
+	switch observed.authority.Backend {
+	case processbinding.PostgresLeaseBackend:
+		return capacity.inner == nil && o.epoch == capacity.epoch && o.active == 1
+	case processbinding.SQLiteLeaseBackend:
+		return capacity.epoch != math.MaxUint64 && capacity.inner != nil && capacity.inner != capacity.write &&
+			capacity.inner.observer == o && capacity.inner.capacity == capacity && !capacity.inner.ended.Load() &&
+			o.epoch == capacity.epoch+1 && o.active == 2
+	default:
+		return false
+	}
+}
+
+func (capacity *agentRecoveryCapacityAttempt) outerIdentityCurrentLocked(observed agentRecoverySeedCheck) bool {
+	return capacity.write != nil && capacity.write.observer == observed.writes && capacity.write.capacity == capacity && !capacity.write.ended.Load() &&
+		observed.epoch != math.MaxUint64 && capacity.epoch == observed.epoch+1 && !capacity.decided
 }
