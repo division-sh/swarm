@@ -4304,133 +4304,133 @@
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.AdmitSessionAccount",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "4cd35118196104b70ae65ce4081857232cbdc6252ca643a24496f38313b05b87"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.BootstrapSession",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "8bb529ead57ab70edbcea98182fc597509b0192184a52875696eba3ab1a250a3"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ChannelExecution",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "f9d762b3c3a5299e1a9b99d1a63867e058c4ddcf6dc691d13647500a0cd9b759"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.CheckpointSessionPairing",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "689ee0b607eb4627429ebb842f2f853651fa0adf52c19b79a4414d7c57d86d3c"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.CurrentValueMatchesSeal",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "90baafa665e87ee063bac6db1547d5aa6cf2079b13d3c9cedac9392e349060ae"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ObserveSession",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "69b6b4562bbad807b73d11ef6e96337420e73130bc081fd83276e93e53c1ed79"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.QualifySessionPlan",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "fad43ada3d8f69cc2c311c12b0e214ac10969cf1b22d38afc6baf943013b40f5"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ReadSessionPairing",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
-    "body_sha256": "59665e46245a2efc604804648dd18b51bb7610e7aefe098046928a1aa75a0cbb"
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
+    "body_sha256": "fd1b9f7cf6a937c927b00ec214f4875ee36e4778f7a78a006b11fd0123395c06"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.ResumeSession",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "e7fd829887de024d7e81cec152bb2702420ede2770f3c0705242dab511729282"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.RetireInactiveSessions",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "b2be89cfa49464c8bb866786c857e2103fd70558cecbe5780dfb379733dc1b72"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.completeSessionAttempt",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "6a6f770b4bb050ea97cd77c20521d2314a8f68f7a9bde599e596f2d7d50a64aa"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.connection",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "1f9a7ae14a7deeb23792db0f1fd7ef29b97d3192008d07f6d2c420d6eb5e34a2"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.currentConnection",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "e8b4cda72ac559543c0e06c2ea0d5481a866b46d5cd1828d4dfcb28080837af0"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.observeSessionRetirement",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "f9ee9a461a6e68a36f25f00f5dcd9b8488f97f23a80598360d4be402bbe69704"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.openSessionAttempt",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "5a132caae914f5e791cf8e84aa263339bb0400c6db1912582588e0afb6df40e1"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.validateResumeSession",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "3b0ceea6e37dcd3d6831d1f0ecf0f615b62cc5c07fc7951b1123eb448bb9be30"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrap.validateRetainedSessionOperation",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "f0d434f0bfe1638a0968db036e076a4937b852e93779a9f63a6e3cc9486fac74"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrapAttempt.current",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "e7e9b4da2de3cd5ba8434361301ca70ed40119890c0bb33bd6e6975a7f26ff4d"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::*serveSessionBootstrapAttempt.finishedConnection",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "f5ea6895494e799f39b2ed19d32b79cdc41f6bacb106f3b948a5f20ac1b02a3a"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::init",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "096dad8a6acfa957329319332b5b5e56392bdc332d84baf91d2122441a3b2568"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::newNativeServeSessionBootstrap",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "975afdb597f160ed4862b396adfc3814bb8bc7d1cfffceeaa872133b39bfd90a"
   },
   {
     "owner": "internal/serveapp/channel_session_bootstrap_unix.go::serveSessionRetirementRequired",
     "audit_rows": "A10,A27",
-    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait",
+    "proof_families": "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing",
     "body_sha256": "d2be2406c8339682413ddbd08c3a2d3673740c184c59f9f5778d4094f253de1c"
   },
   {
