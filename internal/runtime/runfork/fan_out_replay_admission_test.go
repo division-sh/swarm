@@ -89,9 +89,6 @@ func fanOutDeploymentReplayAdmissionFixture(t testing.TB, phase RunForkDeploymen
 		item.RoutingSource = source
 		if index < 2 {
 			item.ClaimVersion, item.RetryCount, item.ActiveSessionID, item.StartedAt = 0, 0, "", nil
-			if phase == RunForkDeploymentPendingReceiver {
-				item.ContinuationHandoffAt = &now
-			}
 		}
 	}
 	if phase == RunForkDeploymentPendingReceiver {
@@ -504,10 +501,15 @@ func TestRunForkSelectedFanOutReplayAdmissionDeploymentPhaseProof(t *testing.T) 
 			started := p.PendingWork[0].CreatedAt
 			p.PendingWork[0].StartedAt = &started
 		}},
-		{"missing_handoff", RunForkDeploymentPendingReceiver, func(p *RunForkPlan) { p.PendingWork[0].ContinuationHandoffAt = nil }},
-		{"unexpected_handoff", RunForkDeploymentPendingPublication, func(p *RunForkPlan) {
-			handoff := p.PendingWork[0].CreatedAt
-			p.PendingWork[0].ContinuationHandoffAt = &handoff
+		{"missing_committed_handoff_time", RunForkDeploymentPendingReceiver, func(p *RunForkPlan) {
+			p.PendingWork[len(p.PendingWork)-1].ReceiptAt = nil
+		}},
+		{"unexpected_committed_handoff", RunForkDeploymentPendingPublication, func(p *RunForkPlan) {
+			at := p.PendingWork[0].CreatedAt
+			p.PendingWork = append(p.PendingWork, RunForkPendingWork{
+				EventID: p.PendingWork[0].EventID, SubscriberType: "platform", SubscriberID: "pipeline",
+				Classification: RunForkPendingClassificationDeliveredCompleted, ReceiptOutcome: "success", ReceiptAt: &at,
+			})
 		}},
 		{"missing_pipeline_receipt", RunForkDeploymentPendingReceiver, func(p *RunForkPlan) { p.PendingWork = p.PendingWork[:len(p.PendingWork)-1] }},
 		{"duplicate_pipeline_receipt", RunForkDeploymentPendingReceiver, func(p *RunForkPlan) { p.PendingWork = append(p.PendingWork, p.PendingWork[len(p.PendingWork)-1]) }},

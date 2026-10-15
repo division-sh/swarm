@@ -37,8 +37,6 @@ func selectedFanOutHistoricalWorkFixture(t *testing.T, deployment bool) Historic
 			if err != nil {
 				t.Fatal(err)
 			}
-			at := time.Unix(100, 0).UTC()
-			item.ContinuationHandoffAt = &at
 		}
 		plan.PendingWork = append(plan.PendingWork, item)
 	}

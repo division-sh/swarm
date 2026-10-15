@@ -3938,8 +3938,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 }
 
 func TestActivateSelectedContractRunForkKeepsPostTReplayScopeSourceLocal(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
 	ctx := runForkTestContext(t)
 	repoRoot := runForkExecutionRepoRoot(t)
 	contractsRoot := filepath.Join(repoRoot, "tests/tier1-primitives/test-emits-multiple")
@@ -3951,6 +3950,7 @@ func TestActivateSelectedContractRunForkKeepsPostTReplayScopeSourceLocal(t *test
 	if err != nil {
 		t.Fatalf("LoadRunForkSelectedContractSource: %v", err)
 	}
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact)
 	selection := runforkadmission.SelectedContractSelection(loaded.Source)
 
 	sourceRunID := uuid.NewString()
@@ -3962,17 +3962,19 @@ func TestActivateSelectedContractRunForkKeepsPostTReplayScopeSourceLocal(t *test
 	historicalRoute := selectedExecutionTestAgentRoute(t, sourceRunID, "source-agent-that-must-not-route", "")
 	historicalRoute.Target = events.MustExistingEntityTarget(historicalTarget)
 	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live, []events.DeliveryRoute{historicalRoute})
-	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
-	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
+	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassConnectorFailure, "source_dead_letter", "run-fork-test", "seed", nil), "run-fork-test", "seed")
+	if err := storetest.SeedSelectedSourceOutcome(ctx, pg, storetest.SelectedSourceOutcomeFixture{
+		RunID: sourceRunID, EventID: sourceEventID, EntityID: entityID, CreatedAt: at, Failure: failure,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	storetest.CaptureRunForkSnapshot(t, ctx, pg, sourceRunID)
 
 	materialized := materializeSelectedExecutionForkForTest(t, ctx, pg, loaded, selection, sourceRunID, sourceEventID)
-	seedSelectedExecutionPostForkSourceEvent(t, db, sourceRunID, afterEventID, entityID, at.Add(time.Second))
-	seedSelectedExecutionSourceReplayScopeMarker(t, db, sourceRunID, afterEventID, "replay_scope_direct", at.Add(time.Second))
-	captureSelectedExecutionSourceRevision(t, db, sourceRunID,
-		runforkrevision.FamilyEvents,
-		runforkrevision.FamilyEventDeliveries,
-		runforkrevision.FamilyCommittedReplayScopes,
-	)
+	afterEvent := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(afterEventID, "source.after", "source-runtime", "", []byte(`{}`), 0,
+		sourceRunID, events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1"), events.NoRoutingSource(), at.Add(time.Second), executionmode.Live)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, afterEvent, nil, runtimepipelineobligation.ScopeDirect)
+	storetest.CaptureRunForkSnapshot(t, ctx, pg, sourceRunID)
 	sourceBefore, err := storetest.ReadSelectedForkSourceDomain(ctx, pg, sourceRunID)
 	if err != nil {
 		t.Fatal(err)

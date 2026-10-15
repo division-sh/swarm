@@ -75,10 +75,31 @@ func prepareRunForkSelectedContractRouteResolution(
 	for _, eventID := range historicalEventIDs {
 		historicalEvents[strings.TrimSpace(eventID)] = struct{}{}
 	}
-	for _, eventID := range eventIDs {
-		if _, ok := historicalEvents[strings.TrimSpace(eventID)]; !ok {
-			return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route frontier event %s is outside fixed revision %d", eventID, plan.ForkPoint.Revision)
+	firstTurn, firstTurnPresent, err := plan.OriginalStartFirstTurn()
+	if err != nil {
+		return runfork.RunForkSelectedContractRouteRecovery{}, err
+	}
+	firstEvent, _ := firstTurn.Event()
+	firstTurnSeen := false
+	for _, entry := range frontier.FrontierEvents {
+		if firstTurnPresent && entry.SourceEventID == firstEvent.ID() {
+			if firstTurnSeen || entry.EventName != string(firstEvent.Type()) || len(entry.SourceClassifications) != 1 || entry.SourceClassifications[0] != "start_first_turn" {
+				return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route frontier differs from the exact original first turn")
+			}
+			firstTurnSeen = true
+			continue
 		}
+		for _, classification := range entry.SourceClassifications {
+			if strings.TrimSpace(classification) == "start_first_turn" {
+				return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route first turn is not its admitted original intention")
+			}
+		}
+		if _, ok := historicalEvents[strings.TrimSpace(entry.SourceEventID)]; !ok {
+			return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route frontier event %s is outside fixed revision %d", entry.SourceEventID, plan.ForkPoint.Revision)
+		}
+	}
+	if firstTurnPresent && !firstTurnSeen {
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route frontier omits its admitted original first turn")
 	}
 	record, err := normalizeRunForkSelectedContractRouteRecovery(runfork.RunForkSelectedContractRouteRecoveryRequest{
 		ForkRunID:         forkRunID,
