@@ -431,7 +431,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 	case FamilyCommittedReplayScopes:
 		spec = projectionSpec{
 			query:  `SELECT CAST(s.event_id AS TEXT), CAST(s.run_id AS TEXT), s.scope, s.created_at, s.updated_at`,
-			source: "committed_replay_scopes s", runAlias: "s",
+			source: "committed_replay_scopes s JOIN events e ON e.event_id = s.event_id", runAlias: "s",
 			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "updated_at": valueTime}, "event_id", "run_id", "scope", "created_at", "updated_at"),
 		}
 	case FamilyEventReceipts:
@@ -556,7 +556,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 		if spec.source != "" {
 			spec.query += " FROM " + spec.source + " WHERE " + spec.runAlias + ".run_id = $1"
 		}
-		if family == FamilyEvents {
+		if family == FamilyEvents || family == FamilyCommittedReplayScopes || family == FamilyEventReceipts {
 			spec.query += " AND e.event_name <> '" + excludedEventName + "'"
 		}
 		spec.parts = []projectionPart{{query: spec.query, alias: alias}}
