@@ -1497,6 +1497,7 @@ type servedControlProofRuntime struct {
 	ReceiverStateReader receiverProofStateReader
 	ReadRunDeliveries   servedRunDeliveryReader
 	WaitReceiverOrigin  func(*testing.T, servedEventPublishRPCResult)
+	joinAndAssertExit   func()
 }
 
 func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProofRuntime) context.Context {
