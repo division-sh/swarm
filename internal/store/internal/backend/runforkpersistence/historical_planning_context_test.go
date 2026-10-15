@@ -9,7 +9,9 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
@@ -176,5 +178,59 @@ func TestHistoricalPlanningContextRejectsConcurrentPrivateReaders(t *testing.T) 
 	}
 	if err := end(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHistoricalEvidenceReconstructionCannotAdmitOrEscape(t *testing.T) {
+	tx, _ := startSnapshotTransaction(t)
+	run := runlifecycle.Snapshot{
+		RunID: eventtest.UUID("evidence-private-lifetime"), State: runlifecycle.StateRunning,
+		Origin: runlifecycle.ScenarioSetupRunOrigin(), BundleHash: "bundle-v2:sha256:" + strings.Repeat("a", 64), StartedAt: time.Now().UTC(),
+	}
+	base := context.Background()
+	ctx, done, err := beginHistoricalEvidenceRead(base, tx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, err := historicalPlanningForTx(ctx, tx)
+	if err != nil || scope == nil || scope.source != nil || scope.resolver.tx != tx {
+		t.Fatalf("evidence scope gained source admission or another transaction: %+v %v", scope, err)
+	}
+	source := struct{ semanticview.Source }{}
+	if _, _, err := readHistoricalFlowInstanceConstructionTx(ctx, tx, source, run, pipeline.WorkflowInstance{}); err == nil || !strings.Contains(err.Error(), "admitted run or source") {
+		t.Fatalf("evidence scope admitted a semantic source: %v", err)
+	}
+	if err := withHistoricalFlowInstancePlanningTx(ctx, tx, nil, run, func(context.Context) error { return nil }); err == nil {
+		t.Fatal("evidence scope weakened the planning source requirement")
+	}
+	if _, _, err := beginHistoricalEvidenceRead(ctx, tx, run); err == nil || !strings.Contains(err.Error(), "serialized planning owner") {
+		t.Fatalf("concurrent evidence reader acquired an active scope: %v", err)
+	}
+	wrong := run
+	wrong.RunID = eventtest.UUID("foreign-evidence-run")
+	if _, _, err := beginHistoricalEvidenceRead(ctx, tx, wrong); err == nil {
+		t.Fatal("evidence scope crossed its run")
+	}
+	if err := done(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := beginHistoricalEvidenceRead(ctx, tx, run); err == nil || !strings.Contains(err.Error(), "lifetime has ended") {
+		t.Fatalf("evidence context escaped its synchronous read: %v", err)
+	}
+	fresh, finish, err := beginHistoricalEvidenceRead(base, tx, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freshScope, err := historicalPlanningForTx(fresh, tx)
+	if err != nil || freshScope == scope || len(freshScope.resolver.snapshots) != 0 {
+		t.Fatal("later evidence call borrowed an ended reconstruction")
+	}
+	if err := finish(); err != nil {
+		t.Fatal(err)
+	}
+	cancelled, cancel := context.WithCancel(base)
+	cancel()
+	if _, _, err := beginHistoricalEvidenceRead(cancelled, tx, run); !errors.Is(err, context.Canceled) {
+		t.Fatalf("evidence entry ignored cancellation: %v", err)
 	}
 }

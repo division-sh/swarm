@@ -81,7 +81,7 @@ func (cut historicalFlowInstanceConstructionCut) admit(source semanticview.Sourc
 }
 
 func readHistoricalFlowInstanceConstructionEvidenceTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instance pipeline.WorkflowInstance) (construction pipeline.HistoricalFlowInstanceConstruction, found bool, finalErr error) {
-	done, err := beginHistoricalPlanningRead(ctx, tx, nil, run)
+	ctx, done, err := beginHistoricalEvidenceRead(ctx, tx, run)
 	if err != nil {
 		return construction, false, err
 	}
@@ -188,7 +188,7 @@ func historicalFlowInstanceConstructionCutForHeader(ctx context.Context, run run
 }
 
 func readHistoricalFlowInstanceConstructionEvidenceBatchTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instances []pipeline.WorkflowInstance) (results []pipelinepersistence.HistoricalFlowInstanceConstructionResult, finalErr error) {
-	done, err := beginHistoricalPlanningRead(ctx, tx, nil, run)
+	ctx, done, err := beginHistoricalEvidenceRead(ctx, tx, run)
 	if err != nil {
 		return nil, err
 	}
