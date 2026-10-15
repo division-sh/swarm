@@ -130,7 +130,8 @@ func factoringTriggerSubject(t *testing.T) Subject {
 		t.Fatal(err)
 	}
 	return Subject{ID: id, Kind: SubjectProviderTrigger, Provider: "acme", Source: "raw_declaration", Applicability: "effective",
-		TriggerAdmission: &TriggerAdmission{BundleHash: "bundle", FlowPath: "flow", Alias: "alias", CatalogGeneration: "generation", PolicySource: "raw_declaration", RequestAuthentication: "HMAC_SHA256", Event: "inbound.acme"},
+		Capabilities:     []Capability{{Code: CapabilityReceiveHTTPSRoute, Target: "/webhooks/alias/acme"}},
+		TriggerAdmission: &TriggerAdmission{Transport: ChannelTransportWebhook, BundleHash: "bundle", FlowPath: "flow", Alias: "alias", CatalogGeneration: "generation", PolicySource: "raw_declaration", RequestAuthentication: "HMAC_SHA256", Event: "inbound.acme"},
 		Requirements:     []Requirement{TargetScopedRequirement(RequirementSecret, "key")}}
 }
 
@@ -155,6 +156,13 @@ func TestFactoringTriggerSubject(t *testing.T) {
 		{"installed/admission", func(s *Subject) { s.Source, s.Applicability = "trigger_pack", "installed" }, `installed provider trigger subject %q must use trigger_pack source and must not carry target admission`, ""},
 		{"coordinate/source", func(s *Subject) { s.Source = "other" }, `effective provider trigger subject %q has invalid source "other"`, ""},
 		{"coordinate/admission", func(s *Subject) { s.TriggerAdmission = nil }, `effective provider trigger subject %q requires typed trigger_admission`, ""},
+		{"transport/missing", func(s *Subject) { s.Capabilities = nil }, `provider trigger subject %q requires exactly one HTTP or session receive capability`, ""},
+		{"transport/mixed", func(s *Subject) {
+			s.Capabilities = append(s.Capabilities, Capability{Code: CapabilityReceiveSessionEvents, Target: "acme"})
+		}, `provider trigger subject %q requires exactly one HTTP or session receive capability`, ""},
+		{"transport/target", func(s *Subject) { s.Capabilities[0].Target = "/webhooks/other/acme" }, `provider trigger subject %q receiver target "/webhooks/other/acme" must be "/webhooks/alias/acme"`, ""},
+		{"transport/absent", func(s *Subject) { s.TriggerAdmission.Transport = "" }, `effective provider trigger subject %q: channel transport must be webhook or session, got ""`, ""},
+		{"transport/mismatch", func(s *Subject) { s.TriggerAdmission.Transport = ChannelTransportSession }, `effective provider trigger subject %q receive capability contradicts transport "session"`, ""},
 		{"coordinate/bundle", func(s *Subject) { s.TriggerAdmission.BundleHash = " " }, `effective provider trigger subject %q requires bundle_hash, alias, catalog_generation, and event`, ""},
 		{"coordinate/catalog", func(s *Subject) { s.TriggerAdmission.CatalogGeneration = " " }, `effective provider trigger subject %q requires bundle_hash, alias, catalog_generation, and event`, ""},
 		{"coordinate/event", func(s *Subject) { s.TriggerAdmission.Event = " " }, `effective provider trigger subject %q requires bundle_hash, alias, catalog_generation, and event`, ""},
@@ -237,6 +245,7 @@ func TestFactoringTriggerSubject(t *testing.T) {
 	t.Run("flow-identity", func(t *testing.T) {
 		changed := CloneSubjects([]Subject{base})[0]
 		changed.TriggerAdmission.Alias = "different-alias"
+		changed.Capabilities[0].Target = "/webhooks/different-alias/acme"
 		got, err := NormalizeSubjects([]Subject{changed})
 		assertFactoringSubjectError(t, err, "")
 		if got[0].ID != base.ID {
