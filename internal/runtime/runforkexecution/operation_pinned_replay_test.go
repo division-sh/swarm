@@ -177,7 +177,13 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int, 
 	if runtime == nil {
 		t.Fatal("exact root receiver retired before replay without terminal business work")
 	}
-	if err := runtime.WaitForQuiescence(ctx, runtime.bus); err != nil {
+	deadline, bounded := ctx.Deadline()
+	if !bounded {
+		t.Fatal("pin replay proof lost its original fixture deadline")
+	}
+	quiescence, cancelQuiescence := context.WithDeadline(runtime.controlContext, deadline)
+	defer cancelQuiescence()
+	if err := runtime.WaitForQuiescence(quiescence, runtime.bus); err != nil {
 		t.Fatalf("join actual receiver/publication work before the replay baseline: %v", err)
 	}
 	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, loader.Store)
