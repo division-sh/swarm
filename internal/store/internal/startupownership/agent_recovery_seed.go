@@ -77,7 +77,7 @@ func (s *postgresSession) ReadAgentRecoverySeed(ctx context.Context) (runtimeown
 		if err := proveAgentRecoveryGeneration(snapshot, s.owner.backend, authority, false); err != nil {
 			return err
 		}
-		runtimeownership.ObserveAgentRecoverySeedReadForTest(snapshot)
+		runtimeownership.ObserveAgentRecoverySeedRead(snapshot)
 		read, imageErr = s.owner.readAgentRecoverySeed(snapshot, authority)
 		// A domain refusal is returned only after native settlement. Re-proving
 		// here also detects a failed SQL transaction; it is never hidden as data.
@@ -103,7 +103,7 @@ func (s *sqliteSession) ReadAgentRecoverySeed(ctx context.Context) (runtimeowner
 		if err := proveAgentRecoveryGeneration(snapshot, s.owner.backend, authority, true); err != nil {
 			return err
 		}
-		runtimeownership.ObserveAgentRecoverySeedReadForTest(snapshot)
+		runtimeownership.ObserveAgentRecoverySeedRead(snapshot)
 		read, imageErr = s.owner.readAgentRecoverySeed(snapshot, authority)
 		return proveAgentRecoveryGeneration(snapshot, s.owner.backend, authority, true)
 	})

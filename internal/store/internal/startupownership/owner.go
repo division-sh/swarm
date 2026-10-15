@@ -146,7 +146,7 @@ func (s *StartupPostgresOwner) AcquireProcessCapability(ctx context.Context, req
 	if err := contextError(ctx); err != nil {
 		return nil, errors.Join(err, capability.Release(context.WithoutCancel(ctx)))
 	}
-	s.bindProcess(capability)
+	s.bindProcess(capability, session)
 	return capability, nil
 }
 
@@ -203,7 +203,7 @@ func (s *StartupSQLiteOwner) AcquireProcessCapability(ctx context.Context, req r
 	if err := contextError(ctx); err != nil {
 		return nil, errors.Join(err, capability.Release(context.WithoutCancel(ctx)))
 	}
-	s.bindProcess(capability)
+	s.bindProcess(capability, session)
 	return capability, nil
 }
 
