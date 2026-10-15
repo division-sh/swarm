@@ -22,9 +22,9 @@ func InstallAgentRecoverySeedFaultProbeForTest(capability ProcessCapability, pro
 	return func() { p.agentRecoverySeedProbe.CompareAndSwap(probe, nil) }, nil
 }
 
-// Only SeedAgentRecovery supplies this process-owned observation hook. It
-// carries no transaction, decoded image, capacity result or mutation authority.
-func ObserveAgentRecoverySeedReadForTest(ctx context.Context) {
+// Only SeedAgentRecovery supplies this passive process-owned notification. It
+// carries no session, image, stamp, result, capacity or mutation authority.
+func ObserveAgentRecoverySeedRead(ctx context.Context) {
 	if probe, _ := ctx.Value(agentRecoverySeedProbeContextKey{}).(*AgentRecoverySeedFaultProbeForTest); probe != nil && probe.InsideRead != nil {
 		probe.observe(probe.InsideRead)
 	}
@@ -36,13 +36,10 @@ func (p *AgentRecoverySeedFaultProbeForTest) observe(observe func()) {
 	observe()
 }
 
-type agentRecoverySeedInterruption interface {
-	InterruptAgentRecoverySeedSessionForTest(context.Context, Authority) error
-}
-
-// This fixed fault cannot run outside a held seed cut, on a substituted process
-// or twice. It returns native errors and exposes neither the session nor SQL.
-func InterruptAgentRecoverySeedSessionForTest(ctx context.Context, capability ProcessCapability, expected Authority) error {
+// ConsumeAgentRecoverySeedFaultCutForTest only checks the original process's
+// installed held probe once. Native interruption belongs to the selected-store
+// test port; this check exposes no session, callback, token or native effect.
+func ConsumeAgentRecoverySeedFaultCutForTest(ctx context.Context, capability ProcessCapability, expected Authority) error {
 	p, ok := capability.(*processCapability)
 	if !ok || p == nil || ctx == nil || expected.Validate() != nil {
 		return errors.New("agent recovery interruption requires its original process and full stamp")
@@ -55,9 +52,8 @@ func InterruptAgentRecoverySeedSessionForTest(ctx context.Context, capability Pr
 	if err != nil || current != expected || probe == nil || !probe.active.Load() {
 		return errors.Join(errors.New("agent recovery interruption differs from its held native process cut"), err)
 	}
-	session, ok := p.session.(agentRecoverySeedInterruption)
-	if !ok || !p.agentRecoverySeedFaultUsed.CompareAndSwap(false, true) {
+	if !p.agentRecoverySeedFaultUsed.CompareAndSwap(false, true) {
 		return errors.New("agent recovery interruption requires one original native session fault")
 	}
-	return session.InterruptAgentRecoverySeedSessionForTest(ctx, expected)
+	return nil
 }
