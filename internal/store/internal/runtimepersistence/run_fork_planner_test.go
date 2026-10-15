@@ -454,18 +454,16 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
+			run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'flow-a/1', 'default',
-			'ready', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
-			$3, $3, $3
+			'{}'::jsonb, $3, $3
 		)
 	`, runID, entityID, at); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
+	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, "flow-a/1", "flow-a", "default", "ready", "{}", at)
 	admitGenericScheduleFixture(t, ctx, pg, testAgentGenericScheduleCommand(
 		t, runID, "other-agent", "flow-other/1", uuid.NewString(), "unrelated", runtimegenericschedule.AbsoluteDue(at.Add(time.Hour)),
 	))

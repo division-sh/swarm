@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"testing"
 	"time"
 
@@ -96,6 +98,10 @@ func newConversationForkCommitFixture(t *testing.T, backend string) (context.Con
 		Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), CreatedAt: now,
 		Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute),
 	}
+	fixture.Construction.CreatingEvent = eventtest.ExistingRunRootIngress(
+		uuid.NewSHA1(uuid.MustParse(fixture.EntityID), []byte("conversation-fork-construction")).String(),
+		"flow/conversation.created", "conversation-construction-fixture", "", []byte(`{"name":"Before"}`), 0,
+		fixture.RunID, events.EventEnvelope{}, fixture.Turn1At.Add(-30*time.Second))
 	fixture.Construction = storetest.PrepareConversationForkConstruction(t, ctx, selected, semanticview.Wrap(bundle), planner, fixture)
 	history := storetest.SeedConversationForkSource(t, ctx, selected, fixture)
 	storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{

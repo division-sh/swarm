@@ -245,6 +245,7 @@ func setReplayReceiverConstructedHistory(t *testing.T, snapshot *runForkRevision
 		EntityID: entityID, FlowInstance: path, EntityType: "receipt", ConstructionKind: "constructed",
 		FlowTemplate: flowID, Mode: "static", FlowConfig: []byte(`{}`), Status: "active", CurrentState: "pending",
 		StageDefined: true, CreatedAt: at, UpdatedAt: at, EnteredStateAt: at,
+		DataCreatedAt: &at, DataUpdatedAt: &at,
 	}}
 	snapshot.EntityMutations = []runForkRevisionEntityMutation{{
 		EntityID: entityID, Domain: "lifecycle_state", NewValue: []byte(`"pending"`), CreatedAt: at,
