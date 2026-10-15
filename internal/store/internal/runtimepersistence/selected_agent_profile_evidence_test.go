@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -21,8 +22,13 @@ func TestSelectedAgentClaimReadsOriginalPreparationWithoutOrdinaryCaptureBothSto
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx, selected := newAgentFixtureAuthorityStore(t, backend)
+			ordinary := newAgentProfileMembershipActor(t, admitAgentClaimProfileFixture(t, ctx, selected))
+			process, err := agentfixture.ProcessCapability(t, ordinary.ctx, selected)
+			if err != nil {
+				t.Fatal(err)
+			}
 			owner := selected.(selectedCompletionAuthorityStore)
-			f := newSelectedProviderCompletionFixture(t, owner, receiverClaimTestDB(t, selected), backend == "sqlite")
+			f := newSelectedProviderCompletionFixtureWithProcess(t, owner, receiverClaimTestDB(t, selected), backend == "sqlite", process)
 			ctx = correlation.WithRunID(testAuthorActivityContextForBundle(f.request.DeclarationPlan.BundleHash), f.forkRun)
 			issued, err := owner.IssueRunForkSelectedContractRuntimeExecution(ctx, f.request)
 			if err != nil {
@@ -146,9 +152,7 @@ func TestSelectedAgentClaimReadsOriginalPreparationWithoutOrdinaryCaptureBothSto
 					proveSelectedAgentPreparationFault(t, ctx, selected, foreignOwner, claimed.Snapshot, reader.ReadSelectedAgentPreparation, fault)
 				})
 			}
-			if _, err := selected.SettleSuccess(ctx, claimed.Claim, nil, 0, deliverylifecycle.NotApplicableHandlerRuleSelection()); err != nil {
-				t.Fatal(err)
-			}
+			proveMixedAgentProfileMembershipWitness(t, ctx, ordinary, f, claimed, foreignOwner)
 			terminal, err := selected.Snapshot(ctx, claimed.Snapshot.DeliveryID)
 			if err != nil {
 				t.Fatal(err)
