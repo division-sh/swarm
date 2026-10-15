@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -243,7 +244,7 @@ func TestSelectedForkHistoricalFieldlessHeaderBothStores(t *testing.T) {
 						if err != nil {
 							t.Fatal(err)
 						}
-						state := selectedContractWorkflowState{SourceRunID: sourceRun, RunID: childRun, EntityID: projection.Fork.EntityID, WorkflowName: "receiver", WorkflowVersion: "fixture", Mode: "static", ExecutionMode: executionmode.Mock, Route: projection.Fork.FlowInstance, History: runfork.RunForkEntityState{EntityID: sourceEntity, CurrentState: "pending", EnteredStateAt: &entered, MaterializationMetadata: metadata}}
+						state := selectedContractWorkflowState{SourceRunID: sourceRun, RunID: childRun, EntityID: projection.Fork.EntityID, WorkflowName: "receiver", WorkflowVersion: "fixture", Mode: "static", ExecutionMode: executionmode.Mock, Route: projection.Fork.FlowInstance, History: runfork.RunForkEntityState{EntityID: sourceEntity, CurrentState: mutationlog.PresentLifecycleState("pending"), EnteredStateAt: &entered, MaterializationMetadata: metadata}}
 						config, err := pipeline.WorkflowInstanceHeaderPayloadForRoute(flowidentity.StoredRoute("receiver", "receiver", metadata.FlowInstance), state.WorkflowVersion)
 						if err != nil {
 							t.Fatal(err)
@@ -404,7 +405,7 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 		}
 	}
 	record := workflowOwnershipConstructionRecord(t, source, runID, instance, entityType, mode, instanceKey, initial.ID(), graph.StageCount() != 0, enteredAt)
-	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{Revision: 7}, Entities: []runfork.RunForkEntityState{{EntityID: entityID, CurrentState: initial.ID(), EnteredStateAt: &enteredAt, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+	plan := runfork.RunForkPlan{SourceRunID: runID, ForkPoint: runfork.RunForkPoint{Revision: 7}, Entities: []runfork.RunForkEntityState{{EntityID: entityID, CurrentState: mutationlog.PresentLifecycleState(initial.ID()), EnteredStateAt: &enteredAt, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 		Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowInstance: path, EntityType: entityType, StageDefined: graph.StageCount() != 0,
 		FlowTemplate: flow, Mode: mode, FlowConfig: config,
 		ParentInstance: instance.ParentRoute.FlowInstance, InstanceKey: instanceKey, InitialMaterialization: record.InitialMaterialization,

@@ -44,11 +44,9 @@ func seedSQLiteNormalRunCompletionFixture(t *testing.T, store *SQLiteRuntimeStor
 	seedWorkflowHeaderProjectionFixture(t, ctx, store.backend, runID, entityID, runID, ".", "default", state, "{}", now)
 	if _, err := store.backend.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES (?, ?, ?, 'default', 'example', 'Example', ?,
-			'{}', '{}', '{}', 1, ?, ?, ?)
-	`, runID, entityID, runID, state, now, now, now); err != nil {
+			run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at
+		) VALUES (?, ?, ?, 'default', 'example', 'Example', '{}', ?, ?)
+	`, runID, entityID, runID, now, now); err != nil {
 		t.Fatalf("seed sqlite entity state: %v", err)
 	}
 	return sqliteNormalRunCompletionFixture{RunID: runID, EventID: eventID, EntityID: entityID}

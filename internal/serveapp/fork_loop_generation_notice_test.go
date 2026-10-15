@@ -95,7 +95,7 @@ func TestServedForkLoopGenerationStateEffectBothStores(t *testing.T) {
 func readForkLoopActivation(t *testing.T, rt servedControlProofRuntime, runID string) loopruntime.Activation {
 	t.Helper()
 	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(accumulator AS TEXT) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, flowidentity.EntityID("review")).Scan(&raw); err != nil {
+	if err := rt.DB.QueryRow(`SELECT CAST(accumulator AS TEXT) FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, runID, flowidentity.EntityID("review")).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	var state map[string]any
@@ -123,7 +123,7 @@ func requireForkLoopStateEffect(t *testing.T, rt servedControlProofRuntime, runI
 	entityID := flowidentity.EntityID("review")
 	var entity operatorread.OperatorEntityFull
 	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
-	if entity.Entity.RunID != runID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != "review" || entity.Entity.CurrentState != "reviewing" || entity.Fields["observed_revision"] != revision || entity.Fields["observed_token"] != "loop-notice-proof" {
+	if entity.Entity.RunID != runID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != "review" || entity.Entity.CurrentState == nil || *entity.Entity.CurrentState != "reviewing" || entity.Fields["observed_revision"] != revision || entity.Fields["observed_token"] != "loop-notice-proof" {
 		t.Fatalf("loop business fields lost current generation: %+v", entity)
 	}
 	activation := readForkLoopActivation(t, rt, runID)

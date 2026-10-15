@@ -151,8 +151,8 @@ func TestRunForkPlanner_ReconstructsEntityStateAtForkPointFromMutations(t *testi
 	if got.EntityID != entityID {
 		t.Fatalf("entity_id = %s, want %s", got.EntityID, entityID)
 	}
-	if got.CurrentState != "queued" {
-		t.Fatalf("current_state = %q, want queued", got.CurrentState)
+	if got.CurrentState == nil || *got.CurrentState != "queued" {
+		t.Fatalf("current_state = %v, want queued", got.CurrentState)
 	}
 	if got.Fields["title"] != "before-title" {
 		t.Fatalf("field title = %#v, want before-title", got.Fields["title"])

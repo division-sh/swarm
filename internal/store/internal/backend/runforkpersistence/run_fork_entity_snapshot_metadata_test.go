@@ -8,13 +8,15 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 func TestRunForkSnapshotOwnershipMetadataAuthority(t *testing.T) {
 	const entityID = "entity-1"
-	metadata := runForkRevisionEntityMetadata{EntityID: entityID, FlowInstance: "owner/one", EntityType: "case", Slug: "case-one", Name: "Case One", ConstructionKind: "imported_state"}
+	at := time.Unix(100, 0).UTC()
+	metadata := runForkRevisionEntityMetadata{EntityID: entityID, FlowInstance: "owner/one", EntityType: "case", Slug: "case-one", Name: "Case One", ConstructionKind: "imported_state", DataCreatedAt: &at, DataUpdatedAt: &at}
 	for _, flows := range [][]string{{"context/one", "context/two"}, {"context/two", "context/one"}, {"owner/one", "owner/one"}, {"", ""}} {
 		t.Run("event_context_not_owner/"+strings.Join(flows, ","), func(t *testing.T) {
 			snapshot := &runForkRevisionSnapshot{EntityMetadata: []runForkRevisionEntityMetadata{metadata}}
@@ -25,6 +27,7 @@ func TestRunForkSnapshotOwnershipMetadataAuthority(t *testing.T) {
 			want := runfork.RunForkMaterializedEntitySnapshotMetadata{
 				Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState,
 				FlowInstance: metadata.FlowInstance, EntityType: metadata.EntityType, Slug: metadata.Slug, Name: metadata.Name,
+				DataCreatedAt: &at, DataUpdatedAt: &at,
 			}
 			if !ok || !reflect.DeepEqual(got, want) {
 				t.Fatalf("metadata = %#v, admitted=%t message=%q; want %#v", got, ok, message, want)
@@ -244,7 +247,7 @@ func TestRunForkSnapshotMetadataKeepsConstructedFieldlessHeader(t *testing.T) {
 				case "unknown_kind":
 					fact.ConstructionKind = ""
 				}
-				got, reason, accepted := loadRunForkMaterializedEntitySnapshotMetadata(&runForkRevisionSnapshot{EntityMetadata: []runForkRevisionEntityMetadata{fact}}, runfork.RunForkEntityState{EntityID: fact.EntityID, CurrentState: "pending"})
+				got, reason, accepted := loadRunForkMaterializedEntitySnapshotMetadata(&runForkRevisionSnapshot{EntityMetadata: []runForkRevisionEntityMetadata{fact}}, runfork.RunForkEntityState{EntityID: fact.EntityID, CurrentState: mutationlog.PresentLifecycleState("pending")})
 				if accepted != (change == "exact") {
 					t.Fatalf("constructed fieldless metadata: %+v accepted=%t reason=%s", got, accepted, reason)
 				}

@@ -166,8 +166,11 @@ func readPhysicalRunState(ctx context.Context, tx *sql.Tx, runID string) (map[st
 		return nil, runProjectionError(err)
 	}
 	out := map[string]mutationlog.EntityStateProjection{}
-	for _, member := range append(inventory.Constructed, inventory.StateOnly...) {
-		state := mutationlog.EntityStateProjection{CurrentState: member.Stage, Fields: map[string]any{}}
+	for index, member := range append(inventory.Constructed, inventory.StateOnly...) {
+		state := mutationlog.EntityStateProjection{Fields: map[string]any{}}
+		if index < len(inventory.Constructed) {
+			state.CurrentState = mutationlog.PresentLifecycleState(member.Stage)
+		}
 		for _, bucket := range []struct {
 			raw    any
 			target *map[string]any
@@ -177,6 +180,8 @@ func readPhysicalRunState(ctx context.Context, tx *sql.Tx, runID string) (map[st
 			}
 			var raw []byte
 			switch value := bucket.raw.(type) {
+			case json.RawMessage:
+				raw = value
 			case []byte:
 				raw = value
 			case string:

@@ -323,11 +323,14 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		if err != nil {
 			return mutationlog.EntityStateProjection{}, nil, err
 		}
-		projection := mutationlog.EntityStateProjection{CurrentState: snapshot.CurrentState}
+		projection := mutationlog.EntityStateProjection{CurrentState: snapshot.CurrentState, Fields: map[string]any{}}
 		for _, owner := range []struct {
 			raw json.RawMessage
 			dst *map[string]any
 		}{{snapshot.Fields, &projection.Fields}, {snapshot.Bookkeeping, &projection.Bookkeeping}, {snapshot.Gates, &projection.Gates}, {snapshot.Accumulator, &projection.Accumulator}} {
+			if owner.raw == nil {
+				continue
+			}
 			if err := json.Unmarshal(owner.raw, owner.dst); err != nil {
 				return mutationlog.EntityStateProjection{}, nil, err
 			}

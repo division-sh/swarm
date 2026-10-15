@@ -249,7 +249,7 @@ func validateFixedConstructionMetadata(entities []runfork.RunForkEntityState) er
 		if id == "" || id != entity.EntityID || metadata == nil || metadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner ||
 			metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance ||
 			metadata.FlowTemplate == "" || (metadata.Mode != "static" && metadata.Mode != "template") || len(metadata.FlowConfig) == 0 || (len(metadata.InitialMaterialization) == 0 && metadata.HistoricalConstruction == nil) ||
-			strings.TrimSpace(metadata.FlowInstance) == "" || strings.TrimSpace(entity.CurrentState) == "" ||
+			strings.TrimSpace(metadata.FlowInstance) == "" || entity.CurrentState == nil || strings.TrimSpace(*entity.CurrentState) == "" ||
 			entity.EnteredStateAt == nil || entity.EnteredStateAt.IsZero() {
 			return fmt.Errorf("%s: entity %s requires exact fixed-revision owner metadata", runfork.RunForkMaterializedEntitySnapshotMetadataOwner, id)
 		}

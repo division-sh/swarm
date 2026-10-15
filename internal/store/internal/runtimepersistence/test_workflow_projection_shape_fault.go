@@ -90,28 +90,18 @@ func runWorkflowProjectionFault(ctx context.Context, selected any, write func(co
 	}
 }
 
-func SetWorkflowProjectionObsoleteFieldRowsForTest(ctx context.Context, selected any, run string) (int64, error) {
-	if err := validateWorkflowProjectionFaultRun(run); err != nil {
-		return 0, err
-	}
-	var changed int64
-	err := runWorkflowProjectionFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		changed, err = pipelinepersistence.SetWorkflowProjectionObsoleteFieldRowsForTest(ctx, tx, run)
-		return err
-	})
-	if err != nil {
-		return 0, err
-	}
-	return changed, nil
-}
-
 func SetWorkflowProjectionPlatformBookkeepingForTest(ctx context.Context, selected any, run, path string) (int64, error) {
 	return applyWorkflowProjectionShapeFault(ctx, selected, run, path, false, pipelinepersistence.SetWorkflowProjectionPlatformBookkeepingForTest)
 }
 
-func SetEntityProjectionPrivateBookkeepingForTest(ctx context.Context, selected any, run, entity string) (int64, error) {
-	return applyWorkflowProjectionShapeFault(ctx, selected, run, entity, true, pipelinepersistence.SetEntityProjectionPrivateBookkeepingForTest)
+func AddWorkflowProjectionPrivateBookkeepingForTest(ctx context.Context, selected any, run, path string) (int64, error) {
+	postgres, err := workflowProjectionNativePostgres(selected)
+	if err != nil {
+		return 0, err
+	}
+	return applyWorkflowProjectionShapeFault(ctx, selected, run, path, false, func(ctx context.Context, tx *sql.Tx, run, path string) (int64, error) {
+		return pipelinepersistence.AddWorkflowProjectionPrivateBookkeepingForTest(ctx, tx, postgres, run, path)
+	})
 }
 
 func SetWorkflowProjectionConflictingEntityTypeForTest(ctx context.Context, selected any, run, entity string) (int64, error) {
@@ -157,6 +147,10 @@ func SetWorkflowProjectionNumericFlowPathForTest(ctx context.Context, selected a
 
 func AddAmbiguousWorkflowProjectionFieldsForTest(ctx context.Context, selected any, run, entity string) (int64, error) {
 	return applyWorkflowProjectionShapeFault(ctx, selected, run, entity, true, pipelinepersistence.AddAmbiguousWorkflowProjectionFieldsForTest)
+}
+
+func AddWorkflowProjectionEmptyFieldsForTest(ctx context.Context, selected any, run, entity string) (int64, error) {
+	return applyWorkflowProjectionShapeFault(ctx, selected, run, entity, true, pipelinepersistence.AddWorkflowProjectionEmptyFieldsForTest)
 }
 
 func SetWorkflowTransitionEvidenceWireForTest(ctx context.Context, selected any, run, path string, wire json.RawMessage) (int64, error) {

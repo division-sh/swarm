@@ -3,6 +3,7 @@ package workflowheader
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -51,12 +52,16 @@ func load(ctx context.Context, tx *sql.Tx, lockPostgres bool, runID, entityID, i
 	if id, err := uuid.Parse(runID); err != nil || id == uuid.Nil || id.String() != runID {
 		return Projection{}, false, fmt.Errorf("constructed header projection requires canonical nonzero run UUID")
 	}
+	entityPredicate := "CAST(fi.entity_id AS TEXT) = $2"
+	if lockPostgres {
+		entityPredicate = "fi.entity_id = NULLIF($2, '')::uuid"
+	}
 	query := `SELECT fi.entity_id, fi.instance_path, fi.entity_type, fi.flow_template, fi.current_state, fi.revision,
 		fi.gates, fi.bookkeeping, fi.accumulator,
 		es.entity_id, es.flow_instance, es.entity_type, es.fields
 		FROM flow_instances fi
 		LEFT JOIN entity_state es ON es.run_id = fi.run_id AND (es.entity_id = fi.entity_id OR es.flow_instance = fi.instance_path)
-		WHERE fi.run_id = $1 AND ($2 = '' OR CAST(fi.entity_id AS TEXT) = $2)
+		WHERE fi.run_id = $1 AND ($2 = '' OR ` + entityPredicate + `)
 		AND ($3 = '' OR fi.instance_path = $3)`
 	if lockPostgres {
 		query += ` FOR UPDATE OF fi`
@@ -87,7 +92,7 @@ func load(ctx context.Context, tx *sql.Tx, lockPostgres bool, runID, entityID, i
 	if err := rows.Close(); err != nil {
 		return Projection{}, false, err
 	}
-	if id, err := uuid.Parse(header.EntityID); err != nil || id == uuid.Nil || id.String() != header.EntityID || header.InstancePath == "" || strings.TrimSpace(header.InstancePath) != header.InstancePath || header.FlowTemplate == "" || strings.TrimSpace(header.FlowTemplate) != header.FlowTemplate || header.Stage == "" || header.Revision <= 0 {
+	if id, err := uuid.Parse(header.EntityID); err != nil || id == uuid.Nil || header.InstancePath == "" || strings.TrimSpace(header.InstancePath) != header.InstancePath || header.FlowTemplate == "" || strings.TrimSpace(header.FlowTemplate) != header.FlowTemplate || header.Stage == "" || header.Revision <= 0 {
 		return Projection{}, false, &ProjectionError{runID, header.EntityID, header.InstancePath, "constructed header projection has invalid identity or lifecycle progress"}
 	}
 	if declaredType.Valid {
@@ -176,8 +181,7 @@ func inventory(ctx context.Context, tx *sql.Tx, lockPostgres bool, runID string)
 }
 
 func inventoryStateOnly(ctx context.Context, tx *sql.Tx, runID string) (_ []Projection, err error) {
-	rows, err := tx.QueryContext(ctx, `SELECT es.entity_id, es.flow_instance, es.entity_type, COALESCE(es.current_state,''),
-		es.fields, es.bookkeeping, es.gates, es.accumulator FROM entity_state es
+	rows, err := tx.QueryContext(ctx, `SELECT es.entity_id, es.flow_instance, es.entity_type, es.fields FROM entity_state es
 		WHERE es.run_id = $1 AND NOT EXISTS (SELECT 1 FROM flow_instances fi WHERE fi.run_id = es.run_id
 		AND (fi.entity_id = es.entity_id OR fi.instance_path = es.flow_instance)) ORDER BY es.entity_id`, runID)
 	if err != nil {
@@ -187,22 +191,16 @@ func inventoryStateOnly(ctx context.Context, tx *sql.Tx, runID string) (_ []Proj
 	var states []Projection
 	for rows.Next() {
 		var state Projection
-		if err := rows.Scan(&state.EntityID, &state.InstancePath, &state.EntityType, &state.Stage,
-			&state.Fields, &state.Bookkeeping, &state.Gates, &state.Accumulator); err != nil {
+		if err := rows.Scan(&state.EntityID, &state.InstancePath, &state.EntityType, &state.Fields); err != nil {
 			return nil, err
 		}
-		if id, err := uuid.Parse(state.EntityID); err != nil || id == uuid.Nil || id.String() != state.EntityID ||
+		if id, err := uuid.Parse(state.EntityID); err != nil || id == uuid.Nil ||
 			state.InstancePath == "" || strings.TrimSpace(state.InstancePath) != state.InstancePath ||
-			state.EntityType == "" || strings.TrimSpace(state.EntityType) != state.EntityType || state.Stage == "" {
-			return nil, &ProjectionError{runID, state.EntityID, state.InstancePath, "state-only projection requires exact identity, declared fields and lifecycle"}
+			state.EntityType == "" || strings.TrimSpace(state.EntityType) != state.EntityType {
+			return nil, &ProjectionError{runID, state.EntityID, state.InstancePath, "state-only projection requires exact identity and declared fields"}
 		}
-		for _, object := range []struct {
-			name string
-			raw  any
-		}{{"fields", state.Fields}, {"bookkeeping", state.Bookkeeping}, {"gates", state.Gates}, {"accumulator", state.Accumulator}} {
-			if err := requireJSONObject(object.name, object.raw); err != nil {
-				return nil, &ProjectionError{runID, state.EntityID, state.InstancePath, err.Error()}
-			}
+		if err := requireJSONObject("fields", state.Fields); err != nil {
+			return nil, &ProjectionError{runID, state.EntityID, state.InstancePath, err.Error()}
 		}
 		states = append(states, state)
 	}
@@ -212,6 +210,8 @@ func inventoryStateOnly(ctx context.Context, tx *sql.Tx, runID string) (_ []Proj
 func requireJSONObject(name string, raw any) error {
 	var data []byte
 	switch value := raw.(type) {
+	case json.RawMessage:
+		data = value
 	case []byte:
 		data = value
 	case string:

@@ -676,22 +676,48 @@ func projectEntityStateRows(rows []map[string]any, selectFields []string) []map[
 	return out
 }
 
-func groupEntityStateRows(rows []map[string]any, groupBy string, selectFields []string) []map[string]any {
-	grouped := map[string][]map[string]any{}
-	order := make([]string, 0)
+type entityGroupKey struct {
+	text   string
+	absent bool
+}
+
+func groupEntityRows(rows []map[string]any, groupBy string) (map[entityGroupKey][]map[string]any, []entityGroupKey) {
+	grouped := map[entityGroupKey][]map[string]any{}
+	keys := make([]entityGroupKey, 0)
 	for _, row := range rows {
-		key := fmt.Sprint(resolveEntitySelectorValue(row, groupBy))
-		if _, ok := grouped[key]; !ok {
-			order = append(order, key)
+		value := resolveEntitySelectorValue(row, groupBy)
+		key := entityGroupKey{absent: value == nil}
+		if !key.absent {
+			key.text = fmt.Sprint(value)
 		}
-		grouped[key] = append(grouped[key], projectEntityStateRows([]map[string]any{row}, selectFields)[0])
+		if _, ok := grouped[key]; !ok {
+			keys = append(keys, key)
+		}
+		grouped[key] = append(grouped[key], row)
 	}
-	sort.Strings(order)
-	out := make([]map[string]any, 0, len(order))
-	for _, key := range order {
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].absent != keys[j].absent {
+			return !keys[i].absent
+		}
+		return keys[i].text < keys[j].text
+	})
+	return grouped, keys
+}
+
+func (k entityGroupKey) value() any {
+	if k.absent {
+		return nil
+	}
+	return k.text
+}
+
+func groupEntityStateRows(rows []map[string]any, groupBy string, selectFields []string) []map[string]any {
+	grouped, keys := groupEntityRows(rows, groupBy)
+	out := make([]map[string]any, 0, len(keys))
+	for _, key := range keys {
 		out = append(out, map[string]any{
-			"group_key": key,
-			"items":     grouped[key],
+			"group_key": key.value(),
+			"items":     projectEntityStateRows(grouped[key], selectFields),
 		})
 	}
 	return out
@@ -709,16 +735,7 @@ func aggregateEntityMetric(metric, fieldName string, rows []map[string]any) (any
 }
 
 func aggregateEntityMetricGroups(metric, fieldName, groupBy string, rows []map[string]any) ([]map[string]any, error) {
-	grouped := map[string][]map[string]any{}
-	keys := make([]string, 0)
-	for _, row := range rows {
-		key := fmt.Sprint(resolveEntitySelectorValue(row, groupBy))
-		if _, ok := grouped[key]; !ok {
-			keys = append(keys, key)
-		}
-		grouped[key] = append(grouped[key], row)
-	}
-	sort.Strings(keys)
+	grouped, keys := groupEntityRows(rows, groupBy)
 	out := make([]map[string]any, 0, len(keys))
 	for _, key := range keys {
 		value, err := aggregateEntityMetric(metric, fieldName, grouped[key])
@@ -726,7 +743,7 @@ func aggregateEntityMetricGroups(metric, fieldName, groupBy string, rows []map[s
 			return nil, err
 		}
 		out = append(out, map[string]any{
-			"group_key": key,
+			"group_key": key.value(),
 			"value":     value,
 		})
 	}

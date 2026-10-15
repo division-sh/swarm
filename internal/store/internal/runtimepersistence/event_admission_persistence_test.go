@@ -171,19 +171,17 @@ func convergeTerminalAdmissionRun(
 	now := time.Now().UTC()
 	query := `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES (?, ?, 'terminal-admission', 'default', 'terminal-admission', 'Terminal Admission', 'done',
-			'{}', '{}', '{}', 1, ?, ?, ?)
+			run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at
+		) VALUES (?, ?, 'terminal-admission', 'default', 'terminal-admission', 'Terminal Admission',
+			'{}', ?, ?)
 	`
-	args := []any{runID, entityID, now, now, now}
+	args := []any{runID, entityID, now, now}
 	if postgres {
 		query = `
 			INSERT INTO entity_state (
-				run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-				gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-			) VALUES ($1::uuid, $2::uuid, 'terminal-admission', 'default', 'terminal-admission', 'Terminal Admission', 'done',
-				'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $3, $4, $5)
+				run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at
+			) VALUES ($1::uuid, $2::uuid, 'terminal-admission', 'default', 'terminal-admission', 'Terminal Admission',
+				'{}'::jsonb, $3, $4)
 		`
 	}
 	if _, err := db.ExecContext(ctx, query, args...); err != nil {

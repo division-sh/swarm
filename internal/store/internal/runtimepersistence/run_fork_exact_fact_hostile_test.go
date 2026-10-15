@@ -116,7 +116,7 @@ func TestRunForkExactFactsHostileBothStores(t *testing.T) {
 			exactRollbackTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 				ref := exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID)
 				for _, runID := range []string{f.runID, foreign.runID} {
-					mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,name,current_state,created_at,updated_at) VALUES ($1,$2,'matrix-flow','matrix-type',$3,'ready',$4,$4)`, runID, f.entityID, "entity-"+runID, f.at)
+					mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,name,created_at,updated_at) VALUES ($1,$2,'matrix-flow','matrix-type',$3,$4,$4)`, runID, f.entityID, "entity-"+runID, f.at)
 					compareExactWithWhole(t, ctx, tx, s, runID, exactEffects(t, runID, ref), 2, true)
 				}
 				foreignBefore := exactLedger(t, ctx, tx, foreign.runID)

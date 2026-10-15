@@ -27,11 +27,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -133,8 +135,8 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 				Recipient: events.MustNodeDeliveryRecipient(activityNode),
 				Target:    events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow_a", FlowInstance: "flow_a", EntityID: entityID}),
 			}
-			fixture.seedSource(t, loaded, sourceRunID, entityID, sourceRequestEventID, at, activityRoute, routingSource)
-			seedSelectedContractActivityLoop(t, db, sourceRunID, entityID, sourceRequestEventID, activation, at)
+			sourceEvent := fixture.seedSource(t, loaded, sourceRunID, entityID, sourceRequestEventID, at, activityRoute, routingSource)
+			seedSelectedContractActivityLoop(t, fixture, loaded, sourceEvent, entityID, activation, at)
 			seedSelectedContractActivityRequest(t, db, sourceRunID, sourceRequestEventID, selectedContractActivityRequestPayload{
 				ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"},
 				EffectClass: string(tt.effectClass), SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
@@ -274,7 +276,12 @@ type activityForkSourceEvidence struct {
 func readActivityForkSourceEvidence(t *testing.T, db activityForkFixtureDB, runID, entityID, requestID string) activityForkSourceEvidence {
 	t.Helper()
 	var out activityForkSourceEvidence
-	if err := db.QueryRowContext(context.Background(), `SELECT flow_instance,entity_type,current_state,fields,accumulator FROM entity_state WHERE run_id=$1::uuid AND entity_id=$2::uuid`, runID, entityID).Scan(&out.Flow, &out.EntityType, &out.Stage, &out.Fields, &out.Accumulator); err != nil {
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT es.flow_instance, es.entity_type, fi.current_state, es.fields, fi.accumulator
+		FROM entity_state es
+		JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+		WHERE es.run_id=$1::uuid AND es.entity_id=$2::uuid
+	`, runID, entityID).Scan(&out.Flow, &out.EntityType, &out.Stage, &out.Fields, &out.Accumulator); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.QueryRowContext(context.Background(), `SELECT payload_bytes FROM events WHERE event_id=$1::uuid AND run_id=$2::uuid`, requestID, runID).Scan(&out.Payload); err != nil {
@@ -324,7 +331,7 @@ func newActivityForkFixture(t *testing.T, backend string) activityForkFixture {
 	}
 }
 
-func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContractSource, runID, entityID, eventID string, at time.Time, route events.DeliveryRoute, source events.RoutingSource) {
+func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContractSource, runID, entityID, eventID string, at time.Time, route events.DeliveryRoute, source events.RoutingSource) events.Event {
 	t.Helper()
 	envelope := events.EnvelopeForSourceRoute(events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow_a"), source.Route())
 	ctx := runtimecorrelation.WithSourceArtifactFact(runForkTestContext(t), loaded.SourceArtifactFact)
@@ -353,6 +360,7 @@ func (f activityForkFixture) seedSource(t *testing.T, loaded LoadedSelectedContr
 	if err != nil || !committed.Acknowledged || !committed.Created || len(committed.Children) != 1 || !committed.Children[0].Created || !committed.Children[0].Acknowledged {
 		t.Fatalf("construct activity source tree: committed=%+v err=%v", committed, err)
 	}
+	return event
 }
 
 func (f activityForkFixture) capture(t *testing.T, runID string) {
@@ -534,25 +542,44 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 	return semanticview.Wrap(bundle)
 }
 
-func seedSelectedContractActivityLoop(t *testing.T, db activityForkFixtureDB, runID, entityID, requestEventID string, activation loopruntime.Activation, at time.Time) {
+func seedSelectedContractActivityLoop(t *testing.T, fixture activityForkFixture, loaded LoadedSelectedContractSource, sourceEvent events.Event, entityID string, activation loopruntime.Activation, at time.Time) {
 	t.Helper()
 	buckets := map[string]map[string]any{}
 	if err := loopruntime.Store(buckets, activation); err != nil {
 		t.Fatalf("store source loop activation: %v", err)
 	}
-	accumulator := selectedContractActivityJSON(t, buckets)
-	handlerLoops := selectedContractActivityJSON(t, buckets[loopruntime.BucketKey])
-	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, `UPDATE entity_state SET accumulator = $3::jsonb WHERE run_id = $1::uuid AND entity_id = $2::uuid`, runID, entityID, accumulator); err != nil {
-		t.Fatalf("seed source loop accumulator: %v", err)
+	runID := sourceEvent.RunID()
+	ctx := effects.WithExecutionMode(runtimecorrelation.WithInboundEvent(runtimecorrelation.WithRunID(runtimecorrelation.WithSourceArtifactFact(runForkTestContext(t), loaded.SourceArtifactFact), runID), sourceEvent), executionmode.Live)
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute("flow_a", "flow_a", "flow_a"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, caused_by_event,
-			writer_type, writer_id, handler_step, created_at
-		) VALUES ($1::uuid, $2::uuid, 'accumulator', 'handler_loops', 'null'::jsonb, $3::jsonb, $4::uuid, 'platform', 'activity-fork-proof', 'seed', $5)
-	`, runID, entityID, handlerLoops, requestEventID, at); err != nil {
-		t.Fatalf("seed source loop mutation: %v", err)
+	selected := fixture.owner.ports.fork.(pipeline.WorkflowPersistenceOwner)
+	before, err := selected.LoadWorkflowTargetPersistence(ctx, owner, identity.NormalizeEntityID(entityID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, err := before.DecodeComplete(owner.Route, identity.NormalizeEntityID(entityID))
+	if err != nil {
+		t.Fatalf("load exact source loop header: %v", err)
+	}
+	state := pipeline.WorkflowEngineStateRecord{
+		Identity: owner, EntityID: entityID, ParentInstance: instance.ParentFlowInstance, InstanceKey: instance.InstanceKey,
+		WorkflowName: instance.WorkflowName, WorkflowVersion: instance.WorkflowVersion, Mode: instance.Mode, Status: instance.Status,
+		CurrentState: instance.CurrentState, StageDefined: instance.StageDefined, EntityType: instance.EntityType, Slug: instance.Slug, Name: instance.Name,
+		Fields: before.State.Fields, Bookkeeping: before.Lifecycle.State.Bookkeeping, Gates: before.Lifecycle.State.Gates,
+		Accumulator: json.RawMessage(selectedContractActivityJSON(t, buckets)), Config: before.Lifecycle.Config,
+		InitialFields:  json.RawMessage(selectedContractActivityJSON(t, instance.InitialFieldValues)),
+		EnteredStageAt: instance.EnteredStageAt, CreatedAt: instance.CreatedAt, UpdatedAt: at,
+		ExpectedState: instance.CurrentState, ExpectedRevision: instance.Revision, Transition: pipeline.WorkflowEngineStateTransitionUpdateStateAndCompanion,
+	}
+	committed, err := selected.CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{State: state})
+	if err != nil || !committed.Committed {
+		t.Fatalf("commit atomic source loop projection/history: committed=%v err=%v", committed.Committed, err)
+	}
+	after, found, err := selected.LoadWorkflowInstance(ctx, owner)
+	if err != nil || !found || after.Revision != instance.Revision+1 || selectedContractActivityJSON(t, after.StateBuckets) != selectedContractActivityJSON(t, buckets) {
+		t.Fatalf("source loop exact header/readback: found=%v instance=%+v err=%v", found, after, err)
 	}
 }
 

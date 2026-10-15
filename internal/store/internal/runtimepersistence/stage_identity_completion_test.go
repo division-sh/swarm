@@ -44,14 +44,7 @@ func TestSelectedCompletionStageReadersBothStores(t *testing.T) {
 			f := openRunLifecycleCandidateParityFixture(t, backend)
 			ctx := testAuthorActivitySourceArtifactContext()
 			set := func(runID, stage string) {
-				query := "UPDATE entity_state SET current_state=? WHERE run_id=?"
-				if f.postgres {
-					query = "UPDATE entity_state SET current_state=$1 WHERE run_id=$2::uuid"
-				}
-				if _, err := f.db.ExecContext(ctx, query, stage, runID); err != nil {
-					t.Fatal(err)
-				}
-				query = "UPDATE flow_instances SET current_state=? WHERE run_id=?"
+				query := "UPDATE flow_instances SET current_state=? WHERE run_id=?"
 				if f.postgres {
 					query = "UPDATE flow_instances SET current_state=$1 WHERE run_id=$2::uuid"
 				}

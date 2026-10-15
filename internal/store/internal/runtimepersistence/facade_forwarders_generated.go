@@ -823,10 +823,6 @@ func (s *PostgresStore) LoadRuntimeIngressState(ctx context.Context) (ingress.St
 	return s.runtimeIngressPostgresOwner.LoadRuntimeIngressState(ctx)
 }
 
-func (s *PostgresStore) LoadWorkflowEntityState(ctx context.Context, identity flowidentity.RunScopedFlowInstance, entityID identity.EntityID) (pipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
-	return s.pipelinePostgresOwner.LoadWorkflowEntityState(ctx, identity, entityID)
-}
-
 func (s *PostgresStore) LoadWorkflowInstance(ctx context.Context, identity flowidentity.RunScopedFlowInstance) (pipeline.WorkflowInstance, bool, error) {
 	return s.pipelinePostgresOwner.LoadWorkflowInstance(ctx, identity)
 }
@@ -2033,10 +2029,6 @@ func (s *SQLiteRuntimeStore) LoadRunTestQuiescence(ctx context.Context, runID st
 
 func (s *SQLiteRuntimeStore) LoadRuntimeIngressState(ctx context.Context) (ingress.State, error) {
 	return s.runtimeIngressSQLiteOwner.LoadRuntimeIngressState(ctx)
-}
-
-func (s *SQLiteRuntimeStore) LoadWorkflowEntityState(ctx context.Context, identity flowidentity.RunScopedFlowInstance, entityID identity.EntityID) (pipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
-	return s.pipelineSQLiteOwner.LoadWorkflowEntityState(ctx, identity, entityID)
 }
 
 func (s *SQLiteRuntimeStore) LoadWorkflowInstance(ctx context.Context, identity flowidentity.RunScopedFlowInstance) (pipeline.WorkflowInstance, bool, error) {

@@ -2,6 +2,8 @@ package runtimepersistence
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -15,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testing.T) {
@@ -35,7 +38,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 			at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 			if _, err := owner.SetupScenarioEntities(f.ctx, pipeline.ScenarioSetupRequest{
 				RunID: runID, CreatedAt: at,
-				Entities: []pipeline.ScenarioSetupEntityRequest{{Alias: "import", EntityID: entityID, FlowInstance: ".", EntityType: "record", CurrentState: "pending", Fields: map[string]any{"marker": "recorded"}}},
+				Entities: []pipeline.ScenarioSetupEntityRequest{{Alias: "import", EntityID: entityID, FlowInstance: ".", EntityType: "record", Fields: map[string]any{"marker": "recorded"}}},
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -44,7 +47,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 				t.Fatal(err)
 			}
 			history, err := owner.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: runID, At: marker.ID()})
-			if err != nil || len(history.Entities) != 1 || history.Entities[0].EntityID != entityID || history.Entities[0].CurrentState != "pending" ||
+			if err != nil || len(history.Entities) != 1 || history.Entities[0].EntityID != entityID || history.Entities[0].CurrentState != nil || history.Entities[0].EnteredStateAt != nil || history.Entities[0].Gates != nil || history.Entities[0].Bookkeeping != nil || history.Entities[0].Accumulator != nil ||
 				history.Entities[0].Fields["marker"] != "recorded" || history.Entities[0].MaterializationMetadata == nil ||
 				history.Entities[0].MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceEntityState {
 				t.Fatalf("scenario import lost its historical meaning: %+v err=%v", history.Entities, err)
@@ -88,7 +91,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, fork.ForkRunID).Scan(&headers); err != nil {
 				t.Fatal(err)
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND current_state='pending'`, fork.ForkRunID, entityID).Scan(&fields); err != nil || headers != 0 || fields != 1 {
+			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, fork.ForkRunID, entityID).Scan(&fields); err != nil || headers != 0 || fields != 1 {
 				t.Fatalf("materialize-only import fabricated construction or lost state: headers=%d fields=%d err=%v", headers, fields, err)
 			}
 			before = snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
@@ -98,20 +101,41 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 			for _, fault := range []struct {
 				name, column string
 				value        any
+				retired      bool
 			}{
-				{"fields", "fields", `{"marker":"changed"}`},
-				{"stage", "current_state", "changed"},
-				{"entry_clock", "entered_state_at", at.Add(time.Second)},
-				{"creation_clock", "created_at", at.Add(-time.Hour)},
-				{"update_clock", "updated_at", at.Add(time.Hour)},
-				{"revision", "revision", int64(2)},
-				{"gates", "gates", `{"foreign":true}`},
-				{"bookkeeping", "bookkeeping", `{"foreign":true}`},
-				{"accumulator", "accumulator", `{"foreign":true}`},
-				{"slug", "slug", "changed"},
-				{"name", "name", "changed"},
+				{"fields", "fields", `{"marker":"changed"}`, false},
+				{"stage", "current_state", "changed", true},
+				{"entry_clock", "entered_state_at", at.Add(time.Second), true},
+				{"creation_clock", "created_at", at.Add(-time.Hour), false},
+				{"update_clock", "updated_at", at.Add(time.Hour), false},
+				{"revision", "revision", int64(2), true},
+				{"gates", "gates", `{"foreign":true}`, true},
+				{"bookkeeping", "bookkeeping", `{"foreign":true}`, true},
+				{"accumulator", "accumulator", `{"foreign":true}`, true},
+				{"slug", "slug", "changed", false},
+				{"name", "name", "changed", false},
 			} {
-				t.Run("reuse_rejects/"+fault.name, func(t *testing.T) {
+				kind := "reuse_rejects"
+				if fault.retired {
+					kind = "retired_column_rejects"
+				}
+				t.Run(kind+"/"+fault.name, func(t *testing.T) {
+					if fault.retired {
+						before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
+						_, err := f.db.ExecContext(f.ctx, "UPDATE entity_state SET "+fault.column+"=$1 WHERE run_id=$2 AND entity_id=$3", fault.value, fork.ForkRunID, entityID)
+						if backend == "postgres" {
+							var native *pq.Error
+							if !errors.As(err, &native) || native.Code != "42703" || !strings.Contains(native.Message, `"`+fault.column+`"`) {
+								t.Fatalf("retired column %s did not fail for undefined-column admission: %v", fault.column, err)
+							}
+						} else if err == nil || !strings.Contains(err.Error(), "no such column: "+fault.column) {
+							t.Fatalf("retired column %s did not fail for undefined-column admission: %v", fault.column, err)
+						}
+						if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
+							t.Fatal("retired-column refusal changed imported state")
+						}
+						return
+					}
 					var original any
 					if err := f.db.QueryRowContext(f.ctx, "SELECT "+fault.column+" FROM entity_state WHERE run_id=$1 AND entity_id=$2", fork.ForkRunID, entityID).Scan(&original); err != nil {
 						t.Fatal(err)
@@ -131,6 +155,23 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 					}
 				})
 			}
+			t.Run("reuse_rejects/constructed_header", func(t *testing.T) {
+				original := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
+				seedWorkflowHeaderProjectionFixture(t, f.ctx, f.db, fork.ForkRunID, entityID, ".", ".", "record", "pending", "{}", at)
+				before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
+				if _, err := owner.MaterializeRunFork(f.ctx, request); err == nil || err.Error() != fmt.Sprintf("fork materialization %s has unexpected entity header/%s", fork.ForkRunID, entityID) {
+					t.Fatalf("import acquired construction or lost exact header refusal: %v", err)
+				}
+				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
+					t.Fatal("unexpected-header refusal changed or repaired imported state")
+				}
+				if _, err := f.db.ExecContext(f.ctx, `DELETE FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, fork.ForkRunID, entityID); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(original, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
+					t.Fatal("header fault cleanup did not preserve physical imported state")
+				}
+			})
 		})
 	}
 }

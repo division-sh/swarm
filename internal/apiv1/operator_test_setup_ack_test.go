@@ -19,6 +19,8 @@ type scenarioSetupAckSelectedStore interface {
 	APIIdempotencyStore
 	RunBundleContextStore
 	sourceartifactfixture.Writer
+	EntityReadStore
+	runtimepipeline.WorkflowInstancePersistenceReader
 }
 
 type scenarioSetupPostCommitFaultStore struct {
@@ -88,7 +90,7 @@ func TestOperatorTestSetupAcknowledgedCleanupErrorCompletesIdempotencyBothStores
 					"bundle_hash":     bundle.SourceArtifact.BundleHash(),
 					"run_id":          runID,
 					"idempotency_key": "setup-ack-key",
-					"entities":        []any{validTestSetupEntity(entityID, "waiting", "seeded", true)},
+					"entities":        []any{validTestSetupEntity(entityID, "seeded")},
 				},
 			}
 
@@ -97,10 +99,11 @@ func TestOperatorTestSetupAcknowledgedCleanupErrorCompletesIdempotencyBothStores
 				t.Fatalf("first setup error = %v, want postcommit diagnostic", err)
 			}
 			committed, ok := first.(testSetupEntitiesResult)
-			if !ok || committed.RunID != runID || len(committed.Entities) != 1 || committed.Entities[0].EntityID != entityID {
+			if !ok || committed.RunID != runID || len(committed.Entities) != 1 || committed.Entities[0].EntityID != entityID || committed.Entities[0].CurrentState != nil {
 				t.Fatalf("acknowledged setup result = %#v, want committed run/entity", first)
 			}
 			assertScenarioSetupAckRows(t, selected, runID, entityID)
+			assertTestSetupImportedEntity(t, selected, runID, entityID, "seeded")
 			if setup.calls != 1 {
 				t.Fatalf("setup calls after acknowledged fault = %d, want 1", setup.calls)
 			}
@@ -117,6 +120,7 @@ func TestOperatorTestSetupAcknowledgedCleanupErrorCompletesIdempotencyBothStores
 				t.Fatalf("setup calls after replay = %d, want no duplicate domain write", setup.calls)
 			}
 			assertScenarioSetupAckRows(t, selected, runID, entityID)
+			assertTestSetupImportedEntity(t, selected, runID, entityID, "seeded")
 		})
 	}
 }
@@ -134,7 +138,7 @@ func assertScenarioSetupAckRows(t *testing.T, selected any, runID, entityID stri
 	}{
 		{"run", observed.Runs, 1},
 		{"entity", observed.Entities, 1},
-		{"entity mutations", observed.SetupMutations, 3},
+		{"entity mutations", observed.SetupMutations, 1},
 		{"idempotency completion", observed.Completions, 1},
 	} {
 		if check.got != check.want {
@@ -142,10 +146,27 @@ func assertScenarioSetupAckRows(t *testing.T, selected any, runID, entityID stri
 		}
 	}
 	var completed testSetupEntitiesResult
+	projection, err := storetest.ReadTrackedEntityMutationProjectionStorage(context.Background(), selected, runID, entityID)
+	if err != nil || len(projection.Mutations) != 1 {
+		t.Fatalf("setup authored mutation projection = %+v, err=%v", projection, err)
+	}
+	mutation := projection.Mutations[0]
+	if mutation.Domain != "authored_field" || mutation.Path != "note" || mutation.WriterType != "platform" || mutation.WriterID != "test.setup_entities" {
+		t.Fatalf("setup mutation = %+v, want one platform/test.setup_entities authored note", mutation)
+	}
 	if err := json.Unmarshal(observed.Response, &completed); err != nil {
 		t.Fatalf("decode idempotency completion: %v", err)
 	}
-	if completed.RunID != runID || len(completed.Entities) != 1 || completed.Entities[0].EntityID != entityID {
+	if completed.RunID != runID || len(completed.Entities) != 1 || completed.Entities[0].EntityID != entityID || completed.Entities[0].CurrentState != nil {
 		t.Fatalf("stored idempotency completion = %#v, want committed run/entity", completed)
+	}
+	var wire struct {
+		Entities []map[string]json.RawMessage `json:"entities"`
+	}
+	if err := json.Unmarshal(observed.Response, &wire); err != nil {
+		t.Fatalf("decode idempotency completion wire shape: %v", err)
+	}
+	if len(wire.Entities) != 1 || string(wire.Entities[0]["current_state"]) != "null" {
+		t.Fatalf("stored idempotency completion must retain explicit null current_state: %s", observed.Response)
 	}
 }

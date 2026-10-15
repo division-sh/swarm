@@ -78,8 +78,10 @@ func commitWorkflowInstanceHeader(ctx context.Context, tx *sql.Tx, postgres bool
 	}
 	var fact workflowEngineStateFact
 	write := transactiontest.BeginWorkflowHeaderJSON(ctx, len(record.Config))
+	stateWrite := transactiontest.BeginLifecycleStateJSON(ctx, len(record.Config)+len(record.Gates)+len(record.Bookkeeping)+len(record.Accumulator))
 	err := tx.QueryRowContext(ctx, query+` RETURNING CAST(run_id AS TEXT), CAST(entity_id AS TEXT)`, args...).Scan(&fact.runID, &fact.entityID)
 	write.End(err)
+	stateWrite.End(err)
 	if err == sql.ErrNoRows {
 		return workflowEngineStateFact{}, workflowEngineStateRevisionConflict(record)
 	}
@@ -176,10 +178,8 @@ func RequireHistoricalImportedWorkflowState(ctx context.Context, tx *sql.Tx, pos
 	state := target.State
 	if state.EntityID != expected.EntityID || state.FlowInstance != expected.FlowInstance ||
 		state.EntityType != expected.EntityType || state.Slug != expected.Slug || state.Name != expected.Name ||
-		state.CurrentState != expected.CurrentState || state.Revision != expected.Revision ||
-		!state.EnteredStageAt.Equal(expected.EnteredStageAt) || !state.CreatedAt.Equal(expected.CreatedAt) || !state.UpdatedAt.Equal(expected.UpdatedAt) ||
-		!workflowCommitJSONEqual(state.Fields, expected.Fields) || !workflowCommitJSONEqual(state.Gates, expected.Gates) ||
-		!workflowCommitJSONEqual(state.Bookkeeping, expected.Bookkeeping) || !workflowCommitJSONEqual(state.Accumulator, expected.Accumulator) {
+		!state.CreatedAt.Equal(expected.CreatedAt) || !state.UpdatedAt.Equal(expected.UpdatedAt) ||
+		!workflowCommitJSONEqual(state.Fields, expected.Fields) {
 		return fmt.Errorf("historical imported fields %s disagree with fixed snapshot", expected.FlowInstance)
 	}
 	return nil

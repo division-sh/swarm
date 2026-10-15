@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -17,12 +18,14 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	gaterouteadapter "github.com/division-sh/swarm/internal/store/internal/backend/gateroute"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 )
 
 func commitWorkflowEngineState(
@@ -100,6 +103,15 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 }
 
 func commitWorkflowHeaderAndFields(ctx context.Context, tx *sql.Tx, postgres bool, record runtimepipeline.WorkflowEngineStateRecord, decision workflowEngineStateDecision) (workflowEngineStateFact, error) {
+	if record.EntityType != "" {
+		value, err := runtimecanonicaljson.Decode(record.Fields)
+		if err != nil {
+			return workflowEngineStateFact{}, fmt.Errorf("admit declared workflow fields: %w", err)
+		}
+		if value.Kind() != semanticvalue.KindObject {
+			return workflowEngineStateFact{}, fmt.Errorf("declared workflow fields require a persisted JSON object")
+		}
+	}
 	fact, err := commitWorkflowInstanceHeader(ctx, tx, postgres, record, decision.createState)
 	if err != nil {
 		return workflowEngineStateFact{}, err
@@ -112,35 +124,37 @@ func commitWorkflowHeaderAndFields(ctx context.Context, tx *sql.Tx, postgres boo
 	if decision.createState {
 		query = `INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, slug, name,
-			current_state, gates, fields, bookkeeping, accumulator, revision,
-			entered_state_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?, ?, ?, 1, ?, ?, ?)`
+			fields, created_at, updated_at
+		) VALUES (?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), ?, ?, ?)`
 		if postgres {
 			query = `INSERT INTO entity_state (
 				run_id, entity_id, flow_instance, entity_type, slug, name,
-				current_state, gates, fields, bookkeeping, accumulator, revision,
-				entered_state_at, created_at, updated_at
+				fields, created_at, updated_at
 			) VALUES ($1::uuid, $2::uuid, $3, $4, NULLIF($5, ''), NULLIF($6, ''),
-				$7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, 1, $12, $13, $14)`
+				$7::jsonb, $8, $9)`
 		}
 		args = []any{record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.EntityType,
-			record.Slug, record.Name, record.CurrentState, string(record.Gates), string(record.Fields),
-			string(record.Bookkeeping), string(record.Accumulator), record.EnteredStageAt, record.CreatedAt, record.UpdatedAt}
+			record.Slug, record.Name, string(record.Fields), record.CreatedAt, record.UpdatedAt}
 	} else {
-		query = `UPDATE entity_state SET slug = NULLIF(?, ''), name = NULLIF(?, ''), current_state = ?,
-			gates = ?, fields = ?, bookkeeping = ?, accumulator = ?, revision = revision + 1,
-			entered_state_at = ?, updated_at = ? WHERE run_id = ? AND entity_id = ? AND flow_instance = ? AND entity_type = ?`
-		if postgres {
-			query = `UPDATE entity_state SET slug = NULLIF($1, ''), name = NULLIF($2, ''), current_state = $3,
-				gates = $4::jsonb, fields = $5::jsonb, bookkeeping = $6::jsonb, accumulator = $7::jsonb,
-				revision = revision + 1, entered_state_at = $8, updated_at = $9
-				WHERE run_id = $10::uuid AND entity_id = $11::uuid AND flow_instance = $12 AND entity_type = $13`
+		changed, err := workflowDataUpdateRequired(ctx, tx, postgres, record)
+		if err != nil {
+			return workflowEngineStateFact{}, err
 		}
-		args = []any{record.Slug, record.Name, record.CurrentState, string(record.Gates), string(record.Fields),
-			string(record.Bookkeeping), string(record.Accumulator), record.EnteredStageAt, record.UpdatedAt,
+		if !changed {
+			return fact, nil
+		}
+		query = `UPDATE entity_state SET slug = NULLIF(?, ''), name = NULLIF(?, ''), fields = ?,
+			updated_at = ? WHERE run_id = ? AND entity_id = ? AND flow_instance = ? AND entity_type = ?`
+		if postgres {
+			query = `UPDATE entity_state SET slug = NULLIF($1, ''), name = NULLIF($2, ''), fields = $3::jsonb,
+				updated_at = $4 WHERE run_id = $5::uuid AND entity_id = $6::uuid AND flow_instance = $7 AND entity_type = $8`
+		}
+		args = []any{record.Slug, record.Name, string(record.Fields), record.UpdatedAt,
 			record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.EntityType}
 	}
+	write := transactiontest.BeginEntityDataJSON(ctx, len(record.Fields))
 	result, err := tx.ExecContext(ctx, query, args...)
+	write.End(err)
 	if err != nil {
 		return workflowEngineStateFact{}, fmt.Errorf("commit declared workflow fields: %w", err)
 	}
@@ -152,6 +166,62 @@ func commitWorkflowHeaderAndFields(ctx context.Context, tx *sql.Tx, postgres boo
 		return workflowEngineStateFact{}, fmt.Errorf("constructed workflow %s has no required field row", record.Identity.Route.InstancePath)
 	}
 	return fact, nil
+}
+
+// Admission runs after the header CAS and under the original field lock. Even
+// unchanged data must have an exact companion and valid independent clocks.
+func workflowDataUpdateRequired(ctx context.Context, tx *sql.Tx, postgres bool, record runtimepipeline.WorkflowEngineStateRecord) (bool, error) {
+	header, found, err := workflowheader.LoadForMutation(ctx, tx, postgres, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath)
+	if err != nil {
+		return false, err
+	}
+	if !found || header.EntityType != record.EntityType {
+		return false, fmt.Errorf("constructed workflow %s has no exact declared field companion", record.Identity.Route.InstancePath)
+	}
+	dataQuery := `SELECT COALESCE(slug,''), COALESCE(name,''), created_at, updated_at
+		FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3 AND entity_type=$4`
+	var slug, name string
+	var createdRaw, updatedRaw any
+	if err := tx.QueryRowContext(ctx, dataQuery, record.Identity.RunID, record.EntityID, record.Identity.Route.InstancePath, record.EntityType).Scan(&slug, &name, &createdRaw, &updatedRaw); err != nil {
+		return false, fmt.Errorf("read required declared data companion: %w", err)
+	}
+	createdAt, created, err := sqliteTimeValue(createdRaw)
+	if err != nil {
+		return false, fmt.Errorf("invalid declared data creation clock: %w", err)
+	}
+	if !created || createdAt.IsZero() {
+		return false, fmt.Errorf("declared data creation clock is missing or zero")
+	}
+	updatedAt, updated, err := sqliteTimeValue(updatedRaw)
+	if err != nil {
+		return false, fmt.Errorf("invalid declared data update clock: %w", err)
+	}
+	if !updated || updatedAt.IsZero() || updatedAt.Before(createdAt) {
+		return false, fmt.Errorf("declared data update clock is missing, zero or predates creation")
+	}
+	before, err := storeentity.DecodeJSONMap(header.Fields)
+	if err != nil {
+		return false, err
+	}
+	after, err := storeentity.DecodeJSONMap(record.Fields)
+	if err != nil {
+		return false, err
+	}
+	beforeValue, err := runtimecanonicaljson.CloneRuntimeValue(before)
+	if err != nil {
+		return false, err
+	}
+	afterValue, err := runtimecanonicaljson.CloneRuntimeValue(after)
+	if err != nil {
+		return false, err
+	}
+	if slug == record.Slug && name == record.Name && reflect.DeepEqual(beforeValue, afterValue) {
+		return false, nil
+	}
+	if record.UpdatedAt.Before(updatedAt) {
+		return false, fmt.Errorf("declared data update clock cannot go backwards")
+	}
+	return true, nil
 }
 
 func workflowEngineStateRevisionConflict(record runtimepipeline.WorkflowEngineStateRecord) error {
@@ -205,7 +275,7 @@ func workflowEngineStateProjection(record runtimepipeline.WorkflowEngineStateRec
 		return runtimemutationlog.EntityStateProjection{}, err
 	}
 	return runtimemutationlog.EntityStateProjection{
-		CurrentState: record.CurrentState,
+		CurrentState: runtimemutationlog.PresentLifecycleState(record.CurrentState),
 		Fields:       fields,
 		Bookkeeping:  bookkeeping,
 		Gates:        gates,
@@ -268,7 +338,7 @@ func loadWorkflowEngineStateProjection(
 		return runtimemutationlog.EntityStateProjection{}, fmt.Errorf("decode workflow engine persisted accumulator: %w", err)
 	}
 	return runtimemutationlog.EntityStateProjection{
-		CurrentState: currentState,
+		CurrentState: runtimemutationlog.PresentLifecycleState(currentState),
 		Fields:       fields,
 		Bookkeeping:  bookkeeping,
 		Gates:        gates,
