@@ -69,6 +69,10 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	sourceRunID := catalogRuntimeRunID
 	assertSourcePendingAgentDelivery(t, h.db, sourceRunID, sourceEventID, "test-agent")
 	forkAt := sourceEventID
+	// Source advancement needs a business event, not incidental runtime logs.
+	storetest.InsertRevisionedExistingRunRootEventRecord(t, h.ctx, h.pg, uuid.NewString(), sourceRunID, "source.after",
+		eventtest.Producer(events.EventProducerExternal, "cataloge2e"), []byte(`{}`),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, sourceRunID), sourceRunID), time.Now().UTC())
 	sourceBefore := selectedContractSourceRunCounts(t, h.db, sourceRunID)
 	sourceRowsBefore := selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID)
 
