@@ -1,67 +1,11 @@
 package main
 
 import (
-	"crypto/sha256"
-	_ "embed"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 )
-
-// This is append-only evidence for the 43 endpoints in the accepted source,
-// not a change to recipes.json or the codemod's production admission rules.
-//
-//go:embed testdata/q10_current_endpoints.json
-var q10CurrentEndpointBytes []byte
-
-type q10CurrentEndpointPacket struct {
-	Source, Scope string
-	Rows          []fixtureSetupSuccessor2617
-}
-
-func decodeQ10CurrentEndpoints(raw []byte) (q10CurrentEndpointPacket, error) {
-	if fmt.Sprintf("%x", sha256.Sum256(raw)) != "7e26bea7902fd5e502a33c2513303bc3cddf7b42aca9f4086c0b9fd6cd1b02a1" {
-		return q10CurrentEndpointPacket{}, fmt.Errorf("Q10 finite endpoint evidence changed")
-	}
-	var packet q10CurrentEndpointPacket
-	if err := json.Unmarshal(raw, &packet); err != nil {
-		return q10CurrentEndpointPacket{}, err
-	}
-	if packet.Source != "6abe659c42a5cbb02742956a17b606631f702887" ||
-		packet.Scope != "https://github.com/division-sh/swarm/issues/2593#issuecomment-6192639877" || len(packet.Rows) != 43 {
-		return q10CurrentEndpointPacket{}, fmt.Errorf("wrong Q10 source, scope or finite endpoint set")
-	}
-	return packet, nil
-}
-
-func q10CurrentEndpointRecipe(row recipe, pin fixtureSetupSuccessor2617) (recipe, error) {
-	if !reflect.DeepEqual(row, pin.Original) || row.Removed || len(pin.Edits) == 0 {
-		return recipe{}, fmt.Errorf("Q10 endpoint changed original history or identity")
-	}
-	if err := validateRecipeSnapshots(row); err != nil {
-		return recipe{}, err
-	}
-	prior := row.Successor
-	if prior == "" {
-		prior = row.After
-	}
-	want, err := canonicalFunction(prior)
-	if err != nil {
-		return recipe{}, err
-	}
-	current, err := canonicalFunction(pin.Candidate)
-	if err != nil || current == want {
-		return recipe{}, fmt.Errorf("Q10 endpoint is not a distinct complete function")
-	}
-	reversed, err := reverseReviewedSuccessor2617(pin.Candidate, pin.Edits)
-	if err != nil || reversed != want {
-		return recipe{}, fmt.Errorf("Q10 endpoint failed exact historical reversal: %v", err)
-	}
-	row.Successor = pin.Candidate
-	return row, nil
-}
 
 // The two whole-corpus proofs use the same immutable 893 recipes as before.
 // Only the independently enumerated 43 current endpoints compose their exact
@@ -184,6 +128,36 @@ func TestQ10CurrentEndpointEvidenceRejectsChangedPacket(t *testing.T) {
 		}
 		if _, err := decodeQ10CurrentEndpoints([]byte(mutant)); err == nil {
 			t.Fatalf("changed Q10 packet accepted: %s", field)
+		}
+	}
+}
+
+func TestQ10CurrentEndpointsUseTheOriginalMigrationPreparationOwner(t *testing.T) {
+	var rows []recipe
+	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
+		t.Fatal(err)
+	}
+	if files, changes, err := prepareFiles("../../..", rows); err != nil || len(files) != 0 || len(changes) != 0 {
+		t.Fatalf("real migration preparation differs from exact Q10 endpoints: %v", err)
+	}
+	packet, err := decodeQ10CurrentEndpoints(q10CurrentEndpointBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pin := range packet.Rows {
+		projected, err := q10CurrentRecipe(pin.Original)
+		if err != nil || projected.Successor != pin.Candidate {
+			t.Fatalf("original preparation omitted fixed endpoint %s: %v", pin.Original.Function, err)
+		}
+		unlisted := pin.Original
+		unlisted.Function += "Unlisted"
+		if got, err := q10CurrentRecipe(unlisted); err != nil || !reflect.DeepEqual(got, unlisted) {
+			t.Fatal("finite endpoint owner interpreted an unlisted recipe")
+		}
+		crossed := pin.Original
+		crossed.Before = pin.Candidate
+		if got, err := q10CurrentRecipe(crossed); err != nil || !reflect.DeepEqual(got, crossed) {
+			t.Fatal("finite endpoint owner interpreted crossed historical input")
 		}
 	}
 }
