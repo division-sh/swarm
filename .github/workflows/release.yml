@@ -60,11 +60,11 @@ jobs:
 
           number = r'(?:0|[1-9][0-9]*)'
           identifier = r'(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
-          semver = re.compile(rf'v{number}\.{number}\.{number}(?:-({identifier}(?:\.{identifier})*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?')
+          semver = re.compile(rf'v{number}\.{number}\.{number}(?:-({identifier}(?:\.{identifier})*))?')
           version = os.environ['VERSION']
           match = semver.fullmatch(version)
           if match is None:
-              raise SystemExit('version must be a v-prefixed SemVer tag')
+              raise SystemExit('version must be a plain vX.Y.Z tag or have a prerelease suffix, without build metadata')
           def git(*args):
               return subprocess.check_output(['git', *args], text=True).strip()
           sha = git('rev-parse', 'HEAD')
@@ -283,6 +283,12 @@ jobs:
     needs: [prepare, verify]
     runs-on: ubuntu-22.04
     timeout-minutes: 10
+    # Native builds remain parallel; serialize the verified publication boundary
+    # across tags so an older hotfix cannot race a newer stable promotion.
+    concurrency:
+      group: release-publication
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: write
       pull-requests: read
@@ -343,15 +349,25 @@ jobs:
           pages = json.loads(subprocess.check_output([
               'gh', 'api', 'graphql', '--paginate', '--slurp', '-f', 'query=' + query,
               '-f', 'owner=' + owner, '-f', 'repo=' + repository], text=True))
-          merged = {pr['number'] for page in pages
-                    for pr in page['data']['repository']['pullRequests']['nodes']
-                    if pr['mergeCommit'] and pr['mergeCommit']['oid'] in commits}
+          if not isinstance(pages, list) or not pages:
+              raise SystemExit('missing merged-PR inventory pages')
+          merged = set()
+          for page in pages:
+              nodes = page['data']['repository']['pullRequests']['nodes']
+              if not isinstance(nodes, list):
+                  raise SystemExit('invalid merged-PR inventory nodes')
+              for pr in nodes:
+                  if (type(pr['number']) is not int or pr['number'] <= 0
+                          or re.fullmatch('[0-9a-f]{40,64}', pr['mergeCommit']['oid']) is None):
+                      raise SystemExit('invalid merged-PR range evidence')
+                  if pr['mergeCommit']['oid'] in commits:
+                      merged.add(pr['number'])
           previous = os.environ['PREVIOUS']
           url = 'https://github.com/' + os.environ['GITHUB_REPOSITORY']
           compare = url + '/compare/' + previous + '...' + tag if previous else url + '/commits/' + tag
           summary = [
               '## Release summary\n\n',
-              f'Range: {previous or "(initial history)"} -> {tag}\n\n',
+              f'Range: {previous or "(no previous release; initial history)"} -> {tag}\n\n',
               f'Commits: {len(commits)}\n\n',
               f'Merged pull requests (merge commit in range): {len(merged)}\n\n',
               f'[Compare changes]({compare})\n',
@@ -396,6 +412,13 @@ jobs:
               pages = json.loads(subprocess.check_output([
                   'gh', 'api', '--paginate', '--slurp',
                   'repos/' + os.environ['GITHUB_REPOSITORY'] + '/releases?per_page=100'], text=True))
+              if not isinstance(pages, list) or not pages or any(not isinstance(page, list) for page in pages):
+                  raise SystemExit('missing or invalid published-release inventory pages')
+              for page in pages:
+                  for release in page:
+                      if (not isinstance(release['tag_name'], str) or type(release['draft']) is not bool
+                              or type(release['prerelease']) is not bool):
+                          raise SystemExit('invalid published-release metadata')
               published = [plain.fullmatch(release['tag_name']) for page in pages for release in page
                            if not release['draft'] and not release['prerelease']]
               latest = all(tuple(map(int, version.groups())) >= tuple(map(int, other.groups()))
