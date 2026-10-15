@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -199,6 +200,20 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer func() {
+				if !t.Failed() {
+					return
+				}
+				diagnostic, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+				defer cancel()
+				debug, debugErr := storetest.ReadServedRunDebugSummary(diagnostic, selected, child)
+				plan, planErr := owner.ports.fork.PlanRunFork(diagnostic, runfork.RunForkPlanRequest{SourceRunID: child})
+				t.Logf("prepared arrival before teardown: child=%s source_due=%s joins=%+v timers=%+v pending=%+v plan_error=%v debug=%s debug_error=%v",
+					child, source.CurrentDueAt, plan.JoinSchedules, plan.WorkflowTimers, plan.PendingWork, planErr, debug, debugErr)
+				stacks := make([]byte, 512*1024)
+				n := goruntime.Stack(stacks, true)
+				t.Logf("prepared arrival blocked owners before teardown:\n%s", stacks[:n])
+			}()
 			operations := selected.(interface {
 				LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 			})

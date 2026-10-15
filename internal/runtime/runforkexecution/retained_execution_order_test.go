@@ -253,6 +253,9 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 			}
 			var result SelectedContractExecutionResult
 			if staged {
+				// This surface is unkeyed; direct execution below retains its
+				// separate exact durable-operation ACK assertions.
+				request.ForkOperation = nil
 				prepared, err := owner.Prepare(ctx, request)
 				if err != nil {
 					t.Fatal(err)

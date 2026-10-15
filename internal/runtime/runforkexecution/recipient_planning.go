@@ -526,6 +526,9 @@ func (g *selectedContractRecipientPlanPublishGuard) materializeRemainingDelivery
 	if err != nil {
 		return nil, err
 	}
+	if len(remaining) == 0 {
+		return nil, nil
+	}
 	if route, found, err := selectedPublishedJoinDeliveryRoute(g.semanticSource, evt, remaining, g.publishedJoins[evt.ID()]); found || err != nil {
 		if err != nil {
 			return nil, err
