@@ -220,11 +220,6 @@ func seedPublishedOrdersJoinConstruction(t *testing.T, ctx context.Context, sele
 	commit := func(plan pipeline.FlowInstanceActivationPlan) pipeline.CommittedFlowInstanceActivation {
 		t.Helper()
 		command := bus.FlowInstanceActivationCommand{Plan: plan}
-		for _, construction := range plan.ConstructionPlans() {
-			command.RouteTopology = append(command.RouteTopology, bus.FlowInstanceRouteRecordSet{
-				Identity: flowidentity.RunScopedFlowInstance{RunID: construction.Readiness.RunID, Route: construction.Identity.Route()},
-			})
-		}
 		committed, err := selected.(bus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
 		if err != nil || !committed.Acknowledged || !committed.Created {
 			t.Fatalf("canonical published-flow construction: %+v err=%v", committed, err)

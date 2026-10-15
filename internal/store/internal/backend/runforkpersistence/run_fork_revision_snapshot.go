@@ -73,27 +73,27 @@ type runForkRevisionEntityMutation struct {
 
 type runForkRevisionEntityMetadata struct {
 	runForkRevisionedFact
-	HistoricalConstruction *runfork.RunForkCapturedHistoricalConstruction `json:"-"`
-	InitialProjectionVersion int                                          `json:"initial_projection_version"`
-	InitialMaterialization json.RawMessage                                `json:"initial_materialization"`
-	FlowConfig             json.RawMessage                                `json:"flow_config"`
-	EntityID               string                                         `json:"entity_id"`
-	FlowInstance           string                                         `json:"flow_instance"`
-	ParentInstance         string                                         `json:"parent_instance"`
-	InstanceKey            string                                         `json:"instance_key"`
-	EntityType             string                                         `json:"entity_type"`
-	Slug                   string                                         `json:"slug"`
-	Name                   string                                         `json:"name"`
-	CreatedAt              time.Time                                      `json:"created_at"`
-	ConstructionKind       string                                         `json:"construction_kind"`
-	StageDefined           bool                                           `json:"stage_defined"`
-	FlowTemplate           string                                         `json:"flow_template"`
-	Mode                   string                                         `json:"mode"`
-	Status                 string                                         `json:"status"`
-	CurrentState           string                                         `json:"current_state"`
-	EnteredStateAt         time.Time                                      `json:"entered_state_at"`
-	UpdatedAt              time.Time                                      `json:"updated_at"`
-	TerminatedAt           time.Time                                      `json:"terminated_at"`
+	HistoricalConstruction   *runfork.RunForkCapturedHistoricalConstruction `json:"-"`
+	InitialProjectionVersion int                                            `json:"initial_projection_version"`
+	InitialMaterialization   json.RawMessage                                `json:"initial_materialization"`
+	FlowConfig               json.RawMessage                                `json:"flow_config"`
+	EntityID                 string                                         `json:"entity_id"`
+	FlowInstance             string                                         `json:"flow_instance"`
+	ParentInstance           string                                         `json:"parent_instance"`
+	InstanceKey              string                                         `json:"instance_key"`
+	EntityType               string                                         `json:"entity_type"`
+	Slug                     string                                         `json:"slug"`
+	Name                     string                                         `json:"name"`
+	CreatedAt                time.Time                                      `json:"created_at"`
+	ConstructionKind         string                                         `json:"construction_kind"`
+	StageDefined             bool                                           `json:"stage_defined"`
+	FlowTemplate             string                                         `json:"flow_template"`
+	Mode                     string                                         `json:"mode"`
+	Status                   string                                         `json:"status"`
+	CurrentState             string                                         `json:"current_state"`
+	EnteredStateAt           time.Time                                      `json:"entered_state_at"`
+	UpdatedAt                time.Time                                      `json:"updated_at"`
+	TerminatedAt             time.Time                                      `json:"terminated_at"`
 }
 
 type runForkRevisionDelivery struct {

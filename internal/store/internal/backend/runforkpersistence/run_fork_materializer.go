@@ -90,7 +90,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 	if plan.ForkPoint.Kind != runfork.RunForkPointEvent {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("deployment revision materialization requires selected fork operation authority")
 	}
-	forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
+	forkRunID := uuid.NewString()
 	blockers, err := runForkReplyProjectionBlockers(plan, forkRunID, plan.UnsupportedBlockers)
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
@@ -136,38 +136,6 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			scenarioProfile, sourceProfiled, err := admitRunForkScenarioProfile(ctx, tx, plan.SourceRunID, req.EffectiveSourceIdentity, identity.SourceArtifactFact)
 			if err != nil {
 				return err
-			}
-			existing, found, err := loadExactRunForkMaterialization(
-				ctx, func(ctx context.Context, tx *sql.Tx, runID string) (storerunlifecycle.Snapshot, error) {
-					return s.RunLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, runID, true)
-				}, tx, true, forkRunID, plan, identity, selection,
-			)
-			if err != nil {
-				return err
-			}
-			if found {
-				if err := requireExactRunForkScenarioProfile(ctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
-					return err
-				}
-				readback, err := requireMaterializedRunForkReplyPlan(ctx, tx, s.replies, plan, forkRunID, true)
-				if err != nil {
-					return err
-				}
-				existing.ReplayResumeAdmission, existing.ExecutionReady = readback.ReplayResumeAdmission, readback.ExecutionReady
-				pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, ctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, true, time.Time{})
-				if err != nil {
-					return err
-				}
-				if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
-					return err
-				}
-				if err := requireExactMaterializedRunForkFanOut(ctx, tx, true, forkRunID, plan, fanOutPlanRefs, req.OriginalLoopCarriage, identity.SourceArtifactFact.BundleHash(), s.durableData, pins); err != nil {
-					return err
-				}
-				existing.DataPins = pins
-				existing.MaterializedFanOutCount = len(plan.FanOutObligations) - countRunForkSourceDeploymentFeeds(plan) + len(pins)
-				materialization = existing
-				return nil
 			}
 			metadata, err := loadRunForkEntityMetadata(plan)
 			if err != nil {
@@ -288,7 +256,7 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 	if plan.ForkPoint.Kind != runfork.RunForkPointEvent {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("deployment revision materialization requires selected fork operation authority")
 	}
-	forkRunID := deterministicRunForkMaterializationID(plan.SourceRunID, plan.ForkPoint.EventID)
+	forkRunID := uuid.NewString()
 	blockers, err := runForkReplyProjectionBlockers(plan, forkRunID, plan.UnsupportedBlockers)
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
@@ -328,40 +296,6 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 			scenarioProfile, sourceProfiled, err := admitSQLiteRunForkScenarioProfile(txctx, tx, plan.SourceRunID, req.EffectiveSourceIdentity, identity.SourceArtifactFact)
 			if err != nil {
 				return err
-			}
-			existing, found, err := loadExactRunForkMaterialization(
-				txctx,
-				func(ctx context.Context, tx *sql.Tx, runID string) (storerunlifecycle.Snapshot, error) {
-					return s.RunLifecycleSQLiteOwner.LoadSnapshotTx(ctx, tx, runID)
-				},
-				tx, false, forkRunID, plan, identity, selection,
-			)
-			if err != nil {
-				return err
-			}
-			if found {
-				if err := requireExactSQLiteRunForkScenarioProfile(txctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
-					return err
-				}
-				readback, err := requireMaterializedRunForkReplyPlan(txctx, tx, s.replies, plan, forkRunID, false)
-				if err != nil {
-					return err
-				}
-				existing.ReplayResumeAdmission, existing.ExecutionReady = readback.ReplayResumeAdmission, readback.ExecutionReady
-				pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, true, time.Time{})
-				if err != nil {
-					return err
-				}
-				if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
-					return err
-				}
-				if err := requireExactMaterializedRunForkFanOut(txctx, tx, false, forkRunID, plan, fanOutPlanRefs, req.OriginalLoopCarriage, identity.SourceArtifactFact.BundleHash(), s.durableData, pins); err != nil {
-					return err
-				}
-				existing.DataPins = pins
-				existing.MaterializedFanOutCount = len(plan.FanOutObligations) - countRunForkSourceDeploymentFeeds(plan) + len(pins)
-				materialization = existing
-				return nil
 			}
 			metadata, err := loadRunForkEntityMetadata(plan)
 			if err != nil {

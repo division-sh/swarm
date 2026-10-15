@@ -697,7 +697,6 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
-	lateRunID := deterministicRunForkMaterializationID(runID, eventID)
 	preservedRunID := uuid.NewString()
 	lateMutationID := uuid.NewString()
 	activeSessionID := uuid.NewString()
@@ -759,8 +758,10 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_SeversPreservedReferencesWhe
 	if err != nil {
 		t.Fatalf("materialize dependent fork: %v", err)
 	}
-	if materialized.ForkRunID != lateRunID {
-		t.Fatalf("dependent fork run_id = %s, want %s", materialized.ForkRunID, lateRunID)
+	lateRunID := materialized.ForkRunID
+	childID, parseErr := uuid.Parse(lateRunID)
+	if parseErr != nil || childID == uuid.Nil || childID.String() != lateRunID || lateRunID == runID || materialized.SourceRunID != runID || materialized.ForkPoint.EventID != eventID {
+		t.Fatalf("dependent fork lost canonical child/origin identity: %+v err=%v", materialized, parseErr)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `
 		INSERT INTO entity_mutations (mutation_id, run_id, entity_id, domain, path, caused_by_event, writer_type, writer_id)
