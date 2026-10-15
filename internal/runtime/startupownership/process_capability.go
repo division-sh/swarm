@@ -160,6 +160,8 @@ type processCapability struct {
 	monitorDone     chan struct{}
 	monitorCadence  time.Duration
 	monitorDeadline time.Duration
+
+	agentRecoverySeed *agentRecoverySeed
 }
 
 type generationGrant struct {
@@ -488,6 +490,7 @@ func (p *processCapability) terminalize(result TerminalResult) {
 	p.doneOnce.Do(func() {
 		p.mu.Lock()
 		p.terminal = result
+		p.agentRecoverySeed = nil
 		grants := make([]*generationGrant, 0, len(p.grants))
 		for _, grant := range p.grants {
 			grants = append(grants, grant)
