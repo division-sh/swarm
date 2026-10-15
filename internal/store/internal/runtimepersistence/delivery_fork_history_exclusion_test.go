@@ -168,6 +168,24 @@ func proveRetainedDeliveryLifecycleAccounting(t *testing.T, fixture authorActivi
 		}
 		return err
 	}
+	expire := func() error {
+		var expiresAt time.Time
+		err := runDeliveryFixtureAttempt(ctx, store, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+			adapter := postgresDeliveryAdapter
+			if completion.sqlite {
+				adapter = sqliteDeliveryAdapter
+			}
+			updated, err := adapter.RenewClaim(ctx, attempt, current.Claim, time.Millisecond)
+			expiresAt = updated.ClaimExpiresAt
+			return err
+		})
+		if err == nil {
+			if wait := time.Until(expiresAt); wait > 0 {
+				time.Sleep(wait)
+			}
+		}
+		return err
+	}
 	phase("initial_status", 1, claim)
 	phase("session_bind", 1, bind)
 	phase("unchanged_session_bind", 0, bind)
@@ -178,7 +196,7 @@ func proveRetainedDeliveryLifecycleAccounting(t *testing.T, fixture authorActivi
 		}
 		return err
 	})
-	setProviderOriginLease(t, completion, current.Claim, time.Now().UTC().Add(-time.Second))
+	phase("short_lease_renewal", 0, expire)
 	previous := current.Claim
 	phase("reclaim_session_clear", 1, claim)
 	if current.Snapshot.ActiveSessionID != "" || current.Claim.Version() != previous.Version()+1 {
@@ -190,7 +208,7 @@ func proveRetainedDeliveryLifecycleAccounting(t *testing.T, fixture authorActivi
 		}
 		return nil
 	})
-	setProviderOriginLease(t, completion, current.Claim, time.Now().UTC().Add(-time.Second))
+	phase("short_lease_renewal_without_session", 0, expire)
 	phase("unchanged_reclaim", 0, claim)
 	phase("retry_settlement", 1, func() error {
 		failed, err := store.SettleFailure(ctx, current.Claim, runtimedelivery.Settlement{
