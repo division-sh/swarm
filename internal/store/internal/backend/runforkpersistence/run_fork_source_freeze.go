@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -34,7 +35,12 @@ func (s *RunForkPostgresOwner) applyRunForkSourceFreeze(ctx context.Context, tx 
 	if err := requireRunForkSourceFreezeReady(ctx, tx, postgresDeliveryAdapter, postgresManagedExternalAttemptRunQuery, lineage.SourceRunID, now); err != nil {
 		return err
 	}
-	if _, _, err := s.RunLifecyclePostgresOwner.ForkSourceTx(ctx, attempt, runtimerunlifecycle.ForkSourceRequest{
+	sourceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, lineage.SourceBundleHash)
+	if err != nil {
+		return err
+	}
+	sourceCtx := runtimeauthoractivity.WithScope(ctx, sourceScope)
+	if _, _, err := s.RunLifecyclePostgresOwner.ForkSourceTx(sourceCtx, attempt, runtimerunlifecycle.ForkSourceRequest{
 		RunID:            lineage.SourceRunID,
 		ContinuedAsRunID: lineage.ForkRunID,
 		EndedAt:          now,
@@ -71,7 +77,12 @@ func (s *RunForkSQLiteOwner) applyRunForkSourceFreeze(ctx context.Context, tx *s
 	if err := requireRunForkSourceFreezeReady(ctx, tx, sqliteDeliveryAdapter, sqliteManagedExternalAttemptRunQuery, lineage.SourceRunID, now); err != nil {
 		return err
 	}
-	if _, _, err := s.RunLifecycleSQLiteOwner.ForkSourceTx(ctx, attempt, runtimerunlifecycle.ForkSourceRequest{
+	sourceScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, lineage.SourceBundleHash)
+	if err != nil {
+		return err
+	}
+	sourceCtx := runtimeauthoractivity.WithScope(ctx, sourceScope)
+	if _, _, err := s.RunLifecycleSQLiteOwner.ForkSourceTx(sourceCtx, attempt, runtimerunlifecycle.ForkSourceRequest{
 		RunID: lineage.SourceRunID, ContinuedAsRunID: lineage.ForkRunID, EndedAt: now,
 	}, changes); err != nil {
 		return fmt.Errorf("freeze source run lifecycle: %w", err)
