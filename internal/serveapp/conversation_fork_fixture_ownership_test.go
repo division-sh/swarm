@@ -25,7 +25,7 @@ func TestServedConversationForkFixtureUsesSelectedWriteOwner(t *testing.T) {
 			continue
 		}
 		body := string(raw[set.Position(fn.Pos()).Offset:set.Position(fn.End()).Offset])
-		for _, required := range []string{"servedControlProofAuthorActivityContext", "WorkOccurrence().Begin(ctx)", "lease.Context()", "lease.Done()", "storetest.SeedConversationForkSource", "storetest.PersistManagedAgentTurnFixture"} {
+		for _, required := range []string{"servedControlProofAuthorActivityContext", "WorkOccurrence().Begin(ctx)", "lease.Context()", "lease.Done()", "storetest.PrepareConversationForkConstruction", "storetest.SeedConversationForkSource", "FinalizeCommittedFlowInstanceActivation", "InspectDynamicFlowRuntimeReadinessForSource", "completed != 1", "storetest.PersistManagedAgentTurnFixture"} {
 			if !strings.Contains(body, required) {
 				t.Errorf("live fixture lost %s", required)
 			}

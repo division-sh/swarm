@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -196,12 +197,14 @@ func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testi
 func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	s := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	bundle := conversationForkConstructionBundle(t)
+	ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now)
+	source := seedConversationForkSource(t, db, now, bundle)
 	entityID := uuid.NewString()
 
-	if err := seedConversationForkChatEntityForTest(ctx, s, source.runID, entityID, source.turn1At); err != nil {
+	construction := prepareNativeConversationForkConstruction(t, ctx, s, bundle, ConversationForkSourceFixture{RunID: source.runID, EntityID: entityID, Turn1At: source.turn1At, kind: conversationForkNativeChat})
+	if err := seedConversationForkChatEntityForTest(ctx, s, source.runID, entityID, source.turn1At, construction); err != nil {
 		t.Fatalf("seed closed conversation projection: %v", err)
 	}
 	var mutationsBefore int
@@ -288,10 +291,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	if result.Snapshot.SnapshotOwner != runfork.ConversationForkChatSnapshotOwner || result.SandboxPolicy.Owner != runfork.ConversationForkChatSandboxOwner {
 		t.Fatalf("owners = snapshot %q policy %q", result.Snapshot.SnapshotOwner, result.SandboxPolicy.Owner)
 	}
-	if len(result.Snapshot.EntitySnapshot) != 1 {
-		t.Fatalf("snapshot entities = %#v, want one reconstructed entity", result.Snapshot.EntitySnapshot)
-	}
-	entity := result.Snapshot.EntitySnapshot[0]
+	entity := requireConversationForkConstructedSnapshot(t, result.Snapshot.EntitySnapshot, source, entityID)
 	if entity.EntityID != entityID || entity.CurrentState == nil || *entity.CurrentState != "draft" || entity.Fields["name"] != "Before" {
 		t.Fatalf("entity snapshot = %#v, want source-at-fork projection", entity)
 	}
@@ -602,7 +602,7 @@ type conversationForkSourceFixture struct {
 
 const conversationForkSourceFlowInstance = "review"
 
-func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conversationForkSourceFixture {
+func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
 	t.Helper()
 	source := conversationForkSourceFixture{
 		runID:      uuid.NewString(),
@@ -616,9 +616,15 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conver
 		turn1At:    base.Add(-2 * time.Minute),
 		turn2At:    base.Add(-1 * time.Minute),
 	}
-	ctx := testAuthorActivityContext()
+	run := semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: source.runID, StartedAt: base.Add(-3 * time.Minute), BundleHash: source.bundleHash}
+	if len(historical) != 0 {
+		run.Artifact = historical[0].SourceArtifact
+		source.bundleHash = run.Artifact.BundleHash()
+		run.BundleHash = source.bundleHash
+	}
+	ctx := testAuthorActivityContextForBundle(source.bundleHash)
 	store := admitTestPostgresStore(t, db)
-	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: source.runID, StartedAt: base.Add(-3 * time.Minute), BundleHash: source.bundleHash})
+	requireRunFixtureForTest(t, ctx, store, run)
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()
 	if err != nil {

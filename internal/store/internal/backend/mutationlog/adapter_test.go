@@ -17,6 +17,9 @@ func TestMutationLogWriterRequiresProtocolAttempt(t *testing.T) {
 		"postgres diff": func() error {
 			return InsertEntityStateDiff(ctx, nil, nil, "", runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.Writer{})
 		},
+		"fixed historical construction": func() error {
+			return InsertConversationForkConstructionDiffForTest(ctx, nil, nil, "", runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.Writer{}, time.Time{})
+		},
 		"sqlite diff": func() error {
 			return InsertSQLiteEntityStateDiff(ctx, nil, nil, "", runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.Writer{}, time.Time{})
 		},

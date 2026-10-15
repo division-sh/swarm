@@ -67,9 +67,10 @@ func proveQ10ConversationDataOnlyCuts(t *testing.T, ctx context.Context, owner c
 				}
 				members[entity.EntityID] = entity
 			}
-			if len(members) != 2 {
+			if len(members) != 3 {
 				t.Fatalf("historical cut changed exact membership: %+v", members)
 			}
+			requireConversationForkParentSnapshot(t, members[source.runID], source)
 			staged, ok := members[stagedID]
 			if !ok || staged.CurrentState == nil || *staged.CurrentState != cut.state || staged.EnteredStateAt == nil ||
 				!staged.EnteredStateAt.Equal(cut.enteredAt) || staged.Fields["name"] != cut.field || staged.Gates["review"] != true ||
@@ -110,4 +111,36 @@ func proveQ10ConversationDataOnlyCuts(t *testing.T, ctx context.Context, owner c
 			}
 		})
 	}
+}
+
+func requireConversationForkParentSnapshot(t *testing.T, root runfork.ConversationForkEntitySnapshot, source conversationForkSourceFixture) {
+	t.Helper()
+	if root.EntityID != source.runID || root.CurrentState == nil || *root.CurrentState != "waiting" || root.EnteredStateAt == nil || !root.EnteredStateAt.Equal(source.turn1At.Add(-30*time.Second)) || len(root.Fields) != 0 || len(root.Gates) != 0 || len(root.Accumulator) != 0 || len(root.Bookkeeping) != 1 || root.Bookkeeping["stage_entry"] == nil {
+		t.Fatalf("historical construction lost its exact fieldless parent: %+v", root)
+	}
+}
+
+func requireConversationForkConstructedSnapshot(t *testing.T, members []runfork.ConversationForkEntitySnapshot, source conversationForkSourceFixture, entityID string) runfork.ConversationForkEntitySnapshot {
+	t.Helper()
+	if len(members) != 2 {
+		t.Fatalf("snapshot changed exact parent/business membership: %+v", members)
+	}
+	var business runfork.ConversationForkEntitySnapshot
+	parents, children := 0, 0
+	for _, row := range members {
+		switch row.EntityID {
+		case source.runID:
+			requireConversationForkParentSnapshot(t, row, source)
+			parents++
+		case entityID:
+			business = row
+			children++
+		default:
+			t.Fatalf("unexpected snapshot member: %+v", row)
+		}
+	}
+	if parents != 1 || children != 1 {
+		t.Fatal("snapshot duplicated/omitted a parent or original business witness")
+	}
+	return business
 }

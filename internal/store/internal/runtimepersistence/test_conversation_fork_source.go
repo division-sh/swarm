@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
@@ -21,16 +23,37 @@ type ConversationForkSourceFixture struct {
 	Identity                                       agentidentity.Identity
 	RunID, SessionID, EntityID, Event1ID, Event2ID string
 	CreatedAt, Turn1At, Turn2At                    time.Time
+	Construction                                   ConversationForkConstruction
 	kind                                           conversationForkFixtureKind
+}
+
+type ConversationForkSourceResult struct {
+	Events       [2]events.Event
+	Construction pipeline.CommittedFlowInstanceActivation
 }
 
 // SeedConversationForkSourceForTest uses the selected backend's existing write
 // admission. No caller-supplied SQL or transaction callback escapes the facade.
-func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixture ConversationForkSourceFixture) ([2]events.Event, error) {
-	var result [2]events.Event
+func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixture ConversationForkSourceFixture) (ConversationForkSourceResult, error) {
+	var result ConversationForkSourceResult
 	bundleHash, err := validateConversationForkFixture(ctx, fixture)
 	if err != nil {
 		return result, err
+	}
+	ctx = runtimecorrelation.WithRunID(ctx, fixture.RunID)
+	evidence := mutationprotocol.RevisionOnly
+	if fixture.kind != conversationForkDataOnlyChat {
+		evidence = mutationprotocol.Story
+		record, err := fixture.Construction.Child.PersistenceRecord()
+		if err != nil {
+			return result, fmt.Errorf("conversation fixture requires complete construction: %w", err)
+		}
+		if record.Identity.RunID != fixture.RunID || record.EntityID != fixture.EntityID ||
+			!record.CreatedAt.Equal(fixture.Turn1At.Add(-30*time.Second).UTC().Truncate(time.Microsecond)) || fixture.Construction.Child.Readiness.BundleHash != bundleHash {
+			return result, fmt.Errorf("conversation construction does not match fixed historical source/identity/time")
+		}
+	} else if fixture.Construction.Child.Identity.InstancePath != "" || fixture.Construction.Parent != nil {
+		return result, fmt.Errorf("data-only conversation fixture cannot carry construction")
 	}
 	persist := func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, dialect authoractivityfixture.Dialect) error {
 		var storedHash string
@@ -40,13 +63,38 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 		if storedHash != bundleHash {
 			return fmt.Errorf("fork fixture source does not match admitted run")
 		}
+		if fixture.kind != conversationForkDataOnlyChat {
+			input := conversationForkConstructionEvent(fixture)
+			producer, err := events.NewProducerIdentity(events.EventProducerExternal, "conversation-construction-fixture")
+			if err != nil {
+				return err
+			}
+			if _, err := eventfixture.ExistingRunRoot(ctx, attempt, dialect, input.ID(), fixture.RunID, input.Type(), producer, input.Payload(), events.EventEnvelope{}, input.CreatedAt()); err != nil {
+				return err
+			}
+			switch store := selected.(type) {
+			case *PostgresStore:
+				result.Construction, err = store.pipelinePostgresOwner.CommitConversationForkConstructionForTest(ctx, attempt, fixture.Construction.Parent, fixture.Construction.Child)
+			case *SQLiteRuntimeStore:
+				result.Construction, err = store.pipelineSQLiteOwner.CommitConversationForkConstructionForTest(ctx, attempt, fixture.Construction.Parent, fixture.Construction.Child)
+			}
+			if err != nil {
+				return err
+			}
+		}
 		statements, err := conversationForkProjectionStatements(fixture, dialect == authoractivityfixture.DialectPostgres)
 		if err != nil {
 			return err
 		}
 		for _, statement := range statements {
-			if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			changed, err := tx.ExecContext(ctx, statement.query, statement.args...)
+			if err != nil {
 				return fmt.Errorf("seed conversation fork source: %w", err)
+			}
+			if strings.HasPrefix(statement.query, "UPDATE ") {
+				if err := requireMailboxFixtureRow(changed); err != nil {
+					return err
+				}
 			}
 		}
 		if fixture.kind != conversationForkServedSource {
@@ -65,7 +113,7 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 			if err != nil {
 				return err
 			}
-			result[i] = event
+			result.Events[i] = event
 		}
 		return nil
 	}
@@ -74,7 +122,7 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 		if store == nil || store.backend == nil {
 			return result, fmt.Errorf("postgres fixture store is required")
 		}
-		err = mutationprotocol.RunPostgres(ctx, store.backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		err = mutationprotocol.RunPostgres(ctx, store.backend, evidence, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 			return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 				return persist(txctx, tx, attempt, authoractivityfixture.DialectPostgres)
 			})
@@ -83,7 +131,7 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 		if store == nil || store.backend == nil {
 			return result, fmt.Errorf("sqlite fixture store is required")
 		}
-		err = mutationprotocol.RunSQLite(ctx, store.backend, "conversation fork source fixture", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		err = mutationprotocol.RunSQLite(ctx, store.backend, "conversation fork source fixture", evidence, mutationprotocol.Ordinary, nil, store.runLifecycleCandidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 			return struct{}{}, attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 				return persist(txctx, tx, attempt, authoractivityfixture.DialectSQLite)
 			})
@@ -92,13 +140,16 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 		err = fmt.Errorf("fork fixture store %T is unsupported", selected)
 	}
 	if err != nil {
-		return [2]events.Event{}, err
+		return ConversationForkSourceResult{}, err
+	}
+	if fixture.kind != conversationForkDataOnlyChat {
+		result.Construction = result.Construction.WithCommitAcknowledgment()
 	}
 	return result, nil
 }
 
-func seedConversationForkChatEntityForTest(ctx context.Context, selected any, run, entity string, forkAt time.Time) error {
-	_, err := SeedConversationForkSourceForTest(ctx, selected, ConversationForkSourceFixture{RunID: run, EntityID: entity, Turn1At: forkAt, kind: conversationForkNativeChat})
+func seedConversationForkChatEntityForTest(ctx context.Context, selected any, run, entity string, forkAt time.Time, construction ConversationForkConstruction) error {
+	_, err := SeedConversationForkSourceForTest(ctx, selected, ConversationForkSourceFixture{RunID: run, EntityID: entity, Turn1At: forkAt, Construction: construction, kind: conversationForkNativeChat})
 	return err
 }
 
