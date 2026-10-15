@@ -33,7 +33,7 @@ func TestDirectScenarioSetupSemanticNumericParity(t *testing.T) {
 				setup = s
 			}
 			run, entity := uuid.NewString(), uuid.NewString()
-			req := pipeline.ScenarioSetupRequest{RunID: run, CreatedAt: time.Now().UTC(), Entities: []pipeline.ScenarioSetupEntityRequest{{Alias: "subject", EntityID: entity, FlowInstance: "operating", EntityType: "product", CurrentState: "waiting"}}}
+			req := pipeline.ScenarioSetupRequest{RunID: run, CreatedAt: time.Now().UTC(), Entities: []pipeline.ScenarioSetupEntityRequest{{Alias: "subject", EntityID: entity, FlowInstance: "operating", EntityType: "product"}}}
 			for _, carrier := range []any{int(5), float64(5), json.Number("5.0"), json.Number("5e0")} {
 				req.Entities[0].Fields = map[string]any{"score": carrier, "nested": []any{carrier, 7.5}}
 				if _, err := setup.SetupScenarioEntities(ctx, req); err != nil {

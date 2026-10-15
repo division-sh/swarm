@@ -305,8 +305,8 @@ func issue2564H2Read(ctx context.Context, rt issue2564H2Fixture, run string) (is
 		if err != nil {
 			return issue2564H2Snapshot{}, err
 		}
-		if hub.Stage != row.HeaderState || hub.Revision != row.HeaderRevision || snapshot.Hubs[hub.ID].ID != "" {
-			return issue2564H2Snapshot{}, fmt.Errorf("H2 header/field identity disagreement for %+v", hub)
+		if snapshot.Hubs[hub.ID].ID != "" {
+			return issue2564H2Snapshot{}, fmt.Errorf("H2 duplicate business hub identity for %+v", hub)
 		}
 		var persisted struct {
 			History []pipeline.WorkflowTransitionRecord `json:"transition_history"`

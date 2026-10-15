@@ -301,8 +301,9 @@ func proveRunForkSelectedStoreLifecycle(t *testing.T, selected runForkSelectedLi
 	}
 	var status, sourceRunID, sourceEventID, currentState, name string
 	if err := db.QueryRowContext(ctx, `
-		SELECT r.status, r.forked_from_run_id, r.forked_from_event_id, e.current_state, e.name
+		SELECT r.status, r.forked_from_run_id, r.forked_from_event_id, fi.current_state, e.name
 		FROM runs r JOIN entity_state e ON e.run_id = r.run_id
+		JOIN flow_instances fi ON fi.run_id=e.run_id AND fi.instance_path=e.flow_instance AND fi.entity_id=e.entity_id
 		WHERE r.run_id = $1 AND e.entity_id = $2
 	`, materialized.ForkRunID, entityID).Scan(&status, &sourceRunID, &sourceEventID, &currentState, &name); err != nil {
 		t.Fatalf("read materialized selected-store fork: %v", err)
@@ -690,7 +691,7 @@ func seedRunForkRevisionMatrixFacts(t *testing.T, ctx context.Context, tx *sql.T
 		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO event_deliveries (delivery_id,run_id,event_id,route_identity,subscriber_type,subscriber_id,agent_name_owner,agent_name_source,agent_route_presence,agent_flow_scope_key,agent_flow_instance_id,agent_flow_instance_path,delivery_target_route,delivery_context,delivery_payload_projection,connect_execution_claim,execution_authority_kind,authority_bundle_hash,execution_authority_id,execution_authority_generation,status,retry_count,max_retries,next_eligible_at,claim_version,created_at,updated_at) VALUES ($1,$2,$3,$4,'node',$5,'','','','','','',$6,$7,$7,$7,'normal_runtime',$8,'revision-matrix',1,'pending',0,3,$9,0,$9,$9)`, f.deliveryID, f.runID, f.eventID, events.EncodeDeliveryRouteIdentity(routeIdentity), route.Recipient.ID(), string(targetJSON), `{}`, "bundle-v2:sha256:"+strings.Repeat("1", 64), f.at)
 		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_intents (run_id,triggering_delivery_id,flow_path,declaration_family,semantic_path,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at) VALUES ($1,$2,'root','handler_rule','handlers["items.ready"].rules[0]',$3,$7,'event_payload_field',$4,'items',1,0,'open',4,$5,$6,$6)`, f.runID, f.deliveryID, "bundle-v2:sha256:"+strings.Repeat("1", 64), f.eventID, string(capsuleJSON), f.at, plan.Ref.SemanticDigest)
 	}
-	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,slug,name,current_state,created_at,updated_at) VALUES ($1,$2,'matrix-flow','matrix-type','matrix-slug','Matrix Entity','ready',$3,$3)`, f.runID, f.entityID, f.at)
+	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,slug,name,created_at,updated_at) VALUES ($1,$2,'matrix-flow','matrix-type','matrix-slug','Matrix Entity',$3,$3)`, f.runID, f.entityID, f.at)
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_mutations (mutation_id,run_id,entity_id,domain,path,new_value,caused_by_event,writer_type,writer_id,created_at) VALUES ($1,$2,$3,'authored_field','name',$4,$5,'platform','revision-matrix',$6)`, f.mutationID, f.runID, f.entityID, `"Matrix Entity"`, f.eventID, f.at)
 	if includeEventDelivery {
 		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO committed_replay_scopes (event_id,run_id,scope,created_at,updated_at) VALUES ($1,$2,'direct',$3,$3)`, f.eventID, f.runID, f.at)

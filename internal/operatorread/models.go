@@ -125,16 +125,20 @@ type OperatorEntityListResult struct {
 }
 
 type OperatorEntitySummary struct {
-	EntityID     string    `json:"entity_id"`
-	RunID        string    `json:"run_id"`
-	FlowInstance string    `json:"flow_instance"`
-	EntityType   string    `json:"entity_type"`
-	CurrentState string    `json:"current_state"`
-	Revision     int       `json:"revision"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	Slug         string    `json:"slug,omitempty"`
-	Name         string    `json:"name,omitempty"`
+	EntityID           string     `json:"entity_id"`
+	RunID              string     `json:"run_id"`
+	FlowInstance       string     `json:"flow_instance"`
+	EntityType         string     `json:"entity_type"`
+	StageDefined       *bool      `json:"stage_defined"`
+	CurrentState       *string    `json:"current_state"`
+	Revision           *int64     `json:"revision"`
+	EnteredStateAt     *time.Time `json:"entered_state_at"`
+	LifecycleCreatedAt *time.Time `json:"lifecycle_created_at"`
+	LifecycleUpdatedAt *time.Time `json:"lifecycle_updated_at"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
+	Slug               string     `json:"slug,omitempty"`
+	Name               string     `json:"name,omitempty"`
 }
 
 type OperatorEntityFull struct {
@@ -143,7 +147,7 @@ type OperatorEntityFull struct {
 	Bookkeeping map[string]any                 `json:"bookkeeping"`
 	Gates       map[string]bool                `json:"gates"`
 	Accumulated map[string]any                 `json:"accumulated"`
-	Loops       []loopruntime.PublicActivation `json:"loops,omitempty"`
+	Loops       []loopruntime.PublicActivation `json:"loops"`
 }
 
 type OperatorEntityAggregateOptions struct {
@@ -153,7 +157,8 @@ type OperatorEntityAggregateOptions struct {
 }
 
 type OperatorEntityAggregateResult struct {
-	Counts map[string]int `json:"counts"`
+	Counts      map[string]int `json:"counts"`
+	AbsentCount int            `json:"absent_count"`
 }
 
 type OperatorEventListFilter struct {
