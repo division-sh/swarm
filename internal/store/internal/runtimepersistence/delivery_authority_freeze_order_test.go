@@ -148,7 +148,7 @@ func TestDeliveryAuthorityActivationSerializesWithFreezeBothStores(t *testing.T)
 					t.Fatal("freeze lost the legitimately earlier authority activation")
 				}
 				before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-				if got := invoke(ctx, fixture.store, "authority"); got.err != nil {
+				if got := invoke(ctx, firstStore, "authority"); got.err != nil {
 					t.Fatal(got.err)
 				}
 				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {
