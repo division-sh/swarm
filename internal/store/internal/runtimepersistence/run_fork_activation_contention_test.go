@@ -705,6 +705,9 @@ func (b *forkContentionBarrier) install(t *testing.T, db *sql.DB, source, child,
 	if first == "source_freeze" {
 		table, predicate = "runs", fmt.Sprintf("OLD.run_id='%s' AND NEW.status='forked' AND OLD.status<>'forked'", source)
 	}
+	if first == "delivery_authority" {
+		table, predicate = "event_deliveries", fmt.Sprintf("OLD.run_id='%s' AND (NEW.execution_authority_id<>OLD.execution_authority_id OR NEW.execution_authority_generation<>OLD.execution_authority_generation)", source)
+	}
 	if b.backend == "sqlite" {
 		_, err := db.Exec(fmt.Sprintf(`CREATE TRIGGER %s BEFORE UPDATE ON %s WHEN %s BEGIN SELECT %s(); END`, b.name, table, predicate, b.name))
 		if err != nil {
