@@ -108,7 +108,7 @@ func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnap
 	case "constructed":
 		source = runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance
 		if len(sourceState.FlowConfig) == 0 || sourceState.CreatedAt.IsZero() || sourceState.UpdatedAt.IsZero() || sourceState.EnteredStateAt.IsZero() || sourceState.Status == "" ||
-			sourceState.CurrentState == "" || sourceState.CurrentState != entity.CurrentState || sourceState.FlowTemplate == "" || (sourceState.Mode != "static" && sourceState.Mode != "template") ||
+			sourceState.CurrentState == "" || entity.CurrentState == nil || sourceState.CurrentState != *entity.CurrentState || sourceState.FlowTemplate == "" || (sourceState.Mode != "static" && sourceState.Mode != "template") ||
 			(sourceState.Status == "terminated") != !sourceState.TerminatedAt.IsZero() {
 			return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove constructed header metadata for entity %s", entityID), false
 		}
@@ -116,11 +116,21 @@ func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnap
 		if entityType == "" {
 			return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization imported state has no entity type for %s", entityID), false
 		}
+		if entity.CurrentState != nil || entity.EnteredStateAt != nil || entity.Gates != nil || entity.Bookkeeping != nil || entity.Accumulator != nil {
+			return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("imported entity %s cannot carry lifecycle history", entityID), false
+		}
 	default:
 		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization has unknown construction evidence for entity %s", entityID), false
 	}
 	if flowInstance == "" {
 		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fork materialization cannot prove source-at-revision flow_instance/entity_type metadata for entity %s", entityID), false
+	}
+	if entityType != "" {
+		if sourceState.DataCreatedAt == nil || sourceState.DataUpdatedAt == nil || sourceState.DataCreatedAt.IsZero() || sourceState.DataUpdatedAt.IsZero() || sourceState.DataUpdatedAt.Before(*sourceState.DataCreatedAt) {
+			return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("entity %s requires exact historical authored-data clocks", entityID), false
+		}
+	} else if sourceState.DataCreatedAt != nil || sourceState.DataUpdatedAt != nil {
+		return runfork.RunForkMaterializedEntitySnapshotMetadata{}, fmt.Sprintf("fieldless entity %s cannot carry authored-data clocks", entityID), false
 	}
 	return runfork.RunForkMaterializedEntitySnapshotMetadata{
 		InitialMaterialization: append([]byte(nil), sourceState.InitialMaterialization...),
@@ -142,6 +152,8 @@ func loadRunForkMaterializedEntitySnapshotMetadata(snapshot *runForkRevisionSnap
 		UpdatedAt:              sourceState.UpdatedAt,
 		TerminatedAt:           sourceState.TerminatedAt,
 		EnteredStateAt:         sourceState.EnteredStateAt,
+		DataCreatedAt:          sourceState.DataCreatedAt,
+		DataUpdatedAt:          sourceState.DataUpdatedAt,
 	}, "", true
 }
 

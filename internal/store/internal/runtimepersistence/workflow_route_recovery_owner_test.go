@@ -3,6 +3,7 @@ package runtimepersistence_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 type activeWorkflowRouteReader interface {
@@ -79,9 +81,9 @@ func TestActiveWorkflowRouteRecoveryUsesExactRunOwnerOnBothStores(t *testing.T) 
 
 			insertOwner := func(runID, entityID string) {
 				t.Helper()
-				query := "INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES (?, ?, ?, 'review_entity', 'active')"
+				query := "INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type) VALUES (?, ?, ?, 'review_entity')"
 				if !tc.sqlite {
-					query = "INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES ($1::uuid, $2::uuid, $3, 'review_entity', 'active')"
+					query = "INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type) VALUES ($1::uuid, $2::uuid, $3, 'review_entity')"
 				}
 				if _, err := db.ExecContext(ctx, query, runID, entityID, instancePath); err != nil {
 					t.Fatalf("seed route owner %s/%s: %v", runID, entityID, err)
@@ -152,17 +154,49 @@ func TestEntityStateSchemaRequiresExplicitNonblankEntityContractOnBothStores(t *
 			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 				Origin: storetest.ScenarioSetupOrigin(), RunID: runID, State: runtimerunlifecycle.StateRunning,
 			})
-			omitted := `INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES (?, ?, 'review/one', 'active')`
-			blank := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES (?, ?, 'review/two', '   ', 'active')`
+			valid := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type) VALUES (?, ?, 'review/valid', 'review_entity')`
+			omitted := `INSERT INTO entity_state (run_id, entity_id, flow_instance) VALUES (?, ?, 'review/one')`
+			blank := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type) VALUES (?, ?, 'review/two', '   ')`
 			if !tc.sqlite {
-				omitted = `INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES ($1::uuid, $2::uuid, 'review/one', 'active')`
-				blank = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES ($1::uuid, $2::uuid, 'review/two', '   ', 'active')`
+				valid = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type) VALUES ($1::uuid, $2::uuid, 'review/valid', 'review_entity')`
+				omitted = `INSERT INTO entity_state (run_id, entity_id, flow_instance) VALUES ($1::uuid, $2::uuid, 'review/one')`
+				blank = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type) VALUES ($1::uuid, $2::uuid, 'review/two', '   ')`
 			}
-			if _, err := db.ExecContext(ctx, omitted, runID, uuid.NewString()); err == nil {
-				t.Fatal("fresh schema accepted omitted entity_type")
+			validEntity := uuid.NewString()
+			if _, err := db.ExecContext(ctx, valid, runID, validEntity); err != nil {
+				t.Fatalf("fresh schema rejected explicit valid entity contract: %v", err)
 			}
-			if _, err := db.ExecContext(ctx, blank, runID, uuid.NewString()); err == nil {
-				t.Fatal("fresh schema accepted blank entity_type")
+			for _, cell := range []struct {
+				name, query, sqlState, sqliteTarget string
+				sqliteCode                          int
+			}{
+				{"omitted", omitted, "23502", "entity_state.entity_type", 1299},
+				{"blank", blank, "23514", "LENGTH(TRIM(entity_type)) > 0", 275},
+			} {
+				t.Run(cell.name, func(t *testing.T) {
+					_, err := db.ExecContext(ctx, cell.query, runID, uuid.NewString())
+					if tc.sqlite {
+						var native interface{ Code() int }
+						if !errors.As(err, &native) || native.Code() != cell.sqliteCode || !strings.Contains(err.Error(), cell.sqliteTarget) {
+							t.Fatalf("entity contract refusal must target %s with SQLite code %d: %T %v", cell.sqliteTarget, cell.sqliteCode, err, err)
+						}
+					} else {
+						var native *pq.Error
+						if !errors.As(err, &native) || string(native.Code) != cell.sqlState || native.Table != "entity_state" ||
+							(cell.name == "omitted" && native.Column != "entity_type") ||
+							(cell.name == "blank" && native.Constraint != "entity_state_entity_type_check") {
+							t.Fatalf("entity contract refusal must target entity_type with PostgreSQL SQLSTATE %s: %+v / %v", cell.sqlState, native, err)
+						}
+					}
+				})
+			}
+			var entityType, flowInstance string
+			if err := db.QueryRowContext(ctx, `SELECT entity_type,flow_instance FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, validEntity).Scan(&entityType, &flowInstance); err != nil || entityType != "review_entity" || flowInstance != "review/valid" {
+				t.Fatalf("valid contract row changed: type=%q path=%q err=%v", entityType, flowInstance, err)
+			}
+			var count int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, runID).Scan(&count); err != nil || count != 1 {
+				t.Fatalf("contract refusals changed the exact run population: count=%d want=1 err=%v", count, err)
 			}
 		})
 	}

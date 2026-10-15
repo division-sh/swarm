@@ -1641,9 +1641,9 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 					gate.waitStarted(t, blocked)
 
 					for _, accountID := range accountIDs[:len(accountIDs)-1] {
-						waitNotifyAllChildrenEntityState(t, ctx, backend, db, descriptors[accountID].InstancePath, "completed")
+						waitNotifyAllChildrenEntityState(t, ctx, backend, runID, descriptors[accountID].InstancePath, "completed")
 					}
-					if got := loadNotifyAllChildrenEntityState(t, ctx, backend, db, blocked); got != "active" {
+					if got := loadNotifyAllChildrenEntityState(t, ctx, backend, runID, blocked); got != "active" {
 						t.Fatalf("blocked sibling status = %q, want active while another instance is terminal", got)
 					}
 					if _, err := runtime.manager.ResolveAgentConfig(runID, nameCase.agentID, blocked); err != nil {
@@ -1655,7 +1655,7 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 					waitNotifyAllChildrenRuntime(t, runtime, runID)
 					for _, accountID := range accountIDs {
 						instancePath := descriptors[accountID].InstancePath
-						waitNotifyAllChildrenEntityState(t, ctx, backend, db, instancePath, "completed")
+						waitNotifyAllChildrenEntityState(t, ctx, backend, runID, instancePath, "completed")
 						waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, backend, runID, nameCase.agentID, instancePath, "delivered")
 						assertNotifyAllChildrenAgentEmissionSettledToSameInstanceNode(t, ctx, db, tc.name, runID, nameCase.agentID, instancePath)
 						waitNotifyAllChildrenAgentRetainedIdle(t, ctx, backend, runtime.manager, runID, nameCase.agentID, instancePath)
@@ -2601,14 +2601,14 @@ func waitNotifyAllChildrenEntityState(
 	t testing.TB,
 	ctx context.Context,
 	backend notifyAllChildrenStore,
-	db *sql.DB,
+	runID string,
 	instancePath string,
 	want string,
 ) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		if got := loadNotifyAllChildrenEntityState(t, ctx, backend, db, instancePath); got == want {
+		if got := loadNotifyAllChildrenEntityState(t, ctx, backend, runID, instancePath); got == want {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -2619,7 +2619,7 @@ func waitNotifyAllChildrenEntityState(
 	t.Fatalf(
 		"flow instance %s status = %q, want %q",
 		instancePath,
-		loadNotifyAllChildrenEntityState(t, ctx, backend, db, instancePath),
+		loadNotifyAllChildrenEntityState(t, ctx, backend, runID, instancePath),
 		want,
 	)
 }
@@ -2628,19 +2628,19 @@ func loadNotifyAllChildrenEntityState(
 	t testing.TB,
 	ctx context.Context,
 	backend notifyAllChildrenStore,
-	db *sql.DB,
+	runID string,
 	instancePath string,
 ) string {
 	t.Helper()
-	query := `SELECT current_state FROM entity_state WHERE flow_instance = $1`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT current_state FROM entity_state WHERE flow_instance = ?`
+	owner, err := runtimeflowidentity.NewRunScopedFlowInstance(runID, runtimeflowidentity.RouteForInstancePath(instancePath))
+	if err != nil {
+		t.Fatal(err)
 	}
-	var state string
-	if err := db.QueryRowContext(ctx, query, instancePath).Scan(&state); err != nil {
-		t.Fatalf("load entity state %s: %v", instancePath, err)
+	instance, found, err := backend.LoadWorkflowInstance(ctx, owner)
+	if err != nil || !found {
+		t.Fatalf("load exact constructed state %s: found=%t err=%v", instancePath, found, err)
 	}
-	return strings.TrimSpace(state)
+	return strings.TrimSpace(instance.CurrentState)
 }
 
 func waitNotifyAllChildrenAgentDeliveryStatus(

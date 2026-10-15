@@ -100,7 +100,7 @@ func TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores(t *testing.T) {
 			for index, expected := range [][]any{{int64(11), int64(22)}, {int64(111), int64(222)}} {
 				join := requireA2PortfolioJoin(t, rt, periods[index], 2, true, expected)
 				results, err := join.Results()
-				if periods[index].Entity.CurrentState != "complete" || !join.OutcomeFired || join.OutcomePending || err != nil || !reflect.DeepEqual(results, expected) ||
+				if periods[index].Entity.CurrentState == nil || *periods[index].Entity.CurrentState != "complete" || !join.OutcomeFired || join.OutcomePending || err != nil || !reflect.DeepEqual(results, expected) ||
 					join.JoinRef().StageEntry().InstancePath != initial[index].Entity.FlowInstance {
 					t.Fatalf("nested ordered completion changed owner/results: join=%+v results=%#v err=%v", join, results, err)
 				}

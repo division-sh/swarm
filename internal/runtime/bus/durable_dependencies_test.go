@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -165,9 +164,6 @@ func (unexpectedDurableTestRoles) LoadWorkflowInstance(context.Context, runtimef
 }
 func (unexpectedDurableTestRoles) ListWorkflowInstances(context.Context, string) ([]runtimepipeline.WorkflowInstance, error) {
 	return nil, errUnexpectedDurableTestRole
-}
-func (unexpectedDurableTestRoles) LoadWorkflowEntityState(context.Context, runtimeflowidentity.RunScopedFlowInstance, runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
-	return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, errUnexpectedDurableTestRole
 }
 func (unexpectedDurableTestRoles) LoadPreparedPublishEvent(context.Context, string) (PreparedPublishEvent, bool, error) {
 	return PreparedPublishEvent{}, false, errUnexpectedDurableTestRole

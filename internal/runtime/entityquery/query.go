@@ -52,44 +52,56 @@ func (r Request) Validate() error {
 	}
 }
 
-func Matches(row map[string]any, predicate Predicate) bool {
+type NullComparisonError struct {
+	Field string
+	Op    string
+}
+
+func (e *NullComparisonError) Error() string {
+	return fmt.Sprintf("query_entities ordered comparison %s requires a non-null value for %s", e.Op, e.Field)
+}
+
+func Matches(row map[string]any, predicate Predicate) (bool, error) {
 	left, present := selectorValue(row, predicate.Field)
 	if !present || predicate.Value == nil {
-		return false
+		return false, nil
 	}
 	switch predicate.Op {
 	case "==":
-		return jsonValuesEqual(left, predicate.Value)
+		return jsonValuesEqual(left, predicate.Value), nil
 	case "!=":
-		return !jsonValuesEqual(left, predicate.Value)
+		return !jsonValuesEqual(left, predicate.Value), nil
+	}
+	if left == nil {
+		return false, &NullComparisonError{Field: predicate.Field, Op: predicate.Op}
 	}
 	leftNumber, leftIsNumber := numericValue(left)
 	rightNumber, rightIsNumber := numericValue(predicate.Value)
 	if leftIsNumber && rightIsNumber {
 		switch predicate.Op {
 		case ">=":
-			return leftNumber >= rightNumber
+			return leftNumber >= rightNumber, nil
 		case "<=":
-			return leftNumber <= rightNumber
+			return leftNumber <= rightNumber, nil
 		case ">":
-			return leftNumber > rightNumber
+			return leftNumber > rightNumber, nil
 		case "<":
-			return leftNumber < rightNumber
+			return leftNumber < rightNumber, nil
 		}
 	}
 	leftText := fmt.Sprintf("%v", left)
 	rightText := fmt.Sprintf("%v", predicate.Value)
 	switch predicate.Op {
 	case ">=":
-		return leftText >= rightText
+		return leftText >= rightText, nil
 	case "<=":
-		return leftText <= rightText
+		return leftText <= rightText, nil
 	case ">":
-		return leftText > rightText
+		return leftText > rightText, nil
 	case "<":
-		return leftText < rightText
+		return leftText < rightText, nil
 	default:
-		return false
+		return false, nil
 	}
 }
 

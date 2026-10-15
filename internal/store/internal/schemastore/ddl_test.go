@@ -202,7 +202,7 @@ func TestPlatformSpecEntityStateUsesRunScopedIdentity(t *testing.T) {
 		"run_id            UUID NOT NULL REFERENCES runs(run_id)",
 		"entity_id         UUID NOT NULL",
 		"PRIMARY KEY (run_id, entity_id)",
-		`CREATE INDEX IF NOT EXISTS "idx_entity_flow" ON "entity_state"(run_id, flow_instance, current_state)`,
+		`CREATE INDEX IF NOT EXISTS "idx_entity_flow" ON "entity_state"(run_id, flow_instance)`,
 		`CREATE INDEX IF NOT EXISTS "idx_entity_cross_run" ON "entity_state"(entity_id)`,
 	} {
 		if !strings.Contains(joined, want) {
