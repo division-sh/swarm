@@ -59,7 +59,7 @@ func TestServedDeliveryQuiescenceMechanicalCallerRecipesPreserveAllOtherWork(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	matched := 0
+	matched, q10Endpoints := 0, 0
 	for _, row := range rows {
 		if row.Family != "native-served-delivery-quiescence-caller" {
 			continue
@@ -74,6 +74,28 @@ func TestServedDeliveryQuiescenceMechanicalCallerRecipesPreserveAllOtherWork(t *
 		current := row.After
 		if row.Successor != "" {
 			current = row.Successor
+		}
+		historical := current
+		current, endpointErr := q10DeliveryCallerCurrentSource(row)
+		if endpointErr != nil {
+			t.Fatal(endpointErr)
+		}
+		if current != historical {
+			q10Endpoints++
+			currentGuard := row
+			currentGuard.Before, currentGuard.After, currentGuard.Successor = current, current, ""
+			if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+historical), currentGuard); err == nil || changed {
+				t.Fatalf("historical delivery reader accepted as current: %s", row.Function)
+			}
+			for _, cut := range []string{"ReadRunDeliveries", "CurrentState", "!reflect.DeepEqual", "fi.run_id=es.run_id", "fi.instance_path=es.flow_instance", "fi.entity_id=es.entity_id"} {
+				mutant := strings.Replace(current, cut, "foreignCut", 1)
+				if mutant == current {
+					continue
+				}
+				if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+mutant), currentGuard); err == nil || changed {
+					t.Fatalf("current delivery caller lost owner, stage, equality or join identity: %s/%s", row.Function, cut)
+				}
+			}
 		}
 		currentPin, pinErr := canonicalFunction(current)
 		activeName := row.Function
@@ -92,8 +114,8 @@ func TestServedDeliveryQuiescenceMechanicalCallerRecipesPreserveAllOtherWork(t *
 			t.Fatalf("foreign owner admitted by finite rewrite: %s", row.Function)
 		}
 	}
-	if matched != 73 {
-		t.Fatalf("mechanical delivery caller recipes=%d,want73; construction is separate", matched)
+	if matched != 73 || q10Endpoints != 12 {
+		t.Fatalf("mechanical delivery caller recipes=%d,want73; Q10 endpoints=%d,want12; construction is separate", matched, q10Endpoints)
 	}
 }
 
