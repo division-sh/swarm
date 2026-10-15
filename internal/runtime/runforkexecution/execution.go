@@ -60,6 +60,10 @@ type SelectedContractExecutionResult struct {
 // ResumeRecoveredSelectedFork re-enters the selected execution sequence
 // from one durable child and predecessor, never from a new fork materialization.
 func (o SelectedContractExecutionOwner) ResumeRecoveredSelectedFork(ctx context.Context, recovered runfork.SelectedForkRecoveryResult, request SelectedContractExecutionRequest) (SelectedContractExecutionResult, error) {
+	return o.resumeRecoveredSelectedFork(ctx, recovered, request, nil)
+}
+
+func (o SelectedContractExecutionOwner) resumeRecoveredSelectedFork(ctx context.Context, recovered runfork.SelectedForkRecoveryResult, request SelectedContractExecutionRequest, reserved *selectedContractOperation) (SelectedContractExecutionResult, error) {
 	if recovered.Disposition != runfork.SelectedForkRecoveryResume && recovered.Disposition != runfork.SelectedForkRecoveryActivate {
 		return SelectedContractExecutionResult{}, errors.New("selected resume requires unfinished recovery evidence")
 	}
@@ -71,7 +75,7 @@ func (o SelectedContractExecutionOwner) ResumeRecoveredSelectedFork(ctx context.
 		return SelectedContractExecutionResult{}, errors.New("selected resume received non-executable action")
 	}
 	admitted.request.Recovery = &recovered
-	return ExecuteSelectedContractRunFork(ctx, admitted.request)
+	return executeSelectedContractRunFork(ctx, admitted.request, reserved)
 }
 
 func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExecutionRequest) (out SelectedContractExecutionResult, finalErr error) {

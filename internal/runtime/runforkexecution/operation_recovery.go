@@ -66,10 +66,5 @@ func (o SelectedContractExecutionOwner) recoverSelectedForkOperation(ctx context
 	if action != selectedRecoveryResume && action != selectedRecoveryActivate {
 		return SelectedContractExecutionResult{}, fmt.Errorf("selected operation recovery is not executable: %s", recovered.Disposition)
 	}
-	admitted, err := o.admitSelectedRecovery(ctx, recovered, SelectedContractExecutionRequest{SourceLoader: request.SourceLoader, AgentRuntime: request.AgentRuntime})
-	if err != nil {
-		return SelectedContractExecutionResult{}, err
-	}
-	admitted.request.Recovery = &recovered
-	return executeSelectedContractRunFork(ctx, admitted.request, operation)
+	return o.resumeRecoveredSelectedFork(ctx, recovered, SelectedContractExecutionRequest{SourceLoader: request.SourceLoader, AgentRuntime: request.AgentRuntime}, operation)
 }
