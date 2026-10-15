@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -418,6 +419,84 @@ func ReadServedDeliveryStatusCountForTest(ctx context.Context, selected any, eve
 		return 0, err
 	}
 	return count, nil
+}
+
+type SelectedDeploymentForkDiagnosticCell struct {
+	Text    string
+	Present bool
+}
+
+type SelectedDeploymentForkDiagnosticSection struct {
+	Name    string
+	Columns []string
+	Rows    [][]SelectedDeploymentForkDiagnosticCell
+	Failure string
+}
+
+func ReadSelectedDeploymentForkDiagnosticsForTest(ctx context.Context, selected any, runID string) ([]SelectedDeploymentForkDiagnosticSection, error) {
+	if err := validateSelectedForkStorageIdentity(runID); err != nil {
+		return nil, err
+	}
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return nil, err
+	}
+	var sections []SelectedDeploymentForkDiagnosticSection
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		for _, query := range []struct{ name, sql string }{
+			{"run_control", `SELECT r.status,c.control_status FROM runs r JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`},
+			{"feeds", `SELECT CAST(deployment_feed_id AS TEXT),status,cursor,cardinality,CAST(claim_owner AS TEXT),claim_generation,CAST(lease_expires_at AS TEXT),CAST(retry_ready_at AS TEXT),CAST(retry_failure AS TEXT),CAST(blocked_reason AS TEXT) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment' ORDER BY deployment_feed_id`},
+			{"executions", `SELECT CAST(execution_id AS TEXT),generation,state,CAST(lease_expires_at AS TEXT),CAST(failure AS TEXT) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 ORDER BY generation`},
+			{"outcomes", `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`},
+			{"events", `SELECT COUNT(*) FROM events WHERE run_id=$1`},
+			{"pipeline_receipts", `SELECT COUNT(*) FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'`},
+			{"deliveries", `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`},
+			{"pending_deliveries", `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','in_progress')`},
+			{"failed_deliveries", `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('failed','dead_letter')`},
+			{"stamped_handoffs", `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND continuation_handoff_at IS NOT NULL`},
+			{"receiver_instances", `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`},
+			{"receipts", `SELECT CAST(r.event_id AS TEXT),r.subscriber_type,r.subscriber_id,r.outcome,CAST(r.reason_code AS TEXT),CAST(r.failure AS TEXT) FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 ORDER BY e.insertion_sequence,r.subscriber_type,r.subscriber_id`},
+			{"delivery_rows", `SELECT CAST(delivery_id AS TEXT),CAST(event_id AS TEXT),subscriber_type,subscriber_id,status,retry_count,claim_version,CAST(next_eligible_at AS TEXT),CAST(continuation_handoff_at AS TEXT),CAST(reason_code AS TEXT),CAST(failure AS TEXT) FROM event_deliveries WHERE run_id=$1 ORDER BY created_at,delivery_id`},
+			{"attempts", `SELECT CAST(a.delivery_id AS TEXT),a.claim_version,a.closure_kind,CAST(a.outcome AS TEXT),CAST(a.reason_code AS TEXT),CAST(a.failure AS TEXT) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1 ORDER BY a.delivery_id,a.claim_version`},
+			{"runtime_logs", `SELECT CAST(event_id AS TEXT),CAST(payload AS TEXT) FROM events WHERE run_id=$1 AND event_name='platform.runtime_log' ORDER BY insertion_sequence DESC LIMIT 20`},
+		} {
+			rows, err := tx.QueryContext(ctx, query.sql, runID)
+			if err != nil {
+				return fmt.Errorf("read selected fork %s: %w", query.name, err)
+			}
+			columns, err := rows.Columns()
+			if err != nil {
+				return errors.Join(err, rows.Close())
+			}
+			section := SelectedDeploymentForkDiagnosticSection{Name: query.name, Columns: columns}
+			for rows.Next() {
+				values := make([]sql.NullString, len(columns))
+				scan := make([]any, len(values))
+				for i := range values {
+					scan[i] = &values[i]
+				}
+				if err := rows.Scan(scan...); err != nil {
+					return errors.Join(err, rows.Close())
+				}
+				cells := make([]SelectedDeploymentForkDiagnosticCell, len(values))
+				for i, value := range values {
+					cells[i] = SelectedDeploymentForkDiagnosticCell{Text: value.String, Present: value.Valid}
+				}
+				section.Rows = append(section.Rows, cells)
+			}
+			if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+				return fmt.Errorf("read selected fork %s rows: %w", query.name, err)
+			}
+			if query.name == "run_control" && len(section.Rows) != 1 {
+				section.Failure = sql.ErrNoRows.Error()
+			}
+			sections = append(sections, section)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return sections, nil
 }
 
 func ReadServedRunDebugSummaryForTest(ctx context.Context, selected any, runID string) (string, error) {

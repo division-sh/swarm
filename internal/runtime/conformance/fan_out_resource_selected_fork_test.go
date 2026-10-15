@@ -166,7 +166,7 @@ func deploymentForkServerAt(t *testing.T, f *deploymentResourceFixture, owner ru
 				result, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, req)
 				if err != nil {
 					t.Logf("selected fork executor diagnosis: %v", err)
-					logSelectedDeploymentForkFailure(t, f.db, result.Materialization.ForkRunID)
+					logSelectedDeploymentForkFailure(t, f.selected, result.Materialization.ForkRunID)
 				}
 				return result, err
 			},
@@ -194,7 +194,7 @@ func deploymentForkServerAt(t *testing.T, f *deploymentResourceFixture, owner ru
 	return server
 }
 
-func logSelectedDeploymentForkFailure(t *testing.T, db *sql.DB, forkRunID string) {
+func logSelectedDeploymentForkFailure(t *testing.T, selected any, forkRunID string) {
 	t.Helper()
 	if forkRunID == "" {
 		t.Log("selected fork diagnostic: no acknowledged materialization")
@@ -202,142 +202,13 @@ func logSelectedDeploymentForkFailure(t *testing.T, db *sql.DB, forkRunID string
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	var runStatus, controlStatus string
-	if err := db.QueryRowContext(ctx, `SELECT r.status,c.control_status FROM runs r JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`, forkRunID).Scan(&runStatus, &controlStatus); err != nil {
-		t.Logf("selected fork diagnostic run/control query: %v", err)
-	} else {
-		t.Logf("selected fork diagnostic run=%s status=%s control=%s", forkRunID, runStatus, controlStatus)
-	}
-	feeds, err := db.QueryContext(ctx, `SELECT CAST(deployment_feed_id AS TEXT),status,cursor,cardinality,CAST(claim_owner AS TEXT),claim_generation,CAST(lease_expires_at AS TEXT),CAST(retry_ready_at AS TEXT),CAST(retry_failure AS TEXT),CAST(blocked_reason AS TEXT) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment' ORDER BY deployment_feed_id`, forkRunID)
+	sections, err := storetest.ReadSelectedDeploymentForkDiagnostics(ctx, selected, forkRunID)
 	if err != nil {
-		t.Logf("selected fork diagnostic feeds query: %v", err)
-	} else {
-		for feeds.Next() {
-			var feedID, status string
-			var cursor, cardinality, generation int64
-			var claimant, lease, retryAt, retryFailure, blocked sql.NullString
-			if err := feeds.Scan(&feedID, &status, &cursor, &cardinality, &claimant, &generation, &lease, &retryAt, &retryFailure, &blocked); err != nil {
-				t.Logf("selected fork diagnostic feed scan: %v", err)
-				break
-			}
-			t.Logf("selected fork diagnostic feed=%s status=%s cursor=%d/%d claim=%q generation=%d lease=%q retry_at=%q retry_failure=%q blocked=%q", feedID, status, cursor, cardinality, claimant.String, generation, lease.String, retryAt.String, retryFailure.String, blocked.String)
-		}
-		if err := feeds.Err(); err != nil {
-			t.Logf("selected fork diagnostic feeds rows: %v", err)
-		}
-		feeds.Close()
+		t.Logf("selected fork diagnostic run=%s: %v", forkRunID, err)
+		return
 	}
-	executions, err := db.QueryContext(ctx, `SELECT CAST(execution_id AS TEXT),generation,state,CAST(lease_expires_at AS TEXT),CAST(failure AS TEXT) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 ORDER BY generation`, forkRunID)
-	if err != nil {
-		t.Logf("selected fork diagnostic executions query: %v", err)
-	} else {
-		for executions.Next() {
-			var executionID, state string
-			var generation int64
-			var lease, failure sql.NullString
-			if err := executions.Scan(&executionID, &generation, &state, &lease, &failure); err != nil {
-				t.Logf("selected fork diagnostic execution scan: %v", err)
-				break
-			}
-			t.Logf("selected fork diagnostic execution=%s generation=%d state=%s lease=%q failure=%s", executionID, generation, state, lease.String, failure.String)
-		}
-		if err := executions.Err(); err != nil {
-			t.Logf("selected fork diagnostic executions rows: %v", err)
-		}
-		executions.Close()
-	}
-	for _, check := range []struct {
-		name  string
-		query string
-	}{
-		{"outcomes", `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`},
-		{"events", `SELECT COUNT(*) FROM events WHERE run_id=$1`},
-		{"pipeline_receipts", `SELECT COUNT(*) FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'`},
-		{"deliveries", `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`},
-		{"pending_deliveries", `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','in_progress')`},
-		{"failed_deliveries", `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('failed','dead_letter')`},
-		{"stamped_handoffs", `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND continuation_handoff_at IS NOT NULL`},
-		{"receiver_instances", `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`},
-	} {
-		var count int
-		if err := db.QueryRowContext(ctx, check.query, forkRunID).Scan(&count); err != nil {
-			t.Logf("selected fork diagnostic %s query: %v", check.name, err)
-		} else {
-			t.Logf("selected fork diagnostic %s=%d", check.name, count)
-		}
-	}
-	receipts, err := db.QueryContext(ctx, `SELECT CAST(r.event_id AS TEXT),r.subscriber_type,r.subscriber_id,r.outcome,CAST(r.reason_code AS TEXT),CAST(r.failure AS TEXT) FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 ORDER BY e.insertion_sequence,r.subscriber_type,r.subscriber_id`, forkRunID)
-	if err != nil {
-		t.Logf("selected fork diagnostic receipts query: %v", err)
-	} else {
-		for receipts.Next() {
-			var eventID, subscriberType, subscriberID, outcome string
-			var reason, failure sql.NullString
-			if err := receipts.Scan(&eventID, &subscriberType, &subscriberID, &outcome, &reason, &failure); err != nil {
-				t.Logf("selected fork diagnostic receipt scan: %v", err)
-				break
-			}
-			t.Logf("selected fork diagnostic receipt event=%s subscriber=%s/%s outcome=%s reason=%q failure=%s", eventID, subscriberType, subscriberID, outcome, reason.String, failure.String)
-		}
-		if err := receipts.Err(); err != nil {
-			t.Logf("selected fork diagnostic receipts rows: %v", err)
-		}
-		receipts.Close()
-	}
-	deliveries, err := db.QueryContext(ctx, `SELECT CAST(delivery_id AS TEXT),CAST(event_id AS TEXT),subscriber_type,subscriber_id,status,retry_count,claim_version,CAST(next_eligible_at AS TEXT),CAST(continuation_handoff_at AS TEXT),CAST(reason_code AS TEXT),CAST(failure AS TEXT) FROM event_deliveries WHERE run_id=$1 ORDER BY created_at,delivery_id`, forkRunID)
-	if err != nil {
-		t.Logf("selected fork diagnostic deliveries query: %v", err)
-	} else {
-		for deliveries.Next() {
-			var deliveryID, eventID, subscriberType, subscriberID, status string
-			var retryCount, claimVersion int64
-			var nextEligible, handoff, reason, failure sql.NullString
-			if err := deliveries.Scan(&deliveryID, &eventID, &subscriberType, &subscriberID, &status, &retryCount, &claimVersion, &nextEligible, &handoff, &reason, &failure); err != nil {
-				t.Logf("selected fork diagnostic delivery scan: %v", err)
-				break
-			}
-			t.Logf("selected fork diagnostic delivery=%s event=%s subscriber=%s/%s status=%s retries=%d claim_version=%d next_eligible=%q handoff=%q reason=%q failure=%s", deliveryID, eventID, subscriberType, subscriberID, status, retryCount, claimVersion, nextEligible.String, handoff.String, reason.String, failure.String)
-		}
-		if err := deliveries.Err(); err != nil {
-			t.Logf("selected fork diagnostic deliveries rows: %v", err)
-		}
-		deliveries.Close()
-	}
-	attempts, err := db.QueryContext(ctx, `SELECT CAST(a.delivery_id AS TEXT),a.claim_version,a.closure_kind,CAST(a.outcome AS TEXT),CAST(a.reason_code AS TEXT),CAST(a.failure AS TEXT) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id WHERE d.run_id=$1 ORDER BY a.delivery_id,a.claim_version`, forkRunID)
-	if err != nil {
-		t.Logf("selected fork diagnostic attempts query: %v", err)
-	} else {
-		for attempts.Next() {
-			var deliveryID, closure string
-			var claimVersion int64
-			var outcome, reason, failure sql.NullString
-			if err := attempts.Scan(&deliveryID, &claimVersion, &closure, &outcome, &reason, &failure); err != nil {
-				t.Logf("selected fork diagnostic attempt scan: %v", err)
-				break
-			}
-			t.Logf("selected fork diagnostic attempt delivery=%s claim_version=%d closure=%s outcome=%q reason=%q failure=%s", deliveryID, claimVersion, closure, outcome.String, reason.String, failure.String)
-		}
-		if err := attempts.Err(); err != nil {
-			t.Logf("selected fork diagnostic attempts rows: %v", err)
-		}
-		attempts.Close()
-	}
-	logs, err := db.QueryContext(ctx, `SELECT CAST(event_id AS TEXT),CAST(payload AS TEXT) FROM events WHERE run_id=$1 AND event_name='platform.runtime_log' ORDER BY insertion_sequence DESC LIMIT 20`, forkRunID)
-	if err != nil {
-		t.Logf("selected fork diagnostic runtime logs query: %v", err)
-	} else {
-		for logs.Next() {
-			var eventID, payload string
-			if err := logs.Scan(&eventID, &payload); err != nil {
-				t.Logf("selected fork diagnostic runtime log scan: %v", err)
-				break
-			}
-			t.Logf("selected fork diagnostic runtime_log event=%s payload=%s", eventID, payload)
-		}
-		if err := logs.Err(); err != nil {
-			t.Logf("selected fork diagnostic runtime logs rows: %v", err)
-		}
-		logs.Close()
+	for _, section := range sections {
+		t.Logf("selected fork diagnostic run=%s %s columns=%v rows=%+v error=%s", forkRunID, section.Name, section.Columns, section.Rows, section.Failure)
 	}
 }
 

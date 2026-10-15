@@ -276,7 +276,7 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 				}
 				defer func() {
 					if t.Failed() {
-						logSelectedDeploymentForkFailure(t, f.db, result.ForkRunID)
+						logSelectedDeploymentForkFailure(t, f.selected, result.ForkRunID)
 					}
 				}()
 				// Activation acknowledgment precedes retained publication. Observe
