@@ -158,17 +158,47 @@ func TestHistoricalMechanicalCurrentHandlerAssemblyIsSourcePinned(t *testing.T) 
 	} {
 		t.Run(pin.function, func(t *testing.T) {
 			source := selectedCausalObservationBody(t, pin.file, pin.function)
-			if !historicalCurrentSourcePinned(source, pin.digest) {
+			historical, err := historicalHandlerAssemblySource(source, pin.function)
+			if err != nil || !historicalCurrentSourcePinned(historical, pin.digest) {
 				t.Fatal("extracted native handler owner/cleanup/publication assembly changed")
 			}
 			for _, cut := range []string{"t.Helper()", "selected", "fact", "return"} {
 				mutant := strings.Replace(source, cut, "foreignCut", 1)
-				if mutant != source && historicalCurrentSourcePinned(mutant, pin.digest) {
+				restored, err := historicalHandlerAssemblySource(mutant, pin.function)
+				if mutant != source && err == nil && historicalCurrentSourcePinned(restored, pin.digest) {
 					t.Fatalf("changed handler successor accepted: %s", cut)
+				}
+			}
+			if pin.function == "workflowHandlerNativeFixtureFromSelected" {
+				for _, cut := range []string{"prepare native handler construction: %w", "commit native handler construction: %w"} {
+					for _, replacement := range []string{"foreign construction: %w", strings.Replace(cut, "%w", "%v", 1)} {
+						mutant := strings.Replace(source, cut, replacement, 1)
+						restored, err := historicalHandlerAssemblySource(mutant, pin.function)
+						if mutant == source || err == nil && historicalCurrentSourcePinned(restored, pin.digest) {
+							t.Fatalf("lost construction phase/error cause accepted: %s", replacement)
+						}
+					}
+				}
+				if _, err := historicalHandlerAssemblySource(historical, pin.function); err == nil {
+					t.Fatal("historical unannotated errors accepted as the current handler assembly")
 				}
 			}
 		})
 	}
+}
+
+func historicalHandlerAssemblySource(source, name string) (string, error) {
+	if name != "workflowHandlerNativeFixtureFromSelected" {
+		return source, nil
+	}
+	for _, phase := range []string{"prepare", "commit"} {
+		current := "return fmt.Errorf(\"" + phase + " native handler construction: %w\", err)"
+		if strings.Count(source, current) != 1 {
+			return "", fmt.Errorf("missing exact %s construction error cause", phase)
+		}
+		source = strings.Replace(source, current, "return err", 1)
+	}
+	return source, nil
 }
 
 func historicalCurrentSourcePinned(source, digest string) bool {
