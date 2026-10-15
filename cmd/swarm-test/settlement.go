@@ -12,17 +12,13 @@ type settlementLease interface {
 	Complete(context.Context, bool) error
 }
 
-type settlementService interface {
-	Close(context.Context) error
-}
-
-func settleRunAuthorities(lease settlementLease, service settlementService, result func() bool) (serviceErr, leaseErr error) {
+func settleRunAuthorities(lease settlementLease, closeService func(context.Context) error, result func() bool) (serviceErr, leaseErr error) {
 	joinCtx, cancelJoin := context.WithTimeout(context.Background(), authoritySettlementTimeout)
 	leaseErr = lease.Join(joinCtx)
 	cancelJoin()
-	if service != nil {
+	if closeService != nil {
 		removalCtx, cancelRemoval := context.WithTimeout(context.Background(), postgresRemovalTimeout)
-		serviceErr = service.Close(removalCtx)
+		serviceErr = closeService(removalCtx)
 		cancelRemoval()
 	}
 	success := result()
