@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -61,17 +62,16 @@ func (p *selectedDeploymentRollbackPublication) CommitSelectedForkEvent(ctx cont
 
 type selectedDeploymentSettlementExecutor struct {
 	startupownership.FanOutExecutor
-	committed chan string
+	observed *selectedDeploymentSettlementObservation
 }
 
 func (e *selectedDeploymentSettlementExecutor) ServeFanOutCandidate(ctx context.Context, owner pipeline.FanOutObligationOwner, key fanoutobligation.IntentKey) (pipeline.FanOutTurnResult, error) {
-	return e.FanOutExecutor.ServeFanOutCandidate(ctx, selectedDeploymentSettlementOwner{FanOutObligationOwner: owner, committed: e.committed}, key)
+	return e.FanOutExecutor.ServeFanOutCandidate(ctx, selectedDeploymentSettlementOwner{FanOutObligationOwner: owner, observed: e.observed}, key)
 }
 
 type selectedDeploymentSettlementOwner struct {
 	pipeline.FanOutObligationOwner
-	committed chan string
-	evaluated chan string
+	observed *selectedDeploymentSettlementObservation
 }
 
 func (o selectedDeploymentSettlementOwner) BeginFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim, validate func(pipeline.FanOutEvaluationInput) error) (pipeline.FanOutEvaluationInput, runtimepipelineobligation.PublicationGroup, error) {
@@ -79,25 +79,73 @@ func (o selectedDeploymentSettlementOwner) BeginFanOutEvaluation(ctx context.Con
 	if group == nil || err != nil {
 		return input, group, err
 	}
-	if o.evaluated != nil {
-		o.evaluated <- claim.Key.RunID
-	}
-	return input, selectedDeploymentSettlementGroup{PublicationGroup: group, committed: o.committed}, nil
+	o.observed.record(claim.Key.RunID, "")
+	return input, selectedDeploymentSettlementGroup{PublicationGroup: group, observed: o.observed}, nil
 }
 
 type selectedDeploymentSettlementGroup struct {
 	runtimepipelineobligation.PublicationGroup
-	committed chan string
+	observed *selectedDeploymentSettlementObservation
 }
 
 func (g selectedDeploymentSettlementGroup) Settle(ctx context.Context, members []runtimepipelineobligation.PublicationSettlementMember) (runtimepipelineobligation.PublicationGroupOutcome, error) {
 	outcome, err := g.PublicationGroup.Settle(ctx, members)
 	for _, result := range outcome.Results {
 		if result.Outcome.DeliveryHandoffCommitted() {
-			g.committed <- result.Claim.EventID()
+			g.observed.record("", result.Claim.EventID())
 		}
 	}
 	return outcome, err
+}
+
+// The journal retains every witness; the coalesced signal only wakes its reader.
+// Serving never waits for an observer to consume a channel.
+type selectedDeploymentSettlementObservation struct {
+	mu        sync.Mutex
+	evaluated []string
+	committed []string
+	changed   chan struct{}
+}
+
+func newSelectedDeploymentSettlementObservation() *selectedDeploymentSettlementObservation {
+	return &selectedDeploymentSettlementObservation{changed: make(chan struct{}, 1)}
+}
+
+func (o *selectedDeploymentSettlementObservation) record(runID, eventID string) {
+	o.mu.Lock()
+	if runID != "" {
+		o.evaluated = append(o.evaluated, runID)
+	}
+	if eventID != "" {
+		o.committed = append(o.committed, eventID)
+	}
+	o.mu.Unlock()
+	select {
+	case o.changed <- struct{}{}:
+	default:
+	}
+}
+
+func (o *selectedDeploymentSettlementObservation) snapshot() (evaluated, committed []string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([]string(nil), o.evaluated...), append([]string(nil), o.committed...)
+}
+
+func (o *selectedDeploymentSettlementObservation) waitCommitted(ctx context.Context, eventID string) error {
+	for {
+		_, committed := o.snapshot()
+		for _, observed := range committed {
+			if observed == eventID {
+				return nil
+			}
+		}
+		select {
+		case <-o.changed:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 func (g *selectedDeploymentClaimGate) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
@@ -142,12 +190,12 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 			t.Run(name, func(t *testing.T) {
 				gate := &selectedDeploymentClaimGate{entered: make(chan string, 16)}
 				gate.held.Store(true)
-				settled := make(chan string, 16)
+				observed := newSelectedDeploymentSettlementObservation()
 				f := selectedDeploymentResourceFixtureConfigured(t, backend, "singleton", true, !changedPin, nil, func(store runtimedelivery.Store) runtimedelivery.Store {
 					gate.Store = store
 					return gate
 				}, func(executor startupownership.FanOutExecutor) startupownership.FanOutExecutor {
-					return &selectedDeploymentSettlementExecutor{FanOutExecutor: executor, committed: settled}
+					return &selectedDeploymentSettlementExecutor{FanOutExecutor: executor, observed: observed}
 				})
 				t.Cleanup(func() { gate.held.Store(false) })
 				server := f.operatorServer(t)
@@ -170,13 +218,8 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 				pointEventID := waitDeploymentForkRowEvent(t, f.ctx, f.db, sourceRunID, f.runtime.fanOutServing.Wake)
 				waitCtx, cancelWait := context.WithTimeout(f.ctx, 10*time.Second)
 				defer cancelWait()
-				for matched := false; !matched; {
-					select {
-					case eventID := <-settled:
-						matched = eventID == pointEventID
-					case <-waitCtx.Done():
-						t.Fatalf("R3b pipeline receipt/handoff did not commit at T: %v", waitCtx.Err())
-					}
+				if err := observed.waitCommitted(waitCtx, pointEventID); err != nil {
+					t.Fatalf("R3b pipeline receipt/handoff did not commit at T: %v", err)
 				}
 				for matched := false; !matched; {
 					select {

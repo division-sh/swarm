@@ -407,6 +407,10 @@ func deploymentForkOwnerWithOverrides(t *testing.T, f *deploymentResourceFixture
 }
 
 func deploymentForkOwnerWithReplay(t *testing.T, f *deploymentResourceFixture, delivery runtimedelivery.Store, fork runforkexecution.SelectedContractForkLifecycle, replay runforkexecution.SelectedContractReplayPersistence) (runforkexecution.SelectedContractExecutionOwner, []runfork.SelectedForkRecoveryResult) {
+	return deploymentForkOwnerWithExecutor(t, f, delivery, fork, replay, nil)
+}
+
+func deploymentForkOwnerWithExecutor(t *testing.T, f *deploymentResourceFixture, delivery runtimedelivery.Store, fork runforkexecution.SelectedContractForkLifecycle, replay runforkexecution.SelectedContractReplayPersistence, decorate func(startupownership.FanOutExecutor) startupownership.FanOutExecutor) (runforkexecution.SelectedContractExecutionOwner, []runfork.SelectedForkRecoveryResult) {
 	t.Helper()
 	if delivery == nil {
 		delivery = f.selected
@@ -474,6 +478,12 @@ func deploymentForkOwnerWithReplay(t *testing.T, f *deploymentResourceFixture, d
 	}
 	if err != nil {
 		t.Fatal(err)
+	}
+	if decorate != nil {
+		owner, err = runforkexecution.WithFanOutExecutorForTest(owner, decorate)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := owner.BindSelectedProcess(f.ctx, conformanceTestProcessOwner(t), f.topology.capability); err != nil {
 		t.Fatal(err)
