@@ -104,6 +104,14 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int) 
 		request.Owner.ports.contexts.mu.Lock()
 		retained := len(request.Owner.ports.contexts.entries)
 		request.Owner.ports.contexts.mu.Unlock()
+		run, runErr := storetest.ReadRuntimeLogRunSnapshot(ctx, loader.Store, materialized.ForkRunID)
+		if runErr != nil || run.Failure != nil || retained == 0 && (summary.Owed != 0 || summary.Unsettled != 0 || pending != 0) {
+			diagnostic, diagnosticErr := storetest.ReadSelectedForkLifecycleDiagnosticStorage(ctx, loader.Store, materialized.ForkRunID)
+			for _, log := range diagnostic.Logs {
+				t.Logf("pin-feed serving diagnostic: %s", log.Payload)
+			}
+			t.Fatalf("pin-feed serving stopped before exact settlement: run=%+v summary=%+v pending=%d retained=%d err=%v/%v", run, summary, pending, retained, runErr, diagnosticErr)
+		}
 		if summary.Owed == 0 && summary.Unsettled == 0 && pending == 0 && retained == 0 {
 			break
 		}
