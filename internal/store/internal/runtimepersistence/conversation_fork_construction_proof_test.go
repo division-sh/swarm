@@ -93,7 +93,7 @@ func TestConversationForkHistoricalConstructionRefusalsBothStores(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, name := range []string{"missing_time", "foreign_source", "mismatched_time", "missing_parent_time"} {
+			for _, name := range []string{"missing_time", "foreign_source", "mismatched_time", "missing_parent_time", "missing_creating_event"} {
 				t.Run(name, func(t *testing.T) {
 					bad, writeCtx, want := fixture, ctx, ""
 					switch name {
@@ -111,6 +111,9 @@ func TestConversationForkHistoricalConstructionRefusalsBothStores(t *testing.T) 
 						parent.OccurredAt = time.Time{}
 						bad.Construction.Parent = &parent
 						want = "conversation construction requires its exact fieldless parent"
+					case "missing_creating_event":
+						bad.Construction.CreatingEvent = events.Event{}
+						want = "conversation construction requires its original prepared creating event"
 					}
 					if _, err := SeedConversationForkSourceForTest(writeCtx, selected, bad); err == nil || !strings.Contains(err.Error(), want) {
 						t.Fatalf("historical refusal = %v, want %s", err, want)
