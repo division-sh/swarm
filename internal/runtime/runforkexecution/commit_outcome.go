@@ -34,7 +34,7 @@ func requireExactSelectedForkMaterialization(req runforkreadiness.MaterializeReq
 	point := req.Preparation.ForkPoint
 	if binding == nil || binding.BindingID == "" || result.ForkRunID == "" ||
 		binding.ForkRunID != result.ForkRunID ||
-		result.SourceRunID != req.SourceRunID || point.Validate() != nil || req.At != point.EventID ||
+		result.SourceRunID != req.SourceRunID || point.Validate() != nil || req.At != point.Input ||
 		!sameSelectedForkPointIdentity(result.ForkPoint, point) ||
 		binding.SourceRunID != req.SourceRunID || !sameSelectedForkPointIdentity(binding.ForkPoint, point) || binding.ForkEventID != point.EventID ||
 		binding.ContractSelection != req.ContractSelection {
