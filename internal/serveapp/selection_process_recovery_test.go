@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -41,7 +42,11 @@ func TestServedSelectionProcessCutsBothStores(t *testing.T) {
 					}
 				}()
 				reached := make(chan error, 1)
-				go func() { var b [1]byte; _, err := io.ReadFull(ready, b[:]); reached <- err }()
+				go func() {
+					var b [1]byte
+					_, err := io.ReadFull(ready, b[:])
+					reached <- err
+				}()
 				select {
 				case err := <-reached:
 					if err != nil {
@@ -59,8 +64,12 @@ func TestServedSelectionProcessCutsBothStores(t *testing.T) {
 				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, deliveryID).Scan(&facts); err != nil {
 					t.Fatal(err)
 				}
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='selected'`, seed.RunID).Scan(&publications); err != nil {
-					t.Fatal(err)
+				{
+					var err error
+					publications, err = readServedEventNameCountForRun(context.Background(), rt.ReceiverStateReader, seed.RunID, "selected")
+					if err != nil {
+						t.Fatal(err)
+					}
 				}
 				committed := cut == "selected"
 				if committed {
@@ -70,14 +79,14 @@ func TestServedSelectionProcessCutsBothStores(t *testing.T) {
 				} else if status != "in_progress" || facts != 0 || publications != 0 {
 					t.Fatalf("preselection cut already persisted final effects: status=%s facts=%d events=%d", status, facts, publications)
 				}
-				assertServedSelectionTrace(t, rt, eventID, seed.RunID, committed)
+				assertServedSelectionTrace(t, rt.Endpoint, eventID, seed.RunID, committed)
 				if err := first.kill(); err != nil || first.waitError() == nil {
 					t.Fatalf("expected actual process death: %v", err)
 				}
 				<-responseDone
 				second, recovered := start(false)
-				assertServedSelectionTrace(t, recovered, eventID, seed.RunID, true)
-				requireServedEventPublishEntityState(t, recovered.DB, backend, seed.RunID, "", "done")
+				assertServedSelectionTrace(t, recovered.Endpoint, eventID, seed.RunID, true)
+				requireServedEventPublishEntityState(t, recovered.ReceiverStateReader, backend, seed.RunID, "", "done")
 				waitServedRunDeliveryQuiescence(t, recovered.ReadRunDeliveries, seed.RunID)
 				duplicate := requireServedEventPublishRPCResult(t, recovered.Endpoint, params)
 				if duplicate.EventID != eventID || duplicate.RunID != seed.RunID {
@@ -92,8 +101,12 @@ func TestServedSelectionProcessCutsBothStores(t *testing.T) {
 				}
 				for _, name := range []string{"selected", "ack"} {
 					var count int
-					if err := recovered.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name=$2`, seed.RunID, name).Scan(&count); err != nil || count != 1 {
-						t.Fatalf("recovery duplicated/lost %s: count=%d err=%v", name, count, err)
+					{
+						var err error
+						count, err = readServedEventNameCountForRun(context.Background(), recovered.ReceiverStateReader, seed.RunID, name)
+						if err != nil || count != 1 {
+							t.Fatalf("recovery duplicated/lost %s: count=%d err=%v", name, count, err)
+						}
 					}
 				}
 				if err := second.stop(); err != nil {

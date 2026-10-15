@@ -1,0 +1,385 @@
+// Command migrate-bus-outbox propagates the native owner through the finite
+// descriptor-only cohort. Fault, routing and ambient-context cases are separate.
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"go/ast"
+	"go/format"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
+
+	"golang.org/x/tools/go/ast/astutil"
+)
+
+var roots = map[string]bool{
+	"TestCommittedReadinessFailureBlocksOnlyItsExactOutput":                            true,
+	"TestEngineOutboxPersistsEventsAndDeliveriesInTransaction":                         true,
+	"TestEngineOutboxExactDuplicateDispatchIsOperationNoOp":                            true,
+	"TestEngineOutboxPreservesAppendOutcomeForEveryIntentInBatch":                      true,
+	"TestEngineOutboxPreexistingExactDuplicateBatchDispatchesZero":                     true,
+	"TestEngineOutboxConflictingSameIDBatchRollsBackOrderedOutcomes":                   true,
+	"TestEngineOutboxDistinctIntentBatchDispatchesEachOnce":                            true,
+	"TestEngineOutboxAndDispatcher_UseCanonicalDirectRecipientManifest":                true,
+	"TestEngineOutboxAndDispatcher_DeliverInternalSubscribersOutsidePersistedManifest": true,
+	"TestEnginePublicationRejectsFilteredDirectIntentBeforePersistence":                true,
+	"TestPublishDirectRejectsFilteredExplicitRecipient":                                true,
+	"TestEngineOutboxAndDispatcher_DoesNotFabricateRoutesForPendingInternalDeliveries": true,
+}
+
+func main() {
+	if len(os.Args) == 3 && os.Args[1] == "--early-release-overlay" {
+		if err := earlyReleaseOverlay(os.Args[2]); err != nil {
+			panic(err)
+		}
+		return
+	}
+	const path = "internal/runtime/bus/outbox_test.go"
+	source, err := os.ReadFile(path)
+	if err != nil {
+		panic(err)
+	}
+	output, err := rewrite(source)
+	if err != nil {
+		panic(err)
+	}
+	output, err = retireFakeOwners(output)
+	if err != nil {
+		panic(err)
+	}
+	if err := os.WriteFile(path, output, 0o644); err != nil {
+		panic(err)
+	}
+}
+
+func earlyReleaseOverlay(directory string) error {
+	const path = "internal/runtime/bus/pipeline_publication_claim.go"
+	const original = "claim: c.claim, batchBorrowed: true"
+	source, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if strings.Count(string(source), original) != 1 {
+		return fmt.Errorf("early-release control requires its exact reviewed claim view")
+	}
+	source = bytes.Replace(source, []byte(original), []byte("claim: c.claim, batchBorrowed: false"), 1)
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return err
+	}
+	target, err := filepath.Abs(filepath.Join(directory, "pipeline_publication_claim.go"))
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(target, source, 0o644); err != nil {
+		return err
+	}
+	input, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	overlay, err := json.Marshal(map[string]any{"Replace": map[string]string{input: target}})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(directory, "overlay.json"), overlay, 0o644)
+}
+
+func retiredOwnerName(name string) bool {
+	return name == "directRecipientTransactionalStore" || name == "outboxClaimStore" || name == "commitEnginePublicationsForTest"
+}
+
+func retiredOwnerDeclaration(declaration ast.Decl) bool {
+	switch declaration := declaration.(type) {
+	case *ast.FuncDecl:
+		if retiredOwnerName(declaration.Name.Name) {
+			return true
+		}
+		if declaration.Recv == nil {
+			return false
+		}
+		receiver := declaration.Recv.List[0].Type
+		if pointer, ok := receiver.(*ast.StarExpr); ok {
+			receiver = pointer.X
+		}
+		return retiredOwnerName(render(receiver))
+	case *ast.GenDecl:
+		if len(declaration.Specs) == 1 {
+			if named, ok := declaration.Specs[0].(*ast.TypeSpec); ok {
+				return retiredOwnerName(named.Name.Name)
+			}
+		}
+	}
+	return false
+}
+
+func retireFakeOwners(source []byte) ([]byte, error) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "outbox_test.go", source, parser.ParseComments)
+	if err != nil {
+		return nil, err
+	}
+	var kept []ast.Decl
+	for _, declaration := range file.Decls {
+		if retiredOwnerDeclaration(declaration) {
+			continue
+		}
+		var residual string
+		ast.Inspect(declaration, func(node ast.Node) bool {
+			if name, ok := node.(*ast.Ident); ok && retiredOwnerName(name.Name) {
+				residual = name.Name
+			}
+			return true
+		})
+		if residual != "" {
+			return nil, fmt.Errorf("native propagation incomplete: surviving consumer of %s", residual)
+		}
+		kept = append(kept, declaration)
+	}
+	file.Decls = kept
+	astutil.DeleteNamedImport(fset, file, "runtimepipelinefixture", "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture")
+	var output bytes.Buffer
+	if err := format.Node(&output, fset, file); err != nil {
+		return nil, err
+	}
+	return format.Source(output.Bytes())
+}
+
+func rewrite(source []byte) ([]byte, error) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "outbox_test.go", source, parser.ParseComments)
+	if err != nil {
+		return nil, err
+	}
+	type edit struct {
+		start, end int
+		text       []byte
+	}
+	var edits []edit
+	for _, declaration := range file.Decls {
+		fn, ok := declaration.(*ast.FuncDecl)
+		if !ok || !roots[fn.Name.Name] {
+			continue
+		}
+		if strings.Contains(render(fn.Body), "newNativeOutboxFixture") {
+			continue
+		}
+		if err := rewriteBlocks(fn.Body); err != nil {
+			return nil, fmt.Errorf("%s: %w", fn.Name, err)
+		}
+		astutil.Apply(fn.Body, rewriteExpression, nil)
+		removeUnusedSetup(fn.Body)
+		clearPositions(fn)
+		body := render(fn.Body)
+		wrapper := statements("for _, backend := range []string{\"sqlite\", \"postgres\"} { t.Run(backend, func(t *testing.T) " + body + ") }")
+		fn.Body.List = wrapper
+		clearPositions(fn)
+		// Locate the original declaration in the parsed source, before rewriting
+		// positions, rather than mixing source coordinates from parsed snippets.
+		original, err := parser.ParseFile(token.NewFileSet(), "", source, 0)
+		if err != nil {
+			return nil, err
+		}
+		for _, value := range original.Decls {
+			if root, ok := value.(*ast.FuncDecl); ok && root.Name.Name == fn.Name.Name {
+				edits = append(edits, edit{int(root.Pos()) - 1, int(root.End()) - 1, []byte(render(fn))})
+			}
+		}
+	}
+	sort.Slice(edits, func(i, j int) bool { return edits[i].start > edits[j].start })
+	for _, edit := range edits {
+		source = append(append(append([]byte(nil), source[:edit.start]...), edit.text...), source[edit.end:]...)
+	}
+	return format.Source(source)
+}
+
+func rewriteBlocks(body *ast.BlockStmt) error {
+	var failure error
+	ast.Inspect(body, func(node ast.Node) bool {
+		block, ok := node.(*ast.BlockStmt)
+		if !ok {
+			return true
+		}
+		var result []ast.Stmt
+		for index := 0; index < len(block.List); index++ {
+			statement := block.List[index]
+			text := render(statement)
+			setup, matched, err := descriptorSetup(statement)
+			if err != nil {
+				failure = err
+				return false
+			}
+			if matched {
+				result = append(result, setup...)
+				continue
+			}
+			if strings.HasPrefix(text, "db, mock, err := sqlmock.New()") || strings.HasPrefix(text, "tx, err := db.Begin()") || strings.HasPrefix(text, "eb, err := newScopedTestEventBus(") {
+				index++ // The immediately following error check belongs to this setup.
+				if strings.Contains(text, "Interceptors:") {
+					result = append(result, statements("eb.SetInterceptors(interceptor)")...)
+				}
+				continue
+			}
+			if obsoleteStatement(text) {
+				continue
+			}
+			if strings.HasPrefix(text, "err = eb.PublishDirect(") {
+				statement.(*ast.AssignStmt).Tok = token.DEFINE
+			}
+			result = append(result, statement)
+		}
+		block.List = result
+		return true
+	})
+	return failure
+}
+
+func descriptorSetup(statement ast.Stmt) ([]ast.Stmt, bool, error) {
+	assignment, ok := statement.(*ast.AssignStmt)
+	if !ok || len(assignment.Rhs) != 1 {
+		return nil, false, nil
+	}
+	literal, ok := assignment.Rhs[0].(*ast.UnaryExpr)
+	if !ok {
+		return nil, false, nil
+	}
+	value, ok := literal.X.(*ast.CompositeLit)
+	if !ok || render(value.Type) != "directRecipientTransactionalStore" {
+		return nil, false, nil
+	}
+	var descriptors string
+	for _, element := range value.Elts {
+		pair, ok := element.(*ast.KeyValueExpr)
+		if !ok || render(pair.Key) != "descriptors" {
+			return nil, true, fmt.Errorf("non-descriptor fixture field %s", render(element))
+		}
+		descriptors = ", " + render(pair.Value) + "..."
+	}
+	name := render(assignment.Lhs[0])
+	return statements("fixture := newNativeOutboxFixture(t, backend" + descriptors + "); " + name + " := fixture.store; eb := fixture.bus"), true, nil
+}
+
+func removeUnusedSetup(body *ast.BlockStmt) {
+	counts := map[string]int{}
+	astutil.Apply(body, func(cursor *astutil.Cursor) bool {
+		if id, ok := cursor.Node().(*ast.Ident); ok {
+			if selector, ok := cursor.Parent().(*ast.SelectorExpr); !ok || selector.Sel != id {
+				counts[id.Name]++
+			}
+		}
+		return true
+	}, nil)
+	ast.Inspect(body, func(node ast.Node) bool {
+		block, ok := node.(*ast.BlockStmt)
+		if !ok {
+			return true
+		}
+		var result []ast.Stmt
+		for _, statement := range block.List {
+			if assignment, ok := statement.(*ast.AssignStmt); ok && len(assignment.Lhs) == 1 && assignment.Tok == token.DEFINE {
+				name := render(assignment.Lhs[0])
+				if (name == "store" || name == "recordingStore" || name == "eb" || name == "ctx" || name == "txctx") && counts[name] == 1 {
+					continue
+				}
+			}
+			result = append(result, statement)
+		}
+		block.List = result
+		return true
+	})
+}
+
+func clearPositions(node ast.Node) {
+	positionType := reflect.TypeOf(token.NoPos)
+	ast.Inspect(node, func(node ast.Node) bool {
+		if node == nil {
+			return true
+		}
+		value := reflect.ValueOf(node).Elem()
+		for i := 0; i < value.NumField(); i++ {
+			if field := value.Field(i); field.Type() == positionType {
+				if value.Type().Field(i).Name == "Ellipsis" && field.Int() != 0 {
+					field.SetInt(1)
+				} else {
+					field.SetInt(0)
+				}
+			}
+		}
+		return true
+	})
+}
+
+func obsoleteStatement(text string) bool {
+	if strings.HasPrefix(text, "ctx :=") || text == "ctx = runtimepipelinefixture.WithPostCommitActions(ctx, &postCommitActions)" {
+		return true
+	}
+	for _, prefix := range []string{"defer db.Close()", "mock.Expect", "if err := tx.Commit()", "if err := tx.Rollback()", "if err := mock.ExpectationsWereMet()", "_ = tx.Rollback()", "runtimepipelinefixture.FlushRollbackActions(", "runtimepipelinefixture.FlushPostCommitActions(", "rollbackActions :=", "postCommitActions :="} {
+		if strings.HasPrefix(text, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func rewriteExpression(cursor *astutil.Cursor) bool {
+	if id, ok := cursor.Node().(*ast.Ident); ok && id.Name == "ctx" {
+		if selector, ok := cursor.Parent().(*ast.SelectorExpr); !ok || selector.Sel != id {
+			cursor.Replace(expression("fixture.ctx"))
+			return false
+		}
+	}
+	call, ok := cursor.Node().(*ast.CallExpr)
+	if !ok {
+		return true
+	}
+	switch render(call.Fun) {
+	case "commitEnginePublicationsForTest":
+		call.Fun = expression("fixture.commitError")
+		call.Args = call.Args[3:]
+	case "runtimepipelinefixture.WithSQLTx", "runtimepipelinefixture.WithRollbackActions", "context.Background":
+		cursor.Replace(expression("fixture.ctx"))
+		return false
+	case "eventtest.RunCreatingRootIngress":
+		if render(call.Args[7]) != `""` {
+			panic("nonempty parent requires explicit migration")
+		}
+		call.Fun = expression("eventtest.ExistingRunRootIngress")
+		call.Args = append(call.Args[:7], call.Args[8:]...)
+	case "len":
+		if len(call.Args) == 1 && strings.HasSuffix(render(call.Args[0]), ".events") {
+			cursor.Replace(expression("fixture.eventCount(t)"))
+			return false
+		}
+	}
+	return true
+}
+
+func statements(body string) []ast.Stmt {
+	file, err := parser.ParseFile(token.NewFileSet(), "", "package p; func f(){"+body+"}", 0)
+	if err != nil {
+		panic(err)
+	}
+	return file.Decls[0].(*ast.FuncDecl).Body.List
+}
+
+func expression(source string) ast.Expr {
+	result, err := parser.ParseExpr(source)
+	if err != nil {
+		panic(err)
+	}
+	return result
+}
+
+func render(node ast.Node) string {
+	var buffer bytes.Buffer
+	if err := format.Node(&buffer, token.NewFileSet(), node); err != nil {
+		panic(err)
+	}
+	return buffer.String()
+}

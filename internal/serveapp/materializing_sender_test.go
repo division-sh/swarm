@@ -43,7 +43,7 @@ func TestMaterializingSenderReachesExistingRequiredReceiverBothStores(t *testing
 					t.Fatal(err)
 				}
 				if count != 1 {
-					t.Fatalf("receiver completions=%d: %s", count, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+					t.Fatalf("receiver completions=%d: %s", count, servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID))
 				}
 			})
 		}
@@ -91,16 +91,16 @@ func TestProspectiveReceiverUpdatesAndCompanionRepairBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				if deliveries != 2 || companions != 1 {
-					t.Fatalf("delivered=%d companions=%d; %s", deliveries, companions, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+					t.Fatalf("delivered=%d companions=%d; %s", deliveries, companions, servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID))
 				}
-				before := mailboxCompletionRunEffects(t, rt, seed.RunID)
+				before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, seed.RunID)
 				rt, _ = restart()
 				duplicate = requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 				if duplicate.EventID != updated.EventID || duplicate.RunID != seed.RunID {
 					t.Fatal("restart changed the committed prospective-state publication")
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				if after := mailboxCompletionRunEffects(t, rt, seed.RunID); !reflect.DeepEqual(before, after) {
+				if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, seed.RunID); !reflect.DeepEqual(before, after) {
 					t.Fatal("restart/duplicate changed state, companion, publication or receiver delivery")
 				}
 			})
@@ -214,20 +214,23 @@ func TestProspectiveTerminalReceiverRefusesWithoutMutationOrPublicationBothStore
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyProspectiveTerminalSender(t))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start", "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "terminal"}, "idempotency_key": "seed"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			var states, publications, failed int
-			if err := rt.DB.QueryRow(`SELECT count(*) FROM entity_state WHERE run_id=$1`, seed.RunID).Scan(&states); err != nil {
+			var publications, failed int
+			states, err := readServedRunFieldRows(rt.ReceiverStateReader, seed.RunID)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := rt.DB.QueryRow(`SELECT count(*) FROM events WHERE run_id=$1 AND event_name='work.ready'`, seed.RunID).Scan(&publications); err != nil {
+			if err := rt.ReceiverStateReader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+				var err error
+				publications, err = storetest.CountRunNamedEventStorage(ctx, rt.ReceiverStateReader, seed.RunID, "work.ready")
+				return err
+			}); err != nil {
 				t.Fatal(err)
 			}
 			if err := rt.DB.QueryRow(`SELECT count(*) FROM event_deliveries WHERE event_id=$1 AND status='dead_letter'`, seed.EventID).Scan(&failed); err != nil {
 				t.Fatal(err)
 			}
-			// Construction precedes execution. A rejected handler must preserve
-			// its initial header/fields, not erase the successfully constructed tree.
 			if states != 1 || publications != 0 || failed != 1 {
-				t.Fatalf("terminal planning states=%d publications=%d refused=%d; %s", states, publications, failed, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+				t.Fatalf("terminal planning states=%d publications=%d refused=%d; %s", states, publications, failed, servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID))
 			}
 			var entityID, stage, fields string
 			var headerRevision, fieldRevision, mutations int

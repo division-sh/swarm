@@ -57,8 +57,8 @@ func TestA2PortfolioSupportedStreamSurfaceBothStores(t *testing.T) {
 			if q1.Entity.EntityID == q2.Entity.EntityID || q1.Entity.FlowInstance == q2.Entity.FlowInstance {
 				t.Fatalf("stream period ownership collapsed: q1=%+v q2=%+v", q1, q2)
 			}
-			beforeFirst := requireA2PortfolioEvents(t, rt, first.RunID, firstReport.EventName)
-			beforeSecond := requireA2PortfolioEvents(t, rt, first.RunID, secondReport.EventName)
+			beforeFirst := requireA2PortfolioEvents(t, rt.Endpoint, first.RunID, firstReport.EventName)
+			beforeSecond := requireA2PortfolioEvents(t, rt.Endpoint, first.RunID, secondReport.EventName)
 			predecessor := rt.Runtime.Options.RuntimeInstanceID
 			if code := process.stop(); code != 0 {
 				t.Fatalf("stream predecessor serve exit=%d", code)
@@ -66,8 +66,8 @@ func TestA2PortfolioSupportedStreamSurfaceBothStores(t *testing.T) {
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 			process, rt = start()
 			rt = a2PortfolioReadbackRuntime(t, process, rt, selected)
-			if rt.Runtime.Options.RuntimeInstanceID == predecessor || !reflect.DeepEqual(q1, requireA2PortfolioEntity(t, rt, first.RunID, q1.Entity.FlowInstance)) ||
-				!reflect.DeepEqual(q2, requireA2PortfolioEntity(t, rt, first.RunID, q2.Entity.FlowInstance)) {
+			if rt.Runtime.Options.RuntimeInstanceID == predecessor || !reflect.DeepEqual(q1, requireA2PortfolioEntity(t, rt.Endpoint, first.RunID, q1.Entity.FlowInstance)) ||
+				!reflect.DeepEqual(q2, requireA2PortfolioEntity(t, rt.Endpoint, first.RunID, q2.Entity.FlowInstance)) {
 				t.Fatal("actual same-store stream reconstruction changed period state or reused the predecessor runtime")
 			}
 			t.Log("actual same-store normal serve restart: both stream periods preserved through public readback")
@@ -76,10 +76,10 @@ func TestA2PortfolioSupportedStreamSurfaceBothStores(t *testing.T) {
 				t.Fatalf("same-idempotency stream publication changed identity: first=%+v replay=%+v", first, replay)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, first.RunID)
-			if !reflect.DeepEqual(q1, requireA2PortfolioEntity(t, rt, first.RunID, q1.Entity.FlowInstance)) ||
-				!reflect.DeepEqual(q2, requireA2PortfolioEntity(t, rt, first.RunID, q2.Entity.FlowInstance)) ||
-				!reflect.DeepEqual(beforeFirst, requireA2PortfolioEvents(t, rt, first.RunID, firstReport.EventName)) ||
-				!reflect.DeepEqual(beforeSecond, requireA2PortfolioEvents(t, rt, first.RunID, secondReport.EventName)) {
+			if !reflect.DeepEqual(q1, requireA2PortfolioEntity(t, rt.Endpoint, first.RunID, q1.Entity.FlowInstance)) ||
+				!reflect.DeepEqual(q2, requireA2PortfolioEntity(t, rt.Endpoint, first.RunID, q2.Entity.FlowInstance)) ||
+				!reflect.DeepEqual(beforeFirst, requireA2PortfolioEvents(t, rt.Endpoint, first.RunID, firstReport.EventName)) ||
+				!reflect.DeepEqual(beforeSecond, requireA2PortfolioEvents(t, rt.Endpoint, first.RunID, secondReport.EventName)) {
 				t.Fatal("sibling period or same-idempotency replay changed stream state or emitted reports")
 			}
 			if code := process.stop(); code != 0 {
@@ -97,32 +97,25 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 			requireA2PortfolioVerification(t, root)
 			opts, start := lifecycleRestartHarness(t, backend, root)
 			var selected serveRuntimePersistence
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected = p })
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+				selected = p
+			})
 			process, rt := start()
 			rt = a2PortfolioReadbackRuntime(t, process, rt, selected)
-			setup := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"bundle_hash": rt.BundleHash, "event_name": "portfolio.setup", "idempotency_key": "a2-join-q1",
-				"payload": map[string]any{"portfolio_id": "portfolio-one", "period_id": "2026-Q1", "expected_operating_ids": []string{"op-a", "op-b"}},
-			})
+			setup := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"bundle_hash": rt.BundleHash, "event_name": "portfolio.setup", "idempotency_key": "a2-join-q1", "payload": map[string]any{"portfolio_id": "portfolio-one", "period_id": "2026-Q1", "expected_operating_ids": []string{"op-a", "op-b"}}})
 			if !setup.NewRunCreated || setup.RunID == "" || setup.EventID == "" {
 				t.Fatalf("root join setup did not create a run: %+v", setup)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, setup.RunID)
 			parent := requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "portfolio", "portfolio_id", "portfolio-one")
 			q1 := requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "portfolio/period", "period_id", "2026-Q1")
-			requireA2PortfolioSetupRoutes(t, rt, setup, parent, q1, "materializing_entity")
+			requireA2PortfolioSetupRoutes(t, rt.Endpoint, setup, parent, q1, "materializing_entity")
 			arm := requireA2PortfolioJoin(t, rt, q1, 0, false, nil)
-
 			created := map[string]operatorread.OperatorEntityFull{}
 			publish := func(period, member string, revenue int) {
 				t.Helper()
-				// Completion retires the active route; retain its exact pre-arrival key.
 				child := requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "portfolio/period", "period_id", period)
-				arrival := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-					"run_id": setup.RunID, "event_name": "operating.report.triggered",
-					"payload":         map[string]any{"portfolio_id": "portfolio-one", "period_id": period, "operating_id": member, "revenue": revenue},
-					"idempotency_key": "a2-join-" + period + "-" + member,
-				})
+				arrival := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"run_id": setup.RunID, "event_name": "operating.report.triggered", "payload": map[string]any{"portfolio_id": "portfolio-one", "period_id": period, "operating_id": member, "revenue": revenue}, "idempotency_key": "a2-join-" + period + "-" + member})
 				if arrival.RunID != setup.RunID || arrival.NewRunCreated || arrival.EventID == "" {
 					t.Fatalf("root join report ingress lost its run: %+v", arrival)
 				}
@@ -134,42 +127,37 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 				}
 				created[operating.Entity.EntityID] = operating
 				reportPayload := map[string]any{"portfolio_id": "portfolio-one", "period_id": period, "operating_id": member, "operating_instance_id": requested.EventID, "revenue": float64(revenue)}
-				reported := requireA2PortfolioEmission(t, rt, setup.RunID, operating.Entity.FlowInstance+"/operating.reported", requested.EventID, reportPayload)
+				reported := requireA2PortfolioEmission(t, rt.Endpoint, setup.RunID, operating.Entity.FlowInstance+"/operating.reported", requested.EventID, reportPayload)
 				requireA2PortfolioDelivery(t, reported, "portfolio", "portfolio-router", parent, "existing_entity")
-				forwarded := requireA2PortfolioEmission(t, rt, setup.RunID, parent.Entity.FlowInstance+"/period.reported", reported.EventID, payload)
-				// The receipt owns this immutable target; its continuation may already be changing state.
+				forwarded := requireA2PortfolioEmission(t, rt.Endpoint, setup.RunID, parent.Entity.FlowInstance+"/period.reported", reported.EventID, payload)
 				requireA2PortfolioDelivery(t, forwarded, "portfolio/period", "portfolio-collector", child, "existing_entity")
 			}
 			publish("2026-Q1", "op-b", 22)
-			partial := requireA2PortfolioJoin(t, rt, requireA2PortfolioEntity(t, rt, setup.RunID, q1.Entity.FlowInstance), 1, false, nil)
+			partial := requireA2PortfolioJoin(t, rt, requireA2PortfolioEntity(t, rt.Endpoint, setup.RunID, q1.Entity.FlowInstance), 1, false, nil)
 			partialResults, err := partial.Results()
 			if !partial.JoinRef().Equal(arm.JoinRef()) || err != nil || !reflect.DeepEqual(partialResults, []any{int64(22)}) || len(partial.Missing()) != 1 || partial.Missing()[0] != "op-a" {
 				t.Fatalf("ordinary partial arrival lost its arm or typed output: %+v", partial)
 			}
-
-			secondSetup := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"run_id": setup.RunID, "event_name": "portfolio.setup", "idempotency_key": "a2-join-q2",
-				"payload": map[string]any{"portfolio_id": "portfolio-one", "period_id": "2026-Q2", "expected_operating_ids": []string{"op-a", "op-b"}},
-			})
+			secondSetup := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"run_id": setup.RunID, "event_name": "portfolio.setup", "idempotency_key": "a2-join-q2", "payload": map[string]any{"portfolio_id": "portfolio-one", "period_id": "2026-Q2", "expected_operating_ids": []string{"op-a", "op-b"}}})
 			if secondSetup.RunID != setup.RunID || secondSetup.NewRunCreated {
 				t.Fatalf("sibling setup lost its run: %+v", secondSetup)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, setup.RunID)
 			q2 := requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "portfolio/period", "period_id", "2026-Q2")
-			requireA2PortfolioSetupRoutes(t, rt, secondSetup, parent, q2, "existing_entity")
+			requireA2PortfolioSetupRoutes(t, rt.Endpoint, secondSetup, parent, q2, "existing_entity")
 			secondArm := requireA2PortfolioJoin(t, rt, q2, 0, false, nil)
 			if secondArm.JoinRef().Equal(arm.JoinRef()) || q2.Entity.EntityID == q1.Entity.EntityID {
 				t.Fatal("sibling periods share a join arm or entity")
 			}
 			publish("2026-Q2", "op-a", 111)
-			stillPartial := requireA2PortfolioJoin(t, rt, requireA2PortfolioEntity(t, rt, setup.RunID, q1.Entity.FlowInstance), 1, false, nil)
+			stillPartial := requireA2PortfolioJoin(t, rt, requireA2PortfolioEntity(t, rt.Endpoint, setup.RunID, q1.Entity.FlowInstance), 1, false, nil)
 			if !reflect.DeepEqual(partial, stillPartial) {
 				t.Fatal("same leaf business ID in another period changed the first join")
 			}
-			q1Partial := requireA2PortfolioEntity(t, rt, setup.RunID, q1.Entity.FlowInstance)
-			q2Partial := requireA2PortfolioEntity(t, rt, setup.RunID, q2.Entity.FlowInstance)
+			q1Partial := requireA2PortfolioEntity(t, rt.Endpoint, setup.RunID, q1.Entity.FlowInstance)
+			q2Partial := requireA2PortfolioEntity(t, rt.Endpoint, setup.RunID, q2.Entity.FlowInstance)
 			secondPartial := requireA2PortfolioJoin(t, rt, q2Partial, 1, false, nil)
-			beforeReports := requireA2PortfolioEvents(t, rt, setup.RunID, parent.Entity.FlowInstance+"/period.reported")
+			beforeReports := requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, parent.Entity.FlowInstance+"/period.reported")
 			predecessor := rt.Runtime.Options.RuntimeInstanceID
 			if code := process.stop(); code != 0 {
 				t.Fatalf("finite join predecessor serve exit=%d", code)
@@ -177,18 +165,15 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 			process, rt = start()
 			rt = a2PortfolioReadbackRuntime(t, process, rt, selected)
-			if rt.Runtime.Options.RuntimeInstanceID == predecessor || !reflect.DeepEqual(q1Partial, requireA2PortfolioEntity(t, rt, setup.RunID, q1.Entity.FlowInstance)) ||
-				!reflect.DeepEqual(q2Partial, requireA2PortfolioEntity(t, rt, setup.RunID, q2.Entity.FlowInstance)) ||
-				!reflect.DeepEqual(beforeReports, requireA2PortfolioEvents(t, rt, setup.RunID, parent.Entity.FlowInstance+"/period.reported")) {
+			if rt.Runtime.Options.RuntimeInstanceID == predecessor || !reflect.DeepEqual(q1Partial, requireA2PortfolioEntity(t, rt.Endpoint, setup.RunID, q1.Entity.FlowInstance)) || !reflect.DeepEqual(q2Partial, requireA2PortfolioEntity(t, rt.Endpoint, setup.RunID, q2.Entity.FlowInstance)) || !reflect.DeepEqual(beforeReports, requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, parent.Entity.FlowInstance+"/period.reported")) {
 				t.Fatal("actual same-store finite join reconstruction changed partial periods, reports, or runtime identity")
 			}
 			for _, operating := range created {
-				if !reflect.DeepEqual(operating, requireA2PortfolioEntity(t, rt, setup.RunID, operating.Entity.FlowInstance)) {
+				if !reflect.DeepEqual(operating, requireA2PortfolioEntity(t, rt.Endpoint, setup.RunID, operating.Entity.FlowInstance)) {
 					t.Fatal("restart changed an actually created operating instance")
 				}
 			}
-			if !reflect.DeepEqual(partial, requireA2PortfolioJoin(t, rt, q1Partial, 1, false, nil)) ||
-				!reflect.DeepEqual(secondPartial, requireA2PortfolioJoin(t, rt, q2Partial, 1, false, nil)) {
+			if !reflect.DeepEqual(partial, requireA2PortfolioJoin(t, rt, q1Partial, 1, false, nil)) || !reflect.DeepEqual(secondPartial, requireA2PortfolioJoin(t, rt, q2Partial, 1, false, nil)) {
 				t.Fatal("restart replaced a retained period arm or its typed outputs")
 			}
 			t.Log("actual same-store normal serve restart: both partial joins and operating instances preserved through public readback")
@@ -198,14 +183,14 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 			if !closed.JoinRef().Equal(arm.JoinRef()) {
 				t.Fatal("completion replaced the first period's arm")
 			}
-			requireA2PortfolioJoin(t, rt, requireA2PortfolioEntity(t, rt, setup.RunID, q2.Entity.FlowInstance), 1, false, nil)
+			requireA2PortfolioJoin(t, rt, requireA2PortfolioEntity(t, rt.Endpoint, setup.RunID, q2.Entity.FlowInstance), 1, false, nil)
 			publish("2026-Q2", "op-b", 222)
 			q2 = waitA2PortfolioComplete(t, rt, setup.RunID, q2.Entity.FlowInstance)
 			secondClosed := requireA2PortfolioJoin(t, rt, q2, 2, true, []any{int64(111), int64(222)})
-			if !secondClosed.JoinRef().Equal(secondArm.JoinRef()) || !reflect.DeepEqual(q1, requireA2PortfolioEntity(t, rt, setup.RunID, q1.Entity.FlowInstance)) {
+			if !secondClosed.JoinRef().Equal(secondArm.JoinRef()) || !reflect.DeepEqual(q1, requireA2PortfolioEntity(t, rt.Endpoint, setup.RunID, q1.Entity.FlowInstance)) {
 				t.Fatal("second completion replaced its arm or changed the completed sibling")
 			}
-			if arrivals := requireA2PortfolioEvents(t, rt, setup.RunID, parent.Entity.FlowInstance+"/period.reported"); len(arrivals) != 4 {
+			if arrivals := requireA2PortfolioEvents(t, rt.Endpoint, setup.RunID, parent.Entity.FlowInstance+"/period.reported"); len(arrivals) != 4 {
 				t.Fatalf("ordinary nested join arrival count=%d, want 4", len(arrivals))
 			}
 			if len(created) != 4 {
@@ -227,7 +212,7 @@ func TestA2PortfolioSupportedFiniteJoinSurfaceBothStores(t *testing.T) {
 				if !reflect.DeepEqual(operating, requireA2PortfolioKeyedEntity(t, rt, setup.RunID, "operating", "operating_instance_id", key)) {
 					t.Fatal("run completion changed its constructed operating instance")
 				}
-				ctx := servedControlProofAuthorActivityContext(t, rt)
+				ctx := servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime)
 				request, err := pipeline.NewExactFlowInstanceLookup(rt.Runtime.Options.WorkflowModule.SemanticSource(), rt.Runtime.Options.SourceArtifactFact,
 					flowidentity.RunScopedFlowInstance{RunID: setup.RunID, Route: flowidentity.RouteForInstancePath(operating.Entity.FlowInstance)})
 				if err != nil {
@@ -309,7 +294,7 @@ func requireA2PortfolioKeyedEntity(t *testing.T, rt servedControlProofRuntime, r
 			if entityID != entity.EntityID {
 				t.Fatalf("public entity contradicts its constructed header: %+v", entity)
 			}
-			full := requireA2PortfolioEntity(t, rt, runID, entity.FlowInstance)
+			full := requireA2PortfolioEntity(t, rt.Endpoint, runID, entity.FlowInstance)
 			if full.Fields[field] == key {
 				matches = append(matches, full)
 			}
@@ -321,10 +306,10 @@ func requireA2PortfolioKeyedEntity(t *testing.T, rt servedControlProofRuntime, r
 	return matches[0]
 }
 
-func requireA2PortfolioEntity(t *testing.T, rt servedControlProofRuntime, runID, path string) operatorread.OperatorEntityFull {
+func requireA2PortfolioEntity(t *testing.T, endpoint string, runID, path string) operatorread.OperatorEntityFull {
 	t.Helper()
 	var list operatorread.OperatorEntityListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.list", map[string]any{"run_id": runID, "limit": 100}, &list)
+	requireServedJSONRPCResult(t, endpoint, "entity.list", map[string]any{"run_id": runID, "limit": 100}, &list)
 	var matches []operatorread.OperatorEntitySummary
 	for _, entity := range list.Entities {
 		if entity.FlowInstance == path {
@@ -335,17 +320,17 @@ func requireA2PortfolioEntity(t *testing.T, rt servedControlProofRuntime, runID,
 		t.Fatalf("exact public portfolio entity %s: matches=%+v list=%+v", path, matches, list)
 	}
 	var full operatorread.OperatorEntityFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": matches[0].EntityID}, &full)
+	requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": matches[0].EntityID}, &full)
 	if !reflect.DeepEqual(matches[0], full.Entity) {
 		t.Fatalf("portfolio entity list/get disagree: summary=%+v full=%+v", matches[0], full)
 	}
 	return full
 }
 
-func requireA2PortfolioEvents(t *testing.T, rt servedControlProofRuntime, runID, name string) []operatorread.OperatorEventFull {
+func requireA2PortfolioEvents(t *testing.T, endpoint string, runID, name string) []operatorread.OperatorEventFull {
 	t.Helper()
 	var list operatorread.OperatorEventListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID, "event_name": name}, "limit": 100}, &list)
+	requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID, "event_name": name}, "limit": 100}, &list)
 	if list.NextCursor != "" {
 		t.Fatalf("small portfolio event proof unexpectedly paginated: %+v", list)
 	}
@@ -357,10 +342,10 @@ func requireA2PortfolioEvents(t *testing.T, rt servedControlProofRuntime, runID,
 	return list.Events
 }
 
-func requireA2PortfolioEvent(t *testing.T, rt servedControlProofRuntime, eventID, runID, name string, payload map[string]any) operatorread.OperatorEventFull {
+func requireA2PortfolioEvent(t *testing.T, endpoint string, eventID, runID, name string, payload map[string]any) operatorread.OperatorEventFull {
 	t.Helper()
 	var event operatorread.OperatorEventFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
+	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
 	if event.EventID != eventID || event.RunID != runID || event.EventName != name || !reflect.DeepEqual(event.Payload, payload) ||
 		len(event.DeadLetters) != 0 || event.NoDelivery != nil || len(event.Deliveries) != 1 {
 		t.Fatalf("exact public portfolio event: %+v, want %s payload=%#v", event, name, payload)
@@ -368,10 +353,10 @@ func requireA2PortfolioEvent(t *testing.T, rt servedControlProofRuntime, eventID
 	return event
 }
 
-func requireA2PortfolioEmission(t *testing.T, rt servedControlProofRuntime, runID, name, sourceID string, payload map[string]any) operatorread.OperatorEventFull {
+func requireA2PortfolioEmission(t *testing.T, endpoint string, runID, name, sourceID string, payload map[string]any) operatorread.OperatorEventFull {
 	t.Helper()
 	var matches []operatorread.OperatorEventFull
-	for _, event := range requireA2PortfolioEvents(t, rt, runID, name) {
+	for _, event := range requireA2PortfolioEvents(t, endpoint, runID, name) {
 		if event.SourceEventID == sourceID {
 			matches = append(matches, event)
 		}
@@ -379,7 +364,7 @@ func requireA2PortfolioEmission(t *testing.T, rt servedControlProofRuntime, runI
 	if len(matches) != 1 {
 		t.Fatalf("ordinary emission %s from %s: matches=%+v", name, sourceID, matches)
 	}
-	full := requireA2PortfolioEvent(t, rt, matches[0].EventID, runID, name, payload)
+	full := requireA2PortfolioEvent(t, endpoint, matches[0].EventID, runID, name, payload)
 	if !reflect.DeepEqual(matches[0], full) {
 		t.Fatalf("portfolio event list/get disagree: list=%+v full=%+v", matches[0], full)
 	}
@@ -405,7 +390,7 @@ func requireA2PortfolioDeliveryTarget(t *testing.T, event operatorread.OperatorE
 
 func requireA2PortfolioOperatingCreation(t *testing.T, rt servedControlProofRuntime, trigger servedEventPublishRPCResult, payload map[string]any, instanceField string) (operatorread.OperatorEventFull, operatorread.OperatorEntityFull) {
 	t.Helper()
-	input := requireA2PortfolioEvent(t, rt, trigger.EventID, trigger.RunID, "operating.report.triggered", payload)
+	input := requireA2PortfolioEvent(t, rt.Endpoint, trigger.EventID, trigger.RunID, "operating.report.triggered", payload)
 	ingress := operatorread.OperatorDeliveryTarget{Kind: "existing_entity", FlowID: "ingress", FlowInstance: "ingress", EntityID: flowidentity.EntityID("ingress")}
 	if trigger.NewRunCreated {
 		ingress.Kind = "materializing_entity"
@@ -422,7 +407,7 @@ func requireA2PortfolioOperatingCreation(t *testing.T, rt servedControlProofRunt
 	if entityID != ingress.EntityID || template != "ingress" || mode != "static" || entityType.Valid || fieldRows != 0 {
 		t.Fatalf("fieldless ingress lost its exact header or acquired fields: entity=%s template=%s mode=%s type=%+v fields=%d", entityID, template, mode, entityType, fieldRows)
 	}
-	requested := requireA2PortfolioEmission(t, rt, trigger.RunID, "ingress/operating.report.requested", trigger.EventID, payload)
+	requested := requireA2PortfolioEmission(t, rt.Endpoint, trigger.RunID, "ingress/operating.report.requested", trigger.EventID, payload)
 	operating := requireA2PortfolioKeyedEntity(t, rt, trigger.RunID, "operating", instanceField, requested.EventID)
 	requireA2PortfolioDelivery(t, requested, "operating", "operating-node", operating, "materializing_entity")
 	var projectionRaw []byte
@@ -446,7 +431,7 @@ func requireA2PortfolioStreamChain(t *testing.T, rt servedControlProofRuntime, t
 	// The source payload has no operating_id; the declared event.id create
 	// projection must become the exact business ID in the emitted report.
 	payload["operating_id"] = requested.EventID
-	reported := requireA2PortfolioEmission(t, rt, trigger.RunID, operating.Entity.FlowInstance+"/operating.reported", requested.EventID, payload)
+	reported := requireA2PortfolioEmission(t, rt.Endpoint, trigger.RunID, operating.Entity.FlowInstance+"/operating.reported", requested.EventID, payload)
 	portfolio := requireA2PortfolioKeyedEntity(t, rt, trigger.RunID, "portfolio", "period_id", period)
 	requireA2PortfolioDelivery(t, reported, "portfolio", "portfolio-collector", portfolio, "materializing_entity")
 	wantFields := map[string]any{"period_id": period, "last_revenue": float64(revenue), "reports": map[string]any{requested.EventID: payload}}
@@ -471,12 +456,12 @@ func requireA2PortfolioStreamChain(t *testing.T, rt servedControlProofRuntime, t
 	return portfolio, reported
 }
 
-func requireA2PortfolioSetupRoutes(t *testing.T, rt servedControlProofRuntime, setup servedEventPublishRPCResult, parent, period operatorread.OperatorEntityFull, parentKind string) {
+func requireA2PortfolioSetupRoutes(t *testing.T, endpoint string, setup servedEventPublishRPCResult, parent, period operatorread.OperatorEntityFull, parentKind string) {
 	t.Helper()
 	fields := map[string]any{"portfolio_id": "portfolio-one", "period_id": period.Fields["period_id"], "expected_operating_ids": []any{"op-a", "op-b"}}
-	input := requireA2PortfolioEvent(t, rt, setup.EventID, setup.RunID, "portfolio.setup", fields)
+	input := requireA2PortfolioEvent(t, endpoint, setup.EventID, setup.RunID, "portfolio.setup", fields)
 	requireA2PortfolioDelivery(t, input, "portfolio", "portfolio-router", parent, parentKind)
-	forwarded := requireA2PortfolioEmission(t, rt, setup.RunID, parent.Entity.FlowInstance+"/period.setup", setup.EventID, fields)
+	forwarded := requireA2PortfolioEmission(t, endpoint, setup.RunID, parent.Entity.FlowInstance+"/period.setup", setup.EventID, fields)
 	requireA2PortfolioDelivery(t, forwarded, "portfolio/period", "portfolio-collector", period, "materializing_entity")
 	if !reflect.DeepEqual(period.Fields, fields) {
 		t.Fatalf("public join membership snapshot fields: %#v, want %#v", period.Fields, fields)
@@ -545,10 +530,10 @@ func waitA2PortfolioComplete(t *testing.T, rt servedControlProofRuntime, runID, 
 		}
 		if period.Entity.CurrentState == "complete" {
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
-			return requireA2PortfolioEntity(t, rt, runID, path)
+			return requireA2PortfolioEntity(t, rt.Endpoint, runID, path)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("real join continuation did not complete %s: %+v\n%s", path, period, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+	t.Fatalf("real join continuation did not complete %s: %+v\n%s", path, period, servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 	return period
 }

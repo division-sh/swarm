@@ -54,7 +54,6 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -636,9 +635,7 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	}
 	source := semanticview.Wrap(bundle)
 	module := newFixtureWorkflowModule(t, bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := eventBusTestRunContextForSource(t, pg, semanticview.Wrap(bundle))
 	instanceRoute := runtimeflowidentity.DeriveRoute("account", "one")
 	accountConstruction := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "account", "one", eventBusTestRunID)
@@ -760,13 +757,8 @@ func TestEventBusPublish_AgentOnlyConnectDoesNotAuthorizeUnrelatedNode(t *testin
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for agent-only connect delivery")
 	}
-	var nodeDeliveries int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-	`, evt.ID()).Scan(&nodeDeliveries); err != nil {
+	nodeDeliveries, err := storetest.CountGateEventNodeDeliveries(ctx, pg, evt.ID())
+	if err != nil {
 		t.Fatalf("count node deliveries: %v", err)
 	}
 	if nodeDeliveries != 0 {
@@ -3653,10 +3645,7 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	if !slices.ContainsFunc(module.WorkflowNodes(), func(node runtimepipeline.WorkflowNode) bool { return node.Node.Equal(rootCollector) }) {
 		t.Fatalf("runtime workflow nodes = %#v, want exact root collector %s", module.WorkflowNodes(), rootCollector.Key())
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	var pc *runtimepipeline.PipelineCoordinator
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
@@ -3797,20 +3786,12 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 	}
 
 	var emitted []string
-	rows, err := db.QueryContext(context.Background(), `SELECT event_name FROM events ORDER BY created_at ASC, event_id ASC`)
+	names, err := storetest.ReadBusRoutingEventNames(context.Background(), pg)
 	if err != nil {
 		t.Fatalf("query events: %v", err)
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			t.Fatalf("scan event: %v", err)
-		}
+	for _, name := range names {
 		emitted = append(emitted, strings.TrimSpace(name))
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate events: %v", err)
 	}
 
 	root, found, err := workflowStore.Load(ctx, testRunScopedFlowRoute(runtimeflowidentity.RouteForInstancePath(eventBusTestRunID)))
@@ -3821,21 +3802,13 @@ func TestEventBusPublish_NestedDescendantCompletionFollowsDeclaredAncestorConnec
 		t.Fatal("expected root instance")
 	}
 	if got := strings.TrimSpace(root.CurrentState); got != "done" {
-		rows, _ := db.QueryContext(context.Background(), `
-			SELECT e.event_name, d.subscriber_id, COALESCE(d.status, ''), COALESCE(d.delivery_target_route::text, '')
-			FROM event_deliveries d
-			JOIN events e ON e.event_id = d.event_id
-			ORDER BY e.created_at, d.subscriber_id, d.delivery_target_route::text
-		`)
+		rows, readErr := storetest.ReadBusAncestorDeliveryDiagnostics(context.Background(), pg)
 		deliveries := make([]string, 0)
-		if rows != nil {
-			defer rows.Close()
-			for rows.Next() {
-				var eventName, subscriberID, status, target string
-				if scanErr := rows.Scan(&eventName, &subscriberID, &status, &target); scanErr == nil {
-					deliveries = append(deliveries, eventName+"/"+subscriberID+"="+status+" "+target)
-				}
-			}
+		if readErr != nil {
+			t.Logf("read ancestor delivery diagnostics: %v", readErr)
+		}
+		for _, row := range rows {
+			deliveries = append(deliveries, row.Name+"/"+row.SubscriberID+"="+row.Status+" "+row.Target)
 		}
 		t.Fatalf("root current_state = %q, want done through declared ancestor connects; events=%v deliveries=%v", got, emitted, deliveries)
 	}
@@ -4481,10 +4454,7 @@ func TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutat
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
 	module := newFixtureWorkflowModule(t, bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	var pc *runtimepipeline.PipelineCoordinator
 	eb, err := newScopedTestEventBus(pg, runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),
@@ -4556,52 +4526,30 @@ func TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutat
 	if err := eb.WaitForQuiescence(ctx); err != nil {
 		t.Fatalf("WaitForQuiescence: %v", err)
 	}
-	var deadLettered int
 	routerNode := testRootNode(t, "router")
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM event_deliveries d
-		JOIN events e ON e.event_id = d.event_id
-		WHERE e.event_name = 'validate.requested'
-		  AND d.subscriber_type = 'node'
-		  AND d.subscriber_id = $1
-		  AND d.status = 'dead_letter'
-	`, routerNode.Key()).Scan(&deadLettered); err != nil {
+	deadLettered, err := storetest.CountBusValidationDeadLetterNode(ctx, pg, routerNode.Key())
+	if err != nil {
 		t.Fatalf("count dead-lettered exact delivery: %v", err)
 	}
 	if deadLettered != 1 {
-		rows, _ := db.QueryContext(ctx, `
-			SELECT e.event_name, COALESCE(e.flow_instance, ''), d.subscriber_id,
-			       COALESCE(d.status, ''), COALESCE(d.delivery_target_route::text, '')
-			FROM events e
-			LEFT JOIN event_deliveries d ON d.event_id = e.event_id
-			ORDER BY e.created_at, e.event_id, d.subscriber_id
-		`)
+		rows, readErr := storetest.ReadBusRoutingDeliveryDiagnostics(ctx, pg)
 		trace := make([]string, 0)
-		if rows != nil {
-			defer rows.Close()
-			for rows.Next() {
-				var eventName, flowInstance, subscriberID, status, target string
-				if scanErr := rows.Scan(&eventName, &flowInstance, &subscriberID, &status, &target); scanErr == nil {
-					trace = append(trace, eventName+" flow="+flowInstance+" subscriber="+subscriberID+" status="+status+" target="+target)
-				}
+		if readErr != nil {
+			t.Logf("read delivery diagnostic trace: %v", readErr)
+		}
+		for _, row := range rows {
+			if row.HasSubscriber {
+				trace = append(trace, row.Name+" flow="+row.FlowInstance+" subscriber="+row.SubscriberID+" status="+row.Status+" target="+row.Target)
 			}
 		}
 		t.Fatalf("dead-lettered root deliveries = %d, want 1; trace=%v", deadLettered, trace)
 	}
-	var childEvents, childEntities int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM events
-		WHERE event_name IN ('child/validate.start', 'child/validation.done')
-	`).Scan(&childEvents); err != nil {
+	childEvents, err := storetest.CountUndeclaredBusChildEvents(ctx, pg)
+	if err != nil {
 		t.Fatalf("count undeclared child events: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM entity_state
-		WHERE flow_instance = 'child' OR flow_instance LIKE 'child/%'
-	`).Scan(&childEntities); err != nil {
+	childEntities, err := storetest.CountUndeclaredBusChildEntities(ctx, pg)
+	if err != nil {
 		t.Fatalf("count undeclared child entities: %v", err)
 	}
 	if childEvents != 0 || childEntities != 0 {
@@ -4616,16 +4564,13 @@ func TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutat
 		t.Fatal("expected root instance")
 	}
 	if got := strings.TrimSpace(root.CurrentState); got != "pending" {
-		rows, _ := db.QueryContext(context.Background(), `SELECT event_name, COALESCE(entity_id::text,''), COALESCE(flow_instance,''), COALESCE(payload::text,'') FROM events ORDER BY created_at ASC, event_id ASC`)
+		rows, readErr := storetest.ReadBusRoutingEventDiagnostics(context.Background(), pg)
 		dump := make([]string, 0)
-		if rows != nil {
-			defer rows.Close()
-			for rows.Next() {
-				var name, entityID, flowInstance, payload string
-				if scanErr := rows.Scan(&name, &entityID, &flowInstance, &payload); scanErr == nil {
-					dump = append(dump, name+" entity="+entityID+" flow="+flowInstance+" payload="+payload)
-				}
-			}
+		if readErr != nil {
+			t.Logf("read undeclared descendant event diagnostics: %v", readErr)
+		}
+		for _, row := range rows {
+			dump = append(dump, row.Name+" entity="+row.EntityID+" flow="+row.FlowInstance+" payload="+row.Payload)
 		}
 		t.Fatalf("root current_state = %q, want pending without subject-link back-propagation; root fields=%#v events=%v", got, root.Fields, dump)
 	}

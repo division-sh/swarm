@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/backendselection"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
 
@@ -23,9 +24,15 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 			root := canonicalrouting.CopyReceiverMixedAgent(t)
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			var db *sql.DB
+			var diagnosticStore any
+			var reader receiverProofStateReader
 			var deliveryReader servedRunDeliveryReader
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
-			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { db, _, _ = selectedRuntimeStoreForTest(t, p) })
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+				diagnosticStore = p.deps.EventStore
+				reader = requireReceiverProofStateReader(t, p.deps.EventStore)
+				db, _, _ = selectedRuntimeStoreForTest(t, p)
+			})
 			if backend == "sqlite" {
 				unsetStoreSelectorEnv(t)
 				opts.ConfigPath = writeMockAgentRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "receiver.sqlite"))
@@ -44,10 +51,10 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 				opts.ConfigPath = writeMockAgentRuntimeConfig(t, "postgres", "")
 				opts.StoreMode, opts.StoreModeSet = backendselection.BackendPostgres.String(), true
 			}
-			endpoint, runtime := startOwnedMockLifecycleFollowUpRuntime(t, opts)
+			endpoint, _ := startOwnedMockLifecycleFollowUpRuntime(t, opts)
 			bundle := servedEventPublishFixtureBundleHash(t, root)
 			seed := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": bundle, "payload": map[string]any{"seed": true}, "idempotency_key": "mixed-agent-seed"})
-			requireServedEventPublishEntityState(t, db, backend, seed.RunID, flowidentity.EntityID("sink"), "active")
+			requireServedEventPublishEntityState(t, reader, backend, seed.RunID, flowidentity.EntityID("sink"), "active")
 			waitServedRunDeliveryQuiescence(t, deliveryReader, seed.RunID)
 			var childID, parentID string
 			if err := db.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance='sink'`, seed.RunID).Scan(&childID); err != nil {
@@ -72,11 +79,10 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			if agents != 1 || nodes != 4 || turns != 1 {
-				var failure string
-				if err := db.QueryRow(`SELECT CAST(failure AS TEXT) FROM dead_letters WHERE original_event_id=$1`, published.EventID).Scan(&failure); err == nil {
+				if failure, err := storetest.ReadGateDeadLetterFailure(context.Background(), diagnosticStore, published.EventID); err == nil {
 					t.Logf("receiver failure: %s", failure)
 				}
-				t.Fatalf("mixed real execution agents/nodes/turns=%d/%d/%d\n%s", agents, nodes, turns, servedEventPublishDebugSummary(t, db, backend, published.RunID))
+				t.Fatalf("mixed real execution agents/nodes/turns=%d/%d/%d\n%s", agents, nodes, turns, servedInspectionRunDebugSummary(reader, published.RunID))
 			}
 			rows, err := db.Query(`SELECT d.subscriber_type,CAST(d.delivery_target_route AS TEXT) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='work.completed'`, published.RunID)
 			if err != nil {
@@ -117,7 +123,7 @@ func TestReceiverCompositionMixedAgentBothStores(t *testing.T) {
 			if nodeOwners != 1 || agentOwners != 1 {
 				t.Fatalf("mixed event owners node/agent=%d/%d, want 1/1", nodeOwners, agentOwners)
 			}
-			requireReceiverPublicReadback(t, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: backend, Runtime: runtime, BundleHash: bundle}, published.RunID)
+			requireReceiverPublicReadback(t, endpoint, reader, published.RunID)
 		})
 	}
 }

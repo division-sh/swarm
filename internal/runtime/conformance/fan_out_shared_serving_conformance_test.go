@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
@@ -10,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -18,15 +16,10 @@ func TestFanOutSharedServingAcrossRealBundleGrantsOnBothBackends(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected notifyAllChildrenStore
-			var db *sql.DB
 			if backend == "postgres" {
-				_, database, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				db = database
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			} else {
-				sqlite := storetest.StartSQLiteRuntimeStore(t)
-				selected, db = sqlite, storetest.DatabaseForTest(sqlite)
+				selected = storetest.StartSQLiteRuntimeStore(t)
 			}
 			sources := []semanticview.Source{
 				notifyallchildren.LoadSource(t, notifyallchildren.Options{NumericRegistrationRows: true, NumericReporterSink: true}),
@@ -42,7 +35,7 @@ func TestFanOutSharedServingAcrossRealBundleGrantsOnBothBackends(t *testing.T) {
 			topology := newNotifyAllChildrenProcessTopology(t, testAuthorActivityContext(context.Background()), selected, sources...)
 			runtimes := make([]notifyAllChildrenRuntime, len(sources))
 			for i, source := range sources {
-				runtimes[i] = newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{processTopology: topology})
+				runtimes[i] = newNotifyAllChildrenRuntime(t, selected, source, time.Now, notifyAllChildrenRuntimeOptions{processTopology: topology})
 			}
 			plan, exists, err := topology.capability.CurrentSourceSet(context.Background())
 			if err != nil || !exists || len(plan.Sources) != 2 || plan.Sources[0].BundleHash == plan.Sources[1].BundleHash {
@@ -70,7 +63,7 @@ func TestFanOutSharedServingAcrossRealBundleGrantsOnBothBackends(t *testing.T) {
 				if err != nil || summary.Intents != 1 || summary.Cursor != 1 || summary.Committed != 1 || summary.SemanticRejected != 0 || summary.Owed != 0 {
 					t.Fatalf("bundle %d shared serving summary=%+v err=%v", i, summary, err)
 				}
-				registrations := loadNotifyAllChildrenNumericRegistrations(t, ctx, selected, db, runIDs[i])
+				registrations := loadNotifyAllChildrenNumericRegistrations(t, ctx, selected, runIDs[i])
 				if len(registrations) != 1 || registrations["shared-account"].EngRoles != i+1 {
 					t.Fatalf("bundle %d exact production publication=%+v", i, registrations)
 				}

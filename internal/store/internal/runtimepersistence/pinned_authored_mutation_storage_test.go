@@ -59,6 +59,12 @@ func TestPinnedAuthoredMutationStoragePreservesExactSourceAndPhysicalBytesBothSt
 			if err != nil || string(got) != wantStored {
 				t.Fatalf("exact stored bytes changed: %s %v", got, err)
 			}
+			var nativeStored []byte
+			if err := fixture.db.QueryRowContext(ctx, `SELECT new_value FROM entity_mutations
+				WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='authored_field' AND path=$4`,
+				source.MutationID, source.RunID, source.EntityID, source.Field).Scan(&nativeStored); err != nil || string(got) != string(nativeStored) {
+				t.Fatalf("existing text projection changed the original direct byte scan: %s/%s %v", got, nativeStored, err)
+			}
 			if counts := probe.Snapshot(); counts.Total.Begun != 1 || counts.Total.ReadCommits != 1 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
 				t.Fatalf("pinned source bypassed original snapshot: %+v", counts)
 			}

@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"bytes"
+	"context"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -37,8 +39,8 @@ func TestDeploymentSourceTwoPinnedFeedsSettleIndependentlyBothStores(t *testing.
 				}
 				runID := startDeploymentResourceRun(t, f, server, "--data", item.declaration+"="+file)
 				waitNotifyAllChildrenRuntimeWithin(t, f.runtime, runID, 30*time.Second)
-				var version string
-				if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='portfolio' AND event_name=$2`, runID, item.declaration).Scan(&version); err != nil {
+				version, err := storetest.ReadPortfolioResourcePinStorage(f.ctx, f.selected, runID, item.declaration)
+				if err != nil {
 					t.Fatal(err)
 				}
 				versions[item.declaration] = version
@@ -103,48 +105,36 @@ func twoDeploymentFeedSource(t *testing.T) semanticview.Source {
 
 func assertTwoDeploymentFeedsSettled(t *testing.T, f *deploymentResourceFixture, runID string, versions map[string]string) {
 	t.Helper()
-	rows, err := f.db.QueryContext(f.ctx, `SELECT source_resource_event_name,source_resource_version_id,status,cardinality,cursor
-		FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment' ORDER BY source_resource_event_name`, runID)
+	rows, err := storetest.ReadPinnedDeploymentFeedsStorage(f.ctx, f.selected, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	seen := make(map[string]bool, len(versions))
-	for rows.Next() {
-		var declaration, version, status string
-		var cardinality, cursor int
-		if err := rows.Scan(&declaration, &version, &status, &cardinality, &cursor); err != nil {
-			rows.Close()
-			t.Fatal(err)
-		}
+	for _, row := range rows {
+		declaration, version, status := row.Declaration, row.Version, row.Status
+		cardinality, cursor := row.Cardinality, row.Cursor
 		if seen[declaration] || versions[declaration] != version || status != "closed" || cardinality != 1 || cursor != 1 {
-			rows.Close()
 			t.Fatalf("two-pin feed disagrees with its exact pin: declaration=%q version=%q status=%q cursor=%d/%d", declaration, version, status, cursor, cardinality)
 		}
 		seen[declaration] = true
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		t.Fatal(err)
-	}
-	if err := rows.Close(); err != nil {
-		t.Fatal(err)
 	}
 	if len(seen) != len(versions) {
 		t.Fatalf("two-pin run has %d feeds, want %d", len(seen), len(versions))
 	}
 	for _, item := range []struct {
-		name, query string
-		want        int
+		name string
+		read func(context.Context, any, string) (int, error)
+		want int
 	}{
-		{"pins", `SELECT COUNT(*) FROM resource_version_pins WHERE run_id=$1`, 2},
-		{"outcomes", `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed'`, 2},
-		{"source events", `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name IN ('portfolio/account.registered','portfolio/account.notify.requested')`, 2},
-		{"pipeline receipts", `SELECT COUNT(*) FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 AND e.event_name IN ('portfolio/account.registered','portfolio/account.notify.requested') AND r.subscriber_type='platform' AND r.subscriber_id='pipeline' AND r.outcome='success'`, 2},
-		{"settled deliveries", `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name IN ('portfolio/account.registered','portfolio/account.notify.requested') AND d.status='delivered' AND d.continuation_handoff_at IS NOT NULL`, 2},
-		{"child instances", `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND flow_template='account'`, 2},
+		{"pins", storetest.CountRunResourcePinsStorage, 2},
+		{"outcomes", storetest.CountDeploymentCommittedOutcomesStorage, 2},
+		{"source events", storetest.CountPinnedPortfolioSourceEventsStorage, 2},
+		{"pipeline receipts", storetest.CountPinnedPortfolioSuccessfulPipelineReceiptsStorage, 2},
+		{"settled deliveries", storetest.CountPinnedPortfolioSettledDeliveriesStorage, 2},
+		{"child instances", storetest.CountAccountDeploymentReceiversStorage, 2},
 	} {
-		var got int
-		if err := f.db.QueryRowContext(f.ctx, item.query, runID).Scan(&got); err != nil {
+		got, err := item.read(f.ctx, f.selected, runID)
+		if err != nil {
 			t.Fatalf("read %s: %v", item.name, err)
 		}
 		if got != item.want {
@@ -156,25 +146,12 @@ func assertTwoDeploymentFeedsSettled(t *testing.T, f *deploymentResourceFixture,
 
 func logTwoDeploymentFeedFailure(t *testing.T, f *deploymentResourceFixture, runID string) {
 	t.Helper()
-	rows, err := f.db.QueryContext(f.ctx, `SELECT e.event_name,COALESCE(r.outcome,''),COALESCE(r.reason_code,''),COALESCE(CAST(r.failure AS TEXT),''),COALESCE(d.status,''),
-		CASE WHEN d.continuation_handoff_at IS NULL THEN 0 ELSE 1 END
-		FROM events e LEFT JOIN event_receipts r ON r.event_id=e.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'
-		LEFT JOIN event_deliveries d ON d.event_id=e.event_id WHERE e.run_id=$1 ORDER BY e.event_name`, runID)
+	rows, err := storetest.ReadPinnedPortfolioDeliveryDiagnosticsStorage(f.ctx, f.selected, runID)
 	if err != nil {
 		t.Logf("two-pin diagnostic query: %v", err)
 		return
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var eventName, receipt, reason, failure, delivery string
-		var handoff bool
-		if err := rows.Scan(&eventName, &receipt, &reason, &failure, &delivery, &handoff); err != nil {
-			t.Logf("two-pin diagnostic scan: %v", err)
-			return
-		}
-		t.Logf("two-pin diagnostic event=%s receipt=%s reason=%s failure=%s delivery=%s handoff=%t", eventName, receipt, reason, failure, delivery, handoff)
-	}
-	if err := rows.Err(); err != nil {
-		t.Logf("two-pin diagnostic rows: %v", err)
+	for _, row := range rows {
+		t.Logf("two-pin diagnostic event=%s receipt=%s reason=%s failure=%s delivery=%s handoff=%t", row.EventName, row.Receipt, row.Reason, row.Failure, row.Delivery, row.Handoff)
 	}
 }

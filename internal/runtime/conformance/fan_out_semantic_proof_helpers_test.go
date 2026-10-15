@@ -25,7 +25,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -190,7 +189,7 @@ type semanticProofReceipt struct {
 
 type semanticProofProbe struct {
 	*pipeline.PipelineCoordinator
-	db               *sql.DB
+	selected         notifyAllChildrenStore
 	mu               sync.Mutex
 	policies         map[string]semanticProofPolicy
 	intents          map[string]fanoutobligation.Intent
@@ -282,21 +281,8 @@ func (turn *semanticProofTurn) CommitFanOutChunk(ctx context.Context, command pi
 }
 
 func (p *semanticProofProbe) verifyNoAttemptRows(ctx context.Context, command pipeline.FanOutChunkCommand) error {
-	key := command.Claim.Key
-	query := `SELECT (SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5 AND ordinal >= $6 AND ordinal < $7)`
-	args := []any{key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath, command.Outcomes[0].Ordinal, command.Outcomes[len(command.Outcomes)-1].Ordinal + 1}
-	var eventParams []string
-	for _, outcome := range command.Outcomes {
-		if outcome.Publication != nil {
-			args = append(args, outcome.Publication.DurablePublicationEventID())
-			eventParams = append(eventParams, fmt.Sprintf("$%d", len(args)))
-		}
-	}
-	if len(eventParams) != 0 {
-		query += ` + (SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_id IN (` + strings.Join(eventParams, ",") + `))`
-	}
-	var leaked int
-	if err := p.db.QueryRowContext(ctx, query, args...).Scan(&leaked); err != nil {
+	leaked, err := storetest.CountFanOutAttemptResidueStorage(ctx, p.selected, command)
+	if err != nil {
 		return fmt.Errorf("verify native safe-aggregate rollback: %w", err)
 	}
 	if leaked != 0 {
@@ -329,7 +315,6 @@ func (turn *semanticProofTurn) ReleaseFanOutRetryable(ctx context.Context, reque
 
 type semanticProofFixture struct {
 	selected notifyAllChildrenStore
-	db       *sql.DB
 	source   semanticview.Source
 	runtime  notifyAllChildrenRuntime
 	topology *notifyAllChildrenProcessTopology
@@ -350,18 +335,15 @@ func newSemanticProofFixtureWithSourcePreparation(t *testing.T, backend string, 
 	t.Helper()
 	f := &semanticProofFixture{source: source, runID: uuid.NewString()}
 	if len(sqlFaults) != 0 && sqlFaults[0] {
-		f.selected, f.db = newSemanticProofSQLFaultStore(t, backend)
+		f.selected, _ = newSemanticProofSQLFaultStore(t, backend)
 	} else if backend == "postgres" {
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		f.selected, f.db = storetest.AdmitPostgresRuntimeStore(t, db), db
+		f.selected = storetest.StartPostgresRuntimeStore(t)
 	} else {
-		selected := storetest.StartSQLiteRuntimeStore(t)
-		f.selected, f.db = selected, storetest.DatabaseForTest(selected)
+		f.selected = storetest.StartSQLiteRuntimeStore(t)
 	}
-	f.probe = &semanticProofProbe{db: f.db, policies: map[string]semanticProofPolicy{}, intents: map[string]fanoutobligation.Intent{}, attempts: map[string][]semanticProofAttempt{}, sqlFaults: map[string][]semanticProofAttempt{}, outcomeSQLFaults: map[string]int{}, blocks: map[string]pipeline.FanOutBlockRequest{}, retries: map[string]pipeline.FanOutRetryableRelease{}, completed: make(chan semanticProofReceipt, 1024)}
+	f.probe = &semanticProofProbe{selected: f.selected, policies: map[string]semanticProofPolicy{}, intents: map[string]fanoutobligation.Intent{}, attempts: map[string][]semanticProofAttempt{}, sqlFaults: map[string][]semanticProofAttempt{}, outcomeSQLFaults: map[string]int{}, blocks: map[string]pipeline.FanOutBlockRequest{}, retries: map[string]pipeline.FanOutRetryableRelease{}, completed: make(chan semanticProofReceipt, 1024)}
 	f.topology = newNotifyAllChildrenProcessTopology(t, testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, f.source)), f.selected, f.source)
-	f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.db, f.source, time.Now, notifyAllChildrenRuntimeOptions{
+	f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.source, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: f.topology,
 		fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 			f.probe.PipelineCoordinator = pc
@@ -422,21 +404,15 @@ func (f *semanticProofFixture) waitIntent(t *testing.T, trigger string, cursor i
 		if reached {
 			return
 		}
-		var deliveryStatus string
-		var deliveryFailure []byte
-		if err := f.db.QueryRowContext(f.ctx, `SELECT status,failure FROM event_deliveries WHERE run_id=$1 AND event_id=$2`, f.runID, trigger).Scan(&deliveryStatus, &deliveryFailure); err == nil {
-			t.Logf("trigger delivery status=%s failure=%s", deliveryStatus, deliveryFailure)
+		if delivery, err := storetest.ReadFanOutTriggerDeliveryDiagnosticStorage(f.ctx, f.selected, f.runID, trigger); err == nil {
+			t.Logf("trigger delivery status=%s failure=%s", delivery.Status, delivery.Failure)
 		} else {
 			t.Logf("trigger delivery readback: %v", err)
 		}
-		logs, err := f.db.QueryContext(f.ctx, `SELECT payload FROM events WHERE run_id=$1 AND event_name='platform.runtime_log' ORDER BY insertion_sequence DESC LIMIT 3`, f.runID)
+		logs, err := storetest.ReadLastThreeFanOutRuntimeLogPayloads(f.ctx, f.selected, f.runID)
 		if err == nil {
-			defer logs.Close()
-			for logs.Next() {
-				var payload []byte
-				if logs.Scan(&payload) == nil {
-					t.Logf("recent runtime log: %s", payload)
-				}
+			for _, payload := range logs {
+				t.Logf("recent runtime log: %s", payload)
 			}
 		}
 		f.probe.mu.Lock()
@@ -455,8 +431,9 @@ func (f *semanticProofFixture) waitIntent(t *testing.T, trigger string, cursor i
 		}
 	}()
 	semanticProofWait(t, func() (bool, error) {
-		err := f.db.QueryRowContext(f.ctx, `SELECT i.cursor,i.status FROM fan_out_intents i JOIN event_deliveries d ON d.delivery_id=i.triggering_delivery_id WHERE i.run_id=$1 AND d.event_id=$2`, f.runID, trigger).Scan(&got, &state)
-		if err == sql.ErrNoRows {
+		progress, err := storetest.ReadFanOutSourceProgressStorage(f.ctx, f.selected, f.runID, trigger)
+		got, state = progress.Cursor, progress.Status
+		if err == nil && !progress.Present {
 			return false, nil
 		}
 		return got == cursor && state == status, err
@@ -478,22 +455,17 @@ type semanticProofOutput struct {
 
 func (f *semanticProofFixture) assertOutcomes(t *testing.T, trigger string, rows []map[string]any, threshold int, rejected map[int]bool) []semanticProofOutput {
 	t.Helper()
-	result, err := f.db.QueryContext(f.ctx, `SELECT o.ordinal,o.outcome_kind,e.event_id,e.payload_bytes,o.failure FROM fan_out_outcomes o JOIN event_deliveries d ON d.delivery_id=o.triggering_delivery_id LEFT JOIN events e ON e.event_id=o.event_id WHERE o.run_id=$1 AND d.event_id=$2 ORDER BY o.ordinal`, f.runID, trigger)
+	result, err := storetest.ReadFanOutSourceOutcomesStorage(f.ctx, f.selected, f.runID, trigger)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer result.Close()
 	var outputs []semanticProofOutput
 	seenIDs := map[string]bool{}
 	ordinal := 0
-	for result.Next() {
-		var got int
-		var kind string
-		var id sql.NullString
-		var payload, failure []byte
-		if err := result.Scan(&got, &kind, &id, &payload, &failure); err != nil {
-			t.Fatal(err)
-		}
+	for _, stored := range result {
+		got, kind := stored.Ordinal, stored.Kind
+		id := sql.NullString{String: stored.EventID, Valid: stored.EventIDPresent}
+		payload, failure := stored.Payload, stored.Failure
 		if got != ordinal || ordinal >= len(rows) {
 			t.Fatalf("non-contiguous exact intent ordinal=%d expected=%d N=%d", got, ordinal, len(rows))
 		}
@@ -521,9 +493,6 @@ func (f *semanticProofFixture) assertOutcomes(t *testing.T, trigger string, rows
 			outputs = append(outputs, output)
 		}
 		ordinal++
-	}
-	if err := result.Err(); err != nil {
-		t.Fatal(err)
 	}
 	if ordinal != len(rows) {
 		t.Fatalf("outcomes=%d want=%d for %s", ordinal, len(rows), trigger)
