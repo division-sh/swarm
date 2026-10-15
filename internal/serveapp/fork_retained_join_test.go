@@ -193,7 +193,8 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 			}
 			request := runfork.RunForkMaterializeRequest{SourceRunID: started.RunID, At: frontier, OriginalLoopCarriage: carriage}
 			if success {
-				requireServedRetainedJoinForkSuccess(t, rt, selected, request, current, sourceJoins)
+				ctx := servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
+				requireServedRetainedJoinForkSuccess(t, ctx, rt.ReceiverStateReader, rt.BundleHash, rt.ForkRuntime, selected, request, current, sourceJoins)
 				return
 			}
 			// Delivery settlement does not join the lifecycle candidate executor. Stop
@@ -238,27 +239,26 @@ func testServedJoinWriterCompletedHistoryRefusal(t *testing.T, separateCheckpoin
 	}
 }
 
-func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRuntime, selected *selectedStoreOwner, request runfork.RunForkMaterializeRequest,
+func requireServedRetainedJoinForkSuccess(t *testing.T, ctx context.Context, reader receiverProofStateReader, bundleHash string, forkRuntime selectedForkRuntimeProofOptions, selected *selectedStoreOwner, request runfork.RunForkMaterializeRequest,
 	current loopruntime.Activation, sourceJoins []joinruntime.Activation) {
 	t.Helper()
 	owner, ok := selected.RunFork()
 	if !ok {
 		t.Fatal("retained join success requires the original selected store owner")
 	}
-	ctx := servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
 	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
-		SourceRunID: request.SourceRunID, At: request.At, ExpectedBundleHash: rt.BundleHash,
+		SourceRunID: request.SourceRunID, At: request.At, ExpectedBundleHash: bundleHash,
 		ContractSelection: selection,
 		ForkOperation: &runfork.ForkOperationRequest{
 			OperationID: uuid.NewString(), Actor: "retained-join-proof", IdempotencyKey: "retained-join-materialization",
 			TransportHash: "retained-join-proof", SourceRunID: request.SourceRunID, ForkEventID: request.At,
-			TargetBundleHash: rt.BundleHash, ContractSelection: selection,
+			TargetBundleHash: bundleHash, ContractSelection: selection,
 		},
 		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 			RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore(),
 		},
-		AgentRuntime: rt.ForkRuntime,
+		AgentRuntime: forkRuntime,
 	})
 	if err != nil {
 		t.Fatalf("prepare the original completed join success: %v", err)
@@ -283,15 +283,18 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 	if len(sourceBefore) != 7 {
 		t.Fatalf("retained join source witness lost table families: %+v", sourceBefore)
 	}
-	before := snapshotForkReceiverApplication(t, rt)
+	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected.RuntimeDeps().DeliveryStore)
+	if err != nil {
+		t.Fatal(err)
+	}
 	child, err := materializer.MaterializeRunForkForSelectedContractExecution(ctx, admitted)
 	if err != nil {
-		if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
-			t.Fatal("failed join-history materialization changed application state")
+		if after, readErr := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected.RuntimeDeps().DeliveryStore); readErr != nil || !reflect.DeepEqual(before, after) {
+			t.Fatalf("failed join-history materialization changed application state: materialization=%v observation=%v", err, readErr)
 		}
 		t.Fatalf("materialize the original completed join success: %v", err)
 	}
-	childLoop, childJoins := readNativeRetainedRootJoins(t, rt.ReceiverStateReader, child.ForkRunID)
+	childLoop, childJoins := readNativeRetainedRootJoins(t, reader, child.ForkRunID)
 	wantLoop, err := loopruntime.Fork(current, child.ForkRunID, child.ForkRunID)
 	if err != nil || !reflect.DeepEqual(childLoop, wantLoop) || childLoop.Attempt != 2 || len(childJoins) != len(sourceJoins) {
 		t.Fatalf("materialized join/loop ownership: loop=%+v joins=%+v error=%v", childLoop, childJoins, err)
@@ -350,7 +353,7 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 	readback := admitted
 	readback.ForkOperation = nil
 	again, err := materializer.RequireMaterializedRunForkForSelectedContractExecution(ctx, ack.ForkRunID, readback)
-	_, repeated := readNativeRetainedRootJoins(t, rt.ReceiverStateReader, child.ForkRunID)
+	_, repeated := readNativeRetainedRootJoins(t, reader, child.ForkRunID)
 	sourceAfter, sourceErr := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, request.SourceRunID)
 	if err != nil {
 		t.Errorf("repeated retained join materialization: %v", err)
