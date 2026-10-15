@@ -107,7 +107,7 @@ func newStandingAgentProfileProcessFixture(t *testing.T, selected agentFixtureFl
 		DeliveryStore: selected, WorkOwner: storeTestWorkOwner(t), ReceiverExecution: eventreceiver.NormalExecution(),
 		PersistenceRoles: manager.PersistenceRoles{LifecycleCensus: selected, LifecycleState: selected, LifecycleOutcome: selected,
 			StandingRestarts: selected.(runlifecycle.StandingRestartDispositionReader), AgentRoutes: bus,
-			FlowActivation: agentFixtureFlowActivationCommitter{store: selected}, RouteInstaller: bus, RouteVerifier: bus, RouteRestorer: bus},
+			FlowActivation: agentFixtureFlowActivationCommitter{store: selected}},
 	}, selected))
 	admission, err := agenttopology.StaticAdmission(plan.Revision, fact.BundleHash(), agenttopology.LifetimeDurableManaged)
 	if err != nil {
@@ -167,15 +167,27 @@ func startStandingAgentProfileProcessFixture(t *testing.T, f receiverConfigActiv
 	}
 	var target events.DeliveryTargetOwnership
 	coordinate := events.RouteIdentity{FlowID: results[0].Instance.TemplateID,
-		FlowInstance: results[0].Instance.InstancePath, EntityID: results[0].Instance.EntityID}
-	if results[0].Instance.EntityID != "" {
+		FlowInstance: results[0].Instance.InstancePath, EntityID: configs[0].EntityID}
+	if coordinate.EntityID != "" {
 		target = events.MustExistingEntityTarget(coordinate)
 	} else {
 		target = events.MustEntitylessReceiverTarget(coordinate)
 	}
+	owner := flowidentity.RunScopedFlowInstance{RunID: results[0].Reconciliation.RunID, Route: results[0].Instance.Route()}
+	construction, err := f.store.(pipeline.FlowConstructionPublicationReader).LoadFlowConstructionPublication(f.ctx, owner, results[0].Instance.EntityID)
+	if err != nil || construction.Identity != results[0].Instance || construction.BundleHash != fact.BundleHash() {
+		t.Fatalf("standing fixture requires its exact immutable construction: %+v err=%v", construction, err)
+	}
+	dependencyTarget := coordinate
+	dependencyTarget.EntityID = construction.Identity.EntityID
+	dependency, err := events.AdmitStoredFlowReceiverInitialization(owner.RunID, construction.CreatingInput.EventID,
+		events.MustExistingEntityTarget(dependencyTarget), configs[0].Identity.Route)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return agentClaimProfileFixture{ctx: correlation.WithRunID(f.ctx, results[0].Reconciliation.RunID), store: f.store, source: fact,
 		authority: authority, route: events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(configs[0].ID),
-			AgentIdentity: configs[0].Identity, Target: target}}
+			AgentIdentity: configs[0].Identity, Target: target, Initialization: dependency}}
 }
 
 func proveStandingAgentProfileProcessRecovery(t *testing.T, next receiverConfigActivationFixture, previous agentProfileProcessEvidence) {

@@ -9,44 +9,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/agenttopology"
-	"github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/manager"
-	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 	"github.com/google/uuid"
 )
 
-// Temporary diagnostic composition until the shared production forwarder is
-// reserved. It does not demonstrate a complete production store assembly.
-type diagnosticAgentRecoveryOwners interface {
-	deliverylifecycle.ActiveSnapshotReader
-	agenttopology.SourceSetHeadReader
-	manager.AgentLifecycleStateReader
-	bus.RunLifecycleReadPersistence
-	runlifecycle.StandingRestartDispositionReader
-	InspectSnapshot(context.Context, func(context.Context) error) error
-	InspectAuthority(context.Context) (startupownership.AuthorityInspection, error)
-	ObserveOrdinaryRunSource(context.Context, correlation.SourceArtifactFact, string) (bool, error)
-	ReadSelectedAgentPreparation(context.Context, deliverylifecycle.Snapshot) (runfork.SelectedForkPreparedActor, error)
-}
-
-type diagnosticAgentRecoveryReader struct {
-	diagnosticAgentRecoveryOwners
-	selected agentFixtureFlowStore
-}
-
-func (r diagnosticAgentRecoveryReader) ReadFirstAgentClaimProfile(ctx context.Context, expected deliverylifecycle.Snapshot) (deliverylifecycle.AgentClaimProfile, error) {
-	return ReadFirstAgentClaimProfileForTest(ctx, r.selected, expected)
-}
-
-func diagnosticAgentRecoveryReaderForTest(selected agentFixtureFlowStore) startuprecovery.AgentRecoveryReader {
-	return diagnosticAgentRecoveryReader{diagnosticAgentRecoveryOwners: selected.(diagnosticAgentRecoveryOwners), selected: selected}
-}
+var _ startuprecovery.AgentRecoveryReader = (*PostgresStore)(nil)
+var _ startuprecovery.AgentRecoveryReader = (*SQLiteRuntimeStore)(nil)
 
 type countedAgentRecoveryImageReader struct {
 	startuprecovery.AgentRecoveryReader
@@ -60,7 +29,7 @@ func (r *countedAgentRecoveryImageReader) InspectSnapshot(ctx context.Context, r
 
 func inspectNativeAgentRecoveryImage(t *testing.T, f agentClaimProfileFixture) (startuprecovery.AgentRecoveryImage, error) {
 	t.Helper()
-	reader := &countedAgentRecoveryImageReader{AgentRecoveryReader: diagnosticAgentRecoveryReaderForTest(f.store)}
+	reader := &countedAgentRecoveryImageReader{AgentRecoveryReader: f.store.(startuprecovery.AgentRecoveryReader)}
 	image, err := startuprecovery.InspectAgentRecoveryImage(f.ctx, reader)
 	if reader.inspections != 1 {
 		t.Fatalf("agent recovery image opened %d inspection scopes, want one", reader.inspections)
@@ -223,7 +192,7 @@ func proveAgentRecoveryExactNativeGenerationJoin(t *testing.T, f agentClaimProfi
 	if err != nil {
 		t.Fatal(err)
 	}
-	reader := &wrongAgentRecoveryGenerationReader{AgentRecoveryReader: diagnosticAgentRecoveryReaderForTest(f.store)}
+	reader := &wrongAgentRecoveryGenerationReader{AgentRecoveryReader: f.store.(startuprecovery.AgentRecoveryReader)}
 	for _, member := range image.Members {
 		if member.CaptureKind == startuprecovery.AgentRecoveryOrdinaryFirstClaim {
 			reader.deliveryID = member.Delivery.DeliveryID

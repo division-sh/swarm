@@ -952,6 +952,10 @@ func (s *PostgresStore) ReadAgentLifecycleOutcome(ctx context.Context, req manag
 	return s.agentPostgresOwner.ReadAgentLifecycleOutcome(ctx, req)
 }
 
+func (s *PostgresStore) ReadFirstAgentClaimProfile(ctx context.Context, expected deliverylifecycle.Snapshot) (deliverylifecycle.AgentClaimProfile, error) {
+	return s.deliveryPostgresOwner.ReadFirstAgentClaimProfile(ctx, expected)
+}
+
 func (s *PostgresStore) ReadResetInventory(ctx context.Context) (destructivereset.Inventory, error) {
 	return s.destructiveResetPostgresOwner.ReadResetInventory(ctx)
 }
@@ -2170,6 +2174,10 @@ func (s *SQLiteRuntimeStore) ReadActiveDeliverySnapshots(ctx context.Context) ([
 
 func (s *SQLiteRuntimeStore) ReadAgentLifecycleOutcome(ctx context.Context, req manager.AgentLifecycleTransition) (manager.AgentLifecycleTransitionResult, bool, error) {
 	return s.agentSQLiteOwner.ReadAgentLifecycleOutcome(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) ReadFirstAgentClaimProfile(ctx context.Context, expected deliverylifecycle.Snapshot) (deliverylifecycle.AgentClaimProfile, error) {
+	return s.deliverySQLiteOwner.ReadFirstAgentClaimProfile(ctx, expected)
 }
 
 func (s *SQLiteRuntimeStore) ReadResetInventory(ctx context.Context) (destructivereset.Inventory, error) {
