@@ -804,7 +804,7 @@ func loadSelectedForkRecoveryOperationTx(ctx context.Context, tx *sql.Tx, bindin
 	if !found || record.ForkRunID != binding.ForkRunID || record.BindingID != binding.BindingID ||
 		record.Request.SourceRunID != binding.SourceRunID || record.Request.TargetBundleHash != bundleHash ||
 		record.Request.ResolvedPoint == nil || !sameSelectedForkPointIdentity(*record.Request.ResolvedPoint, binding.ForkPoint) ||
-		record.Request.ForkEventID != binding.ForkEventID || record.Request.ContractSelection != binding.ContractSelection {
+		record.Request.ResolvedPoint.EventID != binding.ForkEventID || record.Request.ContractSelection != binding.ContractSelection {
 		return nil, fmt.Errorf("permanent selected fork operation conflicts with exact binding")
 	}
 	return &record, nil
