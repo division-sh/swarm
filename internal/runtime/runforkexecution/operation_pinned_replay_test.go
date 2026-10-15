@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
@@ -30,7 +31,7 @@ func TestSelectedOperationEmptyPinnedFeedActivatesAndReplaysBothStores(t *testin
 
 func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int) {
 	t.Helper()
-	ctx, request := ownerlessSelectedOperationFixture(t, backend)
+	ctx, request := ownerlessSelectedOperationFixtureFromSource(t, backend, canonicalrouting.CopySelectedOperationPinnedResource(t), "fixture.seed.requested")
 	loader := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader)
 	loaded, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
 		SourceRunID: request.SourceRunID, Selection: request.ContractSelection,
@@ -48,13 +49,13 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int) 
 		LoadPinnedSource(context.Context, string, string, durabledata.DeclarationRef) (durabledata.PinnedSource, error)
 		LoadPinnedRowsRange(context.Context, string, string, durabledata.PinnedSource, int, int) ([]any, error)
 	})
-	ref, err := durabledata.ParseDeclarationRef(".", "item.received")
+	ref, err := durabledata.ParseDeclarationRef(".", "root.ready")
 	if err != nil {
 		t.Fatal(err)
 	}
 	command := durabledata.SourceCommand{Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operation-pin-proof",
 		BundleHash: loaded.SourceArtifactFact.BundleHash(), Declaration: ref, ExpectedHead: durabledata.AbsentHead(),
-		InputFormat: "jsonl", Input: bytes.Repeat([]byte("{}\n"), rows)}
+		InputFormat: "jsonl", Input: bytes.Repeat([]byte("{\"account_id\":\"original\"}\n"), rows)}
 	original, err := data.ExecuteDataSourceOperation(ctx, command)
 	if err != nil || original.Candidate.VersionID == "" {
 		t.Fatalf("import original immutable version: %+v err=%v", original, err)
@@ -66,7 +67,7 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int) 
 		t.Fatalf("pin proof did not materialize its exact nonempty selection: %+v", materialized.DataPins)
 	}
 	if rows > 0 {
-		command.SourceInvocationID, command.ExpectedHead, command.Input = uuid.NewString(), durabledata.VersionHead(original.Candidate.VersionID), bytes.Repeat([]byte("{}\n"), rows+1)
+		command.SourceInvocationID, command.ExpectedHead, command.Input = uuid.NewString(), durabledata.VersionHead(original.Candidate.VersionID), bytes.Repeat([]byte("{\"account_id\":\"new-head\"}\n"), rows+1)
 		advanced, err := data.ExecuteDataSourceOperation(ctx, command)
 		if err != nil || advanced.Candidate.VersionID == "" || advanced.Candidate.VersionID == original.Candidate.VersionID {
 			t.Fatalf("resource head did not genuinely advance: %+v err=%v", advanced, err)
@@ -87,7 +88,7 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int) 
 	values, err := data.LoadPinnedRowsRange(ctx, materialized.ForkRunID, command.BundleHash, pinned, 0, rows)
 	want := make([]any, rows)
 	for i := range want {
-		want[i] = map[string]any{}
+		want[i] = map[string]any{"account_id": "original"}
 	}
 	if err != nil || !slices.EqualFunc(values, want, reflect.DeepEqual) {
 		t.Fatalf("native child pin lost original immutable contents: %+v err=%v", values, err)
@@ -115,7 +116,10 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int) 
 			}
 			t.Fatalf("pin-feed serving stopped before exact settlement: run=%+v summary=%+v pending=%d retained=%d err=%v/%v", run, summary, pending, retained, runErr, diagnosticErr)
 		}
-		if summary.Owed == 0 && summary.Unsettled == 0 && pending == 0 && retained == 0 {
+		if summary.Owed == 0 && summary.Unsettled == 0 && pending == 0 {
+			if summary.Committed != rows || summary.Settled != rows || summary.SemanticRejected != 0 || summary.Canceled != 0 {
+				t.Fatalf("pin feed did not deliver its exact row set: %+v", summary)
+			}
 			break
 		}
 		select {
@@ -123,6 +127,15 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int) 
 			t.Fatalf("actual pin-feed work did not settle before replay snapshot: %+v pending=%d retained=%d err=%v", summary, pending, retained, ctx.Err())
 		case <-time.After(10 * time.Millisecond):
 		}
+	}
+	if err := request.Owner.RetireSelectedContexts(ctx); err != nil {
+		t.Fatalf("join the root receiver after exact feed settlement: %v", err)
+	}
+	request.Owner.ports.contexts.mu.Lock()
+	remaining := len(request.Owner.ports.contexts.entries)
+	request.Owner.ports.contexts.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("settled pin feed leaked %d retained contexts after joined retirement", remaining)
 	}
 	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, loader.Store)
 	if err != nil {

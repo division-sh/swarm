@@ -56,6 +56,22 @@ func CopySelectedDeploymentResource(t testing.TB, route string, keyed bool) stri
 	return root
 }
 
+// CopySelectedOperationPinnedResource separates the fixed source frontier from
+// a newly pinned output feed, with a real root-local receiver for each row.
+func CopySelectedOperationPinnedResource(t testing.TB) string {
+	t.Helper()
+	root := CopySelectedDeploymentResource(t, "root", false)
+	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "schema.yaml"),
+		"  inputs: [fixture.close.requested]\n", "  inputs: [fixture.seed.requested, fixture.close.requested]\n")
+	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "events.yaml"),
+		DeploymentFixtureCloseDeclaration, DeploymentFixtureCloseDeclaration+"fixture.seed.requested:\n")
+	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "nodes.yaml"),
+		"  subscribes_to: [root.ready, fixture.close.requested]\n", "  subscribes_to: [root.ready, fixture.seed.requested, fixture.close.requested]\n")
+	replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "nodes.yaml"),
+		"  event_handlers:\n", "  event_handlers:\n    fixture.seed.requested: {}\n")
+	return root
+}
+
 // A finite singleton closes through authored business work after its row's
 // receiver runs, never merely because issuance reached the feed cursor.
 func CopySelectedDeploymentResourceFiniteSingleton(t testing.TB) string {
