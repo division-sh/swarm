@@ -9,6 +9,9 @@ import (
 type AgentRecoverySeedFaultProbeForTest struct {
 	InsideRead        func()
 	BeforePublication func()
+	// Check notifications do not activate the native seed-interruption cut.
+	AfterCheckCapture func()
+	AfterCheckProof   func()
 	active            atomic.Bool
 }
 

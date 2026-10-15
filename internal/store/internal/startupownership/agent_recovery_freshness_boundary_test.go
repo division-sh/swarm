@@ -107,6 +107,9 @@ func TestAgentRecoveryNativePreBindWriteMustJoinBothStores(t *testing.T) {
 					if err := runtimeownership.SeedAgentRecovery(ctx, process); err != nil {
 						t.Fatal(err)
 					}
+					if err := runtimeownership.CheckAgentRecoverySeed(ctx, process); err != nil {
+						t.Fatalf("original installed unit seed did not validate: %v", err)
+					}
 					previousReads = 1
 				}
 				entered, release := make(chan struct{}), make(chan struct{})
@@ -182,6 +185,9 @@ func TestAgentRecoveryNativePreBindWriteMustJoinBothStores(t *testing.T) {
 				if err := runtimeownership.SeedAgentRecovery(ctx, process); err == nil || !strings.Contains(err.Error(), "complete fresh reconstruction") || session.reads.Load() != previousReads {
 					t.Fatalf("binding forgot its already-active native write: %v reads=%d", err, session.reads.Load())
 				}
+				if err := runtimeownership.CheckAgentRecoverySeed(ctx, process); err == nil || session.reads.Load() != previousReads {
+					t.Fatalf("check accepted or reconstructed during the held original write: %v reads=%d", err, session.reads.Load())
+				}
 				unblock()
 				outcome := <-done
 				joined = true
@@ -199,6 +205,9 @@ func TestAgentRecoveryNativePreBindWriteMustJoinBothStores(t *testing.T) {
 				}
 				if err := runtimeownership.SeedAgentRecovery(ctx, process); err == nil || !strings.Contains(err.Error(), "already installed") || session.reads.Load() != previousReads+1 {
 					t.Fatalf("read-only native inspection/proof invalidated the seed: %v reads=%d", err, session.reads.Load())
+				}
+				if err := runtimeownership.CheckAgentRecoverySeed(ctx, process); err != nil || session.reads.Load() != previousReads+1 {
+					t.Fatalf("joined writer/reconstruction did not validate without rereading: %v reads=%d", err, session.reads.Load())
 				}
 				if entrance.installed {
 					t.Log("DIAGNOSTIC: native possession passes while the original pooled write is held; installed seed revoked and explicit reconstruction refuses until original commit/rollback and cleanup join; seed payload UNIT only, no consumer or capacity claim")

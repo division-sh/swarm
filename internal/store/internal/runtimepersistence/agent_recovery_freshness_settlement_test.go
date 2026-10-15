@@ -105,7 +105,13 @@ func TestAgentRecoverySeedNativeForeignBackendDoesNotInvalidateBothStores(t *tes
 			if err := startupownership.SeedAgentRecovery(f.ctx, process); err != nil {
 				t.Fatal(err)
 			}
+			if err := startupownership.CheckAgentRecoverySeed(f.ctx, process); err != nil {
+				t.Fatalf("original independent-backend control seed did not validate: %v", err)
+			}
 			foreign.claim(t)
+			if err := startupownership.CheckAgentRecoverySeed(f.ctx, process); err != nil {
+				t.Fatalf("foreign native backend invalidated this process seed: %v", err)
+			}
 			if err := startupownership.SeedAgentRecovery(f.ctx, process); err == nil || !strings.Contains(err.Error(), "already installed") {
 				t.Fatalf("foreign native backend invalidated this private observation: %v", err)
 			}
