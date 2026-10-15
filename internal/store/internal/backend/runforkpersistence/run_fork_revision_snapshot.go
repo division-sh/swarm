@@ -94,7 +94,7 @@ type runForkRevisionEntityMetadata struct {
 
 type runForkRevisionDelivery struct {
 	runForkRevisionedFact
-	Snapshot runtimedelivery.Snapshot
+	Snapshot runtimedelivery.HistoricalFact
 }
 
 type runForkRevisionCommittedReplayScope struct {

@@ -271,7 +271,7 @@ func pipelineDeliveryNativeFixtureFromSelected(t *testing.T, source semanticview
 		return fixture.Continuations.AcceptCommitted(committed.DeliveryHandoffs)
 	}
 	fixture.RetryEligible = func(ctx context.Context, event events.Event, route events.DeliveryRoute) error {
-		return storetest.MakeManagerRetryEligible(ctx, selected, event, route)
+		return storetest.WaitManagerRetryDecision(ctx, selected, event, route)
 	}
 	fixture.HoldUnstampedAdmissionTransaction = func(ctx context.Context, run string) (func() error, error) {
 		return storetest.HoldUnstampedPipelineAdmissionTransaction(ctx, selected, run)
