@@ -71,7 +71,7 @@ func TestRetriedBusinessTurnTerminationAndTimeoutRecoveryBothStores(t *testing.T
 				if err := handle.Settle(providerCtx, effects.StateTerminalFailure, &failure, map[string]any{"launch_rejected": true}); err != nil {
 					t.Fatal(err)
 				}
-				_, err = fixture.store.(deliverylifecycle.Store).SettleFailure(ctx, first.Claim, deliverylifecycle.Settlement{Disposition: deliverylifecycle.FailureRetry, Failure: &failure, RetryBase: time.Nanosecond, RuleSelection: handlerselection.NotReached()})
+				_, err = fixture.store.(deliverylifecycle.Store).SettleFailure(ctx, first.Claim, deliverylifecycle.Settlement{Disposition: deliverylifecycle.FailureRetry, Failure: &failure, RetryBase: time.Microsecond, RuleSelection: handlerselection.NotReached()})
 				if err != nil {
 					t.Fatal(err)
 				}

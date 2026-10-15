@@ -198,7 +198,8 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					}
 					historical := routeEvidenceSnapshot(t, ctx, fixture.db, runID, live.DeliveryID, revision)
 					assertRouteEvidenceEqual(t, historical.Route, route)
-					if live.UpdatedAt.IsZero() || !historical.UpdatedAt.IsZero() || !historical.CreatedAt.Equal(live.CreatedAt) {
+					assertRouteEvidenceHasNoLiveFields(t, historical)
+					if live.UpdatedAt.IsZero() || !historical.CreatedAt.Equal(live.CreatedAt) {
 						t.Fatalf("historical admission time or live update clock changed: historical=%#v live=%#v", historical, live)
 					}
 					if historical.RouteIdentity != live.RouteIdentity || historical.DeliveryID != live.DeliveryID || historical.EventID != event.ID() || historical.RunID != runID || historical.Status != runtimedelivery.StatusPending {
@@ -260,13 +261,11 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					}
 					claimHistory := routeEvidenceSnapshot(t, ctx, fixture.db, runID, live.DeliveryID, claimRevision)
 					assertRouteEvidenceEqual(t, claimHistory.Route, route)
-					if claimHistory.Status != runtimedelivery.StatusInProgress || claimHistory.ClaimVersion != 0 || !claimHistory.ClaimExpiresAt.IsZero() ||
-						!claimHistory.StartedAt.Equal(claimed.Snapshot.StartedAt) || !claimHistory.NextEligibleAt.IsZero() {
+					if claimHistory.Status != runtimedelivery.StatusInProgress || claimHistory.SettledClaimVersion != 0 ||
+						!claimHistory.SourceExecution.InProgress || !claimHistory.SourceExecution.Started || claimHistory.SourceExecution.SessionBound || claimed.Snapshot.StartedAt.IsZero() || claimHistory.RetryDecision != nil {
 						t.Fatalf("retained claim lifecycle or excluded worker authority disagrees: %#v", claimHistory)
 					}
-					if claimHistory.Authority.Validate() == nil {
-						t.Fatal("historical readback of a live claim grants execution authority")
-					}
+					assertRouteEvidenceHasNoLiveFields(t, claimHistory)
 					var claimFact []byte
 					if err := fixture.db.QueryRowContext(ctx, `SELECT fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='event_deliveries' AND fact_key=$2 AND revision=$3`, runID, live.DeliveryID, claimRevision).Scan(&claimFact); err != nil {
 						t.Fatal(err)
@@ -275,7 +274,7 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					if err := json.Unmarshal(claimFact, &claimFields); err != nil {
 						t.Fatal(err)
 					}
-					for _, forbidden := range []string{"claim_token", "lease_token", "execution_authority", "claim_expires_at", "continuation_handoff_at", "updated_at", "claim_version", "settled_claim_version"} {
+					for _, forbidden := range []string{"claim_token", "lease_token", "execution_authority", "claim_expires_at", "continuation_handoff_at", "updated_at", "claim_version", "settled_claim_version", "active_session_id", "started_at", "next_eligible_at"} {
 						if _, exists := claimFields[forbidden]; exists {
 							t.Fatalf("real claimed delivery revision contains %s", forbidden)
 						}
@@ -288,8 +287,9 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					}
 					captured := routeEvidenceSnapshot(t, ctx, fixture.db, runID, live.DeliveryID, routeEvidenceHead(t, ctx, fixture.db, runID))
 					assertRouteEvidenceEqual(t, captured.Route, route)
-					if captured.Status != runtimedelivery.StatusInProgress || captured.ClaimVersion != 0 ||
-						!captured.StartedAt.Equal(claimed.Snapshot.StartedAt) || captured.Authority.Validate() == nil {
+					assertRouteEvidenceHasNoLiveFields(t, captured)
+					if captured.Status != runtimedelivery.StatusInProgress || captured.SettledClaimVersion != 0 ||
+						captured.SourceExecution != claimHistory.SourceExecution || claimed.Snapshot.StartedAt.IsZero() {
 						t.Fatalf("broad capture must retain in-progress evidence, not live generation or authority: %#v", captured)
 					}
 					settled, err := fixture.store.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection())
@@ -347,7 +347,7 @@ func routeEvidenceHead(t testing.TB, ctx context.Context, db *sql.DB, runID stri
 
 func routeEvidenceSnapshot(t testing.TB, ctx context.Context, db interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, runID, deliveryID string, revision int64) runtimedelivery.Snapshot {
+}, runID, deliveryID string, revision int64) runtimedelivery.HistoricalFact {
 	t.Helper()
 	var raw []byte
 	var present bool
@@ -362,6 +362,15 @@ func routeEvidenceSnapshot(t testing.TB, ctx context.Context, db interface {
 		t.Fatalf("decode actual SQL revision delivery projection: %v", err)
 	}
 	return got
+}
+
+func assertRouteEvidenceHasNoLiveFields(t testing.TB, fact runtimedelivery.HistoricalFact) {
+	t.Helper()
+	for _, field := range []string{"Authority", "ClaimVersion", "ClaimExpiresAt", "ActiveSessionID", "StartedAt", "NextEligibleAt", "UpdatedAt", "ContinuationHandoffAt"} {
+		if _, exists := reflect.TypeOf(fact).FieldByName(field); exists {
+			t.Fatalf("historical delivery retains live field %s", field)
+		}
+	}
 }
 
 func assertRouteEvidenceEqual(t testing.TB, got, want events.DeliveryRoute) {

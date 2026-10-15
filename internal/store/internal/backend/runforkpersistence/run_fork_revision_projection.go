@@ -34,7 +34,7 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]ru
 		key := runForkRevisionSubscriberKey(durable.EventID, string(durable.SubscriberClass), durable.SubscriberID)
 		deliveryKeys[key] = struct{}{}
 		item := runfork.RunForkPendingWork{
-			ClaimVersion:    durable.ClaimVersion,
+			ClaimVersion:    durable.SettledClaimVersion,
 			EventID:         strings.TrimSpace(durable.EventID),
 			EventName:       strings.TrimSpace(event.EventName),
 			FlowInstance:    strings.TrimSpace(event.FlowInstance),
@@ -46,9 +46,9 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]ru
 			Status:          string(durable.Status),
 			RetryCount:      durable.RetryCount,
 			ReasonCode:      strings.TrimSpace(durable.ReasonCode),
-			ActiveSessionID: strings.TrimSpace(durable.ActiveSessionID),
+			SourceExecution: durable.SourceExecution,
+			RetryDecision:   durable.RetryDecision,
 			CreatedAt:       durable.CreatedAt,
-			StartedAt:       traceTimePtr(durable.StartedAt),
 			DeliveredAt:     traceTimePtr(durable.SettledAt),
 		}
 		_, deadLetter := deadLetters[item.DeliveryID]
@@ -96,7 +96,7 @@ func loadRunForkPendingWorkFromRevision(snapshot *runForkRevisionSnapshot) ([]ru
 	return out, nil
 }
 
-func classifyRunForkDeliverySnapshot(snapshot runtimedelivery.Snapshot, deadLetter bool) string {
+func classifyRunForkDeliverySnapshot(snapshot runtimedelivery.HistoricalFact, deadLetter bool) string {
 	if deadLetter || snapshot.Status == runtimedelivery.StatusDeadLetter {
 		return runfork.RunForkPendingClassificationDeadLetter
 	}

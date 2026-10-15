@@ -641,7 +641,7 @@ func validateRetainedDeliveryLifecycleCapture(fn *ast.FuncDecl) error {
 	}
 	guard, ok := fn.Body.List[0].(*ast.IfStmt)
 	if !ok || guard.Init != nil || guard.Else != nil || len(guard.Body.List) != 1 ||
-		revisionGuardNode(guard.Cond) != "before.Status == after.Status && before.ActiveSessionID == after.ActiveSessionID" ||
+		revisionGuardNode(guard.Cond) != `before.Status == after.Status && before.StartedAt.IsZero() == after.StartedAt.IsZero() && (strings.TrimSpace(before.ActiveSessionID) == "") == (strings.TrimSpace(after.ActiveSessionID) == "")` ||
 		revisionGuardNode(guard.Body.List[0]) != "return nil" ||
 		revisionGuardNode(fn.Body.List[1]) != "return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)" {
 		return fmt.Errorf("retained delivery lifecycle capture changed its exact semantic-state boundary")
@@ -679,7 +679,7 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 			source += "func (a *Adapter) " + symbol + "() {}\n"
 		}
 		capture := `func declareRetainedDeliveryLifecycle() error {
-    if before.Status == after.Status && before.ActiveSessionID == after.ActiveSessionID { return nil }
+    if before.Status == after.Status && before.StartedAt.IsZero() == after.StartedAt.IsZero() && (strings.TrimSpace(before.ActiveSessionID) == "") == (strings.TrimSpace(after.ActiveSessionID) == "") { return nil }
     return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)
 }`
 		source += capture
@@ -697,7 +697,9 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 		}
 		for _, changed := range []string{
 			strings.Replace(capture, "before.Status == after.Status && ", "", 1),
-			strings.Replace(capture, " && before.ActiveSessionID == after.ActiveSessionID", "", 1),
+			strings.Replace(capture, " && before.StartedAt.IsZero() == after.StartedAt.IsZero()", "", 1),
+			strings.Replace(capture, ` && (strings.TrimSpace(before.ActiveSessionID) == "") == (strings.TrimSpace(after.ActiveSessionID) == "")`, "", 1),
+			strings.Replace(capture, `(strings.TrimSpace(before.ActiveSessionID) == "") == (strings.TrimSpace(after.ActiveSessionID) == "")`, "before.ActiveSessionID == after.ActiveSessionID", 1),
 			strings.Replace(capture, "return nil", "return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)", 1),
 			strings.Replace(capture, "after.RunID,", "before.RunID,", 1),
 			strings.Replace(capture, "after.DeliveryID)", "before.DeliveryID)", 1),

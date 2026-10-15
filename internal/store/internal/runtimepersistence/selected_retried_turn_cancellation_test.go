@@ -52,7 +52,7 @@ func TestSelectedRetriedTurnCancellationBothStores(t *testing.T) {
 				}
 				actual := selected.(deliverylifecycle.Store)
 				claim := first.Attempt().Origin.Delivery
-				if _, err := actual.SettleFailure(ctx, claim, deliverylifecycle.Settlement{Disposition: deliverylifecycle.FailureRetry, Failure: &failure, RetryBase: time.Nanosecond, RuleSelection: handlerselection.NotReached()}); err != nil {
+				if _, err := actual.SettleFailure(ctx, claim, deliverylifecycle.Settlement{Disposition: deliverylifecycle.FailureRetry, Failure: &failure, RetryBase: time.Microsecond, RuleSelection: handlerselection.NotReached()}); err != nil {
 					t.Fatal(err)
 				}
 				history := snapshotForkHistoricalExecutionTables(t, db, !sqlite)

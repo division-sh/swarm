@@ -8,7 +8,7 @@ import (
 )
 
 func TestCanceledDeliveryHistoryRetainsAuthoredDispositionWithoutReplay(t *testing.T) {
-	classification := classifyRunForkDeliverySnapshot(deliverylifecycle.Snapshot{Status: deliverylifecycle.StatusCanceled}, false)
+	classification := classifyRunForkDeliverySnapshot(deliverylifecycle.HistoricalFact{Status: deliverylifecycle.StatusCanceled}, false)
 	if classification != runfork.RunForkPendingClassificationCanceled {
 		t.Fatalf("canceled source history was reinterpreted: %s", classification)
 	}
