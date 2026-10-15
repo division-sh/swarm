@@ -207,3 +207,85 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 		})
 	}
 }
+
+func TestSelectedForkSameKeyRecoversOwnerlessMaterializationBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx, request := ownerlessSelectedOperationFixture(t, backend)
+			prepared, err := request.Owner.Prepare(ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prepared.forkOperation = request.ForkOperation
+			materialized, acknowledged, err := request.Owner.materializePrepared(ctx, prepared)
+			if !acknowledged || err != nil {
+				t.Fatal("materialize exact operation:", err)
+			}
+			if err := prepared.Close(); err != nil {
+				t.Fatal("release abandoned preparation:", err)
+			}
+			replay := *request.ForkOperation
+			replay.OperationID = uuid.NewString()
+			request.ForkOperation = &replay
+			result, err := ExecuteSelectedContractRunFork(ctx, request)
+			if err != nil || !result.Activation.Activated || result.Materialization.ForkRunID != materialized.ForkRunID {
+				t.Fatalf("ownerless operation did not resume its committed child: result=%+v err=%v", result, err)
+			}
+			record, found, err := request.Owner.ports.fork.LoadForkOperation(ctx, replay.Actor, replay.IdempotencyKey, replay.TransportHash)
+			if err != nil || !found || record.Status != runfork.ForkOperationActivated || record.ForkRunID != materialized.ForkRunID ||
+				record.Request.OperationID == replay.OperationID {
+				t.Fatalf("recovery replaced the original operation: record=%+v found=%t err=%v", record, found, err)
+			}
+		})
+	}
+}
+
+func ownerlessSelectedOperationFixture(t *testing.T, backend string) (context.Context, SelectedContractExecutionRequest) {
+	t.Helper()
+	var selected startupownership.Store
+	var owner SelectedContractExecutionOwner
+	if backend == "sqlite" {
+		s := storetest.StartSQLiteRuntimeStore(t)
+		selected, owner = s, selectedContractSQLiteExecutionOwnerForTest(t, s)
+	} else {
+		s, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+		selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
+	}
+	ctx, cancel := context.WithTimeout(runForkTestContext(t), 20*time.Second)
+	t.Cleanup(cancel)
+	capability := selectedContractTestProcessCapability(t, ctx, selected)
+	repo := runForkExecutionRepoRoot(t)
+	loader := admittedFixtureSelectedContractSourceLoader{
+		RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple"),
+		PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo),
+	}
+	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceID, eventID := uuid.NewString(), uuid.NewString()
+	at := time.Unix(1700002200, 0).UTC()
+	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
+		RunID: sourceID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),
+		Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),
+	})
+	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0,
+		sourceID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
+	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event,
+		[]events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
+	commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
+	storetest.CaptureRunForkSnapshot(t, ctx, selected, sourceID)
+	selection := runforkadmission.SelectedContractSelection(loaded.Source)
+	operation := runfork.ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "ownerless-winner", TransportHash: "sha256:same-request",
+		SourceRunID: sourceID, ForkEventID: eventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
+		AllowSourceFreeze: true, ContractSelection: selection,
+	}
+	return ctx, SelectedContractExecutionRequest{
+		Owner: owner, ForkOperation: &operation, SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true,
+		ExpectedBundleHash: loaded.SourceArtifactFact.BundleHash(), ContractSelection: selection,
+		SourceLoader: SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo),
+			Store: selected.(SourceArtifactSelectedContractSourceStore)},
+		AgentRuntime: SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
+	}
+}
