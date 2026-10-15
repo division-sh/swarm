@@ -302,7 +302,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			for _, phase := range []string{"initial", "exact_replay"} {
 				t.Run(phase, func(t *testing.T) {
-					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type", "empty_import_missing_birth", "empty_import_forged_kind", "empty_import_duplicate_birth", "empty_import_missing_creation_clock", "empty_import_missing_update_clock", "empty_import_omitted_creation_clock", "empty_import_omitted_update_clock", "empty_import_zero_creation_clock", "empty_import_zero_update_clock", "empty_import_reversed_clocks"} {
+					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type", "empty_import_missing_birth", "empty_import_forged_kind", "empty_import_duplicate_birth", "empty_import_missing_creation_clock", "empty_import_missing_update_clock", "empty_import_omitted_creation_clock", "empty_import_omitted_update_clock", "empty_import_zero_creation_clock", "empty_import_zero_update_clock", "empty_import_reversed_clocks", "empty_import_lifecycle_history", "empty_import_gate_history", "empty_import_bookkeeping_history", "empty_import_accumulator_history"} {
 						t.Run(invalid, func(t *testing.T) {
 							f := newSnapshotOwnershipFixture(t, backend, false, false)
 							emptyImport := strings.HasPrefix(invalid, "empty_import_")
@@ -369,6 +369,80 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								if err != nil || report.EntitiesChecked != wantEntities || len(report.Rows) != 0 {
 									t.Fatalf("genuine empty import was not a clean native oracle member: %+v %v", report, err)
 								}
+							}
+							if strings.HasSuffix(invalid, "_history") {
+								record := mutationlog.Record{EntityID: metadataEntityID, WriterType: "platform", WriterID: "snapshot-ownership-proof", HandlerStep: "injected-import-history"}
+								emptyPath := ""
+								row := mutationlog.DriftRow{Kind: "value", EntityID: metadataEntityID, Path: &emptyPath, FoldedPresent: true, StoredValue: map[string]any(nil), FoldedType: "object", StoredType: "absent"}
+								switch invalid {
+								case "empty_import_lifecycle_history":
+									record.Domain, record.NewValue = mutationlog.DomainLifecycleState, "unknown"
+									row.FoldedValue, row.StoredValue, row.FoldedType = "unknown", nil, "text"
+								case "empty_import_gate_history":
+									record.Domain, record.Path, record.NewValue = mutationlog.DomainGate, "approved", true
+									row.FoldedValue = map[string]any{"approved": true}
+								case "empty_import_bookkeeping_history":
+									record.Domain, record.Path, record.NewValue = mutationlog.DomainBookkeeping, "step", "retained"
+									row.FoldedValue = map[string]any{"step": "retained"}
+								case "empty_import_accumulator_history":
+									record.Domain, record.Path, record.NewValue = mutationlog.DomainAccumulator, "total", int64(7)
+									row.FoldedValue = map[string]any{"total": int64(7)}
+								}
+								row.Domain = record.Domain
+								want := mutationlog.DriftReport{RunID: f.runID, EntitiesChecked: wantEntities, Rows: []mutationlog.DriftRow{row}}
+								if record.Domain == mutationlog.DomainLifecycleState {
+									for _, domain := range []mutationlog.Domain{mutationlog.DomainBookkeeping, mutationlog.DomainGate, mutationlog.DomainAccumulator} {
+										want.Rows = append(want.Rows, mutationlog.DriftRow{Kind: "value", EntityID: metadataEntityID, Domain: domain, Path: &emptyPath, FoldedPresent: true, FoldedValue: map[string]any{}, StoredValue: map[string]any(nil), FoldedType: "object", StoredType: "absent"})
+									}
+								}
+								// Bypass header mutation admission, not the native log/source/revision owner.
+								if err := insertMutationLogPrivateAdapter(f.ctx, f.store, record); err != nil {
+									t.Fatal(err)
+								}
+								poisonID := uuid.NewString()
+								marker := eventtest.ExistingRunRootIngress(poisonID, "fork.after_import_history", "metadata-proof", "", []byte(`{}`), 0, f.runID, events.EventEnvelope{}, time.Now().UTC())
+								if err := commitSemanticPipelineProcessedEventFixture(f.ctx, f.store, marker); err != nil {
+									t.Fatal(err)
+								}
+								physicalBefore, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store)
+								if err != nil {
+									t.Fatal(err)
+								}
+								report, err := inspector.InspectRunMutationDrift(f.ctx, f.runID)
+								if err != nil || !reflect.DeepEqual(report, want) {
+									t.Fatalf("native imported-domain history lost exact drift: got=%+v want=%+v err=%v", report, want, err)
+								}
+								blocked, err := f.store.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: f.runID, At: poisonID})
+								wantBlockers := []runfork.RunForkUnsupportedBlocker{{Code: runfork.RunForkBlockerEntitySnapshotMetadataUnproven, Message: fmt.Sprintf("imported entity %s cannot carry lifecycle history", metadataEntityID)}}
+								if err != nil || blocked.ExecutionReady || len(blocked.Entities) != wantEntities || !reflect.DeepEqual(blocked.UnsupportedBlockers, wantBlockers) {
+									t.Fatalf("native import history escaped exact fork admission: %+v %v", blocked, err)
+								}
+								refused, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: poisonID})
+								if err == nil || err.Error() != "fork materialization requires execution-ready plan; blockers: "+runfork.RunForkBlockerEntitySnapshotMetadataUnproven || refused.ForkRunID != "" || refused.ExecutionReady || !reflect.DeepEqual(refused.UnsupportedBlockers, wantBlockers) {
+									t.Fatalf("native import history materialized or lost exact refusal: %+v %v", refused, err)
+								}
+								if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(physicalBefore, after) {
+									t.Fatalf("native import history refusal changed source, fork or ledger: %v", err)
+								}
+								prior := f.plan(t)
+								if !reflect.DeepEqual(prior.Entities, plan.Entities) || prior.ForkPoint != plan.ForkPoint {
+									t.Fatalf("later imported history poisoned the earlier clean cut: before=%+v after=%+v", plan, prior)
+								}
+								valid, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+								if err != nil || (phase == "exact_replay" && valid.ForkRunID != forkRunID) {
+									t.Fatalf("earlier admitted import cut stopped materializing: %+v %v", valid, err)
+								}
+								assertSnapshotOwnershipEntity(t, f, valid.ForkRunID, child, 1)
+								clean, err := inspector.InspectRunMutationDrift(f.ctx, valid.ForkRunID)
+								if err != nil || !reflect.DeepEqual(clean, mutationlog.DriftReport{RunID: valid.ForkRunID, EntitiesChecked: wantEntities, Rows: []mutationlog.DriftRow{}}) {
+									t.Fatalf("earlier imported member lost clean native fork oracle: %+v %v", clean, err)
+								}
+								if phase == "exact_replay" {
+									if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(physicalBefore, after) {
+										t.Fatalf("earlier exact replay changed source, fork or ledger: %v", err)
+									}
+								}
+								return
 							}
 							var raw []byte
 							var revision int64
