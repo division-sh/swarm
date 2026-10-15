@@ -496,10 +496,15 @@ func (s *serveSessionBootstrap) ReadSessionPairing(ctx context.Context, op chann
 	if s == nil || ctx == nil || ctx.Err() != nil || principal.Validate() != nil || principal.ID != op.PrincipalID {
 		return channelonboarding.PairingReadback{}, channelonboarding.ErrInvalidRequest
 	}
-	connection, err := s.currentConnection(ctx, op.OperationID)
-	if errors.Is(err, channelonboarding.ErrNotFound) {
+	s.mu.Lock()
+	attempt := s.connections[op.OperationID]
+	s.mu.Unlock()
+	if attempt == nil {
 		return channelonboarding.PairingReadback{Status: "not_started"}, nil
 	}
+	// Pairing observation is not execution health. Its owner rechecks the
+	// retained operation and principal before disclosing any pairing state.
+	connection, err := attempt.finishedConnection(ctx)
 	if err != nil {
 		return channelonboarding.PairingReadback{}, err
 	}
