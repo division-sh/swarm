@@ -44,6 +44,16 @@ successor still needs focused/negative controls, a fresh exact-head preflight,
 ONE quiet real-SDK first-QR/expiry/replacement rehearsal and hosted/final review;
 the existing REDs remain failed evidence and no sitting is authorized.
 
+The integrated focused refresh at d2aa18eeb4 produced a separate paired-resume
+PostgreSQL checkpoint RED (ok=false, err=nil), recorded with its exact owner
+trace in [6202230926](https://github.com/division-sh/swarm/issues/2577#issuecomment-6202230926).
+It is not the accepted paired-PG cancellation-timeout residual. Server2 was
+released WITHOUT starting a rehearsal in
+[6202175409](https://github.com/division-sh/swarm/issues/2577#issuecomment-6202175409).
+The same head's preflight passed (500.910s), but its required focused packet
+remains failed evidence. Further classification needs reviewer-g's ruling;
+no physical rehearsal, hosted qualification or readiness PASS is claimed.
+
 ## Historical Preparation (Superseded)
 
 **NOT READY: preparation checkpoint, not the user's final sitting packet.**
