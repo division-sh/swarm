@@ -2,7 +2,6 @@ package runtime_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,7 +25,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 type inboundCommittedFinalizerProbe struct{ persisted int }
@@ -99,23 +97,20 @@ func (s *inboundPostCommitFaultStore) LoadInboundPublicationByIdentity(ctx conte
 	return s.InboundPersistence.LoadInboundPublicationByIdentity(ctx, identity)
 }
 
-func inboundAcknowledgedSelectedFixture(t *testing.T, backend, runID, entityID, slug, agentID string) (context.Context, operatorChannelInboundSelectedStore, *sql.DB, runtimepkg.InboundTarget) {
+func inboundAcknowledgedSelectedFixture(t *testing.T, backend, runID, entityID, slug, agentID string) (context.Context, operatorChannelInboundSelectedStore, runtimepkg.InboundTarget) {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	flowInstance := boundedProviderFlowID
 	if backend == "postgres" {
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		selected := storetest.AdmitPostgresRuntimeStore(t, db)
+		selected := storetest.StartPostgresRuntimeStore(t)
 		target := seedPostgresInboundGatewayRuntime(t, ctx, selected, runID, entityID, flowInstance, slug, "telegram", "telegram-secret", agentID)
 		ctx = boundedInboundTargetContext(t, ctx, target)
-		return ctx, selected, db, target
+		return ctx, selected, target
 	}
 	selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-	db := storetest.DatabaseForTest(selected)
 	target := seedSQLiteInboundGatewayRuntime(t, ctx, selected, runID, entityID, flowInstance, slug, "telegram", "telegram-secret", agentID)
 	ctx = boundedInboundTargetContext(t, ctx, target)
-	return ctx, selected, db, target
+	return ctx, selected, target
 }
 
 func inboundAcknowledgedTelegramRequest(slug string, updateID int, text string) *http.Request {
@@ -135,7 +130,7 @@ func TestInboundCommittedSiblingFinalizationRecoversDurablePipelineBothStores(t 
 		t.Run(backend, func(t *testing.T) {
 			runID, entityID := boundedInboundTestCoordinates()
 			const agentID = "committed-inbound-observer"
-			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "committed-inbound", agentID)
+			ctx, selected, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "committed-inbound", agentID)
 			probe := &inboundCommittedFinalizerProbe{}
 			bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{TestLifecycleProbe: probe}, "inbound.telegram", "inbound.telegram.text_message")
 			if err != nil {
@@ -187,12 +182,8 @@ func TestInboundCommittedSiblingFinalizationRecoversDurablePipelineBothStores(t 
 				t.Fatalf("recover committed batch: %v", err)
 			}
 			for _, item := range record.Events {
-				query := `SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
-				if backend == "postgres" {
-					query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
-				}
-				var receipts int
-				if err := db.QueryRowContext(ctx, query, item.EventID).Scan(&receipts); err != nil || receipts != 1 {
+				receipts, err := storetest.CountPipelineEventReceiptStorage(ctx, selected, item.EventID)
+				if err != nil || receipts != 1 {
 					t.Fatalf("recovered pipeline receipt for %s=%d err=%v, want 1", item.EventID, receipts, err)
 				}
 			}
@@ -211,7 +202,7 @@ func TestInboundAcknowledgedPublicationCleanupRespondsAndDoesNotRedeliverBothSto
 			runID, entityID := boundedInboundTestCoordinates()
 			const agentID = "acknowledged-telegram-observer"
 			const providerEventID = "8201"
-			ctx, selected, _, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-telegram", agentID)
+			ctx, selected, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-telegram", agentID)
 			bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
 			if err != nil {
 				t.Fatal(err)
@@ -289,7 +280,7 @@ func TestInboundAcknowledgedCreatedResultRejectsChangedExecutionFactsBothStores(
 			t.Run(backend+"/"+fact, func(t *testing.T) {
 				runID, entityID := boundedInboundTestCoordinates()
 				const agentID = "hostile-result-telegram-observer"
-				ctx, selected, _, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "hostile-result", agentID)
+				ctx, selected, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "hostile-result", agentID)
 				bus, err := newBoundedInboundTestEventBus(t, selected, runtimebus.EventBusOptions{}, "inbound.telegram", "inbound.telegram.text_message")
 				if err != nil {
 					t.Fatal(err)
@@ -318,7 +309,7 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runID, entityID := boundedInboundTestCoordinates()
-			ctx, selected, db, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-operator", "")
+			ctx, selected, target := inboundAcknowledgedSelectedFixture(t, backend, runID, entityID, "ack-operator", "")
 			plan := compileEmbeddedTelegramOperatorChannelPlan(t)
 			identity, err := plan.InterfaceIdentity()
 			if err != nil {
@@ -406,8 +397,8 @@ func TestInboundAcknowledgedOperatorClaimCleanupRespondsBothStores(t *testing.T)
 				t.Fatalf("missing-ack claim persisted: found=%v err=%v", found, err)
 			}
 			requireOperatorChannelOperationState(t, selected, principal.ID, operation.OperationID, operatorchannel.StateAwaitingConfirmation, 2)
-			var deliveries int
-			if err := db.QueryRow(`SELECT COUNT(*) FROM event_deliveries`).Scan(&deliveries); err != nil || deliveries != 0 {
+			deliveries, err := storetest.CountPhysicalEventDeliveries(context.Background(), selected)
+			if err != nil || deliveries != 0 {
 				t.Fatalf("operator claim deliveries=%d err=%v, want 0", deliveries, err)
 			}
 		})

@@ -2,11 +2,8 @@ package runforkexecution
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 
@@ -17,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -25,14 +21,12 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected startupownership.Store
-			var db *sql.DB
 			var owner SelectedContractExecutionOwner
 			if backend == "sqlite" {
 				s := storetest.StartSQLiteRuntimeStore(t)
-				selected, db, owner = s, storetest.Database(s), selectedContractSQLiteExecutionOwnerForTest(t, s)
+				selected, owner = s, selectedContractSQLiteExecutionOwnerForTest(t, s)
 			} else {
-				_, db, _ = testutil.StartPostgres(t)
-				s := storetest.AdmitPostgresRuntimeStore(t, db)
+				s := storetest.StartPostgresRuntimeStore(t)
 				selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
 			}
 			ctx := runForkTestContext(t)
@@ -45,14 +39,14 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			sourceRun, eventID := uuid.NewString(), uuid.NewString()
-			seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
+			seedSelectedOperationSource(t, ctx, selected, loaded, sourceRun, eventID)
 			request := SelectedContractExecutionRequest{
 				Owner: owner, SourceRunID: sourceRun, At: eventID,
 				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 				SourceLoader:      SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)},
 				AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 			}
-			before := selectedPreparationDatabaseSnapshot(t, db, backend)
+			before := selectedPreparationDatabaseSnapshot(t, selected)
 			baseline := process.ActiveCount()
 			for _, test := range []struct {
 				name string
@@ -72,7 +66,7 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 						}
 						t.Fatalf("wrong preparation disposition: prepared=%v err=%v", prepared, err)
 					}
-					if !reflect.DeepEqual(before, selectedPreparationDatabaseSnapshot(t, db, backend)) || process.ActiveCount() != baseline {
+					if !reflect.DeepEqual(before, selectedPreparationDatabaseSnapshot(t, selected)) || process.ActiveCount() != baseline {
 						t.Fatal("rejected preparation changed persisted facts or leaked process ownership")
 					}
 				})
@@ -84,79 +78,17 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 			if err := prepared.Close(); err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(before, selectedPreparationDatabaseSnapshot(t, db, backend)) || process.ActiveCount() != baseline {
+			if !reflect.DeepEqual(before, selectedPreparationDatabaseSnapshot(t, selected)) || process.ActiveCount() != baseline {
 				t.Fatal("non-executable preparation mutated the store or retained process work")
 			}
 		})
 	}
 }
 
-func selectedPreparationDatabaseSnapshot(t testing.TB, db *sql.DB, backend string) map[string][]string {
+func selectedPreparationDatabaseSnapshot(t testing.TB, selected any) map[string]storetest.SelectedForkStorageTableSnapshot {
 	t.Helper()
-	opts := &sql.TxOptions{ReadOnly: true}
-	query := `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`
-	if backend == "postgres" {
-		opts.Isolation = sql.LevelRepeatableRead
-		query = `SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name`
-	}
-	tx, err := db.BeginTx(context.Background(), opts)
+	out, err := storetest.ReadSelectedForkApplicationStorageSnapshot(context.Background(), selected)
 	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-	rows, err := tx.Query(query)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var tables []string
-	for rows.Next() {
-		var table string
-		if err := rows.Scan(&table); err != nil {
-			t.Fatal(err)
-		}
-		tables = append(tables, table)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
-	out := make(map[string][]string, len(tables))
-	for _, table := range tables {
-		rows, err := tx.Query(`SELECT * FROM "` + strings.ReplaceAll(table, `"`, `""`) + `"`)
-		if err != nil {
-			t.Fatal(err)
-		}
-		columns, err := rows.Columns()
-		if err != nil {
-			t.Fatal(err)
-		}
-		out[table] = []string{strings.Join(columns, ",")}
-		for rows.Next() {
-			values, pointers := make([]any, len(columns)), make([]any, len(columns))
-			for i := range values {
-				pointers[i] = &values[i]
-			}
-			if err := rows.Scan(pointers...); err != nil {
-				t.Fatal(err)
-			}
-			for i, v := range values {
-				if raw, ok := v.([]byte); ok {
-					values[i] = string(raw)
-				}
-			}
-			encoded, err := json.Marshal(values)
-			if err != nil {
-				t.Fatal(err)
-			}
-			out[table] = append(out[table], string(encoded))
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
-		}
-		rows.Close()
-		sort.Strings(out[table][1:])
-	}
-	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 	return out

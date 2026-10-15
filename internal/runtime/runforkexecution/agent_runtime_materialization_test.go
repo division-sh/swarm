@@ -36,7 +36,6 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -426,8 +425,7 @@ func TestSelectedContractAgentRuntimeBindRunProducesForkLocalIdentityWithoutMuta
 }
 
 func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	selected := storetest.StartPostgresRuntimeStore(t)
 	owner := testGatewayWorkOwner(t)
 	root := t.TempDir()
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selected-fork-cancellation\n")
@@ -442,11 +440,13 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	forkRunID := uuid.NewString()
 	wantScope := runtimeauthoractivity.BundleScope("00000000-0000-0000-0000-000000000313", sourceFact.BundleHash())
 	initiatingCtx, cancel := context.WithCancel(runForkTestContext(t))
 	ctx := runtimecorrelation.WithSourceArtifactFact(initiatingCtx, sourceFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)
+	loaded := LoadedSelectedContractSource{Source: source, SourceArtifactFact: sourceFact, EffectiveSourceIdentity: testEffectiveSourceIdentity(sourceFact)}
+	fork := selectedContractTestRuntimeFork(t, ctx, selected, loaded, bundle.SourceArtifact)
+	forkRunID := fork.ForkRunID
 	identity := selectedContractTestRootAgentIdentity(t, "fork-agent")
 	declaration, err := identity.Plan()
 	if err != nil {
@@ -485,7 +485,6 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 	if err != nil {
 		t.Fatalf("construct selected-contract static topology: %v", err)
 	}
-	loaded := LoadedSelectedContractSource{Source: source, SourceArtifactFact: sourceFact, EffectiveSourceIdentity: testEffectiveSourceIdentity(sourceFact)}
 	agents := selectedContractAgentRuntimePlan{
 		Declarations: declarations, Blueprints: []runtimemanager.AgentMaterializationBlueprint{blueprint},
 		Records: []runtimemanager.PersistedAgent{{Config: record.Config, Topology: topology, Status: record.Status, HiredBy: record.HiredBy}},
@@ -497,7 +496,7 @@ func TestStartSelectedContractAgentRuntimeRetainsGrantRetirementAfterAdoption(t 
 			},
 		},
 	}
-	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, db, selected, loaded, bundle.SourceArtifact, forkRunID, agents)
+	authority, prepared, executionAdmission := selectedContractTestRuntimeAuthority(t, ctx, selected, loaded, fork, agents)
 	ctx = selectedForkExecutionTestContext(t, ctx, authority)
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceFact)
 	ctx = runtimeauthoractivity.WithScope(ctx, wantScope)

@@ -498,15 +498,11 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 				t.Fatalf("wait for timer cancellation handler completion: %v", err)
 			}
 			if handlerCompletion.Status != "completed" {
-				query := `SELECT status, COALESCE(failure, '{}') FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
-				if selected.postgres {
-					query = `SELECT status, COALESCE(failure, '{}'::jsonb) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
-				}
-				var deliveryStatus string
-				var failure []byte
-				if err := selected.db.QueryRowContext(ctx, query, cancelEvent.ID(), controllerNode.Key()).Scan(&deliveryStatus, &failure); err != nil {
+				storage, err := storetest.ReadWorkflowTimerNodeFailure(ctx, selected.events, cancelEvent.ID(), controllerNode.Key())
+				if err != nil {
 					t.Fatalf("timer cancellation handler status = %q and delivery failure readback failed: %v", handlerCompletion.Status, err)
 				}
+				deliveryStatus, failure := storage.Status, storage.Failure
 				t.Fatalf("timer cancellation handler status = %q, delivery status = %q failure = %s; want completed", handlerCompletion.Status, deliveryStatus, failure)
 			}
 			cancelled := false
@@ -799,12 +795,8 @@ func failNextWorkflowTimerPipelineDisposition(t *testing.T, selected runtimebus.
 
 func workflowTimerPersistedEventID(t *testing.T, selected gateRecoveryStoreCase, runID string) string {
 	t.Helper()
-	query := `SELECT event_id FROM events WHERE run_id = ? AND event_name = ?`
-	if selected.postgres {
-		query = `SELECT event_id::text FROM events WHERE run_id = $1::uuid AND event_name = $2`
-	}
-	var eventID string
-	if err := selected.db.QueryRowContext(context.Background(), query, runID, runtimecontracts.WorkflowStageTimerInternalEvent).Scan(&eventID); err != nil {
+	eventID, err := storetest.ReadWorkflowTimerEventIdentity(context.Background(), selected.events, runID, runtimecontracts.WorkflowStageTimerInternalEvent)
+	if err != nil {
 		t.Fatalf("load persisted workflow timer event: %v", err)
 	}
 	return eventID
@@ -812,14 +804,11 @@ func workflowTimerPersistedEventID(t *testing.T, selected gateRecoveryStoreCase,
 
 func workflowTimerPersistedActivation(t *testing.T, selected gateRecoveryStoreCase, runID, entityID string) (timeridentity.WorkflowTimerActivationRef, string) {
 	t.Helper()
-	query := `SELECT timer_name, status FROM timers WHERE run_id = ? AND entity_id = ? AND task_type = 'workflow_timer'`
-	if selected.postgres {
-		query = `SELECT timer_name, status FROM timers WHERE run_id = $1::uuid AND entity_id = $2::uuid AND task_type = 'workflow_timer'`
-	}
-	var taskID, status string
-	if err := selected.db.QueryRowContext(context.Background(), query, runID, entityID).Scan(&taskID, &status); err != nil {
+	storage, err := storetest.ReadWorkflowTimerActivationStorage(context.Background(), selected.events, runID, entityID)
+	if err != nil {
 		t.Fatalf("load persisted workflow timer activation: %v", err)
 	}
+	taskID, status := storage.TaskID, storage.Status
 	ref, ok := timeridentity.ParseWorkflowTimerActivationTaskID(taskID)
 	if !ok {
 		t.Fatalf("persisted workflow timer task id is invalid: %q", taskID)
@@ -829,15 +818,11 @@ func workflowTimerPersistedActivation(t *testing.T, selected gateRecoveryStoreCa
 
 func workflowTimerPersistedOccurrence(t *testing.T, selected gateRecoveryStoreCase, runID, entityID string) (timeridentity.WorkflowTimerOccurrenceRef, string) {
 	t.Helper()
-	query := `SELECT timer_name, fire_at, status FROM timers WHERE run_id = ? AND entity_id = ? AND task_type = 'workflow_timer'`
-	if selected.postgres {
-		query = `SELECT timer_name, fire_at, status FROM timers WHERE run_id = $1::uuid AND entity_id = $2::uuid AND task_type = 'workflow_timer'`
-	}
-	var taskID, status string
-	var dueAtValue any
-	if err := selected.db.QueryRowContext(context.Background(), query, runID, entityID).Scan(&taskID, &dueAtValue, &status); err != nil {
+	storage, err := storetest.ReadWorkflowTimerOccurrenceStorage(context.Background(), selected.events, runID, entityID)
+	if err != nil {
 		t.Fatalf("load persisted workflow timer occurrence: %v", err)
 	}
+	taskID, dueAtValue, status := storage.TaskID, storage.FireAt, storage.Status
 	dueAt, err := workflowTimerTestTimeValue(dueAtValue)
 	if err != nil {
 		t.Fatalf("parse persisted workflow timer due time: %v", err)
@@ -925,12 +910,8 @@ func workflowTimerRecurringCancellationSource(t *testing.T) semanticview.Source 
 
 func assertWorkflowTimerServedRows(t *testing.T, selected gateRecoveryStoreCase, runID, entityID, status string, want int) {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM timers WHERE run_id = ? AND entity_id = ? AND task_type = 'workflow_timer' AND status = ?`
-	if selected.postgres {
-		query = `SELECT COUNT(*) FROM timers WHERE run_id = $1::uuid AND entity_id = $2::uuid AND task_type = 'workflow_timer' AND status = $3`
-	}
-	var got int
-	if err := selected.db.QueryRowContext(context.Background(), query, runID, entityID, status).Scan(&got); err != nil {
+	got, err := storetest.CountWorkflowTimerStatusRows(context.Background(), selected.events, runID, entityID, status)
+	if err != nil {
 		t.Fatalf("count canonical workflow timers: %v", err)
 	}
 	if got != want {
@@ -942,12 +923,8 @@ func waitWorkflowTimerRowStatus(t *testing.T, selected gateRecoveryStoreCase, ru
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		query := `SELECT COUNT(*) FROM timers WHERE run_id = ? AND entity_id = ? AND task_type = 'workflow_timer' AND status = ?`
-		if selected.postgres {
-			query = `SELECT COUNT(*) FROM timers WHERE run_id = $1::uuid AND entity_id = $2::uuid AND task_type = 'workflow_timer' AND status = $3`
-		}
-		var count int
-		if err := selected.db.QueryRowContext(context.Background(), query, runID, entityID, status).Scan(&count); err != nil {
+		count, err := storetest.CountWorkflowTimerStatusRows(context.Background(), selected.events, runID, entityID, status)
+		if err != nil {
 			t.Fatalf("read workflow timer status: %v", err)
 		}
 		if count == 1 {
@@ -960,29 +937,15 @@ func waitWorkflowTimerRowStatus(t *testing.T, selected gateRecoveryStoreCase, ru
 
 func workflowTimerDeliveryTrace(t *testing.T, selected gateRecoveryStoreCase, runID string) []string {
 	t.Helper()
-	query := `SELECT e.event_name, COALESCE(d.subscriber_id, ''), COALESCE(d.status, '') FROM events e LEFT JOIN event_deliveries d ON d.event_id = e.event_id WHERE e.run_id = ? ORDER BY e.created_at`
-	if selected.postgres {
-		query = `SELECT e.event_name, COALESCE(d.subscriber_id, ''), COALESCE(d.status, '') FROM events e LEFT JOIN event_deliveries d ON d.event_id = e.event_id WHERE e.run_id = $1::uuid ORDER BY e.created_at`
-	}
-	rows, err := selected.db.QueryContext(context.Background(), query, runID)
+	storage, err := storetest.ReadWorkflowTimerDeliveryTrace(context.Background(), selected.events, runID)
 	if err != nil {
 		return []string{"readback error: " + err.Error()}
 	}
-	defer rows.Close()
-	var trace []string
-	for rows.Next() {
-		var eventName, subscriberID, status string
-		if err := rows.Scan(&eventName, &subscriberID, &status); err != nil {
-			return append(trace, "scan error: "+err.Error())
-		}
-		trace = append(trace, eventName+" subscriber="+subscriberID+" status="+status)
+	trace := storage.Lines
+	if storage.ScanError != "" {
+		return append(trace, "scan error: "+storage.ScanError)
 	}
-	var runtimeLog string
-	logQuery := `SELECT CAST(payload AS TEXT) FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at DESC LIMIT 1`
-	if selected.postgres {
-		logQuery = `SELECT payload::text FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at DESC LIMIT 1`
-	}
-	if err := selected.db.QueryRowContext(context.Background(), logQuery).Scan(&runtimeLog); err == nil {
+	if runtimeLog, err := storetest.ReadLatestWorkflowTimerRuntimeLogText(context.Background(), selected.events); err == nil {
 		trace = append(trace, "runtime_log="+runtimeLog)
 	}
 	return trace
@@ -1007,12 +970,8 @@ func waitWorkflowTimerEventCount(t *testing.T, selected gateRecoveryStoreCase, f
 
 func workflowTimerEventCount(t *testing.T, selected gateRecoveryStoreCase, runID, eventType string) int {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = ?`
-	if selected.postgres {
-		query = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = $2`
-	}
-	var count int
-	if err := selected.db.QueryRowContext(context.Background(), query, runID, eventType).Scan(&count); err != nil {
+	count, err := storetest.CountRunEventNameStorage(context.Background(), selected.events, runID, eventType)
+	if err != nil {
 		t.Fatalf("count workflow timer events: %v", err)
 	}
 	return count

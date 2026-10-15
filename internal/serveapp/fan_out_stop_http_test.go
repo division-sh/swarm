@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -40,12 +41,11 @@ func TestIssue2394ServedStopTwentyBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			rig := newIssue2394StopRig(t, backend)
 			rt := rig.start(t)
-			runID, eventID, _ := createServedControlWaitingRun(t, rt, "stop-twenty-"+uuid.NewString())
+			runID, eventID, _ := createServedControlWaitingRun(t, rt.Backend, rt.BundleHash, rt.Endpoint, rt.Probe, rt.ReceiverStateReader, "stop-twenty-"+uuid.NewString())
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID})
 			seedIssue2394StopIntents(t, rt, runID, eventID)
-			before := readIssue2394StopSnapshot(t, rt.DB, runID)
+			before := readIssue2394StopSnapshot(t, rt.ReceiverStateReader, runID)
 			assertIssue2394StopMatrix(t, before, false)
-
 			key := uuid.NewString()
 			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":"stop-twenty","method":"run.stop","params":{"run_id":%q,"idempotency_key":%q}}`, runID, key)
 			request, err := http.NewRequest(http.MethodPost, rt.Endpoint, strings.NewReader(body))
@@ -61,15 +61,12 @@ func TestIssue2394ServedStopTwentyBothStores(t *testing.T) {
 			if unauthorized.StatusCode != http.StatusUnauthorized {
 				t.Fatalf("unauthenticated stop HTTP=%d, want 401", unauthorized.StatusCode)
 			}
-			assertIssue2394StopUnchanged(t, before, rt.DB, runID)
+			assertIssue2394StopUnchanged(t, before, rt.ReceiverStateReader, runID)
 			wrongTransport := semanticNumericRPC(t, rt.Endpoint, "ws", body)
 			if wrongTransport.Error == nil || wrongTransport.Error.Code != -32601 {
 				t.Fatalf("WebSocket stop must be refused: %+v", wrongTransport)
 			}
-			assertIssue2394StopUnchanged(t, before, rt.DB, runID)
-
-			// Lose the successful server reply at a proxy, after the actual HTTP
-			// command completed, rather than issuing a second command on timeout.
+			assertIssue2394StopUnchanged(t, before, rt.ReceiverStateReader, runID)
 			target, err := url.Parse(rt.Endpoint)
 			if err != nil {
 				t.Fatal(err)
@@ -80,7 +77,9 @@ func TestIssue2394ServedStopTwentyBothStores(t *testing.T) {
 				_, readErr := io.Copy(io.Discard, response.Body)
 				return errors.Join(readErr, response.Body.Close(), errors.New("test drops stop response"))
 			}
-			proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, _ error) { w.WriteHeader(http.StatusBadGateway) }
+			proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, _ error) {
+				w.WriteHeader(http.StatusBadGateway)
+			}
 			lostReply := httptest.NewServer(proxy)
 			t.Cleanup(lostReply.Close)
 			request, err = http.NewRequest(http.MethodPost, lostReply.URL+"/v1/rpc", strings.NewReader(body))
@@ -111,7 +110,7 @@ func TestIssue2394ServedStopTwentyBothStores(t *testing.T) {
 			if err := json.Unmarshal(stored, &result); err != nil || !result.OK || result.Recovery.Status != "complete" {
 				t.Fatalf("stored stop response=%s err=%v", stored, err)
 			}
-			after := readIssue2394StopSnapshot(t, rt.DB, runID)
+			after := readIssue2394StopSnapshot(t, rt.ReceiverStateReader, runID)
 			assertIssue2394StopMatrix(t, after, true)
 			if !reflect.DeepEqual(before.Outcomes, after.Outcomes) || after.EventCount != before.EventCount {
 				t.Fatal("stop changed committed prefix event identities or fabricated suffix events")
@@ -121,11 +120,11 @@ func TestIssue2394ServedStopTwentyBothStores(t *testing.T) {
 			}
 			requireServedRunStatus(t, rt.Endpoint, runID, "cancelled")
 			requireSemanticReplay(t, stored, requestServedRawJSONRPC(t, rt.Endpoint, body))
-			assertIssue2394StopUnchanged(t, after, rt.DB, runID)
+			assertIssue2394StopUnchanged(t, after, rt.ReceiverStateReader, runID)
 			rig.stop(t)
 			rt = rig.start(t)
 			requireSemanticReplay(t, stored, requestServedRawJSONRPC(t, rt.Endpoint, body))
-			assertIssue2394StopUnchanged(t, after, rt.DB, runID)
+			assertIssue2394StopUnchanged(t, after, rt.ReceiverStateReader, runID)
 			conflict := requestServedJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{"run_id": uuid.NewString(), "idempotency_key": key})
 			if conflict.Error == nil || conflict.Error.Data["code"] != apiv1.IdempotencyConflictCode {
 				t.Fatalf("same key with different run must conflict: %+v", conflict)
@@ -134,8 +133,8 @@ func TestIssue2394ServedStopTwentyBothStores(t *testing.T) {
 			if fresh.Error == nil || fresh.Error.Data["code"] != apiv1.RunAlreadyTerminalCode {
 				t.Fatalf("fresh stop is not committed replay: %+v", fresh)
 			}
-			assertIssue2394StopUnchanged(t, after, rt.DB, runID)
-			requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.stop", key, 1)
+			assertIssue2394StopUnchanged(t, after, rt.ReceiverStateReader, runID)
+			requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.stop", key, 1)
 			rig.stop(t)
 		})
 	}
@@ -146,14 +145,14 @@ func TestIssue2394SelectedStopTwentyBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			rig := newIssue2394StopRig(t, backend)
 			rt := rig.start(t)
-			runID, eventID, _ := createServedControlWaitingRun(t, rt, "selected-stop-twenty-"+uuid.NewString())
+			runID, eventID, _ := createServedControlWaitingRun(t, rt.Backend, rt.BundleHash, rt.Endpoint, rt.Probe, rt.ReceiverStateReader, "selected-stop-twenty-"+uuid.NewString())
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID})
 			seedIssue2394StopIntents(t, rt, runID, eventID)
-			_, err := rt.Runtime.RunControl.Stop(servedControlProofAuthorActivityContext(t, rt), runcontrol.TransitionRequest{RunID: runID})
+			_, err := rt.Runtime.RunControl.Stop(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), runcontrol.TransitionRequest{RunID: runID})
 			if err != nil {
 				t.Fatalf("selected stop twenty: %v", err)
 			}
-			assertIssue2394StopMatrix(t, readIssue2394StopSnapshot(t, rt.DB, runID), true)
+			assertIssue2394StopMatrix(t, readIssue2394StopSnapshot(t, rt.ReceiverStateReader, runID), true)
 			rig.stop(t)
 		})
 	}
@@ -191,16 +190,16 @@ func newIssue2394StopRig(t *testing.T, backend servedparity.Backend) *issue2394S
 
 func (r *issue2394StopRig) start(t *testing.T) servedControlProofRuntime {
 	t.Helper()
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
+		reader = requireReceiverProofStateReader(t, persistence.deps.EventStore)
+	})
 	r.process = startServeRuntimeTestProcess(t, r.opts)
 	r.process.waitForReadyLine()
 	r.process.mu.Lock()
 	rt := r.process.runtime
 	r.process.mu.Unlock()
-	return servedControlProofRuntime{
-		Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, r.process.outputString()) + "/v1/rpc",
-		DB:       r.db, Backend: r.backend, BundleHash: r.bundleHash, Runtime: rt,
-		Probe: r.opts.TestLifecycleProbe.(*lifecycletest.Probe),
-	}
+	return servedControlProofRuntime{Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, r.process.outputString()) + "/v1/rpc", DB: r.db, Backend: r.backend, BundleHash: r.bundleHash, Runtime: rt, ReceiverStateReader: reader, Probe: r.opts.TestLifecycleProbe.(*lifecycletest.Probe)}
 }
 
 func (r *issue2394StopRig) stop(t *testing.T) {
@@ -214,7 +213,7 @@ func seedIssue2394StopIntents(t *testing.T, rt servedControlProofRuntime, runID,
 	t.Helper()
 	// Pausing through the real owner prevents the worker from executing these
 	// fixture rows; cancellation itself still crosses the production HTTP path.
-	requireServedRunControlState(t, rt.DB, rt.Backend, runID, "paused", "paused")
+	requireServedRunControlState(t, rt.ReceiverStateReader, rt.Backend, runID, "paused", "paused")
 	var prefixes []string
 	for i := 0; i < 4; i++ {
 		published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
@@ -311,76 +310,65 @@ func seedIssue2394StopIntents(t *testing.T, rt servedControlProofRuntime, runID,
 	}
 }
 
-type issue2394StopIntent struct {
-	Path                                          string
-	Cardinality, Cursor                           int
-	Status, Claim                                 string
-	Generation                                    int
-	Lease, Reason, RetryAt, RetryFailure, Updated string
-}
+type issue2394StopIntent = storetest.StopFanOutIntentStorage
 
 type issue2394StopSnapshot struct {
-	Intents                                                 []issue2394StopIntent
-	Outcomes                                                []string
+	Intents  []issue2394StopIntent
+	Outcomes []string
+	// PendingDeliveries counts all unfinished persisted delivery rows.
 	EventCount, PendingDeliveries, Revisions, FactRevisions int
 	RunStatus, ControlStatus, ControlUpdated                string
 }
 
-func readIssue2394StopSnapshot(t *testing.T, db *sql.DB, runID string) issue2394StopSnapshot {
+func readIssue2394StopSnapshot(t *testing.T, reader servedEventCountReader, runID string) issue2394StopSnapshot {
 	t.Helper()
 	var snapshot issue2394StopSnapshot
-	rows, err := db.Query(`SELECT semantic_path,cardinality,cursor,status,COALESCE(claim_owner,''),claim_generation,COALESCE(CAST(lease_expires_at AS TEXT),''),COALESCE(blocked_reason,''),COALESCE(CAST(retry_ready_at AS TEXT),''),COALESCE(CAST(retry_failure AS TEXT),''),CAST(updated_at AS TEXT) FROM fan_out_intents WHERE run_id=$1 ORDER BY semantic_path`, runID)
+	read := func(observe func(context.Context) error) {
+		if err := reader.InspectSnapshot(context.Background(), observe); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read(func(ctx context.Context) error {
+		var err error
+		snapshot.Intents, err = storetest.ReadStopFanOutIntentsStorage(ctx, reader, runID)
+		return err
+	})
+	var outcomes []storetest.StopFanOutOutcomeStorage
+	read(func(ctx context.Context) error {
+		var err error
+		outcomes, err = storetest.ReadStopFanOutOutcomesStorage(ctx, reader, runID)
+		return err
+	})
+	for _, row := range outcomes {
+		snapshot.Outcomes = append(snapshot.Outcomes, fmt.Sprintf("%s/%d/%s/%s/%s", row.Path, row.Ordinal, row.Kind, row.EventID, row.Created))
+	}
+	for target, count := range map[*int]func(context.Context, any, string) (int, error){
+		&snapshot.EventCount:    storetest.CountPhysicalRunEvents,
+		&snapshot.Revisions:     storetest.CountRunStopRevisionRows,
+		&snapshot.FactRevisions: storetest.CountRunStopFactRevisionRows,
+	} {
+		read(func(ctx context.Context) error {
+			var err error
+			*target, err = count(ctx, reader, runID)
+			return err
+		})
+	}
+	var err error
+	snapshot.PendingDeliveries, err = readServedStopNonterminalCount(context.Background(), reader, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for rows.Next() {
-		var intent issue2394StopIntent
-		if err := rows.Scan(&intent.Path, &intent.Cardinality, &intent.Cursor, &intent.Status, &intent.Claim, &intent.Generation, &intent.Lease, &intent.Reason, &intent.RetryAt, &intent.RetryFailure, &intent.Updated); err != nil {
-			rows.Close()
-			t.Fatal(err)
-		}
-		snapshot.Intents = append(snapshot.Intents, intent)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		t.Fatal(err)
-	}
-	rows.Close()
-	rows, err = db.Query(`SELECT semantic_path,ordinal,outcome_kind,CAST(event_id AS TEXT),CAST(created_at AS TEXT) FROM fan_out_outcomes WHERE run_id=$1 ORDER BY semantic_path,ordinal`, runID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for rows.Next() {
-		var path, kind, eventID, created string
-		var ordinal int
-		if err := rows.Scan(&path, &ordinal, &kind, &eventID, &created); err != nil {
-			rows.Close()
-			t.Fatal(err)
-		}
-		snapshot.Outcomes = append(snapshot.Outcomes, fmt.Sprintf("%s/%d/%s/%s/%s", path, ordinal, kind, eventID, created))
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		t.Fatal(err)
-	}
-	rows.Close()
-	for table, target := range map[string]*int{"events": &snapshot.EventCount, "run_fork_revisions": &snapshot.Revisions, "run_fork_fact_revisions": &snapshot.FactRevisions} {
-		if err := db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE run_id=$1`, runID).Scan(target); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := db.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','processing','retrying')`, runID).Scan(&snapshot.PendingDeliveries); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.QueryRow(`SELECT r.status,c.control_status,CAST(c.updated_at AS TEXT) FROM runs r JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`, runID).Scan(&snapshot.RunStatus, &snapshot.ControlStatus, &snapshot.ControlUpdated); err != nil {
-		t.Fatal(err)
-	}
+	read(func(ctx context.Context) error {
+		control, err := storetest.ReadStopRunControlClockStorage(ctx, reader, runID)
+		snapshot.RunStatus, snapshot.ControlStatus, snapshot.ControlUpdated = control.Status, control.Control, control.Updated
+		return err
+	})
 	return snapshot
 }
 
-func assertIssue2394StopUnchanged(t *testing.T, want issue2394StopSnapshot, db *sql.DB, runID string) {
+func assertIssue2394StopUnchanged(t *testing.T, want issue2394StopSnapshot, reader servedEventCountReader, runID string) {
 	t.Helper()
-	if got := readIssue2394StopSnapshot(t, db, runID); !reflect.DeepEqual(got, want) {
+	if got := readIssue2394StopSnapshot(t, reader, runID); !reflect.DeepEqual(got, want) {
 		t.Fatalf("stop replay/refusal changed durable state:\nwant=%+v\ngot=%+v", want, got)
 	}
 }

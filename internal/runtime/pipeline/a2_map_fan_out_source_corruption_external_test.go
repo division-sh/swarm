@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type a2CorruptMapSource struct {
@@ -78,11 +79,9 @@ func newA2CorruptMapSource(t *testing.T, selected gateRecoveryStoreCase) *a2Corr
 
 func (f *a2CorruptMapSource) readRaw(t *testing.T) []byte {
 	t.Helper()
-	var raw []byte
 	source := f.intent.Source
-	if err := f.p.selected.db.QueryRowContext(f.p.ctx, `SELECT new_value FROM entity_mutations
-		WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='authored_field' AND path=$4`,
-		source.MutationID, source.RunID, source.EntityID, source.Field).Scan(&raw); err != nil {
+	raw, err := storetest.ReadPinnedAuthoredMutationStorage(f.p.ctx, f.p.selected.events, source)
+	if err != nil {
 		t.Fatal(err)
 	}
 	return raw
@@ -92,13 +91,10 @@ func (f *a2CorruptMapSource) writeRaw(raw []byte) error {
 	// Only hostile setup/restoration changes this real, handler-written revision.
 	// Intent identity, capsule, cardinality, outcomes and live entity state stay untouched.
 	source := f.intent.Source
-	result, err := f.p.selected.db.ExecContext(f.p.ctx, `UPDATE entity_mutations SET new_value=$1
-		WHERE mutation_id=$2 AND run_id=$3 AND entity_id=$4 AND domain='authored_field' AND path=$5`,
-		string(raw), source.MutationID, source.RunID, source.EntityID, source.Field)
+	count, err := storetest.SetPinnedAuthoredMutationWire(f.p.ctx, f.p.selected.events, source, raw)
 	if err != nil {
 		return err
 	}
-	count, err := result.RowsAffected()
 	if err != nil || count != 1 {
 		return fmt.Errorf("retained business-source setup affected %d rows: %v", count, err)
 	}
@@ -116,21 +112,14 @@ type a2CorruptMapSourceFootprint struct {
 func (f *a2CorruptMapSource) footprint(t *testing.T) a2CorruptMapSourceFootprint {
 	t.Helper()
 	var result a2CorruptMapSourceFootprint
-	var diagnostic []byte
-	if err := f.p.selected.db.QueryRowContext(f.p.ctx, `SELECT
-		(SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1),
-		(SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1),
-		(SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1),
-		(SELECT COALESCE(MAX(revision),0) FROM run_fork_revisions WHERE run_id=$1),
-		(SELECT COUNT(*) FROM events WHERE run_id=$1),
-		(SELECT COUNT(*) FROM event_deliveries WHERE event_id IN (SELECT event_id FROM events WHERE run_id=$1)),
-		(SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1),
-		cursor,cardinality,status,blocked_reason FROM fan_out_intents WHERE run_id=$1`, f.p.runID).Scan(
-		&result.Mutations, &result.Facts, &result.Revisions, &result.LatestRevision,
-		&result.Publications, &result.Deliveries, &result.Outcomes,
-		&result.Cursor, &result.Cardinality, &result.Status, &diagnostic); err != nil {
+	storage, err := storetest.ReadA2RetainedSourceFootprintStorage(f.p.ctx, f.p.selected.events, f.p.runID)
+	if err != nil {
 		t.Fatal(err)
 	}
+	result.Mutations, result.Facts, result.Revisions, result.LatestRevision = storage.Mutations, storage.Facts, storage.Revisions, storage.LatestRevision
+	result.Publications, result.Deliveries, result.Outcomes = storage.Publications, storage.Deliveries, storage.Outcomes
+	result.Cursor, result.Cardinality, result.Status = storage.Cursor, storage.Cardinality, storage.Status
+	diagnostic := storage.Diagnostic
 	state, err := json.Marshal(f.p.instance(t))
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +171,7 @@ func TestA2MapFanOutRawBusinessSourceReaderRefusesOnBothStores(t *testing.T) {
 					}
 					beforeSetup := f.footprint(t)
 					if err := f.writeRaw(corruption.raw); err != nil {
-						if !f.p.selected.postgres || !corruption.malformed || !strings.Contains(err.Error(), "invalid input syntax for type json") {
+						if backend.name != "postgres" || !corruption.malformed || !strings.Contains(err.Error(), "invalid input syntax for type json") {
 							t.Fatalf("unexpected hostile source setup refusal: %v", err)
 						}
 						if f.footprint(t) != beforeSetup || !bytes.Equal(f.readRaw(t), f.raw) {
@@ -198,7 +187,7 @@ func TestA2MapFanOutRawBusinessSourceReaderRefusesOnBothStores(t *testing.T) {
 					})
 					before := f.footprint(t)
 					input, err := f.handoff.owner.LoadFanOutEvaluation(f.p.ctx, f.claim)
-					if corruption.duplicate && f.p.selected.postgres {
+					if corruption.duplicate && backend.name == "postgres" {
 						retained := f.readRaw(t)
 						if _, err := canonicaljson.Decode(retained); err != nil || a2AccumulatorJSONHash(t, retained) != a2AccumulatorJSONHash(t, f.raw) {
 							t.Fatalf("JSONB duplicate-evidence boundary changed logical source: retained=%s err=%v", retained, err)
@@ -314,10 +303,12 @@ func TestA2MapFanOutRawBusinessSourcePumpRefusesWithoutProgressOnBothStores(t *t
 				before := f.footprint(t)
 				var originalFactKey string
 				var originalFact []byte
-				if err := f.p.selected.db.QueryRowContext(f.p.ctx, `SELECT fact_key,fact
-					FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations'
-					ORDER BY revision DESC LIMIT 1`, f.p.runID).Scan(&originalFactKey, &originalFact); err != nil {
-					t.Fatal(err)
+				{
+					originalEvidence, err := storetest.ReadLatestFanOutObligationFactStorage(f.p.ctx, f.p.selected.events, f.p.runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					originalFactKey, originalFact = originalEvidence.Key, originalEvidence.Fact
 				}
 				_, err := f.p.pc.ServeFanOutCandidate(f.p.ctx, f.handoff.owner, f.handoff.key)
 				waitForGateRecoveryQuiescence(t, f.p.bus, f.p.ctx)
@@ -335,10 +326,12 @@ func TestA2MapFanOutRawBusinessSourcePumpRefusesWithoutProgressOnBothStores(t *t
 				}
 				var diagnostic []byte
 				var released bool
-				if err := f.p.selected.db.QueryRowContext(f.p.ctx, `SELECT blocked_reason,
-					claim_owner IS NULL AND lease_expires_at IS NULL FROM fan_out_intents WHERE run_id=$1`,
-					f.p.runID).Scan(&diagnostic, &released); err != nil {
-					t.Fatal(err)
+				{
+					blocked, err := storetest.ReadFanOutRunBlockedClaimStorage(f.p.ctx, f.p.selected.events, f.p.runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					diagnostic, released = blocked.Diagnostic, blocked.Released
 				}
 				persisted, decodeErr := runtimefailures.UnmarshalEnvelope(diagnostic)
 				if decodeErr != nil || !released || a2AccumulatorJSONHash(t, diagnostic) != a2AccumulatorJSONHash(t, returnedRaw) {
@@ -356,10 +349,13 @@ func TestA2MapFanOutRawBusinessSourcePumpRefusesWithoutProgressOnBothStores(t *t
 				var family, factKey string
 				var fact []byte
 				var present bool
-				if err := f.p.selected.db.QueryRowContext(f.p.ctx, `SELECT family,fact_key,fact,present
-					FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=$2`,
-					f.p.runID, want.LatestRevision).Scan(&family, &factKey, &fact, &present); err != nil {
-					t.Fatal(err)
+				{
+					revisionEvidence, err := storetest.ReadRunRevisionFactStorage(f.p.ctx, f.p.selected.events, f.p.runID, want.LatestRevision)
+					if err != nil {
+						t.Fatal(err)
+					}
+					family, factKey = revisionEvidence.Family, revisionEvidence.Key
+					fact, present = revisionEvidence.Fact, revisionEvidence.Present
 				}
 				var expectedFact map[string]any
 				if err := json.Unmarshal(originalFact, &expectedFact); err != nil {

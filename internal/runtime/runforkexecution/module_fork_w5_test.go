@@ -75,7 +75,7 @@ func TestW5ToolsPinnedModuleRunsThroughSelectedForkBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, runID, eventID, input)
+			seedSelectedOperationSource(t, ctx, selected, loaded, runID, eventID, input)
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),

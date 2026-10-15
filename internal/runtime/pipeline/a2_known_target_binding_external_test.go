@@ -313,16 +313,11 @@ func TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothSt
 			}
 			outputs := func() (int, string) {
 				t.Helper()
-				query := `SELECT COUNT(*), COALESCE(MIN(CAST(event_id AS TEXT)), '') FROM events WHERE run_id=? AND source_event_id=? AND event_name='item.completed'`
-				if selected.postgres {
-					query = `SELECT COUNT(*), COALESCE(MIN(event_id::text), '') FROM events WHERE run_id=$1::uuid AND source_event_id=$2::uuid AND event_name='item.completed'`
-				}
-				var count int
-				var id string
-				if err := selected.db.QueryRowContext(ctx, query, runID, triggerID).Scan(&count, &id); err != nil {
+				storage, err := storetest.ReadA2WorkerOutputs(ctx, selected.events, runID, triggerID)
+				if err != nil {
 					t.Fatalf("read actual worker outputs: %v", err)
 				}
-				return count, id
+				return storage.Count, storage.EventID
 			}
 			if count, id := outputs(); count != 0 || id != "" {
 				t.Fatalf("worker output was published before receiver arm: count=%d id=%q", count, id)
@@ -425,19 +420,12 @@ func a2KnownTargetWaitForSettlement(t *testing.T, ctx context.Context, bus *runt
 
 func a2KnownTargetEarlyRefusal(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, eventID, nodeKey string) failures.Envelope {
 	t.Helper()
-	query := `SELECT d.status, CAST(COALESCE(d.failure, '{}') AS TEXT), COUNT(a.delivery_id), COALESCE(MAX(a.outcome), '')
-		FROM event_deliveries d LEFT JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id AND a.closure_kind='settled'
-		WHERE d.event_id=? AND d.subscriber_type='node' AND d.subscriber_id=? GROUP BY d.status, d.failure`
-	if selected.postgres {
-		query = `SELECT d.status, COALESCE(d.failure, '{}'::jsonb)::text, COUNT(a.delivery_id), COALESCE(MAX(a.outcome), '')
-			FROM event_deliveries d LEFT JOIN event_delivery_attempts a ON a.delivery_id=d.delivery_id AND a.closure_kind='settled'
-			WHERE d.event_id=$1::uuid AND d.subscriber_type='node' AND d.subscriber_id=$2 GROUP BY d.status, d.failure`
-	}
-	var status, raw, outcome string
-	var attempts int
-	if err := selected.db.QueryRowContext(ctx, query, eventID, nodeKey).Scan(&status, &raw, &attempts, &outcome); err != nil {
+	storage, err := storetest.ReadA2EarlyRefusal(ctx, selected.events, eventID, nodeKey)
+	if err != nil {
 		t.Fatalf("read actual early refusal: %v", err)
 	}
+	status, raw, outcome := storage.Status, storage.Failure, storage.Outcome
+	attempts := storage.SettledAttempts
 	var failure failures.Envelope
 	if err := json.Unmarshal([]byte(raw), &failure); err != nil {
 		t.Fatal(err)

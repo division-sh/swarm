@@ -21,11 +21,15 @@ type CardContentionEvidence = private.CardContentionEvidence
 
 func ObserveWriterStage(t testing.TB, ctx context.Context, selected any, runID, entityID, stage string) WriterStageEvidence {
 	t.Helper()
-	value, err := private.ObserveWriterStageForTest(ctx, selected, runID, entityID, stage)
+	value, err := ReadWriterStage(ctx, selected, runID, entityID, stage)
 	if err != nil {
 		t.Fatalf("observe exact writer stage: %v", err)
 	}
 	return value
+}
+
+func ReadWriterStage(ctx context.Context, selected any, runID, entityID, stage string) (WriterStageEvidence, error) {
+	return private.ObserveWriterStageForTest(ctx, selected, runID, entityID, stage)
 }
 
 func ObserveCardContention(t testing.TB, ctx context.Context, selected any, key, cardID string) CardContentionEvidence {

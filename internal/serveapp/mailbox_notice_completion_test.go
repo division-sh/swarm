@@ -20,14 +20,14 @@ func TestMailboxNoticeAtomicCompletionBothStores(t *testing.T) {
 			f := mailboxCompletionFixtureInRuntime(t, rt, owner)
 			id := mailboxCompletionNotice(t, f)
 			params := map[string]any{"mailbox_id": id, "idempotency_key": "notice-atomic"}
-			beforeEffects := mailboxCompletionRunEffects(t, f.rt, f.base.RunID)
+			beforeEffects := mailboxCompletionRunEffects(t, f.rt.ReceiverStateReader, f.base.RunID)
 			assertCut, remove := installMailboxCompletionFaultWitness(t, f.rt, "notice-atomic")
 			failed := requestServedJSONRPC(t, f.rt.Endpoint, "mailbox.acknowledge", params)
 			if failed.Error == nil {
 				t.Fatal("completion INSERT fault was not surfaced")
 			}
 			assertCut()
-			if after := mailboxCompletionRunEffects(t, f.rt, f.base.RunID); !reflect.DeepEqual(beforeEffects, after) {
+			if after := mailboxCompletionRunEffects(t, f.rt.ReceiverStateReader, f.base.RunID); !reflect.DeepEqual(beforeEffects, after) {
 				t.Fatalf("notice failure mutated run: before=%v after=%v", beforeEffects, after)
 			}
 			var notified bool
@@ -80,7 +80,7 @@ func TestMailboxNoticeAtomicCompletionBothStores(t *testing.T) {
 				t.Fatal("notice returned a card decision")
 			}
 			rt, _ = restart()
-			before := mailboxCompletionRunEffects(t, rt, f.base.RunID)
+			before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID)
 			replay = nil
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.acknowledge", params, &replay)
 			if replay["idempotency_replayed"] != true {
@@ -90,7 +90,7 @@ func TestMailboxNoticeAtomicCompletionBothStores(t *testing.T) {
 			if !reflect.DeepEqual(original, replay) {
 				t.Fatalf("notice restart changed exact response: %v / %v", original, replay)
 			}
-			if after := mailboxCompletionRunEffects(t, rt, f.base.RunID); !reflect.DeepEqual(before, after) {
+			if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID); !reflect.DeepEqual(before, after) {
 				t.Fatalf("notice restart changed domain: %s", mailboxEffectsDifference(before, after))
 			}
 			if err := rt.DB.QueryRow(`SELECT notified FROM mailbox WHERE item_id=$1`, id).Scan(&notified); err != nil || !notified {

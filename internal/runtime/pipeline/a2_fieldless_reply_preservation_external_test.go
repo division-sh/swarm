@@ -109,23 +109,33 @@ func TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores(t *test
 					WorkflowVersion: source.WorkflowVersion(), CurrentState: initial.ID(),
 				}, at)
 			}
-			count := func(query string) int {
+			count := func(n int, err error) int {
 				t.Helper()
-				var n int
-				if err := selected.db.QueryRowContext(ctx, query, runID).Scan(&n); err != nil {
+				if err != nil {
 					t.Fatal(err)
 				}
 				return n
 			}
-			constructionHistory := count("SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1")
+			constructions := func() int {
+				t.Helper()
+				accounting, err := storetest.ObserveH2ConstructionAccounting(ctx, selected.events, runID)
+				return count(accounting.Constructions, err)
+			}
+			constructionHistory := count(storetest.CountRunMutationStorage(ctx, selected.events, runID))
 			assertNoState := func() {
 				t.Helper()
-				for _, table := range []string{"entity_state", "timers"} {
-					if n := count("SELECT COUNT(*) FROM " + table + " WHERE run_id=$1"); n != 0 {
-						t.Fatalf("payload-only reply invented %s rows: %d", table, n)
+				for _, observation := range []struct {
+					table string
+					read  func() (int, error)
+				}{
+					{"entity_state", func() (int, error) { return storetest.CountWorkflowRunFieldRows(ctx, selected.events, runID) }},
+					{"timers", func() (int, error) { return storetest.CountRunTimerStorage(ctx, selected.events, runID) }},
+				} {
+					if n := count(observation.read()); n != 0 {
+						t.Fatalf("payload-only reply invented %s rows: %d", observation.table, n)
 					}
 				}
-				if count("SELECT COUNT(*) FROM flow_instances WHERE run_id=$1") != 3 || count("SELECT COUNT(*) FROM workflow_instance_initial_materializations WHERE run_id=$1") != 3 || count("SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1") != constructionHistory {
+				if count(storetest.CountRunFlowInstanceStorage(ctx, selected.events, runID)) != 3 || constructions() != 3 || count(storetest.CountRunMutationStorage(ctx, selected.events, runID)) != constructionHistory {
 					t.Fatal("fieldless execution changed immutable construction evidence")
 				}
 			}
@@ -231,8 +241,8 @@ func TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores(t *test
 				t.Fatal(err)
 			}
 			for _, name := range []string{source.ResolveFlowEventReference("requester", "provider.requested"), source.ResolveFlowEventReference("provider", "provider.replied"), source.ResolveFlowEventReference("requester", "reply.observed")} {
-				var publications int
-				if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name=$2", runID, name).Scan(&publications); err != nil || publications != 1 {
+				publications, err := storetest.CountRunEventNameStorage(ctx, selected.events, runID, name)
+				if err != nil || publications != 1 {
 					t.Fatalf("fieldless replay duplicated %s: count=%d err=%v", name, publications, err)
 				}
 			}

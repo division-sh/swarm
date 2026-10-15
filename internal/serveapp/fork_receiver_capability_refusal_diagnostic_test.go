@@ -7,7 +7,94 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
+
+func forkReceiverCapabilityRefusalSelectedSnapshotDelta(before, after map[string]storetest.SelectedForkStorageTableSnapshot) string {
+	old, err := capabilitySelectedSnapshotDiagnosticRows(before)
+	if err != nil {
+		return fmt.Sprintf("before physical snapshot decode: %v", err)
+	}
+	current, err := capabilitySelectedSnapshotDiagnosticRows(after)
+	if err != nil {
+		return fmt.Sprintf("after physical snapshot decode: %v", err)
+	}
+	return forkReceiverCapabilityRefusalSnapshotDelta(old, current)
+}
+
+func capabilitySelectedSnapshotDiagnosticRows(snapshot map[string]storetest.SelectedForkStorageTableSnapshot) (map[string][]string, error) {
+	if snapshot == nil {
+		return nil, nil
+	}
+	result := make(map[string][]string, 2*len(snapshot))
+	for table, physical := range snapshot {
+		columns, err := json.Marshal(physical.Columns)
+		if err != nil {
+			return nil, err
+		}
+		result[table+"/columns"] = []string{string(columns)}
+		result[table] = nil
+		if physical.Rows != nil {
+			result[table] = []string{}
+		}
+		rows, err := storetest.DecodeSelectedForkSnapshotRows(physical)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			encoded, err := capabilitySelectedDiagnosticRow(physical.Columns, row)
+			if err != nil {
+				return nil, err
+			}
+			result[table] = append(result[table], encoded)
+		}
+	}
+	return result, nil
+}
+
+func capabilitySelectedDiagnosticRow(columns []string, row map[string]storetest.SelectedForkSnapshotCell) (string, error) {
+	values := make([]json.RawMessage, len(columns))
+	for index, column := range columns {
+		cell := row[column]
+		values[index] = cell.Value
+		if cell.Type == "[]uint8" {
+			text, err := cell.Text()
+			if err != nil {
+				return "", err
+			}
+			values[index], err = json.Marshal(text)
+			if err != nil {
+				return "", err
+			}
+		}
+	}
+	encoded, err := json.Marshal(values)
+	return string(encoded), err
+}
+
+func TestForkReceiverCapabilityRefusalSelectedDiagnosticKeepsExactTransport(t *testing.T) {
+	columns := []string{"payload", "revision", "timestamp"}
+	before, err := storetest.EncodeSelectedForkSnapshotValues(columns, []any{[]byte("old"), int64(9007199254740993), "2026-10-14T12:00:00Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := storetest.EncodeSelectedForkSnapshotValues(columns, []any{[]byte("new"), int64(9007199254740994), "2026-10-14T14:00:00+02:00"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := map[string]storetest.SelectedForkStorageTableSnapshot{"rows": {Columns: columns, Rows: []string{before}}}
+	current := map[string]storetest.SelectedForkStorageTableSnapshot{"rows": {Columns: columns, Rows: []string{after}}}
+	got := forkReceiverCapabilityRefusalSelectedSnapshotDelta(old, current)
+	legacyBefore := map[string][]string{"rows/columns": {`["payload","revision","timestamp"]`}, "rows": {`["old",9007199254740993,"2026-10-14T12:00:00Z"]`}}
+	legacyAfter := map[string][]string{"rows/columns": legacyBefore["rows/columns"], "rows": {`["new",9007199254740994,"2026-10-14T14:00:00+02:00"]`}}
+	if want := forkReceiverCapabilityRefusalSnapshotDelta(legacyBefore, legacyAfter); got != want {
+		t.Fatalf("typed snapshot changed raw bytes/number/time/column diagnostics:\ngot%s\nwant%s", got, want)
+	}
+	if same := forkReceiverCapabilityRefusalSelectedSnapshotDelta(old, old); same != "" {
+		t.Fatal("unchanged typed snapshot gained a delta:", same)
+	}
+}
 
 // Diagnose the captured cut only. Rows remain exact strings and multiset counts;
 // removed/added pairs are not guessed to be updates of a shared primary key.

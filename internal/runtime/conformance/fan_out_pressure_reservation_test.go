@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // Schedule one old waiter after each competing admission, not after a fixed
@@ -334,9 +335,8 @@ func assertPressureReservationState(t *testing.T, f *servingMatrixFixture, claim
 	var owner sql.NullString
 	var until, retry sql.NullTime
 	key := claim.Key
-	err := f.db.QueryRowContext(ctx, `SELECT i.cursor,i.status,i.claim_owner,i.claim_generation,i.lease_expires_at,i.retry_ready_at,
-        (SELECT COUNT(*) FROM fan_out_outcomes o WHERE o.run_id=i.run_id AND o.triggering_delivery_id=i.triggering_delivery_id AND o.flow_path=i.flow_path AND o.declaration_family=i.declaration_family AND o.semantic_path=i.semantic_path)
-        FROM fan_out_intents i WHERE i.run_id=$1 AND i.triggering_delivery_id=$2 AND i.flow_path=$3 AND i.declaration_family=$4 AND i.semantic_path=$5`, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath).Scan(&cursor, &status, &owner, &generation, &until, &retry, &outcomes)
+	state, err := storetest.ReadSupplementalExpiredClaim(ctx, f.selected, key)
+	cursor, status, owner, generation, until, retry, outcomes = state.Cursor, state.Status, state.Owner, state.Generation, state.Until, state.Retry, state.Outcomes
 	validOwnership := !owner.Valid && !until.Valid
 	if held {
 		validOwnership = owner.Valid && owner.String == claim.Owner && until.Valid && until.Time.Equal(claim.LeaseUntil)

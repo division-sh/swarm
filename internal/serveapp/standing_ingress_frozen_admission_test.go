@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"gopkg.in/yaml.v3"
 )
@@ -115,19 +115,14 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 			})
 		}
 	}
-	var db *sql.DB
+	var observationLocation string
 	if backend == "sqlite" {
 		path := filepath.Join(t.TempDir(), "store.sqlite")
-		db, err = sql.Open("sqlite", path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = db.Close() })
+		observationLocation = path
 		opts.ConfigPath = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, backend, path, channelOnboardingHostWorkspaceFields())
 	} else {
-		dsn, opened, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		db = opened
+		dsn := testutil.StartPostgresDSN(t)
+		observationLocation = dsn
 		opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 	}
 	enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
@@ -141,6 +136,7 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 	}
 	start()
 	t.Cleanup(func() { process.stop() })
+	reader := openServedStandingInspection(t, backend, observationLocation)
 	postTo := func(id int, secret, provider string) int {
 		t.Helper()
 		body := fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"probe"}}`, id, id)
@@ -204,13 +200,17 @@ func runServeIngressFrozenCredentialJourney(t *testing.T, backend, policy, point
 	counts := func() []int {
 		t.Helper()
 		var result []int
-		for _, query := range []string{
-			`SELECT COUNT(*) FROM inbound_publications`,
-			`SELECT COUNT(*) FROM events WHERE event_name LIKE 'inbound.%'`,
-			`SELECT COUNT(*) FROM runtime_external_effect_operations`,
+		for _, read := range []func(context.Context, any) (int, error){
+			storetest.CountInboundPublicationsStorage,
+			storetest.CountInboundNamedEventsStorage,
+			storetest.CountExternalEffectOperationsStorage,
 		} {
 			var count int
-			if err := db.QueryRow(query).Scan(&count); err != nil {
+			if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+				var err error
+				count, err = read(ctx, reader)
+				return err
+			}); err != nil {
 				t.Fatal(err)
 			}
 			result = append(result, count)

@@ -38,6 +38,7 @@ const (
 )
 
 type SessionAuthority struct {
+	backend                 *Backend
 	testTransactions        *transactiontest.Slot
 	operationMu             sync.Mutex
 	fenceMu                 sync.Mutex
@@ -713,6 +714,7 @@ func AcquireAdvisoryLockLeaseWith(
 	}
 	authority := newSessionAuthority(conn)
 	if backend, ok := db.(*Backend); ok {
+		authority.backend = backend
 		authority.testTransactions = &backend.testTransactions
 	}
 	return AcquireAdvisoryLockLeaseOnSession(ctx, authority, lockKey, acquire, authority.release)
@@ -868,6 +870,10 @@ func runAuthorityTransactionWithProof(
 	}
 	if fn == nil {
 		return false, nil
+	}
+	if session.backend != nil && (opts == nil || !opts.ReadOnly) {
+		write := session.backend.agentRecoveryWrites.ObserveWriteStart()
+		defer write.End()
 	}
 	probe := session.testTransactions.Begin(opts != nil && opts.ReadOnly, true)
 	defer func() { probe.Finish(err) }()
