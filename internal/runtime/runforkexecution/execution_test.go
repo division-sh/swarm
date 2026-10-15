@@ -4700,6 +4700,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID,
 		runforkrevision.FamilyEvents,
 		runforkrevision.FamilyEventDeliveries,
+		runforkrevision.FamilyCommittedReplayScopes,
 		runforkrevision.FamilyEventReceipts,
 		runforkrevision.FamilyDeadLetters,
 	)
