@@ -2659,12 +2659,12 @@ func (a *Adapter) ActiveSnapshots(ctx context.Context, q queryer) ([]Snapshot, e
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return nil, err
+			return nil, errors.Join(err, rows.Close())
 		}
 		ids = append(ids, id)
 	}
-	if err := rows.Close(); err != nil {
+	iterationErr := rows.Err()
+	if err := errors.Join(iterationErr, rows.Close()); err != nil {
 		return nil, err
 	}
 	out := make([]Snapshot, 0, len(ids))
