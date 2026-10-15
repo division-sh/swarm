@@ -11988,6 +11988,11 @@ tool_model:
         subsequent code after 20 seconds. Readback also enforces elapsed expiry before returning material.
         ADV rotation replaces only the exact ADV-secret component in the pinned SDK QR URI representation, preserves
         remaining identity fields and expiry, and refuses invalid or mismatched secret evidence without fallback.
+        Explicit resume of the same retained onboarding operation checks its exact occurrence's owned pairing state:
+        an unpaired qr_expired batch is not reusable merely because the SDK socket is live. The existing connection
+        owner closes and completely joins that occurrence before constructing its successor on the same reservation.
+        Current unexpired QR and paired/connected reuse are unchanged; an observation error is a refusal, not permission
+        to reconnect. Neither expiry nor replacement creates account, identity or executable authority.
         Overflow, unsupported passkey or non-multidevice modes, failure, cancellation and retirement clear QR material.
         Readback requires the exact authenticated onboarding principal, operation, durable source and live context,
         stable connection and connection occurrence; successor admission never adopts predecessor QR material.
