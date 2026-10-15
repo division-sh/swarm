@@ -257,9 +257,9 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 				header.ParentFlowID != projected.ParentRoute.FlowID || header.ParentFlowInstance != projected.ParentRoute.FlowInstance || header.ParentEntityID != projected.ParentEntityID {
 				t.Fatalf("exact prepared orders timeout receiver lost its template/path/projected parent: want=%+v actual=%+v found=%v err=%v", projected, header, found, err)
 			}
-			if header.InstanceKind != sourceHeader.InstanceKind || header.TemplateVersion != sourceHeader.TemplateVersion || header.WorkflowVersion != target.Source.WorkflowVersion() {
-				t.Fatalf("orders descriptor changed: source kind=%q template version=%q; selected workflow version=%q; child kind=%q template version=%q workflow version=%q",
-					sourceHeader.InstanceKind, sourceHeader.TemplateVersion, target.Source.WorkflowVersion(), header.InstanceKind, header.TemplateVersion, header.WorkflowVersion)
+			if header.InstanceKind != sourceHeader.InstanceKind || header.TemplateVersion != sourceHeader.TemplateVersion || header.WorkflowVersion != sourceHeader.WorkflowVersion {
+				t.Fatalf("orders captured construction changed: source kind=%q template version=%q workflow version=%q; selected workflow version=%q; child kind=%q template version=%q workflow version=%q",
+					sourceHeader.InstanceKind, sourceHeader.TemplateVersion, sourceHeader.WorkflowVersion, target.Source.WorkflowVersion(), header.InstanceKind, header.TemplateVersion, header.WorkflowVersion)
 			}
 			buckets, err := joinruntime.PersistedBuckets(header.StateBuckets)
 			if err != nil {

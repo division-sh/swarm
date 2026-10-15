@@ -124,15 +124,15 @@ func (cut historicalFlowInstanceConstructionCut) project(run runlifecycle.Snapsh
 		return pipeline.HistoricalFlowInstanceConstruction{}, false, &pipeline.FlowInstanceConstructionCorruption{RunID: run.RunID, FlowID: instance.WorkflowName, InstancePath: instance.StorageRef, Cause: err}
 	}
 	recorded, err := pipeline.DecodeWorkflowInstanceRecordedHeader(fixed.Route(), metadata.FlowConfig)
-	// Constructor identity is fixed at the source cut; the selected descriptor
-	// version is fixed at the child's own immutable materialization birth.
+	// The source cut, child birth and physical header retain one captured
+	// construction version; selected executable readiness is independent.
 	if err != nil || recorded.WorkflowVersion() == "" || header != projected || instance.InstanceKey != cut.key || instance.Mode != metadata.Mode || instance.EntityType != metadata.EntityType ||
 		cut.birth.owner.RunID != run.RunID || cut.birth.owner.Route != projected.Route() || cut.birth.header.ParentRoute() != projected.ParentRoute ||
-		cut.birth.createdAt.IsZero() || !cut.birth.createdAt.Equal(instance.CreatedAt) || cut.birth.header.WorkflowVersion() == "" || instance.WorkflowVersion != cut.birth.header.WorkflowVersion() {
+		cut.birth.createdAt.IsZero() || !cut.birth.createdAt.Equal(instance.CreatedAt) || cut.birth.header.WorkflowVersion() != recorded.WorkflowVersion() || instance.WorkflowVersion != recorded.WorkflowVersion() {
 		return pipeline.HistoricalFlowInstanceConstruction{}, false, &pipeline.FlowInstanceConstructionCorruption{RunID: run.RunID, FlowID: instance.WorkflowName, InstancePath: instance.StorageRef, Cause: errors.Join(fmt.Errorf("header contradicts its exact projected historical construction"), err)}
 	}
 	return pipeline.HistoricalFlowInstanceConstruction{
-		Identity: projected, InstanceKey: cut.key, SourceRevision: cut.plan.ForkPoint.Revision, WorkflowVersion: cut.birth.header.WorkflowVersion(),
+		Identity: projected, InstanceKey: cut.key, SourceRevision: cut.plan.ForkPoint.Revision, WorkflowVersion: recorded.WorkflowVersion(),
 		SourceOwner: flowidentity.RunScopedFlowInstance{RunID: cut.plan.SourceRunID, Route: fixed.Route()},
 	}, true, nil
 }

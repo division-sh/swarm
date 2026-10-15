@@ -281,7 +281,7 @@ func selectedContractWorkflowStateConfig(state selectedContractWorkflowState) ([
 	if err != nil {
 		return nil, err
 	}
-	return recorded.Project(identity.Route(), identity.ParentRoute, state.WorkflowVersion)
+	return recorded.Project(identity.Route(), identity.ParentRoute, recorded.WorkflowVersion())
 }
 
 func selectedContractWorkflowIdentity(state selectedContractWorkflowState) (runtimeflowidentity.Instance, runtimepipeline.WorkflowInstanceRecordedHeader, error) {

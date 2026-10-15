@@ -28,13 +28,20 @@ func selectedWorkflowConstructionFixture(t *testing.T, state selectedContractWor
 		t.Fatal(err)
 	}
 	at := time.Unix(100, 0).UTC()
+	key := ""
+	if state.Mode == "template" {
+		key = "fixture-key"
+	}
 	record := selectedWorkflowConstructionRecordFixture(t, state.SourceRunID, "bundle-v2:sha256:"+strings.Repeat("a", 64), identity, pipeline.WorkflowInstance{
-		WorkflowVersion: state.WorkflowVersion, Mode: state.Mode, Status: "active", EntityType: state.EntityType,
+		WorkflowVersion: state.WorkflowVersion, Mode: state.Mode, InstanceKey: key, Status: "active", EntityType: state.EntityType,
 		CurrentState: "initial", StageDefined: true, EnteredStageAt: at, CreatedAt: at,
 	}, state.ExecutionMode)
-	state.History = runfork.RunForkEntityState{EntityID: state.EntityID, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
+	state.History = runfork.RunForkEntityState{EntityID: state.EntityID, CurrentState: record.CurrentState, EnteredStateAt: &at, MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 		Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 		FlowInstance: state.Route, FlowTemplate: state.WorkflowName, FlowConfig: raw,
+		ParentInstance: record.State.ParentInstance, InstanceKey: record.State.InstanceKey,
+		Mode: record.Mode, EntityType: record.EntityType, StageDefined: record.State.StageDefined, Status: record.State.Status,
+		CreatedAt: record.CreatedAt, UpdatedAt: record.CreatedAt, EnteredStateAt: record.EnteredStageAt,
 		InitialMaterialization: record.InitialMaterialization,
 	}}
 	return state
@@ -146,6 +153,7 @@ func TestSelectedWorkflowReadinessAndConfigRetainRecordedParent(t *testing.T) {
 				CurrentState: "initial", StageDefined: true, EnteredStageAt: at, CreatedAt: at,
 			}, state.ExecutionMode)
 			state.History.MaterializationMetadata.InitialMaterialization = record.InitialMaterialization
+			state.History.MaterializationMetadata.ParentInstance = parent.FlowInstance
 			config, err := pipeline.WorkflowInstanceHeaderPayloadForIdentity(identity, "v1")
 			if err != nil {
 				t.Fatal(err)

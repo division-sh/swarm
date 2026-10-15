@@ -84,7 +84,7 @@ func TestReceiverConstructionHistoryExactCoordinates(t *testing.T) {
 			}
 		})
 	}
-	t.Run("selected_version_bound_to_child_birth", func(t *testing.T) {
+	t.Run("source_birth_and_physical_versions_must_agree", func(t *testing.T) {
 		selectedConfig, err := recordedHeader.Project(identity.Route(), childParent, "selected-v2")
 		if err != nil {
 			t.Fatal(err)
@@ -94,23 +94,24 @@ func TestReceiverConstructionHistoryExactCoordinates(t *testing.T) {
 			t.Fatal(err)
 		}
 		selected := construction
-		selected.birth.header = selectedHeader
 		header := exact
-		header.WorkflowVersion = "selected-v2"
 		before, err := json.Marshal(selected.plan)
 		if err != nil {
 			t.Fatal(err)
 		}
 		observed, found, err := selected.project(runlifecycle.Snapshot{RunID: forkRun}, header, identity)
-		if err != nil || !found || observed.WorkflowVersion != "selected-v2" || observed.SourceOwner.RunID != sourceRun || observed.SourceRevision != 1 {
-			t.Fatalf("selected version lost its immutable birth/source cut: observation=%+v found=%t err=%v", observed, found, err)
+		if err != nil || !found || observed.WorkflowVersion != "v1" || observed.SourceOwner.RunID != sourceRun || observed.SourceRevision != 1 {
+			t.Fatalf("historical version lost its immutable birth/source cut: observation=%+v found=%t err=%v", observed, found, err)
 		}
-		for _, fault := range []string{"version", "birth_missing", "birth_run", "birth_route", "birth_parent", "birth_time", "birth_version_missing"} {
+		for _, fault := range []string{"version", "birth_and_header_rewritten", "birth_missing", "birth_run", "birth_route", "birth_parent", "birth_time", "birth_version_missing"} {
 			t.Run(fault, func(t *testing.T) {
 				badCut, badHeader := selected, header
 				switch fault {
 				case "version":
 					badHeader.WorkflowVersion = "foreign"
+				case "birth_and_header_rewritten":
+					badCut.birth.header = selectedHeader
+					badHeader.WorkflowVersion = "selected-v2"
 				case "birth_missing":
 					badCut.birth = runForkReceiverBirth{}
 				case "birth_run":
