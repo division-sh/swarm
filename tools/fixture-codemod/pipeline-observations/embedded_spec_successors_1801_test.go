@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -20,6 +21,8 @@ import (
 //
 //go:embed testdata/embedded_spec_successors_1801.json
 var embeddedSpecSuccessorBytes1801 []byte
+
+var errUnlistedEmbeddedSpecSuccessor1801 = errors.New("unlisted embedded-spec successor")
 
 type embeddedSpecSuccessorPacket1801 struct {
 	Source, Authorization, PopulationSHA256 string
@@ -51,7 +54,15 @@ func embeddedSpecPriorEndpoint1801(row recipe, actual string) (recipe, string, e
 			return reverseEmbeddedSpecSuccessor1801(row, actual, pin)
 		}
 	}
-	return recipe{}, "", fmt.Errorf("unlisted embedded-spec successor")
+	return recipe{}, "", errUnlistedEmbeddedSpecSuccessor1801
+}
+
+func embeddedSpecHistoricalPair1801(row recipe, actual string) (recipe, string, error) {
+	original, prior, err := embeddedSpecPriorEndpoint1801(row, actual)
+	if errors.Is(err, errUnlistedEmbeddedSpecSuccessor1801) {
+		return row, actual, nil
+	}
+	return original, prior, err
 }
 
 func reverseEmbeddedSpecSuccessor1801(row recipe, actual string, pin fixtureSetupSuccessor2617) (recipe, string, error) {
@@ -177,7 +188,7 @@ func TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork(t *testing.T
 
 func assertEmbeddedSpecSuccessorRefusals1801(t *testing.T, row recipe, actual string, pin fixtureSetupSuccessor2617) {
 	t.Helper()
-	for _, field := range []string{"family", "file", "function", "before", "after", "mechanical", "removed", "missing-successor", "prior-endpoint", "current-source", "paired-source"} {
+	for _, field := range []string{"family", "file", "function", "before", "after", "mechanical", "removed", "missing-successor", "wrong-successor", "prior-endpoint", "current-source", "paired-source"} {
 		mutant, source := row, actual
 		switch field {
 		case "family":
@@ -196,6 +207,8 @@ func assertEmbeddedSpecSuccessorRefusals1801(t *testing.T, row recipe, actual st
 			mutant.Removed = true
 		case "missing-successor":
 			mutant.Successor = ""
+		case "wrong-successor":
+			mutant.Successor = pin.Original.After
 		case "prior-endpoint":
 			source = pin.Original.After
 			if pin.Original.Successor != "" {
@@ -210,11 +223,46 @@ func assertEmbeddedSpecSuccessorRefusals1801(t *testing.T, row recipe, actual st
 		if _, _, err := embeddedSpecPriorEndpoint1801(mutant, source); err == nil {
 			t.Fatalf("%s: changed %s admitted", row.Function, field)
 		}
+		if sameReviewedRecipeKey(mutant, row) {
+			if _, _, err := embeddedSpecHistoricalPair1801(mutant, source); err == nil {
+				t.Fatalf("%s: invalid listed %s fell through to an older comparator", row.Function, field)
+			}
+		}
 	}
 	changedPin := pin
 	changedPin.Original.Successor += "\nfunc foreignEndpoint() {}"
 	if _, _, err := reverseEmbeddedSpecSuccessor1801(row, actual, changedPin); err == nil {
 		t.Fatal("altered prior endpoint admitted")
+	}
+}
+
+func TestEmbeddedSpecHistoricalPairPreservesOnlyGenuinelyUnlistedPaths(t *testing.T) {
+	unlisted := recipe{Family: "unlisted-family", File: "unlisted.go", Function: "unlisted", After: "unlisted source"}
+	got, source, err := embeddedSpecHistoricalPair1801(unlisted, unlisted.After)
+	if err != nil || !reflect.DeepEqual(got, unlisted) || source != unlisted.After {
+		t.Fatalf("genuinely unlisted history path changed: %v", err)
+	}
+	packet, err := loadEmbeddedSpecSuccessors1801(embeddedSpecSuccessorBytes1801)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pin := range packet.Rows {
+		t.Run(pin.Original.Function, func(t *testing.T) {
+			row := pin.Original
+			row.Successor = pin.Candidate
+			actual := selectedCausalObservationBody(t, row.File, row.Function)
+			original, prior, err := embeddedSpecHistoricalPair1801(row, actual)
+			want := pin.Original.Successor
+			if want == "" {
+				want = pin.Original.After
+			}
+			if err != nil || !reflect.DeepEqual(original, pin.Original) || !canonicalComparatorEqual2617(prior, want) {
+				t.Fatalf("verified listed source did not recover its exact prior pair: %v", err)
+			}
+			if _, _, err := embeddedSpecHistoricalPair1801(pin.Original, want); err == nil {
+				t.Fatal("listed prior endpoint silently gained the unlisted fallback")
+			}
+		})
 	}
 }
 

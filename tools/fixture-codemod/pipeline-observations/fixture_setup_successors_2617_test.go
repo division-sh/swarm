@@ -199,6 +199,10 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 				t.Fatal(err)
 			}
 			valid := func(candidate recipe, source string) bool {
+				candidate, source, err := embeddedSpecHistoricalPair1801(candidate, source)
+				if err != nil {
+					return false
+				}
 				history := candidate
 				history.Successor = pin.Original.Successor
 				current, sourceErr := canonicalFunction(source)

@@ -152,6 +152,12 @@ func TestExactOriginPublicationSuccessorsPreserveReviewedCuts(t *testing.T) {
 			if err != nil || wantErr != nil || got != want {
 				t.Fatal("current source differs from reviewed successor")
 			}
+			current := *selected
+			historical, priorSource, err := embeddedSpecHistoricalPair1801(current, actual)
+			if err != nil {
+				t.Fatal(err)
+			}
+			selected, actual = &historical, priorSource
 			restored := selected.Successor
 			if target.name == "TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores" {
 				restored, err = capabilityCompletionPredecessor2707(*selected, actual)
@@ -251,7 +257,7 @@ func TestExactOriginPublicationSuccessorsPreserveReviewedCuts(t *testing.T) {
 			if !target.priorSuccessor && (err != nil || predecessor != canonical) {
 				t.Fatal("historical After changed")
 			}
-			if files, changes, err := prepareFiles("../../..", []recipe{*selected}); err != nil || len(files) != 0 || len(changes) != 0 {
+			if files, changes, err := prepareFiles("../../..", []recipe{current}); err != nil || len(files) != 0 || len(changes) != 0 {
 				t.Fatalf("current publication successor is not inert: %v", err)
 			}
 		})
@@ -345,8 +351,12 @@ func exactOriginOrderingMutants(t *testing.T, source string) map[string]string {
 	return mutants
 }
 
-func reviewedMilestoneRow(t *testing.T, row recipe) recipe {
+func reviewedMilestoneRow(t *testing.T, row recipe, actual string) recipe {
 	t.Helper()
+	row, _, err := embeddedSpecHistoricalPair1801(row, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, target := range exactOriginSuccessors {
 		if target.name != row.Function || !target.priorSuccessor {
 			continue
