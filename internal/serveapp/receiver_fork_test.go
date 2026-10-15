@@ -181,6 +181,15 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					t.Fatal("source publication consumed the complete fingerprint deadline")
 				}
 				probe.Expect(request.EventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(remaining)
+				forkCtx := servedControlProofAuthorActivityContext(t, rt)
+				if surface == "admitted_http" {
+					// Branch isolation needs later business history, not excluded runtime logs.
+					if rt.SQLite != nil {
+						advanceLifecycleForkSourceHistory(t, forkCtx, rt.SQLite, request.RunID)
+					} else {
+						advanceLifecycleForkSourceHistory(t, forkCtx, rt.Postgres, request.RunID)
+					}
+				}
 				before := repeatedStaticRunSnapshot(t, rt.DB, request.RunID)
 				checkSource := func(boundary string) {
 					after := repeatedStaticRunSnapshot(t, rt.DB, request.RunID)
@@ -213,7 +222,7 @@ func TestReceiverCompositionForkBothStores(t *testing.T) {
 					if !ok {
 						t.Fatal("missing fork owner")
 					}
-					result, err := family.Execute(servedControlProofAuthorActivityContext(t, rt), runtimerunforkexecution.SelectedContractExecutionRequest{
+					result, err := family.Execute(forkCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
 						SourceRunID: request.RunID, At: forkPoint, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
 						SourceLoader:      runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
 						ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(loadWorkflowValidationBundleAt(t, root))),
