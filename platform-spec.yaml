@@ -22958,15 +22958,6 @@ environment_source_authority:
     - '#1731 repo-wide SWARM env accepted-set guard, typed delegation schema, doctor env reporting, generated-boundary env closure, and unknown-env guard'
     - '#1600 parent residual env-source-authority closeout'
 configuration_source_authority:
-  direct_config_loader:
-    owner: internal/config.LoadWithOptions
-    source_owner: yamlsource.Load/Document.Root
-    rule: >
-      The direct file loader admits exactly one nonempty YAML document through the canonical source parser before typed
-      configuration projection and backend overrides. Empty/comment-only and multi-document files MUST fail closed,
-      including when an override is supplied; a later document cannot be silently ignored. Valid single-document values,
-      defaults, source diagnostics and legal backend overrides retain their existing meaning. This direct-loader rule
-      does not change separately owned CLI config selection.
   unified_swarm_config:
     promoted_by: '#1804'
     parent_trackers:
