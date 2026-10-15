@@ -649,7 +649,7 @@ func TestSelectedForkRecoveryInspectionWithoutProcessAcquisitionBothStores(t *te
 			}
 			before := snapshotForkHistoricalExecutionTables(t, fixture.db, !fixture.sqlite)
 			inspection, err := reader.InspectSelectedForkRecovery(ctx, entries[0])
-			if err != nil || inspection.Plan.ExecutionID != issued.ExecutionID || inspection.ExecutionState != "prepared" || inspection.Plan.Disposition != runfork.SelectedForkRecoveryFailed {
+			if err != nil || inspection.Plan.ExecutionID != issued.ExecutionID || inspection.ExecutionState != "prepared" || inspection.Plan.Disposition != runfork.SelectedForkRecoveryControlOnly {
 				t.Fatalf("released predecessor inspection: %+v %v", inspection, err)
 			}
 			cancelled, cancel := context.WithCancel(ctx)
