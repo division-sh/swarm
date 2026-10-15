@@ -14,8 +14,8 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 	if got := scalarValue(mustMappingValue(t, authority, "promoted_by")); got != "#1804" {
 		t.Fatalf("unified config promoted_by = %q, want #1804", got)
 	}
-	if got := scalarValue(mustMappingValue(t, authority, "implementation_status")); got != "parser_discovery_first_slice_implemented" {
-		t.Fatalf("unified config implementation_status = %q, want parser_discovery_first_slice_implemented", got)
+	if got := scalarValue(mustMappingValue(t, authority, "implementation_status")); got != "single_deployment_document_implemented" {
+		t.Fatalf("unified config implementation_status = %q, want single_deployment_document_implemented", got)
 	}
 	if got := scalarValue(mustMappingValue(t, authority, "canonical_owner")); got != "platform-spec.yaml#configuration_source_authority.unified_swarm_config" {
 		t.Fatalf("unified config canonical owner = %q", got)
@@ -26,22 +26,44 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 		}
 	}
 
-	sourcePrecedence := mustMappingValue(t, authority, "source_precedence")
-	wantOrder := []string{"flags", "explicit_config", "local_operator_config", "project_config", "user_global_config", "built_in_defaults"}
-	if got := scalarSequenceValues(mustMappingValue(t, sourcePrecedence, "order")); !sameStrings(got, wantOrder) {
-		t.Fatalf("source precedence = %#v, want %#v", got, wantOrder)
+	sourceSelection := mustMappingValue(t, authority, "source_selection")
+	wantOrder := []string{"explicit_config", "deployment_config", "built_in_defaults"}
+	if got := scalarSequenceValues(mustMappingValue(t, sourceSelection, "order")); !sameStrings(got, wantOrder) {
+		t.Fatalf("file selection = %#v, want %#v", got, wantOrder)
 	}
-
-	trustTiers := mustMappingValue(t, authority, "trust_tiers")
-	for _, tier := range []string{"full", "medium", "low"} {
-		if !hasMappingKey(trustTiers, tier) {
-			t.Fatalf("trust tier %s missing", tier)
+	for _, retired := range []string{"source_precedence", "trust_tiers", "key_trust_classes", "merge_semantics", "doctor_provenance"} {
+		if hasMappingKey(authority, retired) {
+			t.Fatalf("retired config authority %s remains", retired)
 		}
 	}
-	keyTrustClasses := mustMappingValue(t, authority, "key_trust_classes")
-	for _, class := range []string{"project_safe", "elevated", "secret_reference", "project_contained_path", "split_unsupported"} {
-		if !hasMappingKey(keyTrustClasses, class) {
-			t.Fatalf("key trust class %s missing", class)
+	rules := mustMappingValue(t, sourceSelection, "rules")
+	for key, phrases := range map[string][]string{
+		"explicit_config":   {"whole document", "SWARM_CONFIG", "flag wins", "Relative selectors", "old grammar"},
+		"deployment_config": {"captured invocation root", "Do not walk ancestors", "selected context"},
+		"built_in_defaults": {"Only absence", "Omitted keys", "no additional file discovery"},
+		"selected_failure":  {"broken symlink", "dangling default entry is present", "No fallback"},
+		"ignored_locations": {"Project-root swarm.yaml", "user-global", "cannot contribute values", "delegate an env"},
+		"command_overrides": {"after selected-source", "not file layers", "invalid declaration", "inline secrets"},
+	} {
+		for _, phrase := range phrases {
+			assertContainsScalar(t, mustMappingValue(t, rules, key), phrase)
+		}
+	}
+	document := mustMappingValue(t, authority, "document_semantics")
+	for _, phrase := range []string{"aliases and merge keys only within", "duplicate-key checks", "No cross-file merge", "explicit false", "Null containers refuse"} {
+		assertContainsScalar(t, mustMappingValue(t, document, "rule"), phrase)
+	}
+	for _, phrase := range []string{"selected file", "source coordinates", "cannot delegate env", "secret-reference-only"} {
+		assertContainsScalar(t, mustMappingValue(t, document, "diagnostics"), phrase)
+	}
+	for _, phrase := range []string{"selected document's directory", "not a universal", "platform-spec path", "authored source root"} {
+		assertContainsScalar(t, mustMappingValue(t, document, "path_bases"), phrase)
+	}
+	doctor := mustMappingValue(t, authority, "doctor_selected_source")
+	requirements := strings.Join(scalarSequenceValues(mustMappingValue(t, doctor, "requirements")), "\n")
+	for _, phrase := range []string{"tri-state presence", "not successful admission or readiness", "do not expose file layers", "never disclose secret values", "nonzero", "without parsing", "symlink or hardlink", "uninspected target/store"} {
+		if !strings.Contains(requirements, phrase) {
+			t.Fatalf("doctor selected-source requirements missing %q:\n%s", phrase, requirements)
 		}
 	}
 
@@ -65,6 +87,20 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 	}
 	if hasMappingKey(sections, "human_tasks") {
 		t.Fatal("human_tasks must remain nested under budget, not top-level")
+	}
+	for i := 1; i < len(sections.Content); i += 2 {
+		if hasMappingKey(sections.Content[i], "trust") {
+			t.Fatalf("section %s retains a source trust classification", sections.Content[i-1].Value)
+		}
+	}
+	paths := mustMappingValue(t, mustMappingValue(t, sections, "paths"), "keys")
+	for _, key := range []string{"agent_config_map_file", "verification_gates_file", "tooling_lock_file"} {
+		if got := scalarValue(mustMappingValue(t, paths, key)); got != "retired_rejected" {
+			t.Fatalf("paths.%s = %q, want retired_rejected", key, got)
+		}
+	}
+	if got := scalarValue(mustMappingValue(t, paths, "platform_spec_path")); got != "existing_platform_spec_path_owner" {
+		t.Fatalf("platform spec path authority changed: %q", got)
 	}
 
 	llm := mustMappingValue(t, sections, "llm")
@@ -112,8 +148,8 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 		"human_tasks.auto_expire_hours",
 		"human_tasks.categories_enabled",
 	} {
-		if got := scalarValue(mustMappingValue(t, budgetKeys, key)); got != "project_safe" {
-			t.Fatalf("budget.%s = %q, want project_safe", key, got)
+		if got := scalarValue(mustMappingValue(t, budgetKeys, key)); got != "supported" {
+			t.Fatalf("budget.%s = %q, want supported", key, got)
 		}
 	}
 	for _, want := range []string{"budget.human_tasks", "top-level `human_tasks` section is not part"} {
@@ -124,10 +160,10 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 
 	platform := mustMappingValue(t, sections, "platform")
 	platformKeys := mustMappingValue(t, platform, "keys")
-	if got := scalarValue(mustMappingValue(t, platformKeys, "packs.platform_dirs")); got != "elevated" {
+	if got := scalarValue(mustMappingValue(t, platformKeys, "packs.platform_dirs")); got != "supported_complete_development_replacement" {
 		t.Fatalf("platform.packs.platform_dirs classification = %q", got)
 	}
-	for _, want := range []string{"optional and elevated", "complete development replacement", "no embedded fallback", "packs/manifest.yaml"} {
+	for _, want := range []string{"optional", "complete development replacement", "no embedded fallback", "packs/manifest.yaml", "selected document's directory"} {
 		if !strings.Contains(scalarValue(mustMappingValue(t, platform, "path_rule")), want) {
 			t.Fatalf("platform pack path rule missing %q:\n%s", want, scalarValue(mustMappingValue(t, platform, "path_rule")))
 		}
@@ -148,8 +184,8 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 	}
 
 	sharding := mustMappingValue(t, sections, "sharding")
-	if got := scalarValue(mustMappingValue(t, sharding, "trust")); got != "split_unsupported" {
-		t.Fatalf("sharding trust = %q, want split_unsupported", got)
+	if got := scalarValue(mustMappingValue(t, sharding, "admission")); got != "split_unsupported" {
+		t.Fatalf("sharding admission = %q, want split_unsupported", got)
 	}
 	for _, want := range []string{"Current code rejects", "does not promote sharding runtime behavior"} {
 		if !strings.Contains(scalarValue(mustMappingValue(t, sharding, "rule")), want) {
@@ -160,9 +196,10 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 	consumerMatrix := mustMappingValue(t, authority, "consumer_matrix")
 	wantConsumers := map[string]string{
 		"flat_cli_config":                       "superseded_by_unified_owner_first_slice_implemented",
-		"xdg_config_yaml":                       "unsupported_source_under_current_unified_source_admission",
-		"runtime_config_loader":                 "consumed_by_unified_owner_first_slice_implemented",
-		"executable_adjacent_config_yaml":       "invalid_ambient_reader_removed_by_1858",
+		"xdg_config_yaml":                       "ignored_implicit_location_current_format_allowed_only_by_explicit_selection",
+		"root_swarm_yaml":                       "ignored_implicit_location_metadata_only_doctor_notice",
+		"runtime_config_loader":                 "selected_document_projection_through_unified_owner",
+		"executable_adjacent_config_yaml":       "ignored_implicit_location_current_format_allowed_only_by_explicit_selection",
 		"env_guard_delegated_env_sources":       "consumed_by_unified_owner_first_slice_implemented",
 		"platform_packs_platform_dirs":          "consumed_by_unified_owner_complete_development_replacement",
 		"provider_triggers_packs_platform_dirs": "retired_fail_closed_use_platform_packs_platform_dirs",
@@ -186,14 +223,16 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 		t.Fatalf("unknown key policy = %q", got)
 	}
 	rejectionDiagnostics := mustMappingValue(t, oldShapePolicy, "rejection_diagnostics")
-	for _, key := range []string{"unknown_key", "trust_tier_rejection", "split_unsupported_key"} {
+	for _, key := range []string{"unknown_key", "split_unsupported_key"} {
 		if !hasMappingKey(rejectionDiagnostics, key) {
 			t.Fatalf("rejection diagnostic %s missing", key)
 		}
 	}
 	assertContainsScalar(t, mustMappingValue(t, rejectionDiagnostics, "unknown_key"), "unknown config key")
-	assertContainsScalar(t, mustMappingValue(t, rejectionDiagnostics, "trust_tier_rejection"), "not-allowed-here")
-	for _, want := range []string{"recognized but not wired", "not-yet-wired", "MUST NOT be reported as typos or", "trust-tier violations"} {
+	if hasMappingKey(rejectionDiagnostics, "trust_tier_rejection") {
+		t.Fatal("deleted file trust-tier refusal remains")
+	}
+	for _, want := range []string{"recognized but not wired", "not-yet-wired", "silently ignored or reported as typos", "no supported replacement"} {
 		assertContainsScalar(t, mustMappingValue(t, rejectionDiagnostics, "split_unsupported_key"), want)
 	}
 	for _, key := range []string{"flat_cli_shape", "runtime_config_shape", "executable_adjacent_config_yaml"} {
@@ -231,7 +270,8 @@ func TestPlatformSpecUnifiedConfigSupersedesOldConfigCommitments(t *testing.T) {
 	envAuthority := mustMappingValue(t, mustMappingValue(t, root, "environment_source_authority"), "repo_wide_swarm_env_accepted_set")
 	typedDelegation := mustMappingValue(t, envAuthority, "typed_delegation")
 	assertContainsScalar(t, mustMappingValue(t, typedDelegation, "rule"), "configuration_source_authority.unified_swarm_config")
-	assertContainsScalar(t, mustMappingValue(t, typedDelegation, "rule"), "executable-adjacent `config.yaml` is superseded")
+	assertContainsScalar(t, mustMappingValue(t, typedDelegation, "rule"), "Only the selected, admitted whole document")
+	assertContainsScalar(t, mustMappingValue(t, typedDelegation, "rule"), "ignored files cannot delegate or block")
 
 	serve := mustMappingValue(t, mustMappingValue(t, cliSpec, "command_catalog"), "serve")
 	runtimeConfig := mustMappingValue(t, serve, "runtime_config_backend_selection")
