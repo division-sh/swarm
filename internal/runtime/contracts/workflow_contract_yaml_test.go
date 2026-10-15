@@ -411,31 +411,29 @@ func TestSystemNodeHandlerDecodeJoinCanonicalShape(t *testing.T) {
 	var nodes map[string]SystemNodeContract
 	err := decodeNodeTestYAML([]byte(`
 coordinator:
-  execution_type: system_node
-  event_handlers:
-    item.completed:
-      join:
-        stage: awaiting_items
-        members:
-          from: state.expected_item_ids
-          by: payload.item_id
-        output: payload.result
-        until: items.cancelled
-        on_complete:
-          emit:
-            event: items.completed
-            fields:
-              results: join.results
-          advances_to: ready
-        deadline:
-          after: 24h
-          from: stage_entry
-        on_deadline:
-          emit:
-            event: items.timed_out
-            fields:
-              missing: join.missing
-          advances_to: attention
+  item.completed:
+    join:
+      stage: awaiting_items
+      members:
+        from: state.expected_item_ids
+        by: payload.item_id
+      output: payload.result
+      until: items.cancelled
+      on_complete:
+        emit:
+          event: items.completed
+          fields:
+            results: join.results
+        advances_to: ready
+      deadline:
+        after: 24h
+        from: stage_entry
+      on_deadline:
+        emit:
+          event: items.timed_out
+          fields:
+            missing: join.missing
+        advances_to: attention
 `), &nodes)
 	if err != nil {
 		t.Fatalf("yaml.Unmarshal join: %v", err)

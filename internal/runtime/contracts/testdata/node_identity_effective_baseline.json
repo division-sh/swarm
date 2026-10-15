@@ -174,7 +174,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -182,15 +182,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": null,
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "telegram.reply_requested"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -199,7 +196,10 @@
           "RuntimeSubscriptions": [
             "telegram.reply_requested"
           ],
-          "Produces": []
+          "Produces": [
+            "telegram-chat/telegram_send_message.failed",
+            "telegram-chat/telegram_send_message.succeeded"
+          ]
         },
         "identity": {
           "flow_path": "telegram-chat",
@@ -1175,7 +1175,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -1183,17 +1183,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": [
-            "operating.report.requested"
-          ],
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "operating.report.triggered"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -1317,7 +1312,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -1325,17 +1320,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": [
-            "operating.reported"
-          ],
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "operating.report.requested"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -1565,7 +1555,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -1573,19 +1563,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": [
-            "period.setup",
-            "period.reported"
-          ],
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "portfolio.setup",
-            "operating.reported"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -1936,7 +1919,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -1944,16 +1927,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": null,
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "period.setup",
-            "period.reported"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -3184,7 +3163,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -3192,17 +3171,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": [
-            "operating.report.requested"
-          ],
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "operating.report.triggered"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -3304,7 +3278,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -3312,17 +3286,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": [
-            "operating.reported"
-          ],
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "operating.report.requested"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -3514,7 +3483,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -3522,15 +3491,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": null,
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "operating.reported"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -4839,7 +4805,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -4847,17 +4813,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": null,
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "account.registered",
-            "account.notify.requested",
-            "account.notification.completed"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -5302,7 +5263,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -5310,19 +5271,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": null,
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "portfolio.opened",
-            "portfolio.account.register.requested",
-            "portfolio.accounts.register.requested",
-            "portfolio.membership.seeded",
-            "portfolio.notify.requested"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -6228,7 +6182,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -6236,15 +6190,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": null,
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "work.ready"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -6322,7 +6273,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -6330,17 +6281,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": [
-            "work.ready"
-          ],
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "work.requested"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -6653,7 +6599,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -6661,17 +6607,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": [
-            "item.processed"
-          ],
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "item.received"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -6739,7 +6680,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -6747,15 +6688,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": null,
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "item.processed"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -7393,7 +7331,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -7401,18 +7339,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": [
-            "validation.requested"
-          ],
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "validation.triggered",
-            "validation.started"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -7504,7 +7436,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -7512,17 +7444,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": [
-            "validation.started"
-          ],
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "validation.requested"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -8362,7 +8289,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -8370,19 +8297,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": [
-            "requester.setup",
-            "requester.requested"
-          ],
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "requester.setup.requested",
-            "request.submitted"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -8475,7 +8395,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -8483,17 +8403,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": [
-            "provider.replied"
-          ],
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "provider.requested"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -8663,7 +8578,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -8671,17 +8586,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": null,
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "requester.setup",
-            "requester.requested",
-            "provider.replied"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -9439,7 +9349,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -9447,16 +9357,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": null,
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "account.setup",
-            "account.ready"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -9592,7 +9498,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -9600,19 +9506,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": [
-            "account.setup",
-            "account.ready"
-          ],
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "account.setup.requested",
-            "account.work.requested"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -10058,7 +9957,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -10066,15 +9965,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": null,
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "account.ready"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -10152,7 +10048,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -10160,17 +10056,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": [
-            "account.ready"
-          ],
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "account.requested"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -10458,7 +10349,7 @@
               "SetsGate": null
             }
           },
-          "ExecutionType": "system_node",
+          "ExecutionType": "",
           "GateState": {
             "Description": "",
             "Gates": null,
@@ -10466,15 +10357,12 @@
           },
           "IdempotencyTable": "",
           "Implementation": "",
-          "Produces": null,
           "StateSchema": {
             "Description": "",
             "Fields": null
           },
           "StateTable": "",
-          "SubscribesTo": [
-            "automation.requested"
-          ],
+          "SubscribesTo": null,
           "Timers": null
         },
         "effective": {
@@ -10483,7 +10371,10 @@
           "RuntimeSubscriptions": [
             "automation.requested"
           ],
-          "Produces": []
+          "Produces": [
+            "send_notification.failed",
+            "send_notification.succeeded"
+          ]
         },
         "identity": {
           "flow_path": ".",

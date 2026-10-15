@@ -91,7 +91,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsAllowsMissingExecutionType
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsNodeIDMismatch(t *testing.T) {
 	var nodes map[string]SystemNodeContract
 	err := decodeNodeTestYAML([]byte("worker:\n  id: worker-alias\n"), &nodes)
-	if err == nil || !strings.Contains(err.Error(), retiredNodeID) {
+	if err == nil || !strings.Contains(err.Error(), nodeIDHandlerShapeError) || !strings.Contains(err.Error(), "must be a mapping, got scalar") || !strings.Contains(err.Error(), "nodes.yaml:2:") {
 		t.Fatalf("unexpected load validation error: %v", err)
 	}
 }
@@ -99,7 +99,7 @@ func TestValidateWorkflowContractBundleLoadConstraintsRejectsNodeIDMismatch(t *t
 func TestValidateWorkflowContractBundleLoadConstraintsRejectsRenderedNodeIDTemplate(t *testing.T) {
 	var nodes map[string]SystemNodeContract
 	err := decodeNodeTestYAML([]byte("worker:\n  id: worker-{instance_id}\n"), &nodes)
-	if err == nil || !strings.Contains(err.Error(), retiredNodeID) {
+	if err == nil || !strings.Contains(err.Error(), nodeIDHandlerShapeError) || !strings.Contains(err.Error(), "must be a mapping, got scalar") || !strings.Contains(err.Error(), "nodes.yaml:2:") {
 		t.Fatalf("unexpected node template admission: %v", err)
 	}
 }

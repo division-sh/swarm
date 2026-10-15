@@ -2738,7 +2738,7 @@ contract_formats:
     agents_yaml: '{}'
   produces_derivation: >-
     A node's outputs are the events its handlers emit. One canonical owner derives the effective production surface from
-    handler top-level emit, rule-local emit, rules emit template specialization, selected on_complete emit, guard escalation,
+    handler top-level emit, rule-local emit, rules emit template specialization, on_success emit, selected on_complete emit, guard escalation,
     join outcome emit, fan_out emit, and generated activity result events. Runtime routing, producer authority, transition
     checks, verification and describe consume this derived surface. An authored produces field is not supported.
   underscore_prefix_convention:

@@ -55,6 +55,10 @@ fixture literal. Its explicit `connector` activity ID and all four canonical
 result-event names are asserted through the admitted bundle owner on both stores;
 the five execution/refusal cases are unchanged.
 
+`go-node-identity-inputs.json` banks the complete stage-join fixture used by the
+independent-ID proof. Its join body, effective identity, member paths, completion
+and deadline assertions are unchanged; only the node carriers are removed.
+
 The runtime decoder cut, scalar guard/disposition rewrite, explicit activity-ID
 materialization, generated-source rewrite, and final consumer/pin reconciliation
 remain in the same atomic slice-1 PR. This carrier tool must not be used to

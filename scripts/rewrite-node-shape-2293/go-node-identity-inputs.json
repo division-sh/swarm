@@ -1,0 +1,15 @@
+[
+  {
+    "path": "internal/runtime/contracts/workflow_contract_yaml_test.go",
+    "declaration": "TestSystemNodeHandlerDecodeJoinCanonicalShape",
+    "ordinal": 0,
+    "before": "`\ncoordinator:\n  execution_type: system_node\n  event_handlers:\n    item.completed:\n      join:\n        stage: awaiting_items\n        members:\n          from: state.expected_item_ids\n          by: payload.item_id\n        output: payload.result\n        until: items.cancelled\n        on_complete:\n          emit:\n            event: items.completed\n            fields:\n              results: join.results\n          advances_to: ready\n        deadline:\n          after: 24h\n          from: stage_entry\n        on_deadline:\n          emit:\n            event: items.timed_out\n            fields:\n              missing: join.missing\n          advances_to: attention\n`",
+    "after": "`\ncoordinator:\n  item.completed:\n    join:\n      stage: awaiting_items\n      members:\n        from: state.expected_item_ids\n        by: payload.item_id\n      output: payload.result\n      until: items.cancelled\n      on_complete:\n        emit:\n          event: items.completed\n          fields:\n            results: join.results\n        advances_to: ready\n      deadline:\n        after: 24h\n        from: stage_entry\n      on_deadline:\n        emit:\n          event: items.timed_out\n          fields:\n            missing: join.missing\n        advances_to: attention\n`",
+    "counts": {
+      "Subscriptions": 0,
+      "ExecutionTypes": 1,
+      "Produces": 0,
+      "HandlerContainers": 1
+    }
+  }
+]
