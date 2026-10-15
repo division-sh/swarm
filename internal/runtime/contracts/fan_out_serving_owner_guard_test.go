@@ -53,6 +53,19 @@ func hostileGroupMembership(anotherName runtimepipelineobligation.PublicationGro
     _ = anotherName.ValidateCommittedMembership
 }
 `)...)
+	groupPath := filepath.Join(root, "internal/runtime/bus/fan_out_publication_group.go")
+	groupSource, err := os.ReadFile(groupPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupSource = append(groupSource, []byte(`
+func hostileSameFileRecordPrepared(arbitraryReceiver runtimepipelineobligation.PublicationGroup, ctx context.Context) {
+    arbitraryReceiver.RecordPrepared(ctx, runtimepipelineobligation.Claim{}, nil)
+}
+func hostileSameFileExtractedRecordPrepared(anotherName runtimepipelineobligation.PublicationGroup) {
+    _ = anotherName.RecordPrepared
+}
+`)...)
 	observationPath := filepath.Join(root, "internal/runtime/startupownership/fan_out_readback.go")
 	observationSource, err := os.ReadFile(observationPath)
 	if err != nil {
@@ -67,7 +80,7 @@ func hostileRegistrationReadback(owner fanOutExecutionObserver) {
 }
 `)...)
 	pkgs, err := packages.Load(&packages.Config{
-		Dir: root, Overlay: map[string][]byte{path: source, busPath: busSource, observationPath: observationSource},
+		Dir: root, Overlay: map[string][]byte{path: source, busPath: busSource, groupPath: groupSource, observationPath: observationSource},
 		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
 			packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedImports,
 	}, "./internal/runtime/...", "./internal/store/...", "./internal/operatorread/...", "./internal/apiv1/...")
@@ -99,25 +112,52 @@ func hostileRegistrationReadback(owner fanOutExecutionObserver) {
 		startupPackage + ".hostileRegistrationSelection": false,
 		startupPackage + ".hostileRegistrationReadback":  false,
 	}
-	groupAllowed := map[string]string{
-		obligationPackage + ".PublicationGroup.ClaimBatch":                  busPackage + ".EventBus.PrepareFanOutPublications",
-		pipelinePath + ".FanOutObligationOwner.BeginFanOutPublicationGroup": "",
-		pipelinePath + ".FanOutObligationOwner.BeginFanOutEvaluation":       pipelinePath + ".PipelineCoordinator.claimAndServeFanOutTurn",
-		obligationPackage + ".PublicationGroup.Claim":                       "",
-		obligationPackage + ".PublicationGroup.RecordPrepared":              busPackage + ".EventBus.prepareEnginePublicationsWithMember",
-		obligationPackage + ".PublicationGroup.Seal":                        busPackage + ".EventBus.SealFanOutPublications",
-		obligationPackage + ".PublicationGroup.ValidateCommitted":           busPackage + ".EventBus.validateCommittedFanOutPublications",
-		obligationPackage + ".PublicationGroup.ValidateCommittedMembership": busPackage + ".EventBus.validateCommittedFanOutPublications",
-		obligationPackage + ".PublicationGroup.Settle":                      busPackage + ".fanOutPublicationSettlement.flushLocked",
-		obligationPackage + ".PublicationGroup.ReadPublicationSettlement":   busPackage + ".fanOutPublicationSettlement.flushLocked",
-		obligationPackage + ".PublicationGroup.Close":                       pipelinePath + ".PipelineCoordinator.claimAndServeFanOutTurn",
+	const recordPrepared = obligationPackage + ".PublicationGroup.RecordPrepared"
+	groupAllowed := map[string]map[string]bool{
+		obligationPackage + ".PublicationGroup.ClaimBatch": {
+			busPackage + ".EventBus.PrepareFanOutPublications": true,
+		},
+		pipelinePath + ".FanOutObligationOwner.BeginFanOutPublicationGroup": {},
+		pipelinePath + ".FanOutObligationOwner.BeginFanOutEvaluation": {
+			pipelinePath + ".PipelineCoordinator.claimAndServeFanOutTurn": true,
+		},
+		obligationPackage + ".PublicationGroup.Claim": {},
+		// #2617 6181479409: the native path records after its read cut closes.
+		recordPrepared: {
+			busPackage + ".EventBus.prepareEnginePublicationsWithMember": true,
+			busPackage + ".EventBus.finishFanOutPublicationPreparation":  true,
+		},
+		obligationPackage + ".PublicationGroup.Seal": {
+			busPackage + ".EventBus.SealFanOutPublications": true,
+		},
+		obligationPackage + ".PublicationGroup.ValidateCommitted": {
+			busPackage + ".EventBus.validateCommittedFanOutPublications": true,
+		},
+		obligationPackage + ".PublicationGroup.ValidateCommittedMembership": {
+			busPackage + ".EventBus.validateCommittedFanOutPublications": true,
+		},
+		obligationPackage + ".PublicationGroup.Settle": {
+			busPackage + ".fanOutPublicationSettlement.flushLocked": true,
+		},
+		obligationPackage + ".PublicationGroup.ReadPublicationSettlement": {
+			busPackage + ".fanOutPublicationSettlement.flushLocked": true,
+		},
+		obligationPackage + ".PublicationGroup.Close": {
+			pipelinePath + ".PipelineCoordinator.claimAndServeFanOutTurn": true,
+		},
+	}
+	recordPreparedSites := map[string]int{
+		busPackage + ".EventBus.prepareEnginePublicationsWithMember": 0,
+		busPackage + ".EventBus.finishFanOutPublicationPreparation":  0,
 	}
 	groupHostile := map[string]bool{
-		busPackage + ".hostileOneAtATimeGroupClaims": false,
-		pipelinePath + ".hostilePublicationGroup":    false,
-		busPackage + ".hostileGroupClose":            false,
-		busPackage + ".hostileGroupPreparation":      false,
-		busPackage + ".hostileGroupMembership":       false,
+		busPackage + ".hostileOneAtATimeGroupClaims":           false,
+		pipelinePath + ".hostilePublicationGroup":              false,
+		busPackage + ".hostileGroupClose":                      false,
+		busPackage + ".hostileGroupPreparation":                false,
+		busPackage + ".hostileGroupMembership":                 false,
+		busPackage + ".hostileSameFileRecordPrepared":          false,
+		busPackage + ".hostileSameFileExtractedRecordPrepared": false,
 	}
 	for _, pkg := range pkgs {
 		for _, file := range pkg.Syntax {
@@ -145,11 +185,16 @@ func hostileRegistrationReadback(owner fanOutExecutionObserver) {
 								t.Errorf("unauthorized registration observation consumer %s at %s", owner, pkg.Fset.Position(selector.Pos()))
 							}
 						}
-						if allowedOwner, guarded := groupAllowed[fanOutGuardFunctionIdentity(method)]; guarded && owner != allowedOwner {
-							if _, expected := groupHostile[owner]; expected {
-								groupHostile[owner] = true
-							} else {
-								t.Errorf("unauthorized publication group consumer %s at %s", owner, pkg.Fset.Position(selector.Pos()))
+						methodIdentity := fanOutGuardFunctionIdentity(method)
+						if consumers, guarded := groupAllowed[methodIdentity]; guarded {
+							if !consumers[owner] {
+								if _, expected := groupHostile[owner]; expected {
+									groupHostile[owner] = true
+								} else {
+									t.Errorf("unauthorized publication group consumer %s at %s", owner, pkg.Fset.Position(selector.Pos()))
+								}
+							} else if methodIdentity == recordPrepared {
+								recordPreparedSites[owner]++
 							}
 						}
 					}
@@ -191,6 +236,11 @@ func hostileRegistrationReadback(owner fanOutExecutionObserver) {
 	for owner, detected := range groupHostile {
 		if !detected {
 			t.Errorf("semantic group guard missed %s", owner)
+		}
+	}
+	for owner, count := range recordPreparedSites {
+		if count != 1 {
+			t.Errorf("RecordPrepared consumer %s has %d sites, want exactly one", owner, count)
 		}
 	}
 	for owner, detected := range observationHostile {
