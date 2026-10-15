@@ -19,9 +19,11 @@ func TestS6UnifiedProviderLimitsRejectRetiredFields(t *testing.T) {
 					}
 					path := filepath.Join(t.TempDir(), "swarm.yaml")
 					writeRuntimeConfigText(t, path, "llm: {provider_limits: {anthropic: "+policy+"}}\n")
-					_, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{ExplicitPath: path})
-					if err == nil || !strings.Contains(err.Error(), key) {
-						t.Fatalf("retired field %s admitted: %v", key, err)
+					for _, override := range []string{"", "mock"} {
+						_, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{ExplicitPath: path, BackendOverride: override})
+						if err == nil || !strings.Contains(err.Error(), key) {
+							t.Fatalf("retired field %s admitted with override %q: %v", key, override, err)
+						}
 					}
 				})
 			}

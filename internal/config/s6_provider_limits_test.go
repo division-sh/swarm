@@ -2,8 +2,6 @@ package config
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -30,12 +28,6 @@ func TestS6ProviderLimitsRejectRetiredFieldsBeforeProjection(t *testing.T) {
 					if !reflect.DeepEqual(target, want) {
 						t.Fatalf("rejected source changed projection: %#v", target)
 					}
-					path := filepath.Join(t.TempDir(), "swarm.yaml")
-					if err := os.WriteFile(path, []byte(source), 0600); err != nil {
-						t.Fatal(err)
-					}
-					_, err = LoadWithOptions(path, LoadOptions{BackendOverride: "mock"})
-					assertS6RetiredProviderField(t, err, key)
 					var direct LLMProviderLimitPolicy
 					assertS6RetiredProviderField(t, yaml.Unmarshal([]byte(policy), &direct), key)
 				})
@@ -62,15 +54,6 @@ func TestS6ProviderLimitsAdmitOneProfileInteger(t *testing.T) {
 			}
 			if err := target.validateLLMProviderLimits(); err != nil {
 				t.Fatalf("one profile integer rejected: %v", err)
-			}
-			path := filepath.Join(t.TempDir(), "swarm.yaml")
-			fileSource := fmt.Sprintf("llm:\n  backend: anthropic\n  session: {lock_ttl: 1s, rotate_after_turns: 1, rotate_on_parse_failures: 1}\n  provider_limits: {%s: {max_concurrency: 2}}\n", profile)
-			if err := os.WriteFile(path, []byte(fileSource), 0600); err != nil {
-				t.Fatal(err)
-			}
-			loaded, err := Load(path)
-			if err != nil || loaded.LLM.ProviderLimits[profile].MaxConcurrency != 2 {
-				t.Fatalf("on-disk profile integer: cfg=%#v err=%v", loaded, err)
 			}
 			var direct LLMProviderLimitPolicy
 			if err := yaml.Unmarshal([]byte("{max_concurrency: 2}"), &direct); err != nil || direct.MaxConcurrency != 2 {

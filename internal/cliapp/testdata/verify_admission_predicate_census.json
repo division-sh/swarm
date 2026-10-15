@@ -3246,6 +3246,12 @@
     "body_sha256": "a774f51c979b75b173cdf02738526ab1d918d8759200dd214b392cce24d409f5"
   },
   {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.AgentRecoveryWriteObserver",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "0caf1e8a8b948fe131cd32383eda01f4d1ca5815c1b248f57811e8e127b534ee"
+  },
+  {
     "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.BeginTx",
     "audit_rows": "A19,A20,A28",
     "proof_families": "P18,P19,P24",
@@ -3537,7 +3543,7 @@
     "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.runTransactionOutcome",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
-    "body_sha256": "bc613d74b96a85ec802eb1454f0c5d91e4011c74570fa4eb0b954bf162effd3c"
+    "body_sha256": "80d779dc1ac33c511d03568efafb07f5f7415dd57e2b1a564ab2ad2886ba59e9"
   },
   {
     "owner": "internal/store/internal/backend/postgres/transaction.go::*rolledBackSerializationConflict.Error",
