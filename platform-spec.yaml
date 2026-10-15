@@ -7658,6 +7658,24 @@ engine:
               operation: 'construction:*github.com/division-sh/swarm/internal/store.SQLiteRuntimeStore'
               multiplicity: '1 -> 1; retained debt, zero deletion credit'
               rule: Only this exact forward declaration move is authorized. The resolved type, carrier family and replacement owner stay identical. Whole reviewed old/new journey sources and the unchanged native-reopen factory are pinned before a pending relocation can pass. All actual/head/trusted-baseline/trusted-source comparisons retain the occurrence; coexistence, duplication, reversal, resurrection, foreign donors, source drift and unrelated new authority fail closed. Once landed, the transition is inert and genuine subsequent deletion remains possible. Both native-reopen APIs continue to return concrete adapters; this accounting move grants no capability or collector exemption.
+          retained_registry_completion_2542:
+            authorized_by: '#2542 user decision 6203866523; contracts 6203773156 and 6203881861'
+            owner: existing TestPersistenceAuthorityFindingRegistry
+            active_set: internal/store/testdata/persistence_authority_registry_2542_retained.tsv
+            immutable_origin: 4a7e8b8f66c5f536c1f96719e7e4f4fb5a82a12a
+            origin_rows: 4813
+            origin_sha256: 5f5c9cf2ea361070e0bf3dba00f2029bf9205d7befcfe5ba793bf00fafc823cf
+            rule: >-
+              The exact bytewise-sorted unclassified rows may retain only their completion reason and the raw-disallowed
+              reason caused solely by that same disposition, preserving diagnostic multiplicity. The active set equals
+              the origin on first landing and may subsequently only shrink against both origin and the trusted previous
+              accepted master set; every active key remains an actual registered unclassified finding. Unknown, stale,
+              duplicate, new or resurrected keys, other invalid roles, compound-fixture violations and scan errors fail.
+              Preserve unfiltered strict diagnostics and report strict_completion=false, exact retained count/digest,
+              origin, trusted predecessor and decision provenance. This grants no raw authority, classifier exemption,
+              debt credit, root omission or special attestation. The same contract remains executable on merged master
+              and push/nightly runs; later reviewed B migrations shrink toward zero, without extending approval to E's
+              S6 branch. Normal exact-head preflight, native guards, debt ratchet and hosted gates remain required.
           rules:
             - The registry resolves named aliases, embedded fields, effective method sets after promotion, interface methods, function-valued fields, function parameters/results, and context reads/writes.
             - The census and selected-import boundary guard share the pure fixture-package role predicate in internal/checkoutsource. Fixture sources remain enumerated and subject to every other boundary and authority check; the role does not permit ordinary production to consume fixture authority or grant construction, raw-handle, callback or mutation capabilities.
