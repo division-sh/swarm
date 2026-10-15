@@ -159,7 +159,7 @@ func TestAdmissionFactoringDoctorReadback(t *testing.T) {
 					t.Fatalf("typed blocker %s count=%d\n%s", tc.code, found, result.output)
 				}
 				if tc.name == "invalid-admission" {
-					want := fmt.Sprintf("swarm.yaml config blockers:\n`paths.platform_spec_path` at %s:2:3 is not a config key; the platform spec is embedded in `swarm`.", config)
+					want := fmt.Sprintf("swarm.yaml config blockers:\n`paths.platform_spec_path` at %s:4:3 is not a config key; the platform spec is embedded in `swarm`.", config)
 					if refusal != want {
 						t.Fatalf("config retirement lost exact located teaching; want %q\n%s", want, result.output)
 					}
