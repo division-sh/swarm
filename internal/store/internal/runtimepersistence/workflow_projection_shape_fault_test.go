@@ -92,6 +92,89 @@ func TestWorkflowPrivateBookkeepingWitnessPreservesOtherFactsBothStores(t *testi
 	}
 }
 
+func TestWorkflowIdentityLookalikeFaultPreservesConstructionBothStores(t *testing.T) {
+	run, entity := uuid.NewString(), uuid.NewString()
+	for _, selected := range []any{nil, (*PostgresStore)(nil), (*SQLiteRuntimeStore)(nil), &PostgresStore{}, &SQLiteRuntimeStore{}, &sql.DB{}, &sql.Tx{}} {
+		if changed, err := SetWorkflowProjectionIdentityLookalikesForTest(context.Background(), selected, run, entity, "review/item"); err == nil || changed != 0 {
+			t.Fatalf("identity lookalikes accepted an unowned handle: %T rows=%d err=%v", selected, changed, err)
+		}
+	}
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f, plan := newWorkflowTargetConstructionFixture(t, backend)
+			if committed, err := (agentFixtureFlowActivationCommitter{store: f.store}).CommitFlowInstanceActivation(f.ctx, plan); err != nil || !committed.Created || !committed.Acknowledged {
+				t.Fatalf("lawful construction: %+v err=%v", committed, err)
+			}
+			record, err := plan.PersistenceRecord()
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, entity, path := record.Identity.RunID, record.State.EntityID, record.Identity.Route.InstancePath
+			reader := f.store.(pipeline.WorkflowTargetPersistenceReader)
+			before, err := reader.LoadWorkflowTargetPersistence(f.ctx, record.Identity, identity.NormalizeEntityID(entity))
+			if err != nil {
+				t.Fatal(err)
+			}
+			history, err := ReadTrackedEntityMutationProjectionStorageForTest(f.ctx, f.store, run, entity)
+			if err != nil {
+				t.Fatal(err)
+			}
+			physical := readProjectionShapeStorage(t, f, run, entity)
+			for _, key := range [][3]string{{"", entity, path}, {run, "invalid", path}, {run, entity, " spaced "}, {uuid.NewString(), entity, path}, {run, uuid.NewString(), path}, {run, entity, "foreign/path"}, {run, run, run}} {
+				if changed, err := SetWorkflowProjectionIdentityLookalikesForTest(f.ctx, f.store, key[0], key[1], key[2]); err == nil || changed != 0 {
+					t.Fatalf("identity lookalikes admitted invalid/foreign/fieldless scope: %v rows=%d err=%v", key, changed, err)
+				}
+			}
+			cancelled, cancel := context.WithCancel(f.ctx)
+			cancel()
+			if changed, err := SetWorkflowProjectionIdentityLookalikesForTest(cancelled, f.store, run, entity, path); !errors.Is(err, context.Canceled) || changed != 0 {
+				t.Fatalf("cancelled identity lookalikes: rows=%d err=%v", changed, err)
+			}
+			if actual := readProjectionShapeStorage(t, f, run, entity); !reflect.DeepEqual(actual, physical) {
+				t.Fatalf("refused identity lookalikes changed physical facts: actual=%+v before=%+v", actual, physical)
+			}
+			if changed, err := SetWorkflowProjectionIdentityLookalikesForTest(f.ctx, f.store, run, entity, path); err != nil || changed != 1 {
+				t.Fatalf("exact identity lookalikes: rows=%d err=%v", changed, err)
+			}
+			expected := physical
+			expected[0] = map[string]any{"entity_id": "authored-lookalike", "flow_instance": "authored/lookalike"}
+			expected[4] = map[string]any{"entity_id": "bookkeeping-lookalike", "flow_instance": "bookkeeping/lookalike"}
+			if actual := readProjectionShapeStorage(t, f, run, entity); !reflect.DeepEqual(actual, expected) {
+				t.Fatalf("identity lookalikes lost exact value maps or unrelated facts: actual=%+v expected=%+v", actual, expected)
+			}
+			after, err := reader.LoadWorkflowTargetPersistence(f.ctx, record.Identity, identity.NormalizeEntityID(entity))
+			if err != nil {
+				t.Fatal(err)
+			}
+			after.State.Fields = before.State.Fields
+			after.Lifecycle.State.Bookkeeping = before.Lifecycle.State.Bookkeeping
+			if !reflect.DeepEqual(after, before) {
+				t.Fatalf("identity lookalikes changed constructed identity, status, clocks or revision: before=%+v after=%+v", before, after)
+			}
+			keptHistory, err := ReadTrackedEntityMutationProjectionStorageForTest(f.ctx, f.store, run, entity)
+			if err != nil || !reflect.DeepEqual(keptHistory.Mutations, history.Mutations) {
+				t.Fatalf("identity lookalikes rewrote immutable history: before=%+v after=%+v err=%v", history.Mutations, keptHistory.Mutations, err)
+			}
+			if changed, err := SetWorkflowProjectionConflictingEntityTypeForTest(f.ctx, f.store, run, entity); err != nil || changed != 1 {
+				t.Fatalf("install foreign field contract: rows=%d err=%v", changed, err)
+			}
+			foreign := readProjectionShapeStorage(t, f, run, entity)
+			if changed, err := SetWorkflowProjectionIdentityLookalikesForTest(f.ctx, f.store, run, entity, path); err == nil || changed != 0 {
+				t.Fatalf("identity lookalikes admitted mismatched companions: rows=%d err=%v", changed, err)
+			}
+			if actual := readProjectionShapeStorage(t, f, run, entity); !reflect.DeepEqual(actual, foreign) {
+				t.Fatalf("refused mismatched companion changed physical facts: actual=%+v before=%+v", actual, foreign)
+			}
+			if err := f.store.(interface{ Close() error }).Close(); err != nil {
+				t.Fatal(err)
+			}
+			if changed, err := SetWorkflowProjectionIdentityLookalikesForTest(f.ctx, f.store, run, entity, path); err == nil || changed != 0 {
+				t.Fatalf("identity lookalikes admitted closed owner: rows=%d err=%v", changed, err)
+			}
+		})
+	}
+}
+
 func TestWorkflowEmptyFieldFixturePreservesHeaderAndHistoryBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
