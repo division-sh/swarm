@@ -55,8 +55,15 @@ func (r *capturedConstructionResolver) resolve(ctx context.Context, snapshot *ru
 		raw := bytes.TrimSpace(metadata.InitialMaterialization)
 		native := len(raw) != 0 && !bytes.Equal(raw, []byte("null"))
 		if native {
-			if _, err := pipeline.DecodeStoredFlowConstructionReceipt(raw, snapshot.RunID, metadata.EntityID, metadata.FlowInstance, metadata.FlowTemplate); err != nil {
+			if metadata.InitialProjectionVersion != pipeline.FlowConstructionReceiptVersion {
+				return nil, fmt.Errorf("native captured header requires its immutable constructor receipt version")
+			}
+			receipt, err := pipeline.DecodeStoredFlowConstructionReceipt(raw, snapshot.RunID, metadata.EntityID, metadata.FlowInstance, metadata.FlowTemplate)
+			if err != nil {
 				return nil, err
+			}
+			if !receipt.OccurredAt.Equal(metadata.CreatedAt) || receipt.Persisted.Control.EntityType != metadata.EntityType {
+				return nil, fmt.Errorf("native captured constructor contradicts fixed header birth or field contract")
 			}
 		}
 		if origin.Kind() == runlifecycle.OriginForkMaterialization {

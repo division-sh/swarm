@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -24,19 +25,26 @@ func FixedConstructionForRoute(source semanticview.Source, plan runfork.RunForkP
 	if err != nil || !found {
 		return flowidentity.Instance{}, entity, false, err
 	}
-	if err := constructed.ValidateConstruction(source, plan.SourceRunID); err != nil {
-		return flowidentity.Instance{}, entity, false, fmt.Errorf("selected fixed-revision construction: %w", err)
+	if err := validateSelectedConstruction(source, plan.SourceRunID, constructed, entity); err != nil {
+		return flowidentity.Instance{}, entity, false, err
+	}
+	return constructed, entity, true, nil
+}
+
+func validateSelectedConstruction(source semanticview.Source, runID string, constructed flowidentity.Instance, entity runfork.RunForkEntityState) error {
+	if err := constructed.ValidateConstruction(source, runID); err != nil {
+		return fmt.Errorf("selected fixed-revision construction: %w", err)
 	}
 	metadata := entity.MaterializationMetadata
 	scope, declared := source.FlowScopeByID(constructed.TemplateID)
 	if !declared || metadata.Mode != scope.Mode {
-		return flowidentity.Instance{}, entity, false, fmt.Errorf("selected header conflicts with declared flow mode")
+		return fmt.Errorf("selected header conflicts with declared flow mode")
 	}
 	contract, declared := entityruntime.ResolveForFlow(source, constructed.TemplateID)
 	if (declared && contract.EntityType != metadata.EntityType) || (!declared && (metadata.EntityType != "" || len(entity.Fields) != 0)) {
-		return flowidentity.Instance{}, entity, false, fmt.Errorf("selected entity %s type %q disagrees with selected flow %s", entity.EntityID, metadata.EntityType, constructed.TemplateID)
+		return fmt.Errorf("selected entity %s type %q disagrees with selected flow %s", entity.EntityID, metadata.EntityType, constructed.TemplateID)
 	}
-	return constructed, entity, true, nil
+	return nil
 }
 
 // FixedConstructionEvidenceForRoute reports captured facts without admitting
@@ -119,12 +127,46 @@ type capturedConstructionEvidence struct {
 	Identity    flowidentity.Instance
 	InstanceKey string
 	EntityType  string
+	// Original is the detached, decoded native evidence at the terminal hop.
+	// It is never rewritten into a receipt for a historical child.
+	Original pipeline.FlowConstructionReceipt
+	Lineage  []capturedConstructionHop
+}
+
+type capturedConstructionHop struct {
+	SourceRunID, RunID string
+	SourceRevision     int64
+}
+
+func (e capturedConstructionEvidence) creatingSelector(plan runfork.RunForkPlan) (events.Event, bool, error) {
+	id := e.Original.CreatingInput.EventID
+	if id == "" {
+		return events.Event{}, false, nil
+	}
+	previousID := id
+	for _, hop := range e.Lineage {
+		previousID = id
+		id = runfork.ProjectReplayEventID(hop.RunID, id)
+	}
+	selector, found, err := plan.HistoricalRouteSelector(id)
+	if err != nil || !found {
+		return events.Event{}, false, err
+	}
+	if len(e.Lineage) != 0 {
+		hop := e.Lineage[len(e.Lineage)-1]
+		lineage, recorded := selector.SelectedForkLineage()
+		if !recorded || lineage.DestinationRunID() != hop.RunID || lineage.SourceRunID() != hop.SourceRunID || lineage.SourceEventID() != previousID {
+			return events.Event{}, false, fmt.Errorf("historical constructor selector contradicts its recorded source lineage")
+		}
+	}
+	return selector, true, nil
 }
 
 func fixedConstructionEvidence(plan runfork.RunForkPlan, entity runfork.RunForkEntityState) (capturedConstructionEvidence, error) {
 	type hop struct {
-		runID  string
-		entity runfork.RunForkEntityState
+		runID, sourceRunID string
+		revision           int64
+		entity             runfork.RunForkEntityState
 	}
 	var hops []hop
 	seen := make(map[string]bool)
@@ -148,7 +190,7 @@ func fixedConstructionEvidence(plan runfork.RunForkPlan, entity runfork.RunForkE
 			if meta.HistoricalConstruction != nil {
 				return evidence, fmt.Errorf("captured construction has conflicting native and historical evidence")
 			}
-			evidence = capturedConstructionEvidence{Identity: receipt.Identity, InstanceKey: receipt.InstanceKey, EntityType: receipt.Persisted.Control.EntityType}
+			evidence = capturedConstructionEvidence{Identity: receipt.Identity, InstanceKey: receipt.InstanceKey, EntityType: receipt.Persisted.Control.EntityType, Original: receipt}
 			if err := validateCapturedConstructionBinding(entity, evidence); err != nil {
 				return evidence, err
 			}
@@ -158,7 +200,7 @@ func fixedConstructionEvidence(plan runfork.RunForkPlan, entity runfork.RunForkE
 		if history == nil || history.SourceRevision <= 0 || history.SourceRunID == "" || history.SourceRunID == runID {
 			return evidence, fmt.Errorf("fixed construction lacks positive historical provenance and its native receipt")
 		}
-		hops = append(hops, hop{runID: runID, entity: entity})
+		hops = append(hops, hop{runID: runID, sourceRunID: history.SourceRunID, revision: history.SourceRevision, entity: entity})
 		runID, entity = history.SourceRunID, history.SourceEntity
 	}
 	for i := len(hops) - 1; i >= 0; i-- {
@@ -167,6 +209,7 @@ func fixedConstructionEvidence(plan runfork.RunForkPlan, entity runfork.RunForkE
 			return evidence, err
 		}
 		evidence.Identity = projected
+		evidence.Lineage = append(evidence.Lineage, capturedConstructionHop{SourceRunID: hops[i].sourceRunID, RunID: hops[i].runID, SourceRevision: hops[i].revision})
 		if err := validateCapturedConstructionBinding(hops[i].entity, evidence); err != nil {
 			return evidence, err
 		}

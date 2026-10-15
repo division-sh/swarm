@@ -13,7 +13,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
@@ -465,17 +464,8 @@ func appendRunForkHistoricalFact(snapshot *runForkRevisionSnapshot, context runF
 			return err
 		}
 		if fact.ConstructionKind == "constructed" {
-			if fact.InitialProjectionVersion != pipeline.FlowConstructionReceiptVersion {
-				return fmt.Errorf("constructed historical header requires its immutable constructor receipt")
-			}
-			receipt, err := pipeline.DecodeStoredFlowConstructionReceipt(fact.InitialMaterialization,
-				snapshot.RunID, fact.EntityID, fact.FlowInstance, fact.FlowTemplate)
-			if err != nil {
-				return fmt.Errorf("historical construction receipt: %w", err)
-			}
-			if !receipt.OccurredAt.Equal(fact.CreatedAt) || receipt.Persisted.Control.EntityType != fact.EntityType {
-				return fmt.Errorf("historical constructor contradicts fixed header birth or field contract")
-			}
+			// Native receipts are validated after the immutable origin owner has
+			// distinguished them from positively captured historical construction.
 			var nullable struct {
 				EntityType json.RawMessage `json:"entity_type"`
 			}

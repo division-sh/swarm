@@ -822,14 +822,6 @@ func projectRunForkHistoricalHeader(sourceRunID, forkRunID, entityID, path, targ
 	return header, header.Validate()
 }
 
-func deterministicRunForkMaterializationID(sourceRunID, forkEventID string) string {
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm:run-fork-materialization:"+strings.TrimSpace(sourceRunID)+":"+strings.TrimSpace(forkEventID))).String()
-}
-
-func DeterministicRunForkMaterializationID(sourceRunID, forkEventID string) string {
-	return deterministicRunForkMaterializationID(sourceRunID, forkEventID)
-}
-
 func jsonMapArg(values map[string]any) (string, error) {
 	if values == nil {
 		values = map[string]any{}

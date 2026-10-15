@@ -1,6 +1,7 @@
 package runfork
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -118,9 +119,16 @@ func (p RunForkPlan) BindConstructedRouteEvidence(entityID, eventID string, reci
 		return ConstructedRouteEvidence{}, fmt.Errorf("constructed topology requires its captured constructor")
 	}
 	meta := entity.MaterializationMetadata
+	native := len(bytes.TrimSpace(meta.InitialMaterialization)) != 0 && !bytes.Equal(bytes.TrimSpace(meta.InitialMaterialization), []byte("null"))
+	historical := meta.HistoricalConstruction
 	if meta.Owner != RunForkMaterializedEntitySnapshotMetadataOwner || meta.Source != RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance ||
-		meta.FlowInstance == "" || len(meta.InitialMaterialization) == 0 || len(meta.FlowConfig) == 0 {
+		meta.FlowInstance == "" || len(meta.FlowConfig) == 0 || native == (historical != nil) {
 		return ConstructedRouteEvidence{}, fmt.Errorf("constructed topology has incomplete fixed header")
+	}
+	// The route owner has admitted the complete captured chain before deriving
+	// recipients. Bind that unchanged provenance, never a synthetic native receipt.
+	if historical != nil && (historical.SourceRunID == "" || historical.SourceRunID == p.SourceRunID || historical.SourceRevision <= 0 || historical.SourceEntity.MaterializationMetadata == nil) {
+		return ConstructedRouteEvidence{}, fmt.Errorf("constructed topology lacks its exact historical cut")
 	}
 	canonical, err := forkrecipient.CanonicalSet(recipients)
 	if err != nil || len(canonical) == 0 {

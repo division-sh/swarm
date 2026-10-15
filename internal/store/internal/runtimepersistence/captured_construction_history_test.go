@@ -45,7 +45,7 @@ func TestR7HistoricalHeaderVersionMatchesCapturedCutBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			projected, err := recorded.Project(owner.Route, observed.Identity().ParentRoute)
+			projected, err := recorded.Project(owner.Route, observed.Identity().ParentRoute, recorded.WorkflowVersion())
 			if err != nil {
 				t.Fatal(err)
 			}
