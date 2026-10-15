@@ -34,3 +34,13 @@ func ExpireExactDeliveryClaimFaultForTest(ctx context.Context, selected any, cla
 		return delivery.ExpireExactDeliveryClaimFaultTx(ctx, tx, claim)
 	})
 }
+
+func TieExactPendingPublicationCreatedAtFaultForTest(ctx context.Context, selected any, eventID, firstID, secondID string) error {
+	dialect, err := eventFixtureDialectForTest(selected)
+	if err != nil {
+		return err
+	}
+	return runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return delivery.TieExactPendingPublicationCreatedAtFaultTx(ctx, tx, delivery.Dialect(dialect), eventID, firstID, secondID)
+	})
+}

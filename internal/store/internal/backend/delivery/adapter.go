@@ -133,6 +133,77 @@ func ExpireExactDeliveryClaimFaultTx(ctx context.Context, tx *sql.Tx, claim Clai
 	return nil
 }
 
+// TieExactPendingPublicationCreatedAtFaultTx constructs only a lawful timestamp
+// tie for two unclaimed deliveries. It is TEST FIXTURE ONLY, not a runtime clock.
+func TieExactPendingPublicationCreatedAtFaultTx(ctx context.Context, tx *sql.Tx, dialect Dialect, eventID, firstID, secondID string) error {
+	if tx == nil {
+		return fmt.Errorf("pending publication tie requires the selected transaction")
+	}
+	for _, id := range []string{eventID, firstID, secondID} {
+		parsed, err := uuid.Parse(id)
+		if err != nil || parsed.String() != id {
+			return fmt.Errorf("pending publication tie requires exact canonical identities")
+		}
+	}
+	if firstID == secondID {
+		return fmt.Errorf("pending publication tie requires two distinct deliveries")
+	}
+	a, err := NewAdapter(dialect)
+	if err != nil {
+		return err
+	}
+	members, err := a.SnapshotsForEvent(ctx, tx, eventID)
+	if err != nil {
+		return err
+	}
+	if len(members) != 2 || !((members[0].DeliveryID == firstID && members[1].DeliveryID == secondID) || (members[0].DeliveryID == secondID && members[1].DeliveryID == firstID)) {
+		return fmt.Errorf("pending publication tie requires its complete exact two-delivery membership")
+	}
+	var records [2]deliveryRecord
+	for i, member := range members {
+		records[i], err = a.loadByID(ctx, tx, member.DeliveryID, true)
+		if err != nil {
+			return err
+		}
+		r := records[i]
+		if r.EventID != eventID || r.Status != StatusPending || r.ClaimVersion != 0 || r.RetryCount != 0 || r.claimToken != "" || !r.StartedAt.IsZero() || !r.SettledAt.IsZero() || r.CreatedAt.IsZero() {
+			return fmt.Errorf("pending publication tie refuses claimed or terminal delivery %s", r.DeliveryID)
+		}
+	}
+	if records[0].RunID != records[1].RunID || records[0].Authority != records[1].Authority {
+		return fmt.Errorf("pending publication tie requires the same run and execution authority")
+	}
+	var attempts int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN ($1, $2)`, firstID, secondID).Scan(&attempts); err != nil {
+		return err
+	}
+	if attempts != 0 {
+		return fmt.Errorf("pending publication tie refuses any attempt history")
+	}
+	if records[0].CreatedAt.Equal(records[1].CreatedAt) {
+		return nil
+	}
+	earlier, later := records[0], records[1]
+	if later.CreatedAt.Before(earlier.CreatedAt) {
+		earlier, later = later, earlier
+	}
+	// Copy the original physical timestamp, not a caller value or re-encoded time.
+	result, err := tx.ExecContext(ctx, `UPDATE event_deliveries
+		SET created_at=(SELECT created_at FROM event_deliveries WHERE delivery_id=$1)
+		WHERE delivery_id=$2 AND event_id=$3 AND run_id=$4
+		AND status='pending' AND claim_version=0 AND current_attempt_version IS NULL
+		AND NOT EXISTS (SELECT 1 FROM event_delivery_attempts WHERE delivery_id IN ($1, $2))`,
+		earlier.DeliveryID, later.DeliveryID, eventID, earlier.RunID)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil || count != 1 {
+		return fmt.Errorf("pending publication tie requires one exact later row: count=%d err=%v", count, err)
+	}
+	return nil
+}
+
 func NewAdapter(dialect Dialect) (*Adapter, error) {
 	if dialect != DialectPostgres && dialect != DialectSQLite {
 		return nil, fmt.Errorf("delivery lifecycle dialect %q is unsupported", dialect)
