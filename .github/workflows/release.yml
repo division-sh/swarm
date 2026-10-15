@@ -285,6 +285,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      pull-requests: read
     env:
       GH_TOKEN: ${{ github.token }}
       VERSION: ${{ needs.prepare.outputs.version }}
@@ -305,12 +306,11 @@ jobs:
           path: ${{ runner.temp }}/release-assets
       - name: Recheck the exact archive, member and manifest allowlists
         run: *verify_assets
-      - name: Verify tag and generate grouped release notes
+      - name: Verify tag and summarize the release range
         run: |
           set -euo pipefail
           git ls-remote --tags origin "refs/tags/$VERSION" "refs/tags/$VERSION^{}" > "$RUNNER_TEMP/release-tag.txt"
           python3 - <<'PY'
-          import collections
           import json
           import os
           import pathlib
@@ -323,70 +323,52 @@ jobs:
           actual = rows.get(f'refs/tags/{tag}^{{}}', rows.get(f'refs/tags/{tag}'))
           if actual != os.environ['SOURCE_SHA']:
               raise SystemExit('remote release tag moved or is absent')
-          request = {'tag_name': tag, 'target_commitish': os.environ['SOURCE_SHA']}
-          if os.environ['PREVIOUS']:
-              request['previous_tag_name'] = os.environ['PREVIOUS']
-          response = json.loads(subprocess.check_output([
-              'gh', 'api', '--method', 'POST', 'repos/' + os.environ['GITHUB_REPOSITORY'] + '/releases/generate-notes',
-              '--input', '-'], input=json.dumps(request), text=True))
-          lines = response['body'].splitlines(keepends=True)
-          groups = collections.defaultdict(list)
-          retained = []
-          for line in lines:
-              if re.match(r'^[*-] ', line) and '/pull/' in line:
-                  area = re.match(r'^[*-] \[([A-Za-z0-9_-]+)\]', line)
-                  groups[area.group(1).lower() if area else 'other'].append(line)
-              else:
-                  retained.append(line)
-          grouped = []
-          for area in sorted(groups):
-              grouped.extend([f'### {area}\n\n', *groups[area], '\n'])
-          heading = next((i for i, line in enumerate(retained) if line.rstrip() == "## What's Changed"), None)
-          if heading is not None:
-              retained[heading + 1:heading + 1] = ['\n', *grouped]
-          else:
-              retained = ['## Changes by area\n\n', *grouped, *retained]
           selection = os.environ['SOURCE_SHA']
           if os.environ['PREVIOUS']:
               selection = os.environ['PREVIOUS'] + '..' + selection
-          inventory = subprocess.check_output([
-              'git', 'log', '-z', '--reverse', '--format=%H%x00%s', selection], text=True)
-          fields = inventory.split('\0')
-          if fields[-1] != '' or len(fields) % 2 != 1:
-              raise SystemExit('commit inventory is incomplete')
-          commits = []
-          for index in range(0, len(fields) - 1, 2):
-              sha, subject = fields[index:index + 2]
+          commits = set(subprocess.check_output(['git', 'rev-list', selection], text=True).splitlines())
+          for sha in commits:
               if re.fullmatch('[0-9a-f]{40,64}', sha) is None:
-                  raise SystemExit('commit inventory has an invalid object id')
-              commits.append((sha, subject or '(no subject)'))
-          if commits:
-              retained.extend([
-                  '\n## Commit inventory\n\n',
-                  'Every commit in the exact release range is retained, including '
-                  'PR-associated and direct commits.\n\n',
-              ])
-              for sha, subject in commits:
-                  subject = re.sub(r'([\\`*_{}\[\]<>#!])', r'\\\1', subject)
-                  url = 'https://github.com/' + os.environ['GITHUB_REPOSITORY'] + '/commit/' + sha
-                  retained.append(f'- {subject} ([{sha[:12]}]({url}))\n')
-          retained.extend([
+                  raise SystemExit('release range has an invalid object id')
+          owner, repository = os.environ['GITHUB_REPOSITORY'].split('/')
+          # Count merged PRs by their exact merge commit, not by subjects or dates.
+          query = '''query($owner: String!, $repo: String!, $endCursor: String) {
+            repository(owner: $owner, name: $repo) {
+              pullRequests(first: 100, states: MERGED, after: $endCursor) {
+                nodes { number mergeCommit { oid } }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          }'''
+          pages = json.loads(subprocess.check_output([
+              'gh', 'api', 'graphql', '--paginate', '--slurp', '-f', 'query=' + query,
+              '-f', 'owner=' + owner, '-f', 'repo=' + repository], text=True))
+          merged = {pr['number'] for page in pages
+                    for pr in page['data']['repository']['pullRequests']['nodes']
+                    if pr['mergeCommit'] and pr['mergeCommit']['oid'] in commits}
+          previous = os.environ['PREVIOUS']
+          url = 'https://github.com/' + os.environ['GITHUB_REPOSITORY']
+          compare = url + '/compare/' + previous + '...' + tag if previous else url + '/commits/' + tag
+          summary = [
+              '## Release summary\n\n',
+              f'Range: {previous or "(initial history)"} -> {tag}\n\n',
+              f'Commits: {len(commits)}\n\n',
+              f'Merged pull requests (merge commit in range): {len(merged)}\n\n',
+              f'[Compare changes]({compare})\n',
               '\n## Native binary requirements\n\n',
               '- Linux amd64: built with CGO on Ubuntu 22.04; requires a compatible '
               'glibc runtime (libc, libm and the x86-64 dynamic loader) and libgcc_s.so.1. '
               'This is not a static or musl/Alpine binary.\n',
               '- macOS arm64: built and smoke-tested natively on the macOS 15 arm64 runner.\n',
-          ])
-          (temp / 'release-notes.md').write_text(''.join(retained), encoding='utf-8')
+          ]
+          (temp / 'release-notes.md').write_text(''.join(summary), encoding='utf-8')
           PY
       - name: Publish only the complete verified asset set
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/release-assets"
           test "$(printf '%s\n' * | LC_ALL=C sort)" = "$(printf '%s\n' SHA256SUMS "swarm_${VERSION}_darwin_arm64.tar.gz" "swarm_${VERSION}_linux_amd64.tar.gz" | LC_ALL=C sort)"
-          # Both stable and prerelease latest promotion remain manual in this
-          # draft; the user must approve this choice during workflow-file review.
-          flags=(--draft --verify-tag --title "Swarm $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" --latest=false)
+          flags=(--draft --verify-tag --title "Swarm $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md")
           if test "$PRERELEASE" = true; then flags+=(--prerelease); fi
           gh release create "$VERSION" "${flags[@]}"
           gh release upload "$VERSION" SHA256SUMS "swarm_${VERSION}_linux_amd64.tar.gz" "swarm_${VERSION}_darwin_arm64.tar.gz"
@@ -401,4 +383,24 @@ jobs:
           test "$assets" = "$(printf '%s\n' SHA256SUMS "swarm_${VERSION}_darwin_arm64.tar.gz" "swarm_${VERSION}_linux_amd64.tar.gz" | LC_ALL=C sort)"
           git ls-remote --tags origin "refs/tags/$VERSION" "refs/tags/$VERSION^{}" > "$RUNNER_TEMP/release-final-tag.txt"
           cmp "$RUNNER_TEMP/release-final-tag.txt" "$RUNNER_TEMP/release-tag.txt"
-          gh release edit "$VERSION" --draft=false --latest=false
+          latest=$(python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+
+          plain = re.compile(r'v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)')
+          version = plain.fullmatch(os.environ['VERSION'])
+          latest = False
+          if os.environ['PRERELEASE'] == 'false' and version is not None:
+              pages = json.loads(subprocess.check_output([
+                  'gh', 'api', '--paginate', '--slurp',
+                  'repos/' + os.environ['GITHUB_REPOSITORY'] + '/releases?per_page=100'], text=True))
+              published = [plain.fullmatch(release['tag_name']) for page in pages for release in page
+                           if not release['draft'] and not release['prerelease']]
+              latest = all(tuple(map(int, version.groups())) >= tuple(map(int, other.groups()))
+                           for other in published if other is not None)
+          print(str(latest).lower())
+          PY
+          )
+          gh release edit "$VERSION" --draft=false --latest="$latest"
