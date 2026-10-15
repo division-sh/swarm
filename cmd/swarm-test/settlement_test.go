@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -22,45 +23,47 @@ type settlementServiceProbe func(context.Context) error
 func (p settlementServiceProbe) Close(ctx context.Context) error { return p(ctx) }
 
 func TestRunSettlementSlowRemovalHasIndependentDeadline(t *testing.T) {
-	oldJoin, oldRemoval := authoritySettlementTimeout, postgresRemovalTimeout
-	authoritySettlementTimeout, postgresRemovalTimeout = 20*time.Millisecond, 10*time.Second
-	t.Cleanup(func() { authoritySettlementTimeout, postgresRemovalTimeout = oldJoin, oldRemoval })
-	var joined, removed, completed bool
-	lease := settlementLeaseProbe{
-		join: func(ctx context.Context) error {
-			joined = true
-			return ctx.Err()
-		},
-		complete: func(ctx context.Context, success bool) error {
-			completed = true
-			if !removed || !success {
-				t.Fatalf("completion before successful removal: removed=%v success=%v", removed, success)
+	synctest.Test(t, func(t *testing.T) {
+		oldJoin, oldRemoval := authoritySettlementTimeout, postgresRemovalTimeout
+		authoritySettlementTimeout, postgresRemovalTimeout = 20*time.Millisecond, 10*time.Second
+		t.Cleanup(func() { authoritySettlementTimeout, postgresRemovalTimeout = oldJoin, oldRemoval })
+		var joined, removed, completed bool
+		lease := settlementLeaseProbe{
+			join: func(ctx context.Context) error {
+				joined = true
+				return ctx.Err()
+			},
+			complete: func(ctx context.Context, success bool) error {
+				completed = true
+				if !removed || !success {
+					t.Fatalf("completion before successful removal: removed=%v success=%v", removed, success)
+				}
+				return ctx.Err()
+			},
+		}
+		service := settlementServiceProbe(func(ctx context.Context) error {
+			if !joined {
+				t.Fatal("container removal preceded lease join")
 			}
-			return ctx.Err()
-		},
-	}
-	service := settlementServiceProbe(func(ctx context.Context) error {
-		if !joined {
-			t.Fatal("container removal preceded lease join")
-		}
-		deadline, ok := ctx.Deadline()
-		if !ok || time.Until(deadline) <= authoritySettlementTimeout {
-			t.Fatalf("container removal inherited join budget: deadline=%v", deadline)
-		}
-		timer := time.NewTimer(3 * authoritySettlementTimeout)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-			removed = true
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
+			deadline, ok := ctx.Deadline()
+			if !ok || time.Until(deadline) <= authoritySettlementTimeout {
+				t.Fatalf("container removal inherited join budget: deadline=%v", deadline)
+			}
+			timer := time.NewTimer(3 * authoritySettlementTimeout)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				removed = true
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+		serviceErr, leaseErr := settleRunAuthorities(lease, service, func() bool { return true })
+		if err := errors.Join(serviceErr, leaseErr); err != nil || !completed {
+			t.Fatalf("slow removal settlement: completed=%v err=%v", completed, err)
 		}
 	})
-	serviceErr, leaseErr := settleRunAuthorities(lease, service, func() bool { return true })
-	if err := errors.Join(serviceErr, leaseErr); err != nil || !completed {
-		t.Fatalf("slow removal settlement: completed=%v err=%v", completed, err)
-	}
 }
 
 func TestRunSettlementPreservesIndependentErrors(t *testing.T) {
