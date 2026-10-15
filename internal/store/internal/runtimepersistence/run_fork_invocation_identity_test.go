@@ -95,3 +95,33 @@ func TestRunForkFreshInvocationsAtSameCutHaveIndependentChildrenBothStores(t *te
 		})
 	}
 }
+
+func TestSelectedForkFreshInvocationsAtSameCutHaveIndependentChildrenBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			ctx, request := forkWorkflowOwnershipRequest(t, fixture, backend.name == "postgres")
+			owner := fixture.store.(forkWorkflowOwnershipStore)
+			first, err := owner.MaterializeRunForkForSelectedContractExecution(ctx, request)
+			if err != nil {
+				t.Fatalf("first selected invocation: %v", err)
+			}
+			second, err := owner.MaterializeRunForkForSelectedContractExecution(ctx, request)
+			if err != nil {
+				t.Fatalf("second selected invocation: %v", err)
+			}
+			if first.ForkRunID == second.ForkRunID {
+				t.Fatalf("fresh selected invocations collapsed at one fixed cut: %s", first.ForkRunID)
+			}
+			if first.SourceRunID != request.SourceRunID || second.SourceRunID != request.SourceRunID || first.ForkPoint != second.ForkPoint {
+				t.Fatalf("fresh selected identity changed source provenance: first=%+v second=%+v", first, second)
+			}
+			for _, child := range []runfork.RunForkMaterialization{first, second} {
+				if child.SelectedContractBinding == nil || child.SelectedContractBinding.ForkRunID != child.ForkRunID {
+					t.Fatalf("selected child lost its exact binding: %+v", child)
+				}
+				requireForkWorkflowOwnershipPreserved(t, fixture.db, request.SourceRunID, child.ForkRunID)
+			}
+		})
+	}
+}
