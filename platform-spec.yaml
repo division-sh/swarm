@@ -6502,7 +6502,7 @@ engine:
         action: Root flow's platform_version range includes the running platform version.
       - step: 12
         name: initialize_state_stores
-        action: Create or verify platform runtime tables, including the canonical entity_state/accumulator current-state store, event store, and generated node-local state tables. Derive entity contract metadata from entities.yaml plus the shared type system, but do not create product-specific typed entity tables during normal runtime boot.
+        action: Create or verify platform runtime tables, including canonical flow_instances lifecycle headers, entity_state authored-data rows, the event store, and generated node-local state tables. Derive entity contract metadata from entities.yaml plus the shared type system, but do not create product-specific typed entity tables during normal runtime boot.
       - step: 13
         name: start_system_nodes
         action: Each node subscribes to its declared events. Nodes are ready to handle.
@@ -6652,25 +6652,25 @@ engine:
     entity_state:
       description: A single string value representing where the entity is in the flow lifecycle. Set by advances_to in handler
         execution. Initial, declared and terminal values are lowered only from schema.yaml stages.
-      storage: Entity table, state column, indexed.
+      storage: Constructed instance header in flow_instances.current_state; entity_state has no lifecycle-stage copy.
       mutation: Only via advances_to or on_complete branch. Never by agents directly.
     authored_field_state:
       description: Contract-declared business values exposed through entity.* and authored entity tools. Authored names do not classify or alias platform facts.
-      storage: Entity table, fields JSONB column.
+      storage: entity_state.fields, with independent authored-data creation and update clocks.
       mutation: Producers explicitly write the authored_field domain and an uninterpreted path.
     bookkeeping_state:
       description: Platform-owned runtime facts selected explicitly by their producers. Bookkeeping is operator-visible and is never exposed through entity.*.
-      storage: Entity table, bookkeeping JSONB column, independently required even when empty.
+      storage: flow_instances.bookkeeping, independently required even when empty; no lifecycle copy in entity_state.
       mutation: Producers explicitly write the bookkeeping domain and an uninterpreted path; readers never infer ownership from key spelling.
     accumulator_state:
       description: 'Structured data for admitted instance-scoped stream arrivals within a handler''s accumulate pattern.'
-      storage: Per-node state table (from nodes.yaml state_schema). Keyed by entity_id.
+      storage: Constructed instance accumulator and loop buckets in flow_instances.accumulator, with no lifecycle copy in entity_state. Separately declared node-local state retains its existing table owner.
       mutation: Written by accumulate tracking (record arrival), data_accumulation (write payload fields), and compute steps
         (store computed values). It is cleared only by an explicit supported clear operation; stream admission has no completion cleanup.
     gate_state:
       description: Boolean flags on the entity. Used by validation-style flows to track which sub-steps have completed. Guards
         can check gate state as conditions.
-      storage: Entity table, gates column (jsonb or equivalent).
+      storage: flow_instances.gates, with no lifecycle copy in entity_state.
       mutation: 'Set via sets_gate handler field. Default behavior: set to true, never reset. If an entity needs to re-enter
         a validation cycle, use clear_gates handler field to reset all gates to false before re-entering.'
     scoping: All state is scoped by entity_id + flow instance path. Two entities in the same flow have independent state.
@@ -7445,10 +7445,10 @@ engine:
           - broader runtime mutation-store write serialization outside private workflow persistence owned by #1388
       - name: runtime_budget_spend_rows
         owner: internal/runtime/budgetspend.Store supplied explicitly through runtime.RuntimeDeps.BudgetSpendStore and consumed by internal/runtime.BudgetTracker
-        sqlite_owner: internal/store.SQLiteRuntimeStore budget/spend methods over spend_ledger and entity_state
-        postgres_owner: internal/store.PostgresStore budget/spend methods over spend_ledger and entity_state
+        sqlite_owner: internal/store.SQLiteRuntimeStore budget/spend methods over spend_ledger and flow_instances
+        postgres_owner: internal/store.PostgresStore budget/spend methods over spend_ledger and flow_instances
         scope: |
-          SQLite supports explicit local-dev budget tracking construction, LLM spend recording, flow-instance resolution, run-independent cross-run budget projection target enumeration, system/global/entity spend aggregation, threshold event evaluation, and emergency mailbox side effects through the same BudgetTracker behavior owner. Startup recovery projects process-wide scopes before enumerating active run-scoped entity targets and does not require or synthesize an ambient run identity. Postgres remains authoritative for production runtime budget/spend semantics. SQLite must not substitute an in-memory spend ledger for persisted local runtime budget truth.
+          SQLite supports explicit local-dev budget tracking construction, LLM spend recording, flow-instance resolution, run-independent cross-run budget projection target enumeration, system/global/entity spend aggregation, threshold event evaluation, and emergency mailbox side effects through the same BudgetTracker behavior owner. Startup recovery projects process-wide scopes before enumerating active run-scoped constructed targets and does not require or synthesize an ambient run identity. Header membership includes fieldless instances; data-only imports cannot supply projection targets or lifecycle state. Postgres remains authoritative for production runtime budget/spend semantics. SQLite must not substitute an in-memory spend ledger for persisted local runtime budget truth.
         excludes:
           - public operator agent.usage reads over spend_ledger owned by operator_agent_usage_read_rows
           - tool executor entity and human-task persistence owned by runtime_tool_entity_and_human_task_rows
@@ -10731,14 +10731,14 @@ tool_model:
     generic_runtime_rule: The generic runtime ships handlers for platform_builtin tools ONLY. It does not ship handlers for
       any product-specific tool. All other tools are executed via the MCP client or HTTP executor.
     entity_tool_schemas:
-      description: All entity tools operate on the generic entity_state table. They read/write entity_state.fields (JSONB),
-        entity_state.current_state, entity_state.gates, and entity_state.accumulator. They do NOT operate on product-specific
-        typed tables. Product-specific tables are optional query-performance optimizations — the entity tools always use the
-        generic entity_state interface. For normal agents, these legacy schemas are non-provider-visible runtime-internal
+      description: Entity tools read and write authored data through the generic entity_state owner. Optional lifecycle
+        readback comes only from the exact constructed flow_instances header, never from data-row shadows. Data-only
+        imports retain field-query membership with explicit null lifecycle; fieldless headers acquire no invented data row.
+        Tools do not operate on product-specific typed tables. For normal agents, these legacy schemas are non-provider-visible runtime-internal
         compatibility surfaces; the valid provider-visible surface is the generated role-scoped tool set from
         contract_formats.persistence_model.role_scoped_entity_tools.
       get_entity:
-        description: Read an entity by ID. Returns the full entity state from entity_state table.
+        description: Read authored entity data by ID with optional lifecycle from its exact constructed header. Data clocks and lifecycle clocks are separate.
         input:
           flow_instance: string — required existing addressing surface for the owning flow instance
           entity_id: string — required
@@ -10747,14 +10747,17 @@ tool_model:
           flow_instance: string
           entity_type: string — inferred flow-scoped entity type
           name: string (nullable)
-          current_state: string
-          gates: object — map of gate names to boolean values
+          stage_defined: boolean|null - header stage posture; null for data-only imports
+          current_state: string|null - exact named header stage; null for imports and constructed no-stage members
+          gates: object|null - header gate map; null for data-only imports
           fields: object — complete stored sparse field map; unassigned declared fields are omitted, not null or defaulted
-          accumulator: object — accumulator state
-          revision: integer — entity revision number
-          entered_state_at: string — ISO 8601, when current_state was entered
-          created_at: string — ISO 8601
-          updated_at: string — ISO 8601
+          accumulator: object|null - header accumulator state; null for data-only imports
+          revision: integer|null - positive header revision; null for data-only imports
+          entered_state_at: string|null - named-stage entry time; null for imports and constructed no-stage members
+          lifecycle_created_at: string|null - header creation time; null for data-only imports
+          lifecycle_updated_at: string|null - header update time; null for data-only imports
+          created_at: string - authored-data creation time, ISO 8601
+          updated_at: string - authored-data update time, ISO 8601; unchanged by lifecycle-only progress
         note: Returns all fields. No per-caller field filtering in v1. All agents see all entity fields. Per-field visibility
           is a potential future enhancement.
       save_entity_field:
@@ -10787,7 +10790,7 @@ tool_model:
           bracket/index/dynamic paths, materialized/runtime-owned fields, and post-create writes to immutable fields are
           rejected. Values must satisfy the resolved declared type.
       search_entities:
-        description: Query entities by state, field values, or metadata. Returns matching entities from entity_state.
+        description: Query authored-data members by fields or metadata, with optional exact header stage filtering. Imports remain members; fieldless headers are not invented data rows.
         input:
           flow_instance: string — optional, filter by flow instance
           current_state: string — optional, filter by state
