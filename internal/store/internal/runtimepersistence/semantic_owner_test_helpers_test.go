@@ -52,7 +52,6 @@ type completionRecoveryAttempt = storeeffect.CompletionRecoveryAttempt
 type completionRecoveryAuthorityEvidence = storeeffect.CompletionRecoveryAuthorityEvidence
 
 var insertRunForkReplayDelivery = storerunfork.InsertRunForkReplayDelivery
-var deterministicRunForkMaterializationID = storerunfork.DeterministicRunForkMaterializationID
 var deterministicRunForkReplayEventID = storerunfork.DeterministicRunForkReplayEventID
 var decisionCardAuthorActivityIdentity = storedecision.DecisionCardAuthorActivityIdentity
 var recordExternalEffectStory = storeeffect.RecordExternalEffectStory
