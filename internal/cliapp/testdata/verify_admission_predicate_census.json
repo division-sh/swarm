@@ -1869,7 +1869,7 @@
     "owner": "internal/runtime/runtime.go::newRuntime",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "96737500997020a514836cb9b1f96d0be26f2aafc249b83daaa9163e5a9eb346"
+    "body_sha256": "fc57b47cfd9bd3d708c990ae631cc5faf74850cc194092e8a3f6cdaa0a9550bd"
   },
   {
     "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
