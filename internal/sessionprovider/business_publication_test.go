@@ -60,8 +60,7 @@ func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 		WorkOwner: f.workOwner, ReceiverExecution: eventreceiver.NormalExecution(), DeliveryAuthority: authority,
 		PipelineObligations: selected.PipelineObligations(), PayloadAdmitter: payload, ProviderOutputVerifier: f.catalog,
 		Durable: bus.DurableDependencies{ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
-			ConstructionPublications: selected, FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
-			FlowRouteTopology: selected, FlowRouteRollback: selected, ActiveAgents: selected, ActiveFlows: selected, TargetOwners: selected,
+			ConstructionPublications: selected, Instances: selected, ActiveAgents: selected,
 			PreparedEvents: selected, TargetFailureRecorder: selected, RunOrigins: selected, StandingRestarts: selected},
 	})
 	if err != nil {
