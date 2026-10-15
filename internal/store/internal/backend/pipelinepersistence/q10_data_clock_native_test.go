@@ -3,6 +3,7 @@ package pipelinepersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -16,6 +17,7 @@ import (
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
@@ -143,6 +145,8 @@ func TestQ10DataClockWriteTriggersBothStores(t *testing.T) {
 						if !ok || failure.Failure.Detail.Code != "workflow_engine_state_revision_conflict" || !failure.Failure.Retryable {
 							t.Fatalf("CAS refusal lost retryable identity: %v", mutationErr)
 						}
+					} else if mutationErr.Error() != "declared data update clock cannot go backwards" {
+						t.Fatalf("backwards data clock lost its exact refusal: %v", mutationErr)
 					}
 					record = original
 				})
@@ -195,6 +199,27 @@ func TestQ10DataClockWriteTriggersBothStores(t *testing.T) {
 					}
 					if mutationErr == nil {
 						t.Fatal("unchanged data bypassed required-companion admission")
+					}
+					wantReason := "constructed header projection disagrees with its declared field row"
+					wantClockError := ""
+					switch hostile {
+					case "null_fields", "array_fields":
+						wantReason = "constructed header fields requires persisted JSON object"
+					case "zero_creation_clock":
+						wantClockError = "declared data creation clock is missing or zero"
+					case "zero_update_clock", "reversed_data_clocks":
+						wantClockError = "declared data update clock is missing, zero or predates creation"
+					}
+					if wantClockError != "" {
+						if mutationErr.Error() != wantClockError {
+							t.Fatalf("unchanged-data clock refusal changed: got=%v want=%s", mutationErr, wantClockError)
+						}
+					} else {
+						var projectionErr *workflowheader.ProjectionError
+						want := &workflowheader.ProjectionError{RunID: runID, EntityID: entityID, InstancePath: "work", Reason: wantReason}
+						if !errors.As(mutationErr, &projectionErr) || !reflect.DeepEqual(projectionErr, want) {
+							t.Fatalf("unchanged-data companion refusal lost exact ownership: got=%v want=%v", mutationErr, want)
+						}
 					}
 					if !reflect.DeepEqual(before, read()) {
 						t.Fatalf("unchanged-data refusal leaked header or data effects: %v", mutationErr)
