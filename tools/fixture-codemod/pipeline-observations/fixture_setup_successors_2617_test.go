@@ -30,6 +30,7 @@ import (
 // reviewer-a6190555639 appends the exact delegated catalog harness.
 // reviewer-a6191161328 appends three exact #642 lineage/execution successors.
 // reviewer-a6191625495 appends the exact native source-outcome seed successor.
+// LIGHT under6191161328/6192796272 appends the native retained-join handoff.
 //
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
@@ -62,14 +63,14 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "dc9462f1af05ec13e8fc9c03570c48082fe74b126bb6d0da8597dd4b2689ba62" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "3698f8e49a693211ba853bb110ce400011ec3c828d3af40289505711202daf28" {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 43 {
+	if len(pins) != 44 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
@@ -183,7 +184,7 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "dc9462f1af05ec13e8fc9c03570c48082fe74b126bb6d0da8597dd4b2689ba62" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "3698f8e49a693211ba853bb110ce400011ec3c828d3af40289505711202daf28" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -194,7 +195,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 43 {
+	if len(pins) != 44 {
 		t.Fatal("fixture successor row count changed")
 	}
 	for index, pin := range pins {
@@ -263,7 +264,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 
 func TestIssue642FixtureSuccessorsPreservePriorPacketAndDelegatedOwner(t *testing.T) {
 	var pins []fixtureSetupSuccessor2617
-	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 43 {
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 44 {
 		t.Fatalf("exact #642 successor inventory changed: %v", err)
 	}
 	var prior bytes.Buffer
@@ -284,6 +285,25 @@ func TestIssue642FixtureSuccessorsPreservePriorPacketAndDelegatedOwner(t *testin
 	prior.Reset()
 	if err := encoder.Encode(rawPins[:42]); err != nil || fmt.Sprintf("%x", sha256.Sum256(prior.Bytes())) != "7558f1939d627ff145c5641f322bc51b51f32b6562805b452fe608638639d6d0" {
 		t.Fatal("an authorized #642 completion successor was rewritten")
+	}
+	prior.Reset()
+	if err := encoder.Encode(rawPins[:43]); err != nil || fmt.Sprintf("%x", sha256.Sum256(prior.Bytes())) != "dc9462f1af05ec13e8fc9c03570c48082fe74b126bb6d0da8597dd4b2689ba62" {
+		t.Fatal("the preceding 43 fixture successors were rewritten")
+	}
+	nativeJoin := pins[43]
+	if !sameReviewedRecipeKey(nativeJoin.Original, pins[37].Original) || nativeJoin.Original.Successor != pins[37].Candidate {
+		t.Fatal("native retained join successor crossed its predecessor")
+	}
+	helper := selectedCausalObservationBody(t, nativeJoin.Original.File, "requireServedRetainedJoinForkSuccess")
+	const helperPin = "bc4ec0ce6b477d248dc1833bfed4c1f066907bb30617ae89543171876aafa56d"
+	if !historicalCurrentSourcePinned(helper, helperPin) {
+		t.Fatal("native retained join helper changed its exact observations or assertions")
+	}
+	for _, cut := range []string{"storetest.ReadSelectedForkApplicationStorageSnapshot", "compareRetainedJoinActivations(childJoins, repeated)", "reflect.DeepEqual(ack, stableACK)", "reflect.DeepEqual(childBefore, childAfter)", "len(sourceBefore) != 7", "reflect.DeepEqual(sourceBefore, sourceAfter)"} {
+		mutant := strings.Replace(helper, cut, "unreviewedJoinObservation", 1)
+		if mutant == helper || historicalCurrentSourcePinned(mutant, helperPin) {
+			t.Fatalf("native retained join helper pin missed %s", cut)
+		}
 	}
 	if pins[36].Original.File != "internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go" || pins[36].Original.Function != "selectedContractExecutionOwnerForCatalogTest" ||
 		pins[37].Original.File != "internal/serveapp/fork_retained_join_test.go" || pins[37].Original.Function != "testServedJoinWriterCompletedHistoryRefusal" ||

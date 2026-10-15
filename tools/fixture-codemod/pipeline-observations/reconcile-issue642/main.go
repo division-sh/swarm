@@ -16,6 +16,7 @@ import (
 
 const source = "3e84acd02f4cc3c02e2b26be494e74be1a035f0c"
 const completion = "098a84acd3cff157fb6bcaefb1d55ee15994cdb7"
+const retainedJoinNative = "29c953af346d076cfba81f7c93ef2ced35b41e4a"
 const root = "tools/fixture-codemod/pipeline-observations/"
 
 type recipe struct {
@@ -60,7 +61,11 @@ func main() {
 			candidate := body(read(source, row.File), row.Function)
 			current, err := os.ReadFile(row.File)
 			must(err)
-			if body(current, row.Function) != candidate || row.Successor == "" || row.Successor == candidate {
+			currentCandidate := candidate
+			if row.File == "internal/serveapp/fork_retained_join_test.go" && row.Function == "testServedJoinWriterCompletedHistoryRefusal" {
+				currentCandidate = body(read(retainedJoinNative, row.File), row.Function)
+			}
+			if body(current, row.Function) != currentCandidate || row.Successor == "" || row.Successor == candidate {
 				panic("unreviewed or unchanged successor: " + row.Function)
 			}
 			history = append(history, successor{Original: *row, Candidate: candidate, Edits: []edit{{
@@ -109,6 +114,33 @@ func main() {
 			panic("missing/ambiguous completion endpoint: " + target[1])
 		}
 	}
+	// LIGHT: existing native observation composition under #642/6191161328
+	// and6192796272. Preserve every preceding endpoint and the refusal branch.
+	if prior := encode(history, false); fmt.Sprintf("%x", sha256.Sum256(prior)) != "dc9462f1af05ec13e8fc9c03570c48082fe74b126bb6d0da8597dd4b2689ba62" {
+		panic("reviewed 43-row predecessor changed")
+	}
+	matches := 0
+	for i := range rows {
+		row := &rows[i]
+		if row.File != "internal/serveapp/fork_retained_join_test.go" || row.Function != "testServedJoinWriterCompletedHistoryRefusal" {
+			continue
+		}
+		matches++
+		candidate := body(read(retainedJoinNative, row.File), row.Function)
+		current, err := os.ReadFile(row.File)
+		must(err)
+		if body(current, row.Function) != candidate || row.Successor == "" || row.Successor == candidate {
+			panic("unreviewed or unchanged native retained join successor")
+		}
+		history = append(history, successor{Original: *row, Candidate: candidate, Edits: []edit{{
+			Current: strings.SplitAfter(candidate, "\n"), Prior: strings.SplitAfter(row.Successor, "\n"),
+		}}})
+		row.Successor = candidate
+	}
+	if matches != 1 {
+		panic("missing/ambiguous native retained join endpoint")
+	}
+	fmt.Printf("pin requireServedRetainedJoinForkSuccess %x\n", sha256.Sum256([]byte(canonical(body(read(retainedJoinNative, "internal/serveapp/fork_retained_join_test.go"), "requireServedRetainedJoinForkSuccess")))))
 	for _, target := range [][2]string{
 		{"internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go", "selectedContractExecutionOwnerForCatalogTestWithReplay"},
 		{"internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go", "selectedContractExecutionOwnerForCatalogHarnessWithReplay"},
