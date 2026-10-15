@@ -98,17 +98,10 @@ func bindResolvedForkOperation(operation *runfork.ForkOperationRequest, point ru
 	if operation == nil {
 		return nil, nil
 	}
-	if err := point.Validate(); err != nil {
-		return nil, err
-	}
-	canonical, _, err := operation.Canonical()
+	canonical, err := operation.BindResolvedPoint(point)
 	if err != nil {
 		return nil, err
 	}
-	if canonical.ResolvedPoint != nil && *canonical.ResolvedPoint != point {
-		return nil, fmt.Errorf("fork operation resolved point differs from selected source revision")
-	}
-	canonical.ResolvedPoint = &point
 	return &canonical, nil
 }
 

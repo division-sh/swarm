@@ -92,6 +92,15 @@ func (r ForkOperationRequest) Canonical() (ForkOperationRequest, string, error) 
 	return r, hash, nil
 }
 
+func (r ForkOperationRequest) BindResolvedPoint(point RunForkPoint) (ForkOperationRequest, error) {
+	if r.ResolvedPoint != nil && *r.ResolvedPoint != point {
+		return ForkOperationRequest{}, fmt.Errorf("fork operation resolved point differs from admitted source revision")
+	}
+	r.ResolvedPoint = &point
+	canonical, _, err := r.Canonical()
+	return canonical, err
+}
+
 type ForkOperationStatus string
 
 // ForkOperationReplayRequiredError reports a clean materialization abort after
