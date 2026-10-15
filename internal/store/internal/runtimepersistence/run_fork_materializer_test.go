@@ -764,10 +764,10 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	eventID := uuid.NewString()
 	clearEventID := uuid.NewString()
 	at := time.Unix(1700000600, 0).UTC()
-	sourceEvent := semanticEventRecordFixture(eventID, sourceRunID, "fork.pending", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), semanticEventRecordFixtureEnvelope(entityID, ""), at)
+	route := testEntitylessNodeDeliveryRoute("in-progress-node")
+	sourceEvent := eventtest.TargetRouted(semanticEventRecordFixture(eventID, sourceRunID, "fork.pending", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), semanticEventRecordFixtureEnvelope(entityID, ""), at), route.Target.Route())
 	native := prepareFixedForkHistoryFixture(t, pg, "unsupported-delivery", sourceRunID, entityID, sourceEvent)
 	ctx = native.ctx
-	route := testEntitylessNodeDeliveryRoute("in-progress-node")
 	if err := runSelectedFixtureMutation(ctx, pg, "fixed construction and in-progress delivery cut", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 		if err := commitSemanticEventFixtureWithRoutesStoryTx(ctx, pg, attempt, sourceEvent, []events.DeliveryRoute{route}); err != nil {
 			return err
