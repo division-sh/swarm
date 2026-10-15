@@ -26,6 +26,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
@@ -118,42 +120,10 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	at := time.Unix(1700000500, 0).UTC()
 	fieldOnlyAt := at.Add(30 * time.Second)
 	afterAt := at.Add(time.Minute)
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, firstEventID, sourceRunID, "fork.before", events.EventProducerPlatform, "test", entityID, "", at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
-		)
-			VALUES
-				($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"queued"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-				($1::uuid, $2::uuid, 'authored_field', 'title', 'null'::jsonb, '"before-title"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-				($1::uuid, $2::uuid, 'authored_field', 'slug', 'null'::jsonb, '"before-slug"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-				($1::uuid, $2::uuid, 'authored_field', 'name', 'null'::jsonb, '"Before Name"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-				($1::uuid, $2::uuid, 'authored_field', 'gates.review', 'null'::jsonb, '"authored-review"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-				($1::uuid, $2::uuid, 'authored_field', 'accumulator.total', 'null'::jsonb, '"authored-total"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-				($1::uuid, $2::uuid, 'authored_field', 'bookkeeping.activation', 'null'::jsonb, '"manual"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-				($1::uuid, $2::uuid, 'bookkeeping', 'activation', 'null'::jsonb, '"standing"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-				($1::uuid, $2::uuid, 'gate', 'review', 'null'::jsonb, 'true'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-				($1::uuid, $2::uuid, 'accumulator', 'total', 'null'::jsonb, '7'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4)
-	`, sourceRunID, entityID, firstEventID, at); err != nil {
-		t.Fatalf("seed first mutations: %v", err)
-	}
-	seedWorkflowHeaderProjectionFixture(t, ctx, db, sourceRunID, entityID, "flow-a/1", "flow-a", "historical_entity", "queued", `{"total":7}`, at)
-	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET slug='before-slug',name='Before Name',gates='{"review":true}'::jsonb,bookkeeping='{"activation":"standing"}'::jsonb WHERE run_id=$1 AND entity_id=$2`, sourceRunID, entityID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'flow-a/1', 'historical_entity', 'before-slug', 'Before Name',
-				'{"title":"before-title","slug":"before-slug","name":"Before Name","gates":{"review":"authored-review"},"accumulator":{"total":"authored-total"},"bookkeeping":{"activation":"manual"}}'::jsonb,
-			$3, $3
-		)
-	`, sourceRunID, entityID, at); err != nil {
-		t.Fatalf("seed source entity_state: %v", err)
-	}
+	creating := semanticEventRecordFixture(firstEventID, sourceRunID, "fork.before", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), semanticEventRecordFixtureEnvelope(entityID, ""), at)
+	native := prepareFixedForkHistoryFixture(t, pg, "materializer-state", sourceRunID, entityID, creating)
+	ctx = native.ctx
+	persistFixedForkHistoryFixture(t, native)
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, secondEventID, sourceRunID, "fork.field_only", events.EventProducerPlatform, "test", entityID, "", fieldOnlyAt)
@@ -239,7 +209,7 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	if forkStatus != "paused" || forkedFromRun != sourceRunID || forkedFromEvent != secondEventID {
 		t.Fatalf("fork run = status:%s from:%s event:%s", forkStatus, forkedFromRun, forkedFromEvent)
 	}
-	if forkBundleHash != authorActivityTestBundleHash {
+	if forkBundleHash != native.construction.Child.Readiness.BundleHash {
 		t.Fatalf("fork bundle identity = hash:%q, want inherited canonical identity", forkBundleHash)
 	}
 	var sourceStatus string
@@ -417,33 +387,10 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	postEventID := uuid.NewString()
 	at := time.Unix(1700000505, 0).UTC()
 	afterAt := at.Add(time.Minute)
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.no_event_flow", events.EventProducerPlatform, "test", entityID, "", at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-			($1::uuid, $2::uuid, 'authored_field', 'name', 'null'::jsonb, '"Fork Point Name"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4)
-	`, sourceRunID, entityID, eventID, at); err != nil {
-		t.Fatalf("seed selected mutations: %v", err)
-	}
-	seedWorkflowHeaderProjectionFixture(t, ctx, db, sourceRunID, entityID, "state-flow/at-T", "state-flow", "validation_case", "pending", "{}", at)
-	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET name='Fork Point Name' WHERE run_id=$1 AND entity_id=$2`, sourceRunID, entityID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, name, fields, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'state-flow/at-T', 'validation_case', 'Fork Point Name',
-			'{"name": "Fork Point Name"}'::jsonb, $3, $3
-		)
-	`, sourceRunID, entityID, at); err != nil {
-		t.Fatalf("seed source entity_state: %v", err)
-	}
+	creating := semanticEventRecordFixture(eventID, sourceRunID, "fork.no_event_flow", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), semanticEventRecordFixtureEnvelope(entityID, ""), at)
+	native := prepareFixedForkHistoryFixture(t, pg, "source-metadata", sourceRunID, entityID, creating)
+	ctx = native.ctx
+	persistFixedForkHistoryFixture(t, native)
 
 	captureRunForkTestRevision(t, db, sourceRunID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, postEventID, sourceRunID, "fork.post_flow", events.EventProducerPlatform, "test", entityID, "post-flow/ignored", afterAt)
@@ -476,10 +423,7 @@ func TestRunForkMaterializer_UsesSourceCurrentStateSnapshotMetadataWhenEventFlow
 	if !plan.ExecutionReady {
 		t.Fatalf("ExecutionReady = false, blockers=%#v", plan.UnsupportedBlockers)
 	}
-	if len(plan.Entities) != 1 || plan.Entities[0].MaterializationMetadata == nil {
-		t.Fatalf("plan entities = %#v, want materialization metadata", plan.Entities)
-	}
-	metadata := plan.Entities[0].MaterializationMetadata
+	metadata := fixedForkBusinessEntity(t, plan, native).MaterializationMetadata
 	if metadata.Owner != runfork.RunForkMaterializedEntitySnapshotMetadataOwner ||
 		metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance ||
 		metadata.FlowInstance != "state-flow/at-T" ||
@@ -605,30 +549,10 @@ func TestRunForkPlanner_TypedSourceMetadataWinsOverAuthoredEntityTypeCollision(t
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000509, 0).UTC()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute)})
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.conflicting_entity_type", events.EventProducerPlatform, "test", entityID, "event-flow/at-T", at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"pending"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4),
-			($1::uuid, $2::uuid, 'authored_field', 'entity_type', 'null'::jsonb, '"field_case"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'before', $4)
-	`, sourceRunID, entityID, eventID, at); err != nil {
-		t.Fatalf("seed mutations: %v", err)
-	}
-	seedWorkflowHeaderProjectionFixture(t, ctx, db, sourceRunID, entityID, "state-flow/at-T", "state-flow", "source_case", "pending", "{}", at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'state-flow/at-T', 'source_case',
-			'{}'::jsonb, $3, $3
-		)
-	`, sourceRunID, entityID, at); err != nil {
-		t.Fatalf("seed entity_state: %v", err)
-	}
+	creating := semanticEventRecordFixture(eventID, sourceRunID, "fork.conflicting_entity_type", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), semanticEventRecordFixtureEnvelope(entityID, "event-flow/at-T"), at)
+	native := prepareFixedForkHistoryFixture(t, pg, "typed-collision", sourceRunID, entityID, creating)
+	ctx = native.ctx
+	persistFixedForkHistoryFixture(t, native)
 
 	captureRunForkTestRevision(t, db, sourceRunID)
 	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRunID, At: eventID})
@@ -638,10 +562,7 @@ func TestRunForkPlanner_TypedSourceMetadataWinsOverAuthoredEntityTypeCollision(t
 	if runForkTestHasPlanBlocker(plan, runfork.RunForkBlockerEntitySnapshotMetadataUnproven) {
 		t.Fatalf("plan blockers = %#v, authored entity_type must not challenge typed source metadata", plan.UnsupportedBlockers)
 	}
-	if len(plan.Entities) != 1 || plan.Entities[0].MaterializationMetadata == nil {
-		t.Fatalf("plan entities = %#v, want one typed source-at-revision metadata owner", plan.Entities)
-	}
-	entity := plan.Entities[0]
+	entity := fixedForkBusinessEntity(t, plan, native)
 	if entity.MaterializationMetadata.EntityType != "source_case" || entity.MaterializationMetadata.FlowInstance != "state-flow/at-T" ||
 		entity.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance {
 		t.Fatalf("typed source metadata = %#v", entity.MaterializationMetadata)
@@ -843,29 +764,39 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	eventID := uuid.NewString()
 	clearEventID := uuid.NewString()
 	at := time.Unix(1700000600, 0).UTC()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash})
-	sourceEvent := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, sourceRunID, "fork.pending", events.EventProducerPlatform, "test", entityID, "", at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"ready"'::jsonb, $3::uuid, 'platform', 'materializer-test', 'seed', $4)
-	`, sourceRunID, entityID, eventID, at); err != nil {
-		t.Fatalf("seed mutation: %v", err)
+	sourceEvent := semanticEventRecordFixture(eventID, sourceRunID, "fork.pending", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), semanticEventRecordFixtureEnvelope(entityID, ""), at)
+	native := prepareFixedForkHistoryFixture(t, pg, "unsupported-delivery", sourceRunID, entityID, sourceEvent)
+	ctx = native.ctx
+	route := testEntitylessNodeDeliveryRoute("in-progress-node")
+	if err := runSelectedFixtureMutation(ctx, pg, "fixed construction and in-progress delivery cut", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+		if err := commitSemanticEventFixtureWithRoutesStoryTx(ctx, pg, attempt, sourceEvent, []events.DeliveryRoute{route}); err != nil {
+			return err
+		}
+		if _, err := commitFixedForkHistoryFixture(ctx, attempt, native); err != nil {
+			return err
+		}
+		var authority runtimedelivery.ExecutionAuthority
+		if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			authority, err = deliveryFixtureAuthorityForRun(ctx, tx, deliveryadapter.DialectPostgres, sourceRunID)
+			return err
+		}); err != nil {
+			return err
+		}
+		claim, err := postgresDeliveryAdapter.ClaimExactResult(ctx, attempt, authority, sourceEvent, route, runtimedelivery.DefaultLeaseTTL)
+		if err != nil {
+			return err
+		}
+		if _, acquired := claim.Acquired(); !acquired {
+			return fmt.Errorf("fixed delivery cut did not acquire original contender: %s", claim.Disposition)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
-	seedWorkflowHeaderProjectionFixture(t, ctx, db, sourceRunID, entityID, "flow-a/1", "flow-a", "default", "ready", "{}", at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'flow-a/1', 'default', '{}'::jsonb, $3, $3
-		)
-	`, sourceRunID, entityID, at); err != nil {
-		t.Fatalf("seed source entity_state: %v", err)
+	if revision := captureRunForkTestRevision(t, db, sourceRunID); revision != 1 {
+		t.Fatalf("construction, event and in-progress delivery split the original cut: revision=%d", revision)
 	}
-	seedDeliveryStateFixture(t, ctx, pg, sourceEvent, testEntitylessNodeDeliveryRoute("in-progress-node"), runtimedelivery.StateLaunching, nil)
-	captureRunForkTestRevision(t, db, sourceRunID)
 
 	blocked, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: eventID})
 	if err == nil || !strings.Contains(err.Error(), runfork.RunForkBlockerNonAgentDeliveryReplayUnsupported) {

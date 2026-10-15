@@ -1,12 +1,14 @@
 package runtimepersistence
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -16,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -442,31 +445,24 @@ func TestRunForkPlanner_RouteRelevantStateRemainsBlockedDespiteUnrelatedCurrentR
 	entityID := uuid.NewString()
 	eventID := uuid.NewString()
 	at := time.Unix(1700000210, 0).UTC()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
-	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.state", events.EventProducerPlatform, "test", entityID, "flow-a/1", at)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, caused_by_event, writer_type, writer_id, handler_step, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, 'lifecycle_state', '', 'null'::jsonb, '"ready"'::jsonb, $3::uuid, 'platform', 'planner-test', 'seed', $4)
-	`, runID, entityID, eventID, at); err != nil {
-		t.Fatalf("seed mutation: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'flow-a/1', 'default',
-			'{}'::jsonb, $3, $3
-		)
-	`, runID, entityID, at); err != nil {
-		t.Fatalf("seed entity_state: %v", err)
-	}
-	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, "flow-a/1", "flow-a", "default", "ready", "{}", at)
-	admitGenericScheduleFixture(t, ctx, pg, testAgentGenericScheduleCommand(
+	event := semanticEventRecordFixture(eventID, runID, "fork.state", eventtest.Producer(events.EventProducerPlatform, "test"), []byte(`{}`), semanticEventRecordFixtureEnvelope(entityID, "flow-a/1"), at)
+	native := prepareFixedForkHistoryFixture(t, pg, "route-timer-blocker", runID, entityID, event)
+	ctx = native.ctx
+	timer := testAgentGenericScheduleCommand(
 		t, runID, "other-agent", "flow-other/1", uuid.NewString(), "unrelated", runtimegenericschedule.AbsoluteDue(at.Add(time.Hour)),
-	))
+	)
+	if err := runSelectedFixtureMutation(ctx, pg, "single-member timer-blocked historical cut", func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
+		if err := commitSemanticEventFixtureWithRoutesStoryTx(ctx, pg, attempt, event, nil); err != nil {
+			return err
+		}
+		if _, err := commitFixedForkHistoryFixture(ctx, attempt, native); err != nil {
+			return err
+		}
+		_, err := pg.genericSchedulePostgresOwner.AdmitTx(ctx, attempt, timer)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	unrelatedRunID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: unrelatedRunID, StartedAt: at.Add(-time.Minute)})
 	constructUnrelated := func() {
