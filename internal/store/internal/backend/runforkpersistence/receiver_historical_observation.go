@@ -48,7 +48,17 @@ func (s *RunForkSQLiteOwner) ReadHistoricalFlowInstanceConstructionEvidenceBatch
 	return readHistoricalFlowInstanceConstructionEvidenceBatchTx(ctx, tx, run, instances)
 }
 
-func readHistoricalFlowInstanceConstructionTx(ctx context.Context, tx *sql.Tx, source semanticview.Source, run runlifecycle.Snapshot, instance pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error) {
+func readHistoricalFlowInstanceConstructionTx(ctx context.Context, tx *sql.Tx, source semanticview.Source, run runlifecycle.Snapshot, instance pipeline.WorkflowInstance) (construction pipeline.HistoricalFlowInstanceConstruction, found bool, finalErr error) {
+	done, err := beginHistoricalPlanningRead(ctx, tx, source, run)
+	if err != nil {
+		return construction, false, err
+	}
+	defer func() {
+		finalErr = errors.Join(finalErr, done())
+		if finalErr != nil {
+			construction, found = pipeline.HistoricalFlowInstanceConstruction{}, false
+		}
+	}()
 	if source == nil {
 		return pipeline.HistoricalFlowInstanceConstruction{}, false, fmt.Errorf("historical instance observation requires its admitted snapshot")
 	}
@@ -70,7 +80,17 @@ func (cut historicalFlowInstanceConstructionCut) admit(source semanticview.Sourc
 	return cut.project(run, instance, fixed)
 }
 
-func readHistoricalFlowInstanceConstructionEvidenceTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instance pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error) {
+func readHistoricalFlowInstanceConstructionEvidenceTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instance pipeline.WorkflowInstance) (construction pipeline.HistoricalFlowInstanceConstruction, found bool, finalErr error) {
+	done, err := beginHistoricalPlanningRead(ctx, tx, nil, run)
+	if err != nil {
+		return construction, false, err
+	}
+	defer func() {
+		finalErr = errors.Join(finalErr, done())
+		if finalErr != nil {
+			construction, found = pipeline.HistoricalFlowInstanceConstruction{}, false
+		}
+	}()
 	cut, found, err := loadHistoricalFlowInstanceConstructionCutTx(ctx, tx, run, instance)
 	if err != nil || !found {
 		return pipeline.HistoricalFlowInstanceConstruction{}, false, err
@@ -100,6 +120,9 @@ func loadHistoricalFlowInstanceConstructionCutTx(ctx context.Context, tx *sql.Tx
 	if err := ctx.Err(); err != nil {
 		return historicalFlowInstanceConstructionCut{}, false, err
 	}
+	if err := requireHistoricalPlanningRun(ctx, tx, run); err != nil {
+		return historicalFlowInstanceConstructionCut{}, false, err
+	}
 	if tx == nil || run.Validate() != nil {
 		return historicalFlowInstanceConstructionCut{}, false, fmt.Errorf("historical construction evidence requires its admitted read snapshot")
 	}
@@ -116,10 +139,17 @@ func loadHistoricalFlowInstanceConstructionCutTx(ctx context.Context, tx *sql.Tx
 }
 
 func loadHistoricalFlowInstanceSourceSnapshotTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot) (*runForkRevisionSnapshot, error) {
+	scope, err := historicalPlanningForTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
 	sourceRunID, revision := run.Origin.SourceRunID(), run.Origin.ForkRevision()
 	var recorded int64
 	if err := tx.QueryRowContext(ctx, `SELECT revision FROM run_fork_revisions WHERE run_id=$1 AND revision=$2`, sourceRunID, revision).Scan(&recorded); err != nil {
 		return nil, fmt.Errorf("read admitted historical instance cut: %w", err)
+	}
+	if scope != nil {
+		return scope.resolver.sourceCut(ctx, run.Origin)
 	}
 	return loadRunForkRevisionSnapshot(ctx, tx, sourceRunID, recorded)
 }
@@ -157,13 +187,33 @@ func historicalFlowInstanceConstructionCutForHeader(ctx context.Context, run run
 	}, true, nil
 }
 
-func readHistoricalFlowInstanceConstructionEvidenceBatchTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instances []pipeline.WorkflowInstance) ([]pipelinepersistence.HistoricalFlowInstanceConstructionResult, error) {
+func readHistoricalFlowInstanceConstructionEvidenceBatchTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instances []pipeline.WorkflowInstance) (results []pipelinepersistence.HistoricalFlowInstanceConstructionResult, finalErr error) {
+	done, err := beginHistoricalPlanningRead(ctx, tx, nil, run)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		finalErr = errors.Join(finalErr, done())
+		if finalErr != nil {
+			results = nil
+		}
+	}()
 	return readHistoricalFlowInstanceConstructionHeadersTx(ctx, tx, run, instances, func(cut historicalFlowInstanceConstructionCut, instance pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error) {
 		return cut.evidence(run, instance)
 	})
 }
 
-func readHistoricalFlowInstanceConstructionBatchTx(ctx context.Context, tx *sql.Tx, source semanticview.Source, run runlifecycle.Snapshot, instances []pipeline.WorkflowInstance) ([]pipelinepersistence.HistoricalFlowInstanceConstructionResult, error) {
+func readHistoricalFlowInstanceConstructionBatchTx(ctx context.Context, tx *sql.Tx, source semanticview.Source, run runlifecycle.Snapshot, instances []pipeline.WorkflowInstance) (results []pipelinepersistence.HistoricalFlowInstanceConstructionResult, finalErr error) {
+	done, err := beginHistoricalPlanningRead(ctx, tx, source, run)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		finalErr = errors.Join(finalErr, done())
+		if finalErr != nil {
+			results = nil
+		}
+	}()
 	if source == nil {
 		return nil, fmt.Errorf("historical instance observation requires its admitted snapshot")
 	}
@@ -187,7 +237,8 @@ func readHistoricalFlowInstanceConstructionHeadersTx(ctx context.Context, tx *sq
 	if err != nil {
 		return nil, err
 	}
-	// These complete immutable cuts belong only to this synchronous call and tx.
+	// Non-planning calls retain their synchronous cut lifetime. Planning calls
+	// reuse the same canonical reconstruction inside their existing transaction.
 	var birth *runForkRevisionSnapshot
 	readBirth := func(ctx context.Context, header pipeline.WorkflowInstance) (runForkReceiverBirth, error) {
 		owner, err := flowidentity.NewRunScopedFlowInstance(run.RunID, flowidentity.StoredRoute(header.WorkflowName, header.InstanceID, header.StorageRef))
@@ -363,6 +414,9 @@ func readProjectedReceiverConstructionReceiptTx(ctx context.Context, tx *sql.Tx,
 // ReadConstructedEntityAtRevisionTx delegates fact selection, tombstones and
 // reconstruction to the same fixed-snapshot owner as fork planning and replay.
 func ReadConstructedEntityAtRevisionTx(ctx context.Context, tx *sql.Tx, owner flowidentity.RunScopedFlowInstance, entityID string, revision int64) (runfork.RunForkEntityState, error) {
+	if _, err := historicalPlanningForTx(ctx, tx); err != nil {
+		return runfork.RunForkEntityState{}, err
+	}
 	if tx == nil {
 		return runfork.RunForkEntityState{}, fmt.Errorf("historical evidence requires the selected read transaction")
 	}

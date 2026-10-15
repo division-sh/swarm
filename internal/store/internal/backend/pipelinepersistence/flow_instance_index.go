@@ -26,6 +26,7 @@ type HistoricalFlowInstanceConstructionResult struct {
 }
 
 type HistoricalFlowInstanceReader interface {
+	WithHistoricalFlowInstancePlanningTx(context.Context, *sql.Tx, semanticview.Source, runlifecycle.Snapshot, func(context.Context) error) error
 	ReadHistoricalFlowInstanceConstructionTx(context.Context, *sql.Tx, semanticview.Source, runlifecycle.Snapshot, pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error)
 	ReadHistoricalFlowInstanceConstructionBatchTx(context.Context, *sql.Tx, semanticview.Source, runlifecycle.Snapshot, []pipeline.WorkflowInstance) ([]HistoricalFlowInstanceConstructionResult, error)
 	ReadHistoricalFlowInstanceConstructionEvidenceTx(context.Context, *sql.Tx, runlifecycle.Snapshot, pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error)
@@ -198,17 +199,19 @@ func (s *flowInstanceIndexSnapshot) withPlanningReader(ctx context.Context, scop
 	if err := validateFlowInstanceIndexSnapshot(scope.Source(), scope.SourceFact().BundleHash(), s.run, s.historical); err != nil {
 		return err
 	}
-	reader := &flowInstanceIndexPlanningReader{snapshot: s, scope: scope}
-	defer func() {
-		reader.mu.Lock()
-		defer reader.mu.Unlock()
-		reader.snapshot = nil
-	}()
-	bounded, err := pipeline.WithFlowInstancePlanningInitialTimerReader(ctx, reader)
-	if err != nil {
-		return err
-	}
-	return prepare(bounded, reader)
+	return s.historical.WithHistoricalFlowInstancePlanningTx(ctx, s.tx, s.source, s.run, func(ctx context.Context) error {
+		reader := &flowInstanceIndexPlanningReader{snapshot: s, scope: scope}
+		defer func() {
+			reader.mu.Lock()
+			defer reader.mu.Unlock()
+			reader.snapshot = nil
+		}()
+		bounded, err := pipeline.WithFlowInstancePlanningInitialTimerReader(ctx, reader)
+		if err != nil {
+			return err
+		}
+		return prepare(bounded, reader)
+	})
 }
 
 func (r *flowInstanceIndexPlanningReader) ListFlowInstancePlanningInitialTimers(ctx context.Context, owner flowidentity.RunScopedFlowInstance, entityID string) ([]pipeline.WorkflowTimerActivation, error) {

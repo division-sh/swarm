@@ -20,14 +20,22 @@ import (
 )
 
 func TestHistoricalConstructionEvidenceBatchParityAndRefusalsBothStores(t *testing.T) {
-	testHistoricalConstructionBatchParityAndRefusalsBothStores(t, false)
+	testHistoricalConstructionBatchParityAndRefusalsBothStores(t, false, false)
 }
 
 func TestHistoricalConstructionAdmissionBatchParityAndRefusalsBothStores(t *testing.T) {
-	testHistoricalConstructionBatchParityAndRefusalsBothStores(t, true)
+	testHistoricalConstructionBatchParityAndRefusalsBothStores(t, true, false)
 }
 
-func testHistoricalConstructionBatchParityAndRefusalsBothStores(t *testing.T, sourceCompatible bool) {
+func TestHistoricalPlanningAdmissionKeepsScalarBatchAndParentFencesBothStores(t *testing.T) {
+	testHistoricalConstructionBatchParityAndRefusalsBothStores(t, true, true)
+}
+
+func TestHistoricalPlanningEvidenceDoesNotGainAdmissionAuthorityBothStores(t *testing.T) {
+	testHistoricalConstructionBatchParityAndRefusalsBothStores(t, false, true)
+}
+
+func testHistoricalConstructionBatchParityAndRefusalsBothStores(t *testing.T, sourceCompatible, planning bool) {
 	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -70,19 +78,30 @@ func testHistoricalConstructionBatchParityAndRefusalsBothStores(t *testing.T, so
 			default:
 				t.Fatal("batch proof requires the original native history owner")
 			}
+			source := semanticview.Wrap(f.bundle)
+			readTx := func(ctx context.Context, selectedRun runlifecycle.Snapshot, read func(context.Context, *sql.Tx) error) error {
+				return readServedDeliveryObservation(ctx, f.store, func(ctx context.Context, tx *sql.Tx) error {
+					if planning {
+						return reader.WithHistoricalFlowInstancePlanningTx(ctx, tx, source, selectedRun, func(ctx context.Context) error {
+							return read(ctx, tx)
+						})
+					}
+					return read(ctx, tx)
+				})
+			}
 			readScalar := reader.ReadHistoricalFlowInstanceConstructionEvidenceTx
 			readBatch := reader.ReadHistoricalFlowInstanceConstructionEvidenceBatchTx
 			if sourceCompatible {
 				readScalar = func(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, header pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error) {
-					return reader.ReadHistoricalFlowInstanceConstructionTx(ctx, tx, semanticview.Wrap(f.bundle), run, header)
+					return reader.ReadHistoricalFlowInstanceConstructionTx(ctx, tx, source, run, header)
 				}
 				readBatch = func(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, headers []pipeline.WorkflowInstance) ([]pipelinepersistence.HistoricalFlowInstanceConstructionResult, error) {
-					return reader.ReadHistoricalFlowInstanceConstructionBatchTx(ctx, tx, semanticview.Wrap(f.bundle), run, headers)
+					return reader.ReadHistoricalFlowInstanceConstructionBatchTx(ctx, tx, source, run, headers)
 				}
 			}
 			read := func(ctx context.Context, selectedRun runlifecycle.Snapshot, input []pipeline.WorkflowInstance) ([]pipelinepersistence.HistoricalFlowInstanceConstructionResult, error) {
 				var result []pipelinepersistence.HistoricalFlowInstanceConstructionResult
-				err := readServedDeliveryObservation(ctx, f.store, func(ctx context.Context, tx *sql.Tx) error {
+				err := readTx(ctx, selectedRun, func(ctx context.Context, tx *sql.Tx) error {
 					var err error
 					result, err = readBatch(ctx, tx, selectedRun, input)
 					return err
@@ -96,7 +115,7 @@ func testHistoricalConstructionBatchParityAndRefusalsBothStores(t *testing.T, so
 			}
 			defer restore()
 			var original []pipelinepersistence.HistoricalFlowInstanceConstructionResult
-			if err := readServedDeliveryObservation(f.ctx, f.store, func(ctx context.Context, tx *sql.Tx) error {
+			if err := readTx(f.ctx, run, func(ctx context.Context, tx *sql.Tx) error {
 				var err error
 				original, err = readBatch(ctx, tx, run, headers)
 				if err != nil || len(original) != len(headers) {
@@ -141,7 +160,7 @@ func testHistoricalConstructionBatchParityAndRefusalsBothStores(t *testing.T, so
 					case "instance":
 						bad.InstanceID = "foreign"
 					}
-					if err := readServedDeliveryObservation(f.ctx, f.store, func(ctx context.Context, tx *sql.Tx) error {
+					if err := readTx(f.ctx, run, func(ctx context.Context, tx *sql.Tx) error {
 						_, _, scalarErr := readScalar(ctx, tx, run, bad)
 						got, batchErr := readBatch(ctx, tx, run, []pipeline.WorkflowInstance{exact, bad})
 						if scalarErr == nil || batchErr == nil || got != nil || scalarErr.Error() != batchErr.Error() {
