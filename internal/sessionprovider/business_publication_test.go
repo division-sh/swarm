@@ -19,14 +19,16 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -72,26 +74,33 @@ func (f *activeInputFixture) publicationBus(t *testing.T) *bus.EventBus {
 	return eventBus
 }
 
-// Compiled declaration/routing are fixture inputs, not public source admission.
-// The selected binding, native authentication and commit owners remain real.
+// Provider declarations are isolated component inputs. The compiled source and
+// selected source fact must still consume the identical admitted artifact.
 func sessionBusinessSemanticFixture(t *testing.T) semanticview.Source {
 	t.Helper()
-	root := &contracts.FlowContractView{Paths: contracts.FlowContractPaths{FlowPath: ".", SchemaFile: "schema.yaml"}, Path: ".",
-		Events: map[string]contracts.EventCatalogEntry{
-			"inbound.whatsapp":         {Payload: contracts.EventPayloadSpec{Type: "object"}},
-			"inbound.whatsapp.message": {Payload: contracts.EventPayloadSpec{Type: "object"}},
-			"inbound.whatsapp.edit":    {Payload: contracts.EventPayloadSpec{Type: "object"}},
-			"inbound.whatsapp.revoke":  {Payload: contracts.EventPayloadSpec{Type: "object"}},
-		},
-		Schema: contracts.FlowSchemaDocument{}}
-	bundle := &contracts.WorkflowContractBundle{RootSchema: &root.Schema,
-		FlowSources: map[string]contracts.FlowSource{".": {FlowPath: ".", Schema: "schema.yaml"}},
-		FlowSchemas: map[string]contracts.FlowSchemaDocument{".": root.Schema},
-		FlowTree:    flowmodel.Tree[contracts.FlowContractView]{Root: root, ByID: map[string]*contracts.FlowContractView{".": root}, ByPath: map[string]*contracts.FlowContractView{".": root}}}
-	if err := contracts.CompileWorkflowSemantics(bundle); err != nil {
+	repo := pipeline.WorkflowRepoRoot()
+	bundle, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, sourceartifactfixture.Artifact(),
+		contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+	if err != nil {
 		t.Fatal(err)
 	}
 	return semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{".": {"inbound.whatsapp", "inbound.whatsapp.message", "inbound.whatsapp.edit", "inbound.whatsapp.revoke"}})
+}
+
+func TestSessionPublicationFixtureUsesItsAdmittedArtifact(t *testing.T) {
+	source := sessionBusinessSemanticFixture(t)
+	runID := uuid.NewString()
+	owner, err := flowidentity.NewRunScopedFlowInstance(runID, flowidentity.StoredRoute(".", runID, runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pipeline.NewExactFlowInstanceLookup(source, sourceartifactfixture.Fact(), owner); err != nil {
+		t.Fatalf("compiled publication fixture lost its admitted source: %v", err)
+	}
+	foreign := sourceartifactfixture.FactFor(sourceartifactfixture.New("schema.yaml", []byte("name: foreign\n")))
+	if _, err := pipeline.NewExactFlowInstanceLookup(source, foreign, owner); err == nil {
+		t.Fatal("publication fixture accepted a different admitted artifact")
+	}
 }
 
 func TestWhatsAppBusinessCommitTemporalFencesBothStores(t *testing.T) {
