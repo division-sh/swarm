@@ -162,6 +162,7 @@ type processCapability struct {
 	monitorDeadline time.Duration
 
 	agentRecoverySeed          *agentRecoverySeed
+	agentRecoveryPolicy        *agentRecoveryProfilePolicy
 	agentRecoveryWrites        *AgentRecoveryWriteObserver
 	agentRecoverySeedProbe     atomic.Pointer[AgentRecoverySeedFaultProbeForTest]
 	agentRecoverySeedFaultUsed atomic.Bool

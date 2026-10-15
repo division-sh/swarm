@@ -21,6 +21,7 @@ type agentRecoveryClaimIntent struct {
 	eventID       string
 	runID         string
 	routeIdentity string
+	capacity      *agentRecoveryCapacityAttempt
 }
 
 type agentRecoveryClaimEntry struct{ intent *agentRecoveryClaimIntent }
