@@ -196,16 +196,20 @@ func newS6CreationActivityFixture(t *testing.T, backend, frontier string) s6Crea
 		if err != nil {
 			t.Fatal(err)
 		}
-		requestRoute := bus.FlowInstanceRouteMaterializationRequest{Identity: owner, Instance: plan.Identity}
-		staged, err := publisher.StageFlowInstanceRouteContext(ctx, requestRoute)
-		if err != nil || !staged.Acknowledged {
-			t.Fatalf("stage exact constructed route: %+v err=%v", staged, err)
-		}
 		if ready, err := completeFlowAttachmentFixture(ctx, workflow, admitted.Attempt, time.Now().UTC()); err != nil || !ready.Acknowledged {
 			t.Fatalf("component attachment: %+v err=%v", ready, err)
 		}
-		if _, err := publisher.PublishPersistedFlowInstanceRouteForAttempt(ctx, requestRoute, admitted.Attempt); err != nil {
+		lookup, err := pipeline.NewExactFlowInstanceLookup(source, fact, owner)
+		if err != nil {
 			t.Fatal(err)
+		}
+		observed, found, err := selected.LookupFlowInstance(ctx, lookup)
+		if err != nil || !found || observed.Identity() != plan.Identity {
+			t.Fatalf("exact constructed native index: %+v found=%t err=%v", observed, found, err)
+		}
+		ready, present := observed.Readiness()
+		if !present || ready.Phase != pipeline.FlowAttachmentReady || ready.AttemptOrdinal != admitted.Attempt.Ordinal() {
+			t.Fatalf("native index lost exact completed attachment: %+v present=%t", ready, present)
 		}
 		return plan, admitted.Attempt
 	}

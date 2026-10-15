@@ -38,3 +38,35 @@ func (s *DeliverySQLiteOwner) ReadActiveDeliverySnapshots(ctx context.Context) (
 	}
 	return snapshots, nil
 }
+
+func (s *DeliveryPostgresOwner) ReadFirstAgentClaimProfile(ctx context.Context, expected deliverylifecycle.Snapshot) (deliverylifecycle.AgentClaimProfile, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return deliverylifecycle.AgentClaimProfile{}, err
+	}
+	var profile deliverylifecycle.AgentClaimProfile
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		profile, err = ReadFirstAgentClaimProfileTx(ctx, tx, DialectPostgres, expected)
+		return err
+	})
+	if err != nil {
+		return deliverylifecycle.AgentClaimProfile{}, err
+	}
+	return profile, nil
+}
+
+func (s *DeliverySQLiteOwner) ReadFirstAgentClaimProfile(ctx context.Context, expected deliverylifecycle.Snapshot) (deliverylifecycle.AgentClaimProfile, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return deliverylifecycle.AgentClaimProfile{}, err
+	}
+	var profile deliverylifecycle.AgentClaimProfile
+	err := s.backend.RunReadTransaction(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		profile, err = ReadFirstAgentClaimProfileTx(ctx, tx, DialectSQLite, expected)
+		return err
+	})
+	if err != nil {
+		return deliverylifecycle.AgentClaimProfile{}, err
+	}
+	return profile, nil
+}
