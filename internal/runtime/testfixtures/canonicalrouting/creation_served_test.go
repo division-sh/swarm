@@ -18,6 +18,8 @@ func TestServedCreationFixturesVerificationConsumersAgree(t *testing.T) {
 		{"auto_emit", CopyRootIngressLegacyTemplateAutoEmit},
 		{"empire_outbox", CopyTemplateInstanceEmpireOutbox},
 		{"typed_initialization", CopyServedReceiverInitialization},
+		{"conversation_history", CopyConversationForkHistory},
+		{"conversation_served", CopyRootIngressServedConversationFork},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := RepoRoot(t)

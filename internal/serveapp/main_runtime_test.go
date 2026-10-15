@@ -2343,11 +2343,29 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 	if actorIdentity.IsZero() {
 		t.Fatalf("%s conversation fork source agent was not admitted by startup topology", backend)
 	}
-	history := storetest.SeedConversationForkSource(t, ctx, selected, storetest.ConversationForkSourceFixture{
+	construction := storetest.ConversationForkSourceFixture{
 		Identity: actorIdentity, RunID: fixture.RunID, SessionID: fixture.SessionID, EntityID: fixture.EntityID,
 		Event1ID: fixture.Event1ID, Event2ID: fixture.Event2ID,
 		CreatedAt: now, Turn1At: fixture.Turn1At, Turn2At: fixture.Turn2At,
-	})
+	}
+	construction.Construction = storetest.PrepareConversationForkConstruction(t, ctx, selected, rt.Runtime.Options.WorkflowModule.SemanticSource(), rt.Runtime.Manager, construction)
+	history := storetest.SeedConversationForkSource(t, ctx, selected, construction)
+	if err := rt.Runtime.Manager.FinalizeCommittedFlowInstanceActivation(ctx, history.Construction); err != nil {
+		t.Fatalf("finalize conversation construction: %v", err)
+	}
+	readiness, err := rt.Runtime.Manager.InspectDynamicFlowRuntimeReadinessForSource(ctx, rt.Runtime.Options.SourceArtifactFact)
+	if err != nil {
+		t.Fatalf("inspect completed conversation construction: %v", err)
+	}
+	completed := 0
+	for _, member := range readiness.CurrentCompleted {
+		if member.InstancePath == "flow/forkchat" && member.Plan.RunID == fixture.RunID && member.Plan.Identity.EntityID == fixture.EntityID && member.Plan.BundleHash == rt.BundleHash {
+			completed++
+		}
+	}
+	if completed != 1 {
+		t.Fatalf("conversation construction lacks exact completed readiness: %+v", readiness)
+	}
 	for i, turn := range []struct {
 		id string
 		at time.Time
@@ -2357,7 +2375,7 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 		storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
 			Store: selectedStore, Selected: selected, Identity: actorIdentity,
 			RunID: fixture.RunID, SessionID: fixture.SessionID, TurnID: turn.id,
-			Memory: runtimeagentmemory.Plan{Enabled: true}, Event: history[i], ParseOK: true, CreatedAt: turn.at,
+			Memory: runtimeagentmemory.Plan{Enabled: true}, Event: history.Events[i], ParseOK: true, CreatedAt: turn.at,
 		})
 	}
 	return fixture
