@@ -14,7 +14,7 @@ import (
 )
 
 // Excluded from the collector payload to avoid a self-referential fingerprint.
-const debtProcessLeaseCollectorTo = "1a353f6c8e5cfe2e2fce2163231e4ac4832df0776daa8dbea177c6edb274bd90"
+const debtProcessLeaseCollectorTo = "10884c6e452b55ed978b5aeb4982edb31d4c40d4ac7fd5296b1618326a70671c"
 
 func TestPersistenceAuthorityDebtProcessLeaseReviewedSourcePins(t *testing.T) {
 	root, base := persistenceAuthorityRepoRoot(t), t.TempDir()
