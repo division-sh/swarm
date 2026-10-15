@@ -54,6 +54,23 @@ The same head's preflight passed (500.910s), but its required focused packet
 remains failed evidence. Further classification needs reviewer-g's ruling;
 no physical rehearsal, hosted qualification or readiness PASS is claimed.
 
+The deterministic native and actual serve-adapter held-auth controls at
+`962825ccf7` confirm completed bootstrap/transport before SDK login and a
+truthful false/nil checkpoint, then a true checkpoint at the real post-auth
+milestone. Reviewer-g approved only the paired-fixture/consumer wait in
+[#2577/6202592663](https://github.com/division-sh/swarm/issues/2577#issuecomment-6202592663).
+The fixture now supplies a one-use login-socket token; four immediate callers
+wait once, and the readiness fixture replaces checkpoint polling with one wait
+and one real checkpoint inside its original 5s bound. The explicit held-auth
+negative and distinct-successor stale-signal control remain required. The
+deterministic old immediate expectation is RED on both stores with the same
+peer, before release; the exact failure/consumer accounting is in
+`internal/cliapp/testdata/issue_2577_bootstrap_predicate_accounting.md`.
+This is a test-only observation correction, not a product-checkpoint relaxation.
+Fresh affected race/guards, exact-head preflight and the ONE quiet actual-SDK
+first-QR/expiry/replacement rehearsal are still prerequisites to the next gate.
+No earlier checkpoint RED, preparation RED or accepted residual is erased.
+
 ## Historical Preparation (Superseded)
 
 **NOT READY: preparation checkpoint, not the user's final sitting packet.**
