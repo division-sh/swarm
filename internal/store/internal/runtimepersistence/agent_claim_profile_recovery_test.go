@@ -67,6 +67,9 @@ func proveAgentProfileRecoveryBeforeAttempt(t *testing.T, backend string) {
 		t.Fatal(err)
 	}
 	retry := claimAgentProfileRecoveryEvent(t, f)
+	retryProfile := current
+	retryProfile.DeliveryID, retryProfile.EventID = retry.Snapshot.DeliveryID, retry.Snapshot.EventID
+	assertAgentProfileRecoveryCapture(t, f, retry.Snapshot, retryProfile)
 	if _, err := f.store.SettleFailure(f.ctx, retry.Claim, deliverylifecycle.Settlement{
 		Disposition: deliverylifecycle.FailureRetry, Failure: testRetryableFailure(), RetryBase: time.Hour,
 		RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation(),
@@ -87,7 +90,7 @@ func proveAgentProfileRecoveryBeforeAttempt(t *testing.T, backend string) {
 		t.Fatal("native reopen changed durable claims or immutable capture bytes")
 	}
 	assertAgentProfileRecoveryLifecycle(t, f, state)
-	assertAgentProfileRecoveryInventory(t, f, first, second, retry.Snapshot.DeliveryID, pendingID, original, current)
+	assertAgentProfileRecoveryInventory(t, f, first, second, pendingID, original, current, retryProfile)
 	if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(before, after) {
 		t.Fatal("recovery enumeration/profile joins changed complete application storage")
 	}
@@ -140,7 +143,7 @@ func claimAgentProfileRecoveryEvent(t *testing.T, f agentClaimProfileFixture) de
 }
 
 func assertAgentProfileRecoveryInventory(t *testing.T, f agentClaimProfileFixture, first, second deliverylifecycle.ClaimedObligation,
-	retryID, pendingID string, original, current deliverylifecycle.AgentClaimProfile) {
+	pendingID string, original, current, retryProfile deliverylifecycle.AgentClaimProfile) {
 	t.Helper()
 	inventory, err := f.store.InspectDeliveryRecovery(f.ctx, f.source)
 	want := deliverylifecycle.RecoveryInventory{Runs: []deliverylifecycle.RecoveryRunInventory{{
@@ -169,7 +172,7 @@ func assertAgentProfileRecoveryInventory(t *testing.T, f agentClaimProfileFixtur
 			delete(expected, item.DeliveryID)
 			continue
 		}
-		assertAgentProfileRecoveryUnclaimedOrRetry(t, f, item, pendingID, retryID)
+		assertAgentProfileRecoveryUnclaimedOrRetry(t, f, item, pendingID, retryProfile)
 	}
 	if len(expected) != 0 || !reflect.DeepEqual(counts, map[string]int{original.ProfileID: 1, current.ProfileID: 1}) {
 		t.Fatalf("immutable profile counts lost original claim: counts=%v missing=%v", counts, expected)
@@ -197,7 +200,7 @@ func assertAgentProfileRecoveryClaimDisposition(t *testing.T, item deliverylifec
 	}
 }
 
-func assertAgentProfileRecoveryUnclaimedOrRetry(t *testing.T, f agentClaimProfileFixture, item deliverylifecycle.ContinuationItem, pendingID, retryID string) {
+func assertAgentProfileRecoveryUnclaimedOrRetry(t *testing.T, f agentClaimProfileFixture, item deliverylifecycle.ContinuationItem, pendingID string, retryProfile deliverylifecycle.AgentClaimProfile) {
 	t.Helper()
 	switch item.DeliveryID {
 	case pendingID:
@@ -207,14 +210,23 @@ func assertAgentProfileRecoveryUnclaimedOrRetry(t *testing.T, f agentClaimProfil
 		if _, err := ReadFirstAgentClaimProfileForTest(f.ctx, f.store, item.Snapshot); err == nil {
 			t.Fatal("pending delivery invented immutable claim evidence")
 		}
-	case retryID:
+	case retryProfile.DeliveryID:
 		if item.Snapshot.Status != deliverylifecycle.StatusFailed || item.Disposition != deliverylifecycle.ClaimDeferred {
 			t.Fatalf("future retry lost its independent wake: %+v", item)
 		}
 		if _, present := item.Wake.After(); !present {
 			t.Fatal("future retry lost its due-time wake")
 		}
+		assertAgentProfileRecoveryCapture(t, f, item.Snapshot, retryProfile)
 	default:
 		t.Fatalf("foreign recovery reference: %+v", item)
+	}
+}
+
+func assertAgentProfileRecoveryCapture(t *testing.T, f agentClaimProfileFixture, snapshot deliverylifecycle.Snapshot, expected deliverylifecycle.AgentClaimProfile) {
+	t.Helper()
+	actual, err := ReadFirstAgentClaimProfileForTest(f.ctx, f.store, snapshot)
+	if err != nil || actual != expected {
+		t.Fatalf("recovery retry changed its exact first-claim profile/config/source/generation: actual=%+v expected=%+v err=%v", actual, expected, err)
 	}
 }
