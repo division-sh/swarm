@@ -20,8 +20,6 @@ func (p settlementLeaseProbe) Complete(ctx context.Context, success bool) error 
 
 type settlementServiceProbe func(context.Context) error
 
-func (p settlementServiceProbe) Close(ctx context.Context) error { return p(ctx) }
-
 func TestRunSettlementSlowRemovalHasIndependentDeadline(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		oldJoin, oldRemoval := authoritySettlementTimeout, postgresRemovalTimeout
