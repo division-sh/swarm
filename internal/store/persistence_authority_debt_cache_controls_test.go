@@ -246,7 +246,7 @@ func TestPersistenceAuthorityDebtAnalysisCacheRecomputesCorruptAndUnavailableEnt
 
 func TestPersistenceAuthorityDebtAnalysisCacheFingerprintsOwnersAndBuildContext(t *testing.T) {
 	root := t.TempDir()
-	for _, path := range []string{"internal/store/persistence_authority_debt_census_test.go", "internal/store/persistence_authority_debt_test.go", "internal/store/persistence_authority_debt_cache_test.go", "internal/store/persistence_authority_debt_sidecar_test.go", "internal/store/persistence_authority_debt_process_lease_test.go", "internal/store/persistence_authority_registry_test.go", "internal/checkoutsource/checkoutsource.go"} {
+	for _, path := range []string{"internal/store/persistence_authority_debt_census_test.go", "internal/store/persistence_authority_debt_test.go", "internal/store/persistence_authority_debt_cache_test.go", "internal/store/persistence_authority_debt_sidecar_test.go", "internal/store/persistence_authority_debt_process_lease_test.go", "internal/store/persistence_authority_debt_native_fixture_test.go", "internal/store/persistence_authority_registry_test.go", "internal/checkoutsource/checkoutsource.go"} {
 		debtWriteModuleSource(t, root, path, "package probe\n")
 	}
 	debtWriteModuleSource(t, root, "go.mod", "module example.com/authorityprobe\n\ngo 1.25.0\n")
@@ -255,7 +255,7 @@ func TestPersistenceAuthorityDebtAnalysisCacheFingerprintsOwnersAndBuildContext(
 	if original.directory == "" || original.toolchain == "" {
 		t.Fatal("cache identity could not be computed")
 	}
-	for _, path := range []string{"internal/store/persistence_authority_debt_census_test.go", "internal/store/persistence_authority_debt_test.go", "internal/store/persistence_authority_debt_cache_test.go", "internal/store/persistence_authority_debt_process_lease_test.go", "internal/store/persistence_authority_registry_test.go", "internal/checkoutsource/checkoutsource.go", "go.sum"} {
+	for _, path := range []string{"internal/store/persistence_authority_debt_census_test.go", "internal/store/persistence_authority_debt_test.go", "internal/store/persistence_authority_debt_cache_test.go", "internal/store/persistence_authority_debt_process_lease_test.go", "internal/store/persistence_authority_debt_native_fixture_test.go", "internal/store/persistence_authority_registry_test.go", "internal/checkoutsource/checkoutsource.go", "go.sum"} {
 		prior, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {
 			t.Fatal(err)

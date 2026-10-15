@@ -560,11 +560,10 @@ func startForkEngineRuntimeOwnerAt(t *testing.T, backend, root string, probe lif
 			dsn = testutil.StartPostgresDSN(t)
 		}
 		driver, address = "postgres", dsn
-		connection, err := testpostgres.ParseConnection(dsn)
+		p, err := testpostgres.ParseConnectionParameters(dsn)
 		if err != nil {
 			t.Fatal(err)
 		}
-		p := connection.Parameters()
 		t.Setenv("FORK_ENGINE_DB_PASSWORD", p.Password)
 		config["database"] = map[string]any{"host": p.Host, "port": p.Port, "name": p.Database, "user": p.User, "password_env": "FORK_ENGINE_DB_PASSWORD", "sslmode": p.SSLMode}
 		selection = storebackend.Selection{Backend: storebackend.BackendPostgres}
