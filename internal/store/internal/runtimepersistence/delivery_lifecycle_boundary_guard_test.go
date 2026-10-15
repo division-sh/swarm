@@ -29,7 +29,6 @@ var executableDeliverySQLOwners = map[string]string{
 	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go": "selected-fork physical cleanup after typed terminalization",
 	"internal/store/internal/backend/pipelinepersistence/standing_service.go":                        "standing-service pre-mutation execution-posture inspection",
 	"internal/store/internal/backend/effectpersistence/canceled_turn_recovery.go":                    "read-only cancellation inventory excluding selected possession from normal recovery",
-	"internal/store/testsql/event.go":                                                                "named hostile rollback injection used only by tests",
 }
 
 func TestRetiredGenericDeliveryReadersHaveNoProductionConsumers(t *testing.T) {

@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,10 +41,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -73,9 +69,7 @@ type canonicalEventPublishProofStore interface {
 
 func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 	type fixture struct {
-		store   canonicalEventPublishProofStore
-		db      *sql.DB
-		dialect authoractivityfixture.Dialect
+		store canonicalEventPublishProofStore
 	}
 	for _, backend := range []struct {
 		name string
@@ -85,14 +79,13 @@ func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 			name: "sqlite",
 			open: func(t *testing.T, ctx context.Context) fixture {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return fixture{store: sqliteStore, db: storetest.DatabaseForTest(sqliteStore), dialect: authoractivityfixture.DialectSQLite}
+				return fixture{store: sqliteStore}
 			},
 		},
 		{
 			name: "postgres",
 			open: func(t *testing.T, _ context.Context) fixture {
-				_, db, _ := testutil.StartPostgres(t)
-				return fixture{store: storetest.AdmitPostgresRuntimeStore(t, db), db: db, dialect: authoractivityfixture.DialectPostgres}
+				return fixture{store: storetest.StartPostgresRuntimeStore(t)}
 			},
 		},
 	} {
@@ -140,8 +133,8 @@ func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 				{"existing-run operator", operatorID, events.EventAdmissionOperatorInjected, "", false},
 				{"referenced operator", referencedID, events.EventAdmissionOperatorInjected, rootID, true},
 			} {
-				persisted, err := eventfixture.Load(ctx, f.db, f.dialect, expected.eventID)
-				if err != nil {
+				persisted, found, err := storetest.ReadCanonicalEventRecord(ctx, f.store, expected.eventID)
+				if err != nil || !found {
 					t.Fatalf("canonical readback %s: %v", expected.name, err)
 				}
 				if persisted.AdmissionClass() != expected.class || persisted.RunID() != runID || persisted.ParentEventID() != "" || !persisted.Producer().Equal(wantProducer) {
@@ -160,8 +153,7 @@ func TestEventPublishCanonicalClassAndProvenanceReadbackParity(t *testing.T) {
 }
 
 func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -198,7 +190,7 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 	if count := countEventsByName(t, pg, "scan.requested"); count != 1 {
 		t.Fatalf("scan.requested event count = %d, want 1", count)
 	}
-	assertExistingRunEventPublishPersistence(t, db, runID, eventID, "cli-publish:"+actorTokenID(testToken))
+	assertExistingRunEventPublishPersistence(t, pg, runID, eventID, "cli-publish:"+actorTokenID(testToken))
 	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
@@ -238,8 +230,7 @@ func TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempo
 }
 
 func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
@@ -283,7 +274,7 @@ func TestOperatorEventPublishReturnsDurableAckBeforePostCommitDispatchCompletes(
 	deliveries := asSlice(t, result["deliveries"])
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
 	assertEventPublishDeliveriesContain(t, deliveries, "node", eventPublishScanNodeID(t), "pending", 1)
-	assertExistingRunEventPublishPersistence(t, db, runID, eventID, "cli-publish:"+actorTokenID(testToken))
+	assertExistingRunEventPublishPersistence(t, pg, runID, eventID, "cli-publish:"+actorTokenID(testToken))
 	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows before dispatch release = %d, want 1", count)
 	}
@@ -331,7 +322,7 @@ func TestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock(t *t
 		t.Fatalf("sqlite deliveries = %#v, want one persisted delivery", deliveries)
 	}
 	assertEventPublishDeliveryIdentity(t, asMap(t, deliveries[0]), "node", eventPublishScanNodeID(t), "pending", 1)
-	assertSQLiteEventPublishRows(t, storetest.DatabaseForTest(sqliteStore), runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
+	assertSQLiteEventPublishRows(t, sqliteStore, runID, eventID, "scan.requested", "cli-publish:"+actorTokenID(testToken))
 	if count := countAPIIdempotencyRows(t, sqliteStore); count != 1 {
 		t.Fatalf("sqlite api_idempotency rows = %d, want 1", count)
 	}
@@ -520,8 +511,7 @@ func TestOperatorEventPublishSQLiteRejectsPrivateOrdinaryFlowEndpoint(t *testing
 }
 
 func TestOperatorEventPublishRootEventNameWinsOverFlowLeafAliases(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(rootAndAmbiguousFlowScopedEventPublishTestBundle(t))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -544,7 +534,7 @@ func TestOperatorEventPublishRootEventNameWinsOverFlowLeafAliases(t *testing.T) 
 			t.Fatalf("%s event count = %d, want 0", flowEventName, got)
 		}
 	}
-	assertEventPublishPersistence(t, db, runID, eventID, "item.received", "cli-publish:"+actorTokenID(testToken), runStartTestBundleHashForSource(source))
+	assertEventPublishPersistence(t, pg, runID, eventID, "item.received", "cli-publish:"+actorTokenID(testToken), runStartTestBundleHashForSource(source))
 }
 
 func TestOperatorEventPublishFlowScopedEventNameFailuresFailClosed(t *testing.T) {
@@ -612,8 +602,7 @@ func TestOperatorEventPublishHandlersRequireCanonicalBundleHashForCreateNewWork(
 }
 
 func TestOperatorEventPublishPostgresUsesPublisherScopeWithPlainRequestContext(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -631,7 +620,7 @@ func TestOperatorEventPublishPostgresUsesPublisherScopeWithPlainRequestContext(t
 	result := asMap(t, published.Result)
 	eventID := stringValue(t, result["event_id"], "event_id")
 	runID := stringValue(t, result["run_id"], "run_id")
-	assertExistingRunEventPublishPersistence(t, db, runID, eventID, "cli-publish:"+actorTokenID(testToken))
+	assertExistingRunEventPublishPersistence(t, pg, runID, eventID, "cli-publish:"+actorTokenID(testToken))
 	if got := countEventsByName(t, pg, "scan.requested"); got != 1 {
 		t.Fatalf("scan.requested event count = %d, want 1", got)
 	}
@@ -647,7 +636,7 @@ func TestOperatorEventPublishPostgresUsesPublisherScopeWithPlainRequestContext(t
 	explicitResult := asMap(t, explicit.Result)
 	explicitEventID := stringValue(t, explicitResult["event_id"], "event_id")
 	explicitRunID := stringValue(t, explicitResult["run_id"], "run_id")
-	assertExistingRunEventPublishPersistence(t, db, explicitRunID, explicitEventID, "cli-publish:"+actorTokenID(testToken))
+	assertExistingRunEventPublishPersistence(t, pg, explicitRunID, explicitEventID, "cli-publish:"+actorTokenID(testToken))
 	explicitEvent := requireAPIV1RuntimeBusEventID(t, ch, explicitEventID, "explicit-bundle event.publish delivery")
 	if explicitEvent.ID() != explicitEventID {
 		t.Fatalf("explicit-bundle delivered event = %s, want %s", explicitEvent.ID(), explicitEventID)
@@ -674,7 +663,7 @@ func TestOperatorEventPublishSQLiteUsesPublisherScopeWithPlainRequestContext(t *
 	result := asMap(t, published.Result)
 	eventID := stringValue(t, result["event_id"], "event_id")
 	runID := stringValue(t, result["run_id"], "run_id")
-	assertSQLiteExistingRunEventPublishRows(t, storetest.DatabaseForTest(sqliteStore), runID, eventID, "cli-publish:"+actorTokenID(testToken))
+	assertSQLiteExistingRunEventPublishRows(t, sqliteStore, runID, eventID, "cli-publish:"+actorTokenID(testToken))
 	got := requireAPIV1RuntimeBusEvent(t, ch, "sqlite event.publish delivery")
 	if got.ID() != eventID {
 		t.Fatalf("delivered event = %s, want %s", got.ID(), eventID)
@@ -687,7 +676,7 @@ func TestOperatorEventPublishSQLiteUsesPublisherScopeWithPlainRequestContext(t *
 	explicitResult := asMap(t, explicit.Result)
 	explicitEventID := stringValue(t, explicitResult["event_id"], "event_id")
 	explicitRunID := stringValue(t, explicitResult["run_id"], "run_id")
-	assertSQLiteExistingRunEventPublishRows(t, storetest.DatabaseForTest(sqliteStore), explicitRunID, explicitEventID, "cli-publish:"+actorTokenID(testToken))
+	assertSQLiteExistingRunEventPublishRows(t, sqliteStore, explicitRunID, explicitEventID, "cli-publish:"+actorTokenID(testToken))
 	explicitEvent := requireAPIV1RuntimeBusEventID(t, ch, explicitEventID, "sqlite explicit-bundle event.publish delivery")
 	if explicitEvent.ID() != explicitEventID {
 		t.Fatalf("sqlite explicit-bundle delivered event = %s, want %s", explicitEvent.ID(), explicitEventID)
@@ -711,8 +700,7 @@ func rpcCallWithPlainRequestContext(t *testing.T, handler *Handler, body string)
 }
 
 func TestOperatorEventPublishReturnsStoredCompletionWithoutPostCommitReadback(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -738,8 +726,8 @@ func TestOperatorEventPublishReturnsStoredCompletionWithoutPostCommitReadback(t 
 	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
-	var storedResponse []byte
-	if err := db.QueryRow(`SELECT response FROM api_idempotency WHERE method='event.publish' AND idempotency_key='idem-readback'`).Scan(&storedResponse); err != nil {
+	storedResponse, err := storetest.ReadEventPublicationStoredResponse(context.Background(), pg, "idem-readback")
+	if err != nil {
 		t.Fatalf("load stored event.publish response: %v", err)
 	}
 	var storedResult any
@@ -917,8 +905,7 @@ func TestOperatorEventPublishPostCommitCompletionFailureReplaysWithoutDuplicate(
 }
 
 func TestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	failing := &failCommittedReplayScopeStore{
 		PostgresStore: pg,
 		err:           errors.New("simulated pre-commit replay scope failure"),
@@ -948,7 +935,7 @@ func TestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError(t *tes
 	if got := countAllEventDeliveries(t, pg); got != 0 {
 		t.Fatalf("event_deliveries rows after pre-commit failure = %d, want 0", got)
 	}
-	if _, err := db.ExecContext(ctx, `SELECT 1`); err != nil {
+	if err := pg.Ping(ctx); err != nil {
 		t.Fatalf("database unusable after pre-commit failure: %v", err)
 	}
 }
@@ -1062,8 +1049,7 @@ func TestOperatorEventPublishExplicitRunTargetRequiresExistingNonterminalRun(t *
 }
 
 func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersistence(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(eventPublishFollowUpTestBundle())
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -1100,7 +1086,7 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 	}
 	assertEventPublishDeliveriesContain(t, deliveries, "agent", "scan-orchestrator", "pending", 1)
 	assertEventPublishDeliveriesContain(t, deliveries, "node", identitytest.RootNode(t, "scan-orchestrator").Key(), "pending", 1)
-	assertEventPublishEventRow(t, db, runID, followUpEventID, "scan.followup", "operator-test")
+	assertEventPublishEventRow(t, pg, runID, followUpEventID, "scan.followup", "operator-test")
 	if got := countRunRowsByID(t, pg, runID); got != 1 {
 		t.Fatalf("run rows for selected run = %d, want 1", got)
 	}
@@ -1140,8 +1126,7 @@ func TestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersisten
 
 func TestOperatorEventPublishPrivateTargetCannotAuthorizePublication(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(eventPublishTargetRouteTestBundle(t))
 	bundleHash := runStartTestBundleHashForSource(source)
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
@@ -1167,12 +1152,7 @@ func TestOperatorEventPublishPrivateTargetCannotAuthorizePublication(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		UPDATE entity_state
-		SET fields = '{"entity_id":"authored-lookalike","flow_instance":"authored/lookalike"}'::jsonb,
-		    bookkeeping = '{"entity_id":"bookkeeping-lookalike","flow_instance":"bookkeeping/lookalike"}'::jsonb
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, runID, targetEntityID); err != nil {
+	if err := storetest.SeedPostgresPublicationIdentityLookalikes(ctx, pg, runID, targetEntityID); err != nil {
 		t.Fatalf("seed hostile entity value-map identity lookalikes: %v", err)
 	}
 	lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, mustAPITestSourceArtifactFact(bundleHash), targetOwner)
@@ -1202,8 +1182,7 @@ func TestOperatorEventPublishPrivateTargetCannotAuthorizePublication(t *testing.
 
 func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDDoesNotSelectTarget(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(eventPublishRootTemplateCollisionSource(t))
 	bundleHash := runStartTestBundleHashForSource(source)
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
@@ -1252,15 +1231,11 @@ func TestOperatorEventPublishRootEventTemplateInputNameCollisionPayloadEntityIDD
 	eventID := stringValue(t, asMap(t, followUp.Result)["event_id"], "event_id")
 	requireAPIV1RuntimeBusEvent(t, ch, "follow-up root/template collision delivery")
 
-	var gotEventName, gotEntityID, gotFlowInstance, gotTargetRoute, gotTargetSet string
-	var gotPayload json.RawMessage
-	if err := db.QueryRow(`
-		SELECT event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), COALESCE(target_route::text, '{}'), COALESCE(target_set::text, '[]'), payload
-		FROM events
-		WHERE event_id = $1::uuid
-	`, eventID).Scan(&gotEventName, &gotEntityID, &gotFlowInstance, &gotTargetRoute, &gotTargetSet, &gotPayload); err != nil {
+	row, err := storetest.ReadPostgresRootTemplatePublication(ctx, pg, eventID)
+	if err != nil {
 		t.Fatalf("load root/template collision event row: %v", err)
 	}
+	gotEventName, gotEntityID, gotFlowInstance, gotTargetRoute, gotTargetSet, gotPayload := row.EventName, row.EntityID, row.FlowInstance, row.TargetRoute, row.TargetSet, row.Payload
 	if gotEventName != "review.requested" || gotEntityID != "" || gotFlowInstance != "" {
 		t.Fatalf("event row = name:%q entity:%q flow:%q, want mixed root-receiver projection despite payload entity_id %s/%s", gotEventName, gotEntityID, gotFlowInstance, entityID, flowInstance)
 	}
@@ -1436,8 +1411,7 @@ func TestOperatorEventPublishMissingTemplateInputFailsClosedBeforeLowerPrecedenc
 
 func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePersistence(t *testing.T) {
 	ctx := context.Background()
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(eventPublishTargetRouteTestBundle(t))
 	bundleHash := runStartTestBundleHashForSource(source)
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
@@ -1473,7 +1447,7 @@ func TestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePer
 	}
 	mismatchEntityID := seedEventPublishConstructedFlow(t, pg, bus, source, runID, "operating/"+uuid.NewString(), stringValue(t, asMap(t, initial.Result)["event_id"], "event_id"))
 	unroutableEntityID := uuid.NewString()
-	seedEventPublishImportedFields(t, db, runID, unroutableEntityID, "orphan/inst-1")
+	seedEventPublishImportedFields(t, pg, runID, unroutableEntityID, "orphan/inst-1")
 
 	tests := []struct {
 		name       string
@@ -1720,19 +1694,17 @@ func TestOperatorEventPublishSQLiteRejectsCallerEntityIDForCreateEntityBeforePer
 func TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBothStores(t *testing.T) {
 	for _, backend := range []struct {
 		name string
-		open func(*testing.T) (canonicalEventPublishProofStore, *sql.DB)
+		open func(*testing.T) canonicalEventPublishProofStore
 	}{
-		{"sqlite", func(t *testing.T) (canonicalEventPublishProofStore, *sql.DB) {
-			selected := storetest.StartSQLiteRuntimeStoreWithContext(t, context.Background())
-			return selected, storetest.DatabaseForTest(selected)
+		{"sqlite", func(t *testing.T) canonicalEventPublishProofStore {
+			return storetest.StartSQLiteRuntimeStoreWithContext(t, context.Background())
 		}},
-		{"postgres", func(t *testing.T) (canonicalEventPublishProofStore, *sql.DB) {
-			_, db, _ := testutil.StartPostgres(t)
-			return storetest.AdmitPostgresRuntimeStore(t, db), db
+		{"postgres", func(t *testing.T) canonicalEventPublishProofStore {
+			return storetest.StartPostgresRuntimeStore(t)
 		}},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			selected, db := backend.open(t)
+			selected := backend.open(t)
 			bundle := eventPublishRenamedConnectedCreateEntityTestBundle(t)
 			source := semanticview.Wrap(bundle)
 			bundleHash := bundle.SourceArtifact.BundleHash()
@@ -1762,9 +1734,9 @@ func TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBo
 					if len(violations) != 1 || asMap(t, violations[0])["rule"] != "constructor_owns_entity_id" {
 						t.Fatalf("renamed create-entity violations = %#v", violations)
 					}
+					counts, err := eventPublicationPhysicalCounts(context.Background(), selected)
 					for _, table := range []string{"runs", "events", "event_deliveries", "api_idempotency"} {
-						var count int
-						if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 0 {
+						if count := counts[table]; err != nil || count != 0 {
 							t.Fatalf("%s rows after rejection = %d, err=%v", table, count, err)
 						}
 					}
@@ -1782,9 +1754,9 @@ func TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBo
 			}
 			assertEventPublishDeliveriesContain(t, createdDeliveries, "node", identitytest.RootNode(t, "observer").Key(), "pending", 1)
 			assertEventPublishDeliveriesContain(t, createdDeliveries, "node", identitytest.FlowNode(t, "factory", "thing-writer").Key(), "pending", 1)
+			counts, err := eventPublicationPhysicalCounts(context.Background(), selected)
 			for _, table := range []string{"runs", "events", "api_idempotency"} {
-				var count int
-				if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 1 {
+				if count := counts[table]; err != nil || count != 1 {
 					t.Fatalf("%s rows after valid creation = %d, err=%v", table, count, err)
 				}
 			}
@@ -1800,13 +1772,13 @@ func TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBo
 			if len(targetViolations) != 1 || asMap(t, targetViolations[0])["field_path"] != "$.target.entity_id" || asMap(t, targetViolations[0])["rule"] != "constructor_owns_entity_id" {
 				t.Fatalf("selected creator target violations = %#v", targetViolations)
 			}
+			counts, err = eventPublicationPhysicalCounts(context.Background(), selected)
 			for _, table := range []string{"runs", "events", "event_deliveries", "api_idempotency"} {
-				var count int
 				want := 1
 				if table == "event_deliveries" {
 					want = 2
 				}
-				if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != want {
+				if count := counts[table]; err != nil || count != want {
 					t.Fatalf("%s rows after forbidden target = %d, want %d, err=%v", table, count, want, err)
 				}
 			}
@@ -1822,9 +1794,9 @@ func TestOperatorEventPublishRenamedConnectedCreateEntityRejectsCallerIdentityBo
 				t.Fatalf("unconnected same-name creator received non-creation publication: %#v", plainDeliveries)
 			}
 			assertEventPublishDeliveriesContain(t, plainDeliveries, "node", identitytest.RootNode(t, "observer").Key(), "pending", 1)
+			counts, err = eventPublicationPhysicalCounts(context.Background(), selected)
 			for _, table := range []string{"runs", "events", "api_idempotency"} {
-				var count int
-				if err := db.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil || count != 2 {
+				if count := counts[table]; err != nil || count != 2 {
 					t.Fatalf("%s rows after valid non-creation = %d, err=%v", table, count, err)
 				}
 			}
@@ -1844,8 +1816,7 @@ func TestEventPublicationExplicitRootTargetExcludesConnectedCreator(t *testing.T
 }
 
 func TestOperatorEventPublishOperatorReferenceValidatesSameRunProvenance(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	source := semanticview.Wrap(runStartTestBundle("scan.requested"))
 	bus, err := newScopedAPITestEventBus(t, pg, runStartTestEventBusOptions(source))
 	if err != nil {
@@ -1880,7 +1851,7 @@ func TestOperatorEventPublishOperatorReferenceValidatesSameRunProvenance(t *test
 	if childResult["operator_reference_event_id"] != parentEventID {
 		t.Fatalf("child operator_reference_event_id = %#v, want %s", childResult["operator_reference_event_id"], parentEventID)
 	}
-	assertOperatorEventReference(t, db, childEventID, parentEventID)
+	assertOperatorEventReference(t, pg, childEventID, parentEventID)
 	if count := countEventsByName(t, pg, "scan.requested"); count != 2 {
 		t.Fatalf("scan.requested events after sourced publish = %d, want 2", count)
 	}
@@ -2740,9 +2711,9 @@ func seedEventPublishConstructedFlow(t *testing.T, selected *store.PostgresStore
 	t.Helper()
 	opts := runStartTestEventBusOptions(source)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForSource(context.Background(), opts.SourceArtifactFact), runID)
-	trigger, err := eventfixture.Load(ctx, storetest.DatabaseForTest(selected), authoractivityfixture.DialectPostgres, sourceEventID)
-	if err != nil {
-		t.Fatal(err)
+	trigger, present, err := storetest.ReadCanonicalEventRecord(ctx, selected, sourceEventID)
+	if err != nil || !present {
+		t.Fatalf("load publication constructor trigger: found=%v err=%v", present, err)
 	}
 	flowTemplate, key, found := strings.Cut(flowInstance, "/")
 	schema, declared := source.FlowSchemaByID(flowTemplate)
@@ -2771,33 +2742,34 @@ func seedEventPublishConstructedFlow(t *testing.T, selected *store.PostgresStore
 	return committed.Plan.Identity.EntityID
 }
 
-func seedEventPublishImportedFields(t *testing.T, db *sql.DB, runID, entityID, flowInstance string) {
+func seedEventPublishImportedFields(t *testing.T, selected *store.PostgresStore, runID, entityID, flowInstance string) {
 	t.Helper()
 	// Deliberately undeclared state-only context cannot acquire construction or
 	// attachment authority. It remains the hostile unroutable-input control.
-	if _, err := db.Exec(`
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES (
-			$1::uuid, $2::uuid, $3, 'widget', 'pending',
-			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
-		)
-	`, runID, entityID, flowInstance); err != nil {
+	if err := storetest.SeedPostgresPublicationUnroutableEntity(context.Background(), selected, runID, entityID, flowInstance); err != nil {
 		t.Fatalf("seed entity_state: %v", err)
 	}
 }
 
-func assertEventPublishEventRow(t *testing.T, db *sql.DB, runID, eventID, eventName, producedBy string) {
+func eventPublicationPhysicalCounts(ctx context.Context, selected any) (map[string]int, error) {
+	rows, err := storetest.ReadAPIFlowPublicationRefusalStorage(ctx, selected)
+	if err != nil {
+		return nil, err
+	}
+	deliveries, err := storetest.CountPhysicalEventDeliveries(ctx, selected)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]int{"runs": rows.Runs, "events": rows.Events, "event_deliveries": deliveries, "api_idempotency": rows.APICompletions}, nil
+}
+
+func assertEventPublishEventRow(t *testing.T, selected any, runID, eventID, eventName, producedBy string) {
 	t.Helper()
-	var gotRunID, gotEventName, gotProducedBy, gotEntityID string
-	if err := db.QueryRow(`
-		SELECT run_id::text, event_name, produced_by, COALESCE(entity_id::text, '')
-		FROM events
-		WHERE event_id = $1::uuid
-	`, eventID).Scan(&gotRunID, &gotEventName, &gotProducedBy, &gotEntityID); err != nil {
+	row, err := storetest.ReadPublicationEventIdentityStorage(context.Background(), selected, eventID)
+	if err != nil {
 		t.Fatalf("load event.publish event row: %v", err)
 	}
+	gotRunID, gotEventName, gotProducedBy, gotEntityID := row.RunID, row.EventName, row.ProducedBy, row.EntityID
 	if gotRunID != runID || gotEventName != eventName || gotProducedBy != producedBy {
 		t.Fatalf("event row run/event/producer = %q/%q/%q, want %q/%q/%q", gotRunID, gotEventName, gotProducedBy, runID, eventName, producedBy)
 	}
@@ -2806,56 +2778,46 @@ func assertEventPublishEventRow(t *testing.T, db *sql.DB, runID, eventID, eventN
 	}
 }
 
-func assertEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, eventName, producedBy, expectedBundleHash string) {
+func assertEventPublishPersistence(t *testing.T, selected any, runID, eventID, eventName, producedBy, expectedBundleHash string) {
 	t.Helper()
-	var runStatus, triggerType, triggerID, bundleHash string
-	if err := db.QueryRow(`
-		SELECT status, trigger_event_type, trigger_event_id::text, bundle_hash
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, runID).Scan(&runStatus, &triggerType, &triggerID, &bundleHash); err != nil {
+	row, err := storetest.ReadCreatedPublicationRunStorage(context.Background(), selected, runID)
+	if err != nil {
 		t.Fatalf("load event.publish run row: %v", err)
 	}
+	runStatus, triggerType, triggerID, bundleHash := row.Status, row.TriggerEventType, row.TriggerEventID, row.BundleHash
 	if runStatus != "running" || triggerType != eventName || triggerID != eventID {
 		t.Fatalf("run row status=%q trigger=%q/%q, want running/%s/%s", runStatus, triggerType, triggerID, eventName, eventID)
 	}
 	if bundleHash != expectedBundleHash {
 		t.Fatalf("run row source artifact hash = %q, want %s", bundleHash, expectedBundleHash)
 	}
-	assertPostgresEventPublishRows(t, db, runID, eventID, producedBy)
+	assertPostgresEventPublishRows(t, selected, runID, eventID, producedBy)
 }
 
-func assertExistingRunEventPublishPersistence(t *testing.T, db *sql.DB, runID, eventID, producedBy string) {
+func assertExistingRunEventPublishPersistence(t *testing.T, selected any, runID, eventID, producedBy string) {
 	t.Helper()
-	var runStatus, triggerType, triggerID, bundleHash string
-	if err := db.QueryRow(`
-		SELECT status, COALESCE(trigger_event_type, ''), COALESCE(trigger_event_id::text, ''), bundle_hash
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, runID).Scan(&runStatus, &triggerType, &triggerID, &bundleHash); err != nil {
+	row, err := storetest.ReadExistingPublicationRunStorage(context.Background(), selected, runID)
+	if err != nil {
 		t.Fatalf("load existing event.publish run row: %v", err)
 	}
+	runStatus, triggerType, triggerID, bundleHash := row.Status, row.TriggerEventType, row.TriggerEventID, row.BundleHash
 	if runStatus != "running" || triggerType != "" || triggerID != "" {
 		t.Fatalf("existing run row status=%q trigger=%q/%q, want running with no creation trigger", runStatus, triggerType, triggerID)
 	}
 	if bundleHash != runStartTestBundleHash {
 		t.Fatalf("existing run source artifact = %q, want %s", bundleHash, runStartTestBundleHash)
 	}
-	assertPostgresEventPublishRows(t, db, runID, eventID, producedBy)
+	assertPostgresEventPublishRows(t, selected, runID, eventID, producedBy)
 }
 
-func assertPostgresEventPublishRows(t *testing.T, db *sql.DB, runID, eventID, producedBy string) {
+func assertPostgresEventPublishRows(t *testing.T, selected any, runID, eventID, producedBy string) {
 	t.Helper()
-	var entityID, flowInstance, gotProducedBy, targetRoute, targetSet string
-	var payload json.RawMessage
-	if err := db.QueryRow(`
-		SELECT COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), produced_by, COALESCE(target_route::text, '{}'), COALESCE(target_set::text, '[]'), payload
-		FROM events
-		WHERE event_id = $1::uuid
-	`, eventID).Scan(&entityID, &flowInstance, &gotProducedBy, &targetRoute, &targetSet, &payload); err != nil {
+	row, err := storetest.ReadPublicationEventProjection(context.Background(), selected, eventID)
+	if err != nil {
 		t.Fatalf("load event.publish event row: %v", err)
 	}
-	assertStoredEventProjectionMatchesDeliveries(t, entityID, flowInstance, targetRoute, targetSet, runID, postgresEventDeliveryTargetRoutes(t, db, eventID))
+	entityID, flowInstance, gotProducedBy, targetRoute, targetSet, payload := row.EntityID, row.FlowInstance, row.ProducedBy, row.TargetRoute, row.TargetSet, row.Payload
+	assertStoredEventProjectionMatchesDeliveries(t, entityID, flowInstance, targetRoute, targetSet, runID, publicationDeliveryTargetRoutes(t, selected, eventID))
 	if gotProducedBy != producedBy {
 		t.Fatalf("event produced_by = %q, want %q", gotProducedBy, producedBy)
 	}
@@ -2871,49 +2833,40 @@ func assertPostgresEventPublishRows(t *testing.T, db *sql.DB, runID, eventID, pr
 	}
 }
 
-func assertSQLiteEventPublishRows(t *testing.T, db *sql.DB, runID, eventID, eventName, producedBy string) {
+func assertSQLiteEventPublishRows(t *testing.T, selected any, runID, eventID, eventName, producedBy string) {
 	t.Helper()
-	var runStatus, triggerType, triggerID string
-	if err := db.QueryRow(`
-		SELECT status, COALESCE(trigger_event_type, ''), COALESCE(trigger_event_id, '')
-		FROM runs
-		WHERE run_id = ?
-	`, runID).Scan(&runStatus, &triggerType, &triggerID); err != nil {
+	row, err := storetest.ReadPublicationRunTriggerStorage(context.Background(), selected, runID)
+	if err != nil {
 		t.Fatalf("load sqlite event.publish run row: %v", err)
 	}
+	runStatus, triggerType, triggerID := row.Status, row.TriggerEventType, row.TriggerEventID
 	if runStatus != "running" || triggerType != eventName || triggerID != eventID {
 		t.Fatalf("sqlite run row status=%q trigger=%q/%q, want running/%s/%s", runStatus, triggerType, triggerID, eventName, eventID)
 	}
-	assertSQLiteEventPublishEventRow(t, db, runID, eventID, producedBy)
+	assertSQLiteEventPublishEventRow(t, selected, runID, eventID, producedBy)
 }
 
-func assertSQLiteExistingRunEventPublishRows(t *testing.T, db *sql.DB, runID, eventID, producedBy string) {
+func assertSQLiteExistingRunEventPublishRows(t *testing.T, selected any, runID, eventID, producedBy string) {
 	t.Helper()
-	var runStatus, triggerType, triggerID string
-	if err := db.QueryRow(`
-		SELECT status, COALESCE(trigger_event_type, ''), COALESCE(trigger_event_id, '')
-		FROM runs
-		WHERE run_id = ?
-	`, runID).Scan(&runStatus, &triggerType, &triggerID); err != nil {
+	row, err := storetest.ReadPublicationRunTriggerStorage(context.Background(), selected, runID)
+	if err != nil {
 		t.Fatalf("load existing sqlite event.publish run row: %v", err)
 	}
+	runStatus, triggerType, triggerID := row.Status, row.TriggerEventType, row.TriggerEventID
 	if runStatus != "running" || triggerType != "" || triggerID != "" {
 		t.Fatalf("existing sqlite run row status=%q trigger=%q/%q, want running with no creation trigger", runStatus, triggerType, triggerID)
 	}
-	assertSQLiteEventPublishEventRow(t, db, runID, eventID, producedBy)
+	assertSQLiteEventPublishEventRow(t, selected, runID, eventID, producedBy)
 }
 
-func assertSQLiteEventPublishEventRow(t *testing.T, db *sql.DB, runID, eventID, producedBy string) {
+func assertSQLiteEventPublishEventRow(t *testing.T, selected any, runID, eventID, producedBy string) {
 	t.Helper()
-	var entityID, flowInstance, gotProducedBy, targetRoute, targetSet, payloadText string
-	if err := db.QueryRow(`
-		SELECT COALESCE(entity_id, ''), COALESCE(flow_instance, ''), COALESCE(produced_by, ''), COALESCE(target_route, '{}'), COALESCE(target_set, '[]'), payload
-		FROM events
-		WHERE event_id = ?
-	`, eventID).Scan(&entityID, &flowInstance, &gotProducedBy, &targetRoute, &targetSet, &payloadText); err != nil {
+	row, err := storetest.ReadPublicationEventProjection(context.Background(), selected, eventID)
+	if err != nil {
 		t.Fatalf("load sqlite event.publish event row: %v", err)
 	}
-	assertStoredEventProjectionMatchesDeliveries(t, entityID, flowInstance, targetRoute, targetSet, runID, sqliteEventDeliveryTargetRoutes(t, db, eventID))
+	entityID, flowInstance, gotProducedBy, targetRoute, targetSet, payloadText := row.EntityID, row.FlowInstance, row.ProducedBy, row.TargetRoute, row.TargetSet, string(row.Payload)
+	assertStoredEventProjectionMatchesDeliveries(t, entityID, flowInstance, targetRoute, targetSet, runID, publicationDeliveryTargetRoutes(t, selected, eventID))
 	if gotProducedBy != producedBy {
 		t.Fatalf("sqlite event produced_by = %q, want %q", gotProducedBy, producedBy)
 	}
@@ -2929,52 +2882,24 @@ func assertSQLiteEventPublishEventRow(t *testing.T, db *sql.DB, runID, eventID, 
 	}
 }
 
-func postgresEventDeliveryTargetRoutes(t *testing.T, db *sql.DB, eventID string) []events.RouteIdentity {
+func publicationDeliveryTargetRoutes(t *testing.T, selected any, eventID string) []events.RouteIdentity {
 	t.Helper()
-	rows, err := db.Query(`
-		SELECT COALESCE(delivery_target_route::text, '{}')
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		ORDER BY subscriber_type, subscriber_id, delivery_id
-	`, eventID)
+	rows, err := storetest.ReadPublicationDeliveryTargetEncodings(context.Background(), selected, eventID)
 	if err != nil {
-		t.Fatalf("load postgres delivery targets: %v", err)
+		t.Fatalf("load publication delivery targets: %v", err)
 	}
-	defer rows.Close()
 	return scanDeliveryTargetRoutes(t, rows)
 }
 
-func sqliteEventDeliveryTargetRoutes(t *testing.T, db *sql.DB, eventID string) []events.RouteIdentity {
-	t.Helper()
-	rows, err := db.Query(`
-		SELECT COALESCE(delivery_target_route, '{}')
-		FROM event_deliveries
-		WHERE event_id = ?
-		ORDER BY subscriber_type, subscriber_id, delivery_id
-	`, eventID)
-	if err != nil {
-		t.Fatalf("load sqlite delivery targets: %v", err)
-	}
-	defer rows.Close()
-	return scanDeliveryTargetRoutes(t, rows)
-}
-
-func scanDeliveryTargetRoutes(t *testing.T, rows *sql.Rows) []events.RouteIdentity {
+func scanDeliveryTargetRoutes(t *testing.T, rows []string) []events.RouteIdentity {
 	t.Helper()
 	var routes []events.RouteIdentity
-	for rows.Next() {
-		var raw string
-		if err := rows.Scan(&raw); err != nil {
-			t.Fatalf("scan delivery target: %v", err)
-		}
+	for _, raw := range rows {
 		var owner events.DeliveryTargetOwnership
 		if err := json.Unmarshal([]byte(raw), &owner); err != nil {
 			t.Fatalf("decode delivery target %s: %v", raw, err)
 		}
 		routes = append(routes, owner.Route())
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate delivery targets: %v", err)
 	}
 	return routes
 }
@@ -3033,15 +2958,31 @@ func containsStoredRoute(routes []events.RouteIdentity, want events.RouteIdentit
 	return false
 }
 
-func assertOperatorEventReference(t *testing.T, db *sql.DB, eventID, wantReferenceEventID string) {
+func assertStoredEventUntargeted(t *testing.T, targetRouteRaw, targetSetRaw string) {
 	t.Helper()
-	var sourceEventID, referenceEventID string
-	if err := db.QueryRow(`
-		SELECT COALESCE(source_event_id::text, ''), COALESCE(operator_reference_event_id::text, '')
-		FROM events WHERE event_id = $1::uuid
-	`, eventID).Scan(&sourceEventID, &referenceEventID); err != nil {
+	var target events.RouteIdentity
+	if err := json.Unmarshal([]byte(targetRouteRaw), &target); err != nil {
+		t.Fatalf("decode event target_route: %v", err)
+	}
+	if !target.Empty() {
+		t.Fatalf("event target_route = %#v, want untargeted root publication", target)
+	}
+	var targetSet []events.RouteIdentity
+	if err := json.Unmarshal([]byte(targetSetRaw), &targetSet); err != nil {
+		t.Fatalf("decode event target_set: %v", err)
+	}
+	if len(targetSet) != 0 {
+		t.Fatalf("event target_set = %#v, want untargeted root publication", targetSet)
+	}
+}
+
+func assertOperatorEventReference(t *testing.T, selected any, eventID, wantReferenceEventID string) {
+	t.Helper()
+	row, err := storetest.ReadOperatorReferenceStorage(context.Background(), selected, eventID)
+	if err != nil {
 		t.Fatalf("load operator event provenance: %v", err)
 	}
+	sourceEventID, referenceEventID := row.SourceEventID, row.ReferenceEventID
 	if sourceEventID != "" || referenceEventID != wantReferenceEventID {
 		t.Fatalf("operator event causal/reference ids = %q/%q, want empty/%q", sourceEventID, referenceEventID, wantReferenceEventID)
 	}

@@ -682,36 +682,30 @@ func assertExactJoinFiredSchedule(t *testing.T, selected gateRecoveryStoreCase, 
 
 func assertExactJoinDeliveryStatus(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, eventID, subscriberKey, want string) {
 	t.Helper()
-	query := `SELECT status, CAST(COALESCE(failure, '{}') AS TEXT) FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
-	if selected.postgres {
-		query = `SELECT status, COALESCE(failure, '{}'::jsonb)::text FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
-	}
 	deadline := time.Now().Add(5 * time.Second)
 	var status, failure string
 	var err error
+	var storage storetest.ExactJoinNodeDeliveryStorage
 	for time.Now().Before(deadline) {
-		err = selected.db.QueryRowContext(ctx, query, eventID, subscriberKey).Scan(&status, &failure)
+		storage, err = storetest.ReadExactJoinNodeDeliveryStorage(ctx, selected.events, eventID, subscriberKey)
+		if err == nil {
+			status, failure = storage.Status, storage.Failure
+		}
 		if err == nil && status == want {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if err != nil || status != want {
-		var runtimeLog string
-		logQuery := `SELECT CAST(payload AS TEXT) FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at DESC LIMIT 1`
-		_ = selected.db.QueryRowContext(ctx, logQuery).Scan(&runtimeLog)
+		runtimeLog, _ := storetest.ReadLatestWorkflowTimerRuntimeLogText(ctx, selected.events)
 		t.Fatalf("delivery %s status = %q failure=%s err=%v, want %q; runtime_log=%s", eventID, status, failure, err, want, runtimeLog)
 	}
 }
 
 func assertExactJoinDeliveryCount(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, eventID, subscriberKey string, want int) {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
-	if selected.postgres {
-		query = `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
-	}
-	var count int
-	if err := selected.db.QueryRowContext(ctx, query, eventID, subscriberKey).Scan(&count); err != nil || count != want {
+	count, err := storetest.CountTemplateNodeDelivery(ctx, selected.events, eventID, subscriberKey)
+	if err != nil || count != want {
 		t.Fatalf("delivery %s rows = %d err=%v, want %d", eventID, count, err, want)
 	}
 }
@@ -739,14 +733,9 @@ func waitForExactJoinState(
 
 func exactJoinOccurrenceEventID(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, runID, eventName string) string {
 	t.Helper()
-	query := `SELECT event_id FROM events WHERE run_id = ? AND event_name = ?`
-	if selected.postgres {
-		query = `SELECT event_id::text FROM events WHERE run_id = $1::uuid AND event_name = $2`
-	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		var eventID string
-		if err := selected.db.QueryRowContext(ctx, query, runID, eventName).Scan(&eventID); err == nil {
+		if eventID, err := storetest.ReadWorkflowTimerEventIdentity(ctx, selected.events, runID, eventName); err == nil {
 			return eventID
 		}
 		time.Sleep(10 * time.Millisecond)

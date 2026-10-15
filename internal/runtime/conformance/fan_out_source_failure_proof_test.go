@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestFanOutServingPayloadAndEntitySnapshotsPreserveOrdinalsBothStores(t *testing.T) {
@@ -24,12 +25,11 @@ func TestFanOutServingPayloadAndEntitySnapshotsPreserveOrdinalsBothStores(t *tes
 			f.waitIntent(t, entityID, 0, "open")
 			overwriteID := f.submit(t, semanticProofOverwriteEvent, semanticProofRows(1), 10)
 			semanticProofWait(t, func() (bool, error) {
-				var delivered int
-				err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND event_id=$2 AND status='delivered'`, f.runID, overwriteID).Scan(&delivered)
+				delivered, err := storetest.CountFanOutDeliveredTriggerStorage(f.ctx, f.selected, f.runID, overwriteID)
 				return delivered == 1, err
 			})
-			var current []byte
-			if err := f.db.QueryRowContext(f.ctx, `SELECT fields FROM entity_state WHERE run_id=$1 AND flow_instance='portfolio'`, f.runID).Scan(&current); err != nil {
+			current, err := storetest.ReadFanOutPortfolioFieldsStorage(f.ctx, f.selected, f.runID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			var state struct {
@@ -39,8 +39,9 @@ func TestFanOutServingPayloadAndEntitySnapshotsPreserveOrdinalsBothStores(t *tes
 			if err := json.Unmarshal(current, &state); err != nil || state.Threshold != 10 || len(state.Rows) != 1 {
 				t.Fatalf("real overwrite did not supersede both capsules: %s %v", current, err)
 			}
-			var total, progressed int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*),SUM(cursor) FROM fan_out_intents WHERE run_id=$1`, f.runID).Scan(&total, &progressed); err != nil || total != 2 || progressed != 0 {
+			progress, err := storetest.ReadRunFanOutProgressStorage(f.ctx, f.selected, f.runID)
+			total, progressed := progress.Total, progress.Cursor
+			if err != nil || total != 2 || progressed != 0 {
 				t.Fatalf("sources were not simultaneously pending: intents=%d cursor=%d err=%v", total, progressed, err)
 			}
 			release()
@@ -62,8 +63,8 @@ func TestFanOutServingPayloadAndEntitySnapshotsPreserveOrdinalsBothStores(t *tes
 			if entityIntent.Source.Kind != fanoutobligation.SourceEntityField || entityIntent.Source.RunID != f.runID || entityIntent.Source.MutationID == "" || entityIntent.Request.PlanRef != entityPlan[0].Ref {
 				t.Fatalf("entity/on_complete owner changed: %+v", entityIntent)
 			}
-			var mutationEvent string
-			if err := f.db.QueryRowContext(f.ctx, `SELECT caused_by_event FROM entity_mutations WHERE run_id=$1 AND mutation_id=$2 AND entity_id=$3 AND domain='authored_field' AND path='account_ids'`, f.runID, entityIntent.Source.MutationID, entityIntent.Source.EntityID).Scan(&mutationEvent); err != nil || mutationEvent != entityID {
+			mutationEvent, err := storetest.ReadFanOutAccountIDsMutationSourceStorage(f.ctx, f.selected, f.runID, entityIntent.Source.MutationID, entityIntent.Source.EntityID)
+			if err != nil || mutationEvent != entityID {
 				t.Fatalf("entity source not bound to its own handler mutation: event=%s err=%v", mutationEvent, err)
 			}
 			if _, copied := entityIntent.Request.Capsule.Entity["account_ids"]; copied {
@@ -106,11 +107,11 @@ func TestFanOutServingMixedAndCommitFailureIsolationBothStores(t *testing.T) {
 			for _, batch := range batches {
 				if batch.name == "unknown" || batch.name == "authorization" {
 					f.waitIntent(t, batch.trigger, 0, "blocked")
-					var count, leased int
-					var raw string
-					if err := f.db.QueryRowContext(f.ctx, `SELECT (SELECT COUNT(*) FROM fan_out_outcomes o WHERE o.run_id=i.run_id AND o.triggering_delivery_id=i.triggering_delivery_id),CASE WHEN i.claim_owner IS NULL THEN 0 ELSE 1 END,i.blocked_reason FROM fan_out_intents i JOIN event_deliveries d ON d.delivery_id=i.triggering_delivery_id WHERE i.run_id=$1 AND d.event_id=$2`, f.runID, batch.trigger).Scan(&count, &leased, &raw); err != nil {
+					blocked, err := storetest.ReadFanOutBlockedSourceStorage(f.ctx, f.selected, f.runID, batch.trigger)
+					if err != nil {
 						t.Fatal(err)
 					}
+					count, leased, raw := blocked.Outcomes, blocked.Leased, blocked.Failure
 					failure, err := runtimefailures.UnmarshalEnvelope([]byte(raw))
 					want := runtimefailures.ClassInternalFailure
 					if batch.name == "authorization" {
@@ -158,8 +159,8 @@ func TestFanOutServingMixedAndCommitFailureIsolationBothStores(t *testing.T) {
 			}
 			// Remaining open work belongs only to the two blocked suffixes; healthy
 			// siblings have durable effects without clearing or canceling failures.
-			var leaked int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND claim_owner IS NOT NULL`, f.runID).Scan(&leaked); err != nil || leaked != 0 {
+			leaked, err := storetest.CountLeasedRunFanOutStorage(f.ctx, f.selected, f.runID)
+			if err != nil || leaked != 0 {
 				t.Fatalf("claims leaked after isolated dispositions: %d %v", leaked, err)
 			}
 		})

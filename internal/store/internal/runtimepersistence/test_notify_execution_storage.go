@@ -6,6 +6,7 @@ import (
 
 	"fmt"
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
@@ -139,7 +140,9 @@ func ReadNotifyRunPresenceForTest(ctx context.Context, selected any, runID strin
 	}
 	var out int
 	err := read(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE run_id=$1`, runID).Scan(&out)
+		var err error
+		out, err = runlifecycle.CountRunIdentityStorageTx(ctx, tx, runID)
+		return err
 	})
 	if err != nil {
 		return 0, err

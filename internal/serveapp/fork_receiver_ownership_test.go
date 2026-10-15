@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -12,10 +11,13 @@ import (
 	"testing"
 	"time"
 
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
@@ -47,35 +49,27 @@ type forkReceiverProducerEvidence struct {
 	Name, Mode string
 }
 
-func readForkReceiverProducerEvidence(t *testing.T, rt servedControlProofRuntime, runID, eventID string) forkReceiverProducerEvidence {
+func readForkReceiverProducerEvidence(t *testing.T, owner runtimebus.EventStore, runID, eventID string) forkReceiverProducerEvidence {
 	t.Helper()
-	var evidence forkReceiverProducerEvidence
-	var kind, authority, routeJSON string
-	if err := rt.DB.QueryRow(`SELECT routing_source_kind,COALESCE(routing_source_authority,''),CAST(source_route AS TEXT),event_name,execution_mode FROM events WHERE run_id=$1 AND event_id=$2`, runID, eventID).Scan(&kind, &authority, &routeJSON, &evidence.Name, &evidence.Mode); err != nil {
-		t.Fatal(err)
+	event := storetest.LoadCanonicalEventRecord(t, context.Background(), owner, eventID)
+	if event.RunID() != runID {
+		t.Fatalf("producer event %s belongs to run %s, not requested run %s", eventID, event.RunID(), runID)
 	}
-	var route events.RouteIdentity
-	if err := json.Unmarshal([]byte(routeJSON), &route); err != nil {
-		t.Fatal(err)
-	}
-	var err error
-	evidence.Source, err = events.RestoreRoutingSource(kind, route, authority)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return evidence
+	return forkReceiverProducerEvidence{Source: event.RoutingSource(), Name: string(event.Type()), Mode: string(event.ExecutionMode())}
 }
 
-func waitForkReceiverSourceCompletion(t *testing.T, rt servedControlProofRuntime, runID string) {
+func waitForkReceiverSourceCompletion(t *testing.T, reader receiverProofStateReader, runID string) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for time.Now().Before(deadline) {
 		var incomplete int
 		// Successful pipeline settlement owns the handoff stamp and receipt in
 		// one transaction, after recursive child publication has returned.
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d WHERE d.run_id=$1 AND
-			(d.status IN ('pending','in_progress') OR d.continuation_handoff_at IS NULL OR NOT EXISTS
-			(SELECT 1 FROM event_receipts r WHERE r.event_id=d.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'))`, runID).Scan(&incomplete); err != nil {
+		if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+			var err error
+			incomplete, err = storetest.ReadServedIncompletePipelineHandoffCount(ctx, reader, runID)
+			return err
+		}); err != nil {
 			t.Fatal(err)
 		}
 		if incomplete == 0 {
@@ -83,173 +77,35 @@ func waitForkReceiverSourceCompletion(t *testing.T, rt servedControlProofRuntime
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("source pipeline completion did not finish: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+	t.Fatalf("source pipeline completion did not finish: %s", servedInspectionRunDebugSummary(reader, runID))
 }
 
 // Refusal snapshots cover all application base tables, not merely the child
 // tables that a successful fork would populate. Internal DB objects are excluded.
-func snapshotForkReceiverApplication(t *testing.T, rt servedControlProofRuntime) map[string][]string {
+func snapshotForkReceiverApplication(t *testing.T, read func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)) map[string]storetest.SelectedForkStorageTableSnapshot {
 	t.Helper()
-	opts := &sql.TxOptions{ReadOnly: true}
-	query := `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name`
-	if rt.Backend == "postgres" {
-		opts.Isolation = sql.LevelRepeatableRead
-		query = `SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name`
+	if read == nil {
+		t.Fatal("application snapshot requires its exact selected serving projection")
 	}
-	tx, err := rt.DB.BeginTx(context.Background(), opts)
+	snapshot, err := read(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback()
-	rows, err := tx.Query(query)
+	return snapshot
+}
+
+func readForkReceiverCompanions(t *testing.T, reader receiverProofStateReader, runID string, paths ...string) map[string][]string {
+	t.Helper()
+	out, err := storetest.ReadForkReceiverCompanionStorage(context.Background(), reader, runID, paths...)
 	if err != nil {
-		t.Fatal(err)
-	}
-	var tables []string
-	for rows.Next() {
-		var table string
-		if err := rows.Scan(&table); err != nil {
-			t.Fatal(err)
-		}
-		tables = append(tables, table)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	rows.Close()
-	out := map[string][]string{}
-	for _, table := range tables {
-		rows, err := tx.Query(`SELECT * FROM "` + strings.ReplaceAll(table, `"`, `""`) + `"`)
-		if err != nil {
-			t.Fatal(err)
-		}
-		columns, err := rows.Columns()
-		if err != nil {
-			t.Fatal(err)
-		}
-		encoded, err := json.Marshal(columns)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out[table+"/columns"] = []string{string(encoded)}
-		out[table] = []string{}
-		for rows.Next() {
-			values, pointers := make([]any, len(columns)), make([]any, len(columns))
-			for i := range values {
-				pointers[i] = &values[i]
-			}
-			if err := rows.Scan(pointers...); err != nil {
-				t.Fatal(err)
-			}
-			for i, value := range values {
-				if raw, ok := value.([]byte); ok {
-					values[i] = string(raw)
-				}
-			}
-			encoded, err := json.Marshal(values)
-			if err != nil {
-				t.Fatal(err)
-			}
-			out[table] = append(out[table], string(encoded))
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
-		}
-		rows.Close()
-		sort.Strings(out[table])
-	}
-	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 	return out
 }
 
-func readForkReceiverRows(t *testing.T, rt servedControlProofRuntime, runID string) map[string]forkReceiverRow {
+func requireOptionalForkReceiverHeaderProgress(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID, path string, before, after map[string][]string, deliveries int) {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT es.entity_id,es.flow_instance,es.entity_type,fi.current_state,CAST(es.fields AS TEXT)
-		FROM entity_state es JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
-		WHERE es.run_id=$1 ORDER BY es.entity_id`, runID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	out := map[string]forkReceiverRow{}
-	for rows.Next() {
-		var row forkReceiverRow
-		var raw string
-		if err := rows.Scan(&row.ID, &row.Flow, &row.Type, &row.State, &raw); err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal([]byte(raw), &row.Fields); err != nil {
-			t.Fatal(err)
-		}
-		if _, duplicate := out[row.Flow]; duplicate {
-			t.Fatalf("fixture has duplicate owner rows for %s", row.Flow)
-		}
-		out[row.Flow] = row
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
-
-func readForkReceiverCompanions(t *testing.T, rt servedControlProofRuntime, runID string, paths ...string) map[string][]string {
-	t.Helper()
-	out := map[string][]string{}
-	for _, table := range []string{"flow_instances", "flow_instance_runtime_readiness"} {
-		query, args := `SELECT * FROM `+table+` WHERE run_id=$1`, []any{runID}
-		if len(paths) != 0 {
-			query += ` AND instance_path=$2`
-			args = append(args, paths[0])
-		}
-		rows, err := rt.DB.Query(query, args...)
-		if err != nil {
-			t.Fatal(err)
-		}
-		columns, err := rows.Columns()
-		if err != nil {
-			t.Fatal(err)
-		}
-		columnJSON, err := json.Marshal(columns)
-		if err != nil {
-			t.Fatal(err)
-		}
-		out[table+"/columns"] = []string{string(columnJSON)}
-		out[table] = []string{}
-		for rows.Next() {
-			values, pointers := make([]any, len(columns)), make([]any, len(columns))
-			for i := range values {
-				pointers[i] = &values[i]
-			}
-			if err := rows.Scan(pointers...); err != nil {
-				t.Fatal(err)
-			}
-			for i, value := range values {
-				if raw, ok := value.([]byte); ok {
-					values[i] = string(raw)
-				}
-			}
-			encoded, err := json.Marshal(values)
-			if err != nil {
-				t.Fatal(err)
-			}
-			out[table] = append(out[table], string(encoded))
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
-		}
-		rows.Close()
-		sort.Strings(out[table])
-	}
-	return out
-}
-
-func requireOptionalForkReceiverHeaderProgress(t *testing.T, rt servedControlProofRuntime, runID, path string, before, after map[string][]string, deliveries int) {
-	t.Helper()
-	if !reflect.DeepEqual(before["flow_instance_runtime_readiness"], after["flow_instance_runtime_readiness"]) ||
-		!reflect.DeepEqual(before["flow_instances/columns"], after["flow_instances/columns"]) ||
-		len(before["flow_instances"]) != 1 || len(after["flow_instances"]) != 1 {
+	if !reflect.DeepEqual(before["flow_instance_runtime_readiness"], after["flow_instance_runtime_readiness"]) || !reflect.DeepEqual(before["flow_instances/columns"], after["flow_instances/columns"]) || len(before["flow_instances"]) != 1 || len(after["flow_instances"]) != 1 {
 		t.Fatalf("optional receiver lost its exact header/readiness shape: before=%v after=%v", before, after)
 	}
 	var columns []string
@@ -257,9 +113,7 @@ func requireOptionalForkReceiverHeaderProgress(t *testing.T, rt servedControlPro
 	for _, value := range []struct {
 		raw    string
 		target any
-	}{
-		{before["flow_instances/columns"][0], &columns}, {before["flow_instances"][0], &old}, {after["flow_instances"][0], &current},
-	} {
+	}{{before["flow_instances/columns"][0], &columns}, {before["flow_instances"][0], &old}, {after["flow_instances"][0], &current}} {
 		if err := json.Unmarshal([]byte(value.raw), value.target); err != nil {
 			t.Fatal(err)
 		}
@@ -277,7 +131,13 @@ func requireOptionalForkReceiverHeaderProgress(t *testing.T, rt servedControlPro
 			}
 		case "updated_at":
 			var advanced bool
-			if err := rt.DB.QueryRow(`SELECT updated_at>$3 FROM flow_instances WHERE run_id=$1 AND instance_path=$2`, runID, path, old[index]).Scan(&advanced); err != nil || !advanced || reflect.DeepEqual(old[index], current[index]) {
+			if err := func() error {
+				observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (bool, error) {
+					return storetest.ReadInstanceClockAdvancedStorage(ctx, selectedProofReceiverStateReader, runID, path, old[index])
+				})
+				advanced = observed
+				return err
+			}(); err != nil || !advanced || reflect.DeepEqual(old[index], current[index]) {
 				t.Fatalf("optional header update time did not advance: %v -> %v err=%v", old[index], current[index], err)
 			}
 		case "config":
@@ -302,11 +162,11 @@ func requireOptionalForkReceiverHeaderProgress(t *testing.T, rt servedControlPro
 	}
 }
 
-func requireForkReceiverDelivery(t *testing.T, rt servedControlProofRuntime, runID, sourceEvent, path, kind, entityID string) events.DeliveryRoute {
+func requireForkReceiverDelivery(t *testing.T, selectedProofEndpoint string, selectedProofReceiverStateReader receiverProofStateReader, selectedProofRuntime *runtimepkg.Runtime, runID, sourceEvent, path, kind, entityID string) events.DeliveryRoute {
 	t.Helper()
 	var matched []servedForkDeliveryEvidence
 	var deliveryID string
-	for id, delivery := range readServedForkDeliveryEvidence(t, rt, runID) {
+	for id, delivery := range readServedForkDeliveryEvidence(t, selectedProofReceiverStateReader, runID) {
 		node, ok := delivery.route.Recipient.Node()
 		if delivery.eventID == sourceEvent && ok && node.FlowPath() == path && node.NodeID() == "collector" {
 			matched = append(matched, delivery)
@@ -322,29 +182,38 @@ func requireForkReceiverDelivery(t *testing.T, rt servedControlProofRuntime, run
 		t.Fatalf("lost exact selected handler/local event: %+v", route)
 	}
 	if target := route.Target.Route(); route.Target.Code() != kind || target.FlowID != path || target.FlowInstance != path || target.EntityID != entityID {
-		t.Fatalf("%s/%s: target=%+v kind=%s; want %s entity=%s; rows=%+v", runID, path, target, route.Target.Code(), kind, entityID, readForkReceiverRows(t, rt, runID))
+		t.Fatalf("%s/%s: target=%+v kind=%s; want %s entity=%s; rows=%+v", runID, path, target, route.Target.Code(), kind, entityID, readWorkspaceProofReceiverRows(t, selectedProofRuntime.Bus.Store(), runID))
 	}
-	var status, outcome, failure string
-	var claim, outcomeClaim, outcomes int
-	if err := rt.DB.QueryRow(`SELECT d.status,d.claim_version,o.claim_version,o.outcome,COALESCE(CAST(o.failure AS TEXT),'') FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.delivery_id=$2`, runID, deliveryID).Scan(&status, &claim, &outcomeClaim, &outcome, &failure); err != nil {
+	settlement, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (storetest.ForkReceiverSettlementStorage, error) {
+		return storetest.ReadForkReceiverSettlementStorage(ctx, selectedProofReceiverStateReader, runID, deliveryID)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=$1`, deliveryID).Scan(&outcomes); err != nil {
+	status, outcome, failure := settlement.Status, settlement.Outcome, settlement.Failure
+	claim, outcomeClaim := settlement.Claim, settlement.OutcomeClaim
+	outcomes, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (int, error) {
+		return storetest.CountForkReceiverSettledAttemptsStorage(ctx, selectedProofReceiverStateReader, deliveryID)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if status != "delivered" || outcome != "delivered" || claim != 1 || outcomeClaim != 1 || outcomes != 1 {
-		logServedForkHandlerDiagnostics(t, rt)
+		logServedForkHandlerDiagnostics(t, selectedProofReceiverStateReader)
 		t.Fatalf("%s/%s: final settlement status=%s outcome=%s claim=%d/%d count=%d failure=%s", runID, path, status, outcome, claim, outcomeClaim, outcomes, failure)
 	}
-	var selectionContext, disposition, selectionFlow, family, semanticPath, displayLabel string
-	if err := rt.DB.QueryRow(`SELECT selection_context,disposition,COALESCE(flow_path,''),COALESCE(declaration_family,''),COALESCE(semantic_path,''),COALESCE(display_label,'') FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, deliveryID).Scan(&selectionContext, &disposition, &selectionFlow, &family, &semanticPath, &displayLabel); err != nil {
+	selection, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (storetest.PublicationRuleSelectionStorage, error) {
+		return storetest.ReadForkReceiverRuleSelectionStorage(ctx, selectedProofReceiverStateReader, deliveryID)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
+	selectionContext, disposition, selectionFlow, family, semanticPath, displayLabel := selection.Context, selection.Disposition, selection.Flow, selection.Family, selection.Path, selection.Label
 	if selectionContext != "none" || disposition != "not_applicable" || selectionFlow != "" || family != "" || semanticPath != "" || displayLabel != "" {
 		t.Fatalf("direct handler settlement lost exact not-applicable rule selection: %s/%s/%s/%s/%s/%s", selectionContext, disposition, selectionFlow, family, semanticPath, displayLabel)
 	}
 	var public operatorread.OperatorEventFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": sourceEvent}, &public)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "event.get", map[string]any{"event_id": sourceEvent}, &public)
 	found := false
 	for _, delivery := range public.Deliveries {
 		if delivery.DeliveryID == deliveryID {
@@ -363,12 +232,15 @@ func requireForkReceiverDelivery(t *testing.T, rt servedControlProofRuntime, run
 
 func requireForkReceiverEffect(t *testing.T, rt servedControlProofRuntime, runID, sourceEvent, path, label, kind, entityID string) events.DeliveryRoute {
 	t.Helper()
-	route := requireForkReceiverDelivery(t, rt, runID, sourceEvent, path, kind, entityID)
+	route := requireForkReceiverDelivery(t, rt.Endpoint, rt.ReceiverStateReader, rt.Runtime, runID, sourceEvent, path, kind, entityID)
 	var public operatorread.OperatorEventFull
-	var effectID, rawSource, payload string
-	if err := rt.DB.QueryRow(`SELECT event_id,CAST(source_route AS TEXT),CAST(payload AS TEXT) FROM events WHERE run_id=$1 AND event_name=$2 AND source_event_id=$3`, runID, path+"/receiver.finished", sourceEvent).Scan(&effectID, &rawSource, &payload); err != nil {
+	effect, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) (storetest.ReceiverFinishedEffectStorage, error) {
+		return storetest.ReadReceiverFinishedEffectStorage(ctx, rt.ReceiverStateReader, runID, path+"/receiver.finished", sourceEvent)
+	})
+	if err != nil {
 		t.Fatalf("%s final effect: %v", path, err)
 	}
+	effectID, rawSource, payload := effect.ID, effect.Source, effect.Payload
 	var effectSource events.RouteIdentity
 	var effectPayload map[string]any
 	if err := json.Unmarshal([]byte(rawSource), &effectSource); err != nil {
@@ -380,8 +252,10 @@ func requireForkReceiverEffect(t *testing.T, rt servedControlProofRuntime, runID
 	if effectSource.FlowID != path || effectSource.FlowInstance != path || effectSource.EntityID != entityID || effectPayload["owner"] != label || effectPayload["token"] != "receiver-proof" {
 		t.Fatalf("receiver final effect borrowed ownership: source=%+v payload=%v", effectSource, effectPayload)
 	}
-	var count int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name=$2 AND source_event_id=$3`, runID, path+"/receiver.finished", sourceEvent).Scan(&count); err != nil || count != 1 {
+	count, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) (int, error) {
+		return storetest.CountConnectorNamedSourceEvent(ctx, rt.ReceiverStateReader, runID, path+"/receiver.finished", sourceEvent)
+	})
+	if err != nil || count != 1 {
 		t.Fatalf("final effect count=%d err=%v", count, err)
 	}
 	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": effectID}, &public)
@@ -394,8 +268,10 @@ func requireForkReceiverEffect(t *testing.T, rt servedControlProofRuntime, runID
 	if parentInstance == "" {
 		parentInstance = runID
 	}
-	var parentEntity string
-	if err := rt.DB.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, runID, parentInstance).Scan(&parentEntity); err != nil {
+	parentEntity, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) (string, error) {
+		return storetest.ReadReceiverParentEntityIdentityStorage(ctx, rt.ReceiverStateReader, runID, parentInstance)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	delivery := public.Deliveries[0]
@@ -421,7 +297,9 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		selected = owner
 		return previous(owner)
 	}
-	t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+	t.Cleanup(func() {
+		projectRuntimePersistenceForServe = previous
+	})
 	root := canonicalrouting.CopyForkReceiverOwnership(t, receivers, entitylessProducer)
 	if option.repeated {
 		root = canonicalrouting.CopyForkReceiverRepeatedOwnership(t, receivers)
@@ -439,7 +317,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		requireEffect = func(t *testing.T, rt servedControlProofRuntime, runID, eventID, path, label, kind, entityID string) events.DeliveryRoute {
 			for _, receiver := range receivers {
 				if prefix+receiver.Path == path {
-					return requireForkReceiverExecution(t, rt, runID, eventID, path, label, kind, entityID, receiver.Policy)
+					return requireForkReceiverExecution(t, rt.Endpoint, rt.ReceiverStateReader, rt.Runtime, runID, eventID, path, label, kind, entityID, receiver.Policy)
 				}
 			}
 			t.Fatalf("undeclared receiver %s", path)
@@ -448,25 +326,21 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	}
 	publication := newExactOriginPublicationProbe(t)
 	rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name": seedName, "bundle_hash": rt.BundleHash,
-		"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-seed",
-	})
+	seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": seedName, "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-seed"})
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-	waitForkReceiverSourceCompletion(t, rt, seed.RunID)
-	seedRows := readForkReceiverRows(t, rt, seed.RunID)
+	waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
+	seedRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 	seedCompanions := map[string]map[string][]string{}
 	for _, receiver := range receivers {
 		if receiver.Policy == canonicalrouting.ForkReceiverOptionalAbsent || receiver.Policy == canonicalrouting.ForkReceiverOptionalExisting {
 			path := prefix + receiver.Path
-			seedCompanions[path] = readForkReceiverCompanions(t, rt, seed.RunID, path)
+			seedCompanions[path] = readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID, path)
 		}
 	}
-	request := map[string]any{"event_name": requestName, "run_id": seed.RunID, "source_event_id": seed.EventID,
-		"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-request"}
+	request := map[string]any{"event_name": requestName, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-request"}
 	started := requireServedEventPublishRPCResult(t, rt.Endpoint, request)
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-	waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+	waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 	if started.RunID != seed.RunID {
 		t.Fatal("second source ingress escaped the seeded run")
 	}
@@ -483,7 +357,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 			t.Fatal("distinct source occurrence collapsed")
 		}
 		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-		waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+		waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 		if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2 AND event_id<>$3`, seed.RunID, prefix+"producer/work.ready", frontier).Scan(&frontier); err != nil {
 			t.Fatal(err)
 		}
@@ -492,14 +366,14 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		if err := waitExactOriginPublications(t.Context(), publication, origins...); err != nil {
 			t.Fatal(err)
 		}
-		beforeDuplicate := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
-		beforeDuplicateNotices := readForkReceiverNoticeDomain(t, rt, seed.RunID)
+		beforeDuplicate := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)
+		beforeDuplicateNotices := readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, seed.RunID)
 		duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, request)
-		if !reflect.DeepEqual(second, duplicate) || !reflect.DeepEqual(beforeDuplicate, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(beforeDuplicateNotices, readForkReceiverNoticeDomain(t, rt, seed.RunID)) {
+		if !reflect.DeepEqual(second, duplicate) || !reflect.DeepEqual(beforeDuplicate, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)) || !reflect.DeepEqual(beforeDuplicateNotices, readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, seed.RunID)) {
 			t.Fatal("duplicate ingress rematerialized a source occurrence")
 		}
 	}
-	sourceRows := readForkReceiverRows(t, rt, seed.RunID)
+	sourceRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 	if option.executionOnly {
 		for _, receiver := range receivers {
 			if receiver.Policy == canonicalrouting.ForkReceiverOptionalAbsent || receiver.Policy == canonicalrouting.ForkReceiverOptionalExisting {
@@ -507,11 +381,11 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 				if !reflect.DeepEqual(seedRows[path], sourceRows[path]) {
 					t.Fatalf("optional receiver changed seeded state %s: before=%+v after=%+v", path, seedRows[path], sourceRows[path])
 				}
-				requireOptionalForkReceiverHeaderProgress(t, rt, seed.RunID, path, seedCompanions[path], readForkReceiverCompanions(t, rt, seed.RunID, path), len(frontiers))
+				requireOptionalForkReceiverHeaderProgress(t, rt.ReceiverStateReader, seed.RunID, path, seedCompanions[path], readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID, path), len(frontiers))
 			}
 		}
 	}
-	producerEvidence := readForkReceiverProducerEvidence(t, rt, seed.RunID, frontier)
+	producerEvidence := readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), seed.RunID, frontier)
 	producer, producerExists := sourceRows[prefix+"producer"]
 	if producerExists == entitylessProducer || (producerExists && (producer.Type != "work" || producer.Fields["marker"] != "producer-owned")) {
 		t.Fatalf("source producer prerequisite: %+v", sourceRows)
@@ -555,12 +429,12 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		if !ok {
 			t.Fatal("missing source planner")
 		}
-		plan, err := family.Plan(servedControlProofAuthorActivityContext(t, rt), runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: frontier})
+		plan, err := family.Plan(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: frontier})
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, occurrence := range frontiers {
-			if got := readForkReceiverProducerEvidence(t, rt, seed.RunID, occurrence); got != producerEvidence {
+			if got := readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), seed.RunID, occurrence); got != producerEvidence {
 				t.Fatalf("same-owner occurrence lost producer or execution mode: first=%+v got=%+v", producerEvidence, got)
 			}
 			for _, receiver := range receivers {
@@ -582,19 +456,18 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	}
 	if option.executionOnly {
 		for _, occurrence := range frontiers {
-			requireForkReceiverMutationOwners(t, rt, seed.RunID, occurrence, prefix, receivers)
+			requireForkReceiverMutationOwners(t, rt.ReceiverStateReader, seed.RunID, occurrence, prefix, receivers)
 		}
 	}
 	t.Logf("source success reached: run=%s frontier=%s receivers=%d", seed.RunID, frontier, len(receivers))
 	if option.nested {
-		siblingSeed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": seedName, "bundle_hash": rt.BundleHash,
-			"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-seed"})
+		siblingSeed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": seedName, "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-seed"})
 		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, siblingSeed.RunID)
-		waitForkReceiverSourceCompletion(t, rt, siblingSeed.RunID)
+		waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, siblingSeed.RunID)
 		siblingRequest := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": requestName, "run_id": siblingSeed.RunID, "source_event_id": siblingSeed.EventID,
 			"payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "ownership-sibling-request"})
 		waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, siblingSeed.RunID)
-		waitForkReceiverSourceCompletion(t, rt, siblingSeed.RunID)
+		waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, siblingSeed.RunID)
 		if siblingSeed.RunID == seed.RunID {
 			t.Fatal("independent sibling run collapsed")
 		}
@@ -602,7 +475,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2`, siblingSeed.RunID, prefix+"producer/work.ready").Scan(&siblingFrontier); err != nil {
 			t.Fatal(err)
 		}
-		siblingRows := readForkReceiverRows(t, rt, siblingSeed.RunID)
+		siblingRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), siblingSeed.RunID)
 		for _, receiver := range receivers {
 			path := prefix + receiver.Path
 			if siblingRows[path].ID != sourceRows[path].ID || siblingRows[path].Flow != path {
@@ -613,10 +486,10 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		if err := waitExactOriginPublications(t.Context(), publication, siblingSeed.EventID, siblingRequest.EventID); err != nil {
 			t.Fatal(err)
 		}
-		siblingDomain, siblingCompanions := readServedForkRecipientSourceDomain(t, rt, siblingSeed.RunID), readForkReceiverCompanions(t, rt, siblingSeed.RunID)
-		siblingNotices := readForkReceiverNoticeDomain(t, rt, siblingSeed.RunID)
+		siblingDomain, siblingCompanions := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), siblingSeed.RunID), readForkReceiverCompanions(t, rt.ReceiverStateReader, siblingSeed.RunID)
+		siblingNotices := readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, siblingSeed.RunID)
 		defer func() {
-			if !reflect.DeepEqual(siblingDomain, readServedForkRecipientSourceDomain(t, rt, siblingSeed.RunID)) || !reflect.DeepEqual(siblingCompanions, readForkReceiverCompanions(t, rt, siblingSeed.RunID)) || !reflect.DeepEqual(siblingNotices, readForkReceiverNoticeDomain(t, rt, siblingSeed.RunID)) {
+			if !reflect.DeepEqual(siblingDomain, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), siblingSeed.RunID)) || !reflect.DeepEqual(siblingCompanions, readForkReceiverCompanions(t, rt.ReceiverStateReader, siblingSeed.RunID)) || !reflect.DeepEqual(siblingNotices, readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, siblingSeed.RunID)) {
 				t.Error("fork mutated the independently executed sibling run")
 			}
 		}()
@@ -624,17 +497,17 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	if err := waitExactOriginPublications(t.Context(), publication, origins...); err != nil {
 		t.Fatal(err)
 	}
-	before := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
-	beforeCompanions := readForkReceiverCompanions(t, rt, seed.RunID)
-	beforeNotices := readForkReceiverNoticeDomain(t, rt, seed.RunID)
+	before := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)
+	beforeCompanions := readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID)
+	beforeNotices := readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, seed.RunID)
 	defer func() {
-		if after := readServedForkRecipientSourceDomain(t, rt, seed.RunID); !reflect.DeepEqual(before, after) {
+		if after := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID); !reflect.DeepEqual(before, after) {
 			t.Errorf("fork mutated source domain: before=%v after=%v", before, after)
 		}
-		if after := readForkReceiverCompanions(t, rt, seed.RunID); !reflect.DeepEqual(beforeCompanions, after) {
+		if after := readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID); !reflect.DeepEqual(beforeCompanions, after) {
 			t.Errorf("fork mutated source companion/readiness rows: before=%v after=%v", beforeCompanions, after)
 		}
-		if !reflect.DeepEqual(beforeNotices, readForkReceiverNoticeDomain(t, rt, seed.RunID)) {
+		if !reflect.DeepEqual(beforeNotices, readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, seed.RunID)) {
 			t.Error("fork changed source business notices")
 		}
 	}()
@@ -644,15 +517,8 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		return
 	}
 	if option.selectedMissing {
-		// This is changed-selected execution through the actual owner, not a
-		// mutation of the successful source bundle or a forged route plan. Eager
-		// construction already owns "consumer", even with empty fields; select
-		// a different receiver that was genuinely absent at the fork point.
 		const missingReceiver = "missing"
-		selectedRoot := canonicalrouting.CopyForkReceiverOwnership(t, []canonicalrouting.ForkReceiver{
-			{Path: "consumer", Policy: canonicalrouting.ForkReceiverOptionalAbsent},
-			{Path: missingReceiver, Policy: canonicalrouting.ForkReceiverRequiredMissing},
-		}, false)
+		selectedRoot := canonicalrouting.CopyForkReceiverOwnership(t, []canonicalrouting.ForkReceiver{{Path: "consumer", Policy: canonicalrouting.ForkReceiverOptionalAbsent}, {Path: missingReceiver, Policy: canonicalrouting.ForkReceiverRequiredMissing}}, false)
 		bundle := loadWorkflowValidationBundleAt(t, selectedRoot)
 		if selected == nil {
 			t.Fatal("missing selected store owner")
@@ -663,18 +529,13 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		if !ok {
 			t.Fatal("missing actual fork executor")
 		}
-		beforeRefusal := snapshotForkReceiverApplication(t, rt)
+		beforeRefusal := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 		for attempt := 0; attempt < 2; attempt++ {
-			result, err := family.Execute(servedControlProofAuthorActivityContext(t, rt), runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: seed.RunID, At: frontier, AllowSourceFreeze: true, ExpectedBundleHash: selectedHash,
-				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
-				ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: selectedHash},
-				AgentRuntime:      rt.ForkRuntime,
-			})
+			result, err := family.Execute(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), runforkexecution.SelectedContractExecutionRequest{SourceRunID: seed.RunID, At: frontier, AllowSourceFreeze: true, ExpectedBundleHash: selectedHash, SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()}, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: selectedHash}, AgentRuntime: rt.ForkRuntime})
 			if err == nil || !strings.Contains(err.Error(), "receiver target owner is missing") || !strings.Contains(err.Error(), missingReceiver) || result.ExecutedEventCount != 0 || result.Materialization.ForkRunID != "" {
 				t.Fatalf("required missing receiver must reject before materialization: executions=%d child=%q err=%v", result.ExecutedEventCount, result.Materialization.ForkRunID, err)
 			}
-			if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(beforeRefusal, after) {
+			if after := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot); !reflect.DeepEqual(beforeRefusal, after) {
 				t.Fatalf("required-missing attempt %d changed application state", attempt)
 			}
 		}
@@ -686,11 +547,9 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		t.Fatalf("fork identity: %+v", fork)
 	}
 	waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
-	childRows := readForkReceiverRows(t, rt, fork.ForkRunID)
+	childRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), fork.ForkRunID)
 	childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, frontier)
-	// This persisted child event has passed backend source-event loading and
-	// container preparation/publication. Compare their composition, not helpers.
-	childProducer := readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent)
+	childProducer := readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), fork.ForkRunID, childEvent)
 	if childProducer != producerEvidence {
 		t.Fatalf("backend/container composition changed immutable non-root producer: source=%+v child=%+v", producerEvidence, childProducer)
 	}
@@ -724,7 +583,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		t.Fatalf("producer state was rehomed: source=%+v child=%+v", producer, childRows)
 	}
 	if option.executionOnly {
-		requireForkReceiverMutationOwners(t, rt, fork.ForkRunID, childEvent, prefix, receivers)
+		requireForkReceiverMutationOwners(t, rt.ReceiverStateReader, fork.ForkRunID, childEvent, prefix, receivers)
 	}
 	if entitylessProducer {
 		if _, exists := childRows[prefix+"producer"]; exists {
@@ -735,10 +594,10 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 	if rootRow.ID != fork.ForkRunID || rootRow.Type != "root" || rootRow.Fields["marker"] != "root-owned" || rootRow.State != "active" {
 		t.Fatalf("root remap/restoration: %+v", childRows)
 	}
-	childBefore := readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID)
-	childNotices, childCompanions := readForkReceiverNoticeDomain(t, rt, fork.ForkRunID), readForkReceiverCompanions(t, rt, fork.ForkRunID)
+	childBefore := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), fork.ForkRunID)
+	childNotices, childCompanions := readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, fork.ForkRunID), readForkReceiverCompanions(t, rt.ReceiverStateReader, fork.ForkRunID)
 	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-	if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(childBefore, readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID)) || !reflect.DeepEqual(childNotices, readForkReceiverNoticeDomain(t, rt, fork.ForkRunID)) || !reflect.DeepEqual(childCompanions, readForkReceiverCompanions(t, rt, fork.ForkRunID)) {
+	if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(childBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), fork.ForkRunID)) || !reflect.DeepEqual(childNotices, readForkReceiverNoticeDomain(t, rt.ReceiverStateReader, fork.ForkRunID)) || !reflect.DeepEqual(childCompanions, readForkReceiverCompanions(t, rt.ReceiverStateReader, fork.ForkRunID)) {
 		t.Fatal("same-key fork replay changed response, committed targets, or final effects")
 	}
 }
@@ -762,7 +621,7 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "validation.triggered", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"candidate": "fork-capability"}, "idempotency_key": "capability-source"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 			var frontier, entityID, instancePath string
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/validation.requested'`, seed.RunID).Scan(&frontier); err != nil {
 				t.Fatal(err)
@@ -777,11 +636,11 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status<>'delivered'`, seed.RunID).Scan(&incomplete); err != nil || incomplete != 0 {
 				t.Fatalf("dynamic source did not settle: %d %v", incomplete, err)
 			}
-			requireReceiverPublicReadback(t, rt, seed.RunID)
+			requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID)
 			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID); err != nil {
 				t.Fatal(err)
 			}
-			before := snapshotForkReceiverApplication(t, rt)
+			before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "capability-fork"}
 			for attempt := 0; attempt < 2; attempt++ {
 				rpcErr := requireServedJSONRPCError(t, rt.Endpoint, "run.fork", params)
@@ -797,8 +656,8 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 				if err != nil || string(raw) != `["dynamic_flow_instance_creation"]` {
 					t.Fatalf("wrong exact capability set: %s error=%v", raw, err)
 				}
-				if after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {
-					t.Logf("capability refusal snapshot delta:\n%s", forkReceiverCapabilityRefusalSnapshotDelta(before, after))
+				if after := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot); !reflect.DeepEqual(before, after) {
+					t.Logf("capability refusal snapshot delta:\n%s", forkReceiverCapabilityRefusalSelectedSnapshotDelta(before, after))
 					t.Fatalf("capability refusal attempt %d changed application tables", attempt)
 				}
 			}
@@ -887,22 +746,14 @@ func TestServedForkSourceCompletionWithoutForkBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			earlyRoot := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), rt.ReceiverStateReader, seed.RunID, seed.EventID)
-			early := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
-			waitForkReceiverSourceCompletion(t, rt, seed.RunID)
-			settled := readServedForkRecipientSourceDomain(t, rt, seed.RunID)
+			early := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)
+			waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
+			settled := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)
 			settledRoot := storetest.ReadSemanticEventFixtureEvidence(t, t.Context(), rt.ReceiverStateReader, seed.RunID, seed.EventID)
 			if earlyRoot.PipelineReceiptCount != 1 || settledRoot.PipelineReceiptCount != 1 {
 				t.Fatalf("joined root publication lost its settled receipt: %d->%d", earlyRoot.PipelineReceiptCount, settledRoot.PipelineReceiptCount)
 			}
-			columnsRows, err := rt.DB.Query(`SELECT * FROM event_deliveries WHERE 1=0`)
-			if err != nil {
-				t.Fatal(err)
-			}
-			columns, err := columnsRows.Columns()
-			columnsRows.Close()
-			if err != nil {
-				t.Fatal(err)
-			}
+			columns := settled["event_deliveries"].Columns
 			handoff := -1
 			for i, column := range columns {
 				if column == "continuation_handoff_at" {
@@ -912,21 +763,27 @@ func TestServedForkSourceCompletionWithoutForkBothStores(t *testing.T) {
 			if handoff < 0 {
 				t.Fatal("missing delivery handoff fact")
 			}
-			if len(early["event_deliveries"]) != len(settled["event_deliveries"]) {
+			if !reflect.DeepEqual(early["event_deliveries"].Columns, columns) {
+				t.Fatal("no-fork observation changed delivery columns")
+			}
+			if len(early["event_deliveries"].Rows) != len(settled["event_deliveries"].Rows) {
 				t.Fatal("no-fork observation added or removed deliveries")
 			}
-			for i, raw := range early["event_deliveries"] {
-				var beforeRow, afterRow []any
+			for i, raw := range early["event_deliveries"].Rows {
+				var beforeRow, afterRow []storetest.SelectedForkSnapshotCell
 				if err := json.Unmarshal([]byte(raw), &beforeRow); err != nil {
 					t.Fatal(err)
 				}
-				if err := json.Unmarshal([]byte(settled["event_deliveries"][i]), &afterRow); err != nil {
+				if err := json.Unmarshal([]byte(settled["event_deliveries"].Rows[i]), &afterRow); err != nil {
 					t.Fatal(err)
 				}
-				if beforeRow[handoff] != nil && !reflect.DeepEqual(beforeRow[handoff], afterRow[handoff]) {
+				if len(beforeRow) != len(columns) || len(afterRow) != len(columns) {
+					t.Fatal("no-fork observation changed delivery row cardinality")
+				}
+				if beforeRow[handoff].Type != "<nil>" && !reflect.DeepEqual(beforeRow[handoff], afterRow[handoff]) {
 					t.Fatal("no-fork completion rewrote an existing handoff")
 				}
-				if afterRow[handoff] == nil {
+				if afterRow[handoff].Type == "<nil>" {
 					t.Fatal("pipeline completion left absent handoff")
 				}
 				beforeRow[handoff] = afterRow[handoff]
@@ -934,9 +791,12 @@ func TestServedForkSourceCompletionWithoutForkBothStores(t *testing.T) {
 					t.Fatalf("no-fork delivery changed beyond handoff stamp: %v / %v", beforeRow, afterRow)
 				}
 			}
-			for _, receipt := range early["event_receipts"] {
+			if !reflect.DeepEqual(early["event_receipts"].Columns, settled["event_receipts"].Columns) {
+				t.Fatal("no-fork observation changed receipt columns")
+			}
+			for _, receipt := range early["event_receipts"].Rows {
 				found := false
-				for _, after := range settled["event_receipts"] {
+				for _, after := range settled["event_receipts"].Rows {
 					if receipt == after {
 						found = true
 					}
@@ -962,9 +822,9 @@ func TestServedForkSourceCompletionWithoutForkBothStores(t *testing.T) {
 			// Root handoff 0->1 is witnessed by the separate held-publication proof.
 			// Child handoffs may still settle between these original snapshots.
 			t.Logf("JOINED ROOT: receipts=%d->%d; root delta is zero, not positive handoff proof", earlyRoot.PipelineReceiptCount, settledRoot.PipelineReceiptCount)
-			t.Logf("NO FORK INVOKED: delivery-only quiescence -> pipeline completion changed=%v receipts=%d->%d", changed, len(early["event_receipts"]), len(settled["event_receipts"]))
+			t.Logf("NO FORK INVOKED: delivery-only quiescence -> pipeline completion changed=%v receipts=%d->%d", changed, len(early["event_receipts"].Rows), len(settled["event_receipts"].Rows))
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			if after := readServedForkRecipientSourceDomain(t, rt, seed.RunID); !reflect.DeepEqual(settled, after) {
+			if after := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID); !reflect.DeepEqual(settled, after) {
 				t.Fatal("source continued changing after exact pipeline handoff/receipt boundary")
 			}
 		})
@@ -1008,11 +868,11 @@ func TestSelectedForkRequiredReceiverOwnershipStateEffectBothStores(t *testing.T
 	}
 }
 
-func requireForkReceiverBusinessMutation(t *testing.T, rt servedControlProofRuntime, runID, eventID, entityID string) events.DeliveryRoute {
+func requireForkReceiverBusinessMutation(t *testing.T, selectedProofEndpoint string, selectedProofReceiverStateReader receiverProofStateReader, runID, eventID, entityID string) events.DeliveryRoute {
 	t.Helper()
 	var exact []servedForkDeliveryEvidence
 	var deliveryID string
-	for id, delivery := range readServedForkDeliveryEvidence(t, rt, runID) {
+	for id, delivery := range readServedForkDeliveryEvidence(t, selectedProofReceiverStateReader, runID) {
 		if node, ok := delivery.route.Recipient.Node(); delivery.eventID == eventID && ok && node.FlowPath() == "consumer" && node.NodeID() == "collector" {
 			exact = append(exact, delivery)
 			deliveryID = id
@@ -1027,26 +887,35 @@ func requireForkReceiverBusinessMutation(t *testing.T, rt servedControlProofRunt
 	if !ok || handler.FlowPath() != "consumer" || handler.NodeID() != "collector" || local != "work.ready" || route.Target.Code() != "existing_entity" || route.Target.Route() != wantTarget {
 		t.Fatalf("business receiver authority: %+v", route)
 	}
-	var status, outcome string
-	var claim, outcomeClaim, outcomes int
-	if err := rt.DB.QueryRow(`SELECT d.status,d.claim_version,o.outcome,o.claim_version FROM event_deliveries d JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o ON o.delivery_id=d.delivery_id WHERE d.run_id=$1 AND d.delivery_id=$2`, runID, deliveryID).Scan(&status, &claim, &outcome, &outcomeClaim); err != nil {
+	settlement, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (storetest.ForkReceiverSettlementStorage, error) {
+		return storetest.ReadForkReceiverBusinessSettlementStorage(ctx, selectedProofReceiverStateReader, runID, deliveryID)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=$1`, deliveryID).Scan(&outcomes); err != nil {
+	status, outcome := settlement.Status, settlement.Outcome
+	claim, outcomeClaim := settlement.Claim, settlement.OutcomeClaim
+	outcomes, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (int, error) {
+		return storetest.CountForkReceiverSettledAttemptsStorage(ctx, selectedProofReceiverStateReader, deliveryID)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if status != "delivered" || outcome != "delivered" || claim != 1 || outcomeClaim != 1 || outcomes != 1 {
 		t.Fatalf("business receiver settlement: %s/%s claims=%d/%d outcomes=%d", status, outcome, claim, outcomeClaim, outcomes)
 	}
 	var public operatorread.OperatorEventFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": eventID}, &public)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "event.get", map[string]any{"event_id": eventID}, &public)
 	if public.RunID != runID || len(public.Deliveries) != 1 || public.Deliveries[0].DeliveryID != deliveryID || public.Deliveries[0].Status != "delivered" || public.Deliveries[0].Target != (operatorread.OperatorDeliveryTarget{Kind: "existing_entity", FlowID: "consumer", FlowInstance: "consumer", EntityID: entityID}) {
 		t.Fatalf("public business receiver evidence: %+v", public)
 	}
-	var oldJSON, newJSON, writerType, writerID, step string
-	if err := rt.DB.QueryRow(`SELECT CAST(old_value AS TEXT),CAST(new_value AS TEXT),writer_type,writer_id,handler_step FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND caused_by_event=$3 AND domain='authored_field' AND path='processed_token'`, runID, entityID, eventID).Scan(&oldJSON, &newJSON, &writerType, &writerID, &step); err != nil {
+	mutation, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (storetest.ReceiverFieldMutationStorage, error) {
+		return storetest.ReadReceiverBusinessTokenMutationStorage(ctx, selectedProofReceiverStateReader, runID, entityID, eventID)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
+	oldJSON, newJSON, writerType, writerID, step := mutation.Old, mutation.New, mutation.WriterType, mutation.WriterID, mutation.Step
 	var oldValue, newValue string
 	if err := json.Unmarshal([]byte(oldJSON), &oldValue); err != nil {
 		t.Fatal(err)
@@ -1057,19 +926,25 @@ func requireForkReceiverBusinessMutation(t *testing.T, rt servedControlProofRunt
 	if oldValue != "seeded" || newValue != "receiver-proof" || writerType != "platform" || writerID != "workflow_engine" || step != "mutate" {
 		t.Fatalf("receiver business mutation: old=%q new=%q writer=%s/%s step=%s", oldValue, newValue, writerType, writerID, step)
 	}
-	var mutations, emitted int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND caused_by_event=$2 AND domain='authored_field' AND path='processed_token'`, runID, eventID).Scan(&mutations); err != nil {
+	mutations, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (int, error) {
+		return storetest.CountReceiverBusinessTokenMutationsStorage(ctx, selectedProofReceiverStateReader, runID, eventID)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	// Runtime log records are admitted diagnostics, not authored emissions.
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND source_event_id=$2 AND NOT (event_class=$3 AND event_name=$4)`, runID, eventID, string(events.EventAdmissionDiagnosticDirect), string(events.EventTypePlatformRuntimeLog)).Scan(&emitted); err != nil {
+	emitted, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (int, error) {
+		return storetest.CountSourceNonDiagnosticEventsStorage(ctx, selectedProofReceiverStateReader, runID, eventID, string(events.EventAdmissionDiagnosticDirect), string(events.EventTypePlatformRuntimeLog))
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if mutations != 1 || emitted != 0 {
 		t.Fatalf("business effect census: mutations=%d emitted=%d", mutations, emitted)
 	}
-	var extraDeliveries int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 AND e.source_event_id=$2`, runID, eventID).Scan(&extraDeliveries); err != nil || extraDeliveries != 0 {
+	extraDeliveries, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (int, error) {
+		return storetest.CountSourceRunDeliveryStorage(ctx, selectedProofReceiverStateReader, runID, eventID)
+	})
+	if err != nil || extraDeliveries != 0 {
 		t.Fatalf("effect-only consumer produced executable downstream work: deliveries=%d err=%v", extraDeliveries, err)
 	}
 	return route
@@ -1083,8 +958,8 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, entityless))
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "start.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "receiver-proof"}, "idempotency_key": "business-seed"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
-				seedRows := readForkReceiverRows(t, rt, seed.RunID)
+				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
+				seedRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 				if got := seedRows["consumer"]; got.Type != "receipt" || got.State != "active" || got.Fields["marker"] != "consumer-owned" || got.Fields["processed_token"] != "seeded" {
 					t.Fatalf("receiver seed ownership: %+v", seedRows)
 				}
@@ -1093,12 +968,12 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 					t.Fatal("source request escaped seeded run")
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				waitForkReceiverSourceCompletion(t, rt, seed.RunID)
+				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, seed.RunID)
 				var frontier string
 				if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, seed.RunID).Scan(&frontier); err != nil {
 					t.Fatal(err)
 				}
-				sourceRows := readForkReceiverRows(t, rt, seed.RunID)
+				sourceRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), seed.RunID)
 				consumer := sourceRows["consumer"]
 				if consumer.ID != seedRows["consumer"].ID || consumer.Fields["marker"] != "consumer-owned" || consumer.Fields["processed_token"] != "receiver-proof" || consumer.State != "active" {
 					t.Fatalf("source receiver effect ownership: %+v", sourceRows)
@@ -1107,7 +982,7 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				if exists == entityless || (exists && (producer.ID == consumer.ID || producer.Type != "work" || producer.Fields["marker"] != "producer-owned")) {
 					t.Fatalf("source producer ownership: %+v", sourceRows)
 				}
-				sourceEvidence := readForkReceiverProducerEvidence(t, rt, seed.RunID, frontier)
+				sourceEvidence := readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), seed.RunID, frontier)
 				var producerHeaderID string
 				if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path='producer' AND flow_template='producer'`, seed.RunID).Scan(&producerHeaderID); err != nil {
 					t.Fatal(err)
@@ -1115,13 +990,13 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				if (exists && producer.ID != producerHeaderID) || sourceEvidence.Source.Kind() != events.RoutingSourceStaticFlow || sourceEvidence.Source.Route() != (events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: producerHeaderID}) {
 					t.Fatalf("immutable producer evidence: %+v", sourceEvidence)
 				}
-				sourceRoute := requireForkReceiverBusinessMutation(t, rt, seed.RunID, frontier, consumer.ID)
+				sourceRoute := requireForkReceiverBusinessMutation(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, frontier, consumer.ID)
 				if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, started.EventID); err != nil {
 					t.Fatal(err)
 				}
-				before, companions := readServedForkRecipientSourceDomain(t, rt, seed.RunID), readForkReceiverCompanions(t, rt, seed.RunID)
+				before, companions := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID), readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID)
 				defer func() {
-					if !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, seed.RunID)) || !reflect.DeepEqual(companions, readForkReceiverCompanions(t, rt, seed.RunID)) {
+					if !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), seed.RunID)) || !reflect.DeepEqual(companions, readForkReceiverCompanions(t, rt.ReceiverStateReader, seed.RunID)) {
 						t.Error("business fork changed settled source domain or companions")
 					}
 				}()
@@ -1133,11 +1008,11 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
 				childEvent := activityidentity.ForkLineageEventID(fork.ForkRunID, frontier)
-				childRoute := requireForkReceiverBusinessMutation(t, rt, fork.ForkRunID, childEvent, consumer.ID)
-				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt, fork.ForkRunID, childEvent) != sourceEvidence {
+				childRoute := requireForkReceiverBusinessMutation(t, rt.Endpoint, rt.ReceiverStateReader, fork.ForkRunID, childEvent, consumer.ID)
+				if !reflect.DeepEqual(sourceRoute.ConnectClaim, childRoute.ConnectClaim) || readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), fork.ForkRunID, childEvent) != sourceEvidence {
 					t.Fatal("business fork changed compiled consumer or immutable producer evidence")
 				}
-				childRows := readForkReceiverRows(t, rt, fork.ForkRunID)
+				childRows := readWorkspaceProofReceiverRows(t, rt.Runtime.Bus.Store(), fork.ForkRunID)
 				if !reflect.DeepEqual(childRows["consumer"], consumer) || !reflect.DeepEqual(childRows["producer"], producer) {
 					t.Fatalf("business fork rehomed producer/receiver: source=%+v child=%+v", sourceRows, childRows)
 				}
@@ -1145,9 +1020,9 @@ func TestSelectedForkIndependentReceiverBusinessMutationBothStores(t *testing.T)
 				if root.ID != fork.ForkRunID || root.Type != "root" || root.Fields["marker"] != "root-owned" {
 					t.Fatalf("business fork root remapping: %+v", childRows)
 				}
-				childBefore := readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID)
+				childBefore := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), fork.ForkRunID)
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-				if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(childBefore, readServedForkRecipientSourceDomain(t, rt, fork.ForkRunID)) {
+				if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(childBefore, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), fork.ForkRunID)) {
 					t.Fatal("business fork replay repeated execution or changed response")
 				}
 			})

@@ -31,7 +31,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 type providerRawSettlementProofStore interface {
@@ -257,9 +256,7 @@ func providerRawSettlementAgentIdentity(t testing.TB, runID, flowID, flowInstanc
 func openProviderRawSettlementStore(t *testing.T, backend string) providerRawSettlementProofStore {
 	t.Helper()
 	if backend == "postgres" {
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		return storetest.AdmitPostgresRuntimeStore(t, db)
+		return storetest.StartPostgresRuntimeStore(t)
 	}
 	selected := storetest.StartSQLiteRuntimeStoreWithContext(t, testAuthorActivityContext(context.Background()))
 	return selected

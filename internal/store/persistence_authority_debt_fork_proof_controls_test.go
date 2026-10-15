@@ -125,7 +125,7 @@ func debtForkProofHostility(t *testing.T, original authorityDebtSite, old, curre
 }
 
 func TestPersistenceAuthorityDebtForkProofCollectorIsPinned(t *testing.T) {
-	root := persistenceAuthorityRepoRoot(t)
+	root := debtCatchUpHistoricalArchive(t, debtCatchUpMaster)
 	digest, err := debtCollectorDigest(root)
 	if err != nil || (digest != debtForkProofCollectorTo && digest != debtProcessLeaseCollectorTo) {
 		t.Fatalf("fork/process collector=%s/%s actual=%s error=%v", debtForkProofCollectorTo, debtProcessLeaseCollectorTo, digest, err)

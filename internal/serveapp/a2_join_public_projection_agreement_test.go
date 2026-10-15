@@ -70,19 +70,19 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 			if !opened.NewRunCreated || opened.RunID == "" || opened.EventID == "" {
 				t.Fatalf("supported root ingress did not create the join run: %+v", opened)
 			}
-			a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 0, true)
-			created := requireA2PortfolioEntity(t, rt, opened.RunID, opened.RunID)
+			a2WaitJoinPublicRun(t, rt.Endpoint, opened.RunID, "running", 0, true)
+			created := requireA2PortfolioEntity(t, rt.Endpoint, opened.RunID, opened.RunID)
 			if created.Entity.CurrentState != "dispatching" {
 				t.Fatalf("actual root creation did not enter dispatching: %+v", created)
 			}
-			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt, opened.EventID, opened.RunID, "order.started",
+			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt.Endpoint, opened.EventID, opened.RunID, "order.started",
 				map[string]any{"dispatch_id": "dispatch-m37", "expected": []any{"op-a", "op-b"}}), ".", "starter", created, "materializing_entity")
 			dispatched := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 				"run_id": opened.RunID, "event_name": "order.dispatched", "source_event_id": opened.EventID,
 				"payload": map[string]any{}, "idempotency_key": "a2-m37-dispatch",
 			})
-			a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 0, true)
-			initialEntity, initial := a2ReadJoinPublicObligation(t, rt, opened.RunID)
+			a2WaitJoinPublicRun(t, rt.Endpoint, opened.RunID, "running", 0, true)
+			initialEntity, initial := a2ReadJoinPublicObligation(t, rt.Endpoint, opened.RunID)
 			entry, found, err := workflowlifecycle.LoadStageEntry(initialEntity.Bookkeeping)
 			if err != nil || !found || entry != initial.JoinRef().StageEntry() || entry.EventID != dispatched.EventID || entry.Cause != "delivery" {
 				t.Fatalf("public bookkeeping/arm lost the actual admitted entry: entry=%+v arm=%+v err=%v", entry, initial, err)
@@ -91,9 +91,9 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 				initial.Expected() != 2 || initial.OutcomePending || initial.OutcomeFired || initial.DeadlineAt.Sub(initial.ArmedAt) != time.Hour {
 				t.Fatalf("public initial arrival obligation: entity=%+v arm=%+v", initialEntity, initial)
 			}
-			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt, dispatched.EventID, opened.RunID, "order.dispatched", map[string]any{}),
+			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt.Endpoint, dispatched.EventID, opened.RunID, "order.dispatched", map[string]any{}),
 				".", "dispatcher", initialEntity, "existing_entity")
-			a2RequireJoinPublicGraph(t, rt, root, initialEntity, initial)
+			a2RequireJoinPublicGraph(t, rt.BundleHash, root, initialEntity, initial)
 			publish := func(member, idempotency string, ok bool) servedEventPublishRPCResult {
 				t.Helper()
 				result := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
@@ -107,14 +107,14 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 				return result
 			}
 			first := publish("op-b", "a2-m37-b", false)
-			a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 0, true)
-			partialEntity, partial := a2ReadJoinPublicObligation(t, rt, opened.RunID)
+			a2WaitJoinPublicRun(t, rt.Endpoint, opened.RunID, "running", 0, true)
+			partialEntity, partial := a2ReadJoinPublicObligation(t, rt.Endpoint, opened.RunID)
 			a2RequireJoinPublicIdentity(t, initial, partial)
 			if partial.Status != joinruntime.StatusOpen || partial.Completed() != 1 || !reflect.DeepEqual(partial.Missing(), []string{"op-a"}) {
 				t.Fatalf("public partial arrival obligation: %+v", partial)
 			}
 			a2RequireJoinPublicResults(t, partial, []any{map[string]any{"ok": false}})
-			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt, first.EventID, opened.RunID, "item.completed",
+			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt.Endpoint, first.EventID, opened.RunID, "item.completed",
 				map[string]any{"dispatch_id": "dispatch-m37", "member_id": "op-b", "result": map[string]any{"ok": false}}), ".", "join-node", partialEntity, "existing_entity")
 			last := publish("op-a", "a2-m37-a", true)
 			var occurrence events.Event
@@ -123,8 +123,8 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 			case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
 				t.Fatal("real platform.join_complete did not reach the existing handler-start hook")
 			}
-			pendingDiagnosis := a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 1, false)
-			pendingEntity, pending := a2ReadJoinPublicObligation(t, rt, opened.RunID)
+			pendingDiagnosis := a2WaitJoinPublicRun(t, rt.Endpoint, opened.RunID, "running", 1, false)
+			pendingEntity, pending := a2ReadJoinPublicObligation(t, rt.Endpoint, opened.RunID)
 			a2RequireJoinPublicIdentity(t, initial, pending)
 			if pendingEntity.Entity.CurrentState != "awaiting" || pending.Status != joinruntime.StatusClosed || pending.CloseReason != joinruntime.CloseReasonComplete ||
 				pending.Completed() != 2 || pending.TimerCancelled || !pending.OutcomePending || pending.OutcomeFired || pending.TimerHandle().Kind() != timeridentity.TimerHandleJoinComplete {
@@ -132,30 +132,30 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 			}
 			ordered := []any{map[string]any{"ok": true}, map[string]any{"ok": false}}
 			a2RequireJoinPublicResults(t, pending, ordered)
-			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt, last.EventID, opened.RunID, "item.completed",
+			requireA2PortfolioDelivery(t, requireA2PortfolioEvent(t, rt.Endpoint, last.EventID, opened.RunID, "item.completed",
 				map[string]any{"dispatch_id": "dispatch-m37", "member_id": "op-a", "result": map[string]any{"ok": true}}), ".", "join-node", pendingEntity, "existing_entity")
-			completion := a2ReadJoinPublicEvent(t, rt, occurrence.ID())
+			completion := a2ReadJoinPublicEvent(t, rt.Endpoint, occurrence.ID())
 			handle, ref, valid := timeridentity.ParseJoinHandle(completion.Payload)
 			if !valid || !ref.Equal(initial.JoinRef()) || handle != pending.TimerHandle() || occurrence.TaskID() != handle.TaskID() ||
 				completion.RunID != opened.RunID || completion.EventName != "platform.join_complete" || len(completion.Deliveries) != 1 ||
 				completion.Deliveries[0].Status != "in_progress" || completion.Deliveries[0].Terminal || completion.Deliveries[0].Target.EntityID != pendingEntity.Entity.EntityID {
 				t.Fatalf("public continuation event disagrees with exact pending obligation: event=%+v handle=%+v arm=%+v", completion, handle, pending)
 			}
-			a2RequireJoinPublicClients(t, rt, pendingDiagnosis, pendingEntity)
-			a2RequireJoinPublicTrace(t, rt, opened.RunID, completion)
+			a2RequireJoinPublicClients(t, rt.Endpoint, pendingDiagnosis, pendingEntity)
+			a2RequireJoinPublicTrace(t, rt.Endpoint, opened.RunID, completion)
 
 			late := publish("op-a", "a2-m37-late", false)
-			lateDiagnosis := a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 1, false, late.EventID)
-			lateEvent := a2ReadJoinPublicEvent(t, rt, late.EventID)
+			lateDiagnosis := a2WaitJoinPublicRun(t, rt.Endpoint, opened.RunID, "running", 1, false, late.EventID)
+			lateEvent := a2ReadJoinPublicEvent(t, rt.Endpoint, late.EventID)
 			a2RequireJoinPublicLateFailure(t, lateEvent, pendingEntity, initial.JoinRef())
-			unchangedEntity, unchanged := a2ReadJoinPublicObligation(t, rt, opened.RunID)
+			unchangedEntity, unchanged := a2ReadJoinPublicObligation(t, rt.Endpoint, opened.RunID)
 			if !reflect.DeepEqual(pendingEntity, unchangedEntity) || !reflect.DeepEqual(pending, unchanged) {
 				t.Fatal("typed late refusal changed the retained closed-pending obligation or entry")
 			}
 			a2RequireJoinPublicFailureAgreement(t, lateDiagnosis, lateEvent)
-			a2RequireJoinPublicClients(t, rt, lateDiagnosis, unchangedEntity)
-			a2RequireJoinPublicTrace(t, rt, opened.RunID, lateEvent)
-			human := a2JoinPublicCLI(t, rt, "event", "view", late.EventID)
+			a2RequireJoinPublicClients(t, rt.Endpoint, lateDiagnosis, unchangedEntity)
+			a2RequireJoinPublicTrace(t, rt.Endpoint, opened.RunID, lateEvent)
+			human := a2JoinPublicCLI(t, rt.Endpoint, "event", "view", late.EventID)
 			for _, want := range []string{"subscriber=node/" + node.Key(), "status=dead letter", "failure=platform.stale_arrival/join_closed"} {
 				if !strings.Contains(human, want) {
 					t.Fatalf("CLI late refusal omitted %q: %s", want, human)
@@ -164,28 +164,28 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 			unblock()
 			// Join firing is not a promise that the whole run has terminated.
 			// Assert active-work agreement and compare the actual header/diagnosis.
-			firedDiagnosis := a2WaitJoinPublicRun(t, rt, opened.RunID, "", 0, true, late.EventID)
+			firedDiagnosis := a2WaitJoinPublicRun(t, rt.Endpoint, opened.RunID, "", 0, true, late.EventID)
 			if firedDiagnosis.Run.Status != "running" && firedDiagnosis.Run.Status != "completed" || firedDiagnosis.Run.Failure != nil {
 				t.Fatalf("typed late refusal incorrectly failed the containing run: %+v", firedDiagnosis)
 			}
-			firedEntity, fired := a2ReadJoinPublicObligation(t, rt, opened.RunID)
+			firedEntity, fired := a2ReadJoinPublicObligation(t, rt.Endpoint, opened.RunID)
 			a2RequireJoinPublicIdentity(t, initial, fired)
 			if firedEntity.Entity.CurrentState != "ready" || fired.Status != joinruntime.StatusClosed || fired.CloseReason != joinruntime.CloseReasonComplete ||
 				fired.OutcomePending || !fired.OutcomeFired || !fired.TimerCancelled || !reflect.DeepEqual(pending.Outputs, fired.Outputs) {
 				t.Fatalf("public fired obligation did not consume the real continuation: entity=%+v arm=%+v", firedEntity, fired)
 			}
 			a2RequireJoinPublicResults(t, fired, ordered)
-			completion = a2ReadJoinPublicEvent(t, rt, occurrence.ID())
+			completion = a2ReadJoinPublicEvent(t, rt.Endpoint, occurrence.ID())
 			requireA2PortfolioDelivery(t, completion, ".", "join-node", firedEntity, "existing_entity")
 			firedEntry, found, err := workflowlifecycle.LoadStageEntry(firedEntity.Bookkeeping)
 			if err != nil || !found || firedEntry == entry || firedEntry.EventID != completion.EventID ||
 				firedEntry.RequireOwner(opened.RunID, ".", opened.RunID, opened.RunID, opened.RunID, "ready") != nil {
 				t.Fatalf("public fired bookkeeping lost the actual continuation's new entry: entry=%+v retained=%+v event=%s err=%v", firedEntry, entry, completion.EventID, err)
 			}
-			a2RequireJoinPublicFailureAgreement(t, firedDiagnosis, a2ReadJoinPublicEvent(t, rt, late.EventID))
-			a2RequireJoinPublicClients(t, rt, firedDiagnosis, firedEntity)
-			a2RequireJoinPublicTrace(t, rt, opened.RunID, completion)
-			a2RequireJoinPublicGraph(t, rt, root, firedEntity, fired)
+			a2RequireJoinPublicFailureAgreement(t, firedDiagnosis, a2ReadJoinPublicEvent(t, rt.Endpoint, late.EventID))
+			a2RequireJoinPublicClients(t, rt.Endpoint, firedDiagnosis, firedEntity)
+			a2RequireJoinPublicTrace(t, rt.Endpoint, opened.RunID, completion)
+			a2RequireJoinPublicGraph(t, rt.BundleHash, root, firedEntity, fired)
 			t.Logf("public HTTP/CLI describe/graph/readback agreement: closed_pending(active=1, run=running) -> typed platform.stale_arrival/join_closed -> fired(active=0, run=%s, operational=%s); entry=%s arm=%s; non-loop generation absent; ordered JoinResult outputs=[{ok:true}, {ok:false}]; no restart or SQL oracle", firedDiagnosis.Run.Status, firedDiagnosis.OperationalState, entry.Key(), fired.Key())
 			if code := process.stop(); code != 0 {
 				t.Fatalf("normal serve exit=%d", code)
@@ -194,10 +194,10 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 	}
 }
 
-func a2ReadJoinPublicObligation(t *testing.T, rt servedControlProofRuntime, runID string) (operatorread.OperatorEntityFull, joinruntime.Activation) {
+func a2ReadJoinPublicObligation(t *testing.T, endpoint string, runID string) (operatorread.OperatorEntityFull, joinruntime.Activation) {
 	t.Helper()
 	var raw json.RawMessage
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": runID}, &raw)
+	requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": runID}, &raw)
 	var entity operatorread.OperatorEntityFull
 	// Decode the public DTO itself, preserving numeric tokens without a SQL oracle.
 	if err := canonicaljson.DecodePreservingNumberLexemes(raw, &entity); err != nil {
@@ -229,7 +229,7 @@ func a2ReadJoinPublicObligation(t *testing.T, rt servedControlProofRuntime, runI
 		t.Fatalf("public catalog and exact node/activation-key readers disagree: arm=%+v loaded=%+v err=%v", arm, loaded, err)
 	}
 	var list operatorread.OperatorEntityListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.list", map[string]any{"run_id": runID, "limit": 10}, &list)
+	requireServedJSONRPCResult(t, endpoint, "entity.list", map[string]any{"run_id": runID, "limit": 10}, &list)
 	if list.NextCursor != "" || len(list.Entities) != 1 || !reflect.DeepEqual(list.Entities[0], entity.Entity) {
 		t.Fatalf("public entity list/get disagree on the exact join receiver: list=%+v entity=%+v", list, entity)
 	}
@@ -252,7 +252,7 @@ func a2RequireJoinPublicResults(t *testing.T, arm joinruntime.Activation, want [
 	}
 }
 
-func a2RequireJoinPublicGraph(t *testing.T, rt servedControlProofRuntime, root string, entity operatorread.OperatorEntityFull, arm joinruntime.Activation) {
+func a2RequireJoinPublicGraph(t *testing.T, bundleHash string, root string, entity operatorread.OperatorEntityFull, arm joinruntime.Activation) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
@@ -265,8 +265,8 @@ func a2RequireJoinPublicGraph(t *testing.T, rt servedControlProofRuntime, root s
 	if err := json.Unmarshal(stdout.Bytes(), &view); err != nil {
 		t.Fatal(err)
 	}
-	if view.SourceHash != rt.BundleHash || len(view.StageGraphs) != 1 {
-		t.Fatalf("actual CLI describe/graph lost its served source: hash=%s want=%s graphs=%+v", view.SourceHash, rt.BundleHash, view.StageGraphs)
+	if view.SourceHash != bundleHash || len(view.StageGraphs) != 1 {
+		t.Fatalf("actual CLI describe/graph lost its served source: hash=%s want=%s graphs=%+v", view.SourceHash, bundleHash, view.StageGraphs)
 	}
 	for _, diagnostic := range view.Diagnostics {
 		if diagnostic.Severity != "lint_evidence" {
@@ -310,15 +310,15 @@ func a2RequireJoinPublicGraph(t *testing.T, rt servedControlProofRuntime, root s
 	}
 }
 
-func a2ReadJoinPublicEvent(t *testing.T, rt servedControlProofRuntime, eventID string) operatorread.OperatorEventFull {
+func a2ReadJoinPublicEvent(t *testing.T, endpoint string, eventID string) operatorread.OperatorEventFull {
 	t.Helper()
 	var event operatorread.OperatorEventFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
+	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": eventID}, &event)
 	if event.EventID != eventID || event.RunID == "" || event.NoDelivery != nil || len(event.Deliveries) != 1 {
 		t.Fatalf("public join event lost its exact committed identity/obligation: %+v", event)
 	}
 	var matches []operatorread.OperatorEventFull
-	for _, listed := range requireA2PortfolioEvents(t, rt, event.RunID, event.EventName) {
+	for _, listed := range requireA2PortfolioEvents(t, endpoint, event.RunID, event.EventName) {
 		if listed.EventID == eventID {
 			matches = append(matches, listed)
 		}
@@ -329,13 +329,13 @@ func a2ReadJoinPublicEvent(t *testing.T, rt servedControlProofRuntime, eventID s
 	return event
 }
 
-func a2WaitJoinPublicRun(t *testing.T, rt servedControlProofRuntime, runID, status string, active int, ready bool, failedEventID ...string) a2JoinPublicDiagnosis {
+func a2WaitJoinPublicRun(t *testing.T, endpoint string, runID, status string, active int, ready bool, failedEventID ...string) a2JoinPublicDiagnosis {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var last, previous a2JoinPublicDiagnosis
 	stable := 0
 	for time.Now().Before(deadline) {
-		requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &last)
+		requireServedJSONRPCResult(t, endpoint, "run.diagnose", map[string]any{"run_id": runID}, &last)
 		failureReady := len(failedEventID) == 0 || len(last.FailedDeliveries) == 1 && last.FailedDeliveries[0].EventID == failedEventID[0]
 		if failureReady && last.Run.RunID == runID && (status == "" || last.Run.Status == status) && last.TestQuiescence.ActiveDeliveries == active && last.TestQuiescence.Ready == ready {
 			if reflect.DeepEqual(previous, last) {
@@ -364,18 +364,18 @@ func a2WaitJoinPublicRun(t *testing.T, rt servedControlProofRuntime, runID, stat
 	return last
 }
 
-func a2RequireJoinPublicClients(t *testing.T, rt servedControlProofRuntime, diagnosis a2JoinPublicDiagnosis, entity operatorread.OperatorEntityFull) {
+func a2RequireJoinPublicClients(t *testing.T, endpoint string, diagnosis a2JoinPublicDiagnosis, entity operatorread.OperatorEntityFull) {
 	t.Helper()
 	runID := entity.Entity.RunID
 	var header struct {
 		Run operatorread.RunHeader `json:"run"`
 	}
-	requireServedJSONRPCResult(t, rt.Endpoint, "run.get", map[string]any{"run_id": runID}, &header)
+	requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": runID}, &header)
 	if !reflect.DeepEqual(header.Run, diagnosis.Run) || header.Run.EntityCount != 1 || header.Run.EventCount < 4 {
 		t.Fatalf("public run header/diagnosis disagree with the actual single join receiver: header=%+v diagnosis=%+v", header, diagnosis)
 	}
 	var events operatorread.OperatorEventListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID}, "limit": 100}, &events)
+	requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID}, "limit": 100}, &events)
 	if events.NextCursor != "" || header.Run.EventCount != len(events.Events) {
 		t.Fatalf("public run/event readers disagree on exact event count: header=%+v events=%+v", header.Run, events)
 	}
@@ -387,15 +387,15 @@ func a2RequireJoinPublicClients(t *testing.T, rt servedControlProofRuntime, diag
 	var cliHeader struct {
 		Run operatorread.RunHeader `json:"run"`
 	}
-	if err := json.Unmarshal([]byte(a2JoinPublicCLI(t, rt, "run", "status", runID, "--no-diagnose", "--json")), &cliHeader); err != nil {
+	if err := json.Unmarshal([]byte(a2JoinPublicCLI(t, endpoint, "run", "status", runID, "--no-diagnose", "--json")), &cliHeader); err != nil {
 		t.Fatal(err)
 	}
 	var cliDiagnosis a2JoinPublicDiagnosis
-	if err := json.Unmarshal([]byte(a2JoinPublicCLI(t, rt, "run", "status", runID, "--json")), &cliDiagnosis); err != nil {
+	if err := json.Unmarshal([]byte(a2JoinPublicCLI(t, endpoint, "run", "status", runID, "--json")), &cliDiagnosis); err != nil {
 		t.Fatal(err)
 	}
 	var cliEntity operatorread.OperatorEntityFull
-	if err := canonicaljson.DecodePreservingNumberLexemes([]byte(a2JoinPublicCLI(t, rt, "entity", "view", entity.Entity.EntityID, "--run-id", runID, "--json")), &cliEntity); err != nil {
+	if err := canonicaljson.DecodePreservingNumberLexemes([]byte(a2JoinPublicCLI(t, endpoint, "entity", "view", entity.Entity.EntityID, "--run-id", runID, "--json")), &cliEntity); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(cliHeader, header) || !reflect.DeepEqual(cliDiagnosis, diagnosis) || !reflect.DeepEqual(cliEntity, entity) {
@@ -403,9 +403,9 @@ func a2RequireJoinPublicClients(t *testing.T, rt servedControlProofRuntime, diag
 	}
 }
 
-func a2JoinPublicCLI(t *testing.T, rt servedControlProofRuntime, args ...string) string {
+func a2JoinPublicCLI(t *testing.T, endpoint string, args ...string) string {
 	t.Helper()
-	stdout, stderr, code := runServedCLICommand(t, rt.Endpoint, args)
+	stdout, stderr, code := runServedCLICommand(t, endpoint, args)
 	if code != 0 || strings.TrimSpace(stderr) != "" {
 		t.Fatalf("supported CLI %v: exit=%d stderr=%s stdout=%s", args, code, stderr, stdout)
 	}
@@ -442,13 +442,13 @@ func a2RequireJoinPublicFailureAgreement(t *testing.T, diagnosis a2JoinPublicDia
 	}
 }
 
-func a2RequireJoinPublicTrace(t *testing.T, rt servedControlProofRuntime, runID string, event operatorread.OperatorEventFull) {
+func a2RequireJoinPublicTrace(t *testing.T, endpoint string, runID string, event operatorread.OperatorEventFull) {
 	t.Helper()
 	var page struct {
 		Trace      []operatorread.RunDebugTraceRow `json:"trace"`
 		NextCursor string                          `json:"next_cursor"`
 	}
-	requireServedJSONRPCResult(t, rt.Endpoint, "run.trace", map[string]any{"run_id": runID, "limit": 100}, &page)
+	requireServedJSONRPCResult(t, endpoint, "run.trace", map[string]any{"run_id": runID, "limit": 100}, &page)
 	var rows []operatorread.RunDebugTraceRow
 	for _, row := range page.Trace {
 		if row.EventID == event.EventID && row.DeliveryID == event.Deliveries[0].DeliveryID {

@@ -21,7 +21,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -76,7 +75,11 @@ func Test2376VerifyServeArtifactParityBothStores(t *testing.T) {
 				t.Fatalf("serve did not present admitted source: %v\n%s", err, process.outputString())
 			}
 			var blob []byte
-			if err := rt.DB.QueryRow("SELECT source_blob FROM source_artifacts WHERE bundle_hash=$1", verified.Hash).Scan(&blob); err != nil {
+			if err := func() error {
+				var err error
+				blob, err = readServedPersistedSourceBlob(context.Background(), selected.SourceArtifactStore(), verified.Hash)
+				return err
+			}(); err != nil {
 				t.Fatal(err)
 			}
 			stored, err := sourceartifact.DecodeLogical(blob)
@@ -87,6 +90,19 @@ func Test2376VerifyServeArtifactParityBothStores(t *testing.T) {
 	}
 }
 
+func countServedPhysicalSourceArtifacts(t testing.TB, reader servedEventCountReader) int {
+	t.Helper()
+	var count int
+	if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.CountPhysicalSourceArtifactsStorage(ctx, reader)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
 func Test2376RootManifestRejectsBeforePublicationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, condition := range []string{"incompatible", "malformed range", "unknown path", "oversized name", "oversized version", "oversized platform_version"} {
@@ -94,11 +110,8 @@ func Test2376RootManifestRejectsBeforePublicationBothStores(t *testing.T) {
 				root := canonicalrouting.CopyLifecycleForkSource(t, true)
 				opts, start := lifecycleRestartHarness(t, backend, root)
 				process, selected := start()
-				before := lifecycleAdmissionDomainCounts(t, selected.DB)
-				var sourcesBefore int
-				if err := selected.DB.QueryRow("SELECT COUNT(*) FROM source_artifacts").Scan(&sourcesBefore); err != nil {
-					t.Fatal(err)
-				}
+				before := lifecycleAdmissionDomainCounts(t, selected.ReceiverStateReader)
+				sourcesBefore := countServedPhysicalSourceArtifacts(t, selected.ReceiverStateReader)
 				if code := process.stop(); code != 0 {
 					t.Fatalf("stop=%d", code)
 				}
@@ -171,15 +184,10 @@ func Test2376RootManifestRejectsBeforePublicationBothStores(t *testing.T) {
 				}
 				var sourcesAfter int
 				if backend == "sqlite" {
-					reader, err := store.NewSQLiteRuntimeStore(cfg.Config.Store.SQLite.Path)
-					if err != nil {
-						t.Fatal(err)
-					}
+					reader := openServedStandingInspection(t, "sqlite", cfg.Config.Store.SQLite.Path)
 					defer reader.Close()
-					after = lifecycleAdmissionDomainCounts(t, storetest.DatabaseForTest(reader))
-					if err := storetest.DatabaseForTest(reader).QueryRow("SELECT COUNT(*) FROM source_artifacts").Scan(&sourcesAfter); err != nil {
-						t.Fatal(err)
-					}
+					after = lifecycleAdmissionDomainCounts(t, reader)
+					sourcesAfter = countServedPhysicalSourceArtifacts(t, reader)
 				} else {
 					// The harness factory opens an independent selected owner for each epoch.
 					owner, err := buildStoresForServe(context.Background(), storebackend.Selection{Backend: storebackend.BackendPostgres}, cfg.Config)
@@ -187,11 +195,9 @@ func Test2376RootManifestRejectsBeforePublicationBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					defer owner.CloseUnactivated()
-					db, _, _ := selectedRuntimeStoreForTest(t, projectRuntimePersistenceForServe(owner))
-					after = lifecycleAdmissionDomainCounts(t, db)
-					if err := db.QueryRow("SELECT COUNT(*) FROM source_artifacts").Scan(&sourcesAfter); err != nil {
-						t.Fatal(err)
-					}
+					reader := requireReceiverProofStateReader(t, projectRuntimePersistenceForServe(owner).deps.EventStore)
+					after = lifecycleAdmissionDomainCounts(t, reader)
+					sourcesAfter = countServedPhysicalSourceArtifacts(t, reader)
 				}
 				if sourcesBefore != sourcesAfter || !reflect.DeepEqual(before, after) {
 					t.Fatalf("rejection mutated domain: sources=%d/%d before=%v after=%v", sourcesBefore, sourcesAfter, before, after)
@@ -292,7 +298,7 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 				if err := selectedA.DB.QueryRow("SELECT bundle_hash FROM runs WHERE run_id=$1", seed.RunID).Scan(&exact); err != nil || exact != hashA {
 					t.Fatalf("new-work source=%s want=%s: %v", exact, hashA, err)
 				}
-				requireServedEventPublishEntityState(t, selectedA.DB, backend, seed.RunID, "", "review")
+				requireServedEventPublishEntityState(t, selectedA.ReceiverStateReader, backend, seed.RunID, "", "review")
 				waitServedRunDeliveryQuiescence(t, selectedA.ReadRunDeliveries, seed.RunID)
 				if name == "pin" {
 					if err := selectedA.DB.QueryRow("SELECT event_id FROM events WHERE run_id=$1 AND event_name='work.requested' ORDER BY created_at,event_id LIMIT 1", seed.RunID).Scan(&seed.EventID); err != nil {
@@ -328,7 +334,7 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 					} else {
 						args = append(args, "--pin", "work.requested@v1", "--pin", "work.requested@"+string(imported.Candidate.VersionID))
 					}
-					before := lifecycleAdmissionDomainCounts(t, servedB.DB)
+					before := lifecycleAdmissionDomainCounts(t, servedB.ReceiverStateReader)
 					var beforeRun map[string]any
 					requireServedJSONRPCResult(t, servedB.Endpoint, "run.get", map[string]any{"run_id": p.runID}, &beforeRun)
 					out, errOut, code := runServedCLICommand(t, servedB.Endpoint, args)
@@ -337,7 +343,7 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 					}
 					var afterRun map[string]any
 					requireServedJSONRPCResult(t, servedB.Endpoint, "run.get", map[string]any{"run_id": p.runID}, &afterRun)
-					if !reflect.DeepEqual(beforeRun, afterRun) || !reflect.DeepEqual(before, lifecycleAdmissionDomainCounts(t, servedB.DB)) {
+					if !reflect.DeepEqual(beforeRun, afterRun) || !reflect.DeepEqual(before, lifecycleAdmissionDomainCounts(t, servedB.ReceiverStateReader)) {
 						t.Fatal("rejected source/pin mutated durable source or run")
 					}
 				})
@@ -380,10 +386,10 @@ func Test2376ForkSourceAndPinsFollowSourceRunBothStores(t *testing.T) {
 					if err := servedB.DB.QueryRow("SELECT COUNT(*) FROM author_activity_occurrences WHERE run_id=$1 AND scope_kind='bundle' AND bundle_hash=$2", fork.ForkRunID, want).Scan(&targetActivity); err != nil || targetActivity == 0 {
 						t.Fatalf("child has no exact activity source evidence: %d %v", targetActivity, err)
 					}
-					beforeRepeat := lifecycleAdmissionDomainCounts(t, servedB.DB)
+					beforeRepeat := lifecycleAdmissionDomainCounts(t, servedB.ReceiverStateReader)
 					repeated, repeatErr, repeatCode := runServedCLICommand(t, servedB.Endpoint, args)
 					var same apiv1.RunForkExecutionResult
-					if repeatCode != 0 || json.Unmarshal([]byte(repeated), &same) != nil || same.ForkRunID != fork.ForkRunID || !reflect.DeepEqual(beforeRepeat, lifecycleAdmissionDomainCounts(t, servedB.DB)) {
+					if repeatCode != 0 || json.Unmarshal([]byte(repeated), &same) != nil || same.ForkRunID != fork.ForkRunID || !reflect.DeepEqual(beforeRepeat, lifecycleAdmissionDomainCounts(t, servedB.ReceiverStateReader)) {
 						t.Fatalf("public exact repeat changed child effects: %d %s / %s", repeatCode, repeated, repeatErr)
 					}
 					if name == "pin" && (len(fork.DataPins) != 1 || fork.DataPins[0].VersionID != imported.Candidate.VersionID) {

@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,7 +23,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -47,7 +45,7 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 				}
 			}
 			childGate := newNestedChildHandlerGateCount(t, "account.task.requested", 2)
-			rt, db := b17MixedNestedRuntime(t, backend, source, probe, childGate)
+			rt := b17MixedNestedRuntime(t, backend, source, probe, childGate)
 			t.Cleanup(releaseReturn)
 			t.Cleanup(func() {
 				if t.Failed() {
@@ -97,7 +95,9 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 			deadline := time.Now().Add(5 * time.Second)
 			var status string
 			for time.Now().Before(deadline) {
-				if err := db.QueryRowContext(ctx, `SELECT status FROM fan_out_obligation_barriers WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`, held.Key.RunID, held.Key.TriggeringDeliveryID, held.Key.ElementRef.FlowPath, held.Key.ElementRef.Family, held.Key.ElementRef.SemanticPath).Scan(&status); err != nil {
+				var err error
+				status, err = storetest.ReadNestedFanOutBarrierStatus(ctx, rt.selected, held.Key)
+				if err != nil {
 					t.Fatal(err)
 				}
 				if status == "fired" {
@@ -105,7 +105,7 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 				}
 				time.Sleep(10 * time.Millisecond)
 			}
-			assertNestedExactBarrier(t, ctx, db, held.Key, "fired", fanoutbarrier.Summary{Total: 2, Succeeded: 2})
+			assertNestedExactBarrier(t, ctx, rt.selected, held.Key, "fired", fanoutbarrier.Summary{Total: 2, Succeeded: 2})
 			for _, parent := range parents {
 				view := assertNestedDeliveredEvent(t, ctx, reader, parent.ID, 2)
 				kinds := map[string]int{}
@@ -115,9 +115,9 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 				if kinds["node"] != 1 || kinds["agent"] != 1 {
 					t.Fatalf("parent lacks exact real mixed recipients: %+v", view.Deliveries)
 				}
-				b17RequirePipelineReceipt(t, ctx, db, parent.ID, 1)
+				b17RequirePipelineReceipt(t, ctx, rt.selected, parent.ID, 1)
 			}
-			b17RequirePipelineReceipt(t, ctx, db, signal.EventID, 1)
+			b17RequirePipelineReceipt(t, ctx, rt.selected, signal.EventID, 1)
 			child, err := reader.LoadOperatorEvent(ctx, signal.EventID)
 			if err != nil || len(child.Deliveries) != 1 || child.Deliveries[0].Terminal || child.NoDelivery != nil {
 				t.Fatalf("held real grandchild was prematurely settled: %+v err=%v", child, err)
@@ -147,18 +147,19 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 			if counts.Active != 0 || counts.PeakActive != 1 || counts.Started != before.Started+3 || counts.Returned != counts.Started || counts.Carriers != 0 {
 				t.Fatalf("nested mixed execution escaped the sole serving permit: %+v", counts)
 			}
-			var intents, owed int
-			if err := db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(cardinality-cursor),0) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&intents, &owed); err != nil {
+			backlog, err := storetest.ReadNestedRunFanOutOwed(ctx, rt.selected, runID)
+			if err != nil {
 				t.Fatal(err)
 			}
+			intents, owed := backlog.Intents, backlog.Owed
 			if intents != 4 || owed != 0 {
 				t.Fatalf("nested issuance did not finish while real handlers remain held: intents=%d owed=%d", intents, owed)
 			}
-			var nextTask string
-			if err := db.QueryRowContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND source_event_id=(SELECT source_event_id FROM events WHERE event_id=$2) AND event_name=(SELECT event_name FROM events WHERE event_id=$2) AND event_id<>$2`, runID, signal.EventID).Scan(&nextTask); err != nil {
+			nextTask, err := storetest.ReadNestedSiblingSourceEventID(ctx, rt.selected, runID, signal.EventID)
+			if err != nil {
 				t.Fatal(err)
 			}
-			boundary := &b17NestedBoundary{db: db, predecessor: signal.EventID, current: nextTask, observed: make(chan error, 1)}
+			boundary := &b17NestedBoundary{selected: rt.selected, predecessor: signal.EventID, current: nextTask, observed: make(chan error, 1)}
 			rt.bus.SetInterceptors(boundary, rt.pipeline)
 			childGate.open()
 			select {
@@ -201,11 +202,11 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 				if receipt.LoadedAt.Before(parentReturned) || receipt.Publications != 2 || receipt.Key == held.Key {
 					t.Fatalf("recursive serving permit or incorrect child range: %+v", receipt)
 				}
-				assertNestedExactBarrier(t, ctx, db, receipt.Key, "fired", fanoutbarrier.Summary{Total: 2, Succeeded: 2})
+				assertNestedExactBarrier(t, ctx, rt.selected, receipt.Key, "fired", fanoutbarrier.Summary{Total: 2, Succeeded: 2})
 				view := assertNestedDeliveredEvent(t, ctx, reader, parent.ID, 2)
 				flow := view.Deliveries[0].Target.FlowInstance
 				name := eventidentity.ExternalizeForFlow(flow, []string{"account.notification.completed"}, "account.notification.completed")
-				ids := nestedEventIDs(t, ctx, db, runID, name, parent.ID)
+				ids := nestedEventIDs(t, ctx, rt.selected, runID, name, parent.ID)
 				if len(ids) != 1 {
 					t.Fatalf("exact agent nested effect %s for %s: %v", name, parent.ID, ids)
 				}
@@ -214,7 +215,7 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 					t.Fatalf("nested agent effect did not settle: %+v err=%v", effect, err)
 				}
 				taskName := eventidentity.ExternalizeForFlow(flow, []string{"account.task.requested"}, "account.task.requested")
-				tasks := nestedEventIDs(t, ctx, db, runID, taskName, parent.ID)
+				tasks := nestedEventIDs(t, ctx, rt.selected, runID, taskName, parent.ID)
 				if len(tasks) != 2 {
 					t.Fatalf("exact child range for %s: %v", parent.ID, tasks)
 				}
@@ -227,7 +228,7 @@ func TestB17MixedNestedDependencyCapacityOneBothStores(t *testing.T) {
 					}
 					seen[value] = true
 					name := eventidentity.ExternalizeForFlow(task.Deliveries[0].Target.FlowInstance, []string{"account.task.completed"}, "account.task.completed")
-					effects := nestedEventIDs(t, ctx, db, runID, name, id)
+					effects := nestedEventIDs(t, ctx, rt.selected, runID, name, id)
 					if len(effects) != 1 {
 						t.Fatalf("task %s effects=%v", id, effects)
 					}
@@ -255,24 +256,19 @@ func (p b17MockServingExecutor) ServeFanOutCandidate(ctx context.Context, owner 
 	return p.nestedServingProbe.ServeFanOutCandidate(effects.WithExecutionMode(ctx, effects.ExecutionModeMock), owner, key)
 }
 
-func b17MixedNestedRuntime(t *testing.T, backend string, source semanticview.Source, probe *nestedServingProbe, child *nestedChildHandlerGate) (notifyAllChildrenRuntime, *sql.DB) {
+func b17MixedNestedRuntime(t *testing.T, backend string, source semanticview.Source, probe *nestedServingProbe, child *nestedChildHandlerGate) notifyAllChildrenRuntime {
 	t.Helper()
 	var selected notifyAllChildrenStore
-	var db *sql.DB
 	switch backend {
 	case "postgres":
-		var cleanup func()
-		_, db, cleanup = testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		selected = storetest.AdmitPostgresRuntimeStore(t, db)
+		selected = storetest.StartPostgresRuntimeStore(t)
 	case "sqlite":
 		selected = storetest.StartSQLiteRuntimeStore(t)
-		db = storetest.DatabaseForTest(selected)
 	default:
 		t.Fatalf("unsupported B17 backend %q", backend)
 	}
 	workers := 1
-	rt := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{
+	rt := newNotifyAllChildrenRuntime(t, selected, source, time.Now, notifyAllChildrenRuntimeOptions{
 		realMockAgents: true, enableGenericSchedules: true, fanOutWorkers: &workers,
 		nestedPublications: &probe.publications,
 		fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
@@ -283,11 +279,11 @@ func b17MixedNestedRuntime(t *testing.T, backend string, source semanticview.Sou
 	t.Cleanup(probe.releaseHeld)
 	rt.pipeline.SetTestLifecycleProbe(child)
 	t.Cleanup(child.open)
-	return rt, db
+	return rt
 }
 
 type b17NestedBoundary struct {
-	db                   *sql.DB
+	selected             notifyAllChildrenStore
 	predecessor, current string
 	observed             chan error
 	calls                atomic.Int32
@@ -301,15 +297,16 @@ func (p *b17NestedBoundary) Intercept(ctx context.Context, event events.Event) (
 		return false, nil, pipelineobligation.Continue(), fmt.Errorf("duplicate exact nested node dispatch")
 	}
 	var prior, current, handoffs, currentHandoffs int
-	err := p.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline' AND outcome='success'`, p.predecessor).Scan(&prior)
+	var err error
+	prior, err = storetest.CountNestedSuccessfulPipelineReceipt(ctx, p.selected, p.predecessor)
 	if err == nil {
-		err = p.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, p.current).Scan(&current)
+		current, err = storetest.CountPipelineEventReceiptStorage(ctx, p.selected, p.current)
 	}
 	if err == nil {
-		err = p.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND continuation_handoff_at IS NOT NULL`, p.predecessor).Scan(&handoffs)
+		handoffs, err = storetest.CountNestedContinuationHandoffs(ctx, p.selected, p.predecessor)
 	}
 	if err == nil {
-		err = p.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND continuation_handoff_at IS NOT NULL`, p.current).Scan(&currentHandoffs)
+		currentHandoffs, err = storetest.CountNestedContinuationHandoffs(ctx, p.selected, p.current)
 	}
 	if err == nil && (prior != 1 || current != 1 || handoffs != 1 || currentHandoffs != 1) {
 		err = fmt.Errorf("nested boundary: predecessor receipt=%d handoff=%d, current receipt=%d handoff=%d", prior, handoffs, current, currentHandoffs)
@@ -322,10 +319,10 @@ func (p *b17NestedBoundary) Intercept(ctx context.Context, event events.Event) (
 	return true, nil, pipelineobligation.Continue(), err
 }
 
-func b17RequirePipelineReceipt(t *testing.T, ctx context.Context, db *sql.DB, eventID string, want int) {
+func b17RequirePipelineReceipt(t *testing.T, ctx context.Context, selected notifyAllChildrenStore, eventID string, want int) {
 	t.Helper()
-	var count int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, eventID).Scan(&count); err != nil || count != want {
+	count, err := storetest.CountPipelineEventReceiptStorage(ctx, selected, eventID)
+	if err != nil || count != want {
 		t.Fatalf("exact pipeline receipt %s count=%d want=%d err=%v", eventID, count, want, err)
 	}
 }

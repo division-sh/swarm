@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,8 +11,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
@@ -46,17 +45,13 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 			bundleHash := servedEventPublishFixtureBundleHash(t, h.opts.SourceRoot)
 			h.start(t)
 			defer h.stop(t)
-			connected := runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider,
-				"connect", "bot-token", 1001, "private", 0)
+			connected := runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider, "connect", "bot-token", 1001, "private", 0)
 			if connected.Readiness == nil || !connected.Readiness.Ready {
 				t.Fatalf("public connection is not ready: %#v", connected)
 			}
-			db, err := sql.Open(backendName, h.storeDSN)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
-			cardMessageID := waitChannelCardMessageID(t, db, backendName, "telegram-ingress")
+			intentIdentity := captureChannelIntentIdentity(t, h)
+			intentReader := openChannelAnchorObservation(t, h)
+			cardMessageID := waitChannelCardMessageID(t, channelAnchorStorageObservation(t, h), backendName, "telegram-ingress")
 			card := h.provider.Delivery(cardMessageID - 1)
 			if fmt.Sprint(card["chat_id"]) != "1001" {
 				t.Fatalf("operator card escaped operator conversation: %v", card)
@@ -71,13 +66,7 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 			send := func(updateID, chatID int64, text string) {
 				t.Helper()
 				callbackURL, signing, _ := h.provider.Registration()
-				names := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
-					"update_id": updateID,
-					"message": map[string]any{
-						"message_id": updateID, "from": map[string]any{"id": chatID},
-						"chat": map[string]any{"id": chatID, "type": "private"}, "text": text,
-					},
-				})
+				names := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{"update_id": updateID, "message": map[string]any{"message_id": updateID, "from": map[string]any{"id": chatID}, "chat": map[string]any{"id": chatID, "type": "private"}, "text": text}})
 				if !slices.Contains(names, "inbound.telegram.text_message") {
 					t.Fatalf("customer text was not publicly admitted: %v", names)
 				}
@@ -94,23 +83,13 @@ func TestChannelOneBotManyConversationsPublicJourney(t *testing.T) {
 			before := loadStandingMemorySessions(t, backendName, h.storeDSN)
 			requireReceptionistMemory(t, before, 2)
 			requireReceptionistReplies(t, h, expectedDestinations)
-			for index, foreign := range []struct{ user, chat int64 }{
-				{2001, 1001}, {7000, 2001}, {2002, 2002},
-			} {
+			for index, foreign := range []struct{ user, chat int64 }{{2001, 1001}, {7000, 2001}, {2002, 2002}} {
 				callbackURL, signing, _ := h.provider.Registration()
 				providerID := fmt.Sprintf("receptionist-foreign-%d", index)
-				if names := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{
-					"update_id": 83200 + index,
-					"callback_query": map[string]any{
-						"id": providerID, "from": map[string]any{"id": foreign.user},
-						"message": map[string]any{"message_id": cardMessageID,
-							"chat": map[string]any{"id": foreign.chat, "type": "private"}},
-						"data": token,
-					},
-				}); len(names) != 0 {
+				if names := postChannelTelegramUpdate(t, callbackURL, signing, map[string]any{"update_id": 83200 + index, "callback_query": map[string]any{"id": providerID, "from": map[string]any{"id": foreign.user}, "message": map[string]any{"message_id": cardMessageID, "chat": map[string]any{"id": foreign.chat, "type": "private"}}, "data": token}}); len(names) != 0 {
 					t.Fatalf("customer callback became business authority: %v", names)
 				}
-				waitReceptionistActionRejection(t, h, fmt.Sprint(83200+index))
+				waitObjectChannelDisposition(t, intentReader, objectIntentQuery(intentIdentity, channeldelivery.IntentAction, fmt.Sprint(83200+index)), "rejected")
 			}
 			if after := receptionistPendingMailbox(t, h); !reflect.DeepEqual(beforeMailbox, after) {
 				t.Fatalf("customer callbacks mutated operator inbox: before=%v after=%v", beforeMailbox, after)
@@ -190,35 +169,6 @@ func receptionistPendingMailbox(t *testing.T, h *channelOnboardingE2EHarness) []
 		t.Fatal("operator inbox has no pending card")
 	}
 	return result.Items
-}
-
-func waitReceptionistActionRejection(t *testing.T, h *channelOnboardingE2EHarness, providerID string) {
-	t.Helper()
-	driver, placeholder := "sqlite", "?"
-	if h.backend == servedparity.BackendExplicitPostgres {
-		driver, placeholder = "postgres", "$1"
-	}
-	db, err := sql.Open(driver, h.storeDSN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		var state, disposition string
-		err := db.QueryRow("SELECT state, COALESCE(disposition, '') FROM operator_channel_action_intents WHERE provider_event_id="+placeholder, providerID).Scan(&state, &disposition)
-		if err != nil && err != sql.ErrNoRows {
-			t.Fatal(err)
-		}
-		if err == nil && state == "settled" {
-			if disposition != "rejected" {
-				t.Fatalf("foreign action disposition=%q", disposition)
-			}
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatal("foreign customer action did not reach durable rejection")
 }
 
 type receptionistAnthropicDouble struct {

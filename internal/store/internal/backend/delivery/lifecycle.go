@@ -21,12 +21,109 @@ import (
 	runstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
+	"github.com/google/uuid"
 )
+
+func SetPublicationMaterializationFailureTx(ctx context.Context, tx *sql.Tx, postgres bool, id uuid.UUID, template string, enabled bool) error {
+	name := "publication_materialization_" + strings.ReplaceAll(id.String(), "-", "")
+	statements := []string{"DROP TRIGGER IF EXISTS " + name}
+	if postgres {
+		statements = []string{"DROP TRIGGER IF EXISTS " + name + " ON event_deliveries", "DROP FUNCTION IF EXISTS " + name + "()"}
+	}
+	if enabled {
+		template = strings.ReplaceAll(template, "'", "''")
+		statements = []string{fmt.Sprintf(`CREATE TRIGGER %s BEFORE INSERT ON event_deliveries BEGIN
+SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM events WHERE event_id=NEW.event_id AND run_id=NEW.run_id)
+THEN RAISE(ABORT,'materialization fault prerequisite: exact publication event absent') END;
+SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM flow_instances fi
+JOIN workflow_instance_initial_materializations m ON m.run_id=fi.run_id AND m.instance_path=fi.instance_path AND m.entity_id=fi.entity_id
+JOIN flow_instance_runtime_readiness r ON r.run_id=fi.run_id AND r.instance_path=fi.instance_path
+WHERE fi.run_id=NEW.run_id AND fi.flow_template='%s'
+AND json_extract(m.projection,'$.creating_input.event_id')=NEW.event_id
+AND (fi.entity_type IS NULL OR EXISTS (SELECT 1 FROM entity_state es
+WHERE es.run_id=fi.run_id AND es.flow_instance=fi.instance_path AND es.entity_id=fi.entity_id AND es.entity_type=fi.entity_type)))
+THEN RAISE(ABORT,'materialization fault prerequisite: exact lifecycle absent') END;
+SELECT RAISE(ABORT,'injected delivery route persistence failure'); END`, name, template)}
+		if postgres {
+			statements = []string{fmt.Sprintf(`CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+IF NOT EXISTS (SELECT 1 FROM events WHERE event_id=NEW.event_id AND run_id=NEW.run_id) THEN
+RAISE EXCEPTION 'materialization fault prerequisite: exact publication event absent'; END IF;
+IF NOT EXISTS (SELECT 1 FROM flow_instances fi
+JOIN workflow_instance_initial_materializations m ON m.run_id=fi.run_id AND m.instance_path=fi.instance_path AND m.entity_id=fi.entity_id
+JOIN flow_instance_runtime_readiness r ON r.run_id=fi.run_id AND r.instance_path=fi.instance_path
+WHERE fi.run_id=NEW.run_id AND fi.flow_template='%s'
+AND m.projection->'creating_input'->>'event_id'=NEW.event_id::text
+AND (fi.entity_type IS NULL OR EXISTS (SELECT 1 FROM entity_state es
+WHERE es.run_id=fi.run_id AND es.flow_instance=fi.instance_path AND es.entity_id=fi.entity_id AND es.entity_type=fi.entity_type))) THEN
+RAISE EXCEPTION 'materialization fault prerequisite: exact lifecycle absent'; END IF;
+RAISE EXCEPTION 'injected delivery route persistence failure'; END $$`, name, template),
+				fmt.Sprintf(`CREATE TRIGGER %s BEFORE INSERT ON event_deliveries FOR EACH ROW EXECUTE FUNCTION %s()`, name, name)}
+		}
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 var (
 	postgresDeliveryAdapter = mustDeliveryAdapter(DialectPostgres)
 	sqliteDeliveryAdapter   = mustDeliveryAdapter(DialectSQLite)
 )
+
+func SettleOperatorSnapshotDeliveryTx(ctx context.Context, tx *sql.Tx, deliveryID string, renamed bool) error {
+	query := `UPDATE event_deliveries SET status='delivered',next_eligible_at=NULL,settled_at=$1,updated_at=$1 WHERE delivery_id=$2 AND status='pending'`
+	if renamed {
+		query = strings.Replace(query, "UPDATE event_deliveries ", "UPDATE event_deliveries_snapshot_source ", 1)
+	}
+	result, err := tx.ExecContext(ctx, query, time.Now().UTC(), deliveryID)
+	return requireOperatorSnapshotDeliveryRow(result, err)
+}
+
+func CorruptOperatorSnapshotDeliveryRouteTx(ctx context.Context, tx *sql.Tx, deliveryID string, postgres bool) error {
+	value := "$1"
+	if postgres {
+		value += "::jsonb"
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET delivery_target_route=`+value+` WHERE delivery_id=$2`, `{}`, deliveryID)
+	return requireOperatorSnapshotDeliveryRow(result, err)
+}
+
+func requireOperatorSnapshotDeliveryRow(result sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return fmt.Errorf("operator snapshot delivery mutation changed%d rows, want1", n)
+	}
+	return nil
+}
+
+func HoldOperatorDeliverySnapshotTx(ctx context.Context, tx *sql.Tx, postgres bool, id int64) error {
+	if postgres {
+		_, err := tx.ExecContext(ctx, `LOCK TABLE event_deliveries IN ACCESS EXCLUSIVE MODE`)
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE event_deliveries RENAME TO event_deliveries_snapshot_source`); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, fmt.Sprintf(`CREATE VIEW event_deliveries AS SELECT * FROM event_deliveries_snapshot_source WHERE agent_snapshot_barrier(%d)=1`, id))
+	return err
+}
+
+func RestoreOperatorDeliverySnapshotTx(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `DROP VIEW event_deliveries`); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `ALTER TABLE event_deliveries_snapshot_source RENAME TO event_deliveries`)
+	return err
+}
 
 func SetPreparedTargetConflictTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, originalIdentity, subscriberID, corruptIdentity, corruptTarget string) (int64, error) {
 	if tx == nil {

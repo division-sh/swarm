@@ -20,31 +20,29 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, canonicalrouting.CopyLifecycleEmitter(t, canonicalrouting.LifecycleLoopRepeatEmits))
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "replay-seed"})
-			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, "waiting")
+			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, seed.RunID, "waiting")
 			params := func(event, key string, payload map[string]any) map[string]any {
 				return map[string]any{"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": key}
 			}
 			started := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.start", "start", map[string]any{"seed": true}))
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "drafting")
 			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), started.EventID, "waiting", "drafting")
-			first := readLifecycleLoop(t, rt, seed.RunID, entityID)
+			first := readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID)
 			admit := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", "admit-1", map[string]any{"revision_id": first.RevisionID}))
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "review")
 			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), admit.EventID, "drafting", "review")
 			repeated := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.repeat", "repeat-1", map[string]any{"revision_id": first.RevisionID}))
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "drafting")
 			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), repeated.EventID, "review", "drafting")
-			requireLifecycleFlowEntity(t, rt, seed.RunID, "ordinary/", "observed")
+			requireLifecycleFlowEntity(t, rt.ReceiverStateReader, seed.RunID, "ordinary/", "observed")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
-			// The public replay endpoint requires agent delivery history. Do not
-			// manufacture that history for this real node-only execution.
+			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			replay := requireServedJSONRPCError(t, rt.Endpoint, "event.replay", map[string]any{"event_id": repeated.EventID, "idempotency_key": "repeat-replay"})
 			if replay.Data["code"] != "EVENT_REPLAY_NO_DELIVERY_HISTORY" {
 				t.Fatalf("node-only replay=%#v", replay)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 				t.Fatal("refused node-only replay mutated the next attempt")
 			}
 			var replayFailures int
@@ -54,9 +52,9 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 			if replayFailures != 1 {
 				t.Fatalf("accepted ordinary repeat node deliveries=%d", replayFailures)
 			}
-			current := readLifecycleLoop(t, rt, seed.RunID, entityID)
+			current := readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID)
 			admit = requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", "admit-2", map[string]any{"revision_id": current.RevisionID}))
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "review")
 			requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), admit.EventID, "drafting", "review")
 			var replies [2]servedJSONRPCEnvelope
 			start := make(chan struct{})
@@ -89,7 +87,7 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 				accepted[result.EventID] = true
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			closed := readLifecycleLoop(t, rt, seed.RunID, entityID)
+			closed := readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID)
 			if closed.Status != loopruntime.StatusClosed || closed.Attempt != 2 || closed.RevisionID != current.RevisionID {
 				t.Fatalf("race loop=%#v", closed)
 			}
@@ -111,17 +109,17 @@ func TestServedCompiledLoopTransitionReplayOnBothStores(t *testing.T) {
 				if history[0].To != "escaped" || compiled.Edge().Source != "loop.escape" {
 					t.Fatal("escape winner lost exact cause")
 				}
-				requireLifecycleFlowEntity(t, rt, seed.RunID, "sink/", "done")
+				requireLifecycleFlowEntity(t, rt.ReceiverStateReader, seed.RunID, "sink/", "done")
 			} else {
 				if history[0].To != "done" || string(compiled.Edge().LoopOperation) != "close" {
 					t.Fatalf("close winner lost exact cause=%#v", compiled)
 				}
 			}
-			requireLifecycleEventCount(t, rt, seed.RunID, "ordinary.repeated", 1)
-			requireLifecycleEventCount(t, rt, seed.RunID, "loop.escaped", escapeCount)
-			settled := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "ordinary.repeated", 1)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "loop.escaped", escapeCount)
+			settled := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.repeat", "repeat-1", map[string]any{"revision_id": first.RevisionID}))
-			if duplicate.EventID != repeated.EventID || lifecycleStoredSnapshot(t, rt, seed.RunID) != settled {
+			if duplicate.EventID != repeated.EventID || lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != settled {
 				t.Fatal("closed replay reminted work or changed evidence")
 			}
 			t.Logf("cap/close winner=%s accepted_public_contenders=%d", closed.CloseReason, len(accepted))

@@ -36,6 +36,14 @@ type DeliveryAttemptDiagnosticRow = private.DeliveryAttemptDiagnosticRow
 
 type EventDeliveryDiagnosticRow = private.EventDeliveryDiagnosticRow
 
+func CountGlobalDeliveredNodeRowsStorage(ctx context.Context, selected any, nodeID string) (int, error) {
+	return private.CountGlobalDeliveredNodeRowsStorageForTest(ctx, selected, nodeID)
+}
+
+func ReadCanonicalRoutingSQLiteDiagnostic(ctx context.Context, selected any) (string, error) {
+	return private.ReadCanonicalRoutingSQLiteDiagnosticForTest(ctx, selected)
+}
+
 type NodeDeliveryDiagnosticStorage = private.NodeDeliveryDiagnosticStorage
 
 func ReadNodeDeliveryTargetEncoding(ctx context.Context, selected any, eventID, nodeID string) (string, error) {
@@ -70,10 +78,42 @@ func ReadServedIncompletePipelineHandoffCount(ctx context.Context, selected any,
 	return private.ReadServedIncompletePipelineHandoffCountForTest(ctx, selected, runID)
 }
 
+func CountRunDeadLetterDeliveries(ctx context.Context, selected any, runID string) (int, error) {
+	return private.CountRunDeadLetterDeliveriesForTest(ctx, selected, runID)
+}
+
+func ReadMailboxCompletionRunEffects(ctx context.Context, selected any, runID string) ([]string, error) {
+	return private.ReadMailboxCompletionRunEffectsForTest(ctx, selected, runID)
+}
+
 func ReadServedDeliveryStatusCount(ctx context.Context, selected any, eventID, subscriberType, subscriberID string, statuses ...string) (int, error) {
 	return private.ReadServedDeliveryStatusCountForTest(ctx, selected, eventID, subscriberType, subscriberID, statuses...)
 }
 
 func ReadServedRunDebugSummary(ctx context.Context, selected any, runID string) (string, error) {
 	return private.ReadServedRunDebugSummaryForTest(ctx, selected, runID)
+}
+
+func ReadServedRuntimeLogDebugSummary(ctx context.Context, selected any, runID string) (string, error) {
+	return private.ReadServedRuntimeLogDebugSummaryForTest(ctx, selected, runID)
+}
+
+func CountExactRunNodeEventDeliveryStorage(ctx context.Context, selected any, runID, eventID, nodeID string) (int, error) {
+	return private.CountExactRunNodeEventDeliveryStorageForTest(ctx, selected, runID, eventID, nodeID)
+}
+
+func CountCurrentEventDeliveryOutcomeStorage(ctx context.Context, selected any, eventID, subscriberType, subscriberID, outcome string) (int, error) {
+	return private.CountCurrentEventDeliveryOutcomeStorageForTest(ctx, selected, eventID, subscriberType, subscriberID, outcome)
+}
+
+func CountSubscriberEventReceiptOutcomeStorage(ctx context.Context, selected any, eventID, subscriberType, subscriberID, outcome string) (int, error) {
+	return private.CountSubscriberEventReceiptOutcomeStorageForTest(ctx, selected, eventID, subscriberType, subscriberID, outcome)
+}
+
+func CountExactRunEventReplayScopeStorage(ctx context.Context, selected any, runID, eventID, scope string) (int, error) {
+	return private.CountExactRunEventReplayScopeStorageForTest(ctx, selected, runID, eventID, scope)
+}
+
+func CountEventSubscriberReceiptStorage(ctx context.Context, selected any, eventID string, subscribers []string) (int, error) {
+	return private.CountEventSubscriberReceiptStorageForTest(ctx, selected, eventID, subscribers)
 }

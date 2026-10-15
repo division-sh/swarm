@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestRetainedRootForkOriginalArtifactPreserved(t *testing.T) {
@@ -47,15 +49,15 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			if gate {
 				stage = "review"
 			}
-			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, stage)
+			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, seed.RunID, stage)
 			var parentCard map[string]any
 			if gate {
-				parentCard = lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+				parentCard = lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, "approve")
 			} else {
 				loopStart := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "loop.start", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "fork-loop-start"})
 				origins = append(origins, loopStart.EventID)
 				stage = "drafting"
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, stage)
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, stage)
 			}
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "fork-pause"})
@@ -63,7 +65,7 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			frontierPayload := map[string]any{"seed": true}
 			if !gate {
 				frontierEvent = "loop.admit"
-				frontierPayload = map[string]any{"revision_id": readLifecycleLoop(t, rt, seed.RunID, entityID).RevisionID}
+				frontierPayload = map[string]any{"revision_id": readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID).RevisionID}
 			}
 			frontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": frontierEvent, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": frontierPayload, "idempotency_key": "fork-frontier"})
 			waitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, frontier.EventID)
@@ -71,12 +73,11 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			if err := waitExactOriginPublications(t.Context(), publication, origins...); err != nil {
 				t.Fatal(err)
 			}
-			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "lifecycle-fork"}
 			var fork, duplicate apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
-
 			if fork.ForkRunID == "" || fork.ForkRunID == seed.RunID || fork.ExecutedEventCount != 1 || !reflect.DeepEqual(fork, duplicate) {
 				t.Fatalf("fork=%#v duplicate=%#v", fork, duplicate)
 			}
@@ -86,12 +87,12 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			} else {
 				requireLifecycleRootLoopForkRevision(t, rt, seed.RunID, entityID, frontier.EventID, fork.ForkRunID)
 			}
-			childBefore := lifecycleStoredSnapshot(t, rt, fork.ForkRunID)
+			childBefore := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, fork.ForkRunID)
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &duplicate)
-			if !reflect.DeepEqual(fork, duplicate) || lifecycleStoredSnapshot(t, rt, fork.ForkRunID) != childBefore {
+			if !reflect.DeepEqual(fork, duplicate) || lifecycleStoredSnapshot(t, rt.ReceiverStateReader, fork.ForkRunID) != childBefore {
 				t.Fatal("fork retry changed response or child state/history")
 			}
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 				t.Fatal("fork mutated parent business state/history")
 			}
 		})
@@ -100,8 +101,8 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 
 func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProofRuntime, parentRun string, parentParams map[string]any, runID string) {
 	t.Helper()
-	entity := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, "", "review")
-	childParams := lifecycleGateDecisionParams(t, rt, runID, "approve")
+	entity := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, runID, "", "review")
+	childParams := lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, runID, "approve")
 	readCard := func(id any) map[string]any {
 		var detail struct {
 			Card map[string]any `json:"decision_card"`
@@ -130,12 +131,9 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 	if !ok || parentEntity == "" {
 		t.Fatal("parent gate has no exact entity anchor")
 	}
-	parentGate := readLifecycleTemplateGate(t, rt, parentRun, parentEntity, ".")
-	childGate := readLifecycleTemplateGate(t, rt, runID, entity, ".")
-	if childGate.ActivationID != ca["stage_activation_id"] || childGate.CardID != child["card_id"] ||
-		childGate.RoutesJSON != parentGate.RoutesJSON || childGate.BundleHash != parentGate.BundleHash ||
-		childGate.DecisionID != parentGate.DecisionID || childGate.Stage != parentGate.Stage ||
-		childGate.Status != parentGate.Status || !childGate.OpenedAt.Equal(parentGate.OpenedAt) {
+	parentGate := readLifecycleTemplateGate(t, rt.ReceiverStateReader, parentRun, parentEntity, ".")
+	childGate := readLifecycleTemplateGate(t, rt.ReceiverStateReader, runID, entity, ".")
+	if childGate.ActivationID != ca["stage_activation_id"] || childGate.CardID != child["card_id"] || childGate.RoutesJSON != parentGate.RoutesJSON || childGate.BundleHash != parentGate.BundleHash || childGate.DecisionID != parentGate.DecisionID || childGate.Stage != parentGate.Stage || childGate.Status != parentGate.Status || !childGate.OpenedAt.Equal(parentGate.OpenedAt) {
 		t.Fatalf("fork changed frozen gate authority: parent=%#v child=%#v", parentGate, childGate)
 	}
 	for _, key := range []string{"flow_id", "stage"} {
@@ -143,8 +141,7 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 			t.Fatalf("fork changed declaration %s: %#v", key, ca)
 		}
 	}
-	if ca["entity_id"] != entity || ca["stage_activation_id"] == "" || ca["stage_activation_id"] == pa["stage_activation_id"] ||
-		ca["flow_instance"] != runID || ca["flow_instance_id"] != runID {
+	if ca["entity_id"] != entity || ca["stage_activation_id"] == "" || ca["stage_activation_id"] == pa["stage_activation_id"] || ca["flow_instance"] != runID || ca["flow_instance_id"] != runID {
 		t.Fatalf("fork-local anchor not exact: parent=%#v child=%#v", pa, ca)
 	}
 	source, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: entity})
@@ -166,8 +163,6 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 	if err := rt.DB.QueryRow(`SELECT binding_id FROM run_fork_selected_contract_bindings WHERE fork_run_id=$1`, runID).Scan(&bindingID); err != nil {
 		t.Fatal(err)
 	}
-	// Await legitimate completion maintenance before attributing a snapshot delta
-	// to refusal. No application table or completion-candidate column is excluded.
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for {
 		var settled bool
@@ -182,16 +177,14 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	before := snapshotForkReceiverApplication(t, rt)
+	before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 	for attempt := 0; attempt < 2; attempt++ {
 		refusal := requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", childParams)
 		details, ok := refusal.Data["details"].(map[string]any)
-		if refusal.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" || refusal.Data["retryable"] != false || !ok ||
-			details["operation"] != "mailbox.decide" || details["run_id"] != runID || details["binding_id"] != bindingID ||
-			details["required_capability"] != "selected_fork_deferred_execution" {
+		if refusal.Data["code"] != "SELECTED_FORK_CONTROL_UNSUPPORTED" || refusal.Data["retryable"] != false || !ok || details["operation"] != "mailbox.decide" || details["run_id"] != runID || details["binding_id"] != bindingID || details["required_capability"] != "selected_fork_deferred_execution" {
 			t.Fatalf("wrong selected refusal: %+v", refusal)
 		}
-		after := snapshotForkReceiverApplication(t, rt)
+		after := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 		if !reflect.DeepEqual(before, after) {
 			for table, rows := range before {
 				if !reflect.DeepEqual(rows, after[table]) {
@@ -204,22 +197,19 @@ func requireLifecycleFrozenGateControlRefusal(t *testing.T, rt servedControlProo
 	if !reflect.DeepEqual(parent, readCard(parentParams["card_id"])) || !reflect.DeepEqual(child, readCard(childParams["card_id"])) {
 		t.Fatal("refusal changed either frozen card")
 	}
-	requireLifecycleEventCount(t, rt, runID, "work.completed", 0)
-	requireLifecycleEventCount(t, rt, parentRun, "work.completed", 0)
+	requireLifecycleEventCount(t, rt.ReceiverStateReader, runID, "work.completed", 0)
+	requireLifecycleEventCount(t, rt.ReceiverStateReader, parentRun, "work.completed", 0)
 }
 
 func requireLifecycleRootLoopForkRevision(t *testing.T, rt servedControlProofRuntime, parentRun, parentEntity, frontierID, runID string) {
 	t.Helper()
-	entity := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, "", "review")
-	parent := readLifecycleStoredLoop(t, rt, parentRun, parentEntity)
-	child := readLifecycleStoredLoop(t, rt, runID, entity)
-	if child.ActivationID == parent.ActivationID || child.RevisionID == parent.RevisionID ||
-		child.Attempt != parent.Attempt || child.MaxAttempts != parent.MaxAttempts ||
-		parent.CurrentStage != "drafting" || child.CurrentStage != "review" || child.Status != parent.Status ||
-		child.CloseReason != parent.CloseReason || child.LoopID != parent.LoopID || child.RevisionField != parent.RevisionField {
+	entity := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, runID, "", "review")
+	parent := readLifecycleStoredLoop(t, rt.ReceiverStateReader, parentRun, parentEntity)
+	child := readLifecycleStoredLoop(t, rt.ReceiverStateReader, runID, entity)
+	if child.ActivationID == parent.ActivationID || child.RevisionID == parent.RevisionID || child.Attempt != parent.Attempt || child.MaxAttempts != parent.MaxAttempts || parent.CurrentStage != "drafting" || child.CurrentStage != "review" || child.Status != parent.Status || child.CloseReason != parent.CloseReason || child.LoopID != parent.LoopID || child.RevisionField != parent.RevisionField {
 		t.Fatalf("fork loop identity/business facts: parent=%#v child=%#v", parent, child)
 	}
-	public := readLifecycleLoop(t, rt, runID, entity)
+	public := readLifecycleLoop(t, rt.Endpoint, runID, entity)
 	if public.RevisionID != child.RevisionID || public.Status != loopruntime.StatusOpen {
 		t.Fatalf("child public loop=%#v", public)
 	}
@@ -237,12 +227,11 @@ func requireLifecycleRootLoopForkRevision(t *testing.T, rt servedControlProofRun
 	if err := json.Unmarshal([]byte(copied), &childPayload); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(sourcePayload, map[string]any{"revision_id": parent.RevisionID}) ||
-		!reflect.DeepEqual(childPayload, map[string]any{"revision_id": child.RevisionID}) {
+	if !reflect.DeepEqual(sourcePayload, map[string]any{"revision_id": parent.RevisionID}) || !reflect.DeepEqual(childPayload, map[string]any{"revision_id": child.RevisionID}) {
 		t.Fatalf("root-declared revision did not project: source=%#v child=%#v", sourcePayload, childPayload)
 	}
 	for run, event := range map[string]string{parentRun: frontierID, runID: childEvent} {
-		source := readForkReceiverProducerEvidence(t, rt, run, event).Source
+		source := readForkReceiverProducerEvidence(t, rt.Runtime.Bus.Store(), run, event).Source
 		if source.Kind() != events.RoutingSourceRoot {
 			t.Fatalf("root input source changed: %#v", source)
 		}
@@ -255,14 +244,20 @@ func requireLifecycleRootLoopForkRevision(t *testing.T, rt servedControlProofRun
 		t.Fatalf("projected root input delivery = %s, want delivered", status)
 	}
 	for _, event := range []string{"loop.close", "work.completed"} {
-		requireLifecycleEventCount(t, rt, runID, event, 0)
+		requireLifecycleEventCount(t, rt.ReceiverStateReader, runID, event, 0)
 	}
 }
 
-func readLifecycleStoredLoop(t *testing.T, rt servedControlProofRuntime, runID, entityID string) loopruntime.Activation {
+func readLifecycleStoredLoop(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID, entityID string) loopruntime.Activation {
 	t.Helper()
 	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(accumulator AS TEXT) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, entityID).Scan(&raw); err != nil {
+	if err := func() error {
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (string, error) {
+			return storetest.ReadEntityAccumulatorTextStorage(ctx, selectedProofReceiverStateReader, runID, entityID)
+		})
+		raw = observed
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
 	var bucket map[string]map[string]any

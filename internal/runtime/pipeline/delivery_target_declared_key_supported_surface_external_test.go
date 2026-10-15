@@ -165,7 +165,7 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 						materialize(instances[1])
 					}
 					if keyRelation == "conflict" {
-						if _, err := selected.db.ExecContext(ctx, `UPDATE entity_state SET entity_type=$1 WHERE run_id=$2 AND entity_id=$3`, "wrong_entity_type", runID, exactEntityID); err != nil {
+						if _, err := storetest.SetWorkflowProjectionConflictingEntityType(ctx, selected.events, runID, exactEntityID); err != nil {
 							t.Fatal(err)
 						}
 					}

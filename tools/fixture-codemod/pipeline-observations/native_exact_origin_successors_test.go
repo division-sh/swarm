@@ -132,6 +132,9 @@ func TestExactOriginPublicationSuccessorsPreserveReviewedCuts(t *testing.T) {
 				t.Fatal("originating-publication row changed historical migration identity")
 			}
 			actual := selectedCausalObservationBody(t, selected.File, selected.Function)
+			currentRow := *selected
+			prior, actual := requireCatchUp2542MasterPair(t, currentRow, actual)
+			selected = &prior
 			got, err := canonicalFunction(actual)
 			want, wantErr := canonicalFunction(selected.Successor)
 			if err != nil || wantErr != nil || got != want {
@@ -216,7 +219,7 @@ func TestExactOriginPublicationSuccessorsPreserveReviewedCuts(t *testing.T) {
 			if !target.priorSuccessor && (err != nil || predecessor != canonical) {
 				t.Fatal("historical After changed")
 			}
-			if files, changes, err := prepareFiles("../../..", []recipe{*selected}); err != nil || len(files) != 0 || len(changes) != 0 {
+			if files, changes, err := prepareFiles("../../..", []recipe{currentRow}); err != nil || len(files) != 0 || len(changes) != 0 {
 				t.Fatalf("current publication successor is not inert: %v", err)
 			}
 		})
@@ -312,6 +315,11 @@ func exactOriginOrderingMutants(t *testing.T, source string) map[string]string {
 
 func reviewedMilestoneRow(t *testing.T, row recipe) recipe {
 	t.Helper()
+	actual := selectedCausalObservationBody(t, row.File, row.Function)
+	row, _, err := catchUp2542PriorMasterPair(row, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, target := range exactOriginSuccessors {
 		if target.name != row.Function || !target.priorSuccessor {
 			continue

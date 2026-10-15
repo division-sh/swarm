@@ -3,7 +3,6 @@ package conformance
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,11 +24,7 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -38,7 +33,6 @@ type deliveryLifecycleConformanceBackend struct {
 	store    runtimedelivery.Store
 	restart  runtimedelivery.Store
 	selected any
-	db       *sql.DB
 	postgres bool
 }
 
@@ -403,7 +397,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil || busy.Disposition != runtimedelivery.ClaimBusy {
 					t.Fatalf("busy claim = %#v, err=%v", busy, err)
 				}
-				expireDeliveryClaimForConformance(t, ctx, backend, pendingID)
+				expireDeliveryClaimForConformance(t, ctx, backend, acquired.Claimed.Claim)
 				reclaimed, err := backend.restart.ClaimDelivery(ctx, pending.Authority, pendingEvent, pendingRoute)
 				if err != nil || reclaimed.Disposition != runtimedelivery.ClaimAcquired ||
 					reclaimed.Previous != runtimedelivery.ClaimReclaimable {
@@ -460,11 +454,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				corruptQuery := `UPDATE event_deliveries SET delivery_target_route='{"flow_id":7}'::jsonb WHERE delivery_id=$1::uuid`
-				if !backend.postgres {
-					corruptQuery = `UPDATE event_deliveries SET delivery_target_route='{"flow_id":7}' WHERE delivery_id=?`
-				}
-				if _, err := backend.db.ExecContext(ctx, corruptQuery, invalidID); err != nil {
+				if err := storetest.CorruptDeliveryConformanceRoute(ctx, backend.selected, invalidID); err != nil {
 					t.Fatalf("seed structurally invalid delivery: %v", err)
 				}
 				invalid, err := backend.store.ClaimDelivery(ctx, pending.Authority, invalidEvent, invalidRoute)
@@ -636,107 +626,9 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					if err != nil {
 						t.Fatalf("claim long-transaction lease route: %v", err)
 					}
-					adapter, err := deliveryfixture.NewAdapter(deliveryfixture.DialectPostgres)
-					if err != nil {
-						t.Fatal(err)
-					}
-					if err := eventfixture.RunMutation(ctx, backend.db, authoractivityfixture.DialectPostgres, func(txctx context.Context, attempt *eventfixture.Attempt) error {
-						var transactionStartedAt time.Time
-						if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-							if err := tx.QueryRowContext(txctx, `SELECT CURRENT_TIMESTAMP`).Scan(&transactionStartedAt); err != nil {
-								return fmt.Errorf("read PostgreSQL transaction timestamp: %w", err)
-							}
-							_, err := tx.ExecContext(txctx, `UPDATE event_delivery_attempts SET lease_expires_at=$1
-						 WHERE delivery_id=$2::uuid AND claim_version=$3 AND open_marker=TRUE`,
-								transactionStartedAt.Add(500*time.Millisecond),
-								longLeaseClaim.Claim.DeliveryID(),
-								longLeaseClaim.Claim.Version(),
-							)
-							if err != nil {
-								return fmt.Errorf("age long-transaction lease: %w", err)
-							}
-							return nil
-						}); err != nil {
-							return err
-						}
-						time.Sleep(1100 * time.Millisecond)
-						longClaimResult, err := adapter.ClaimExactResult(
-							txctx,
-							attempt,
-							longClaimSnapshot.Authority,
-							longEvent,
-							longClaimRoute,
-							runtimedelivery.DefaultLeaseTTL,
-						)
-						if err != nil {
-							return fmt.Errorf("claim in long PostgreSQL transaction: %w", err)
-						}
-						longClaimed, acquired := longClaimResult.Acquired()
-						if !acquired {
-							return fmt.Errorf("long-transaction claim = %#v, want acquired", longClaimResult)
-						}
-						longRetry, err := adapter.SettleFailure(txctx, attempt, longRetryClaim.Claim, runtimedelivery.Settlement{
-							Disposition: runtimedelivery.FailureRetry,
-							Failure:     testFailure("long_transaction_retry"),
-							RetryBase:   10 * time.Second, RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
-						})
-						if err != nil {
-							return fmt.Errorf("settle retry in long PostgreSQL transaction: %w", err)
-						}
-						var leaseObservation runtimedelivery.ContinuationObservation
-						var longPage runtimedelivery.ContinuationPage
-						if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-							var err error
-							leaseObservation, err = adapter.ObserveContinuationInTransaction(txctx, tx, longClaimSnapshot.Authority, longLeaseClaim.Claim.DeliveryID())
-							if err != nil {
-								return fmt.Errorf("observe aged lease in long PostgreSQL transaction: %w", err)
-							}
-							longPage, err = adapter.ScanContinuations(txctx, tx, longClaimSnapshot.Authority, runtimedelivery.ContinuationCursor{}, 10)
-							if err != nil {
-								return fmt.Errorf("scan long PostgreSQL transaction continuations: %w", err)
-							}
-							return nil
-						}); err != nil {
-							return err
-						}
-						if leaseObservation.Disposition != runtimedelivery.ClaimReclaimable {
-							return fmt.Errorf("aged lease observation = %s, want reclaimable after transaction-start time", leaseObservation.Disposition)
-						}
-						longDispositions := map[string]runtimedelivery.ClaimDisposition{}
-						longWakes := map[string]time.Duration{}
-						for _, item := range longPage.Items {
-							longDispositions[item.DeliveryID] = item.Disposition
-							if after, ok := item.Wake.After(); ok {
-								longWakes[item.DeliveryID] = after
-							}
-						}
-						if longDispositions[longClaimed.Snapshot.DeliveryID] != runtimedelivery.ClaimBusy ||
-							longWakes[longClaimed.Snapshot.DeliveryID] <= 0 {
-							return fmt.Errorf("fresh long-transaction claim scan = %s/%s, want busy with opaque wake", longDispositions[longClaimed.Snapshot.DeliveryID], longWakes[longClaimed.Snapshot.DeliveryID])
-						}
-						if longDispositions[longRetry.DeliveryID] != runtimedelivery.ClaimDeferred ||
-							longWakes[longRetry.DeliveryID] <= 0 {
-							return fmt.Errorf("long-transaction retry scan = %s/%s, want deferred with opaque wake", longDispositions[longRetry.DeliveryID], longWakes[longRetry.DeliveryID])
-						}
-						if longDispositions[longLeaseClaim.Claim.DeliveryID()] != runtimedelivery.ClaimReclaimable {
-							return fmt.Errorf("long-transaction expired lease scan = %s, want reclaimable", longDispositions[longLeaseClaim.Claim.DeliveryID()])
-						}
-						for label, observed := range map[string]time.Time{
-							"claim": longClaimed.Snapshot.UpdatedAt,
-							"retry": longRetry.UpdatedAt,
-						} {
-							if elapsed := observed.Sub(transactionStartedAt); elapsed < 900*time.Millisecond {
-								return fmt.Errorf("%s database clock advanced %s across long transaction; want clock_timestamp semantics", label, elapsed)
-							}
-							if observed.Nanosecond()%1000 != 0 || observed.Location() != time.UTC {
-								return fmt.Errorf("%s database clock = %s (%s), want UTC microseconds", label, observed, observed.Location())
-							}
-						}
-						if delay := longRetry.NextEligibleAt.Sub(longRetry.UpdatedAt); delay != 10*time.Second {
-							return fmt.Errorf("long-transaction retry delay = %s, want exact 10s from current database time", delay)
-						}
-						return nil
-					}).Err(); err != nil {
+					if err := storetest.ProveDeliveryConformanceClock(ctx, backend.selected, storetest.DeliveryConformanceClockInput{
+						Event: longEvent, Snapshot: longClaimSnapshot, ClaimRoute: longClaimRoute, RetryClaim: longRetryClaim, LeaseClaim: longLeaseClaim, Failure: testFailure("long_transaction_retry"),
+					}); err != nil {
 						t.Fatalf("commit long PostgreSQL delivery mutation: %v", err)
 					}
 				}
@@ -837,7 +729,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil {
 					t.Fatalf("claim delivery: %v", err)
 				}
-				agedAt := ageDeliveryClaimForConformance(t, ctx, backend, claimed.Snapshot.DeliveryID)
+				agedAt := ageDeliveryClaimForConformance(t, ctx, backend, claimed.Claim)
 				renewal, err := backend.store.RenewClaim(ctx, claimed.Claim)
 				if err != nil {
 					t.Fatalf("renew claim: %v", err)
@@ -858,7 +750,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					t.Fatalf("claim before renewed expiry = %#v, err=%v; want busy", beforeExpiry, err)
 				}
 
-				expireDeliveryClaimForConformance(t, ctx, backend, renewed.DeliveryID)
+				expireDeliveryClaimForConformance(t, ctx, backend, claimed.Claim)
 				if _, err := backend.store.RenewClaim(ctx, claimed.Claim); !errors.Is(err, runtimedelivery.ErrConflict) {
 					t.Fatalf("expired claim renewal = %v, want ErrConflict", err)
 				}
@@ -1012,7 +904,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil || beforeExpiry.Disposition != runtimedelivery.ClaimBusy {
 					t.Fatalf("pre-expiry reconstructed-store claim = %#v, err=%v; want busy", beforeExpiry, err)
 				}
-				expireDeliveryClaimForConformance(t, ctx, backend, winner.Snapshot.DeliveryID)
+				expireDeliveryClaimForConformance(t, ctx, backend, winner.Claim)
 				reclaimed, err := storetest.ClaimDelivery(ctx, backend.restart, event, route)
 				if err != nil {
 					t.Fatalf("post-expiry reconstructed-store reclaim: %v", err)
@@ -1060,7 +952,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil {
 					t.Fatalf("claim selector expiry candidate: %v", err)
 				}
-				expireDeliveryClaimForConformance(t, ctx, backend, claimed.Snapshot.DeliveryID)
+				expireDeliveryClaimForConformance(t, ctx, backend, claimed.Claim)
 				page, err := backend.restart.ScanDeliveryContinuations(
 					ctx,
 					claimed.Snapshot.Authority,
@@ -1144,33 +1036,15 @@ func acknowledgeDeliveryLifecyclePipelineEvent(
 
 func installDeliveryDeadLetterFault(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend) func() {
 	t.Helper()
-	if backend.postgres {
-		if _, err := backend.db.ExecContext(ctx, `CREATE OR REPLACE FUNCTION fail_delivery_dead_letter_insert() RETURNS trigger AS $$ BEGIN IF NEW.delivery_id IS NOT NULL THEN RAISE EXCEPTION 'forced delivery diagnostic failure'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql`); err != nil {
-			t.Fatalf("create delivery diagnostic fault function: %v", err)
-		}
-		if _, err := backend.db.ExecContext(ctx, `CREATE TRIGGER fail_delivery_dead_letter_insert BEFORE INSERT ON dead_letters FOR EACH ROW EXECUTE FUNCTION fail_delivery_dead_letter_insert()`); err != nil {
-			t.Fatalf("create delivery diagnostic fault trigger: %v", err)
-		}
-		cleanup := func() {
-			if _, err := backend.db.ExecContext(ctx, `DROP TRIGGER IF EXISTS fail_delivery_dead_letter_insert ON dead_letters`); err != nil {
-				t.Fatalf("drop delivery diagnostic fault trigger: %v", err)
-			}
-			if _, err := backend.db.ExecContext(ctx, `DROP FUNCTION IF EXISTS fail_delivery_dead_letter_insert()`); err != nil {
-				t.Fatalf("drop delivery diagnostic fault function: %v", err)
-			}
-		}
-		t.Cleanup(cleanup)
-		return cleanup
-	}
-	if _, err := backend.db.ExecContext(ctx, `CREATE TRIGGER fail_delivery_dead_letter_insert BEFORE INSERT ON dead_letters WHEN NEW.delivery_id IS NOT NULL BEGIN SELECT RAISE(ABORT, 'forced delivery diagnostic failure'); END`); err != nil {
-		t.Fatalf("create sqlite delivery diagnostic fault trigger: %v", err)
-	}
 	cleanup := func() {
-		if _, err := backend.db.ExecContext(ctx, `DROP TRIGGER IF EXISTS fail_delivery_dead_letter_insert`); err != nil {
-			t.Fatalf("drop sqlite delivery diagnostic fault trigger: %v", err)
+		if err := storetest.RemoveDeliveryDiagnosticFault(context.WithoutCancel(ctx), backend.selected); err != nil {
+			t.Errorf("drop delivery diagnostic fault trigger: %v", err)
 		}
 	}
 	t.Cleanup(cleanup)
+	if err := storetest.InstallDeliveryDiagnosticFault(ctx, backend.selected); err != nil {
+		t.Fatalf("create delivery diagnostic fault trigger: %v", err)
+	}
 	return cleanup
 }
 
@@ -1183,18 +1057,11 @@ func assertDeliverySettlementRolledBack(t *testing.T, ctx context.Context, backe
 	if snapshot.Status != runtimedelivery.StatusInProgress || snapshot.ClaimVersion != claimed.Claim.Version() {
 		t.Fatalf("faulted settlement snapshot = %#v, want original in-progress claim", snapshot)
 	}
-	query := `SELECT (SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=$1::uuid), (SELECT COUNT(*) FROM dead_letters WHERE delivery_id=$1::uuid), (SELECT COUNT(*) FROM author_activity_occurrences WHERE source_identity=$1::text AND transition IN ('dead_letter', 'terminalized'))`
-	if !backend.postgres {
-		query = `SELECT (SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id=?), (SELECT COUNT(*) FROM dead_letters WHERE delivery_id=?), (SELECT COUNT(*) FROM author_activity_occurrences WHERE source_identity=? AND transition IN ('dead_letter', 'terminalized'))`
-	}
-	args := []any{claimed.Snapshot.DeliveryID}
-	if !backend.postgres {
-		args = []any{claimed.Snapshot.DeliveryID, claimed.Snapshot.DeliveryID, claimed.Snapshot.DeliveryID}
-	}
-	var outcomes, diagnostics, transitions int
-	if err := backend.db.QueryRowContext(ctx, query, args...).Scan(&outcomes, &diagnostics, &transitions); err != nil {
+	stored, err := storetest.ReadDeliveryRollbackStorage(ctx, backend.selected, claimed.Snapshot.DeliveryID)
+	if err != nil {
 		t.Fatalf("read faulted settlement evidence: %v", err)
 	}
+	outcomes, diagnostics, transitions := stored.Outcomes, stored.Diagnostics, stored.Transitions
 	if outcomes != 0 || diagnostics != 0 || transitions != 0 {
 		t.Fatalf("faulted settlement evidence outcomes=%d diagnostics=%d transitions=%d, want all zero", outcomes, diagnostics, transitions)
 	}
@@ -1202,17 +1069,13 @@ func assertDeliverySettlementRolledBack(t *testing.T, ctx context.Context, backe
 
 func assertExactDeliveryDeadLetter(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, event events.Event, settled runtimedelivery.Snapshot) {
 	t.Helper()
-	query := `SELECT delivery_id::text, claim_version, original_event, original_payload, failure, retry_count, chain_depth, handler_node FROM dead_letters WHERE delivery_id=$1::uuid AND claim_version=$2`
-	if !backend.postgres {
-		query = `SELECT delivery_id, claim_version, original_event, original_payload, failure, retry_count, chain_depth, handler_node FROM dead_letters WHERE delivery_id=? AND claim_version=?`
-	}
-	var deliveryID, eventType, handler string
-	var claimVersion int64
-	var payload, failureRaw []byte
-	var retryCount, chainDepth int
-	if err := backend.db.QueryRowContext(ctx, query, settled.DeliveryID, settled.ClaimVersion).Scan(&deliveryID, &claimVersion, &eventType, &payload, &failureRaw, &retryCount, &chainDepth, &handler); err != nil {
+	stored, err := storetest.ReadExactDeliveryDeadLetterStorage(ctx, backend.selected, settled.DeliveryID, settled.ClaimVersion)
+	if err != nil {
 		t.Fatalf("read exact terminal delivery diagnostic: %v", err)
 	}
+	deliveryID, eventType, handler := stored.DeliveryID, stored.EventType, stored.Handler
+	claimVersion, payload, failureRaw := stored.ClaimVersion, stored.Payload, stored.Failure
+	retryCount, chainDepth := stored.RetryCount, stored.ChainDepth
 	deadLetterFailure, err := runtimefailures.UnmarshalEnvelope(failureRaw)
 	if err != nil {
 		t.Fatalf("decode exact terminal delivery failure: %v", err)
@@ -1228,21 +1091,16 @@ func assertExactDeliveryDeadLetter(t *testing.T, ctx context.Context, backend de
 		!reflect.DeepEqual(gotPayload, wantPayload) || settled.Failure == nil || !reflect.DeepEqual(deadLetterFailure, *settled.Failure) || retryCount != settled.RetryCount || chainDepth != event.ChainDepth() || handler != settled.SubscriberID {
 		t.Fatalf("terminal diagnostic = delivery:%s version:%d type:%s payload:%v retry:%d depth:%d handler:%s; want exact settled/event facts", deliveryID, claimVersion, eventType, gotPayload, retryCount, chainDepth, handler)
 	}
-	attemptQuery := `SELECT failure FROM event_delivery_attempts WHERE delivery_id=$1::uuid AND claim_version=$2`
-	activityQuery := `SELECT failure FROM author_activity_occurrences WHERE source_owner='event_deliveries' AND source_identity=$1 ORDER BY sequence DESC LIMIT 1`
-	if !backend.postgres {
-		attemptQuery = `SELECT failure FROM event_delivery_attempts WHERE delivery_id=? AND claim_version=?`
-		activityQuery = `SELECT failure FROM author_activity_occurrences WHERE source_owner='event_deliveries' AND source_identity=? ORDER BY sequence DESC LIMIT 1`
-	}
-	for owner, queryAndArgs := range map[string]struct {
-		query string
-		args  []any
-	}{
-		"attempt":         {query: attemptQuery, args: []any{settled.DeliveryID, settled.ClaimVersion}},
-		"author activity": {query: activityQuery, args: []any{settled.DeliveryID}},
+	for owner, read := range map[string]func() ([]byte, error){
+		"attempt": func() ([]byte, error) {
+			return storetest.ReadDeliveryAttemptFailureStorage(ctx, backend.selected, settled.DeliveryID, settled.ClaimVersion)
+		},
+		"author activity": func() ([]byte, error) {
+			return storetest.ReadLatestDeliveryActivityFailureStorage(ctx, backend.selected, settled.DeliveryID)
+		},
 	} {
-		var raw []byte
-		if err := backend.db.QueryRowContext(ctx, queryAndArgs.query, queryAndArgs.args...).Scan(&raw); err != nil {
+		raw, err := read()
+		if err != nil {
 			t.Fatalf("read exact terminal %s failure: %v", owner, err)
 		}
 		persisted, err := runtimefailures.UnmarshalEnvelope(raw)
@@ -1266,10 +1124,7 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 	if err := proof.Validate(); err != nil {
 		t.Fatalf("persisted handoff proof is incomplete: %v", err)
 	}
-	assertDeliverySQLRejected(t, backend, "event/run mismatch",
-		`UPDATE event_deliveries SET run_id = $1::uuid WHERE delivery_id = $2::uuid`,
-		`UPDATE event_deliveries SET run_id = ? WHERE delivery_id = ?`,
-		[]any{other.RunID(), proof.DeliveryID()})
+	assertDeliverySQLRejected(t, backend, storetest.DeliveryConstraintEventRunMismatch, storetest.DeliveryConstraintInput{OtherRunID: other.RunID(), DeliveryID: proof.DeliveryID()})
 
 	missingAttemptEvent := deliveryLifecycleEvent("schema-missing-attempt-" + backend.name)
 	missingAttemptRoute := deliveryLifecycleConformanceRoute(t, missingAttemptEvent.RunID(), "agent", "schema-agent-"+backend.name)
@@ -1279,10 +1134,7 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	assertDeliverySQLRejected(t, backend, "in-progress without open attempt",
-		`UPDATE event_deliveries SET status='in_progress', next_eligible_at=NULL, claim_version=1, current_attempt_version=1, current_attempt_open=TRUE, started_at=$1, updated_at=$1 WHERE delivery_id=$2::uuid`,
-		`UPDATE event_deliveries SET status='in_progress', next_eligible_at=NULL, claim_version=1, current_attempt_version=1, current_attempt_open=TRUE, started_at=?, updated_at=? WHERE delivery_id=?`,
-		[]any{now, missingAttempt.DeliveryID()})
+	assertDeliverySQLRejected(t, backend, storetest.DeliveryConstraintMissingOpenAttempt, storetest.DeliveryConstraintInput{At: now, DeliveryID: missingAttempt.DeliveryID()})
 
 	sessionEvent := deliveryLifecycleEvent("schema-session-" + backend.name)
 	sessionRoute := deliveryLifecycleConformanceRoute(t, sessionEvent.RunID(), "agent", "schema-agent-"+backend.name)
@@ -1291,28 +1143,19 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertDeliverySQLRejected(t, backend, "nonexistent exact agent session",
-		`UPDATE event_delivery_attempts SET active_session_id=$1::uuid, session_run_id=$2::uuid, session_agent_id=$3 WHERE delivery_id=$4::uuid AND claim_version=$5`,
-		`UPDATE event_delivery_attempts SET active_session_id=?, session_run_id=?, session_agent_id=? WHERE delivery_id=? AND claim_version=?`,
-		[]any{uuid.NewString(), sessionEvent.RunID(), sessionRoute.Recipient.ID(), claimed.Snapshot.DeliveryID, claimed.Claim.Version()})
+	assertDeliverySQLRejected(t, backend, storetest.DeliveryConstraintMissingSession, storetest.DeliveryConstraintInput{SessionID: uuid.NewString(), RunID: sessionEvent.RunID(), AgentID: sessionRoute.Recipient.ID(), DeliveryID: claimed.Snapshot.DeliveryID, Version: claimed.Claim.Version()})
 
 	otherSessionEvent := deliveryLifecycleEvent("schema-session-other-owner-" + backend.name)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, otherSessionEvent, nil, runtimepipelineobligation.ScopeDirect)
 	otherSessionID := uuid.NewString()
 	otherAgentID := "schema-other-agent-" + backend.name
 	seedDeliveryAgentSession(t, ctx, backend, otherSessionID, otherSessionEvent.RunID(), otherAgentID)
-	assertDeliverySQLRejected(t, backend, "session owned by another delivery run and agent",
-		`UPDATE event_delivery_attempts SET active_session_id=$1::uuid, session_delivery_id=$2::uuid, session_run_id=$3::uuid, session_subscriber_type='agent', session_agent_id=$4 WHERE delivery_id=$2::uuid AND claim_version=$5`,
-		`UPDATE event_delivery_attempts SET active_session_id=?1, session_delivery_id=?2, session_run_id=?3, session_subscriber_type='agent', session_agent_id=?4 WHERE delivery_id=?2 AND claim_version=?5`,
-		[]any{otherSessionID, claimed.Snapshot.DeliveryID, otherSessionEvent.RunID(), otherAgentID, claimed.Claim.Version()})
+	assertDeliverySQLRejected(t, backend, storetest.DeliveryConstraintForeignSession, storetest.DeliveryConstraintInput{SessionID: otherSessionID, DeliveryID: claimed.Snapshot.DeliveryID, RunID: otherSessionEvent.RunID(), AgentID: otherAgentID, Version: claimed.Claim.Version()})
 	if _, err := backend.store.BindAgentSession(ctx, claimed.Claim, otherSessionID); !errors.Is(err, runtimedelivery.ErrConflict) {
 		t.Fatalf("bind session owned by another delivery error = %v, want ErrConflict", err)
 	}
 
-	assertDeliverySQLRejected(t, backend, "unreferenced second open attempt",
-		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker, closure_kind) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $1::uuid, TRUE, 'open')`,
-		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker, closure_kind) VALUES (?1, ?2, ?3, ?4, ?5, ?1, TRUE, 'open')`,
-		[]any{claimed.Snapshot.DeliveryID, claimed.Claim.Version() + 1, uuid.NewString(), now, now.Add(time.Minute)})
+	assertDeliverySQLRejected(t, backend, storetest.DeliveryConstraintSecondOpenAttempt, storetest.DeliveryConstraintInput{DeliveryID: claimed.Snapshot.DeliveryID, Version: claimed.Claim.Version() + 1, Token: uuid.NewString(), At: now, ExpiresAt: now.Add(time.Minute)})
 
 	terminatedEvent := deliveryLifecycleEvent("schema-terminated-session-" + backend.name)
 	terminatedRoute := deliveryLifecycleConformanceRoute(t, terminatedEvent.RunID(), "agent", "terminated-session-agent-"+backend.name)
@@ -1323,16 +1166,7 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 	}
 	terminatedSessionID := uuid.NewString()
 	seedDeliveryAgentSession(t, ctx, backend, terminatedSessionID, terminatedEvent.RunID(), terminatedRoute.Recipient.ID())
-	terminateSessionQuery := `UPDATE agent_sessions SET status='terminated', termination_reason='normal', terminated_at=$2, updated_at=$2 WHERE session_id=$1::uuid`
-	if !backend.postgres {
-		terminateSessionQuery = `UPDATE agent_sessions SET status='terminated', termination_reason='normal', terminated_at=?, updated_at=? WHERE session_id=?`
-	}
-	var terminateErr error
-	if backend.postgres {
-		_, terminateErr = backend.db.ExecContext(ctx, terminateSessionQuery, terminatedSessionID, now)
-	} else {
-		_, terminateErr = backend.db.ExecContext(ctx, terminateSessionQuery, now, now, terminatedSessionID)
-	}
+	terminateErr := storetest.TerminateDeliveryConformanceSession(ctx, backend.selected, terminatedSessionID, now)
 	if terminateErr != nil {
 		t.Fatalf("terminate exact delivery session: %v", terminateErr)
 	}
@@ -1347,34 +1181,13 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertDeliverySQLRejected(t, backend, "settled attempt without required evidence",
-		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, completed_at) VALUES ($1::uuid, 99, gen_random_uuid(), $2, $2 + INTERVAL '1 minute', FALSE, 'settled', 'delivered', $2)`,
-		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, completed_at) VALUES (?1, 99, lower(hex(randomblob(16))), ?2, datetime(?2, '+1 minute'), FALSE, 'settled', 'delivered', ?2)`,
-		[]any{outcomeProof.DeliveryID(), now})
-	assertDeliverySQLRejected(t, backend, "settled attempt without outcome",
-		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, duration_ms, completed_at) VALUES ($1::uuid, 99, gen_random_uuid(), $2, $2 + INTERVAL '1 minute', FALSE, 'settled', 0, $2)`,
-		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, duration_ms, completed_at) VALUES (?1, 99, lower(hex(randomblob(16))), ?2, datetime(?2, '+1 minute'), FALSE, 'settled', 0, ?2)`,
-		[]any{outcomeProof.DeliveryID(), now})
-	assertDeliverySQLRejected(t, backend, "settled attempt without completion time",
-		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, duration_ms) VALUES ($1::uuid, 99, gen_random_uuid(), $2, $2 + INTERVAL '1 minute', FALSE, 'settled', 'delivered', 0)`,
-		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, duration_ms) VALUES (?1, 99, lower(hex(randomblob(16))), ?2, datetime(?2, '+1 minute'), FALSE, 'settled', 'delivered', 0)`,
-		[]any{outcomeProof.DeliveryID(), now})
-	assertDeliverySQLRejected(t, backend, "expired attempt cannot carry settlement duration",
-		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, duration_ms, completed_at) VALUES ($1::uuid, 99, gen_random_uuid(), $2, $2 + INTERVAL '1 minute', FALSE, 'lease_expired', 'lease_expired', 0, $2)`,
-		`INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, duration_ms, completed_at) VALUES (?1, 99, lower(hex(randomblob(16))), ?2, datetime(?2, '+1 minute'), FALSE, 'lease_expired', 'lease_expired', 0, ?2)`,
-		[]any{outcomeProof.DeliveryID(), now})
-	assertDeliverySQLRejected(t, backend, "open attempt cannot own a linked dead letter",
-		`INSERT INTO dead_letters (dead_letter_id, original_event_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'settled', 'delivery.schema', '{}'::jsonb, '', '{"class":"lifecycle_conflict"}'::jsonb)`,
-		`INSERT INTO dead_letters (dead_letter_id, original_event_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES (?, ?, ?, ?, 'settled', 'delivery.schema', '{}', '', '{"class":"lifecycle_conflict"}')`,
-		[]any{uuid.NewString(), sessionEvent.ID(), claimed.Snapshot.DeliveryID, claimed.Claim.Version()})
-	assertDeliverySQLRejected(t, backend, "partial-null settlement reference cannot bypass the FK",
-		`INSERT INTO dead_letters (dead_letter_id, original_event_id, delivery_id, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES ($1::uuid, $2::uuid, $3::uuid, 'settled', 'delivery.schema', '{}'::jsonb, '', '{"class":"lifecycle_conflict"}'::jsonb)`,
-		`INSERT INTO dead_letters (dead_letter_id, original_event_id, delivery_id, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES (?, ?, ?, 'settled', 'delivery.schema', '{}', '', '{"class":"lifecycle_conflict"}')`,
-		[]any{uuid.NewString(), sessionEvent.ID(), claimed.Snapshot.DeliveryID})
-	assertDeliverySQLRejected(t, backend, "contradictory open settlement tag",
-		`UPDATE event_delivery_attempts SET closure_kind='settled' WHERE delivery_id=$1::uuid AND claim_version=$2`,
-		`UPDATE event_delivery_attempts SET closure_kind='settled' WHERE delivery_id=? AND claim_version=?`,
-		[]any{claimed.Snapshot.DeliveryID, claimed.Claim.Version()})
+	assertDeliverySQLRejected(t, backend, storetest.DeliveryConstraintMissingSettlementEvidence, storetest.DeliveryConstraintInput{DeliveryID: outcomeProof.DeliveryID(), At: now})
+	assertDeliverySQLRejected(t, backend, storetest.DeliveryConstraintMissingOutcome, storetest.DeliveryConstraintInput{DeliveryID: outcomeProof.DeliveryID(), At: now})
+	assertDeliverySQLRejected(t, backend, storetest.DeliveryConstraintMissingCompletionTime, storetest.DeliveryConstraintInput{DeliveryID: outcomeProof.DeliveryID(), At: now})
+	assertDeliverySQLRejected(t, backend, storetest.DeliveryConstraintExpiredDuration, storetest.DeliveryConstraintInput{DeliveryID: outcomeProof.DeliveryID(), At: now})
+	assertDeliverySQLRejected(t, backend, storetest.DeliveryConstraintOpenDeadLetter, storetest.DeliveryConstraintInput{RecordID: uuid.NewString(), EventID: sessionEvent.ID(), DeliveryID: claimed.Snapshot.DeliveryID, Version: claimed.Claim.Version()})
+	assertDeliverySQLRejected(t, backend, storetest.DeliveryConstraintPartialSettlementReference, storetest.DeliveryConstraintInput{RecordID: uuid.NewString(), EventID: sessionEvent.ID(), DeliveryID: claimed.Snapshot.DeliveryID})
+	assertDeliverySQLRejected(t, backend, storetest.DeliveryConstraintContradictoryClosure, storetest.DeliveryConstraintInput{DeliveryID: claimed.Snapshot.DeliveryID, Version: claimed.Claim.Version()})
 
 	deadLetterEvent := deliveryLifecycleEvent("schema-dead-letter-failure-" + backend.name)
 	deadLetterRoute := deliveryLifecycleConformanceRoute(t, deadLetterEvent.RunID(), "agent", "schema-agent-"+backend.name)
@@ -1383,22 +1196,17 @@ func assertDeliverySchemaRejectsDisconnectedFacts(t *testing.T, ctx context.Cont
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertDeliverySQLRejected(t, backend, "dead-letter without typed failure",
-		`UPDATE event_deliveries SET status='dead_letter', next_eligible_at=NULL, reason_code='raw_terminal', settled_at=created_at, updated_at=created_at WHERE delivery_id=$1::uuid`,
-		`UPDATE event_deliveries SET status='dead_letter', next_eligible_at=NULL, reason_code='raw_terminal', settled_at=created_at, updated_at=created_at WHERE delivery_id=?`,
-		[]any{deadLetterProof.DeliveryID()})
+	assertDeliverySQLRejected(t, backend, storetest.DeliveryConstraintMissingTypedFailure, storetest.DeliveryConstraintInput{DeliveryID: deadLetterProof.DeliveryID()})
 }
 
-func assertDeliverySQLRejected(t *testing.T, backend deliveryLifecycleConformanceBackend, name, postgresQuery, sqliteQuery string, args []any) {
+func assertDeliverySQLRejected(t *testing.T, backend deliveryLifecycleConformanceBackend, name storetest.DeliveryConstraintCase, input storetest.DeliveryConstraintInput) {
 	t.Helper()
-	query := postgresQuery
-	if !backend.postgres {
-		query = sqliteQuery
-		if name == "in-progress without open attempt" {
-			args = []any{args[0], args[0], args[1]}
-		}
+	input.Case = name
+	rejected, err := storetest.ProbeDeliveryConstraint(testAuthorActivityContext(context.Background()), backend.selected, input)
+	if err != nil {
+		t.Fatalf("%s constraint probe failed outside expected schema rejection: %v", name, err)
 	}
-	if _, err := backend.db.Exec(query, args...); err == nil {
+	if !rejected {
 		t.Fatalf("%s mutation succeeded; fresh schema must reject it", name)
 	}
 }
@@ -1502,119 +1310,42 @@ func assertRetryExhaustedFailure(t *testing.T, failure *runtimefailures.Envelope
 
 func makeDeliveryImmediatelyEligible(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string) {
 	t.Helper()
-	query := `UPDATE event_deliveries SET next_eligible_at = $1 WHERE delivery_id = $2::uuid AND status = 'failed'`
-	if !backend.postgres {
-		query = `UPDATE event_deliveries SET next_eligible_at = ? WHERE delivery_id = ? AND status = 'failed'`
-	}
-	result, err := backend.db.ExecContext(ctx, query, time.Now().Add(-time.Hour).UTC(), deliveryID)
-	if err != nil {
+	if err := storetest.MakeDeliveryRecoveryRetryEligible(ctx, backend.selected, deliveryID); err != nil {
 		t.Fatalf("make retry eligible: %v", err)
-	}
-	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
-		t.Fatalf("make retry eligible affected %d rows, err=%v", rows, err)
 	}
 }
 
-func ageDeliveryClaimForConformance(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string) time.Time {
+func ageDeliveryClaimForConformance(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, claim runtimedelivery.Claim) time.Time {
 	t.Helper()
 	agedAt := time.Now().Add(-15 * time.Minute).UTC()
-	transaction, err := backend.db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin aged-claim proof: %v", err)
-	}
-	defer func() { _ = transaction.Rollback() }()
-	deliveryQuery := `UPDATE event_deliveries SET created_at = $1, started_at = $1, updated_at = $1 WHERE delivery_id = $2::uuid AND status = 'in_progress'`
-	attemptQuery := `UPDATE event_delivery_attempts SET started_at = $1 WHERE delivery_id = $2::uuid AND open_marker = TRUE`
-	if !backend.postgres {
-		deliveryQuery = `UPDATE event_deliveries SET created_at = ?, started_at = ?, updated_at = ? WHERE delivery_id = ? AND status = 'in_progress'`
-		attemptQuery = `UPDATE event_delivery_attempts SET started_at = ? WHERE delivery_id = ? AND open_marker = TRUE`
-	}
-	var deliveryResult sql.Result
-	if backend.postgres {
-		deliveryResult, err = transaction.ExecContext(ctx, deliveryQuery, agedAt, deliveryID)
-	} else {
-		deliveryResult, err = transaction.ExecContext(ctx, deliveryQuery, agedAt, agedAt, agedAt, deliveryID)
-	}
-	if err != nil {
-		t.Fatalf("age delivery lifecycle timestamp: %v", err)
-	}
-	if rows, rowsErr := deliveryResult.RowsAffected(); rowsErr != nil || rows != 1 {
-		t.Fatalf("age delivery lifecycle affected %d rows, err=%v", rows, rowsErr)
-	}
-	if result, execErr := transaction.ExecContext(ctx, attemptQuery, agedAt, deliveryID); execErr != nil {
-		t.Fatalf("age delivery attempt: %v", execErr)
-	} else if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
-		t.Fatalf("age delivery attempt affected %d rows, err=%v", rows, rowsErr)
-	}
-	if err := transaction.Commit(); err != nil {
+	if err := storetest.AgeManagerClaimStartedAt(ctx, backend.selected, claim, agedAt); err != nil {
 		t.Fatalf("commit aged-claim proof: %v", err)
 	}
 	return agedAt
 }
 
-func expireDeliveryClaimForConformance(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string) {
+func expireDeliveryClaimForConformance(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, claim runtimedelivery.Claim) {
 	t.Helper()
-	startedAt := time.Now().Add(-2 * time.Hour).UTC()
-	expiresAt := time.Now().Add(-time.Hour).UTC()
-	transaction, err := backend.db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin claim-expiry proof: %v", err)
-	}
-	defer func() { _ = transaction.Rollback() }()
-	deliveryQuery := `UPDATE event_deliveries SET created_at = $1, started_at = $1, updated_at = $2 WHERE delivery_id = $3::uuid AND status = 'in_progress'`
-	attemptQuery := `UPDATE event_delivery_attempts SET started_at = $1, lease_expires_at = $2 WHERE delivery_id = $3::uuid AND open_marker = TRUE`
-	if !backend.postgres {
-		deliveryQuery = `UPDATE event_deliveries SET created_at = ?, started_at = ?, updated_at = ? WHERE delivery_id = ? AND status = 'in_progress'`
-		attemptQuery = `UPDATE event_delivery_attempts SET started_at = ?, lease_expires_at = ? WHERE delivery_id = ? AND open_marker = TRUE`
-	}
-	var deliveryResult sql.Result
-	if backend.postgres {
-		deliveryResult, err = transaction.ExecContext(ctx, deliveryQuery, startedAt, expiresAt, deliveryID)
-	} else {
-		deliveryResult, err = transaction.ExecContext(ctx, deliveryQuery, startedAt, startedAt, expiresAt, deliveryID)
-	}
-	if err != nil {
-		t.Fatalf("expire delivery claim: %v", err)
-	}
-	if rows, rowsErr := deliveryResult.RowsAffected(); rowsErr != nil || rows != 1 {
-		t.Fatalf("expire delivery claim affected %d rows, err=%v", rows, rowsErr)
-	}
-	if result, execErr := transaction.ExecContext(ctx, attemptQuery, startedAt, expiresAt, deliveryID); execErr != nil {
-		t.Fatalf("expire delivery attempt: %v", execErr)
-	} else if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
-		t.Fatalf("expire delivery attempt affected %d rows, err=%v", rows, rowsErr)
-	}
-	if err := transaction.Commit(); err != nil {
+	if err := storetest.ExpireExactDeliveryClaimFault(ctx, backend.selected, claim); err != nil {
 		t.Fatalf("commit claim-expiry proof: %v", err)
 	}
 }
 
 func assertDeliveryAttemptHistory(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string) {
 	t.Helper()
-	query := `SELECT claim_version, closure_kind, outcome FROM event_delivery_attempts WHERE delivery_id = $1::uuid ORDER BY claim_version`
-	if !backend.postgres {
-		query = `SELECT claim_version, closure_kind, outcome FROM event_delivery_attempts WHERE delivery_id = ? ORDER BY claim_version`
-	}
-	rows, err := backend.db.QueryContext(ctx, query, deliveryID)
+	rows, err := storetest.ReadDeliveryConformanceAttemptsStorage(ctx, backend.selected, deliveryID)
 	if err != nil {
 		t.Fatalf("load delivery attempt history: %v", err)
 	}
-	defer rows.Close()
 	type attempt struct {
 		version int64
 		closure string
 		outcome string
 	}
 	var attempts []attempt
-	for rows.Next() {
-		var current attempt
-		if err := rows.Scan(&current.version, &current.closure, &current.outcome); err != nil {
-			t.Fatalf("scan delivery attempt history: %v", err)
-		}
+	for _, row := range rows {
+		current := attempt{version: row.Version, closure: row.Closure, outcome: row.Outcome}
 		attempts = append(attempts, current)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read delivery attempt history: %v", err)
 	}
 	if len(attempts) != 2 || attempts[0] != (attempt{version: 1, closure: "lease_expired", outcome: "lease_expired"}) || attempts[1] != (attempt{version: 2, closure: "settled", outcome: "delivered"}) {
 		t.Fatalf("delivery attempt history = %#v", attempts)
@@ -1623,20 +1354,13 @@ func assertDeliveryAttemptHistory(t *testing.T, ctx context.Context, backend del
 	if err != nil || len(outcomes) != 1 || outcomes[0].ClaimVersion != 2 || outcomes[0].Outcome != "delivered" {
 		t.Fatalf("expired attempt appeared as settlement: outcomes=%#v err=%v", outcomes, err)
 	}
-	assertDeliverySQLRejected(t, backend, "expired attempt cannot own a linked dead letter",
-		`INSERT INTO dead_letters (dead_letter_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES ($1::uuid, $2::uuid, 1, 'settled', 'delivery.expired', '{}'::jsonb, '', '{"class":"lifecycle_conflict"}'::jsonb)`,
-		`INSERT INTO dead_letters (dead_letter_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES (?, ?, 1, 'settled', 'delivery.expired', '{}', '', '{"class":"lifecycle_conflict"}')`,
-		[]any{uuid.NewString(), deliveryID})
+	assertDeliverySQLRejected(t, backend, storetest.DeliveryConstraintExpiredDeadLetter, storetest.DeliveryConstraintInput{RecordID: uuid.NewString(), DeliveryID: deliveryID})
 }
 
 func assertDeliveryAttemptLeaseMatchesObligation(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string, version int64) {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id = a.delivery_id AND d.current_attempt_version = a.claim_version AND d.current_attempt_open = TRUE WHERE a.delivery_id = $1::uuid AND a.claim_version = $2 AND a.open_marker = TRUE`
-	if !backend.postgres {
-		query = `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id = a.delivery_id AND d.current_attempt_version = a.claim_version AND d.current_attempt_open = TRUE WHERE a.delivery_id = ? AND a.claim_version = ? AND a.open_marker = TRUE`
-	}
-	var matches int
-	if err := backend.db.QueryRowContext(ctx, query, deliveryID, version).Scan(&matches); err != nil {
+	matches, err := storetest.CountMatchingOpenDeliveryAttemptStorage(ctx, backend.selected, deliveryID, version)
+	if err != nil {
 		t.Fatalf("compare renewed delivery attempt lease: %v", err)
 	}
 	if matches != 1 {
@@ -1677,8 +1401,7 @@ func deliveryLifecycleEventWithPayload(label string, payload json.RawMessage) ev
 func seedDeliveryAgentSession(t *testing.T, ctx context.Context, backend deliveryLifecycleConformanceBackend, sessionID, runID, agentID string) {
 	t.Helper()
 	identity := agentidentitytest.RootRuntimeForRun(t, runID, agentID, "delivery-lifecycle-conformance")
-	fields, err := identity.StorageFields()
-	if err != nil {
+	if _, err := identity.StorageFields(); err != nil {
 		t.Fatalf("seed delivery agent identity: %v", err)
 	}
 	selected, ok := backend.selected.(storetest.AgentFixtureStore)
@@ -1692,24 +1415,7 @@ func seedDeliveryAgentSession(t *testing.T, ctx context.Context, backend deliver
 		},
 		Status: "active", HiredBy: "delivery-lifecycle-conformance", StartedAt: time.Now().UTC(),
 	})
-	sessionQuery := `
-			INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance
-		) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9)`
-	if !backend.postgres {
-		sessionQuery = `
-			INSERT INTO agent_sessions (
-				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
-				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	}
-	identityArgs := []any{
-		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-	}
-	sessionArgs := append([]any{sessionID, runID}, identityArgs...)
-	if _, err := backend.db.ExecContext(ctx, sessionQuery, sessionArgs...); err != nil {
+	if err := storetest.SeedReplayDeliverySession(ctx, backend.selected, sessionID, identity); err != nil {
 		t.Fatalf("seed delivery agent session: %v", err)
 	}
 }
@@ -1731,13 +1437,11 @@ func deliveryLifecycleAgentIntent(t testing.TB, agentID string) runtimeagentinte
 func deliveryLifecycleConformanceBackends(t *testing.T) []deliveryLifecycleConformanceBackend {
 	t.Helper()
 	sqlite, sqliteRestart := storetest.StartSQLiteRuntimeStorePair(t)
-	_, postgresDB, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	postgres := storetest.AdmitPostgresRuntimeStore(t, postgresDB)
-	postgresRestart := storetest.AdmitPostgresRuntimeStore(t, postgresDB)
+	postgres, reopenPostgres := storetest.StartPostgresRuntimeStoreWithReopen(t)
+	postgresRestart := reopenPostgres()
 	return []deliveryLifecycleConformanceBackend{
-		{name: "sqlite", store: sqlite, restart: sqliteRestart, selected: sqlite, db: storetest.DatabaseForTest(sqlite)},
-		{name: "postgres", store: postgres, restart: postgresRestart, selected: postgres, db: storetest.DatabaseForTest(postgres), postgres: true},
+		{name: "sqlite", store: sqlite, restart: sqliteRestart, selected: sqlite},
+		{name: "postgres", store: postgres, restart: postgresRestart, selected: postgres, postgres: true},
 	}
 }
 
@@ -1778,15 +1482,11 @@ func mustHandlerSelectionNoMatch(t testing.TB, context handlerselection.Context)
 
 func loadDeliveryHandlerRuleSelectionFact(t testing.TB, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string) handlerselection.HandlerRuleSelectionFact {
 	t.Helper()
-	query := `SELECT selection_context, disposition, COALESCE(flow_path, ''), COALESCE(declaration_family, ''), COALESCE(semantic_path, ''), display_label FROM event_delivery_handler_rule_selections WHERE delivery_id=$1::uuid`
-	if !backend.postgres {
-		query = `SELECT selection_context, disposition, COALESCE(flow_path, ''), COALESCE(declaration_family, ''), COALESCE(semantic_path, ''), display_label FROM event_delivery_handler_rule_selections WHERE delivery_id=?`
-	}
-	var contextRaw, dispositionRaw, flowPathRaw, familyRaw, semanticPathRaw, labelRaw string
-	if err := backend.db.QueryRowContext(ctx, query, deliveryID).Scan(&contextRaw, &dispositionRaw, &flowPathRaw, &familyRaw, &semanticPathRaw, &labelRaw); err != nil {
+	stored, err := storetest.ReadDeliveryConformanceSelectionStorage(ctx, backend.selected, deliveryID)
+	if err != nil {
 		t.Fatalf("load handler rule selection %s: %v", deliveryID, err)
 	}
-	fact, err := handlerselection.Hydrate(contextRaw, dispositionRaw, flowPathRaw, familyRaw, semanticPathRaw, labelRaw)
+	fact, err := handlerselection.Hydrate(stored.Context, stored.Disposition, stored.Flow, stored.Family, stored.Path, stored.Label)
 	if err != nil {
 		t.Fatalf("hydrate handler rule selection %s: %v", deliveryID, err)
 	}
@@ -1795,12 +1495,8 @@ func loadDeliveryHandlerRuleSelectionFact(t testing.TB, ctx context.Context, bac
 
 func assertDeliveryHandlerRuleSelectionMissing(t testing.TB, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string) {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id=$1::uuid`
-	if !backend.postgres {
-		query = `SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id=?`
-	}
-	var count int
-	if err := backend.db.QueryRowContext(ctx, query, deliveryID).Scan(&count); err != nil {
+	count, err := storetest.CountDeliveryHandlerSelectionsStorage(ctx, backend.selected, deliveryID)
+	if err != nil {
 		t.Fatalf("count handler rule selection %s: %v", deliveryID, err)
 	}
 	if count != 0 {

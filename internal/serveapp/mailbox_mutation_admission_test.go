@@ -22,8 +22,8 @@ func TestMailboxMutationAdmissionRollbackBothStores(t *testing.T) {
 					var foreignDraft map[string]any
 					requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.begin_input", map[string]any{"card_id": foreign.base.CardID, "verdict": "reject", "observed_content_hash": foreign.base.CardContentHash}, &foreignDraft)
 					notice := mailboxCompletionNotice(t, f)
-					before := mailboxCompletionRunEffects(t, rt, card.RunID)
-					beforeForeign := mailboxCompletionRunEffects(t, rt, foreign.base.RunID)
+					before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, card.RunID)
+					beforeForeign := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, foreign.base.RunID)
 					for _, bad := range []struct {
 						name, method string
 						params       map[string]any
@@ -54,10 +54,10 @@ func TestMailboxMutationAdmissionRollbackBothStores(t *testing.T) {
 							}
 						})
 					}
-					if after := mailboxCompletionRunEffects(t, rt, card.RunID); !reflect.DeepEqual(before, after) {
+					if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, card.RunID); !reflect.DeepEqual(before, after) {
 						t.Fatalf("invalid mutation changed domain: %s", mailboxEffectsDifference(before, after))
 					}
-					if after := mailboxCompletionRunEffects(t, rt, foreign.base.RunID); !reflect.DeepEqual(beforeForeign, after) {
+					if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, foreign.base.RunID); !reflect.DeepEqual(beforeForeign, after) {
 						t.Fatalf("invalid mutation changed foreign draft: %s", mailboxEffectsDifference(beforeForeign, after))
 					}
 					var notified bool

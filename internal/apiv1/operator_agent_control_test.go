@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -19,7 +18,6 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestOperatorAgentControlHandlersUseCanonicalOwnerAndIdempotency(t *testing.T) {
@@ -245,9 +243,7 @@ func TestOperatorAgentSendDirectiveRunTargetErrors(t *testing.T) {
 }
 
 func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, authorActivityTestSourceArtifactFact.BundleHash())
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{WorkOwner: workOwner})
 	if err != nil {
@@ -315,9 +311,7 @@ func TestOperatorAgentSendDirectivePersistsDirectiveEventOnceOnReplay(t *testing
 }
 
 func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	bootFact := authorActivityTestSourceArtifactFact
 	workOwner := newAPITestRuntimeWorkOccurrence(t, authorActivityTestRuntimeInstanceID, bootFact.BundleHash())
 	bus, err := newScopedAPITestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -369,7 +363,7 @@ func TestOperatorAgentSendDirectiveUsesCanonicalRuntimeSourceArtifact(t *testing
 	if runID != agentidentitytest.DefaultRunID {
 		t.Fatalf("exact-run directive result = %#v", first.Result)
 	}
-	assertRunBundleIdentity(t, db, runID, bootFact.BundleHash())
+	assertRunBundleIdentity(t, pg, runID, bootFact.BundleHash())
 }
 
 func materializeAPITestAgent(t testing.TB, ctx context.Context, selected storetest.AgentFixtureStore, manager *runtimemanager.AgentManager, cfg runtimeactors.AgentConfig) {
@@ -572,14 +566,10 @@ func countDirectiveEvents(t *testing.T, selected any) int {
 	return count
 }
 
-func assertRunBundleIdentity(t *testing.T, db *sql.DB, runID, wantHash string) {
+func assertRunBundleIdentity(t *testing.T, selected any, runID, wantHash string) {
 	t.Helper()
-	var gotHash string
-	if err := db.QueryRow(`
-		SELECT bundle_hash
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, runID).Scan(&gotHash); err != nil {
+	gotHash, err := storetest.ReadSelectedForkRunBundleHash(context.Background(), selected, runID)
+	if err != nil {
 		t.Fatalf("load run bundle identity: %v", err)
 	}
 	if gotHash != wantHash {
