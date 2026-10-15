@@ -23,16 +23,27 @@ func TestJSONCopyReceiptOutcomes(t *testing.T) {
 			want := CopyCounts{}
 			if outcome != "no_write" {
 				write := BeginWorkflowHeaderJSON(ctx, 17)
+				var history []*JSONCopyWrite
+				for _, family := range []string{"events", "event_deliveries", "committed_replay_scopes", "event_receipts", "dead_letters"} {
+					history = append(history, BeginEventHistoryJSON(ctx, family, 17, 1))
+				}
 				want = CopyCounts{Calls: 1, Copies: 1, SubmittedBytes: 17}
 				switch outcome {
 				case "unfinished":
 					want.UnfinishedBytes = 17
 				case "failed_write":
 					write.End(errors.New("write refused"))
+					for _, observed := range history {
+						observed.End(errors.New("write refused"))
+					}
 					want.FailedCalls, want.FailedBytes = 1, 17
 				default:
 					write.End(nil)
 					write.End(errors.New("duplicate notification"))
+					for _, observed := range history {
+						observed.End(nil)
+						observed.End(errors.New("duplicate notification"))
+					}
 					want.SucceededCalls, want.SucceededBytes = 1, 17
 				}
 			}
@@ -61,6 +72,11 @@ func TestJSONCopyReceiptOutcomes(t *testing.T) {
 			if got.Active != 0 || got.Total.JSONCopies.WorkflowHeader != want || got.Total.JSONCopies.EntityMetadata != (CopyCounts{}) || got.Retained.JSONCopies != got.Total.JSONCopies || got.ByOperation[WorkflowMutation].JSONCopies != got.Total.JSONCopies {
 				t.Fatalf("outcome=%s receipt=%+v want=%+v", outcome, got, want)
 			}
+			for _, counts := range []CopyCounts{got.Total.JSONCopies.Events, got.Total.JSONCopies.EventDeliveries, got.Total.JSONCopies.CommittedReplayScopes, got.Total.JSONCopies.EventReceipts, got.Total.JSONCopies.DeadLetters} {
+				if counts != want {
+					t.Fatalf("event/delivery history lost %s attribution: got=%+v want=%+v", outcome, counts, want)
+				}
+			}
 		})
 	}
 }
@@ -69,6 +85,7 @@ func TestJSONCopyReceiptDisabledAndCollectorReplacement(t *testing.T) {
 	ctx := context.Background()
 	BeginWorkflowHeaderJSON(ctx, 9).End(nil)
 	BeginEntityMetadataJSON(ctx, 11, 2).End(nil)
+	BeginEventHistoryJSON(ctx, "events", 11, 2).End(nil)
 	var slot Slot
 	first, restore, err := slot.Install(Options{})
 	if err != nil {
@@ -79,6 +96,8 @@ func TestJSONCopyReceiptDisabledAndCollectorReplacement(t *testing.T) {
 	ctx = WithAttempt(ctx, a)
 	BeginEntityMetadataJSON(ctx, 11, 2).End(nil)
 	BeginEntityMetadataJSON(ctx, 0, 0).End(nil)
+	BeginEventHistoryJSON(ctx, "events", 0, 0).End(nil)
+	BeginEventHistoryJSON(ctx, "unobserved_family", 11, 2).End(nil)
 	first.Stop()
 	if slot.Begin(false, false) != nil || first.Snapshot().Active != 1 {
 		t.Fatal("stop lost captured attempt or admitted another one")
