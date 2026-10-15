@@ -112,11 +112,17 @@ func (r *capturedConstructionResolver) sourceCut(ctx context.Context, origin run
 	if r.active[runID] {
 		return nil, fmt.Errorf("captured construction has cyclic immutable lineage")
 	}
-	var recorded int64
-	if err := r.tx.QueryRowContext(ctx, `SELECT revision FROM run_fork_revisions WHERE run_id=$1 AND revision=$2`, runID, revision).Scan(&recorded); err != nil {
-		return nil, fmt.Errorf("read captured construction lineage cut: %w", err)
+	var snapshot *runForkRevisionSnapshot
+	var err error
+	if origin.ForkPointKind() == runlifecycle.ForkOriginPointRunStart {
+		snapshot, err = loadRunForkStartSnapshot(ctx, r.tx, runID, revision)
+	} else {
+		var recorded int64
+		if err := r.tx.QueryRowContext(ctx, `SELECT revision FROM run_fork_revisions WHERE run_id=$1 AND revision=$2`, runID, revision).Scan(&recorded); err != nil {
+			return nil, fmt.Errorf("read captured construction lineage cut: %w", err)
+		}
+		snapshot, err = loadRunForkRevisionSnapshotRaw(ctx, r.tx, runID, recorded, false)
 	}
-	snapshot, err := loadRunForkRevisionSnapshotRaw(ctx, r.tx, runID, recorded, false)
 	if err != nil {
 		return nil, err
 	}
@@ -129,6 +135,15 @@ func (r *capturedConstructionResolver) sourceCut(ctx context.Context, origin run
 func validateCapturedOriginBoundary(origin runlifecycle.RunOrigin, snapshot *runForkRevisionSnapshot) error {
 	if snapshot.RunID != origin.SourceRunID() || snapshot.Revision != origin.ForkRevision() {
 		return fmt.Errorf("captured construction lineage cut disagrees with its immutable origin")
+	}
+	if origin.ForkPointKind() == runlifecycle.ForkOriginPointRunStart {
+		if snapshot.StartProjection == nil {
+			return fmt.Errorf("captured construction start requires its exclusive immutable projection")
+		}
+		return snapshot.StartProjection.Validate()
+	}
+	if snapshot.StartProjection != nil {
+		return fmt.Errorf("captured construction cannot use a start projection as an inclusive cut")
 	}
 	if origin.ForkPointKind() == runlifecycle.ForkOriginPointDeploymentRevision {
 		return nil
