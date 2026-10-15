@@ -96,7 +96,8 @@ func TestIssue642InheritedUnissuedFanOutReturnsOwnChildReplyBothStores(t *testin
 			loader, selection, _ := selectedContractForkFixtureSelection(t, h.ctx, repoRootFromCatalogE2E(t), root, selected)
 			owner := selectedContractExecutionOwnerForCatalogHarness(t, h)
 			options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
-			staged := stageCatalogSelectedContractFork(t, h.ctx, selected, owner, loader, selection, options, catalogRuntimeRunID, cut)
+			operation := catalogStagedForkOperation(t, h.ctx, selected, selection, catalogRuntimeRunID, cut)
+			staged := stageCatalogSelectedContractFork(t, h.ctx, selected, owner, loader, selection, options, catalogRuntimeRunID, cut, operation)
 			childRows, err := storetest.ReadReplyContextRecords(phase, selected, staged.ForkRunID)
 			childPlan, planErr := selected.PlanRunFork(phase, runfork.RunForkPlanRequest{SourceRunID: staged.ForkRunID, AtStart: true})
 			if err != nil || planErr != nil || len(childRows) != 1 || childRows[0].State != replycontext.StateOpen ||
@@ -129,7 +130,7 @@ func TestIssue642InheritedUnissuedFanOutReturnsOwnChildReplyBothStores(t *testin
 			}
 			baseline := h.processOwner.ActiveCount()
 			executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: catalogRuntimeRunID, At: cut, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
+				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 				ContractSelection: selection, AgentRuntime: options,
 			})
 			if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
