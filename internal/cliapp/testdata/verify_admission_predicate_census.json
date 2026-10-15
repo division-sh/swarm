@@ -252,6 +252,12 @@
     "body_sha256": "0334933e50968582101b12c5d3de53f9d97a662a491a1393c1129e9ba0c7ef32"
   },
   {
+    "owner": "internal/channelonboarding/result_progress.go::*Result.projectInitialSessionPreparation",
+    "audit_rows": "A10,A27",
+    "proof_families": "P08,P10,P21,2577-native-pending,2577-native-cli-progress",
+    "body_sha256": "62bce4224365b89e8f82de651a6a533fc26d08977f7cb99cc3c72acd6b03654f"
+  },
+  {
     "owner": "internal/channelonboarding/result_progress.go::Result.ProviderCredentialRequirement",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-cli-progress",
@@ -525,7 +531,7 @@
     "owner": "internal/channelonboarding/service.go::*Service.result",
     "audit_rows": "A10,A27",
     "proof_families": "P08,P10,P21,2577-native-pending,2577-native-startup-wait,2577-native-cli-progress",
-    "body_sha256": "8a822451ec174334183968663ade23cb8ef3dc7dd34342541c302e4ddb201ab4"
+    "body_sha256": "98470293638879be362a5822ce03c443af967d5324a3eed156ffcdce2ae94d58"
   },
   {
     "owner": "internal/channelonboarding/service.go::*Service.resumeSession",
