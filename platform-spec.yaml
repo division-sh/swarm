@@ -42729,6 +42729,9 @@ managed_agent_capability_surface:
         and recorded-predecessor proof under the locked run/execution transaction may recovery compare-and-set
         that exact prepared/running row to quiesced, advance its fence and remove its lease. No continuation,
         replay grant, provider retry, business mutation or run-terminal mutation follows from this disposition.
+        The same fenced transaction may finalize already admitted per-origin cancellations through the existing
+        effect owner after retirement, preserving settled responses and outcomes. Quiescence alone never proves
+        predecessor abandonment or successor authority; a current predecessor remains ineligible for recovery.
         Already quiesced/closed rows remain idempotent; keyed, running-child and failure-bearing policies are unchanged.
       selected_deployment_feed_recovery: >
         An interrupted selected execution may resume only a durably admitted finite deployment-feed phase under

@@ -7,15 +7,85 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
+
+func TestSelectedRecoveryCurrentPredecessorIsNotAbandonedBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, state := range []string{"prepared", "running", "quiesced"} {
+			t.Run(backend+"/"+state, func(t *testing.T) {
+				store, db, sqlite := selectedForkDiscardTestStore(t, backend)
+				fixture := newSelectedCompletionFixture(t, store, db, sqlite)
+				ctx := testAuthorActivityContext()
+				issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if state != "prepared" {
+					authority, err := store.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, "current-predecessor", time.Minute)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if state == "quiesced" {
+						if err := store.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				process, err := fixture.process.Evidence()
+				if err != nil {
+					t.Fatal(err)
+				}
+				recovery := store.(interface {
+					ListSelectedForkRecoveryEntries(context.Context) ([]runfork.SelectedForkRecoveryEntry, error)
+					InspectSelectedForkRecovery(context.Context, runfork.SelectedForkRecoveryEntry) (runfork.SelectedForkRecoveryInspection, error)
+					RecoverSelectedFork(context.Context, runcontrol.SelectedForkRecoveryRequest) (runfork.SelectedForkRecoveryResult, error)
+				})
+				entries, err := recovery.ListSelectedForkRecoveryEntries(ctx)
+				if err != nil || len(entries) != 1 {
+					t.Fatalf("current predecessor inventory: %+v %v", entries, err)
+				}
+				request := runcontrol.SelectedForkRecoveryRequest{Entry: entries[0], Process: process.LeaseStamp(), Effects: liveExternalEffectRecoveryRequest(time.Now().UTC())}
+				before := snapshotForkHistoricalExecutionTables(t, db, !sqlite)
+				inspection, err := recovery.InspectSelectedForkRecovery(ctx, request.Entry)
+				if err != nil || inspection.ExecutionState != state || inspection.Plan.ExecutionID != issued.ExecutionID {
+					t.Fatalf("current predecessor state differs: %+v %v", inspection, err)
+				}
+				result, err := recovery.RecoverSelectedFork(ctx, request)
+				if err != nil || result.Disposition != runfork.SelectedForkRecoveryCurrent || result.ExecutionID != issued.ExecutionID ||
+					result.Continuation != nil || len(result.CanceledTurns) != 0 || len(result.PendingCancellations) != 0 || result.Effects.PrelaunchTerminal != 0 || result.Effects.OutcomeUncertain != 0 {
+					t.Fatalf("current predecessor gained recovery authority: %+v %v", result, err)
+				}
+				for _, field := range []string{"boot", "lease", "generation"} {
+					bad := request
+					switch field {
+					case "boot":
+						bad.Process.BootID = uuid.NewString()
+					case "lease":
+						bad.Process.LeaseID = uuid.NewString()
+					case "generation":
+						bad.Process.Generation++
+					}
+					if _, err := recovery.RecoverSelectedFork(ctx, bad); err == nil {
+						t.Fatalf("crossed %s recovered current %s predecessor", field, state)
+					}
+				}
+				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, db, !sqlite)) {
+					t.Fatal("current predecessor inspection/refusal changed durable evidence")
+				}
+			})
+		}
+	}
+}
 
 func TestSelectedRecoveryUsesNativeAdmittedPreparationWithoutProcessJournalBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
@@ -95,7 +165,7 @@ func TestSelectedRecoveryUsesNativeAdmittedPreparationWithoutProcessJournalBothS
 				}
 				before := snapshotForkHistoricalExecutionTables(t, db, !sqlite)
 				inspection, err := reader.InspectSelectedForkRecovery(ctx, entries[0])
-				if err != nil || inspection.Plan.ExecutionID != issued.ExecutionID || inspection.ExecutionState != "prepared" || inspection.Plan.Disposition != runfork.SelectedForkRecoveryFailed {
+				if err != nil || inspection.Plan.ExecutionID != issued.ExecutionID || inspection.ExecutionState != "prepared" || inspection.Plan.Disposition != runfork.SelectedForkRecoveryControlOnly {
 					t.Fatalf("retained preparation inspection required a journal: %+v %v", inspection, err)
 				}
 				crossed := entries[0]
