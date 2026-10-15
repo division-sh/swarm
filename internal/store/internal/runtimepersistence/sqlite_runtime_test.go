@@ -101,11 +101,9 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	entityID := uuid.NewString()
 	if _, err := store.backend.ExecContext(ctx, `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES (?, ?, 'test-flow', 'test_entity', 'test', 'Test Entity', 'active',
-			'{}', '{"score":1}', '{}', 1, ?, ?, ?)
-	`, runID, entityID, time.Now().UTC(), time.Now().UTC(), time.Now().UTC()); err != nil {
+			run_id, entity_id, flow_instance, entity_type, slug, name, fields, created_at, updated_at
+		) VALUES (?, ?, 'test-flow', 'test_entity', 'test', 'Test Entity', '{"score":1}', ?, ?)
+	`, runID, entityID, time.Now().UTC(), time.Now().UTC()); err != nil {
 		t.Fatalf("seed sqlite entity_state: %v", err)
 	}
 	itemID, err := store.InsertMailboxItem(ctx, runtimetools.MailboxItem{

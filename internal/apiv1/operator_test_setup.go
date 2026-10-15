@@ -24,11 +24,11 @@ type testSetupEntitiesResult struct {
 }
 
 type testSetupEntityResult struct {
-	Alias        string `json:"alias"`
-	EntityID     string `json:"entity_id"`
-	FlowInstance string `json:"flow_instance,omitempty"`
-	EntityType   string `json:"entity_type"`
-	CurrentState string `json:"current_state"`
+	Alias        string  `json:"alias"`
+	EntityID     string  `json:"entity_id"`
+	FlowInstance string  `json:"flow_instance,omitempty"`
+	EntityType   string  `json:"entity_type"`
+	CurrentState *string `json:"current_state"`
 }
 
 func OperatorTestSetupHandlers(opts TestSetupHandlerOptions) map[string]MethodHandler {
@@ -163,7 +163,7 @@ func testSetupEntitiesRequestFromParams(params map[string]any, now time.Time) (r
 		Entities:  make([]runtimepipeline.ScenarioSetupEntityRequest, 0, len(list)),
 	}
 	for i, raw := range list {
-		entity, err := testSetupEntityRequestFromParam(raw, i)
+		entity, err := testSetupEntityRequestFromParam(raw, i, runID)
 		if err != nil {
 			return runtimepipeline.ScenarioSetupRequest{}, bundleIdentityParam{}, err
 		}
@@ -172,7 +172,7 @@ func testSetupEntitiesRequestFromParams(params map[string]any, now time.Time) (r
 	return out, identity, nil
 }
 
-func testSetupEntityRequestFromParam(raw any, i int) (runtimepipeline.ScenarioSetupEntityRequest, error) {
+func testSetupEntityRequestFromParam(raw any, i int, runID string) (runtimepipeline.ScenarioSetupEntityRequest, error) {
 	entity, ok := raw.(map[string]any)
 	if !ok {
 		return runtimepipeline.ScenarioSetupEntityRequest{}, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("entities[%d]", i), "reason": "must be an object"})
@@ -200,15 +200,27 @@ func testSetupEntityRequestFromParam(raw any, i int) (runtimepipeline.ScenarioSe
 	if err != nil {
 		return runtimepipeline.ScenarioSetupEntityRequest{}, err
 	}
-	currentState, err := requiredStringParam(entity, "current_state")
-	if err != nil {
-		return runtimepipeline.ScenarioSetupEntityRequest{}, err
+	constructedRoot := entityID == runID && (flowInstance == "" || flowInstance == runID)
+	var currentState *string
+	var gates map[string]bool
+	if constructedRoot {
+		state, err := requiredStringParam(entity, "current_state")
+		if err != nil {
+			return runtimepipeline.ScenarioSetupEntityRequest{}, err
+		}
+		currentState = &state
+		gates, err = testSetupGatesParam(entity, i)
+		if err != nil {
+			return runtimepipeline.ScenarioSetupEntityRequest{}, err
+		}
+	} else {
+		for _, key := range []string{"current_state", "gates"} {
+			if _, present := entity[key]; present {
+				return runtimepipeline.ScenarioSetupEntityRequest{}, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("entities[%d].%s", i, key), "reason": "data-only imports cannot carry lifecycle inputs"})
+			}
+		}
 	}
 	fields, err := testSetupFieldsParam(entity, i)
-	if err != nil {
-		return runtimepipeline.ScenarioSetupEntityRequest{}, err
-	}
-	gates, err := testSetupGatesParam(entity, i)
 	if err != nil {
 		return runtimepipeline.ScenarioSetupEntityRequest{}, err
 	}
@@ -266,7 +278,7 @@ func testSetupEntitiesAPIResult(result runtimepipeline.ScenarioSetupResult) test
 			EntityID:     strings.TrimSpace(entity.EntityID),
 			FlowInstance: strings.Trim(strings.TrimSpace(entity.FlowInstance), "/"),
 			EntityType:   strings.TrimSpace(entity.EntityType),
-			CurrentState: strings.TrimSpace(entity.CurrentState),
+			CurrentState: entity.CurrentState,
 		})
 	}
 	return out
@@ -310,16 +322,18 @@ func validateTestSetupEntityAgainstBundle(bundle *runtimecontracts.WorkflowContr
 			"provided_type": entity.EntityType,
 		})
 	}
-	currentState := strings.TrimSpace(entity.CurrentState)
-	graph, found := bundle.WorkflowStageTopology(flowID)
-	_, stageErr := graph.ResolveStage(currentState)
-	if currentState == "" || !found || graph.FlowID != flowID || stageErr != nil {
-		return NewInvalidParamsError(map[string]any{
-			"field":         fieldPrefix + ".current_state",
-			"reason":        "must be a declared state for the selected flow",
-			"flow_instance": flowID,
-			"state":         currentState,
-		})
+	if entity.CurrentState != nil {
+		currentState := strings.TrimSpace(*entity.CurrentState)
+		graph, found := bundle.WorkflowStageTopology(flowID)
+		_, stageErr := graph.ResolveStage(currentState)
+		if currentState == "" || !found || graph.FlowID != flowID || stageErr != nil {
+			return NewInvalidParamsError(map[string]any{
+				"field":         fieldPrefix + ".current_state",
+				"reason":        "must be a declared state for the selected flow",
+				"flow_instance": flowID,
+				"state":         currentState,
+			})
+		}
 	}
 	if err := validateTestSetupFieldsAgainstBundle(flowID, primary, entity.Fields, fieldPrefix); err != nil {
 		return err

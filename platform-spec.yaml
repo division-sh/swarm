@@ -3888,6 +3888,12 @@ runtime_enforcement:
       Unassigned root fields remain omitted. Explicit zero, empty text, false,
       and empty collections remain present; reads never initialize fields or
       reconstruct cleared values from request snapshots.
+      Generated role-scoped whole-entity read schemas keep current_state required
+      and admit exactly text or null. A data-only import or constructed instance
+      with no named stages returns null, not a missing key or an invented stage.
+      A declared business field named current_state retains its independent
+      authored type under fields. This does not expand the read envelope or
+      expose private bookkeeping or loop facts.
   query_entities:
     rule: |
       query_entities validates filter paths against the inferred entity
@@ -7135,10 +7141,12 @@ engine:
               pipeline_handoff_observation: The fixed incomplete-handoff witness composes delivery-owned detached status and missing-handoff facts with pipeline-owned exact platform/pipeline receipt existence in one original selected native read transaction. The pipeline owner counts each delivery once when any of pending/in-progress, NULL continuation handoff, or absent exact receipt applies; overlapping arms never multiply a row and multiple deliveries for one event remain distinct. Receipt existence may be cached only within that snapshot and never decodes receipt payloads or grants execution eligibility. Foreign run/event/subscriber facts cannot satisfy the witness. An unavailable relation, cancelled/closed owner or late read failure yields no partial count, including an empty delivery set. Neither owner interprets the other's SQL row family; public fixture bridges remain SQL-free and return only the detached count.
               fan_out_component_observation: Fan-out component witnesses read exact stored outcome-to-event rows, all physical intent/progress rows, compiled triggering-delivery/declaration coordinates and capsule bytes, and exact-key ordinal outcomes with completion progress through the original selected native read coordinator. Trigger-to-delivery joins are fixed physical observations owned by the closed delivery projection owner, not parallel runtime-adapter SQL interpreters. They retain original joins, scope, order, duplicate/history and NULL behavior, without adding eligibility or decoder-derived source authority. Pinned authored-mutation evidence retains exact run/entity/mutation/domain/path coordinates and unnormalized stored new-value bytes; runtime source admission, capsule validation and full source equality remain separate consumer assertions. Invalid identities, absent required evidence, cancellation, closed storage or a late read failure yield no partial snapshot.
               reply_return_observation: Reply-return witnesses count every physical context in the exact run, including terminal/history rows, and every dead-letter row joined by its original event to that run, retaining duplicate and NULL association behavior. Both counts share one original selected native read transaction. The witness does not reopen contexts, authorize a reply, reinterpret terminal status or suppress the actual replay, delivery-settlement and constructed-execution assertions.
-              workflow_projection_storage_observation: Control-status and conflicting-construction witnesses retain their separate original three-column physical observations through the original selected native read coordinator. Both join flow_instances to entity_state by exact run and instance path and filter only the requested run and entity, without adding entity type, readiness, route or eligibility predicates. The control witness reads current_state, native fields bytes and the config status default; the duplicate witness reads entity_state revision, the stored name-field default and native fields bytes. Dialect extraction retains the original defaults and consumer assertions. Invalid identities, cancellation, closed ownership or read failure return no partial evidence. Detached storetest facts grant no SQL, callback, query selector or reconstructed coordinator authority; native construction and duplicate refusal remain existing workflow-owner operations.
+              workflow_projection_storage_observation: Control-status and conflicting-construction witnesses retain their separate original three-column physical observations through the original selected native read coordinator. Both pair flow_instances with entity_state by exact run, instance path and entity identity and filter only the requested run and entity, without adding entity type, readiness, route or eligibility predicates. The control witness reads header current_state, native authored fields bytes and the header config status default; the duplicate witness reads header revision, the stored authored name-field default and native fields bytes. A field row without its exact header cannot supply stage or revision evidence; absence returns no successful or partial projection rather than a default lifecycle. Dialect extraction retains the original defaults and consumer assertions. Invalid identities, cancellation, closed ownership or read failure return no partial evidence. Detached storetest facts grant no SQL, callback, query selector or reconstructed coordinator authority; native construction and duplicate refusal remain existing workflow-owner operations.
+              workflow_field_row_state_observation: The existing global physical field-row witness retains every entity_state row, duplicate identities across runs and ascending authored-data created_at order. An exact run/path/entity LEFT JOIN obtains optional header current_state without changing field-row membership or adding type, status, readiness or eligibility filters. Headerless data has a null control state; constructed no-stage headers retain their actual internal pending state, while fieldless headers acquire no invented field row. This private physical control posture is not public named-stage metadata or execution admission. Catalog diagnostics render null separately from quoted present stage text, including a real unknown or null spelling; physical data-owner and containment cardinalities remain independent of header membership. Empty, invalid, cancelled, closed or unavailable observations retain their original empty/error behavior with no partial evidence, raw selector, reconstructed transaction owner or fallback lifecycle.
               workflow_projection_shape_faults: Six named hostile projection cuts operate only after lawful native construction, through the exact selected writer coordinator. Fixed fields-array, numeric-gate, accumulator-array, malformed-transition-history, conflicting-instance-id and slash-only-path writes retain their original JSON payloads and exact run/entity or run/instance-path predicates. Exactly one existing row must change before commit; absence, invalid identity, closed ownership, cancellation or writer failure yields no successful outcome and joins cleanup. SQLite faults participate in the original writer admission and cancellation, never a reconstructed coordinator. The component decoder's actual malformed-storage rejection remains the consumer proof on both backends. Public fixture ports accept only exact coordinates for these named cuts, not SQL, arbitrary payloads, selectors, transaction contexts or callbacks.
               receiver_predecessor_evidence_faults: Two named faults start from real native construction and actual fork materialization, and consume the original selected writer. The pipeline owner copies exactly one validated corresponding native ancestor receipt to a positively validated historical receiver only when the destination scope has no native receipt, preserving source projection/version/time and changing no header/readiness or other receipt. This intentionally contradictory row is never construction authority. The fixed-cut owner validates the original persisted origin and captured receiver, then verifies a distinct bounded positive revision is absent for the exact source run; the run-lifecycle owner CAS changes only that destination's forked_from_revision against every original fork coordinate. Source writes are frozen for this negative. Source revision/fact rows, headers, business state, readiness, receipts, status and timestamps remain unchanged. Invalid, foreign, duplicate, stale, canceled or closed cuts refuse without mutation. No revision deletion, cascade, fabricated event, generic origin setter, query callback or raw fixture authority is exposed.
-              workflow_projection_header_shadow_fault: The constructed-header list witness first constructs its fieldless and fielded instances through the existing native activation owner, then invokes one fixed run-scoped field-row fault through the same selected writer coordinator. The fault changes only entity_state current_state to obsolete and gates, bookkeeping and accumulator to empty objects, preserving fields and all flow-instance header facts. Exactly one existing field row must change before commit; zero or multiple matches fail and roll back. The original canonical ListWorkflowInstances owner must still return both constructed headers with their authoritative lifecycle metadata, preserving fieldless absence and fielded business data. No alternate list reader, raw getter, payload selector or transaction callback is exposed; admission, cancellation, refusal and joined cleanup remain the same original-coordinator obligations as the named malformed-shape faults.
+              workflow_projection_ambiguity_fault: The existing exact run/entity ambiguity cut adds one competing physical authored-data row with the source run, path and entity contract and a fresh competing identity. It copies no lifecycle columns and changes no header; exactly one source row must be selected before the original native writer commits. Canonical active-route recovery must refuse multiple matching declared field rows rather than select a winner or reconstruct ownership from a field-row stage. Same-path other-run headers and data remain distinct. This hostile component witness does not construct an instance or publish execution or revision authority.
+              workflow_projection_header_list_witness: The native list witness constructs its fieldless and fielded instances through the existing selected activation owner, then consumes canonical ListWorkflowInstances. Exactly two constructed identities and paths, header stage and revision, gates, bookkeeping and accumulator must survive; fieldless instances acquire no invented fields and the complete fielded business object survives, including declared fields with lifecycle-like names. Only the two original construction writes occur; no obsolete field-row shadow fault or compatibility port survives. An independent fresh-schema component witness requires the nine live authored-data columns and absence of current_state, gates, bookkeeping, accumulator, revision and entered_state_at on entity_state. Each attempted shadow write must fail with its exact undefined-column diagnostic while the complete constructed header/data target and exact row counts remain unchanged. No alternate list reader, raw getter, payload selector or reconstructed transaction owner is exposed. Refusal, cancellation, original writer admission and joined cleanup remain covered by the live named malformed-projection faults rather than a retired-column writer.
               workflow_mutation_native_component_fixture: Mutation callback and competing-transition witnesses use canonical native run/source construction, acknowledged selected activation, opaque workflow reads and the existing selected engine-mutation owner. Callback rollback, both overlapping snapshots, commit ordering, single-writer fields and compiled transition history remain actual execution assertions on both backends. Stale writes must prove the canonical typed lifecycle conflict with exact revision, prior state and route, not helper-specific text. A transition against the already-constructed scenario run explicitly uses an existing-run event and acquires its exact declared-handler delivery through the selected publication and claim owners before the race begins. Missing or foreign claims refuse without persistence. Transition preparation and finalization stay in one shared component helper; no raw coordinator, SQL callback or fabricated transaction-context protocol is supplied. Gated workers are released and joined before cleanup can retire the original native ownership.
               workflow_lookup_miss_header_observation: Lookup-miss witnesses count all physical flow_instances rows through one original native read transaction, preserving the original whole-store scope with no run, lifecycle, type or eligibility filter. The count is a detached scalar and missing, cancelled or closed ownership supplies no successful evidence. Actual opaque workflow mutation/read owners must preserve typed exact-key misses, prevent callback invocation and leave that cardinality unchanged; a database, transaction, count-query selector or reconstructed test coordinator never crosses the component fixture boundary.
               workflow_platform_bookkeeping_fixture: The complete-carrier mutation witness first performs acknowledged native construction, then changes only the exact run/instance-path header bookkeeping to the fixed platform_fact=preserve object through the original selected writer. Fields, gates, accumulator, config and the field-row companion are not changed by that named cut. Exactly one existing header must change before commit; missing coordinates, cancellation and failed ownership provide no successful outcome. The actual opaque read and selected engine-mutation owner must preserve that platform fact and the ready gate while updating the business status field. The fixed coordinate-only storetest bridge exposes no SQL, arbitrary value, selector or transaction callback. Original SQLite writer admission, cancellation and joined cleanup remain required execution proof.
@@ -7155,7 +7163,7 @@ engine:
               workflow_foreign_flow_refusal_component_fixture: Foreign-flow engine-write proof admits the original two flow scopes in its source artifact, constructs the original flow-a prepared component through the selected activation owner and invokes the unchanged engine mutation from flow-b. Canonical source version replaces placeholder metadata, without changing target path, entity, pending state, fields or hostile candidate. The production authorization owner must still return cross_flow_write_forbidden before any engine write; original selected reads before and after must return identical durable state. Both backends prove zero engine mutations and delivery claims. A synthetic flow-prefix map, raw fixture pool, reconstructed coordinator or alternate authorization interpreter cannot supply this component evidence; acknowledged prepared-component construction is not public eligibility qualification.
               workflow_engine_malformed_bucket_component_fixture: Persisted-carrier decoding proof consumes the existing original selected projection construction/read owners, preserving the exact prepared component metadata and malformed evidence bucket string. The actual engine state reader must refuse with invalid workflow state bucket on both stores, without another writer or permissive normalization. This is source-independent component carrier decoding, not public construction, selected-source preparation or execution eligibility; artifact-bound handler fixtures and their canonical source-version obligations remain separate. The fixture supplies opaque workflow persistence and prepared construction only, with no raw pool, reconstructed store, SQL callback, alternate decoder or legacy-store compatibility behavior.
               workflow_closed_owner_component_fixture: Unavailable-store component proof first reads successfully through the original native selected persistence, closes that same owner while no work is active, and independently observes its failed read. Existing state and accumulator entry paths must propagate that exact error on both backends, not merely return any unrelated input or lookup error. Historical test names do not qualify a final mutation or rollback cut when failure occurs at the initial read. No reconstruction around a closed pool, fresh replacement store, fake transaction protocol or error-classification heuristic supplies this evidence. The component close port exposes only the original owner close action; probes require zero writes and active work, with native fixture cleanup retained.
-              workflow_missing_header_component_fixture: A state-only hostile target is formed after acknowledged native component construction by removing exactly its run and instance-path lifecycle header through the original selected writer coordinator. The fixed fault accepts only those coordinates, requires one existing header, refuses absent or invalid coordinates and closed ownership, and respects SQLite writer admission and cancellation. Its field row, values, revision and clocks must remain identical. Consumer proof positively observes state-only presence before the original target-ownership refusal, then conserves the complete field row. Parent and child scopes are admitted together in the identical source artifact before fixture consumption, never appended afterward. No raw insert, replacement coordinator, arbitrary deletion callback or public construction/retirement claim substitutes for these component witnesses.
+              workflow_missing_header_component_fixture: A state-only hostile target is formed after acknowledged native component construction by removing exactly its run and instance-path lifecycle header through the original selected writer coordinator. The fixed fault accepts only those coordinates, requires one existing header, refuses absent or invalid coordinates and closed ownership, and respects SQLite writer admission and cancellation. Its complete authored-data row, values and independent data clocks must remain identical. Consumer proof positively observes state-only presence before the original target-ownership refusal, then conserves the complete field row. Parent and child scopes are admitted together in the identical source artifact before fixture consumption, never appended afterward. No raw insert, replacement coordinator, arbitrary deletion callback or public construction/retirement claim substitutes for these component witnesses.
               workflow_wrong_run_target_component_fixture: The complete-existing, state-only-existing, materializing and entityless wrong-root ownership cases retain the same foreign run coordinate, event, target, owner disposition and two fresh-coordinator attempts on both backends. Complete and state-only component prestates are constructed through the original selected owner and independently observed before rejection; the state-only case consumes the existing exact missing-header fault. Source version replaces only a placeholder fixture version. Whole-table field and lifecycle counts and all original marker/read-error assertions remain, with complete field-record conservation added. This is a hostile prepared component and cold-coordinator refusal witness, not public construction eligibility or a selected-store reopen. No raw pool/coordinator reconstruction or SQL table-selector authority supplies its evidence.
               workflow_invalid_lifecycle_component_fixture: Lifecycle-only, contradictory descriptor, terminated and draining component cases retain their original refusal and conservation obligations on both stores. The original selected owner acknowledges prepared construction before fixed exact-coordinate faults remove the field row or set the lifecycle header to draining with NULL termination time or terminated at the supplied nonzero instant. These named faults use the original writer admission and change exactly one existing row; they do not enact production retirement, timer/card cleanup, arbitrary status selection or an idempotency protocol. Consumers positively observe the requested presence, descriptor or status before refusal, conserve the complete remaining record afterward, and preserve the original zero-field or marker/revision readback. Public fixture ports expose only the named cut's coordinates and exact time, never SQL, column selectors, transaction contexts or callbacks.
               workflow_nonactive_delivery_component_fixture: Delayed and cold-coordinator replay refusal retain the original draining-before-pending-publication cut and exact event, handler, target and field/status conservation. A scenario-established run consumes existing-run ingress, never a run-creating event or raw run-origin override. The original selected event and delivery owners establish an exact pending obligation; both unclaimed internal attempts must stop at the inactive-target gate before acquiring or settling that obligation. The existing closed whole-store snapshot owner supplies immutable application-data evidence before and after each attempt, covering outgoing events, delivery rows and mutation history without a caller-selected query. Exact pending snapshot and whole mutation cardinality remain unchanged. This qualifies the component's early refusal and fresh-coordinator replay, not acquired execution, selected-store reopen or public admission/readiness.
@@ -7178,10 +7186,10 @@ engine:
               canonical_event_fixture_readback: Shared complete-event fixture readback consumes the original selected native read coordinator and the existing backend event-record loader and decoder. It reads only the exact event identifier without adding delivery, status, eligibility, run or pagination filters and returns the complete decoded event, never SQL or a reconstructed store. Missing records remain absent; raw, nil, closed or cancelled ownership and corrupt canonical records fail without partial event evidence. Existing lineage, supported API, gate-recovery and selected-fork consumers retain their original assertions and receive no new mutation or runtime-admission capability. One native read operation owns store validation, transaction selection and complete record decoding; mandatory-load consumers enforce missing-record refusal only after consuming that operation and must not open another read or decode independently.
               entity_tool_postgres_construction_fixture: The shared PostgreSQL entity/human-task tool fixture obtains its original native selected store from the existing location-based fixture factory, preserving canonical schema bootstrap, payload admission and joined close-before-sandbox cleanup. The complete six-consumer inventory retains authored source, run setup, tool workloads, acknowledgment/refusal and replay assertions. No raw pool, reconstructed coordinator, new admission posture or alternate close path is returned. The distinct SQLite fixture admission posture is not changed by this PostgreSQL migration.
               entity_tool_contract_observation: Imported entity-tool contract readback consumes the original selected tracked entity-mutation projection reader. Its physical entity_type witness uses exact run_id and entity_id coordinates without status filtering or runtime reconstruction, with all existing tool readback assertions retained. The reader preserves complete projection and ordered mutation evidence and fails closed without partial evidence on unavailable storage.
-              entity_tool_private_bookkeeping_fixture: The fixed entity_state bookkeeping hostility witness is applied only through the original selected projection-fault coordinator, at exact run_id/entity_id and with the fixed private_fact payload. It is not the flow_instances bookkeeping fault and accepts no caller SQL, callback or arbitrary value. The operation requires one existing row, preserves other columns, joins the original SQLite writer queue and fails closed under cancellation or missing/invalid/closed ownership. Entity-tool no-leak and create/update mutation-count checks retain their complete workload and use the existing selected ordered-history reader for physical evidence.
+              entity_tool_private_bookkeeping_fixture: Entity-tool privacy witnesses construct an exact native header before applying the existing fixed flow_instances platform_fact=preserve bookkeeping fault through the original selected projection-fault coordinator at exact run_id/instance_path. No entity_state bookkeeping column, writer or compatibility fault is supported. The selected tracked projection must independently witness the present header lifecycle and private fact before public tool reads, and preserve the same fact after business writes. Get, search, whole-row query and generated role reads must not expose platform bookkeeping; the original complete tool workload and create/update history checks remain. The shared fixed header fault preserves all other columns, requires one existing row, accepts no caller SQL, callback or arbitrary value, and retains original SQLite writer admission, cancellation, refusal and joined cleanup obligations.
               entity_tool_run_history_observation: Sparse generated-tool history consumes the original selected tracked-projection read owner through a named whole-run physical observation. The witness preserves every entity_mutations row for the exact run_id, descending created_at/mutation_id ordering and COALESCE(new_value,'null') bytes without pagination, entity/domain narrowing or runtime reconstruction. PostgreSQL's separate debug-history count and all sparse-tool mutation/refusal/continuation assertions remain intact. Raw/invalid/cancelled/closed/unavailable owners fail closed without partial evidence; an absent run remains empty physical evidence. Both named projection observations share the same original native read-owner validation, not a second coordinator.
               http_settlement_attempt_observation: HTTP acknowledgment/replay/refusal witnesses observe physical external-effect attempts through their original selected effect owner. The bounded storage inventory preserves every attempt, including duplicate operation identifiers, and exact operation_id/state bytes without authority/state filtering, pagination or recovery-policy interpretation. It replaces raw all-row and settled-row counts and the single-operation read without weakening provider-call, receipt, refusal, diagnostic or replay assertions. The existing native PostgreSQL fixture constructor supplies the original selected owner; no pool getter or reconstructed coordinator remains in this family. Read errors, stale schema and invalid/closed ownership yield no partial inventory; empty storage remains empty evidence.
-              role_scoped_tool_bookkeeping_fixture: The SQLite current-entity generated-tool witness consumes the same fixed selected entity_state private-bookkeeping fault as the backend-neutral tool witness, at its original run/entity and post-import/pre-execution cut. Its actor/source, inbound event identity and flow binding, available tool definitions, save/read payloads and bookkeeping no-leak assertions are preserved. No SQL getter, duplicate fault owner, new fault payload or compatibility path is introduced.
+              role_scoped_tool_bookkeeping_fixture: The SQLite current-entity generated-tool witness consumes the same existing fixed flow_instances header-bookkeeping fault as the backend-neutral tool witness, at exact run/instance-path after native construction and before tool execution. The selected tracked projection must witness present header lifecycle and the fixed private fact, which successful business writes must preserve. Its actor/source, inbound event identity and flow binding, available tool definitions, save/read payloads and bookkeeping no-leak assertions remain. No entity_state bookkeeping fault, SQL getter, duplicate fault owner, arbitrary fault payload or compatibility path is supported.
               entity_tool_acknowledgment_observation: Entity-field acknowledged-error and unacknowledged-refusal witnesses consume the original selected tracked entity projection reader, including exact physical revision and unfiltered mutation history at the original run_id/entity_id. Baseline, committed and refused observations retain exact revision/count increments, receipt/retry truth, diagnostic privacy and original fault behavior. The original selected base owner supplies evidence, never the deliberately faulting executor collaborator; no SQL handle, dialect selector or alternate semantic receipt owner is introduced.
               workflow_initial_preparation_component_fixture: Initial-entry preparation witnesses retain the existing one-emission semantic collaborator and exact occurrence time while consuming opaque native workflow persistence. The actual component preparation must reject emissions outside its atomic commit before any write, and the actual selected reader must report the instance absent. Both backends prove zero native writes and joined cleanup. This negative component witness grants neither public construction eligibility nor a storage fault/SQL callback capability, and does not reconstruct another persistence coordinator.
               workflow_missing_run_component_fixture: Missing-run witnesses obtain an explicitly unscoped typed author context from the existing native fixture rather than inheriting a run or attempting to clear it by supplying an empty value to WithRunID. The actual activation command must refuse the unchanged prepared instance for missing run identity before persistence. Both backends prove zero selected writes, zero physical workflow headers and joined cleanup. The full run-scope cohort consumes opaque native owners; no raw SQL, alternate context protocol or reconstructed workflow store is exposed.
@@ -18443,23 +18451,39 @@ platform_tables:
         \ entity_id IS NOT NULL,\n    INDEX idx_receipts_subscriber (subscriber_id, processed_at),\n    INDEX idx_receipts_idempotency\
         \ (idempotency_key) WHERE idempotency_key IS NOT NULL\n);"
     entity_state:
-      description: Current run-scoped state of every entity. This IS the run-scoped entity registry — no separate registry
-        table. Current-state identity is (run_id, entity_id), allowing source and fork runs to preserve the same entity_id
-        while diverging independently. slug and name are top-level columns for fast lookup/display without JSONB queries.
-        entity_type records the exact admitted flow-scoped entity contract for the row; the admitted contract is resolved from
-        the authored flow contract before mutation, and storage never infers or repairs it. Callers do not author or choose multiple
-        entity kinds inside one flow in Wave 1. It is mandatory, nonblank, and has no storage default; omission or disagreement
-        fails before mutation, while a literal `default` is valid only when that is the exact canonical contract name. fields JSONB holds only contract-driven authored entity fields. bookkeeping
-        JSONB independently holds platform facts chosen by explicit bookkeeping producers; readers never classify either
-        map by key spelling. Generic store reads use entity_state for run-scoped listing, filtering, and lookup.
-      ddl: "CREATE TABLE entity_state (\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    entity_id         UUID NOT NULL,\n    flow_instance     TEXT NOT NULL,\n    entity_type       TEXT NOT NULL CHECK (LENGTH(TRIM(entity_type)) > 0),\n    slug              TEXT,\n\
-        \    name              TEXT,\n    current_state     TEXT NOT NULL,\n    gates             JSONB NOT NULL DEFAULT '{}',\n\
-        \    fields            JSONB NOT NULL DEFAULT '{}',\n    bookkeeping       JSONB NOT NULL DEFAULT '{}',\n    accumulator       JSONB NOT NULL DEFAULT '{}',\n    revision\
-        \          INTEGER NOT NULL DEFAULT 0,\n    entered_state_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    created_at\
-        \        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    PRIMARY\
-        \ KEY (run_id, entity_id),\n    INDEX idx_entity_flow (run_id, flow_instance, current_state),\n\
-        \    INDEX idx_entity_state (run_id, current_state),\n    INDEX idx_entity_type (run_id, entity_type),\n    INDEX\
-        \ idx_entity_slug (run_id, slug) WHERE slug IS NOT NULL,\n    INDEX idx_entity_cross_run (entity_id)\n);"
+      description: >-
+        Run-scoped authored entity data, identified by (run_id, entity_id). The exact admitted flow-scoped contract
+        supplies fields; slug and name retain their authored display meaning. This table is not construction, lifecycle,
+        stage, gate, bookkeeping, accumulator, stage-entry or lifecycle-revision authority. Those facts belong to
+        flow_instances. A required field companion must be admitted even when its data is unchanged and its UPDATE is
+        skipped. Data clocks must be present and nonzero, with updated_at not before created_at; unchanged-data
+        write elision does not exempt this admission. Fieldless constructed instances have no invented row;
+        data-only imports retain fields and identity but
+        never acquire a header or execution permission. Platform lifecycle input presence on an import fails before
+        effects. Declared fields with lifecycle-like names remain business data, not platform facts.
+        created_at records the authored-data origin; updated_at advances only when admitted fields or authored display
+        metadata change. Lifecycle-only mutations do not rewrite the data row or advance either data clock. Historical
+        entity metadata captures these clocks in the same original transaction; fixed-cut forks preserve their admitted
+        data clocks separately from header lifecycle clocks. Entity-list cursors use the data updated_at/entity_id/run_id
+        tuple, not lifecycle progress. No synchronized data revision, lifecycle shadows, old-store migration or fallback
+        reader is supported.
+      ddl: |
+        CREATE TABLE entity_state (
+            run_id            UUID NOT NULL REFERENCES runs(run_id),
+            entity_id         UUID NOT NULL,
+            flow_instance     TEXT NOT NULL,
+            entity_type       TEXT NOT NULL CHECK (LENGTH(TRIM(entity_type)) > 0),
+            slug              TEXT,
+            name              TEXT,
+            fields            JSONB NOT NULL DEFAULT '{}',
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (run_id, entity_id),
+            INDEX idx_entity_flow (run_id, flow_instance),
+            INDEX idx_entity_type (run_id, entity_type),
+            INDEX idx_entity_slug (run_id, slug) WHERE slug IS NOT NULL,
+            INDEX idx_entity_cross_run (entity_id)
+        );
     workflow_instance_initial_materializations:
       description: >-
         Immutable run-scoped construction identity for a workflow instance. The canonical activation transaction inserts
@@ -19999,8 +20023,8 @@ platform_tables:
         multi_bundle_persistence.bundle_identity format and intentionally have no database foreign key
         to bundles.bundle_hash so historical audit identity survives bundle deletion.'
     entity_mutations:
-      description: 'Append-only mutation log for entity_state changes. Every write to entity_state.fields,
-        entity_state.bookkeeping, entity_state.current_state, entity_state.gates, or entity_state.accumulator produces a row.
+      description: 'Append-only mutation log for admitted authored-field and constructed lifecycle changes. The authored_field
+        domain records entity_state.fields; lifecycle_state, bookkeeping, gate and accumulator record flow_instances facts.
         The mutation log is the audit trail for the flight recorder and the undo log for fork/replay.
         Not a separate event stream — just a side-table that captures the before/after of every state change. Domain is
         producer-owned and never inferred from path spelling; path is uninterpreted within its selected domain.'
@@ -20653,10 +20677,13 @@ run_model:
       A missing historical header or changed historical lifecycle/configuration/clock/state fact on exact reuse is corruption and refuses
       without repair. Reuse consumes the canonical paired header/optional-fields reader and the same fixed-revision
       projection as the historical writer, not presence counts alone. Imported state-only rows remain non-executable:
-      exact materialize-only reuse verifies their projected fields, stage, entry time, revision, gates, bookkeeping,
-      accumulator, names and branch-creation clocks through the same paired reader and historical writer projection.
-      Their branch-creation clocks use the canonical run-start timestamp; they do not replace recorded stage-entry
-      time. Changed import evidence refuses without repair or construction. Flow membership
+      exact materialize-only reuse verifies their projected fields, names and recorded data creation/update clocks
+      through the same paired reader and historical data-only writer projection. Lifecycle stage, entry time,
+      revision, gates, bookkeeping and accumulator remain absent; neither branch-start time nor an empty loop
+      correspondence may fabricate them. Proposed-effect discovery uses exact persisted source coordinates:
+      no matching card requires no execution correspondence, while any matching card still requires exact admitted
+      child correspondence before authority can be copied. Changed import evidence or an unexpected constructed
+      header refuses without repair or construction. Flow membership
       alone proves neither entity type nor lifecycle readiness. Every retained frontier event
       association and its execution mode remains explicit; duplicate or conflicting projections cannot elect an owner.
       A child companion and its readiness are fresh work admitted through the canonical selected declaration and
@@ -21706,6 +21733,10 @@ run_model:
       and current-only members remain explicit drift. Missing required fields, fabricated fieldless fields and conflicting
       entity/route/type pairing fail closed with coordinates. Read-only projection access shares mutation admission
       without acquiring mutation locks or promoting state-only evidence to construction authority.
+      Projection preserves the actual producer/store entity identifier: PostgreSQL mutation selection uses native
+      UUID equality, while SQLite retains exact stored TEXT spelling. Valid nonzero entity UUID spellings must not
+      acquire a reader-only canonical-text restriction borrowed from run-ID admission; header/data pairing still
+      requires exact stored identity. No reader rewrites identifiers or grants construction through normalization.
       Mutation ordering shares the run-fork committed-revision owner: first
       revision, then mutation ID within a revision. This UUID tie-break is deterministic, not an intra-transaction
       chronology. Revision facts supply validated ordering coordinates, never replacement mutation values.
@@ -32726,6 +32757,11 @@ api_specification:
           test_quiescence:
             $ref: '#/components/schemas/RunTestQuiescence'
       EntitySummary:
+        description: >-
+          Authored-data membership and clocks with nullable header lifecycle. Data-only imports have null for every
+          lifecycle property. Constructed no-stage members have stage_defined false, a positive header revision and
+          lifecycle clocks, but null current_state and entered_state_at. Staged members expose the exact declared stage.
+          created_at and updated_at are data clocks; lifecycle-only changes do not move the data-list cursor.
         type: object
         additionalProperties: false
         required:
@@ -32733,8 +32769,12 @@ api_specification:
         - run_id
         - flow_instance
         - entity_type
+        - stage_defined
         - current_state
         - revision
+        - entered_state_at
+        - lifecycle_created_at
+        - lifecycle_updated_at
         - created_at
         - updated_at
         properties:
@@ -32746,21 +32786,28 @@ api_specification:
             type: string
           entity_type:
             type: string
+          stage_defined:
+            oneOf: [{type: boolean}, {type: 'null'}]
           current_state:
-            type: string
+            oneOf: [{type: string}, {type: 'null'}]
           slug:
             type: string
           name:
             type: string
           revision:
-            type: integer
-            minimum: 0
+            oneOf: [{type: integer, minimum: 1}, {type: 'null'}]
+          entered_state_at:
+            oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+          lifecycle_created_at:
+            oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
+          lifecycle_updated_at:
+            oneOf: [{$ref: '#/components/schemas/Timestamp'}, {type: 'null'}]
           created_at:
             $ref: '#/components/schemas/Timestamp'
           updated_at:
             $ref: '#/components/schemas/Timestamp'
       EntityFull:
-        description: 'Entity-native operator shape from the canonical typed entity-read owner: entity identity, authored fields, platform bookkeeping, gates and accumulator state. The v1 entity.get reader returns this decomposition directly; retired dashboard instance projections are not an alternate owner.'
+        description: 'Entity-native operator shape from the canonical typed entity-read owner: admitted data identity/fields and optional exact header lifecycle. Imports have explicit null bookkeeping/gates/accumulated/loops, never empty fabricated lifecycle maps. Constructed members retain valid maps and typed loop arrays. Retired projections are not an alternate owner.'
         type: object
         additionalProperties: false
         required:
@@ -32769,6 +32816,7 @@ api_specification:
         - bookkeeping
         - gates
         - accumulated
+        - loops
         properties:
           entity:
             $ref: '#/components/schemas/EntitySummary'
@@ -32777,24 +32825,28 @@ api_specification:
             description: Typed entity fields per the entity contract. Shape depends on entity_type.
             additionalProperties: true
           bookkeeping:
-            type: object
             description: Platform bookkeeping facts selected by explicit producers. Keys never classify authored fields.
-            additionalProperties: true
+            oneOf:
+            - {type: object, additionalProperties: true}
+            - {type: 'null'}
           gates:
-            type: object
             description: "Gate state. Map of gate_name \u2192 boolean."
-            additionalProperties:
-              type: boolean
+            oneOf:
+            - {type: object, additionalProperties: {type: boolean}}
+            - {type: 'null'}
           accumulated:
-            type: object
             description: "Accumulator state. Map of accumulator key \u2192 JSON value; values may be scalars, objects, or\
               \ arrays depending on accumulate, data_accumulation, compute, or projection writers."
-            additionalProperties: true
+            oneOf:
+            - {type: object, additionalProperties: true}
+            - {type: 'null'}
           loops:
-            type: array
             description: Typed bounded-loop runtime projection. The reserved mutable control bucket is never returned.
-            items:
-              $ref: '#/components/schemas/BoundedLoopActivation'
+            oneOf:
+            - type: array
+              items:
+                $ref: '#/components/schemas/BoundedLoopActivation'
+            - {type: 'null'}
       BoundedLoopActivation:
         type: object
         additionalProperties: false
@@ -32829,6 +32881,7 @@ api_specification:
         additionalProperties: false
         required:
         - counts
+        - absent_count
         properties:
           counts:
             type: object
@@ -32836,6 +32889,10 @@ api_specification:
             additionalProperties:
               type: integer
               minimum: 0
+          absent_count:
+            type: integer
+            minimum: 0
+            description: SQL-null groups, separate from every real string bucket including unknown. Sum of counts plus absent_count conserves admitted data membership.
       DeliveryStatus:
         type: string
         description: >-

@@ -69,11 +69,18 @@ type Writer struct {
 }
 
 type EntityStateProjection struct {
-	CurrentState string
+	CurrentState *string
 	Fields       map[string]any
 	Bookkeeping  map[string]any
 	Gates        map[string]any
 	Accumulator  map[string]any
+}
+
+// PresentLifecycleState records presence even for an invalid blank value;
+// validation, rather than a string sentinel, decides whether it is admissible.
+func PresentLifecycleState(value string) *string {
+	value = strings.TrimSpace(value)
+	return &value
 }
 
 type ProjectionMutation struct {
@@ -140,12 +147,23 @@ func BuildEntityStateDiffRecords(entityID string, before, after EntityStateProje
 	}
 	handlerStep := strings.TrimSpace(writer.HandlerStep)
 	records := make([]Record, 0, 8)
-	if strings.TrimSpace(before.CurrentState) != strings.TrimSpace(after.CurrentState) {
+	oldState, err := projectedLifecycleValue(before.CurrentState)
+	if err != nil {
+		return nil, err
+	}
+	newState, err := projectedLifecycleValue(after.CurrentState)
+	if err != nil {
+		return nil, err
+	}
+	if oldState != nil && newState == nil {
+		return nil, ErrInvalidMutationLogWriter("constructed lifecycle state cannot be removed")
+	}
+	if oldState != newState {
 		records = append(records, Record{
 			EntityID:    entityID,
 			Domain:      DomainLifecycleState,
-			OldValue:    stringOrNil(before.CurrentState),
-			NewValue:    stringOrNil(after.CurrentState),
+			OldValue:    oldState,
+			NewValue:    newState,
 			WriterType:  writerType,
 			WriterID:    writerID,
 			HandlerStep: handlerStep,
@@ -176,10 +194,7 @@ func BuildEntityStateDiffRecords(entityID string, before, after EntityStateProje
 
 func ReconstructEntityStateProjection(records []ProjectionMutation) (EntityStateProjection, error) {
 	state := EntityStateProjection{
-		Fields:      map[string]any{},
-		Bookkeeping: map[string]any{},
-		Gates:       map[string]any{},
-		Accumulator: map[string]any{},
+		Fields: map[string]any{},
 	}
 	for _, rec := range records {
 		if err := ApplyEntityStateProjectionMutation(&state, rec.Domain, rec.Path, rec.NewValue); err != nil {
@@ -203,7 +218,13 @@ func ApplyEntityStateProjectionMutation(state *EntityStateProjection, domain Dom
 		if !ok {
 			return ErrInvalidMutationLogWriter("lifecycle_state mutation value must be a string")
 		}
-		state.CurrentState = strings.TrimSpace(next)
+		if strings.TrimSpace(next) == "" {
+			return ErrInvalidMutationLogWriter("lifecycle_state mutation value must not be blank")
+		}
+		state.CurrentState = PresentLifecycleState(next)
+		state.ensureBookkeeping()
+		state.ensureGates()
+		state.ensureAccumulator()
 		return nil
 	case DomainAuthoredField:
 		return applyProjectionMapValue(state.ensureFields(), path, value, "authored_field")
@@ -297,12 +318,15 @@ func jsonValuesEqual(left, right any) (bool, error) {
 	return string(leftJSON) == string(rightJSON), nil
 }
 
-func stringOrNil(raw string) any {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
+func projectedLifecycleValue(raw *string) (any, error) {
+	if raw == nil {
+		return nil, nil
 	}
-	return raw
+	value := strings.TrimSpace(*raw)
+	if value == "" {
+		return nil, ErrInvalidMutationLogWriter("present lifecycle state must not be blank")
+	}
+	return value, nil
 }
 
 func (p *EntityStateProjection) ensureFields() map[string]any {

@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -26,13 +27,18 @@ func TestIssue2564AgentWriteMustAdvanceCanonicalRevisionBothStores(t *testing.T)
 			if err != nil || !result.Acknowledged {
 				t.Fatalf("agent save: %+v %v", result, err)
 			}
-			var headerRevision, fieldsRevision int64
-			query := `SELECT f.revision, e.revision FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.entity_id=f.entity_id WHERE f.run_id=$1 AND f.entity_id=$2`
-			if err := f.db.QueryRowContext(f.ctx, query, record.Identity.RunID, record.EntityID).Scan(&headerRevision, &fieldsRevision); err != nil {
+			var headerRevision int64
+			var rawFields []byte
+			query := `SELECT f.revision, e.fields FROM flow_instances f JOIN entity_state e ON e.run_id=f.run_id AND e.entity_id=f.entity_id AND e.flow_instance=f.instance_path WHERE f.run_id=$1 AND f.entity_id=$2`
+			if err := f.db.QueryRowContext(f.ctx, query, record.Identity.RunID, record.EntityID).Scan(&headerRevision, &rawFields); err != nil {
 				t.Fatal(err)
 			}
-			if headerRevision <= record.ExpectedRevision || headerRevision != fieldsRevision {
-				t.Fatalf("acknowledged agent save bypassed canonical CAS: evaluated=%d header=%d fields=%d tool=%d", record.ExpectedRevision, headerRevision, fieldsRevision, result.Revision)
+			if headerRevision <= record.ExpectedRevision || headerRevision != int64(result.Revision) {
+				t.Fatalf("acknowledged agent save bypassed canonical CAS: evaluated=%d header=%d tool=%d", record.ExpectedRevision, headerRevision, result.Revision)
+			}
+			var fields map[string]any
+			if err := json.Unmarshal(rawFields, &fields); err != nil || fields["account_id"] != "agent-committed" {
+				t.Fatalf("acknowledged CAS lost its exact authored companion: fields=%s err=%v", rawFields, err)
 			}
 		})
 	}

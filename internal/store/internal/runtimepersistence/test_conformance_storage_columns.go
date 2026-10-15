@@ -26,7 +26,8 @@ func CheckRuntimeLogStorageColumnsForTest(ctx context.Context, selected any) err
 
 func CheckMutationStorageColumnsForTest(ctx context.Context, selected any) error {
 	return checkConformanceStorageColumns(ctx, selected, []conformanceStorageColumns{
-		{"entity_state", "entity_id current_state fields bookkeeping gates accumulator"},
+		{"entity_state", "entity_id fields"},
+		{"flow_instances", "entity_id current_state bookkeeping gates accumulator"},
 		{"entity_mutations", "entity_id domain path old_value new_value writer_type writer_id handler_step created_at"},
 	})
 }
