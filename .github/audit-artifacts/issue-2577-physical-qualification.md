@@ -31,6 +31,19 @@ nor a passing rehearsal erases their retained evidence or recurrence rules.
 Final source/binary/helper/receipt identity is bound in the final issue packet,
 not by the superseded preparation hashes below.
 
+The subsequent quiet 3d05729332 rehearsal stopped at the first CLI progress
+read (exit 2), before rendering a QR; its retained evidence is in
+[#2577/6201572376](https://github.com/division-sh/swarm/issues/2577#issuecomment-6201572376).
+The deterministic both-store held-first-batch cut separately reproduces the
+get and retry refusals and proves the exact conditional gate in
+[6201624807](https://github.com/division-sh/swarm/issues/2577#issuecomment-6201624807).
+The onboarding result owner projects only that valid owned, zero-material,
+unpaired/unconnected initial snapshot as existing non-executable preparing.
+Private pairing state and strict current-QR validation are unchanged. This
+successor still needs focused/negative controls, a fresh exact-head preflight,
+ONE quiet real-SDK first-QR/expiry/replacement rehearsal and hosted/final review;
+the existing REDs remain failed evidence and no sitting is authorized.
+
 ## Historical Preparation (Superseded)
 
 **NOT READY: preparation checkpoint, not the user's final sitting packet.**
