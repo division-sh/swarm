@@ -17,7 +17,13 @@ type publicationSuccessorEdit struct{ before, after string }
 // amendment reverses before the older publication edits, preserving their pins.
 const rootForkPostCutBusinessSetup = `			if gate {
 				// Branch isolation needs later business history, not runtime logs.
-				advanceLifecycleForkSourceHistory(t, rt, seed.RunID)
+				var selected interface {
+					PipelineObligations() pipelineobligation.Store
+				} = rt.Postgres
+				if rt.SQLite != nil {
+					selected = rt.SQLite
+				}
+				advanceLifecycleForkSourceHistory(t, servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash), selected, seed.RunID)
 			}
 `
 
