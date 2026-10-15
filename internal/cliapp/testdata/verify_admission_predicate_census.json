@@ -3303,7 +3303,7 @@
     "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.NewSessionAuthority",
     "audit_rows": "A19,A20,A28",
     "proof_families": "P18,P19,P24",
-    "body_sha256": "05608bf636363eecf6954b1c9e48e54630b4885153fc77484a6b0f00c7fb8480"
+    "body_sha256": "d66e1ad2afe1871d90b523ddfb08190b79fb9d1d4129c59947a55a83a3aa87ec"
   },
   {
     "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.Ping",
@@ -3364,6 +3364,12 @@
     "audit_rows": "A19,A20,A28",
     "proof_families": "P18,P19,P24",
     "body_sha256": "a2ee518d568d5161c6bdccbd3ad0b40f8b3dee1e8f3390435e9c70f48bfb7f94"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/inspection.go::*Backend.InspectRetainedAgentRecovery",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "201796b2dabcead4842259c65068b5e2134894c46fb380e33a3fe01fdc677994"
   },
   {
     "owner": "internal/store/internal/backend/postgres/inspection.go::*Backend.InspectSnapshot",
