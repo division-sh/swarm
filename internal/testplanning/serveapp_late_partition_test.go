@@ -42,7 +42,7 @@ func serveappLateSplitEnvelopes() map[string]UnitPolicy {
 	return map[string]UnitPolicy{
 		"serveapp-other-late": {
 			Packages: []string{"github.com/division-sh/swarm/internal/serveapp"},
-			Run:      `^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E|Issue2394(Held.*|Served(F.*|S.*)|Stop.*|Selected.*)|Issue2564(DecisionCard.*|Served(H3.*|M33.*))|Issue2566ReporterFiniteFixtureCanCloseBothStores|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$`,
+			Run:      `^(Test([J-LNOQ].*|P($|[^r].*|r($|[^o].*|o($|[^v].*)))|Issue2394(Held.*|Served(F.*|S.*)|Stop.*|Selected.*)|Issue2564(DecisionCard.*|Served(H3.*|M33.*))|Issue2566ReporterFiniteFixtureCanCloseBothStores|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$`,
 			RequiredChildren: map[string][]string{
 				"TestPublicPublicationCompletionBoundaryBothStores":                    {"default_sqlite", "explicit_postgres"},
 				"TestPublicCompletionCapacityServedBothStores":                         {"default_sqlite", "explicit_postgres"},
@@ -61,7 +61,6 @@ func serveappLateSplitEnvelopes() map[string]UnitPolicy {
 				"TestPublicCompletionAcknowledgedDefaultAbandonmentBothStores":         {"default_sqlite/event.publish", "default_sqlite/run.start/event-backed", "default_sqlite/run.start/feed-only", "explicit_postgres/event.publish", "explicit_postgres/run.start/event-backed", "explicit_postgres/run.start/feed-only"},
 				"TestPublicCompletionAcknowledgedFenceRecoveryBothStores":              {"default_sqlite/event.publish", "default_sqlite/run.start/event-backed", "default_sqlite/run.start/feed-only", "explicit_postgres/event.publish", "explicit_postgres/run.start/event-backed", "explicit_postgres/run.start/feed-only"},
 				"TestPublicCompletionManagedCommitCutBothStores":                       {"default_sqlite/bundle/event.publish", "default_sqlite/bundle/run.start/event-backed", "default_sqlite/bundle/run.start/feed-only", "default_sqlite/supervisor/event.publish", "default_sqlite/supervisor/run.start/event-backed", "default_sqlite/supervisor/run.start/feed-only", "explicit_postgres/bundle/event.publish", "explicit_postgres/bundle/run.start/event-backed", "explicit_postgres/bundle/run.start/feed-only", "explicit_postgres/supervisor/event.publish", "explicit_postgres/supervisor/run.start/event-backed", "explicit_postgres/supervisor/run.start/feed-only"},
-				"TestProviderSelectedRootStandingBootBothStores":                       {"default_sqlite", "explicit_postgres"},
 				"TestIssue2566ReporterFiniteFixtureCanCloseBothStores":                 {"sqlite", "postgres"},
 				"TestManagedEmitPublicationExactScopeBothStores":                       {"default_sqlite/root", "default_sqlite/imported", "default_sqlite/nested", "default_sqlite/template", "explicit_postgres/root", "explicit_postgres/imported", "explicit_postgres/nested", "explicit_postgres/template"},
 			},
@@ -80,8 +79,9 @@ func TestServeappLateSplitPreservesOriginalRootPartition(t *testing.T) {
 	policy := loadPersistenceDebtPolicy(t)
 	old := regexp.MustCompile(originalServeappLateSelection)
 	matchers := []func(string) bool{func(name string) bool { return !old.MatchString(name) }}
-	for _, id := range []string{"serveapp-other-late", "serveapp-delayed-commit-preservation"} {
-		matchers = append(matchers, regexp.MustCompile(policy.Units[id].Run).MatchString)
+	for _, id := range []string{"serveapp-other-late", "serveapp-delayed-commit-preservation", "serveapp-channel", "serveapp-channel-neutral"} {
+		pattern := regexp.MustCompile(policy.Units[id].Run)
+		matchers = append(matchers, func(name string) bool { return old.MatchString(name) && pattern.MatchString(name) })
 	}
 	dir := filepath.Join("..", "..", "internal", "serveapp")
 	if err := validateGoProofMatchers(dir, matchers); err != nil {

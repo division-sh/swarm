@@ -13,11 +13,14 @@ func TestChannelNeutralSplitRetainsCompleteProofEnvelopes(t *testing.T) {
 	policy := loadPersistenceDebtPolicy(t)
 	for id, run := range map[string]string{
 		"serveapp-channel-learned": `^TestChannelLearned.*$`,
-		"serveapp-channel-neutral": `^TestChannel(TextReply.*|OptionalCapabilities.*|CollidingCaption.*|PageOracle.*)$`,
+		"serveapp-channel-neutral": `^Test(Channel(TextReply.*|OptionalCapabilities.*|CollidingCaption.*|PageOracle.*)|Prov.*)$`,
 	} {
 		want := UnitPolicy{
 			Packages: []string{policy.Module + "/internal/serveapp"}, Run: run,
 			CountMode: "count-1", EnvironmentIDs: managedEnvironmentIDs(), BudgetClass: "full",
+		}
+		if id == "serveapp-channel-neutral" {
+			want.RequiredChildren = map[string][]string{"TestProviderSelectedRootStandingBootBothStores": {"default_sqlite", "explicit_postgres"}}
 		}
 		if !reflect.DeepEqual(policy.Units[id], want) {
 			t.Errorf("%s changed complete-root/backend/count/environment/budget/timeout envelope: %+v", id, policy.Units[id])
@@ -37,7 +40,8 @@ func validateChannelNeutralSplit(policy Policy) error {
 	old := regexp.MustCompile(originalChannelLearnedSelection)
 	matchers := []func(string) bool{func(name string) bool { return !old.MatchString(name) }}
 	for _, id := range []string{"serveapp-channel-learned", "serveapp-channel-neutral"} {
-		matchers = append(matchers, regexp.MustCompile(policy.Units[id].Run).MatchString)
+		pattern := regexp.MustCompile(policy.Units[id].Run)
+		matchers = append(matchers, func(name string) bool { return old.MatchString(name) && pattern.MatchString(name) })
 	}
 	return validateGoProofMatchers(filepath.Join("..", "..", "internal", "serveapp"), matchers)
 }
