@@ -4,7 +4,12 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -30,12 +35,17 @@ func TestSelectedForkIndependentOperationsExecuteDistinctChildrenBothStores(t *t
 					request.ForkOperation.IdempotencyKey = ""
 				}
 				selected := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader).Store
+				advanced := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(uuid.NewString(), "item.received", "source-runtime", "", []byte(`{}`), 0,
+					request.SourceRunID, events.EventEnvelope{}, events.NoRoutingSource(), time.Unix(1700002300, 0).UTC(), executionmode.Mock)
+				storetest.CommitSemanticEventWithRoutes(t, ctx, selected, advanced,
+					[]events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
+				storetest.CaptureRunForkSnapshot(t, ctx, selected, request.SourceRunID)
 				execution := &liveWinnerExecutionProbe{SelectedContractRuntimeExecutionLifecycle: request.Owner.ports.runtimeExecution,
 					entered: make(chan struct{}), allow: make(chan struct{})}
 				close(execution.allow)
 				request.Owner.ports.runtimeExecution = execution
 				first, err := ExecuteSelectedContractRunFork(ctx, request)
-				if err != nil || !first.Activation.Activated {
+				if err != nil || !first.Activation.Activated || first.Activation.SourceFrozen || !first.Activation.SourceAdvancedAfterFork {
 					t.Fatalf("first invocation failed: %+v err=%v", first, err)
 				}
 				next := *request.ForkOperation
