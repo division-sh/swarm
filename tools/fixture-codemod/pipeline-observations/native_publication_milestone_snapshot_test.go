@@ -268,6 +268,10 @@ func TestNativeReceiverForkMilestoneSuccessorPreservesReviewedCuts(t *testing.T)
 }
 
 func validateReceiverForkMilestoneSuccessor(row recipe, actual string) error {
+	row, actual, err := receiverForkBusinessPredecessor(row, actual)
+	if err != nil {
+		return err
+	}
 	if fmt.Sprintf("%x", sha256.Sum256([]byte(row.After))) != "fecc19b2cd332c799fb77740e3e4e9c0c857810022536660b0f188d1b87791e6" {
 		return fmt.Errorf("receiver predecessor changed")
 	}
