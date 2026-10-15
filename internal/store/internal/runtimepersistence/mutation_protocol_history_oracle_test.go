@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/google/uuid"
 )
 
@@ -74,59 +75,82 @@ func requireMutationProtocolFullCaptureNoRepair(t *testing.T, ctx context.Contex
 func TestMutationProtocolOrdinaryEventWriterMatchesFullHistoricalCaptureBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
-			fixture := backend.open(t)
-			ctx := testAuthorActivityContext()
-			runID, eventID := uuid.NewString(), uuid.NewString()
-			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
-			publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, backend.name == "postgres", runID)
-			baseline := snapshotMutationProtocolHistory(t, ctx, fixture.db, runID)
+			for _, diagnostic := range []bool{false, true} {
+				name := "business"
+				if diagnostic {
+					name = "diagnostic"
+				}
+				t.Run(name, func(t *testing.T) {
+					fixture := backend.open(t)
+					ctx := testAuthorActivityContext()
+					runID, eventID := uuid.NewString(), uuid.NewString()
+					seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+					publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, fixture.dialect == "postgres", runID)
+					baseline := snapshotMutationProtocolHistory(t, ctx, fixture.db, runID)
 
-			event := eventtest.DiagnosticDirect(
-				eventID, events.EventTypePlatformRuntimeLog, "runtime", "",
-				[]byte(`{"log_level":"info","message":"history oracle","details":{"component":"mutation_protocol_history_oracle","action":"append"}}`),
-				0, runID, "", events.EventEnvelope{}, time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC),
-			)
-			bound, err := bindSemanticEventFixturePayload(event)
-			if err != nil {
-				t.Fatalf("bind runtime-log payload: %v", err)
-			}
-			admitted, err := events.AdmitForPersistence(bound, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
-			if err != nil {
-				t.Fatalf("admit runtime-log event: %v", err)
-			}
-			writer, ok := fixture.store.(diagnosticRuntimeLogFixtureStore)
-			if !ok {
-				t.Fatalf("selected store %T has no runtime-log production writer", fixture.store)
-			}
-			outcome, err := writer.CommitRuntimeLogEvent(ctx, admitted)
-			if err != nil || outcome != runtimebus.EventAppendInserted {
-				t.Fatalf("ordinary runtime-log commit: outcome=%v err=%v", outcome, err)
-			}
-			inserted := snapshotMutationProtocolHistory(t, ctx, fixture.db, runID)
-			if inserted.Head != baseline.Head+1 || inserted.RevisionRows != baseline.RevisionRows+1 {
-				t.Fatalf("ordinary writer revision = head:%d rows:%d, baseline head:%d rows:%d", inserted.Head, inserted.RevisionRows, baseline.Head, baseline.RevisionRows)
-			}
-			var eventFacts int
-			if err := fixture.db.QueryRowContext(ctx, `
+					at := time.Date(2026, 9, 22, 12, 0, 0, 0, time.UTC)
+					event := eventtest.ExistingRunRootIngress(eventID, "history.oracle", "runtime", "", []byte(`{"message":"history oracle"}`), 0, runID, events.EventEnvelope{}, at)
+					wantRevisionDelta := int64(1)
+					if diagnostic {
+						event = eventtest.DiagnosticDirect(
+							eventID, events.EventTypePlatformRuntimeLog, "runtime", "",
+							[]byte(`{"log_level":"info","message":"history oracle","details":{"component":"mutation_protocol_history_oracle","action":"append"}}`),
+							0, runID, "", events.EventEnvelope{}, at,
+						)
+						wantRevisionDelta = 0
+					}
+					bound, err := bindSemanticEventFixturePayload(event)
+					if err != nil {
+						t.Fatalf("bind event payload: %v", err)
+					}
+					admitted, err := events.AdmitForPersistence(bound, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+					if err != nil {
+						t.Fatalf("admit event: %v", err)
+					}
+					writer, ok := fixture.store.(diagnosticRuntimeLogFixtureStore)
+					if !ok {
+						t.Fatalf("selected store %T has no runtime-log production writer", fixture.store)
+					}
+					commit := func() (runtimebus.EventAppendOutcome, error) {
+						if diagnostic {
+							return writer.CommitRuntimeLogEvent(ctx, admitted)
+						}
+						return commitAdmittedSemanticEventFixtureOutcome(ctx, fixture.store, admitted, nil, runtimepipelineobligation.ScopeDirect)
+					}
+					outcome, err := commit()
+					if err != nil || outcome != runtimebus.EventAppendInserted {
+						t.Fatalf("event commit: outcome=%v err=%v", outcome, err)
+					}
+					inserted := snapshotMutationProtocolHistory(t, ctx, fixture.db, runID)
+					if inserted.Head != baseline.Head+wantRevisionDelta || inserted.RevisionRows != baseline.RevisionRows+int(wantRevisionDelta) {
+						t.Fatalf("ordinary writer revision = head:%d rows:%d, baseline head:%d rows:%d", inserted.Head, inserted.RevisionRows, baseline.Head, baseline.RevisionRows)
+					}
+					if diagnostic && !reflect.DeepEqual(inserted, baseline) {
+						t.Fatal("diagnostic append changed fork history")
+					}
+					var eventFacts int
+					if err := fixture.db.QueryRowContext(ctx, `
 				SELECT COUNT(*) FROM run_fork_fact_revisions
 				WHERE run_id=$1 AND revision=$2 AND family='events' AND fact_key=$3 AND present=TRUE
 			`, runID, inserted.Head, eventID).Scan(&eventFacts); err != nil {
-				t.Fatalf("count writer event facts: %v", err)
-			}
-			if eventFacts != 1 {
-				t.Fatalf("ordinary writer event facts = %d, want one at revision %d", eventFacts, inserted.Head)
-			}
-			requireMutationProtocolFullCaptureNoRepair(t, ctx, fixture, runID)
+						t.Fatalf("count writer event facts: %v", err)
+					}
+					if eventFacts != int(wantRevisionDelta) {
+						t.Fatalf("writer event facts = %d, want %d at revision %d", eventFacts, wantRevisionDelta, inserted.Head)
+					}
+					requireMutationProtocolFullCaptureNoRepair(t, ctx, fixture, runID)
 
-			outcome, err = writer.CommitRuntimeLogEvent(ctx, admitted)
-			if err != nil || outcome != runtimebus.EventAppendExactDuplicate {
-				t.Fatalf("exact duplicate runtime-log commit: outcome=%v err=%v", outcome, err)
+					outcome, err = commit()
+					if err != nil || outcome != runtimebus.EventAppendExactDuplicate {
+						t.Fatalf("exact duplicate event commit: outcome=%v err=%v", outcome, err)
+					}
+					duplicate := snapshotMutationProtocolHistory(t, ctx, fixture.db, runID)
+					if !reflect.DeepEqual(duplicate, inserted) {
+						t.Fatalf("exact duplicate changed history:\ninserted=%#v\nduplicate=%#v", inserted, duplicate)
+					}
+					requireMutationProtocolFullCaptureNoRepair(t, ctx, fixture, runID)
+				})
 			}
-			duplicate := snapshotMutationProtocolHistory(t, ctx, fixture.db, runID)
-			if !reflect.DeepEqual(duplicate, inserted) {
-				t.Fatalf("exact duplicate changed history:\ninserted=%#v\nduplicate=%#v", inserted, duplicate)
-			}
-			requireMutationProtocolFullCaptureNoRepair(t, ctx, fixture, runID)
 		})
 	}
 }

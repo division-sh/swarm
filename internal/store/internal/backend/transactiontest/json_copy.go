@@ -76,24 +76,34 @@ func (c *JSONCopyCounts) settle(acknowledged, commitAttempted, rollbackAttempted
 	c.DeadLetters.settle(acknowledged, commitAttempted, rollbackAttempted)
 }
 
+type EventHistoryJSONFamily uint8
+
+const (
+	EventJSON EventHistoryJSONFamily = iota + 1
+	DeliveryJSON
+	ReplayScopeJSON
+	ReceiptJSON
+	DeadLetterJSON
+)
+
 // BeginEventHistoryJSON observes only the submitted event/delivery ledger
 // arguments. It neither selects history nor creates transaction authority.
-func BeginEventHistoryJSON(ctx context.Context, family string, length, copies int) *JSONCopyWrite {
+func BeginEventHistoryJSON(ctx context.Context, family EventHistoryJSONFamily, length, copies int) *JSONCopyWrite {
 	a := revisionAttempt(ctx)
 	if a == nil || copies == 0 {
 		return nil
 	}
 	var counts *CopyCounts
 	switch family {
-	case "events":
+	case EventJSON:
 		counts = &a.jsonCopies.Events
-	case "event_deliveries":
+	case DeliveryJSON:
 		counts = &a.jsonCopies.EventDeliveries
-	case "committed_replay_scopes":
+	case ReplayScopeJSON:
 		counts = &a.jsonCopies.CommittedReplayScopes
-	case "event_receipts":
+	case ReceiptJSON:
 		counts = &a.jsonCopies.EventReceipts
-	case "dead_letters":
+	case DeadLetterJSON:
 		counts = &a.jsonCopies.DeadLetters
 	default:
 		return nil
