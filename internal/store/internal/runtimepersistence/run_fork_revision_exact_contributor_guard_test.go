@@ -44,7 +44,7 @@ func revisionProjectionContributorCensus() map[string][]string {
 		"FamilyEntityMutations":         {"entity_mutations"},
 		"FamilyEntityMetadata":          {"entity_state", "flow_instances", "workflow_instance_initial_materializations"},
 		"FamilyEventDeliveries":         {"event_deliveries", "event_delivery_attempts", "event_delivery_handler_rule_selections"},
-		"FamilyCommittedReplayScopes":   {"committed_replay_scopes"},
+		"FamilyCommittedReplayScopes":   {"committed_replay_scopes", "events"},
 		"FamilyEventReceipts":           {"event_receipts", "events"},
 		"FamilyDeadLetters":             {"dead_letters", "event_delivery_attempts", "events"},
 		"FamilyTimers":                  {"timers"},
