@@ -41,7 +41,7 @@ func PrepareConversationForkConstructionForTest(ctx context.Context, selected an
 	event := fixture.Construction.CreatingEvent
 	if event.ID() != id || event.RunID() != fixture.RunID || event.Type() != "flow/conversation.created" ||
 		event.ProducerType() != events.EventProducerExternal || event.Producer().ID() != "conversation-construction-fixture" || !bytes.Equal(event.Payload(), []byte(`{"name":"Before"}`)) ||
-		!event.CreatedAt().Equal(fixture.Turn1At.Add(-30*time.Second)) {
+		!event.CreatedAt().Equal(fixture.Turn1At.Add(-30*time.Second).UTC().Truncate(time.Microsecond)) {
 		return ConversationForkConstruction{}, fmt.Errorf("conversation construction requires its original prepared creating event")
 	}
 	rootSource, err := events.NewRootRoutingSource(fixture.RunID)
