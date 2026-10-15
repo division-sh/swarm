@@ -453,6 +453,24 @@ func assertSelectedDeploymentRowsWithClosedExecutions(t *testing.T, f *deploymen
 
 func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, server *httptest.Server, runID, route string, compiledVersion string, rows [][]byte, wantClosed int) {
 	t.Helper()
+	assertSelectedDeploymentRowSettlement(t, f, server, runID, route, compiledVersion, rows)
+	var parentRunID sql.NullString
+	if err := f.db.QueryRowContext(f.ctx, `SELECT CAST(forked_from_run_id AS TEXT) FROM runs WHERE run_id=$1`, runID).Scan(&parentRunID); err != nil {
+		t.Fatal(err)
+	}
+	if parentRunID.Valid {
+		var closed int
+		if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 AND state='closed'`, runID).Scan(&closed); err != nil {
+			t.Fatal(err)
+		}
+		if closed != wantClosed {
+			t.Fatalf("%s selected child has %d closed executions after settled public result, want %d", route, closed, wantClosed)
+		}
+	}
+}
+
+func assertSelectedDeploymentRowSettlement(t *testing.T, f *deploymentResourceFixture, server *httptest.Server, runID, route string, compiledVersion string, rows [][]byte) {
+	t.Helper()
 	defer func() {
 		if t.Failed() {
 			logDeploymentResourceFailure(t, f.db, runID)
@@ -498,19 +516,6 @@ func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, 
 	}
 	if events != len(rows) || delivered != len(rows) || committed != 1 || pipelineReceipts != len(rows) || stampedHandoffs != len(rows) {
 		t.Fatalf("%s selected route did not settle: events=%d delivered=%d committed=%d pipeline_receipts=%d stamped_handoffs=%d", route, events, delivered, committed, pipelineReceipts, stampedHandoffs)
-	}
-	var parentRunID sql.NullString
-	if err := f.db.QueryRowContext(f.ctx, `SELECT CAST(forked_from_run_id AS TEXT) FROM runs WHERE run_id=$1`, runID).Scan(&parentRunID); err != nil {
-		t.Fatal(err)
-	}
-	if parentRunID.Valid {
-		var closed int
-		if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 AND state='closed'`, runID).Scan(&closed); err != nil {
-			t.Fatal(err)
-		}
-		if closed != wantClosed {
-			t.Fatalf("%s selected child has %d closed executions after settled public result, want %d", route, closed, wantClosed)
-		}
 	}
 	want := make(map[string]map[string]any, len(rows))
 	for _, row := range rows {
@@ -625,7 +630,48 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					assertForkRows := func() {
 						assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1)
 					}
+					assertSelectedDeploymentRowSettlement(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows)
+					beforeRefusals, err := storetest.ReadSelectedForkSourceDomain(f.ctx, f.selected, result.ForkRunID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					workBeforeRefusals := conformanceTestProcessOwner(t).ActiveCount()
+					canceled, cancel := context.WithCancel(f.ctx)
+					cancel()
+					for _, refused := range []struct {
+						name  string
+						owner runforkexecution.SelectedContractExecutionOwner
+						ctx   context.Context
+						runID string
+					}{
+						{"wrong_run", owner, f.ctx, uuid.NewString()},
+						{"ordinary_run", owner, f.ctx, changedSourceID},
+						{"unavailable_owner", runforkexecution.SelectedContractExecutionOwner{}, f.ctx, result.ForkRunID},
+						{"canceled_caller", owner, canceled, result.ForkRunID},
+					} {
+						observed, err := refused.owner.PublishSelectedFixtureCloseForTest(refused.ctx, refused.runID,
+							runforkexecution.SelectedFixtureCloseInputForTest{AccountID: "changed"})
+						if err == nil || observed != (runforkexecution.SelectedFixtureCloseResultForTest{}) {
+							t.Fatalf("%s fixture close acquired a child: %+v error=%v", refused.name, observed, err)
+						}
+					}
+					afterRefusals, err := storetest.ReadSelectedForkSourceDomain(f.ctx, f.selected, result.ForkRunID)
+					if err != nil || !reflect.DeepEqual(afterRefusals, beforeRefusals) || conformanceTestProcessOwner(t).ActiveCount() != workBeforeRefusals {
+						t.Fatalf("refused fixture inputs changed child state or retained work: error=%v", err)
+					}
+					closeResult, err := owner.PublishSelectedFixtureCloseForTest(f.ctx, result.ForkRunID,
+						runforkexecution.SelectedFixtureCloseInputForTest{AccountID: "changed"})
+					if err != nil {
+						t.Fatalf("close settled selected fixture through retained child: %v", err)
+					}
+					if closeResult.RunID != result.ForkRunID || closeResult.BindingID == "" || closeResult.ExecutionID == "" || closeResult.Generation != 1 || closeResult.EventID == "" {
+						t.Fatalf("fixture close lost retained execution evidence: %+v", closeResult)
+					}
 					assertForkRows()
+					var closes int
+					if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='fixture.close.requested'`, result.ForkRunID).Scan(&closes); err != nil || closes != 1 {
+						t.Fatalf("selected fixture close publication count=%d, want one: %v", closes, err)
+					}
 					operationBefore := selectedDeploymentForkOperationSnapshot(t, f, result.ForkRunID)
 
 					// The first response was decoded; rebuild the public handler for replay.
@@ -697,6 +743,10 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					old := f.runtime
 					join := beginServingLifetimeJoin(old, nil)
 					assertServingJoinComplete(t, join, old, nil)
+					if err := f.topology.capability.Release(context.Background()); err != nil {
+						t.Fatal(err)
+					}
+					f.topology = newNotifyAllChildrenProcessTopology(t, f.ctx, f.selected, f.source)
 					f.boot(t)
 					f.runtime.fanOutServing.Wake()
 					assertForkRows()
@@ -709,6 +759,10 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					}
 					if !controlOnly {
 						t.Fatalf("completed selected fork did not recover control-only: %+v", recovery)
+					}
+					if _, err := recoveredOwner.PublishSelectedFixtureCloseForTest(f.ctx, result.ForkRunID,
+						runforkexecution.SelectedFixtureCloseInputForTest{AccountID: "changed"}); err == nil {
+						t.Fatal("completed control-only child acquired another close input")
 					}
 					restartedServer := deploymentForkServer(t, f, recoveredOwner)
 					restartedReplay, rpcErr := deploymentForkRPC(t, f.ctx, restartedServer, params)

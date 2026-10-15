@@ -1129,6 +1129,7 @@ typed-process-local	interface-method	typed	internal/runtime/runforkexecution/com
 typed-process-local	interface-method	typed	internal/runtime/runforkexecution/commit_outcome.go	selectedForkSourceEventsCommit	method:SelectedForkSourceEventsCommit	func() (string, string, []github.com/division-sh/swarm/internal/runtime/runfork.RunForkSelectedContractSourceEvent)
 typed-process-local	callback-type	typed	internal/runtime/runforkexecution/decision_control.go	SelectedDecisionCardControl	field:cancel	func()
 typed-process-local	callback-type	typed	internal/runtime/runforkexecution/decision_control.go	bindSelectedDecisionCaller	result:#2	func()
+typed-process-local	callback-type	typed	internal/runtime/runforkexecution/fixture_close_test_support.go	selectedFixtureCloseUseForTest	field:cancel	func()
 typed-process-local	callback-type	typed	internal/runtime/runforkexecution/operation_lifetime.go	selectedContractOperation	field:cancel	context.CancelCauseFunc
 typed-process-local	callback-type	typed	internal/runtime/runforkexecution/operation_lifetime.go	selectedContractOperation	field:cancelOwned	context.CancelCauseFunc
 typed-process-local	callback-type	typed	internal/runtime/runforkexecution/operation_lifetime.go	selectedContractOperation	field:stop	func()
