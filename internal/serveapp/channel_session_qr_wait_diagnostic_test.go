@@ -89,9 +89,26 @@ func TestReadinessPublicUnpairedQRWaitDiagnosticBothStores(t *testing.T) {
 				if foreign, err := connection.PairingReadback(t.Context(), foreignPrincipal); err == nil || foreign.Code != "" {
 					t.Fatal("foreign principal obtained pairing material")
 				}
-				if response := requestServedJSONRPC(t, endpoint, "channel.list", map[string]any{}); response.Error != nil {
-					t.Fatal("public list failed before the diagnostic cut")
+				checkList := func() {
+					t.Helper()
+					var listed struct {
+						Channels []channelonboarding.ConnectedChannelReadback `json:"channels"`
+					}
+					requireServedJSONRPCResult(t, endpoint, "channel.list", map[string]any{}, &listed)
+					found := 0
+					for _, row := range listed.Channels {
+						if row.Operation != nil && row.Operation.OperationID == result.Operation.OperationID {
+							found++
+							if row.Identity.Status != "unbound" || row.Activation != nil || row.Readiness != nil && row.Readiness.Ready {
+								t.Fatal("terminal pairing observation granted standing readiness")
+							}
+						}
+					}
+					if found != 1 {
+						t.Fatal("public list lost the exact retained onboarding operation")
+					}
 				}
+				checkList()
 				peer.mu.Lock()
 				wire := peer.wire
 				peer.mu.Unlock()
@@ -122,6 +139,7 @@ func TestReadinessPublicUnpairedQRWaitDiagnosticBothStores(t *testing.T) {
 								t.Fatal("QR exhaustion changed scope or retained code")
 							}
 							t.Log("control: authenticated exhausted SDK batch has qr_expired, no code, original scope, socket still live")
+							checkList()
 							break
 						}
 						select {
@@ -156,12 +174,43 @@ func TestReadinessPublicUnpairedQRWaitDiagnosticBothStores(t *testing.T) {
 				if private.Code != "" {
 					t.Fatal("stopped pairing disclosed code")
 				}
-				response := requestServedJSONRPC(t, endpoint, "channel.list", map[string]any{})
-				if response.Error != nil {
-					t.Errorf("public channel.list at controlled SDK cut: code=%d (no secret error payload logged)", response.Error.Code)
+				want := "failed"
+				if mode == "empty_batch_then_disconnect" {
+					want = "qr_expired"
 				}
+				if privateErr != nil || private.Status != want || private.Paired || private.Connected {
+					t.Fatal("retained pairing observation differs from the actual SDK event")
+				}
+				if currentErr == nil || bootstrapErr == nil {
+					t.Fatal("pairing observation granted execution health")
+				}
+				if _, err := connection.ChannelExecution(t.Context()); err == nil {
+					t.Fatal("terminal pairing granted channel execution")
+				}
+				if _, err := connection.AdmitSessionAccount(t.Context(), result.Operation.SessionAccount); err == nil {
+					t.Fatal("terminal pairing granted account admission")
+				}
+				if view, err := connection.PairingReadback(t.Context(), foreignPrincipal); err == nil || view != (channelonboarding.PairingReadback{}) {
+					t.Fatal("terminal pairing bypassed principal authorization")
+				}
+				canceled, stop := context.WithCancel(t.Context())
+				stop()
+				if view, err := connection.PairingReadback(canceled, principal); err == nil || view != (channelonboarding.PairingReadback{}) {
+					t.Fatal("canceled caller received a terminal observation")
+				}
+				var after channelonboarding.Result
+				requireServedJSONRPCResult(t, endpoint, "channel.onboarding_get", map[string]any{
+					"operation_id": result.Operation.OperationID}, &after)
+				if after.Pairing == nil || *after.Pairing != private || after.Operation.OperationID != result.Operation.OperationID ||
+					!after.Operation.Coordinate.MatchesDeclaration(result.Operation.Coordinate) {
+					t.Fatal("public terminal readback lost the original scoped observation")
+				}
+				checkList()
 				if code := process.stop(); code != 0 {
 					t.Error("diagnostic serving cleanup failed", code)
+				}
+				if view, err := connection.PairingReadback(t.Context(), principal); err == nil || view != (channelonboarding.PairingReadback{}) {
+					t.Fatal("retired runtime still projected a pairing observation")
 				}
 			})
 		}
