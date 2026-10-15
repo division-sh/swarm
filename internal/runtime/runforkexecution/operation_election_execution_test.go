@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -14,6 +15,55 @@ type competingPreparationLoader struct {
 	SelectedContractSourceLoader
 	loads atomic.Int32
 	ready chan struct{}
+}
+
+func TestSelectedForkIndependentOperationsExecuteDistinctChildrenBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, keyed := range []bool{true, false} {
+			name := backend + "/keyless"
+			if keyed {
+				name = backend + "/independent_keys"
+			}
+			t.Run(name, func(t *testing.T) {
+				ctx, request := ownerlessSelectedOperationFixture(t, backend)
+				if !keyed {
+					request.ForkOperation.IdempotencyKey = ""
+				}
+				selected := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader).Store
+				execution := &liveWinnerExecutionProbe{SelectedContractRuntimeExecutionLifecycle: request.Owner.ports.runtimeExecution,
+					entered: make(chan struct{}), allow: make(chan struct{})}
+				close(execution.allow)
+				request.Owner.ports.runtimeExecution = execution
+				first, err := ExecuteSelectedContractRunFork(ctx, request)
+				if err != nil || !first.Activation.Activated {
+					t.Fatalf("first invocation failed: %+v err=%v", first, err)
+				}
+				next := *request.ForkOperation
+				next.OperationID = uuid.NewString()
+				if keyed {
+					next.IdempotencyKey = "independent-second-operation"
+				}
+				request.ForkOperation = &next
+				second, err := ExecuteSelectedContractRunFork(ctx, request)
+				if err != nil || !second.Activation.Activated || first.Materialization.ForkRunID == second.Materialization.ForkRunID ||
+					!first.Materialization.ForkPoint.SameIdentity(second.Materialization.ForkPoint) || execution.issues.Load() != 2 {
+					t.Fatalf("independent invocation rediscovered a cut sibling: first=%+v second=%+v issues=%d err=%v", first, second, execution.issues.Load(), err)
+				}
+				for _, child := range []string{first.Materialization.ForkRunID, second.Materialization.ForkRunID} {
+					stored, err := storetest.ReadSelectedExecutionStorage(ctx, selected, child)
+					if err != nil || stored.Occurrences != 1 {
+						t.Fatalf("independent child execution count: child=%s stored=%+v err=%v", child, stored, err)
+					}
+				}
+				request.Owner.ports.contexts.mu.Lock()
+				remaining := len(request.Owner.ports.contexts.entries)
+				request.Owner.ports.contexts.mu.Unlock()
+				if remaining != 2 {
+					t.Fatalf("independent invocation leaked or displaced its sibling: entries=%d", remaining)
+				}
+			})
+		}
+	}
 }
 
 func (l *competingPreparationLoader) LoadRunForkSelectedContractSourceForRequest(ctx context.Context, request SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
