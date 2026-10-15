@@ -369,7 +369,32 @@ func (c *RuntimeConnection) CheckSessionReuse(ctx context.Context, expected chan
 	if errors.Is(err, errClientOccurrenceFenced) {
 		return false, nil
 	}
-	return err == nil, err
+	if err != nil {
+		return false, err
+	}
+	if expected.SessionAccount == (operatorchannel.SessionAccountAdmission{}) {
+		occurrence := c.state.currentOccurrence()
+		if occurrence == nil {
+			return false, errClientOccurrenceFenced
+		}
+		occurrence.mu.Lock()
+		pairing := occurrence.pairing
+		occurrence.mu.Unlock()
+		if pairing != nil {
+			view, err := pairing.read(pairingQRScope{PrincipalID: expected.PrincipalID,
+				OperationID: expected.OperationID, ConnectionID: expected.SessionConnectionID,
+				OccurrenceID: occurrence.occurrenceID, Coordinate: expected.Coordinate})
+			if err != nil {
+				return false, err
+			}
+			// A live unpaired socket cannot renew an exhausted QR batch.
+			// Only explicit resume owns retirement and successor construction.
+			if !view.Paired && view.Status == pairingExpired {
+				return false, nil
+			}
+		}
+	}
+	return true, nil
 }
 
 // CheckBootstrap proves this original attempt remains connected. A retained
