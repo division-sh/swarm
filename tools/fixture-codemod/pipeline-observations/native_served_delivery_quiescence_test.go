@@ -75,12 +75,17 @@ func TestServedDeliveryQuiescenceMechanicalCallerRecipesPreserveAllOtherWork(t *
 		if row.Successor != "" {
 			current = row.Successor
 		}
-		currentPin, pinErr := canonicalFunction(current)
 		activeName := row.Function
 		if row.File == forkProofTruthFile && row.Function == forkProofTruthOldName && row.Successor != "" {
 			activeName = forkProofTruthNewName
 		}
-		actual, actualErr := canonicalFunction(selectedCausalObservationBody(t, row.File, activeName))
+		actualSource := selectedCausalObservationBody(t, row.File, activeName)
+		if original, err := fixtureSetupCurrentEndpoint2617(row, actualSource); err == nil {
+			// #642 6190268703: exact finite reversal preserves the prior caller.
+			current, actualSource = original.Successor, original.Successor
+		}
+		currentPin, pinErr := canonicalFunction(current)
+		actual, actualErr := canonicalFunction(actualSource)
 		if err != nil || afterErr != nil || pinErr != nil || actualErr != nil || want != got || actual != currentPin {
 			t.Fatalf("delivery caller changed setup, temporal cuts or assertions: %s", row.Function)
 		}

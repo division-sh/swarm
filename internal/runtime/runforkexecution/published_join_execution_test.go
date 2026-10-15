@@ -409,8 +409,7 @@ func TestIssue642PublishedJoinContinuesExactDeliveryBothStores(t *testing.T) {
 				s := storetest.StartSQLiteRuntimeStore(t)
 				selected, owner = s, selectedContractSQLiteExecutionOwnerForTest(t, s)
 			} else {
-				_, db, _ := testutil.StartPostgres(t)
-				s := storetest.AdmitPostgresRuntimeStore(t, db)
+				s := storetest.StartPostgresRuntimeStore(t)
 				selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
 			}
 			ctx := runForkTestContext(t)

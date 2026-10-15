@@ -240,7 +240,7 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 	if !ok {
 		t.Fatal("retained join success requires the original selected store owner")
 	}
-	ctx := servedControlProofAuthorActivityContext(t, rt)
+	ctx := servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
 	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: request.SourceRunID, At: request.At, ExpectedBundleHash: rt.BundleHash,
 		ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
@@ -265,7 +265,10 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 	if !ok {
 		t.Fatal("retained join success requires the canonical selected materialization owner")
 	}
-	sourceBefore := readServedForkRecipientSourceDomain(t, rt, request.SourceRunID)
+	sourceBefore, err := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, request.SourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	before := snapshotForkReceiverApplication(t, rt)
 	child, err := materializer.MaterializeRunForkForSelectedContractExecution(ctx, admitted)
 	if err != nil {
@@ -306,9 +309,10 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 	}
 	again, err := materializer.MaterializeRunForkForSelectedContractExecution(ctx, admitted)
 	_, repeated := readNativeRetainedRootJoins(t, rt.ReceiverStateReader, child.ForkRunID)
+	sourceAfter, sourceErr := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, request.SourceRunID)
 	if err != nil || again.ForkRunID != child.ForkRunID || !reflect.DeepEqual(childJoins, repeated) ||
-		!reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, request.SourceRunID)) {
-		t.Fatalf("repeated materialization changed child/source history: %v", err)
+		sourceErr != nil || !reflect.DeepEqual(sourceBefore, sourceAfter) {
+		t.Fatalf("repeated materialization changed child/source history: %v/%v", err, sourceErr)
 	}
 	if err := prepared.Close(); err != nil {
 		t.Fatalf("join retained join preparation: %v", err)
