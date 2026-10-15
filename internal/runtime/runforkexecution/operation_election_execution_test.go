@@ -24,14 +24,10 @@ type competingPreparationLoader struct {
 
 func TestSelectedForkIndependentOperationsExecuteDistinctChildrenBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, keyed := range []bool{true, false} {
-			name := backend + "/keyless"
-			if keyed {
-				name = backend + "/independent_keys"
-			}
-			t.Run(name, func(t *testing.T) {
+		for _, identity := range []string{"independent_keys", "independent_actors", "keyless"} {
+			t.Run(backend+"/"+identity, func(t *testing.T) {
 				ctx, request := ownerlessSelectedOperationFixture(t, backend)
-				if !keyed {
+				if identity == "keyless" {
 					request.ForkOperation.IdempotencyKey = ""
 				}
 				selected := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader).Store
@@ -50,8 +46,11 @@ func TestSelectedForkIndependentOperationsExecuteDistinctChildrenBothStores(t *t
 				}
 				next := *request.ForkOperation
 				next.OperationID = uuid.NewString()
-				if keyed {
+				switch identity {
+				case "independent_keys":
 					next.IdempotencyKey = "independent-second-operation"
+				case "independent_actors":
+					next.Actor = "operation-identity-other-actor"
 				}
 				request.ForkOperation = &next
 				second, err := ExecuteSelectedContractRunFork(ctx, request)
