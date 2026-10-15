@@ -78,6 +78,20 @@ func awaitServeSessionBootstrapFixture(ctx context.Context, owner *serveSessionB
 	return err
 }
 
+func awaitServePairedAuthenticationFixture(t *testing.T, ctx context.Context, authenticated <-chan struct{}) {
+	t.Helper()
+	wait, stop := context.WithTimeout(ctx, 5*time.Second)
+	defer stop()
+	select {
+	case <-authenticated:
+		if err := wait.Err(); err != nil {
+			t.Fatal("SDK login milestone arrived after the existing fixture bound", err)
+		}
+	case <-wait.Done():
+		t.Fatal("SDK login did not complete within the existing fixture bound", context.Cause(wait))
+	}
+}
+
 func newServeBootstrapTestFixture(t *testing.T, backend string) *serveBootstrapTestFixture {
 	t.Helper()
 	var selected serveBootstrapTestStore
@@ -212,9 +226,19 @@ func serveBootstrapWireFixture(t *testing.T, mode string, owner *worklifetime.Ru
 	}
 	noise := whatsappfixture.NewNoiseServer(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	entered := make(chan struct{})
+	entered := make(chan struct{}, 1)
 	var enteredOnce sync.Once
-	signalEntered := func() { enteredOnce.Do(func() { close(entered) }) }
+	signalEntered := func() {
+		enteredOnce.Do(func() {
+			if mode == "paired" {
+				// Consume this first login socket's evidence once. A closed
+				// channel could incorrectly bless a later distinct attempt.
+				entered <- struct{}{}
+			} else {
+				close(entered)
+			}
+		})
+	}
 	var mu sync.Mutex
 	var peers []*websocket.Conn
 	var workers sync.WaitGroup
@@ -262,7 +286,9 @@ func serveBootstrapWireFixture(t *testing.T, mode string, owner *worklifetime.Ru
 			t.Error(err)
 			return
 		}
-		signalEntered()
+		if mode != "paired" {
+			signalEntered()
+		}
 		var authCut *serveBootstrapAuthCut
 		if len(authCuts) == 1 && wire.ClientPayload().Username != nil {
 			authCut = authCuts[0]
@@ -292,9 +318,12 @@ func serveBootstrapWireFixture(t *testing.T, mode string, owner *worklifetime.Ru
 			if node.Tag == "iq" {
 				// This exact socket's post-authentication IQ is emitted only
 				// after the pinned SDK sets IsLoggedIn, not after Noise alone.
-				if authCut != nil && node.AttrGetter().OptionalString("xmlns") == "encrypt" &&
+				if mode == "paired" && wire.ClientPayload().Username != nil && node.AttrGetter().OptionalString("xmlns") == "encrypt" &&
 					node.AttrGetter().OptionalString("type") == "get" && node.GetChildByTag("count").Tag == "count" {
-					authCut.authOnce.Do(func() { close(authCut.authenticated) })
+					if authCut != nil {
+						authCut.authOnce.Do(func() { close(authCut.authenticated) })
+					}
+					signalEntered()
 				}
 				_ = wire.Send(ctx, waBinary.Node{Tag: "iq", Attrs: waBinary.Attrs{"id": node.Attrs["id"], "type": "result"}})
 			}
