@@ -70,16 +70,25 @@ func beginEventHistoryWrites(ctx context.Context, facts []revisionFactInsert) []
 		return nil
 	}
 	var writes []*transactiontest.JSONCopyWrite
-	for _, family := range []Family{FamilyEvents, FamilyEventDeliveries, FamilyCommittedReplayScopes, FamilyEventReceipts, FamilyDeadLetters} {
+	for _, observed := range []struct {
+		family Family
+		kind   transactiontest.EventHistoryJSONFamily
+	}{
+		{FamilyEvents, transactiontest.EventJSON},
+		{FamilyEventDeliveries, transactiontest.DeliveryJSON},
+		{FamilyCommittedReplayScopes, transactiontest.ReplayScopeJSON},
+		{FamilyEventReceipts, transactiontest.ReceiptJSON},
+		{FamilyDeadLetters, transactiontest.DeadLetterJSON},
+	} {
 		length, copies := 0, 0
 		for _, fact := range facts {
-			if fact.family == family {
+			if fact.family == observed.family {
 				length += len(fact.fact)
 				copies++
 			}
 		}
 		if copies != 0 {
-			writes = append(writes, transactiontest.BeginEventHistoryJSON(ctx, string(family), length, copies))
+			writes = append(writes, transactiontest.BeginEventHistoryJSON(ctx, observed.kind, length, copies))
 		}
 	}
 	return writes
