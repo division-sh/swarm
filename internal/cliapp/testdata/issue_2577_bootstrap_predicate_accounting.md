@@ -380,3 +380,35 @@ The existing isolated authorization matrix also repeats the disconnect before
 each scope/error check. Fresh focused/race, exact-head preflight and real
 QR-render/expiry receipts are required for this successor; old passes are not
 relabeled as its qualification.
+
+### P01 Explicit Replacement After An Exhausted QR Batch
+
+Reviewer-g's #2577 comment 6201030995 approves only the exact reuse owner.
+The real supplied-command rehearsal at b2a300d5ee refused after the first QR
+expired: same original operation, activating_provider/revision 11, CLI exit 2.
+That RED remains separate from the two load-sensitive pre-QR preparation REDs
+and the accepted paired-PostgreSQL resume residual.
+
+| Owner / caller | Boundary | Execution proof |
+| --- | --- | --- |
+| Service.Retry -> resumeSession -> serveSessionBootstrap.ResumeSession | Explicit continuation of the SAME retained operation/reservation; an unfinished connection remains pending, not a replacement instruction | TestServedExpiredQRExplicitRetryReplacesOriginalOccurrenceBothStores verifies the expired occurrence already completed connect and its socket is live |
+| RuntimeConnection.CheckSessionReuse -> exact occurrence-owned pairingQR.read | An unpaired qr_expired batch refuses reuse despite live transport; current QR and paired connected reuse are unchanged; observation errors retain their cause, never permission to reconnect | TestWhatsAppPairingReuseExpiryAndObservationErrorsBothStores plus TestServeSessionExplicitResumeRetainsPairedIdentityBothStores and TestServeSessionResumePreservesObservationErrorWithoutReconnectBothStores |
+| Existing ResumeSession Close-before-open and RuntimeConnection.Close | Join original SDK/callback/QR work and release private-directory possession before a successor can open the same reservation; cancellation retains cleanup ownership | Both new roots, TestServeSessionResumeCancellationRetainsJoinAndPossessionBothStores and TestServeSessionConcurrentResumeConstructsOneSuccessorBothStores |
+| Authenticated public retry/get and original scope | Fresh QR/expiry with the same operation/principal/source/interface/target and nondecreasing selected revision; no account, identity, standing activation or executable readiness | TestServedExpiredQRExplicitRetryReplacesOriginalOccurrenceBothStores, both stores; terminal/scope/duplicate-disconnect controls remain mandatory |
+
+The deterministic public control failed on BOTH stores before the production
+change, specifically because retry reused the live, completed expired
+occurrence. Its test source is unchanged between RED and GREEN. The repaired
+nine-root packet passed -race -count=3: 135 test/subtest PASS records, no failures
+or skips. Provider package 86.296s; served package 213.697s. The initial extra
+provider-control attempt lacked its fixture's QR batch and remains a setup RED;
+the corrected test sends a genuine public SDK pairing request before testing
+the reuse decision. No product deadline or existing assertion changed.
+
+Receipt SHA256: pre-fix public RED
+7ce13a8485959c541bd55686107c11e63f8cd455876551c1b612a81b51ed53c5;
+repaired race packet
+96718556439c97b32d2a308794721dc84305b7c3a9136e4573cd5b9152932be2.
+Focused evidence is not a local tier, hosted credit, physical pairing or a
+readiness PASS. Fresh affected guards/preflight and the single quiet actual-SDK
+same-operation replacement rehearsal remain required before the PR push.
