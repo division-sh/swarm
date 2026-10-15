@@ -10,6 +10,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"strings"
 	"time"
@@ -176,7 +177,9 @@ func (am *AgentManager) completeDeclaredDynamicFlowReadiness(admission dynamicFl
 	finish := func() {
 		select {
 		case <-attempt.retiring:
-			am.lifecycle.recordTerminalCompletion(result)
+			if !isReadinessShutdownRefusal(result) {
+				am.lifecycle.recordTerminalCompletion(result)
+			}
 		default:
 		}
 		attempt.err = result
@@ -227,4 +230,17 @@ func (am *AgentManager) completeDeclaredDynamicFlowReadiness(admission dynamicFl
 		am.dynamicFlowReadinessMu.Unlock()
 		return
 	}
+}
+
+func isReadinessShutdownRefusal(err error) bool {
+	// A stopped occurrence cannot become executable. Only its exact refusal,
+	// without an independent joined failure, is not a terminal completion.
+	return runtimefailures.OnlyBranches(err, func(branch error) bool {
+		failure, ok := branch.(*runtimefailures.Error)
+		return ok && failure.Failure.Class == runtimefailures.ClassLifecycleConflict &&
+			failure.Failure.Component == "agent-lifecycle" &&
+			failure.Failure.Operation == "verify_executable_readiness" &&
+			failure.Failure.Detail.Code == "agent_execution_not_ready" &&
+			failure.Failure.Detail.Attributes["manager_phase"] == string(runtimeLifecycleShuttingDown)
+	})
 }

@@ -92,6 +92,7 @@ type AgentManager struct {
 	dynamicFlowStartupTopologyPending bool
 
 	testAfterDynamicFlowReadinessAdmission func()
+	testBeforeDynamicFlowAgentReadiness    func()
 }
 
 // InstallStartupTopology binds the selected-store generation writer and the
