@@ -27,7 +27,7 @@ func TestRetryDecisionGeneratedSchemaCombinationsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			db := bootstrappedForkPointSchemaDB(t, backend)
-			runID, eventID, bundleHash := seedRetrySchemaPrerequisites(t, db)
+			runID, eventID, bundleHash := seedForkPointSchemaRunAndEvent(t, db)
 			completed := time.Date(2026, 10, 15, 12, 0, 1, 123456000, time.UTC)
 			due, earlier := completed.Add(time.Hour), completed.Add(-time.Microsecond)
 			var duration int64
@@ -86,7 +86,7 @@ func TestRetryDecisionMalformedStoredDueIsNotRepairedBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			db := bootstrappedForkPointSchemaDB(t, backend)
-			runID, eventID, bundleHash := seedRetrySchemaPrerequisites(t, db)
+			runID, eventID, bundleHash := seedForkPointSchemaRunAndEvent(t, db)
 			tx, deliveryID := beginRetrySchemaCell(t, db, runID, eventID, bundleHash, false)
 			completed := time.Date(2026, 10, 15, 12, 0, 1, 123456000, time.UTC)
 			var duration int64
@@ -114,27 +114,6 @@ func TestRetryDecisionMalformedStoredDueIsNotRepairedBothStores(t *testing.T) {
 			requireRetrySchemaCellAbsent(t, db, deliveryID)
 		})
 	}
-}
-
-func seedRetrySchemaPrerequisites(t *testing.T, db *sql.DB) (runID, eventID, bundleHash string) {
-	t.Helper()
-	ctx := context.Background()
-	runID, eventID = uuid.NewString(), uuid.NewString()
-	bundleHash = "bundle-v2:sha256:" + strings.Repeat("a", 64)
-	if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,bundle_hash,origin_kind) VALUES ($1,$2,'scenario_setup')`, runID, bundleHash); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO events
-		(event_class,event_id,run_id,event_name,scope,payload,payload_bytes,payload_schema_bundle_hash,
-		payload_schema_event_key,payload_schema_digest,payload_schema_class,execution_mode,chain_depth,
-		produced_by,produced_by_type,created_at,routing_source_kind,routing_source_authority,
-		source_route,target_route,target_set,route_settlement)
-		VALUES ('root_ingress',$1,$2,'retry.schema','global','{}',$3,$4,'retry.schema',$5,
-		'schema_less','live',0,'external','external',CURRENT_TIMESTAMP,'external_ingress','test',
-		'{"flow_path":"."}','{}','[]','{}')`, eventID, runID, []byte("{}"), bundleHash, "sha256:"+strings.Repeat("b", 64)); err != nil {
-		t.Fatal(err)
-	}
-	return runID, eventID, bundleHash
 }
 
 func beginRetrySchemaCell(t *testing.T, db *sql.DB, runID, eventID, bundleHash string, open bool) (*sql.Tx, string) {
