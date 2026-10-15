@@ -83,7 +83,7 @@ func TestForkDeploymentReadbackAllowsProgressButPreservesInheritedPrefixBothStor
 			if _, err := tx.ExecContext(ctx, `UPDATE fan_out_outcomes SET source_event_id=$3 WHERE run_id=$1 AND deployment_feed_id=$2 AND ordinal=0`, key.RunID, key.DeploymentFeedID, sourceID); err != nil {
 				t.Fatal(err)
 			}
-			for _, fault := range []string{"version", "schema", "declaration", "cardinality", "cursor_regression", "cursor_overflow", "progressed_status", "inherited_initial_status", "blocked_before_progress"} {
+			for _, fault := range []string{"version", "schema", "declaration", "cardinality", "cursor_regression", "cursor_overflow", "progressed_status", "inherited_initial_status", "blocked_before_progress", "restored_prefix", "missing_inherited_outcome"} {
 				t.Run(fault, func(t *testing.T) {
 					version, schema, declaration := string(target.VersionID), string(target.SchemaDigest), target.Declaration.EventName
 					cardinality, cursor, status := target.RowCount, 2, "closed"
@@ -108,13 +108,26 @@ func TestForkDeploymentReadbackAllowsProgressButPreservesInheritedPrefixBothStor
 						cursor, want = 1, "changed its inherited status before progress"
 					case "blocked_before_progress":
 						cursor, status, blocked, want = 1, "open", "unexpected", "changed its inherited status before progress"
+					case "restored_prefix":
+						want = ""
+					case "missing_inherited_outcome":
+						want = "inherited ordinal 0 is missing"
 					}
-					if _, err := tx.ExecContext(ctx, `UPDATE fan_out_intents
+					query := `UPDATE fan_out_intents
 						SET source_resource_version_id=$3,deployment_schema_digest=$4,source_resource_event_name=$5,
 						cardinality=$6,cursor=$7,status=$8,blocked_reason=$9
-						WHERE run_id=$1 AND deployment_feed_id=$2`, key.RunID, key.DeploymentFeedID,
-						version, schema, declaration, cardinality, cursor, status, blocked); err != nil {
+						WHERE run_id=$1 AND deployment_feed_id=$2`
+					args := []any{key.RunID, key.DeploymentFeedID, version, schema, declaration, cardinality, cursor, status, blocked}
+					if fault == "missing_inherited_outcome" {
+						query = `DELETE FROM fan_out_outcomes WHERE run_id=$1 AND deployment_feed_id=$2 AND ordinal=0`
+						args = args[:2]
+					}
+					if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 						t.Fatal(err)
+					}
+					if want == "" {
+						check(t, true)
+						return
 					}
 					if err := check(t, false); !strings.Contains(err.Error(), want) {
 						t.Fatalf("wrong refusal for %s: %v", fault, err)
