@@ -1982,8 +1982,8 @@ func (r scenarioRunner) assertEntityDetailExpectation(ctx context.Context, runID
 	if full.Entity.EntityType != entityType {
 		return fmt.Errorf("malformed entity.get result: entity.entity_type = %q, want %q", full.Entity.EntityType, entityType)
 	}
-	if detail.State != nil && full.Entity.CurrentState != *detail.State {
-		return fmt.Errorf("entity %s current_state = %q, want %q", entityID, full.Entity.CurrentState, *detail.State)
+	if detail.State != nil && (full.Entity.CurrentState == nil || *full.Entity.CurrentState != *detail.State) {
+		return fmt.Errorf("entity %s current_state = %s, want %q", entityID, entityLifecycleStageText(full.Entity), *detail.State)
 	}
 	if detail.FieldsSet {
 		if err := assertScenarioJSONEqual(fmt.Sprintf("entity %s fields", entityID), full.Fields, detail.Fields); err != nil {

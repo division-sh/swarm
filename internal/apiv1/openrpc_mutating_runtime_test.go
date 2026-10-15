@@ -1367,7 +1367,7 @@ func (s *mutatingProbeTestSetupStore) SetupScenarioEntities(_ context.Context, r
 			EntityID:     strings.TrimSpace(entity.EntityID),
 			FlowInstance: strings.Trim(strings.TrimSpace(entity.FlowInstance), "/"),
 			EntityType:   strings.TrimSpace(entity.EntityType),
-			CurrentState: strings.TrimSpace(entity.CurrentState),
+			CurrentState: entity.CurrentState,
 		})
 	}
 	return runtimepipeline.ScenarioSetupResult{

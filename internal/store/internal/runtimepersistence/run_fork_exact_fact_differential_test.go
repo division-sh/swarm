@@ -182,7 +182,8 @@ func TestRunForkExactFactsThirteenFamilyDifferentialBothStores(t *testing.T) {
 		assertRunForkRevisionMatrixShape(t, loadRunForkRevisionMatrixFacts(t, testAuthorActivityContext(), s.db, f.runID, 1), true)
 		t.Run("duplicate_union_and_excluded_churn", func(t *testing.T) {
 			exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
-				mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE entity_state SET current_state='excluded',updated_at=$1 WHERE entity_id=$2 AND run_id=$3`, f.at.Add(time.Second), f.entityID, f.runID)
+				// Metadata excludes authored fields, but owns their data clocks.
+				mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE entity_state SET fields='{"excluded":true}' WHERE entity_id=$1 AND run_id=$2`, f.entityID, f.runID)
 				mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE event_receipts SET side_effects=$1 WHERE receipt_id=$2`, `{"excluded":true}`, f.receiptID)
 				effects := exactEffects(t, f.runID, refs...)
 				if err := effects.AddFacts(f.runID, refs...); err != nil {
@@ -230,14 +231,21 @@ func TestRunForkExactFactsThirteenFamilyDifferentialBothStores(t *testing.T) {
 				})
 			}
 		})
+		t.Run("authored_data_clock_is_tracked", func(t *testing.T) {
+			exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
+				mustExecRunForkRevisionMatrix(t, ctx, tx, `UPDATE entity_state SET updated_at=$1 WHERE run_id=$2 AND entity_id=$3`, f.at.Add(time.Second), f.runID, f.entityID)
+				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID)), 4, true)
+				compareExactWithWhole(t, ctx, tx, s, f.runID, exactEffects(t, f.runID, exactFactRef(t, runforkrevision.FamilyEntityMetadata, f.entityID)), 4, false)
+			})
+		})
 		t.Run("retained_run_tombstones_and_repeat_noop", func(t *testing.T) {
 			exactTransaction(t, s, func(ctx context.Context, tx *sql.Tx) {
 				deleteRunForkRevisionMatrixFacts(t, ctx, tx, f)
 				effects := exactEffects(t, f.runID, refs...)
-				compareExactWithWhole(t, ctx, tx, s, f.runID, effects, 4, true)
-				compareExactWithWhole(t, ctx, tx, s, f.runID, effects, 4, false)
+				compareExactWithWhole(t, ctx, tx, s, f.runID, effects, 5, true)
+				compareExactWithWhole(t, ctx, tx, s, f.runID, effects, 5, false)
 			})
-			facts := loadRunForkRevisionMatrixFacts(t, testAuthorActivityContext(), s.db, f.runID, 4)
+			facts := loadRunForkRevisionMatrixFacts(t, testAuthorActivityContext(), s.db, f.runID, 5)
 			if len(facts) != 14 {
 				t.Fatalf("tombstones=%d, want thirteen families plus generated sibling", len(facts))
 			}

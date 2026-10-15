@@ -7,17 +7,21 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 	"github.com/google/uuid"
 )
 
 type TrackedProjectionMutationStorage struct {
-	Domain, Path string
-	NewValue     json.RawMessage
+	Domain, Path                      string
+	OldValue, NewValue                json.RawMessage
+	WriterType, WriterID, HandlerStep string
 }
 
 type TrackedEntityMutationProjectionStorage struct {
-	EntityType, CurrentState                string
-	Revision                                int
+	EntityType                              string
+	CurrentState                            *string
+	Revision                                *int64
 	Fields, Bookkeeping, Gates, Accumulator json.RawMessage
 	Mutations                               []TrackedProjectionMutationStorage
 }
@@ -34,25 +38,27 @@ func ReadTrackedEntityMutationProjectionStorageForTest(ctx context.Context, sele
 	}
 	var evidence TrackedEntityMutationProjectionStorage
 	err = read(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		var fields, bookkeeping, gates, accumulator []byte
-		if err := tx.QueryRowContext(ctx, `SELECT entity_type,COALESCE(current_state,''),COALESCE(fields,'{}'),COALESCE(bookkeeping,'{}'),COALESCE(gates,'{}'),COALESCE(accumulator,'{}'),revision FROM entity_state WHERE run_id=$1 AND entity_id=$2`, run, entity).
-			Scan(&evidence.EntityType, &evidence.CurrentState, &fields, &bookkeeping, &gates, &accumulator, &evidence.Revision); err != nil {
-			return fmt.Errorf("load entity_state projection: %w", err)
+		inventory, err := workflowheader.InventoryForRead(ctx, tx, run)
+		if err != nil {
+			return fmt.Errorf("load current header/data projection: %w", err)
 		}
-		evidence.Fields, evidence.Bookkeeping = append(json.RawMessage(nil), fields...), append(json.RawMessage(nil), bookkeeping...)
-		evidence.Gates, evidence.Accumulator = append(json.RawMessage(nil), gates...), append(json.RawMessage(nil), accumulator...)
-		rows, err := tx.QueryContext(ctx, `SELECT domain,path,new_value FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 ORDER BY created_at ASC,mutation_id ASC`, run, entity)
+		evidence, err = trackedProjectionStorageFromInventory(inventory, entity)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT domain,path,old_value,new_value,writer_type,writer_id,COALESCE(handler_step,'') FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 ORDER BY created_at ASC,mutation_id ASC`, run, entity)
 		if err != nil {
 			return fmt.Errorf("query mutations: %w", err)
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var row TrackedProjectionMutationStorage
-			var value []byte
-			if err := rows.Scan(&row.Domain, &row.Path, &value); err != nil {
+			var oldValue, value []byte
+			if err := rows.Scan(&row.Domain, &row.Path, &oldValue, &value, &row.WriterType, &row.WriterID, &row.HandlerStep); err != nil {
 				return fmt.Errorf("scan mutation: %w", err)
 			}
 			row.NewValue = append(json.RawMessage(nil), value...)
+			row.OldValue = append(json.RawMessage(nil), oldValue...)
 			evidence.Mutations = append(evidence.Mutations, row)
 		}
 		if err := rows.Err(); err != nil {
@@ -62,6 +68,48 @@ func ReadTrackedEntityMutationProjectionStorageForTest(ctx context.Context, sele
 	})
 	if err != nil {
 		return TrackedEntityMutationProjectionStorage{}, err
+	}
+	return evidence, nil
+}
+
+func trackedProjectionStorageFromInventory(inventory workflowheader.ReadInventory, entity string) (TrackedEntityMutationProjectionStorage, error) {
+	var evidence TrackedEntityMutationProjectionStorage
+	found := false
+	for index, member := range append(inventory.Constructed, inventory.StateOnly...) {
+		if member.EntityID != entity {
+			continue
+		}
+		if found {
+			return TrackedEntityMutationProjectionStorage{}, fmt.Errorf("current projection has multiple owners for entity %s", entity)
+		}
+		found = true
+		evidence.EntityType = member.EntityType
+		if index < len(inventory.Constructed) {
+			evidence.CurrentState = mutationlog.PresentLifecycleState(member.Stage)
+			revision := member.Revision
+			evidence.Revision = &revision
+		}
+		// Keep private control/loop facts intact; public entity projections
+		// intentionally hide them and cannot serve as reconstruction operands.
+		for _, bucket := range []struct {
+			raw any
+			dst *json.RawMessage
+		}{{member.Fields, &evidence.Fields}, {member.Bookkeeping, &evidence.Bookkeeping}, {member.Gates, &evidence.Gates}, {member.Accumulator, &evidence.Accumulator}} {
+			switch raw := bucket.raw.(type) {
+			case nil:
+			case string:
+				*bucket.dst = append(json.RawMessage(nil), raw...)
+			case []byte:
+				*bucket.dst = append(json.RawMessage(nil), raw...)
+			case json.RawMessage:
+				*bucket.dst = append(json.RawMessage(nil), raw...)
+			default:
+				return TrackedEntityMutationProjectionStorage{}, fmt.Errorf("unexpected admitted projection transport %T", raw)
+			}
+		}
+	}
+	if !found {
+		return TrackedEntityMutationProjectionStorage{}, fmt.Errorf("load current entity projection: %w", sql.ErrNoRows)
 	}
 	return evidence, nil
 }

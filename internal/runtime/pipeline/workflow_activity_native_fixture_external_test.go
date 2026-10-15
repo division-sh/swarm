@@ -9,8 +9,11 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -122,11 +125,11 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 		Construct: func(ctx context.Context, instance pipeline.WorkflowInstance) error {
 			command, err := flowactivationfixture.Command(ctx, instance, pipeline.WorkflowLifecycleMutationPlan{}, instance.CreatedAt)
 			if err != nil {
-				return err
+				return fmt.Errorf("prepare native component construction: %w", err)
 			}
 			committed, err := selected.(runtimebus.FlowInstanceActivationCommitOwner).CommitFlowInstanceActivation(ctx, command)
 			if err != nil {
-				return err
+				return fmt.Errorf("commit native component construction: %w", err)
 			}
 			if !committed.Acknowledged || !committed.Created {
 				return fmt.Errorf("loop component construction did not acknowledge exact native creation")
@@ -145,6 +148,45 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 		},
 		Publish: func(ctx context.Context, event events.Event) {
 			storetest.CommitSemanticEvent(t, ctx, selected, event)
+		},
+		ReadMutationProjection: func(ctx context.Context, run, entity string) (pipeline.WorkflowMutationProjectionForTest, error) {
+			evidence, err := storetest.ReadTrackedEntityMutationProjectionStorage(ctx, selected, run, entity)
+			if err != nil {
+				return pipeline.WorkflowMutationProjectionForTest{}, err
+			}
+			out := pipeline.WorkflowMutationProjectionForTest{Current: mutationlog.EntityStateProjection{CurrentState: evidence.CurrentState, Fields: map[string]any{}}}
+			for _, bucket := range []struct {
+				raw []byte
+				dst *map[string]any
+			}{{evidence.Fields, &out.Current.Fields}, {evidence.Bookkeeping, &out.Current.Bookkeeping}, {evidence.Gates, &out.Current.Gates}, {evidence.Accumulator, &out.Current.Accumulator}} {
+				if bucket.raw != nil {
+					if err := canonicaljson.DecodePreservingNumberLexemes(bucket.raw, bucket.dst); err != nil {
+						return pipeline.WorkflowMutationProjectionForTest{}, err
+					}
+				}
+			}
+			for _, row := range evidence.Mutations {
+				out.Mutations = append(out.Mutations, pipeline.WorkflowMutationRowForTest{Domain: mutationlog.Domain(row.Domain),
+					Path: row.Path, OldValue: row.OldValue, NewValue: row.NewValue, WriterType: row.WriterType, WriterID: row.WriterID, HandlerStep: row.HandlerStep})
+			}
+			return out, nil
+		},
+		RemoveMutationLog: func(ctx context.Context) error {
+			return storetest.RemoveMutationLogForRollbackProof(ctx, selected)
+		},
+		TryInvalidMutationPath: func(ctx context.Context, run, entity string) error {
+			return storetest.TryInvalidAccumulatorMutationPath(ctx, selected, run, entity)
+		},
+		PersistEvent: func(ctx context.Context, event events.Event) {
+			storetest.CommitSemanticEvent(t, ctx, selected, event)
+		},
+		AdmitDelivery: func(ctx context.Context, event events.Event, route events.DeliveryRoute) (deliverylifecycle.Snapshot, error) {
+			storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, selected, event, []events.DeliveryRoute{route})
+			id, err := deliverylifecycle.DeliveryID(event.ID(), route)
+			if err != nil {
+				return deliverylifecycle.Snapshot{}, err
+			}
+			return selected.Snapshot(ctx, id)
 		},
 		Reopen: func() pipeline.WorkflowActivityNativeFixtureForTest {
 			if err := join(); err != nil {
