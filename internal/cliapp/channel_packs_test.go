@@ -2,7 +2,9 @@ package cliapp
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
@@ -12,6 +14,28 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
+
+func TestChannelPlatformSpecExplicitLoaderRefusesInvalidSources(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"missing", "", "read platform spec:"},
+		{"malformed", "platform: [unfinished\n", "unmarshal platform spec:"},
+		{"draft", "platform: {name: draft}\n", "platform.version missing or duplicated"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "explicit-spec.yaml")
+			if tc.name != "missing" {
+				if err := os.WriteFile(path, []byte(tc.body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := loadChannelPlatformSpecDocument(path); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("explicit %s spec error = %v, want %q", tc.name, err, tc.want)
+			}
+		})
+	}
+}
 
 func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *testing.T) {
 	repo := RepoRoot()
