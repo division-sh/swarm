@@ -2,8 +2,9 @@
 
 The inherited whole-file runtime.go census assigns A05/A08/A11/A13/A18/
 A23/A24/A25 and P04/P08/P09/P11/P15/P20/P21 to every body. S6 changes only
-AuthorActivityEventDescriptors in this measured file, not those admission
-predicates, boot sequencing, hydration, timers or recovery authority.
+AuthorActivityEventDescriptors and its extracted authoredCreationEventKeys
+projection in this measured file, not those admission predicates, boot
+sequencing, hydration, timers or recovery authority.
 
 Governing user ruling: #2269/6170784774; bounded review6178053370.
 AuthorActivityEventDescriptors remains the source-to-story-descriptor owner.
@@ -20,6 +21,12 @@ Each retains its actual source and existing catalog lease/lifetime. Caller
 code is unchanged: no boot step, selected recovery ordering or dispatcher
 connection is introduced. The descriptor is observation metadata, not a new
 startup refusal owner. The existing check registry and A/P labels stay intact.
+
+authoredCreationEventKeys contains the unchanged creation-event loop extracted
+from AuthorActivityEventDescriptors to preserve the complexity ratchet. Its
+only caller is that descriptor owner; it consumes the same source, resolves
+the same authored auto-emits and returns the same exact event-key set. It is
+not a new admission predicate, source reader, catalog lease or boot step.
 
 Execution witnesses: the five TestAuthorActivityEventDescriptors roots cover
 internal stage timers, join demands/conflicts, normal catalog lifetime, compiled
@@ -38,8 +45,9 @@ an authored creation line cannot manufacture timer declaration eligibility.
 The same named clock checks and constructor relation controls remain required.
 
 Regenerate through SWARM_UPDATE_ADMISSION_PREDICATE_CENSUS and compare the
-artifact delta: only this one body hash may change, with its owner, caller
-family, labels and all other entries retained. Generation gives no execution
+artifact delta: only the descriptor body hash and its extracted helper entry
+may change, with the same owner, caller family, labels and all other entries
+retained. Generation gives no execution
 credit; exact receipts belong in the S6 checkpoint audit. Connected dispatcher,
 occupancy, selected-preparation and runtime recovery joins remain gated.
 
