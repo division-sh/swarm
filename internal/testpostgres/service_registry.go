@@ -306,14 +306,11 @@ func (s *Service) Close(ctx context.Context) error {
 			if _, exists, err := s.registry.inspectExactMaybe(ctx, s.record); err != nil {
 				errs = append(errs, err)
 			} else if exists {
-				if out, err := s.registry.runDocker(ctx, "rm", "--force", s.record.ContainerID); err != nil {
-					errs = append(errs, fmt.Errorf("remove Postgres service %s: %v output=%s", s.record.ContainerID, err, strings.TrimSpace(string(out))))
-				}
-			}
-			if len(errs) == 0 {
-				if err := s.registry.verifyContainerAbsent(ctx, s.record.ContainerID); err != nil {
+				if err := s.registry.removeServiceContainer(ctx, s.record.ContainerID); err != nil {
 					errs = append(errs, err)
 				}
+			} else if err := s.registry.verifyContainerAbsent(ctx, s.record.ContainerID); err != nil {
+				errs = append(errs, err)
 			}
 		}
 		if len(errs) == 0 {
@@ -338,6 +335,25 @@ func (s *Service) Close(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (r *ServiceRegistry) removeServiceContainer(ctx context.Context, containerID string) error {
+	out, err := r.runDocker(ctx, "rm", "--force", containerID)
+	if err == nil {
+		return r.verifyContainerAbsent(ctx, containerID)
+	}
+	removeErr := fmt.Errorf("remove Postgres service %s: %w output=%s", containerID, err, strings.TrimSpace(string(out)))
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) && !errors.Is(err, context.DeadlineExceeded) {
+		return removeErr
+	}
+	// The daemon may finish removing the container after the timed-out CLI exits.
+	checkCtx, cancelCheck := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancelCheck()
+	if checkErr := r.verifyContainerAbsent(checkCtx, containerID); checkErr != nil {
+		return errors.Join(removeErr, ctx.Err(), checkErr)
+	}
+	fmt.Fprintf(os.Stderr, "%v; container absence confirmed after removal timeout\n", removeErr)
+	return nil
 }
 
 func (r *ServiceRegistry) RunCreator(ctx context.Context, leaseID string, creatorFD uintptr) error {
