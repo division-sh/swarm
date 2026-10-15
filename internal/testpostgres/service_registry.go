@@ -128,25 +128,13 @@ func (r *ServiceRegistry) Provision(ctx context.Context, executable string) (_ *
 	if err := r.Reconcile(ctx); err != nil {
 		return nil, err
 	}
-	images, err := r.dockerOutput(ctx, "image", "ls", "--quiet", "--no-trunc", postgresImage)
+	imageID, err := r.postgresImageID(ctx)
 	if err != nil {
 		return nil, err
-	}
-	if images == "" {
-		if out, err := r.runDocker(ctx, "pull", postgresImage); err != nil {
-			return nil, fmt.Errorf("pull %s: %w output=%s", postgresImage, err, strings.TrimSpace(string(out)))
-		}
 	}
 	daemonID, err := r.dockerOutput(ctx, "info", "--format", "{{.ID}}")
 	if err != nil {
 		return nil, err
-	}
-	imageID, err := r.dockerOutput(ctx, "image", "inspect", "--format", "{{.Id}}", postgresImage)
-	if err != nil {
-		return nil, err
-	}
-	if imageID == "" {
-		return nil, fmt.Errorf("inspect %s: empty image ID", postgresImage)
 	}
 	ownerID, err := r.ownerID()
 	if err != nil {
@@ -969,6 +957,53 @@ func (r *ServiceRegistry) ownerID() (string, error) {
 		}
 		return value, nil
 	}
+}
+
+func (r *ServiceRegistry) postgresImageID(ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	images, err := r.dockerOutput(ctx, "image", "ls", "--no-trunc", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}", postgresImage)
+	if err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	var listedID string
+	if images == "" {
+		if out, err := r.runDocker(ctx, "pull", postgresImage); err != nil {
+			return "", fmt.Errorf("pull %s: %w output=%s", postgresImage, err, strings.TrimSpace(string(out)))
+		}
+	} else {
+		fields := strings.Fields(images)
+		if len(fields) != 2 || fields[0] != postgresImage || strings.ContainsAny(images, "\r\n") {
+			return "", fmt.Errorf("unexpected local image listing for %s: %q", postgresImage, images)
+		}
+		listedID = fields[1]
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	imageID, err := r.dockerOutput(ctx, "image", "inspect", "--format", "{{.Id}}", postgresImage)
+	if err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if imageID == "" {
+		return "", fmt.Errorf("inspect %s: empty image ID", postgresImage)
+	}
+	hash := strings.TrimPrefix(imageID, "sha256:")
+	digest, decodeErr := hex.DecodeString(hash)
+	if !strings.HasPrefix(imageID, "sha256:") || decodeErr != nil || len(digest) != sha256.Size || hex.EncodeToString(digest) != hash {
+		return "", fmt.Errorf("inspect %s: malformed image ID %q", postgresImage, imageID)
+	}
+	if listedID != "" && listedID != imageID {
+		return "", fmt.Errorf("local %s image identity changed before admission", postgresImage)
+	}
+	return imageID, nil
 }
 
 func (r *ServiceRegistry) dockerOutput(ctx context.Context, args ...string) (string, error) {
