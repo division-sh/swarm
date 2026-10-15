@@ -137,11 +137,8 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return err
 		}
-		if at := strings.TrimSpace(req.At); at != "" && at != point.EventID && at != point.Input {
-			return fmt.Errorf("selected materialization selector differs from its captured fork point")
-		}
 		planRequest := runfork.RunForkPlanRequest{
-			SourceRunID: sourceRunID, At: point.Input, ResolvedPoint: &point,
+			SourceRunID: sourceRunID, At: strings.TrimSpace(req.At), ResolvedPoint: &point,
 			AtStart: point.Kind == runfork.RunForkPointRunStart,
 		}
 		plan, err := port.plan(txctx, tx, planRequest)

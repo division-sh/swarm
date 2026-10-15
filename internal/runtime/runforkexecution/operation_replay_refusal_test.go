@@ -184,3 +184,54 @@ func TestSelectedOperationRefusalsDoNotCreateAnotherChildBothStores(t *testing.T
 		}
 	}
 }
+
+func TestSelectedOperationSameInvocationRefusesChangedMeaningBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, keyed := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/keyed=%t", backend, keyed), func(t *testing.T) {
+				ctx, request := ownerlessSelectedOperationFixture(t, backend)
+				if !keyed {
+					request.ForkOperation.IdempotencyKey = ""
+				}
+				materialized := abandonSelectedOperationPreparation(t, ctx, request)
+				selected := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader).Store
+				for _, change := range []string{"bundle", "fixed_revision"} {
+					t.Run(change, func(t *testing.T) {
+						altered := *request.ForkOperation
+						switch change {
+						case "bundle":
+							altered.TargetBundleHash = "sha256:different-same-invocation-bundle"
+						case "fixed_revision":
+							point := materialized.ForkPoint
+							point.Revision++
+							altered.ResolvedPoint = &point
+						}
+						if _, _, err := altered.Canonical(); err != nil {
+							t.Fatalf("hostile request is not independently valid: %v", err)
+						}
+						before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+						if err != nil {
+							t.Fatal(err)
+						}
+						duplicate := request
+						duplicate.ForkOperation = &altered
+						result, refusal := ExecuteSelectedContractRunFork(ctx, duplicate)
+						after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+						if err != nil || !reflect.DeepEqual(before, after) {
+							t.Fatalf("changed invocation mutated durable state: refusal=%v snapshot=%v", refusal, err)
+						}
+						if refusal == nil || !strings.Contains(refusal.Error(), "differs from original invocation semantics") || result.Activation.Activated {
+							t.Fatalf("changed invocation bypassed semantic refusal: result=%+v err=%v", result, refusal)
+						}
+						request.Owner.ports.contexts.mu.Lock()
+						remaining := len(request.Owner.ports.contexts.entries)
+						request.Owner.ports.contexts.mu.Unlock()
+						if remaining != 0 {
+							t.Fatalf("refused invocation leaked %d preparation entries", remaining)
+						}
+					})
+				}
+			})
+		}
+	}
+}
