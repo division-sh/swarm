@@ -6058,6 +6058,7 @@
     "Family": "native-run-setup-family144",
     "File": "internal/runtime/tools/executor_entity_test.go",
     "Function": "ensureEntityToolTestRun",
+    "Removed": true,
     "Before": "func ensureEntityToolTestRun(t *testing.T, db *sql.DB) {\n\tt.Helper()\n\trunlifecyclefixture.RequirePostgres(t, unmanagedToolTestContext(), db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: entityToolTestRunID, BundleHash: authorActivityTestBundleHash})\n}",
     "After": "func ensureEntityToolTestRun(t *testing.T, selected storetest.RunFixtureStore) {\n\tt.Helper()\n\tstoretest.RequireRun(t, unmanagedToolTestContext(), selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: entityToolTestRunID, BundleHash: authorActivityTestBundleHash})\n}"
   },
