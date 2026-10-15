@@ -137,3 +137,26 @@ original whole-file classifications. Preserve every prior owner/row/proof and
 the source-currentness and hostile controls. Generation supplies no execution
 credit. Exact source-bound receipts belong in the checkpoint audit. No boot,
 dispatcher, slot, accepted-tail or global DC-3 gate is opened by this accounting.
+
+## Private Native Write Freshness (A19/A20/A28, P18/P19/P24)
+
+Gate #2269/6192553264 and single-writer reservation #2542/6192598032 add
+passive cache revocation only. The original backend constructs the observer
+before process binding; its original private PostgreSQL/SQLite retained session
+supplies that exact observer to `newProcessCapability`. No selected facade,
+boot step, verify repair, provider slot or new SQL authority is introduced.
+
+| Measured body / boundary | Owner and consumers | Execution proof |
+| --- | --- | --- |
+| `postgres.(*Backend).AgentRecoveryWriteObserver` and SQLite peer | Original backend identity, consumed only by its original native startup session and native boundary tests. Binding preserves pre-existing active writes and refuses a different live process. | `TestAgentRecoveryNativePreBindWriteMustJoinBothStores`, queued pool/mutation-admission controls, and process binding/foreign/takeover controls. |
+| `postgres.(*Backend).runTransactionOutcome` and `runAuthorityTransactionWithProof` | The existing pooled and retained native transaction owners begin passive invalidation before pool/session admission; end only after their unchanged rollback/discard/close joins. The observer never takes process `opMu` or retains `p.mu` during native work. | `TestPostgresFreshnessObservationJoinsOriginalCleanup`, `TestPostgresFreshnessObservesPoolWaitBeforeProcessBind`, native cancellation/uncertain-commit exits and generation-monitor controls. |
+| SQLite `RunTransactionOutcome` and `runTransactionWithConnectionScope` | Existing logical retry/mutation owner and native connection owner retain their cleanup order, including B's scoped prepare failure. Nested scopes are cache observations, not occupancy. Read-only transactions do not invalidate. | `TestSQLiteFreshnessObservationJoinsOriginalCleanup`, `TestSQLiteFreshnessObservesQueuedWriteBeforeProcessBind`, original transaction exit/cancellation/retry controls. |
+| `startupownership.SeedAgentRecovery` publication | Existing retained canonical reader plus original-process mutex; epoch mismatch or any active write refuses publication. A later explicit call reconstructs the entire image, never increments/decrements cached occupancy. | `TestAgentRecoverySeedRevokesAcrossClaimAndSettlementBothStores` (12 held/installed cuts), reclaim/retry/failure/bulk, parent provider settlement, canceled-turn and foreign backend controls; original loss/takeover/full-storage controls remain. |
+
+P18 remains observation-only; P19 still requires native possession and the exact
+generation; P24 preserves actual error/ACK and cleanup semantics. Writable
+locking proof/source operations conservatively revoke even if unchanged;
+genuinely read-only inspections and native proofs do not. Generation of the
+census itself provides no execution credit. Native installed seed bytes remain
+unobserved; this packet proves revocation and explicit complete reconstruction,
+not a live provider/capacity decision or integrated S6 recovery.
