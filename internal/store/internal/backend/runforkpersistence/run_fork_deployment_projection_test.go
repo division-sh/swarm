@@ -81,6 +81,7 @@ func TestForkDeploymentCarriageMatchesExactPinVersion(t *testing.T) {
 		{"changed-pin", durabledata.PinnedSource{Declaration: ref, VersionID: durabledata.VersionID("resource-version-v1:sha256:" + strings.Repeat("d", 64)), SchemaDigest: schema, RowCount: 3}, false, 0, fanoutobligation.StatusOpen, 0, false},
 		{"changed-empty-pin", durabledata.PinnedSource{Declaration: ref, VersionID: durabledata.VersionID("resource-version-v1:sha256:" + strings.Repeat("d", 64)), SchemaDigest: schema, RowCount: 0}, false, 0, fanoutobligation.StatusClosed, 0, false},
 		{"same-version-new-cardinality", durabledata.PinnedSource{Declaration: ref, VersionID: version, SchemaDigest: schema, RowCount: 3}, false, 0, "", 0, true},
+		{"negative-cardinality", durabledata.PinnedSource{Declaration: ref, VersionID: version, SchemaDigest: schema, RowCount: -1}, false, 0, "", 0, true},
 		{"different-declaration", durabledata.PinnedSource{Declaration: durabledata.DeclarationRef{FlowPath: ".", EventName: "other"}, VersionID: version, SchemaDigest: schema, RowCount: 2}, false, 0, "", 0, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -92,6 +93,25 @@ func TestForkDeploymentCarriageMatchesExactPinVersion(t *testing.T) {
 				t.Fatalf("carriage=%+v", got)
 			}
 		})
+	}
+}
+
+func TestFreshForkDeploymentCarriageUsesExactChildCardinality(t *testing.T) {
+	for _, count := range []int{-1, 0, 1, 32} {
+		got, err := freshForkDeploymentCarriage(durabledata.PinnedSource{RowCount: count})
+		if count < 0 {
+			if err == nil {
+				t.Fatal("negative child cardinality became a fresh feed")
+			}
+			continue
+		}
+		want := fanoutobligation.StatusOpen
+		if count == 0 {
+			want = fanoutobligation.StatusClosed
+		}
+		if err != nil || got.status != want || got.inherit || got.cursor != 0 || got.blockedReason != "" || len(got.outcomes) != 0 {
+			t.Fatalf("fresh carriage for %d rows invented inherited progress: %+v err=%v", count, got, err)
+		}
 	}
 }
 
