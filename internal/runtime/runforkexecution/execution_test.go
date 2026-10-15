@@ -4686,8 +4686,10 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	// Source advancement requires a business event, not excluded diagnostics.
-	seedSelectedExecutionPostForkSourceEvent(t, db, sourceRunID, afterEventID, sourceRunID, at.Add(time.Second))
-	seedSourceOutcomeThatMustNotSuppressFork(t, db, afterEventID, sourceRunID, at.Add(time.Second))
+	afterEvent := eventtest.ExistingRunRootIngress(afterEventID, "source.after", "source-runtime", "", []byte(`{}`), 0, sourceRunID,
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, sourceRunID), sourceRunID), at.Add(time.Second))
+	afterOutcome := runtimepipelineobligation.Acknowledged("source_outcome_must_not_suppress_fork")
+	storetest.CommitSemanticEventWithInitialFacts(t, ctx, pg, afterEvent, nil, runtimepipelineobligation.ScopeDirect, &afterOutcome)
 	if _, _, err := storetest.TerminalizeRun(ctx, pg, storerunlifecycle.TerminalRequest{
 		RunID:   sourceRunID,
 		State:   storerunlifecycle.StateCancelled,
