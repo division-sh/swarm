@@ -2,6 +2,7 @@ package releasee2e
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -158,11 +159,9 @@ func TestAdmissionFactoringDoctorReadback(t *testing.T) {
 					t.Fatalf("typed blocker %s count=%d\n%s", tc.code, found, result.output)
 				}
 				if tc.name == "invalid-admission" {
-					const teaching = "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
-					for _, want := range []string{config, `unknown config key "paths.platform_spec_path"`, teaching} {
-						if !strings.Contains(refusal, want) {
-							t.Fatalf("config retirement lost located teaching %q\n%s", want, result.output)
-						}
+					want := fmt.Sprintf("swarm.yaml config blockers:\n`paths.platform_spec_path` at %s:2:3 is not a config key; the platform spec is embedded in `swarm`.", config)
+					if refusal != want {
+						t.Fatalf("config retirement lost exact located teaching; want %q\n%s", want, result.output)
 					}
 					if len(report.CapabilitySubjects) != 0 || len(report.PackInventory.Packs) != 0 {
 						t.Fatalf("retired spec override reached installed readback\n%s", result.output)

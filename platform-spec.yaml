@@ -23150,7 +23150,7 @@ configuration_source_authority:
             verification_gates_file: retired_rejected
             tooling_lock_file: retired_rejected
           owner: contract/platform path owners, agent_intent_model, and #1600 helper-path drains
-          platform_spec_path_remediation: "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
+          platform_spec_path_remediation: "`paths.platform_spec_path` at <file>:<line>:<col> is not a config key; the platform spec is embedded in `swarm`."
     document_semantics:
       rule: >
         Expand supported aliases and merge keys only within the selected document through the existing YAML source
@@ -28453,7 +28453,7 @@ cli_specification:
             by the API connection and auth resolver. This key is server-side `swarm serve` auth only and MUST NOT be
             consumed as client API auth.
         rejected_keys:
-          paths.platform_spec_path: "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
+          paths.platform_spec_path: "`paths.platform_spec_path` at <file>:<line>:<col> is not a config key; the platform spec is embedded in `swarm`."
           api_token: Inline bearer tokens in config files are not promoted.
           output_format: Split to #848 output renderer implementation.
           no_color: >
@@ -28497,8 +28497,8 @@ cli_specification:
         accepted_sources:
           built_in_default: embedded platform-spec.yaml
         rejected_config_key: paths.platform_spec_path
-        remediation: "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
-        rule: Use embedded tracked bytes by default. Existing explicit owner options resolve against invocation root. No environment or public swarm CLI flag source; do not add one as part of config retirement.
+        remediation: "`paths.platform_spec_path` at <file>:<line>:<col> is not a config key; the platform spec is embedded in `swarm`."
+        rule: The platform spec is always embedded in the swarm binary. No config key, environment variable, flag or file lookup selects an external spec for swarm; changing the spec requires rebuilding the binary.
     error_channel_and_exit_code_contract:
       implemented_by: '#846'
       scope: >

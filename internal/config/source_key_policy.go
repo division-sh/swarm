@@ -1,6 +1,38 @@
 package config
 
-const PlatformSpecPathConfigRemediation = "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
+import (
+	"fmt"
+	"strings"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+)
+
+const PlatformSpecPathConfigRefusal = "`paths.platform_spec_path` at %s:%d:%d is not a config key; the platform spec is embedded in `swarm`."
+
+// SourceKeyError preserves typed vocabulary evidence while applying the ruled
+// embedded-spec teaching instead of suggesting a nonexistent config or flag.
+func SourceKeyError(diagnostic *runtimecontracts.LoaderDiagnostic) error {
+	if strings.TrimPrefix(diagnostic.Location.YAMLPath, "config.") != "paths.platform_spec_path" {
+		return diagnostic
+	}
+	diagnostic.Remediation = ""
+	return platformSpecPathConfigError{diagnostic: diagnostic}
+}
+
+type platformSpecPathConfigError struct {
+	diagnostic *runtimecontracts.LoaderDiagnostic
+}
+
+func (e platformSpecPathConfigError) Error() string {
+	location := e.diagnostic.Location
+	file := location.File
+	if file == "" {
+		file = "<config>"
+	}
+	return fmt.Sprintf(PlatformSpecPathConfigRefusal, file, location.Line, location.Column)
+}
+
+func (e platformSpecPathConfigError) Unwrap() error { return e.diagnostic }
 
 // SourceKeyRule describes the existing swarm.yaml source policy.
 type SourceKeyRule struct {

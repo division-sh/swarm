@@ -100,7 +100,7 @@ func TestPlatformSpecUnifiedSwarmConfigSourceAuthority(t *testing.T) {
 			t.Fatalf("paths.%s = %q, want retired_rejected", key, got)
 		}
 	}
-	const teaching = "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
+	const teaching = "`paths.platform_spec_path` at <file>:<line>:<col> is not a config key; the platform spec is embedded in `swarm`."
 	if got := scalarValue(mustMappingValue(t, pathSection, "platform_spec_path_remediation")); got != teaching {
 		t.Fatalf("platform spec path teaching = %q, want %q", got, teaching)
 	}
@@ -268,12 +268,13 @@ func TestPlatformSpecUnifiedConfigSupersedesOldConfigCommitments(t *testing.T) {
 
 	pathConfig := mustMappingValue(t, foundations, "source_platform_spec_path_resolution")
 	assertContainsScalar(t, mustMappingValue(t, pathConfig, "scope"), "authored source root is owned by filesystem_source_model.local_root_selection")
-	assertContainsScalar(t, mustYAMLPath(t, pathConfig, "platform_spec_path", "rule"), "No environment or public swarm CLI flag source")
+	assertContainsScalar(t, mustYAMLPath(t, pathConfig, "platform_spec_path", "rule"), "always embedded in the swarm binary")
+	assertContainsScalar(t, mustYAMLPath(t, pathConfig, "platform_spec_path", "rule"), "No config key, environment variable, flag or file lookup")
 	accepted := mustYAMLPath(t, pathConfig, "platform_spec_path", "accepted_sources")
 	if hasMappingKey(accepted, "config_key") || scalarValue(mustMappingValue(t, accepted, "built_in_default")) != "embedded platform-spec.yaml" {
 		t.Fatal("platform spec default/source contract restored a config override")
 	}
-	const teaching = "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
+	const teaching = "`paths.platform_spec_path` at <file>:<line>:<col> is not a config key; the platform spec is embedded in `swarm`."
 	if got := scalarValue(mustYAMLPath(t, pathConfig, "platform_spec_path", "remediation")); got != teaching {
 		t.Fatalf("path-resolution teaching = %q, want %q", got, teaching)
 	}

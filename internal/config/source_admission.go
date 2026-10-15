@@ -93,11 +93,7 @@ func validateConfigValue(value yamlsource.Value, shape reflect.Type, owner strin
 		for _, field := range fields {
 			child := declared[field.Name]
 			if _, admitted := options[field.Name]; !admitted {
-				diagnostic := runtimecontracts.NewUndefinedFieldDiagnostic(owner, field.Name, options, field)
-				if owner == "config.paths" && field.Name == "platform_spec_path" {
-					diagnostic.Remediation = PlatformSpecPathConfigRemediation
-				}
-				return diagnostic
+				return undefinedConfigSourceKey(owner, field, options)
 			}
 			if err := validateConfigValue(field.Value, child, owner+"."+field.Name); err != nil {
 				return err
@@ -129,6 +125,14 @@ func validateConfigValue(value yamlsource.Value, shape reflect.Type, owner strin
 		}
 	}
 	return nil
+}
+
+func undefinedConfigSourceKey(owner string, field yamlsource.MappingField, options map[string]struct{}) error {
+	diagnostic := runtimecontracts.NewUndefinedFieldDiagnostic(owner, field.Name, options, field)
+	if owner == "config.paths" && field.Name == "platform_spec_path" {
+		diagnostic.Location.YAMLPath = "paths.platform_spec_path"
+	}
+	return SourceKeyError(diagnostic)
 }
 
 func validateConfigContainerShape(value yamlsource.Value, shape reflect.Type, owner string) error {

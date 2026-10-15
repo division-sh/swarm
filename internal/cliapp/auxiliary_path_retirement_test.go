@@ -54,14 +54,16 @@ func TestRuntimeConfigRejectsRetiredAuxiliaryPaths(t *testing.T) {
 					if slices.Contains(problem.ValidOptions, key) || !slices.Contains(problem.ValidOptions, "swarm_dir") || !slices.Contains(problem.ValidOptions, "monitor_dir") {
 						t.Fatalf("wrong current path vocabulary: %#v", problem.ValidOptions)
 					}
-					if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "paths."+key) || !strings.Contains(err.Error(), "Valid fields:") {
+					if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "paths."+key) {
 						t.Fatalf("missing located current-key teaching: %v", err)
 					}
 					if key == "platform_spec_path" {
-						const teaching = "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
-						if problem.Remediation != teaching || !strings.Contains(err.Error(), teaching) {
+						want := fmt.Sprintf("`paths.platform_spec_path` at %s:%d:%d is not a config key; the platform spec is embedded in `swarm`.", path, problem.Line, problem.Column)
+						if problem.Message != want || problem.Remediation != "" || err.Error() != "swarm.yaml config blockers:\n"+want {
 							t.Fatalf("platform spec teaching differs from the user ruling: %#v / %v", problem, err)
 						}
+					} else if !strings.Contains(err.Error(), "Valid fields:") {
+						t.Fatalf("missing current-key teaching: %v", err)
 					}
 					if _, err := os.Stat(filepath.Join(root, ".swarm", "stores")); !os.IsNotExist(err) {
 						t.Fatalf("source refusal created store state: %v", err)
