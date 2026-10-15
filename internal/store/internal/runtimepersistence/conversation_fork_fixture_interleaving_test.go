@@ -31,7 +31,8 @@ func (c *forkFixtureAdmissionContext) Done() <-chan struct{} {
 }
 
 func TestConversationForkRawSeedOverlapsRuntimeDiagnostic(t *testing.T) {
-	ctx := testAuthorActivityContext()
+	bundle := conversationForkConstructionBundle(t)
+	ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
 	entered, release := make(chan struct{}), make(chan struct{})
 	var armed, held atomic.Bool
 	var once sync.Once
@@ -58,12 +59,20 @@ func TestConversationForkRawSeedOverlapsRuntimeDiagnostic(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.SetEventPayloadAdmitter(storeTestPayloadAdmitter)
-	item := createLifecycleDiagnostic(t, ctx, store)
+	seedStoreTestPersistedArtifact(t, db, bundle.SourceArtifact)
+	item := createConversationForkLifecycleDiagnostic(t, ctx, store, bundle)
 	identity, err := item.Identity.StorageFields()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Bound the held-writer experiment, not schema construction under -race.
+	now := time.Now().UTC()
+	fixture := ConversationForkSourceFixture{
+		Identity: item.Identity, RunID: identity.RunID, SessionID: uuid.NewString(), EntityID: uuid.NewString(),
+		Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), CreatedAt: now,
+		Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute),
+	}
+	fixture.Construction = prepareNativeConversationForkConstruction(t, ctx, store, bundle, fixture)
+	// Bound the held-writer experiment, not schema/constructor preparation.
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	done := make(chan error, 1)
@@ -80,7 +89,6 @@ func TestConversationForkRawSeedOverlapsRuntimeDiagnostic(t *testing.T) {
 	}
 	// This is the original served fixture's first write, with valid admitted
 	// agent coordinates. The lock holder is a real selected-store diagnostic.
-	now := time.Now().UTC()
 	_, err = db.ExecContext(ctx, `INSERT INTO agent_sessions (
 		session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 		flow_scope_key, flow_instance_id, flow_instance,
@@ -92,11 +100,6 @@ func TestConversationForkRawSeedOverlapsRuntimeDiagnostic(t *testing.T) {
 		t.Fatalf("raw fixture write under real diagnostic lock = %v, want SQLITE_BUSY", err)
 	}
 	t.Logf("reproduced raw session seed failure with real diagnostic lock owner: %v", err)
-	fixture := ConversationForkSourceFixture{
-		Identity: item.Identity, RunID: identity.RunID, SessionID: uuid.NewString(), EntityID: uuid.NewString(),
-		Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), CreatedAt: now,
-		Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute),
-	}
 	queued, cancelQueued := context.WithCancel(ctx)
 	defer cancelQueued()
 	observed := &forkFixtureAdmissionContext{Context: queued, entered: make(chan struct{})}
@@ -132,20 +135,23 @@ func TestConversationForkSourceFixtureAtomicBothStores(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			store, db := newLifecycleDiagnosticTestStore(t, sqlite)
-			ctx := testAuthorActivityContext()
-			item := createLifecycleDiagnostic(t, ctx, store)
+			bundle := conversationForkConstructionBundle(t)
+			ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
+			seedStoreTestPersistedArtifact(t, db, bundle.SourceArtifact)
+			item := createConversationForkLifecycleDiagnostic(t, ctx, store, bundle)
 			now := time.Now().UTC().Truncate(time.Second)
 			fixture := ConversationForkSourceFixture{
 				Identity: item.Identity, RunID: item.Identity.RunID, SessionID: uuid.NewString(), EntityID: uuid.NewString(),
 				Event1ID: uuid.NewString(), CreatedAt: now, Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute),
 			}
 			fixture.Event2ID = fixture.Event1ID
+			fixture.Construction = prepareNativeConversationForkConstruction(t, ctx, store, bundle, fixture)
 			// Event2 conflicts after the session, entity, mutations and first
 			// event have been written. None may survive the failed transaction.
 			if _, err := SeedConversationForkSourceForTest(ctx, store, fixture); err == nil {
 				t.Fatal("invalid second event accepted")
 			}
-			for _, table := range []string{"agent_sessions", "flow_instances", "entity_state", "entity_mutations", "events"} {
+			for _, table := range []string{"agent_sessions", "flow_instances", "workflow_instance_initial_materializations", "flow_instance_runtime_readiness", "entity_state", "entity_mutations", "events"} {
 				var count int
 				if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
 					t.Fatal(err)
@@ -159,7 +165,7 @@ func TestConversationForkSourceFixtureAtomicBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result[0].ID() != fixture.Event1ID || result[1].ID() != fixture.Event2ID || !result[0].CreatedAt().Equal(fixture.Turn1At) || !result[1].CreatedAt().Equal(fixture.Turn2At) {
+			if result.Events[0].ID() != fixture.Event1ID || result.Events[1].ID() != fixture.Event2ID || !result.Events[0].CreatedAt().Equal(fixture.Turn1At) || !result.Events[1].CreatedAt().Equal(fixture.Turn2At) {
 				t.Fatal("historical event identities/timestamps changed")
 			}
 			reader := store.(interface {
@@ -186,13 +192,23 @@ func TestConversationForkSourceFixtureAtomicBothStores(t *testing.T) {
 			mutations := make([]mutationlog.ProjectionMutation, 0, len(evidence.Mutations))
 			for _, row := range evidence.Mutations {
 				var value any
-				if err := canonicaljson.DecodePreservingNumberLexemes(row.NewValue, &value); err != nil {
-					t.Fatal(err)
+				if len(row.NewValue) != 0 {
+					if err := canonicaljson.DecodePreservingNumberLexemes(row.NewValue, &value); err != nil {
+						t.Fatal(err)
+					}
 				}
 				mutations = append(mutations, mutationlog.ProjectionMutation{Domain: mutationlog.Domain(row.Domain), Path: row.Path, NewValue: value})
 			}
 			reconstructed, err := mutationlog.ReconstructEntityStateProjection(mutations)
-			if err != nil || len(mutations) != 4 || reconstructed.CurrentState == nil || *reconstructed.CurrentState != "after" || reconstructed.Fields["name"] != "After" {
+			entries := 0
+			for _, row := range evidence.Mutations {
+				if row.Domain == string(mutationlog.DomainBookkeeping) && row.Path == "stage_entry" {
+					entries++
+				}
+			}
+			// The original four field/lifecycle facts remain; lawful construction
+			// additionally records its entry fact and this fixed advance removes it.
+			if err != nil || len(mutations) != 6 || entries != 2 || reconstructed.CurrentState == nil || *reconstructed.CurrentState != "after" || reconstructed.Fields["name"] != "After" || len(reconstructed.Bookkeeping) != 0 {
 				t.Fatalf("current fixture disagrees with original history fold: %+v mutations=%v err=%v", reconstructed, mutations, err)
 			}
 		})

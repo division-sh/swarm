@@ -353,6 +353,7 @@ func commitWorkflowEngineMutationLog(
 	postgres bool,
 	record runtimepipeline.WorkflowEngineStateRecord,
 	before runtimemutationlog.EntityStateProjection,
+	historicalConversationFixture bool,
 	attribution ...*runtimemutationlog.Writer,
 ) error {
 	if record.Transition.PreservesState() {
@@ -370,19 +371,23 @@ func commitWorkflowEngineMutationLog(
 	if len(attribution) != 0 && attribution[0] != nil {
 		writer = *attribution[0]
 	}
-	return insertWorkflowEngineStateDiff(ctx, attempt, store, postgres, record.EntityID, before, after, writer, record.UpdatedAt)
+	return insertWorkflowEngineStateDiff(ctx, attempt, store, postgres, record.EntityID, before, after, writer, record.UpdatedAt, historicalConversationFixture)
 }
 
-func insertWorkflowEngineStateDiff(ctx context.Context, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer, occurredAt time.Time) error {
+func insertWorkflowEngineStateDiff(ctx context.Context, attempt *mutationprotocol.Attempt, store eventCommitTxStore, postgres bool, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer, occurredAt time.Time, historicalConversationFixture bool) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if postgres {
 			selected, ok := store.(*PipelinePostgresOwner)
 			if !ok {
 				return fmt.Errorf("workflow engine PostgreSQL mutation requires PostgreSQL selected store")
 			}
-			return privatemutationlog.InsertEntityStateDiff(ctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+			owner := activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 				return selected.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
-			}), entityID, before, after, writer)
+			})
+			if historicalConversationFixture {
+				return privatemutationlog.InsertConversationForkConstructionDiffForTest(ctx, attempt, owner, entityID, before, after, writer, occurredAt)
+			}
+			return privatemutationlog.InsertEntityStateDiff(ctx, attempt, owner, entityID, before, after, writer)
 		}
 		selected, ok := store.(*PipelineSQLiteOwner)
 		if !ok {
@@ -401,6 +406,7 @@ func commitWorkflowEngineInitialValues(
 	postgres bool,
 	record runtimepipeline.WorkflowEngineStateRecord,
 	before runtimemutationlog.EntityStateProjection,
+	historicalConversationFixture bool,
 ) (runtimemutationlog.EntityStateProjection, error) {
 	decision, err := decideWorkflowEngineState(record.Transition)
 	if err != nil {
@@ -438,7 +444,7 @@ func commitWorkflowEngineInitialValues(
 		next.Fields = copyWorkflowEngineProjectionMap(adjusted.Fields)
 		next.Fields[field] = initial[field]
 		writer := runtimemutationlog.Writer{Type: "platform", ID: "entity_initial_value", HandlerStep: "create_entity"}
-		if err := insertWorkflowEngineStateDiff(ctx, attempt, store, postgres, record.EntityID, adjusted, next, writer, record.UpdatedAt); err != nil {
+		if err := insertWorkflowEngineStateDiff(ctx, attempt, store, postgres, record.EntityID, adjusted, next, writer, record.UpdatedAt, historicalConversationFixture); err != nil {
 			return runtimemutationlog.EntityStateProjection{}, err
 		}
 		adjusted = next
@@ -513,7 +519,7 @@ func commitWorkflowEngineMutation(
 			if err := commitWorkflowEngineState(txctx, attempt, postgres, command.State); err != nil {
 				return err
 			}
-			before, err = commitWorkflowEngineInitialValues(txctx, attempt, store, postgres, command.State, before)
+			before, err = commitWorkflowEngineInitialValues(txctx, attempt, store, postgres, command.State, before, false)
 			if err != nil {
 				return err
 			}
@@ -526,7 +532,7 @@ func commitWorkflowEngineMutation(
 					return err
 				}
 			}
-			if err := commitWorkflowEngineMutationLog(txctx, attempt, store, postgres, command.State, before, command.Writer); err != nil {
+			if err := commitWorkflowEngineMutationLog(txctx, attempt, store, postgres, command.State, before, false, command.Writer); err != nil {
 				return err
 			}
 			for index, proposed := range command.ProposedEffects {
