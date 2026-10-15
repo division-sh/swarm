@@ -146,6 +146,10 @@ func validateSelectedForkRecoveryRequest(req SelectedContractExecutionRequest) e
 // Prepare admits process-owned, non-executable selected work. The caller must
 // Close it on every path; only the execution owner can bind it to concrete work.
 func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req SelectedContractExecutionRequest) (_ *PreparedSelectedFork, finalErr error) {
+	return o.prepareWithOperation(ctx, req, nil)
+}
+
+func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context, req SelectedContractExecutionRequest, operation *selectedContractOperation) (_ *PreparedSelectedFork, finalErr error) {
 	if err := validateSelectedForkRecoveryRequest(req); err != nil {
 		return nil, err
 	}
@@ -160,9 +164,20 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 	if err != nil {
 		return nil, err
 	}
-	operation, err := o.beginPreparation(ctx)
-	if err != nil {
-		return nil, err
+	if operation == nil {
+		operation, err = o.beginPreparation(ctx)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		ports.contexts.mu.Lock()
+		entry := ports.contexts.entries[operation]
+		valid := !ports.contexts.retired && entry != nil && !entry.retiring && entry.recoveryReserved &&
+			req.Recovery != nil && entry.binding.ForkRunID == req.Recovery.RunID
+		ports.contexts.mu.Unlock()
+		if !valid {
+			return nil, errors.New("selected recovery preparation lost its exact reservation")
+		}
 	}
 	owned := &PreparedSelectedFork{owner: o, operation: operation}
 	transferred := false

@@ -16,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
-func (o SelectedContractExecutionOwner) settleRecoveredSelectedCancellations(ctx context.Context, request runcontrol.SelectedForkRecoveryRequest, pending runfork.SelectedForkRecoveryResult, environment SelectedForkRecoveryEnvironment) (result runfork.SelectedForkRecoveryResult, finalErr error) {
+func (o SelectedContractExecutionOwner) settleRecoveredSelectedCancellations(ctx context.Context, request runcontrol.SelectedForkRecoveryRequest, pending runfork.SelectedForkRecoveryResult, environment SelectedForkRecoveryEnvironment, reservation *selectedContractOperation) (result runfork.SelectedForkRecoveryResult, finalErr error) {
 	result = pending
 	commands := make([]effects.CanceledTurnCommand, 0, len(pending.PendingCancellations))
 	var preparation *PreparedSelectedFork
@@ -39,7 +39,7 @@ func (o SelectedContractExecutionOwner) settleRecoveredSelectedCancellations(ctx
 		if turn.Cancellation.Reason == deliverylifecycle.CancellationTurnTimeout {
 			if preparation == nil {
 				var err error
-				preparation, err = o.beginSelectedCancellationInspection(ctx, request, environment.SourceInspector)
+				preparation, err = o.beginSelectedCancellationInspection(ctx, request, environment.SourceInspector, reservation)
 				if err != nil {
 					return result, err
 				}
@@ -93,7 +93,7 @@ func validateRecoveredSelectedCancellationCommits(commands []effects.CanceledTur
 	return nil
 }
 
-func (o SelectedContractExecutionOwner) beginSelectedCancellationInspection(ctx context.Context, request runcontrol.SelectedForkRecoveryRequest, inspector SelectedContractSourceInspector) (p *PreparedSelectedFork, err error) {
+func (o SelectedContractExecutionOwner) beginSelectedCancellationInspection(ctx context.Context, request runcontrol.SelectedForkRecoveryRequest, inspector SelectedContractSourceInspector, reservation *selectedContractOperation) (p *PreparedSelectedFork, err error) {
 	if inspector == nil {
 		return nil, errors.New("selected timeout recovery requires immutable source inspection")
 	}
@@ -104,7 +104,9 @@ func (o SelectedContractExecutionOwner) beginSelectedCancellationInspection(ctx 
 	p = &PreparedSelectedFork{owner: o, operation: op}
 	contexts := o.ports.contexts
 	contexts.mu.Lock()
-	if contexts.retired || !contexts.recovering || contexts.process != op.process {
+	reserved := contexts.entries[reservation]
+	requestRecovery := reserved != nil && !reserved.retiring && reserved.recoveryReserved && reserved.binding == request.Entry.Binding
+	if contexts.retired || (!contexts.recovering && !requestRecovery) || contexts.process != op.process {
 		contexts.mu.Unlock()
 		return p, errors.Join(errors.New("selected cancellation inspection lost startup ownership"), op.Finish())
 	}
