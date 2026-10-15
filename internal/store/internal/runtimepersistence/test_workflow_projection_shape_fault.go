@@ -104,6 +104,29 @@ func AddWorkflowProjectionPrivateBookkeepingForTest(ctx context.Context, selecte
 	})
 }
 
+func SetWorkflowProjectionIdentityLookalikesForTest(ctx context.Context, selected any, run, entity, path string) (int64, error) {
+	if err := validateWorkflowProjectionFaultKey(run, entity, true); err != nil {
+		return 0, err
+	}
+	if err := validateWorkflowProjectionFaultKey(run, path, false); err != nil {
+		return 0, err
+	}
+	postgres, err := workflowProjectionNativePostgres(selected)
+	if err != nil {
+		return 0, err
+	}
+	var changed int64
+	err = runWorkflowProjectionFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = pipelinepersistence.SetWorkflowProjectionIdentityLookalikesForTest(ctx, tx, postgres, run, entity, path)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return changed, nil
+}
+
 func SetWorkflowProjectionConflictingEntityTypeForTest(ctx context.Context, selected any, run, entity string) (int64, error) {
 	return applyWorkflowProjectionShapeFault(ctx, selected, run, entity, true, pipelinepersistence.SetWorkflowProjectionConflictingEntityTypeForTest)
 }
