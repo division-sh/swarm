@@ -8,13 +8,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -54,7 +57,7 @@ func TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 				`CREATE TEMP TABLE entity_state (run_id TEXT, entity_id TEXT, flow_instance TEXT, entity_type TEXT, slug TEXT, name TEXT, created_at TEXT)`,
 				fmt.Sprintf(`CREATE TEMP TABLE entity_mutations (run_id TEXT, mutation_id TEXT, entity_id TEXT, domain TEXT, path TEXT, new_value %s, caused_by_event TEXT, created_at TEXT)`, jsonType),
 				fmt.Sprintf(`CREATE TEMP TABLE flow_instances (run_id TEXT, instance_path TEXT, entity_id TEXT, entity_type TEXT, slug TEXT, name TEXT, config %s, stage_defined BOOLEAN, flow_template TEXT, mode TEXT, parent_instance TEXT, instance_key TEXT, status TEXT, current_state TEXT, entered_state_at TEXT, created_at TEXT, updated_at TEXT, terminated_at TEXT)`, jsonType),
-				fmt.Sprintf(`CREATE TEMP TABLE workflow_instance_initial_materializations (run_id TEXT, instance_path TEXT, entity_id TEXT, projection %s)`, jsonType),
+				fmt.Sprintf(`CREATE TEMP TABLE workflow_instance_initial_materializations (run_id TEXT, instance_path TEXT, entity_id TEXT, projection_version INTEGER NOT NULL, projection %s)`, jsonType),
 			} {
 				if _, err := tx.Exec(ddl); err != nil {
 					t.Fatal(err)
@@ -87,10 +90,20 @@ func TestRuntimeHeaderHistoricalCaptureAndReadinessBothStores(t *testing.T) {
 			insertHeader := `INSERT INTO flow_instances (run_id,instance_path,entity_id,entity_type,slug,name,config,stage_defined,flow_template,mode,parent_instance,instance_key,status,current_state,entered_state_at,created_at,updated_at)
 				VALUES ($1,$2,$3,'deployment','','',$4,TRUE,'consumer','template',$6,$7,'active',$5,'2026-09-21T00:00:00Z','2026-09-21T00:00:00Z','2026-09-21T00:00:00Z')`
 			metadata := plan.Entities[0].MaterializationMetadata
+			bundle, found := semanticview.Bundle(source)
+			if !found || bundle.SourceArtifact == nil {
+				t.Fatal("historical capture fixture requires its exact admitted artifact")
+			}
+			at := time.Date(2026, time.September, 21, 0, 0, 0, 0, time.UTC)
+			construction := selectedWorkflowConstructionRecordFixture(t, runID, bundle.SourceArtifact.BundleHash(), instance, pipeline.WorkflowInstance{
+				WorkflowVersion: "v1", Mode: metadata.Mode, Status: "active", EntityType: "deployment", InstanceKey: metadata.InstanceKey,
+				CurrentState: plan.Entities[0].CurrentState, Fields: plan.Entities[0].Fields, StageDefined: true, EnteredStageAt: at, CreatedAt: at,
+			}, executionmode.Live)
+			metadata.InitialMaterialization = construction.InitialMaterialization
 			if _, err := tx.Exec(insertHeader, runID, path, entityID, config, plan.Entities[0].CurrentState, instance.ParentRoute.FlowInstance, metadata.InstanceKey); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := tx.Exec(`INSERT INTO workflow_instance_initial_materializations (run_id,instance_path,entity_id,projection) VALUES ($1,$2,$3,$4)`, runID, path, entityID, string(metadata.InitialMaterialization)); err != nil {
+			if _, err := tx.Exec(`INSERT INTO workflow_instance_initial_materializations (run_id,instance_path,entity_id,projection_version,projection) VALUES ($1,$2,$3,$4,$5)`, runID, path, entityID, pipeline.FlowConstructionReceiptVersion, string(metadata.InitialMaterialization)); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := tx.Exec(insertHeader, "44444444-4444-4444-8444-444444444444", path, entityID, strings.Replace(config, "v1", "foreign-run", 1), plan.Entities[0].CurrentState, "44444444-4444-4444-8444-444444444444", metadata.InstanceKey); err != nil {

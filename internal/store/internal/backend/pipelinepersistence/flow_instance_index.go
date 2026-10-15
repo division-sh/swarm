@@ -27,6 +27,7 @@ type HistoricalFlowInstanceConstructionResult struct {
 
 type HistoricalFlowInstanceReader interface {
 	ReadHistoricalFlowInstanceConstructionTx(context.Context, *sql.Tx, semanticview.Source, runlifecycle.Snapshot, pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error)
+	ReadHistoricalFlowInstanceConstructionBatchTx(context.Context, *sql.Tx, semanticview.Source, runlifecycle.Snapshot, []pipeline.WorkflowInstance) ([]HistoricalFlowInstanceConstructionResult, error)
 	ReadHistoricalFlowInstanceConstructionEvidenceTx(context.Context, *sql.Tx, runlifecycle.Snapshot, pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error)
 	ReadHistoricalFlowInstanceConstructionEvidenceBatchTx(context.Context, *sql.Tx, runlifecycle.Snapshot, []pipeline.WorkflowInstance) ([]HistoricalFlowInstanceConstructionResult, error)
 }
@@ -428,6 +429,13 @@ func (s *flowInstanceIndexSnapshot) observe(ctx context.Context, request pipelin
 	if err != nil {
 		return pipeline.FlowInstanceObservation{}, err
 	}
+	return s.observeConstruction(ctx, request, header, HistoricalFlowInstanceConstructionResult{Construction: historical, Found: projected})
+}
+
+func (s *flowInstanceIndexSnapshot) observeConstruction(ctx context.Context, request pipeline.FlowInstanceLookupRequest, header pipeline.WorkflowInstance, history HistoricalFlowInstanceConstructionResult) (pipeline.FlowInstanceObservation, error) {
+	if err := ctx.Err(); err != nil {
+		return pipeline.FlowInstanceObservation{}, err
+	}
 	if err := s.preloadCompanions(ctx, []pipeline.WorkflowInstance{header}); err != nil {
 		return pipeline.FlowInstanceObservation{}, err
 	}
@@ -438,7 +446,7 @@ func (s *flowInstanceIndexSnapshot) observe(ctx context.Context, request pipelin
 		return pipeline.FlowInstanceObservation{}, err
 	}
 	var observation pipeline.FlowInstanceObservation
-	if projected {
+	if history.Found {
 		if companions.constructionPresent {
 			return pipeline.FlowInstanceObservation{}, corruptFlowConstructionEvidence(flowidentity.RunScopedFlowInstance{RunID: s.run.RunID, Route: route}, fmt.Errorf("instance has conflicting native and historical construction evidence"))
 		}
@@ -446,7 +454,7 @@ func (s *flowInstanceIndexSnapshot) observe(ctx context.Context, request pipelin
 		if readyFound {
 			desired = &readiness
 		}
-		observation, err = pipeline.AdmitHistoricalFlowInstanceObservation(request, header, s.run, s.revision, historical, desired)
+		observation, err = pipeline.AdmitHistoricalFlowInstanceObservation(request, header, s.run, s.revision, history.Construction, desired)
 	} else {
 		if !readyFound {
 			return pipeline.FlowInstanceObservation{}, &pipeline.FlowInstanceConstructionCorruption{RunID: request.RunID(), FlowID: request.FlowID(), InstancePath: header.StorageRef, Cause: fmt.Errorf("native instance lacks desired attachment evidence")}
@@ -580,14 +588,27 @@ func (s *flowInstanceIndexSnapshot) observeDeclaration(ctx context.Context, scop
 	if err := s.preloadCompanions(ctx, headers); err != nil {
 		return nil, err
 	}
+	var history []HistoricalFlowInstanceConstructionResult
+	if len(headers) != 0 {
+		if err := s.requireRecordedRevision(ctx); err != nil {
+			return nil, err
+		}
+		history, err = s.historical.ReadHistoricalFlowInstanceConstructionBatchTx(ctx, s.tx, s.source, s.run, headers)
+		if err != nil {
+			return nil, err
+		}
+		if len(history) != len(headers) {
+			return nil, fmt.Errorf("historical declaration batch changed its header cardinality")
+		}
+	}
 	observations := make([]pipeline.FlowInstanceObservation, 0, len(headers))
-	for _, header := range headers {
+	for index, header := range headers {
 		owner := flowidentity.RunScopedFlowInstance{RunID: s.run.RunID, Route: flowidentity.StoredRoute(flowidentity.ScopeKey(s.source, flowID), header.InstanceID, header.StorageRef)}
 		request, err := pipeline.NewExactFlowInstanceLookup(s.source, scope.SourceFact(), owner)
 		if err != nil {
 			return nil, err
 		}
-		observation, err := s.observe(ctx, request, header)
+		observation, err := s.observeConstruction(ctx, request, header, history[index])
 		if err != nil {
 			return nil, err
 		}

@@ -20,6 +20,15 @@ import (
 )
 
 func TestHistoricalConstructionEvidenceBatchParityAndRefusalsBothStores(t *testing.T) {
+	testHistoricalConstructionBatchParityAndRefusalsBothStores(t, false)
+}
+
+func TestHistoricalConstructionAdmissionBatchParityAndRefusalsBothStores(t *testing.T) {
+	testHistoricalConstructionBatchParityAndRefusalsBothStores(t, true)
+}
+
+func testHistoricalConstructionBatchParityAndRefusalsBothStores(t *testing.T, sourceCompatible bool) {
+	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newOrdinaryForkPredecessorFixture(t, backend)
@@ -61,11 +70,21 @@ func TestHistoricalConstructionEvidenceBatchParityAndRefusalsBothStores(t *testi
 			default:
 				t.Fatal("batch proof requires the original native history owner")
 			}
+			readScalar := reader.ReadHistoricalFlowInstanceConstructionEvidenceTx
+			readBatch := reader.ReadHistoricalFlowInstanceConstructionEvidenceBatchTx
+			if sourceCompatible {
+				readScalar = func(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, header pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error) {
+					return reader.ReadHistoricalFlowInstanceConstructionTx(ctx, tx, semanticview.Wrap(f.bundle), run, header)
+				}
+				readBatch = func(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, headers []pipeline.WorkflowInstance) ([]pipelinepersistence.HistoricalFlowInstanceConstructionResult, error) {
+					return reader.ReadHistoricalFlowInstanceConstructionBatchTx(ctx, tx, semanticview.Wrap(f.bundle), run, headers)
+				}
+			}
 			read := func(ctx context.Context, selectedRun runlifecycle.Snapshot, input []pipeline.WorkflowInstance) ([]pipelinepersistence.HistoricalFlowInstanceConstructionResult, error) {
 				var result []pipelinepersistence.HistoricalFlowInstanceConstructionResult
 				err := readServedDeliveryObservation(ctx, f.store, func(ctx context.Context, tx *sql.Tx) error {
 					var err error
-					result, err = reader.ReadHistoricalFlowInstanceConstructionEvidenceBatchTx(ctx, tx, selectedRun, input)
+					result, err = readBatch(ctx, tx, selectedRun, input)
 					return err
 				})
 				return result, err
@@ -79,12 +98,12 @@ func TestHistoricalConstructionEvidenceBatchParityAndRefusalsBothStores(t *testi
 			var original []pipelinepersistence.HistoricalFlowInstanceConstructionResult
 			if err := readServedDeliveryObservation(f.ctx, f.store, func(ctx context.Context, tx *sql.Tx) error {
 				var err error
-				original, err = reader.ReadHistoricalFlowInstanceConstructionEvidenceBatchTx(ctx, tx, run, headers)
+				original, err = readBatch(ctx, tx, run, headers)
 				if err != nil || len(original) != len(headers) {
 					return errors.Join(errors.New("batch changed its exact header cardinality"), err)
 				}
 				for i, header := range headers {
-					construction, found, err := reader.ReadHistoricalFlowInstanceConstructionEvidenceTx(ctx, tx, run, header)
+					construction, found, err := readScalar(ctx, tx, run, header)
 					if err != nil || original[i] != (pipelinepersistence.HistoricalFlowInstanceConstructionResult{Construction: construction, Found: found}) || found != (header.StorageRef != "review/ti-later") {
 						t.Fatalf("scalar/batch changed exact evidence or native absence: path=%s batch=%+v scalar=%+v found=%t err=%v", header.StorageRef, original[i], construction, found, err)
 					}
@@ -123,8 +142,8 @@ func TestHistoricalConstructionEvidenceBatchParityAndRefusalsBothStores(t *testi
 						bad.InstanceID = "foreign"
 					}
 					if err := readServedDeliveryObservation(f.ctx, f.store, func(ctx context.Context, tx *sql.Tx) error {
-						_, _, scalarErr := reader.ReadHistoricalFlowInstanceConstructionEvidenceTx(ctx, tx, run, bad)
-						got, batchErr := reader.ReadHistoricalFlowInstanceConstructionEvidenceBatchTx(ctx, tx, run, []pipeline.WorkflowInstance{exact, bad})
+						_, _, scalarErr := readScalar(ctx, tx, run, bad)
+						got, batchErr := readBatch(ctx, tx, run, []pipeline.WorkflowInstance{exact, bad})
 						if scalarErr == nil || batchErr == nil || got != nil || scalarErr.Error() != batchErr.Error() {
 							t.Fatalf("crossed duplicate gained authority or partial output: field=%s result=%+v scalar=%v batch=%v", field, got, scalarErr, batchErr)
 						}
@@ -155,7 +174,7 @@ func TestHistoricalConstructionEvidenceBatchParityAndRefusalsBothStores(t *testi
 			if got, err := read(cancelled, run, headers); !errors.Is(err, context.Canceled) || got != nil {
 				t.Fatalf("cancelled batch returned evidence: %+v %v", got, err)
 			}
-			if got, err := reader.ReadHistoricalFlowInstanceConstructionEvidenceBatchTx(f.ctx, nil, run, headers); err == nil || got != nil {
+			if got, err := readBatch(f.ctx, nil, run, headers); err == nil || got != nil {
 				t.Fatalf("batch accepted missing transaction authority: %+v %v", got, err)
 			}
 			if got, err := read(f.ctx, run, nil); err != nil || len(got) != 0 {
@@ -215,6 +234,26 @@ func TestHistoricalConstructionBatchReadinessKeepsNativeEvidenceChecksBothStores
 						t.Fatalf("%s/%s bypassed actual per-header receipt checks: %v", scenario, surface, err)
 					}
 				}
+				scope, err := pipeline.NewFlowInstanceLookupScope(semanticview.Wrap(f.bundle), fact, f.owner.RunID, []string{"review"}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, surface := range []string{"list", "planning"} {
+					var got []pipeline.FlowInstanceObservation
+					if surface == "list" {
+						got, err = f.store.(pipeline.FlowInstanceIndexReader).ListFlowInstances(f.ctx, scope)
+					} else {
+						err = f.store.(pipeline.FlowInstancePlanningSnapshotOwner).WithFlowInstancePlanningSnapshot(f.ctx, scope, func(ctx context.Context, index pipeline.FlowInstanceIndexReader) error {
+							var readErr error
+							got, readErr = index.ListFlowInstances(ctx, scope)
+							return readErr
+						})
+					}
+					var corruption *pipeline.FlowInstanceConstructionCorruption
+					if got != nil || !errors.As(err, &corruption) || corruption.RunID != owner.RunID || corruption.InstancePath != owner.Route.InstancePath {
+						t.Fatalf("%s/%s bypassed actual per-header companions: %+v %v", scenario, surface, got, err)
+					}
+				}
 				if after := forkReceiverFaultSnapshot(t, f.ctx, f.store); !reflect.DeepEqual(before, after) {
 					t.Fatal("readiness receipt refusal changed durable state")
 				}
@@ -224,9 +263,22 @@ func TestHistoricalConstructionBatchReadinessKeepsNativeEvidenceChecksBothStores
 }
 
 func TestHistoricalConstructionEvidenceBatchUsesFreshRunAndTransactionBothStores(t *testing.T) {
+	testHistoricalConstructionBatchUsesFreshRunAndTransactionBothStores(t, false)
+}
+
+func TestHistoricalConstructionAdmissionBatchUsesFreshRunAndTransactionBothStores(t *testing.T) {
+	testHistoricalConstructionBatchUsesFreshRunAndTransactionBothStores(t, true)
+}
+
+func testHistoricalConstructionBatchUsesFreshRunAndTransactionBothStores(t *testing.T, sourceCompatible bool) {
+	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newOrdinaryForkPredecessorFixture(t, backend)
+			var source semanticview.Source
+			if sourceCompatible {
+				source = semanticview.Wrap(f.bundle)
+			}
 			workflows := f.store.(pipeline.WorkflowInstancePersistenceReader)
 			header, found, err := workflows.LoadWorkflowInstance(f.ctx, f.owner)
 			if err != nil || !found {
@@ -236,7 +288,7 @@ func TestHistoricalConstructionEvidenceBatchUsesFreshRunAndTransactionBothStores
 			if err != nil {
 				t.Fatal(err)
 			}
-			first, err := readHistoricalConstructionBatchTest(f.ctx, f.store, run, []pipeline.WorkflowInstance{header, header})
+			first, err := readHistoricalConstructionBatchTest(f.ctx, f.store, source, run, []pipeline.WorkflowInstance{header, header})
 			if err != nil || len(first) != 2 || !first[0].Found || first[0] != first[1] {
 				t.Fatalf("exact duplicates changed ordered evidence: %+v %v", first, err)
 			}
@@ -257,7 +309,7 @@ func TestHistoricalConstructionEvidenceBatchUsesFreshRunAndTransactionBothStores
 				t.Fatalf("intervening physical change was not observed: found=%t err=%v", found, err)
 			}
 			before := forkReceiverFaultSnapshot(t, f.ctx, f.store)
-			got, err := readHistoricalConstructionBatchTest(f.ctx, f.store, run, []pipeline.WorkflowInstance{header, changed})
+			got, err := readHistoricalConstructionBatchTest(f.ctx, f.store, source, run, []pipeline.WorkflowInstance{header, changed})
 			var corruption *pipeline.FlowInstanceConstructionCorruption
 			if got != nil || !errors.As(err, &corruption) || corruption.RunID != f.owner.RunID || corruption.InstancePath != f.owner.Route.InstancePath {
 				t.Fatalf("later transaction reused old physical authority or returned partial facts: %+v %v", got, err)
@@ -269,7 +321,7 @@ func TestHistoricalConstructionEvidenceBatchUsesFreshRunAndTransactionBothStores
 				t.Fatal(err)
 			}
 			restored = true
-			if got, err := readHistoricalConstructionBatchTest(f.ctx, f.store, run, []pipeline.WorkflowInstance{header, header}); err != nil || !reflect.DeepEqual(got, first) {
+			if got, err := readHistoricalConstructionBatchTest(f.ctx, f.store, source, run, []pipeline.WorkflowInstance{header, header}); err != nil || !reflect.DeepEqual(got, first) {
 				t.Fatalf("restored fresh transaction retained refusal or mutated facts: %+v %v", got, err)
 			}
 			component := f.receiverConfigActivationFixture
@@ -284,20 +336,20 @@ func TestHistoricalConstructionEvidenceBatchUsesFreshRunAndTransactionBothStores
 			if err != nil {
 				t.Fatal(err)
 			}
-			second, err := readHistoricalConstructionBatchTest(f.ctx, f.store, otherRun, []pipeline.WorkflowInstance{other})
+			second, err := readHistoricalConstructionBatchTest(f.ctx, f.store, source, otherRun, []pipeline.WorkflowInstance{other})
 			if err != nil || len(second) != 1 || !second[0].Found || second[0].Construction.SourceOwner != f.owner ||
 				second[0].Construction.SourceRevision != fork.ForkPoint.Revision || second[0].Construction.Identity.ParentRoute.FlowInstance != otherOwner.RunID ||
 				first[0].Construction.SourceOwner != f.sourceOwner || first[0].Construction.SourceRevision != f.cutRevision {
 				t.Fatalf("batch aliased colliding run/cut meanings: first=%+v second=%+v err=%v", first, second, err)
 			}
-			if got, err := readHistoricalConstructionBatchTest(f.ctx, f.store, otherRun, []pipeline.WorkflowInstance{other, header}); err == nil || got != nil {
+			if got, err := readHistoricalConstructionBatchTest(f.ctx, f.store, source, otherRun, []pipeline.WorkflowInstance{other, header}); err == nil || got != nil {
 				t.Fatalf("foreign physical header borrowed other run's authority: %+v %v", got, err)
 			}
 		})
 	}
 }
 
-func readHistoricalConstructionBatchTest(ctx context.Context, selected any, run runlifecycle.Snapshot, headers []pipeline.WorkflowInstance) ([]pipelinepersistence.HistoricalFlowInstanceConstructionResult, error) {
+func readHistoricalConstructionBatchTest(ctx context.Context, selected any, source semanticview.Source, run runlifecycle.Snapshot, headers []pipeline.WorkflowInstance) ([]pipelinepersistence.HistoricalFlowInstanceConstructionResult, error) {
 	var reader pipelinepersistence.HistoricalFlowInstanceReader
 	switch owner := selected.(type) {
 	case *SQLiteRuntimeStore:
@@ -310,7 +362,11 @@ func readHistoricalConstructionBatchTest(ctx context.Context, selected any, run 
 	var result []pipelinepersistence.HistoricalFlowInstanceConstructionResult
 	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
 		var err error
-		result, err = reader.ReadHistoricalFlowInstanceConstructionEvidenceBatchTx(ctx, tx, run, headers)
+		if source == nil {
+			result, err = reader.ReadHistoricalFlowInstanceConstructionEvidenceBatchTx(ctx, tx, run, headers)
+		} else {
+			result, err = reader.ReadHistoricalFlowInstanceConstructionBatchTx(ctx, tx, source, run, headers)
+		}
 		return err
 	})
 	if err != nil {

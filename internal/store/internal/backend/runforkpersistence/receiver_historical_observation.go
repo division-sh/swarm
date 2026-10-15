@@ -24,6 +24,14 @@ func (s *RunForkSQLiteOwner) ReadHistoricalFlowInstanceConstructionTx(ctx contex
 	return readHistoricalFlowInstanceConstructionTx(ctx, tx, source, run, instance)
 }
 
+func (s *RunForkPostgresOwner) ReadHistoricalFlowInstanceConstructionBatchTx(ctx context.Context, tx *sql.Tx, source semanticview.Source, run runlifecycle.Snapshot, instances []pipeline.WorkflowInstance) ([]pipelinepersistence.HistoricalFlowInstanceConstructionResult, error) {
+	return readHistoricalFlowInstanceConstructionBatchTx(ctx, tx, source, run, instances)
+}
+
+func (s *RunForkSQLiteOwner) ReadHistoricalFlowInstanceConstructionBatchTx(ctx context.Context, tx *sql.Tx, source semanticview.Source, run runlifecycle.Snapshot, instances []pipeline.WorkflowInstance) ([]pipelinepersistence.HistoricalFlowInstanceConstructionResult, error) {
+	return readHistoricalFlowInstanceConstructionBatchTx(ctx, tx, source, run, instances)
+}
+
 func (s *RunForkPostgresOwner) ReadHistoricalFlowInstanceConstructionEvidenceTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instance pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error) {
 	return readHistoricalFlowInstanceConstructionEvidenceTx(ctx, tx, run, instance)
 }
@@ -48,6 +56,10 @@ func readHistoricalFlowInstanceConstructionTx(ctx context.Context, tx *sql.Tx, s
 	if err != nil || !found {
 		return pipeline.HistoricalFlowInstanceConstruction{}, false, err
 	}
+	return cut.admit(source, run, instance)
+}
+
+func (cut historicalFlowInstanceConstructionCut) admit(source semanticview.Source, run runlifecycle.Snapshot, instance pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error) {
 	fixed, _, found, err := runforkadmission.FixedConstructionForRoute(source, cut.plan, cut.route)
 	if err != nil {
 		return pipeline.HistoricalFlowInstanceConstruction{}, false, fmt.Errorf("admit historical construction: fixed header refusal: %w", err)
@@ -146,6 +158,21 @@ func historicalFlowInstanceConstructionCutForHeader(ctx context.Context, run run
 }
 
 func readHistoricalFlowInstanceConstructionEvidenceBatchTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instances []pipeline.WorkflowInstance) ([]pipelinepersistence.HistoricalFlowInstanceConstructionResult, error) {
+	return readHistoricalFlowInstanceConstructionHeadersTx(ctx, tx, run, instances, func(cut historicalFlowInstanceConstructionCut, instance pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error) {
+		return cut.evidence(run, instance)
+	})
+}
+
+func readHistoricalFlowInstanceConstructionBatchTx(ctx context.Context, tx *sql.Tx, source semanticview.Source, run runlifecycle.Snapshot, instances []pipeline.WorkflowInstance) ([]pipelinepersistence.HistoricalFlowInstanceConstructionResult, error) {
+	if source == nil {
+		return nil, fmt.Errorf("historical instance observation requires its admitted snapshot")
+	}
+	return readHistoricalFlowInstanceConstructionHeadersTx(ctx, tx, run, instances, func(cut historicalFlowInstanceConstructionCut, instance pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error) {
+		return cut.admit(source, run, instance)
+	})
+}
+
+func readHistoricalFlowInstanceConstructionHeadersTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instances []pipeline.WorkflowInstance, project func(historicalFlowInstanceConstructionCut, pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error)) ([]pipelinepersistence.HistoricalFlowInstanceConstructionResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -189,7 +216,7 @@ func readHistoricalFlowInstanceConstructionEvidenceBatchTx(ctx context.Context, 
 			return nil, err
 		}
 		if found {
-			construction, admitted, err := cut.evidence(run, instance)
+			construction, admitted, err := project(cut, instance)
 			if err != nil {
 				return nil, err
 			}

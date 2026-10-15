@@ -132,6 +132,24 @@ func TestD1HistoricalReforkExactRequireSurvivesReopenBothStores(t *testing.T) {
 			if err != nil || !historical || !wasHistorical || fixed != prior || !reflect.DeepEqual(actual, header) {
 				t.Fatalf("reopened historical construction changed: fixed=%+v header=%+v err=%v", fixed, actual, err)
 			}
+			scope, err := pipeline.NewFlowInstanceLookupScope(lookup.Source(), lookup.SourceFact(), owner.RunID, []string{"review"}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			inventory, err := reopened.(pipeline.FlowInstanceIndexReader).ListFlowInstances(f.ctx, scope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			listed := false
+			for _, item := range inventory {
+				if item.Owner() == owner {
+					got, itemErr := item.WorkflowInstance()
+					listed = itemErr == nil && reflect.DeepEqual(got, header)
+				}
+			}
+			if !listed {
+				t.Fatal("reopened declaration batch lost exact historical construction")
+			}
 			if _, err := reopened.(pipeline.FlowConstructionPublicationReader).LoadFlowConstructionPublication(f.ctx, owner, observed.Identity().EntityID); !errors.Is(err, sql.ErrNoRows) {
 				t.Fatalf("reopened history manufactured native construction: %v", err)
 			}
