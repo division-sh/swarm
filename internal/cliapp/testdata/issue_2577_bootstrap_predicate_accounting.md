@@ -412,3 +412,41 @@ repaired race packet
 Focused evidence is not a local tier, hosted credit, physical pairing or a
 readiness PASS. Fresh affected guards/preflight and the single quiet actual-SDK
 same-operation replacement rehearsal remain required before the PR push.
+
+### P01 First-Batch Preparation Projection
+
+Reviewer-g's conditional gate #2577/6201624807 is met by the deterministic
+TestWhatsAppHeldFirstQRPublicCLIProgressBothStores. The genuine SDK peer holds
+its first QR until an explicit wire send, after connect completes. The actual
+authenticated get and retry results are separately captured and replayed only
+in memory through the real CLI entrypoint and its private progress validator.
+Both stores refuse BOTH responses with exit 2 before the repair: a valid exact
+selected declaration, activating_provider, awaiting_qr, no code/expiry, no
+pairing/connection/account/identity/READY. Releasing the real first batch proves
+ordinary current-QR progress. No QR or account values are logged.
+
+| Owner / caller | Boundary | Execution proof |
+| --- | --- | --- |
+| Service.result -> Result.projectInitialSessionPreparation | After all read owners and caller cancellation checks, only exact initial non-executable evidence becomes preparing; no private state or durable revision write | TestWhatsAppHeldFirstQRPublicCLIProgressBothStores; TestInitialSessionPreparationProjectionIsExact |
+| Result.ProviderCredentialRequirement -> SessionPreparationPending | Selected declaration, operation, coordinate, target, posture, ceremony and phase must agree; no account, binding, identity, logout or READY | Finite projection negatives; existing caller-cancellation and pairing read-error/scope matrix |
+| CLI channel resume -> validateCLIChannelProgress -> SessionPairingPending | Both captured get/retry responses consume the existing preparing contract; awaiting_qr still requires current material/future expiry | Both-store held-first-batch control, released real QR, contradictory/expired CLI controls |
+
+The quiet supplied-command first-progress RED at 3d05729332 remains retained
+under #2577/6201572376. It captured the CLI exit and last preceding public
+read, not the rejected response itself; the deterministic cut identifies the
+same possible predicate for both responses without claiming a retrospective
+trace. It remains distinct from the earlier preparation-deadline REDs, expired
+batch reuse RED and accepted paired-PostgreSQL resume residual. Fresh focused
+race, affected guards/preflight and ONE quiet supplied-command rehearsal are
+required before hosted qualification or readiness.
+
+The identical held-first-batch test source is used for RED and GREEN (SHA256
+799c74ff611e84ea7049baee7be9dded3a07a55cf730988ea972df3194718f9e).
+RED raw receipt SHA256
+443151ba43882d18a448d460d7ba2fe4ef7d286081956b402f23f2458f79c3d9;
+initial GREEN receipt SHA256
+b3e2129ddcbd4c76895c43eb0e22d70a4c65683e034290ebab430fa3028a1ee9.
+The initial combined GREEN invocation first stopped at two new test compile
+errors (interface fixture assignment and noncomparable operation comparison),
+before admission; the corrected projection table and unchanged held-QR root
+then passed. This setup failure earns no execution credit.

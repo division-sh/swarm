@@ -2117,6 +2117,7 @@ func (s *Service) result(ctx context.Context, op Operation, candidate *Candidate
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
+	result.projectInitialSessionPreparation()
 	return result, nil
 }
 
