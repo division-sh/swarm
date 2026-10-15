@@ -113,7 +113,7 @@ func TestRunForkFanOutTimestampCurrentReadbackBothStores(t *testing.T) {
 								}
 							}
 							beforeRetry := historicalContextDatabaseRows(t, db, postgres)
-							repeated, retryErr := store.MaterializeRunFork(ctx, request)
+							repeated, retryErr := store.RequireMaterializedRunFork(ctx, child.ForkRunID, request)
 							historicalContextRequireUnchanged(t, beforeRetry, historicalContextDatabaseRows(t, db, postgres))
 							wantSuccess := (column == "created_at" && (cell.name == "valid_native" || cell.name == "valid_offset_text")) || (column != "created_at" && cell.name == "null")
 							if wantSuccess {

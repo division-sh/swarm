@@ -563,8 +563,15 @@ func TestGenericConstructedGateForkUsesFixedSnapshotBothStores(t *testing.T) {
 				t.Fatal("fixed gate planning changed source or child state")
 			}
 			var first runfork.RunForkMaterialization
+			request := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID}
 			for attempt := 0; attempt < 2; attempt++ {
-				result, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+				var result runfork.RunForkMaterialization
+				var err error
+				if attempt == 0 {
+					result, err = f.store.MaterializeRunFork(f.ctx, request)
+				} else {
+					result, err = f.store.RequireMaterializedRunFork(f.ctx, first.ForkRunID, request)
+				}
 				if err != nil || result.ForkRunID == "" {
 					t.Fatalf("fixed gate materialization: %+v %v", result, err)
 				}

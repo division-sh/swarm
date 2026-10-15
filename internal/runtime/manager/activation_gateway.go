@@ -33,7 +33,7 @@ func (am *AgentManager) unpublishedActivationState(token effects.LifecycleToken)
 		if am.lifecycle.phase == runtimeLifecycleRunning && cell != nil && cell.view.Phase == AgentLifecycleRunning && cell.execution != nil {
 			execution := cell.execution
 			if execution.token == token && !execution.fenced && execution.routeToken == (effects.LifecycleToken{}) && execution.route == nil && execution.loopDone != nil && execution.generationCtx != nil && execution.generationCtx.Err() == nil {
-				return cell.configRevision, cell.topology, nil
+				return cell.view.ConfigRevision, cell.view.Topology, nil
 			}
 		}
 	}

@@ -101,7 +101,7 @@ func TestRunForkProfileInheritanceRequiresExactEffectiveSourceBeforeMutation(t *
 	if inherited.Digest() != profile.Digest() || !bytes.Equal(inherited.CanonicalBytes(), profile.CanonicalBytes()) {
 		t.Fatal("fork did not inherit exact scenario execution profile bytes")
 	}
-	if _, err := pg.MaterializeRunFork(ctx, request); err != nil {
+	if _, err := pg.RequireMaterializedRunFork(ctx, materialized.ForkRunID, request); err != nil {
 		t.Fatalf("exact fork replay: %v", err)
 	}
 }
@@ -906,7 +906,7 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	if err != nil {
 		t.Fatalf("MaterializeRunFork first: %v", err)
 	}
-	repeated, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: clearEventID})
+	repeated, err := pg.RequireMaterializedRunFork(ctx, first.ForkRunID, runfork.RunForkMaterializeRequest{SourceRunID: sourceRunID, At: clearEventID})
 	if err != nil {
 		t.Fatalf("MaterializeRunFork exact replay: %v", err)
 	}
@@ -930,7 +930,7 @@ func TestRunForkMaterializer_ReplaysExactAndFailsClosedOnUnsupportedBlockers(t *
 	runlifecyclefixture.CorruptPostgresOrigin(
 		t, ctx, db, first.ForkRunID, storerunlifecycle.ScenarioSetupRunOrigin(),
 	)
-	if _, err := pg.MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{
+	if _, err := pg.RequireMaterializedRunFork(ctx, first.ForkRunID, runfork.RunForkMaterializeRequest{
 		SourceRunID: sourceRunID,
 		At:          clearEventID,
 	}); err == nil || !strings.Contains(err.Error(), "conflicts with persisted lifecycle state") {

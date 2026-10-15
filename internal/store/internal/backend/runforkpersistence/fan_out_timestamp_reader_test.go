@@ -98,7 +98,7 @@ func TestFanOutTimestampReaderPresenceBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			readErr := requireExactMaterializedRunForkFanOut(context.Background(), tx, backend == "postgres", childID, plan, refs, original, "", nil, nil)
+			readErr := requireExactMaterializedRunForkFanOut(context.Background(), tx, backend == "postgres", backend == "postgres", childID, plan, refs, original, "", nil, nil)
 			if err := tx.Rollback(); err != nil {
 				t.Fatal(err)
 			}
@@ -148,7 +148,7 @@ func TestFanOutTimestampReaderPresenceBothStores(t *testing.T) {
 							if err != nil {
 								t.Fatal(err)
 							}
-							readErr := requireExactMaterializedRunForkFanOut(context.Background(), tx, backend == "postgres", childID, plan, refs, original, "", nil, nil)
+							readErr := requireExactMaterializedRunForkFanOut(context.Background(), tx, backend == "postgres", backend == "postgres", childID, plan, refs, original, "", nil, nil)
 							if err := tx.Rollback(); err != nil {
 								t.Fatal(err)
 							}

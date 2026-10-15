@@ -167,7 +167,7 @@ func testRetainedMapSourceForkOnBothStores(t *testing.T, counterfactual bool) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				err = requireExactMaterializedRunForkFanOut(context.Background(), tx, backend == "postgres", child, plan, refs, original, "", nil, nil)
+				err = requireExactMaterializedRunForkFanOut(context.Background(), tx, backend == "postgres", backend == "postgres", child, plan, refs, original, "", nil, nil)
 				if rollback := tx.Rollback(); rollback != nil {
 					t.Fatal(rollback)
 				}
@@ -201,7 +201,7 @@ func testRetainedMapSourceForkOnBothStores(t *testing.T, counterfactual bool) {
 					if _, err := tx.Exec(`UPDATE fan_out_intents SET `+tc.column+`=$1 WHERE run_id=$2`, tc.value, child); err != nil {
 						t.Fatal(err)
 					}
-					if err := requireExactMaterializedRunForkFanOut(context.Background(), tx, backend == "postgres", child, plan, refs, original, "", nil, nil); err == nil {
+					if err := requireExactMaterializedRunForkFanOut(context.Background(), tx, backend == "postgres", backend == "postgres", child, plan, refs, original, "", nil, nil); err == nil {
 						t.Fatal("contradictory retained plan/source accepted")
 					}
 					if err := tx.Rollback(); err != nil {

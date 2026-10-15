@@ -63,7 +63,7 @@ func (c ReplyRequestContinuation) claimTarget(acquired events.RouteIdentity) (ev
 		}
 		return events.RouteIdentity{}, nil
 	}
-	materialized := MaterializeConnectRoutePlan(c.Plan, ConnectRoutePlanMaterializationInput{})
+	materialized := MaterializeConnectRoutePlan(c.Plan)
 	targets := append([]events.RouteIdentity(nil), materialized.TargetSet...)
 	if !materialized.Target.Empty() {
 		targets = append(targets, materialized.Target)

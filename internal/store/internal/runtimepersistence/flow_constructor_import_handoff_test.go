@@ -29,6 +29,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 				SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)
 				PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 				MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+				RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 				pipeline.WorkflowEngineMutationOwner
 			})
 			runID, entityID := correlation.RunIDFromContext(f.ctx), uuid.NewString()
@@ -92,7 +93,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 				t.Fatalf("materialize-only import fabricated construction or lost state: headers=%d fields=%d err=%v", headers, fields, err)
 			}
 			before = snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
-			if replay, err := owner.MaterializeRunFork(f.ctx, request); err != nil || replay.ForkRunID != fork.ForkRunID || !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
+			if replay, err := owner.RequireMaterializedRunFork(f.ctx, fork.ForkRunID, request); err != nil || replay.ForkRunID != fork.ForkRunID || !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
 				t.Fatalf("exact imported history replay changed state: %+v err=%v", replay, err)
 			}
 			for _, fault := range []struct {
@@ -120,7 +121,7 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 						t.Fatal(err)
 					}
 					before := snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")
-					if _, err := owner.MaterializeRunFork(f.ctx, request); err == nil {
+					if _, err := owner.RequireMaterializedRunFork(f.ctx, fork.ForkRunID, request); err == nil {
 						t.Errorf("exact replay accepted changed imported %s", fault.name)
 					}
 					if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, f.db, backend == "postgres")) {
