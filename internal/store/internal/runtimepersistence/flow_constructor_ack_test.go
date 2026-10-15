@@ -445,7 +445,7 @@ func TestOrdinaryWorkflowMutationCannotConstructOrRepairBothStores(t *testing.T)
 					path, at := flowID+"/receiver", time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 					record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, path, entityID, "active", 1, at)
 					if imported {
-						seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, path, "active", 1, at)
+						seedWorkflowTargetStateForTransition(t, backend, db, runID, entityID, path, at)
 					} else {
 						record.ExpectedState, record.ExpectedRevision = "", 0
 						record.Transition = pipeline.WorkflowEngineStateTransitionCreateStateAndCompanion
@@ -464,7 +464,7 @@ func TestOrdinaryWorkflowMutationCannotConstructOrRepairBothStores(t *testing.T)
 					}
 					assertNoWorkflowEngineHistory(t, backend, db, runID, entityID)
 					if imported {
-						assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, path, "", "active", 1, 0)
+						assertWorkflowTargetTransitionRows(t, backend, db, runID, entityID, path, "", "", 0, 0)
 					}
 				})
 			}

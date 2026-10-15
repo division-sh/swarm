@@ -85,7 +85,7 @@ func projectRunForkEntityExecutionState(entity runfork.RunForkEntityState, sourc
 		}
 	}
 	if found {
-		if entry.Stage != entity.CurrentState {
+		if entity.CurrentState == nil || entry.Stage != *entity.CurrentState {
 			return nil, nil, nil, fmt.Errorf("fork current stage contradicts its retained lifecycle entry")
 		}
 		child, err := projectRunForkStageEntry(entry, sourceRunID, forkRunID, projection)

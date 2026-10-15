@@ -289,7 +289,9 @@ type mutationProtocolJourneyFacts struct {
 func readMutationProtocolJourneyFacts(t *testing.T, db *sql.DB, runID string) mutationProtocolJourneyFacts {
 	t.Helper()
 	var f mutationProtocolJourneyFacts
-	if err := db.QueryRow(`SELECT CAST(fields AS TEXT),current_state,revision FROM entity_state WHERE run_id=$1 AND flow_instance='consumer'`, runID).Scan(&f.consumerFields, &f.consumerState, &f.consumerRevision); err != nil {
+	if err := db.QueryRow(`SELECT CAST(e.fields AS TEXT),h.current_state,h.revision FROM entity_state e
+		JOIN flow_instances h ON h.run_id=e.run_id AND h.entity_id=e.entity_id AND h.instance_path=e.flow_instance AND h.entity_type=e.entity_type
+		WHERE e.run_id=$1 AND e.flow_instance='consumer'`, runID).Scan(&f.consumerFields, &f.consumerState, &f.consumerRevision); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='producer/work.ready'`, runID).Scan(&f.eventID); err != nil {
@@ -345,7 +347,9 @@ func waitForMutationProtocolSeed(t *testing.T, db *sql.DB, runID string) int64 {
 		if err := db.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 AND e.event_name='receiver.seeded' AND d.subscriber_type='node' AND d.status='delivered' AND d.claim_version>0`, runID).Scan(&delivered); err != nil {
 			t.Fatal(err)
 		}
-		err := db.QueryRow(`SELECT CAST(fields AS TEXT),revision FROM entity_state WHERE run_id=$1 AND flow_instance='consumer'`, runID).Scan(&fields, &revision)
+		err := db.QueryRow(`SELECT CAST(e.fields AS TEXT),h.revision FROM entity_state e
+			JOIN flow_instances h ON h.run_id=e.run_id AND h.entity_id=e.entity_id AND h.instance_path=e.flow_instance AND h.entity_type=e.entity_type
+			WHERE e.run_id=$1 AND e.flow_instance='consumer'`, runID).Scan(&fields, &revision)
 		if err != nil && err != sql.ErrNoRows {
 			t.Fatal(err)
 		}

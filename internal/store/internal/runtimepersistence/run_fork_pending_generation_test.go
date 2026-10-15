@@ -150,8 +150,8 @@ func TestForkPendingGenerationCorrespondenceBothStores(t *testing.T) {
 					}
 					seedWorkflowHeaderProjectionFixture(t, ctx, fixture.db, childRun, effect.EntityID, effect.FlowInstance, effect.FlowID, "default", "operating", string(raw), now)
 					if _, err := fixture.db.ExecContext(ctx, `INSERT INTO entity_state
-				(run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, entered_state_at, created_at, updated_at)
-				VALUES ($1,$2,$3,'default','operating','{}','{}',$4,$5,$5,$5)`, childRun, effect.EntityID, effect.FlowInstance, string(raw), now); err != nil {
+				(run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at)
+				VALUES ($1,$2,$3,'default','{}',$4,$4)`, childRun, effect.EntityID, effect.FlowInstance, now); err != nil {
 						t.Fatal(err)
 					}
 					before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
@@ -172,6 +172,9 @@ func TestForkPendingGenerationCorrespondenceBothStores(t *testing.T) {
 					if wantFailure {
 						if err == nil {
 							t.Fatal("accepted contradictory pending-effect generation")
+						}
+						if (geometry == "missing_correspondence" || geometry == "zero_correspondence" || geometry == "wrong_destination") && err.Error() != "fork correspondence does not own the exact child run and entity" {
+							t.Fatalf("correspondence refusal lost its exact cause: %v", err)
 						}
 						if after := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres"); !reflect.DeepEqual(before, after) {
 							t.Fatal("rejected correspondence mutated durable tables")

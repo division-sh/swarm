@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
@@ -13,23 +12,53 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/deadletters"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
+type runForkCLIConstructionOwner interface {
+	storetest.RunFixtureStore
+	runforkexecution.SourceArtifactSelectedContractSourceStore
+	pipeline.WorkflowPersistenceOwner
+	pipeline.DecisionCardDraftExpiry
+	pipeline.HumanTaskExpiry
+	bus.EventStore
+	bus.FlowInstanceActivationCommitOwner
+	bus.ActiveAgentDescriptorLister
+	bus.PreparedPublishEventReader
+	bus.TargetFailureDeadLetterRecorder
+	bus.RunOriginReader
+	replycontext.Store
+	deliverylifecycle.Store
+	runlifecycle.StandingRestartDispositionReader
+	deadletters.AcknowledgedRecorder
+	decisioncard.Store
+	decisioncard.ProposedEffectStore
+	decisioncard.HumanTaskStore
+	PipelineObligations() pipelineobligation.Store
+}
+
 // This establishes real source construction, not executable attachment or a
 // public launch. The fork controls keep their original admission assertions.
-func seedRunForkCLIConstruction(t *testing.T, db *sql.DB, runID, bundleHash string, at time.Time) {
+func seedRunForkCLIConstruction(t *testing.T, fixture storetest.RunFixtureStore, runID, bundleHash string, at time.Time) {
 	t.Helper()
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	selected, ok := fixture.(runForkCLIConstructionOwner)
+	if !ok || selected == nil {
+		t.Fatal("source construction requires the original selected semantic roles")
+	}
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{
 		RepoRoot: repoRootForTest(), PlatformSpecPath: contracts.DefaultPlatformSpecFile(repoRootForTest()), Store: selected,
 	}

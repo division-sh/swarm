@@ -406,7 +406,7 @@ func issue2564AssertRetainedFork(t *testing.T, f issue2564OperationFixture, reta
 			continue
 		}
 		matches++
-		if entity.CurrentState != retained.CurrentState || !reflect.DeepEqual(entity.Fields, retained.Fields) || !reflect.DeepEqual(entity.Bookkeeping, retained.Bookkeeping) {
+		if entity.CurrentState == nil || *entity.CurrentState != retained.CurrentState || !reflect.DeepEqual(entity.Fields, retained.Fields) || !reflect.DeepEqual(entity.Bookkeeping, retained.Bookkeeping) {
 			t.Fatalf("fork history lost canonical writer/constructor values: %+v", entity)
 		}
 	}

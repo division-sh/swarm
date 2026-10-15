@@ -55,7 +55,14 @@ func CompareEntityStateProjections(runID string, folded, stored map[string]Entit
 				FoldedPresent: leftOK, StoredPresent: rightOK, FoldedValue: left, StoredValue: right,
 				FoldedType: projectionValueType(left, leftOK), StoredType: projectionValueType(right, rightOK)})
 		}
-		add(DomainLifecycleState, "", before.CurrentState, true, after.CurrentState, true)
+		var beforeStage, afterStage any
+		if before.CurrentState != nil {
+			beforeStage = *before.CurrentState
+		}
+		if after.CurrentState != nil {
+			afterStage = *after.CurrentState
+		}
+		add(DomainLifecycleState, "", beforeStage, before.CurrentState != nil, afterStage, after.CurrentState != nil)
 		for _, bucket := range []struct {
 			domain      Domain
 			left, right map[string]any
@@ -65,6 +72,10 @@ func CompareEntityStateProjections(runID string, folded, stored map[string]Entit
 			{DomainGate, before.Gates, after.Gates},
 			{DomainAccumulator, before.Accumulator, after.Accumulator},
 		} {
+			if bucket.domain != DomainAuthoredField && (bucket.left == nil) != (bucket.right == nil) {
+				add(bucket.domain, "", bucket.left, bucket.left != nil, bucket.right, bucket.right != nil)
+				continue
+			}
 			left, err := cloneProjectionBucket(bucket.left)
 			if err != nil {
 				return DriftReport{}, fmt.Errorf("entity %s folded %s: %w", entity, bucket.domain, err)

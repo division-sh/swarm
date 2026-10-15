@@ -105,8 +105,14 @@ func TestIssue2589FullEngineCommandStatementCount(t *testing.T) {
 				if casLost {
 					mock.ExpectRollback()
 				} else {
-					mock.ExpectExec(`(?s)^UPDATE\s+entity_state SET .*revision = revision \+ 1, .*WHERE run_id = .* AND entity_id = .* AND flow_instance = .* AND entity_type = .*$`).
-						WithArgs("", "", "done", "{}", "{}", "{}", "{}", record.EnteredStageAt, record.UpdatedAt, runID, entityID, "root", "task").WillReturnResult(sqlmock.NewResult(0, 1))
+					mock.ExpectQuery(`(?s)^SELECT fi.entity_id, fi.instance_path`).WithArgs(runID, entityID, "root").WillReturnRows(issue2589Rows(
+						"entity_id instance_path entity_type flow_template current_state revision gates bookkeeping accumulator field_id field_path field_type fields",
+						entityID, "root", "task", "root", "done", int64(2), "{}", "{}", "{}", entityID, "root", "task", "{}",
+					))
+					if postgres {
+						mock.ExpectQuery(`(?s)^SELECT entity_id FROM entity_state .* FOR UPDATE$`).WithArgs(runID, entityID, "root", "task").WillReturnRows(issue2589Rows("entity_id", entityID))
+					}
+					mock.ExpectQuery(`(?s)^SELECT COALESCE\(slug,''\), COALESCE\(name,''\), created_at, updated_at`).WithArgs(runID, entityID, "root", "task").WillReturnRows(issue2589Rows("slug name created_at updated_at", "", "", at, at))
 					issue2589ExpectTimerCancellation(mock, postgres, timer)
 					issue2589ExpectArtifact(mock, postgres)
 					mutationRows := issue2589Rows("mutation_id entity_id domain path new_value caused_by_event created_at")
@@ -138,10 +144,7 @@ func TestIssue2589FullEngineCommandStatementCount(t *testing.T) {
 				ctx := correlation.WithSourceArtifactFact(correlation.WithRunID(context.Background(), runID), sourceartifactfixture.Fact())
 				ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
 				result, err := issue2589CommitEngine(t, ctx, db, postgres, command)
-				wantCount, wantArtifacts := 26, 3
-				if postgres {
-					wantCount = 25
-				}
+				wantCount, wantArtifacts := 27, 3
 				if casLost {
 					wantCount, wantArtifacts = 8, 2
 					if postgres {
@@ -236,8 +239,8 @@ func issue2589ExpectEngineRevision(mock sqlmock.Sqlmock, postgres bool, state pi
 	}
 	mock.ExpectQuery(`(?s)^WITH\s+requested\(family,fact_key\).*run_fork_fact_revisions.*`).WillReturnRows(issue2589Rows("family fact_key fact present"))
 	mock.ExpectQuery(`(?s)^SELECT\s+CAST\(e.entity_id AS TEXT\).*FROM .*flow_instances.*UNION ALL.*WHERE e.run_id = .*`).WillReturnRows(issue2589Rows(
-		"entity_id flow_instance entity_type slug name created_at flow_config construction_kind stage_defined flow_template mode status current_state entered_state_at updated_at terminated_at parent_instance instance_key initial_materialization",
-		state.EntityID, state.Identity.Route.InstancePath, state.EntityType, nil, nil, state.CreatedAt, string(state.Config), "constructed", true, state.WorkflowName, state.Mode, state.Status, state.CurrentState, state.EnteredStageAt, state.UpdatedAt, nil, nil, nil, nil,
+		"entity_id flow_instance entity_type slug name created_at flow_config construction_kind stage_defined flow_template mode status current_state entered_state_at updated_at terminated_at parent_instance instance_key initial_materialization data_created_at data_updated_at",
+		state.EntityID, state.Identity.Route.InstancePath, state.EntityType, nil, nil, state.CreatedAt, string(state.Config), "constructed", true, state.WorkflowName, state.Mode, state.Status, state.CurrentState, state.EnteredStageAt, state.UpdatedAt, nil, nil, nil, nil, state.CreatedAt, state.CreatedAt,
 	))
 	mock.ExpectQuery(`(?s)^SELECT\s+CAST\(m.mutation_id AS TEXT\).*FROM entity_mutations m WHERE m.run_id = .*`).WillReturnRows(mutations)
 	routing, _ := json.Marshal(timer.RoutingSource)

@@ -192,8 +192,11 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				target := snapshot.Route.Target.Route()
 				var before string
 				var beforeRevision int64
-				if err := db.QueryRow(`SELECT CAST(fields AS TEXT),revision FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, claim.RunID(), target.EntityID).Scan(&before, &beforeRevision); err != nil || forkEngineMarker(t, before) != "consumer-owned" {
-					t.Fatalf("fixed-revision receiver was not reconstructed independently of current source: %s err=%v", before, err)
+				if err := db.QueryRow(`SELECT CAST(es.fields AS TEXT), fi.revision
+FROM entity_state es JOIN flow_instances fi
+ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+WHERE es.run_id=$1 AND es.entity_id=$2 AND es.flow_instance='consumer'`, claim.RunID(), target.EntityID).Scan(&before, &beforeRevision); err != nil || forkEngineMarker(t, before) != "consumer-owned" || beforeRevision != 1 {
+					t.Fatalf("fixed-revision receiver was not reconstructed independently of current source: %s header revision=%d err=%v", before, beforeRevision, err)
 				}
 				if missing {
 					result, err := db.Exec(`DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, claim.RunID(), target.EntityID)
@@ -223,7 +226,7 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 				if err != nil || current.Status != want || current.ClaimVersion != claim.Version() {
 					t.Fatalf("bridge exact settlement status=%s reason=%s failure=%+v claim=%d want=%s err=%v diagnostics=%v", current.Status, current.ReasonCode, current.Failure, current.ClaimVersion, want, err, forkEngineHandlerErrors(t, db, claim.RunID()))
 				}
-				assertForkEngineRows(t, db, runID, claim.RunID(), target.EntityID, sourceConsumer, beforeRevision+1, missing)
+				assertForkEngineRows(t, selected.RuntimeDeps().EventStore, runID, claim.RunID(), target.EntityID, sourceConsumer, beforeRevision+1, missing)
 				resumeSettled()
 				select {
 				case err := <-finished:
@@ -294,23 +297,81 @@ func forkEngineMarker(t *testing.T, raw string) any {
 	return fields["marker"]
 }
 
-func assertForkEngineRows(t *testing.T, db *sql.DB, sourceRun, childRun, receiver, sourceBefore string, wantRevision int64, missing bool) {
+func assertForkEngineRows(t *testing.T, selected any, sourceRun, childRun, receiver, sourceBefore string, wantRevision int64, missing bool) {
 	t.Helper()
-	var fields string
-	var revision int64
-	err := db.QueryRow(`SELECT CAST(fields AS TEXT),revision FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='consumer'`, childRun, receiver).Scan(&fields, &revision)
-	if missing {
-		if err != sql.ErrNoRows {
-			t.Fatalf("required-state failure recreated the receiver: %s err=%v", fields, err)
+	child, err := storetest.ReadSelectedForkRecoveredStorageSnapshot(context.Background(), selected, childRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := storetest.ReadSelectedForkRecoveredStorageSnapshot(context.Background(), selected, sourceRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fieldRow := func(snapshot map[string]storetest.SelectedForkStorageTableSnapshot, path, entity string) (string, int) {
+		t.Helper()
+		rows, err := storetest.DecodeSelectedForkSnapshotRows(snapshot["entity_state"])
+		if err != nil {
+			t.Fatal(err)
 		}
-	} else if err != nil || forkEngineMarker(t, fields) != "consumer-engine" || revision != wantRevision {
-		t.Fatalf("engine did not write receiving entity exactly once: %s revision=%d want=%d err=%v", fields, revision, wantRevision, err)
+		fields, count := "", 0
+		for _, row := range rows {
+			storedPath, err := row["flow_instance"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			storedEntity, err := row["entity_id"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if storedPath != path || entity != "" && storedEntity != entity {
+				continue
+			}
+			fields, err = row["fields"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			count++
+		}
+		return fields, count
 	}
-	if err := db.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance='producer'`, childRun).Scan(&fields); err != nil || forkEngineMarker(t, fields) != "producer-owned" {
-		t.Fatalf("engine borrowed producer state: %s err=%v", fields, err)
+	fields, count := fieldRow(child, "consumer", receiver)
+	if missing {
+		// A missing header must not hide a recreated data row before cleanup.
+		if count != 0 {
+			t.Fatalf("required-state failure recreated the receiver: rows=%d fields=%s", count, fields)
+		}
+	} else {
+		var revision int64
+		headers, err := storetest.DecodeSelectedForkSnapshotRows(child["flow_instances"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		headerCount := 0
+		for _, row := range headers {
+			path, err := row["instance_path"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			entity, err := row["entity_id"].Text()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if path == "consumer" && entity == receiver {
+				if err := json.Unmarshal(row["revision"].Value, &revision); err != nil {
+					t.Fatal(err)
+				}
+				headerCount++
+			}
+		}
+		if count != 1 || headerCount != 1 || forkEngineMarker(t, fields) != "consumer-engine" || revision != wantRevision {
+			t.Fatalf("engine did not write receiving entity exactly once: field rows=%d header rows=%d fields=%s revision=%d want=%d", count, headerCount, fields, revision, wantRevision)
+		}
 	}
-	if err := db.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance='consumer'`, sourceRun).Scan(&fields); err != nil || fields != sourceBefore {
-		t.Fatalf("engine mutated source receiver: %s err=%v", fields, err)
+	if fields, count := fieldRow(child, "producer", ""); count != 1 || forkEngineMarker(t, fields) != "producer-owned" {
+		t.Fatalf("engine borrowed producer state: rows=%d fields=%s", count, fields)
+	}
+	if fields, count := fieldRow(source, "consumer", ""); count != 1 || fields != sourceBefore {
+		t.Fatalf("engine mutated source receiver: rows=%d fields=%s", count, fields)
 	}
 }
 

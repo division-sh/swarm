@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
@@ -66,13 +67,17 @@ func TestHistoricalForkHeaderAndFieldsShareLifecycleCorrespondence(t *testing.T)
 					t.Fatal(err)
 				}
 				history := runfork.RunForkEntityState{
-					EntityID: entityID, CurrentState: "active", EnteredStateAt: &at,
+					EntityID: entityID, CurrentState: mutationlog.PresentLifecycleState("active"), EnteredStateAt: &at,
 					Fields: map[string]any{}, Bookkeeping: map[string]any{"stage_entry": entry},
 					Accumulator: engine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets(),
 					MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 						Source:       runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 						FlowInstance: path, FlowTemplate: flow, EntityType: entityType, Mode: mode, InstanceKey: instanceKey, StageDefined: true,
 					},
+				}
+				if entityType != "" {
+					history.MaterializationMetadata.DataCreatedAt = &at
+					history.MaterializationMetadata.DataUpdatedAt = &at
 				}
 				before, err := json.Marshal(history.Accumulator)
 				if err != nil {
@@ -101,7 +106,7 @@ func TestHistoricalForkHeaderAndFieldsShareLifecycleCorrespondence(t *testing.T)
 				header, headerErr := selectedContractHistoricalHeader(state, encoded, targetHash, at)
 				fields, fieldErr := projectRunForkHistoricalFields(sourceRun, childRun, projection.Fork.EntityID, targetHash, history, runForkEntityMetadata{
 					FlowInstance: projection.Fork.FlowInstance, EntityType: entityType,
-				}, at)
+				})
 				if variant != "exact" {
 					if headerErr == nil || fieldErr == nil {
 						t.Fatalf("hostile source evidence accepted: header=%v fields=%v", headerErr, fieldErr)
@@ -111,22 +116,23 @@ func TestHistoricalForkHeaderAndFieldsShareLifecycleCorrespondence(t *testing.T)
 				if headerErr != nil || fieldErr != nil {
 					t.Fatalf("exact projection refused: header=%v fields=%v", headerErr, fieldErr)
 				}
-				if len(fields.GateBindings) != 1 || fields.GateBindings[0].Source.BundleHash != sourceHash || fields.GateBindings[0].Fork.BundleHash != targetHash || !bytes.Equal(header.Accumulator, fields.Record.Accumulator) {
+				projectedAccumulator, err := json.Marshal(fields.Mutation.Accumulator)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(fields.GateBindings) != 1 || fields.GateBindings[0].Source.BundleHash != sourceHash || fields.GateBindings[0].Fork.BundleHash != targetHash || !bytes.Equal(header.Accumulator, projectedAccumulator) {
 					t.Fatalf("paired gate projections lost admitted target source: %+v", fields.GateBindings)
 				}
 				after, err := json.Marshal(history.Accumulator)
 				if err != nil || !bytes.Equal(before, after) {
 					t.Fatalf("projection mutated source gate evidence: %v", err)
 				}
-				var headerBookkeeping, fieldBookkeeping map[string]any
+				var headerBookkeeping map[string]any
 				if err := json.Unmarshal(header.Bookkeeping, &headerBookkeeping); err != nil {
 					t.Fatal(err)
 				}
-				if err := json.Unmarshal(fields.Record.Bookkeeping, &fieldBookkeeping); err != nil {
-					t.Fatal(err)
-				}
 				headerEntry, headerFound, headerErr := workflowlifecycle.LoadStageEntry(headerBookkeeping)
-				fieldEntry, fieldFound, fieldErr := workflowlifecycle.LoadStageEntry(fieldBookkeeping)
+				fieldEntry, fieldFound, fieldErr := workflowlifecycle.LoadStageEntry(fields.Mutation.Bookkeeping)
 				if headerErr != nil || fieldErr != nil || !headerFound || !fieldFound || headerEntry != fieldEntry {
 					t.Fatalf("paired historical entries disagree: header=%+v fields=%+v errors=%v/%v", headerEntry, fieldEntry, headerErr, fieldErr)
 				}

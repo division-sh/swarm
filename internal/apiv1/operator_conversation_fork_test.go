@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
@@ -626,7 +627,7 @@ func TestLLMForkChatExecutorUsesRuntimeRequestedToolsOnly(t *testing.T) {
 			},
 			EntitySnapshot: []runfork.ConversationForkEntitySnapshot{{
 				EntityID:     "entity-1",
-				CurrentState: "draft",
+				CurrentState: mutationlog.PresentLifecycleState("draft"),
 				Fields:       map[string]any{"name": "Before"},
 			}},
 		},

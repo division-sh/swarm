@@ -351,7 +351,7 @@ func registryProofBusinessResults(t *testing.T, endpoint, runID string, outputEv
 		var detail operatorread.OperatorEntityFull
 		requireServedJSONRPCResult(t, endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entity.EntityID}, &detail)
 		slug, _ := detail.Fields["slug"].(string)
-		if entityIDs[slug] != "" || entity.CurrentState != "done" || !reflect.DeepEqual(detail.Fields, want[slug]) {
+		if entityIDs[slug] != "" || entity.CurrentState == nil || *entity.CurrentState != "done" || !reflect.DeepEqual(detail.Fields, want[slug]) {
 			t.Fatalf("registry business result differs: entity=%+v fields=%+v expected=%+v", entity, detail.Fields, want[slug])
 		}
 		entityIDs[slug] = entity.EntityID

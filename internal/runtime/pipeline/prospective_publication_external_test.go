@@ -55,7 +55,7 @@ func (p *observedProspectivePersistence) CommitWorkflowEngineMutation(ctx contex
 		command.Lifecycle.RequestCompletionCandidate = !command.Lifecycle.RequestCompletionCandidate
 	case "competing_revision":
 		if p.armRace && !p.raced {
-			// Advance persisted state after the real planner has read it, without
+			// Advance the lifecycle header after the real planner has read it, without
 			// altering the prepared command or its prospective evidence.
 			tx, err := p.db.BeginTx(ctx, nil)
 			if err != nil {
@@ -68,13 +68,6 @@ func (p *observedProspectivePersistence) CommitWorkflowEngineMutation(ctx contex
 			}
 			if count, err := result.RowsAffected(); err != nil || count != 1 {
 				return runtimepipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("competing revision cut rows=%d err=%v", count, err)
-			}
-			result, err = tx.ExecContext(ctx, `UPDATE entity_state SET revision=revision+1 WHERE run_id=$1 AND flow_instance=$2 AND entity_id=$3 AND revision=$4`, command.State.Identity.RunID, command.State.Identity.Route.InstancePath, command.State.EntityID, command.State.ExpectedRevision)
-			if err != nil {
-				return runtimepipeline.CommittedWorkflowEngineMutation{}, err
-			}
-			if count, err := result.RowsAffected(); err != nil || count != 1 {
-				return runtimepipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("competing field revision cut rows=%d err=%v", count, err)
 			}
 			if err := tx.Commit(); err != nil {
 				return runtimepipeline.CommittedWorkflowEngineMutation{}, err
@@ -135,23 +128,23 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 				selected.persistence = runtimepipeline.NewWorkflowPersistence(persistence)
 				coordinator := newGateRecoveryCoordinator(observed, selected, runtimepipeline.PipelineCoordinatorOptions{Module: proposedEffectProofModule{source: source, nodes: nodes}, SourceArtifactFact: fact})
 				commitKeylessConstructorComponent(t, ctx, selected, coordinator, source)
-				var initialFields string
-				var initialRevision int64
-				if err := selected.db.QueryRow(`SELECT CAST(fields AS TEXT), revision FROM entity_state WHERE run_id=$1`, runID).Scan(&initialFields, &initialRevision); err != nil {
+				initial, err := storetest.ReadWorkflowDuplicateProjectionStorage(ctx, selected.events, runID, runID)
+				if err != nil {
 					t.Fatal(err)
+				}
+				initialFields, initialRevision := string(initial.Fields), int64(initial.Revision)
+				if initialRevision != 1 {
+					t.Fatalf("construction header revision=%d, want 1", initialRevision)
 				}
 				assertUnchangedConstruction := func() {
 					t.Helper()
-					var fields string
-					var fieldRevision, headerRevision int64
-					if err := selected.db.QueryRow(`SELECT CAST(fields AS TEXT), revision FROM entity_state WHERE run_id=$1`, runID).Scan(&fields, &fieldRevision); err != nil {
+					current, err := storetest.ReadWorkflowDuplicateProjectionStorage(ctx, selected.events, runID, runID)
+					if err != nil {
 						t.Fatal(err)
 					}
-					if err := selected.db.QueryRow(`SELECT revision FROM flow_instances WHERE run_id=$1`, runID).Scan(&headerRevision); err != nil {
-						t.Fatal(err)
-					}
-					if fields != initialFields || fieldRevision != initialRevision || headerRevision != initialRevision {
-						t.Fatalf("failed handler changed construction: fields=%s field revision=%d header revision=%d; want %s at %d", fields, fieldRevision, headerRevision, initialFields, initialRevision)
+					fields, headerRevision := string(current.Fields), int64(current.Revision)
+					if fields != initialFields || headerRevision != initialRevision {
+						t.Fatalf("failed handler changed construction: fields=%s header revision=%d; want %s at %d", fields, headerRevision, initialFields, initialRevision)
 					}
 				}
 				if name == "publication_failure" {
@@ -189,7 +182,7 @@ func TestProspectivePublicationRealPlannerTerminalAndOrdinaryWriterFenceBothStor
 					persistence.onConflict = func(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) {
 						current, err := persistence.LoadWorkflowTargetPersistence(ctx, command.State.Identity, identity.NormalizeEntityID(command.State.EntityID))
 						var fields map[string]any
-						if err != nil || json.Unmarshal(current.State.Fields, &fields) != nil || fields["case_id"] != "first" || int64(current.State.Revision) != command.State.ExpectedRevision+1 {
+						if err != nil || json.Unmarshal(current.State.Fields, &fields) != nil || fields["case_id"] != "first" || current.Lifecycle.State.Revision != command.State.ExpectedRevision+1 {
 							t.Fatalf("stale attempt changed rival state: %+v err=%v", current, err)
 						}
 						for _, publication := range command.Publications {

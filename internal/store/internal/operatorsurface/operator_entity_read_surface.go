@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/store/internal/workflowheader"
 	"github.com/google/uuid"
 )
 
@@ -24,7 +24,6 @@ type entityPositionCursor struct {
 
 type entityAggregateGroup struct {
 	Expr string
-	Join string
 }
 
 var entityAggregateFieldPattern = regexp.MustCompile(`^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)*$`)
@@ -69,7 +68,7 @@ func (s *EntityPostgres) ListOperatorEntities(ctx context.Context, opts operator
 	}
 	if opts.CurrentState != "" {
 		n := add(opts.CurrentState)
-		where = append(where, fmt.Sprintf("es.current_state = $%d", n))
+		where = append(where, fmt.Sprintf("fi.stage_defined AND fi.current_state = $%d", n))
 	}
 	if opts.Cursor != "" {
 		cursor, err := decodeEntityPositionCursor(opts.Cursor, "entity.list")
@@ -101,19 +100,7 @@ func (s *EntityPostgres) ListOperatorEntities(ctx context.Context, opts operator
 		)`, nTime, nTime, nEntity, nEntity, nRun))
 	}
 	limitArg := add(opts.Limit + 1)
-	rows, err := s.backend.QueryContext(ctx, `
-		SELECT
-			es.entity_id::text,
-			es.run_id::text,
-			COALESCE(es.flow_instance, ''),
-			COALESCE(es.entity_type, ''),
-			COALESCE(es.current_state, ''),
-			COALESCE(es.revision, 0),
-			es.created_at,
-			es.updated_at,
-			COALESCE(es.slug, ''),
-			COALESCE(es.name, '')
-		FROM entity_state es
+	rows, err := s.backend.QueryContext(ctx, `SELECT `+workflowheader.DataReadColumns+` `+workflowheader.DataReadFrom+`
 		WHERE `+strings.Join(where, " AND ")+fmt.Sprintf(`
 		ORDER BY es.updated_at DESC, es.entity_id::text ASC, es.run_id::text ASC
 		LIMIT $%d
@@ -124,22 +111,11 @@ func (s *EntityPostgres) ListOperatorEntities(ctx context.Context, opts operator
 	defer rows.Close()
 	entities := []operatorread.OperatorEntitySummary{}
 	for rows.Next() {
-		var item operatorread.OperatorEntitySummary
-		if err := rows.Scan(
-			&item.EntityID,
-			&item.RunID,
-			&item.FlowInstance,
-			&item.EntityType,
-			&item.CurrentState,
-			&item.Revision,
-			&item.CreatedAt,
-			&item.UpdatedAt,
-			&item.Slug,
-			&item.Name,
-		); err != nil {
+		item, err := workflowheader.ScanData(rows, sqliteTimeValue)
+		if err != nil {
 			return operatorread.OperatorEntityListResult{}, fmt.Errorf("scan operator entity summary: %w", err)
 		}
-		entities = append(entities, item)
+		entities = append(entities, item.Entity)
 	}
 	if err := rows.Err(); err != nil {
 		return operatorread.OperatorEntityListResult{}, fmt.Errorf("read operator entity summaries: %w", err)
@@ -193,7 +169,7 @@ func (s *EntitySQLite) ListOperatorEntities(ctx context.Context, opts operatorre
 	}
 	if opts.CurrentState != "" {
 		add(opts.CurrentState)
-		where = append(where, "es.current_state = ?")
+		where = append(where, "fi.stage_defined AND fi.current_state = ?")
 	}
 	if opts.Cursor != "" {
 		cursor, err := decodeEntityPositionCursor(opts.Cursor, "entity.list")
@@ -227,19 +203,7 @@ func (s *EntitySQLite) ListOperatorEntities(ctx context.Context, opts operatorre
 		)`)
 	}
 	add(opts.Limit + 1)
-	rows, err := s.backend.QueryContext(ctx, `
-		SELECT
-			COALESCE(es.entity_id, ''),
-			COALESCE(es.run_id, ''),
-			COALESCE(es.flow_instance, ''),
-			COALESCE(es.entity_type, ''),
-			COALESCE(es.current_state, ''),
-			COALESCE(es.revision, 0),
-			es.created_at,
-			es.updated_at,
-			COALESCE(es.slug, ''),
-			COALESCE(es.name, '')
-		FROM entity_state es
+	rows, err := s.backend.QueryContext(ctx, `SELECT `+workflowheader.DataReadColumns+` `+workflowheader.DataReadFrom+`
 		WHERE `+strings.Join(where, " AND ")+`
 		ORDER BY es.updated_at DESC, es.entity_id ASC, es.run_id ASC
 		LIMIT ?
@@ -250,11 +214,11 @@ func (s *EntitySQLite) ListOperatorEntities(ctx context.Context, opts operatorre
 	defer rows.Close()
 	entities := []operatorread.OperatorEntitySummary{}
 	for rows.Next() {
-		item, err := scanSQLiteOperatorEntitySummary(rows)
+		item, err := workflowheader.ScanData(rows, sqliteTimeValue)
 		if err != nil {
 			return operatorread.OperatorEntityListResult{}, fmt.Errorf("scan sqlite operator entity summary: %w", err)
 		}
-		entities = append(entities, item)
+		entities = append(entities, item.Entity)
 	}
 	if err := rows.Err(); err != nil {
 		return operatorread.OperatorEntityListResult{}, fmt.Errorf("read sqlite operator entity summaries: %w", err)
@@ -403,32 +367,18 @@ func (s *EntityPostgres) AggregateOperatorEntities(ctx context.Context, opts ope
 		return operatorread.OperatorEntityAggregateResult{}, err
 	}
 	rows, err := s.backend.QueryContext(ctx, `
-		SELECT COALESCE(`+group.Expr+`, 'unknown') AS bucket, COUNT(*)::int
-		FROM entity_state es
-		`+group.Join+`
+		SELECT grouped.*, COUNT(*) OVER (PARTITION BY bucket) AS bucket_count
+		FROM (SELECT `+workflowheader.DataReadColumns+`, `+group.Expr+` AS bucket
+		`+workflowheader.DataReadFrom+`
 		WHERE `+strings.Join(where, " AND ")+`
-		GROUP BY bucket
-		ORDER BY COUNT(*) DESC, bucket ASC
+		) grouped
+		ORDER BY bucket_count DESC, (bucket IS NULL), bucket ASC
 	`, args...)
 	if err != nil {
 		return operatorread.OperatorEntityAggregateResult{}, fmt.Errorf("aggregate operator entities: %w", err)
 	}
 	defer rows.Close()
-	counts := map[string]int{}
-	for rows.Next() {
-		var (
-			key   string
-			count int
-		)
-		if err := rows.Scan(&key, &count); err != nil {
-			return operatorread.OperatorEntityAggregateResult{}, fmt.Errorf("scan operator entity aggregate: %w", err)
-		}
-		counts[key] = count
-	}
-	if err := rows.Err(); err != nil {
-		return operatorread.OperatorEntityAggregateResult{}, fmt.Errorf("read operator entity aggregate: %w", err)
-	}
-	return operatorread.OperatorEntityAggregateResult{Counts: counts}, nil
+	return scanOperatorEntityAggregateRows(rows)
 }
 
 func (s *EntitySQLite) AggregateOperatorEntities(ctx context.Context, opts operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error) {
@@ -458,223 +408,80 @@ func (s *EntitySQLite) AggregateOperatorEntities(ctx context.Context, opts opera
 		where = append(where, "es.entity_type = ?")
 	}
 	rows, err := s.backend.QueryContext(ctx, `
-		SELECT COALESCE(`+group.Expr+`, 'unknown') AS bucket, COUNT(*)
-		FROM entity_state es
-		`+group.Join+`
+		SELECT grouped.*, COUNT(*) OVER (PARTITION BY bucket) AS bucket_count
+		FROM (SELECT `+workflowheader.DataReadColumns+`, `+group.Expr+` AS bucket
+		`+workflowheader.DataReadFrom+`
 		WHERE `+strings.Join(where, " AND ")+`
-		GROUP BY bucket
-		ORDER BY COUNT(*) DESC, bucket ASC
+		) grouped
+		ORDER BY bucket_count DESC, (bucket IS NULL), bucket ASC
 	`, args...)
 	if err != nil {
 		return operatorread.OperatorEntityAggregateResult{}, fmt.Errorf("aggregate sqlite operator entities: %w", err)
 	}
 	defer rows.Close()
-	counts := map[string]int{}
-	for rows.Next() {
-		var (
-			key   string
-			count int
-		)
-		if err := rows.Scan(&key, &count); err != nil {
-			return operatorread.OperatorEntityAggregateResult{}, fmt.Errorf("scan sqlite operator entity aggregate: %w", err)
-		}
-		counts[key] = count
-	}
-	if err := rows.Err(); err != nil {
-		return operatorread.OperatorEntityAggregateResult{}, fmt.Errorf("read sqlite operator entity aggregate: %w", err)
-	}
-	return operatorread.OperatorEntityAggregateResult{Counts: counts}, nil
+	return scanOperatorEntityAggregateRows(rows)
 }
 
 func (s *EntityPostgres) loadOperatorEntityRow(ctx context.Context, entityID, runID string) (operatorread.OperatorEntityFull, error) {
-	row := s.backend.QueryRowContext(ctx, `
-		SELECT
-			es.entity_id::text,
-			es.run_id::text,
-			COALESCE(es.flow_instance, ''),
-			COALESCE(es.entity_type, ''),
-			COALESCE(es.current_state, ''),
-			COALESCE(es.revision, 0),
-			es.created_at,
-			es.updated_at,
-			COALESCE(es.slug, ''),
-			COALESCE(es.name, ''),
-			COALESCE(es.fields, '{}'::jsonb),
-			COALESCE(es.bookkeeping, '{}'::jsonb),
-			COALESCE(es.gates, '{}'::jsonb),
-			COALESCE(es.accumulator, '{}'::jsonb)
-		FROM entity_state es
-		WHERE es.entity_id = $1::uuid
-		  AND es.run_id = $2::uuid
-	`, entityID, runID)
-	var (
-		out         operatorread.OperatorEntityFull
-		fields      []byte
-		bookkeeping []byte
-		gates       []byte
-		accum       []byte
-		summary     = &out.Entity
-	)
-	if err := row.Scan(
-		&summary.EntityID,
-		&summary.RunID,
-		&summary.FlowInstance,
-		&summary.EntityType,
-		&summary.CurrentState,
-		&summary.Revision,
-		&summary.CreatedAt,
-		&summary.UpdatedAt,
-		&summary.Slug,
-		&summary.Name,
-		&fields,
-		&bookkeeping,
-		&gates,
-		&accum,
-	); err == sql.ErrNoRows {
-		return operatorread.OperatorEntityFull{}, operatorread.ErrEntityNotFound
-	} else if err != nil {
+	rows, err := s.backend.QueryContext(ctx, `SELECT `+workflowheader.DataReadColumns+` `+workflowheader.DataReadFrom+`
+		WHERE es.entity_id = $1::uuid AND es.run_id = $2::uuid`, entityID, runID)
+	if err != nil {
 		return operatorread.OperatorEntityFull{}, fmt.Errorf("load operator entity: %w", err)
 	}
-	decodedFields, err := decodeStoreJSONMap(fields)
-	if err != nil {
-		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode operator entity fields: %w", err)
-	}
-	decodedBookkeeping, err := decodeStoreJSONMap(bookkeeping)
-	if err != nil {
-		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode operator entity bookkeeping: %w", err)
-	}
-	decodedGates, err := decodeStoreJSONBoolMap(gates)
-	if err != nil {
-		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode operator entity gates: %w", err)
-	}
-	decodedAccumulated, err := decodeStoreJSONMap(accum)
-	if err != nil {
-		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode operator entity accumulated: %w", err)
-	}
-	loops, err := loopruntime.PublicActivations(decodedAccumulated)
-	if err != nil {
-		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode operator entity loops: %w", err)
-	}
-	out.Fields = decodedFields
-	out.Bookkeeping = decodedBookkeeping
-	out.Gates = decodedGates
-	out.Accumulated = loopruntime.PublicStateBuckets(decodedAccumulated)
-	out.Loops = loops
-	return out, nil
+	defer rows.Close()
+	return scanOperatorEntityRow(rows)
 }
 
 func (s *EntitySQLite) loadSQLiteOperatorEntityRow(ctx context.Context, entityID, runID string) (operatorread.OperatorEntityFull, error) {
-	row := s.backend.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(es.entity_id, ''),
-			COALESCE(es.run_id, ''),
-			COALESCE(es.flow_instance, ''),
-			COALESCE(es.entity_type, ''),
-			COALESCE(es.current_state, ''),
-			COALESCE(es.revision, 0),
-			es.created_at,
-			es.updated_at,
-			COALESCE(es.slug, ''),
-			COALESCE(es.name, ''),
-			COALESCE(es.fields, '{}'),
-			COALESCE(es.bookkeeping, '{}'),
-			COALESCE(es.gates, '{}'),
-			COALESCE(es.accumulator, '{}')
-		FROM entity_state es
-		WHERE es.entity_id = ?
-		  AND es.run_id = ?
-	`, entityID, runID)
-	var (
-		out         operatorread.OperatorEntityFull
-		fields      any
-		bookkeeping any
-		gates       any
-		accum       any
-		summary     = &out.Entity
-	)
-	item, err := scanSQLiteOperatorEntitySummaryWithTail(row, &fields, &bookkeeping, &gates, &accum)
-	if err == sql.ErrNoRows {
-		return operatorread.OperatorEntityFull{}, operatorread.ErrEntityNotFound
-	}
+	rows, err := s.backend.QueryContext(ctx, `SELECT `+workflowheader.DataReadColumns+` `+workflowheader.DataReadFrom+`
+		WHERE es.entity_id = ? AND es.run_id = ?`, entityID, runID)
 	if err != nil {
 		return operatorread.OperatorEntityFull{}, fmt.Errorf("load sqlite operator entity: %w", err)
 	}
-	*summary = item
-	decodedFields, err := decodeStoreJSONMap([]byte(sqliteJSONRawMessage(fields)))
-	if err != nil {
-		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode sqlite operator entity fields: %w", err)
-	}
-	decodedBookkeeping, err := decodeStoreJSONMap([]byte(sqliteJSONRawMessage(bookkeeping)))
-	if err != nil {
-		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode sqlite operator entity bookkeeping: %w", err)
-	}
-	decodedGates, err := decodeStoreJSONBoolMap([]byte(sqliteJSONRawMessage(gates)))
-	if err != nil {
-		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode sqlite operator entity gates: %w", err)
-	}
-	decodedAccumulated, err := decodeStoreJSONMap([]byte(sqliteJSONRawMessage(accum)))
-	if err != nil {
-		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode sqlite operator entity accumulated: %w", err)
-	}
-	loops, err := loopruntime.PublicActivations(decodedAccumulated)
-	if err != nil {
-		return operatorread.OperatorEntityFull{}, fmt.Errorf("decode sqlite operator entity loops: %w", err)
-	}
-	out.Fields = decodedFields
-	out.Bookkeeping = decodedBookkeeping
-	out.Gates = decodedGates
-	out.Accumulated = loopruntime.PublicStateBuckets(decodedAccumulated)
-	out.Loops = loops
-	return out, nil
+	defer rows.Close()
+	return scanOperatorEntityRow(rows)
 }
 
-type sqliteOperatorEntityScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanSQLiteOperatorEntitySummary(scanner sqliteOperatorEntityScanner) (operatorread.OperatorEntitySummary, error) {
-	return scanSQLiteOperatorEntitySummaryWithTail(scanner)
-}
-
-func scanSQLiteOperatorEntitySummaryWithTail(scanner sqliteOperatorEntityScanner, tail ...any) (operatorread.OperatorEntitySummary, error) {
-	var (
-		item       operatorread.OperatorEntitySummary
-		createdRaw any
-		updatedRaw any
-	)
-	dest := []any{
-		&item.EntityID,
-		&item.RunID,
-		&item.FlowInstance,
-		&item.EntityType,
-		&item.CurrentState,
-		&item.Revision,
-		&createdRaw,
-		&updatedRaw,
-		&item.Slug,
-		&item.Name,
+func scanOperatorEntityRow(rows *sql.Rows) (operatorread.OperatorEntityFull, error) {
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return operatorread.OperatorEntityFull{}, err
+		}
+		return operatorread.OperatorEntityFull{}, operatorread.ErrEntityNotFound
 	}
-	dest = append(dest, tail...)
-	if err := scanner.Scan(dest...); err != nil {
-		return operatorread.OperatorEntitySummary{}, err
-	}
-	createdAt, ok, err := sqliteTimeValue(createdRaw)
+	item, err := workflowheader.ScanData(rows, sqliteTimeValue)
 	if err != nil {
-		return operatorread.OperatorEntitySummary{}, fmt.Errorf("decode created_at: %w", err)
+		return operatorread.OperatorEntityFull{}, err
 	}
-	if !ok {
-		return operatorread.OperatorEntitySummary{}, fmt.Errorf("created_at is required")
+	if rows.Next() {
+		return operatorread.OperatorEntityFull{}, fmt.Errorf("entity has conflicting constructed header owners")
 	}
-	updatedAt, ok, err := sqliteTimeValue(updatedRaw)
-	if err != nil {
-		return operatorread.OperatorEntitySummary{}, fmt.Errorf("decode updated_at: %w", err)
+	if err := rows.Err(); err != nil {
+		return operatorread.OperatorEntityFull{}, err
 	}
-	if !ok {
-		return operatorread.OperatorEntitySummary{}, fmt.Errorf("updated_at is required")
-	}
-	item.CreatedAt = createdAt
-	item.UpdatedAt = updatedAt
 	return item, nil
+}
+
+func scanOperatorEntityAggregateRows(rows *sql.Rows) (operatorread.OperatorEntityAggregateResult, error) {
+	out := operatorread.OperatorEntityAggregateResult{Counts: map[string]int{}}
+	for rows.Next() {
+		var key sql.NullString
+		var count int
+		// Window counts retain SQL grouping while every member consumes exact
+		// companion admission in the same query snapshot.
+		if _, err := workflowheader.ScanData(rows, sqliteTimeValue, &key, &count); err != nil {
+			return operatorread.OperatorEntityAggregateResult{}, fmt.Errorf("scan operator entity aggregate: %w", err)
+		}
+		if key.Valid {
+			out.Counts[key.String] = count
+		} else {
+			out.AbsentCount = count
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return operatorread.OperatorEntityAggregateResult{}, fmt.Errorf("read operator entity aggregate: %w", err)
+	}
+	return out, nil
 }
 
 func defaultOperatorEntityListOptions(opts operatorread.OperatorEntityListOptions) (operatorread.OperatorEntityListOptions, error) {
@@ -721,18 +528,16 @@ func defaultOperatorEntityAggregateOptions(opts operatorread.OperatorEntityAggre
 func operatorEntityAggregateGroup(groupBy string, add func(any) int) (entityAggregateGroup, error) {
 	switch strings.TrimSpace(groupBy) {
 	case "current_state":
-		return entityAggregateGroup{Expr: "NULLIF(es.current_state, '')"}, nil
+		return entityAggregateGroup{Expr: "CASE WHEN fi.stage_defined THEN fi.current_state END"}, nil
 	case "flow", "flow_instance":
 		return entityAggregateGroup{Expr: "NULLIF(es.flow_instance, '')"}, nil
 	case "workflow_name":
 		return entityAggregateGroup{
 			Expr: "NULLIF(fi.flow_template, '')",
-			Join: "LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance",
 		}, nil
 	case "workflow_version":
 		return entityAggregateGroup{
 			Expr: "NULLIF(fi.config->>'workflow_version', '')",
-			Join: "LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance",
 		}, nil
 	case "type", "entity_type":
 		return entityAggregateGroup{Expr: "NULLIF(es.entity_type, '')"}, nil
@@ -752,18 +557,16 @@ func operatorEntityAggregateGroup(groupBy string, add func(any) int) (entityAggr
 func sqliteOperatorEntityAggregateGroup(groupBy string, add func(any) int) (entityAggregateGroup, error) {
 	switch strings.TrimSpace(groupBy) {
 	case "current_state":
-		return entityAggregateGroup{Expr: "NULLIF(es.current_state, '')"}, nil
+		return entityAggregateGroup{Expr: "CASE WHEN fi.stage_defined THEN fi.current_state END"}, nil
 	case "flow", "flow_instance":
 		return entityAggregateGroup{Expr: "NULLIF(es.flow_instance, '')"}, nil
 	case "workflow_name":
 		return entityAggregateGroup{
 			Expr: "NULLIF(fi.flow_template, '')",
-			Join: "LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance",
 		}, nil
 	case "workflow_version":
 		return entityAggregateGroup{
 			Expr: "NULLIF(CAST(json_extract(COALESCE(fi.config, '{}'), '$.workflow_version') AS TEXT), '')",
-			Join: "LEFT JOIN flow_instances fi ON fi.run_id = es.run_id AND fi.instance_path = es.flow_instance",
 		}, nil
 	case "type", "entity_type":
 		return entityAggregateGroup{Expr: "NULLIF(es.entity_type, '')"}, nil
@@ -798,18 +601,4 @@ func decodeEntityPositionCursor(raw string, kind string) (entityPositionCursor, 
 		return entityPositionCursor{}, operatorread.ErrInvalidEntityCursor
 	}
 	return cursor, nil
-}
-
-func decodeStoreJSONBoolMap(raw []byte) (map[string]bool, error) {
-	if len(raw) == 0 {
-		return map[string]bool{}, nil
-	}
-	var out map[string]bool
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	if out == nil {
-		out = map[string]bool{}
-	}
-	return out, nil
 }

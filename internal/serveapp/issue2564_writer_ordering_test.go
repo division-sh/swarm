@@ -198,7 +198,7 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 					p.release("a", 0)
 					p.wait(t, "a", 1)
 					entity := issue2564Entity(t, rt, seed.RunID, entityID)
-					if entity.Fields["marker"] != "retained" || entity.Entity.CurrentState != "working" {
+					if entity.Fields["marker"] != "retained" || entity.Entity.CurrentState == nil || *entity.Entity.CurrentState != "working" {
 						t.Fatalf("reverse ordering did not commit before timer: %#v", entity)
 					}
 				}
@@ -230,7 +230,7 @@ func TestIssue2564ServedM33NonterminalDeadlineLateResultBothStores(t *testing.T)
 				// it does not require an invented extra provider continuation.
 				rt.waitDeliveries(t, seed.RunID)
 				entity := issue2564Entity(t, rt, seed.RunID, entityID)
-				if entity.Entity.CurrentState != "review" || entity.Fields["marker"] != "retained" || entity.Fields["result"] != "retained" || entity.Fields["result_stage"] != "review" || entity.Fields["results"] != float64(1) {
+				if entity.Entity.CurrentState == nil || *entity.Entity.CurrentState != "review" || entity.Fields["marker"] != "retained" || entity.Fields["result"] != "retained" || entity.Fields["result_stage"] != "review" || entity.Fields["results"] != float64(1) {
 					t.Fatalf("deadline/late-result effects not retained in current stage: %#v", entity)
 				}
 				requireIssue2564MutationReceipts(t, rt, seed.RunID, entityID, map[string]int{"marker": 1}, 1)
