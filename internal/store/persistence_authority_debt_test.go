@@ -514,6 +514,20 @@ func debtCollectorDigest(root string) (string, error) {
 		return "", err
 	}
 	fmt.Fprintf(hash, "%s\x00%s\x00", nativePath, canonical.Bytes())
+	prior = hex.EncodeToString(hash.Sum(nil))
+	const excludedPath = "internal/store/persistence_authority_debt_excluded_fixture_test.go"
+	file, err = parser.ParseFile(token.NewFileSet(), filepath.Join(root, excludedPath), nil, parser.AllErrors)
+	if os.IsNotExist(err) && prior == debtNativeFixtureCollectorTo {
+		return prior, nil // Exact immutable predecessor of #642/6202173993.
+	}
+	if err != nil {
+		return "", err
+	}
+	canonical.Reset()
+	if err := format.Node(&canonical, token.NewFileSet(), file); err != nil {
+		return "", err
+	}
+	fmt.Fprintf(hash, "%s\x00%s\x00", excludedPath, canonical.Bytes())
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
@@ -876,6 +890,13 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
+	}
+	if current == debtExcludedFixtureCollectorTo && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
+		prior := head
+		prior.Collector = debtNativeFixtureCollectorTo
+		if debtValidateCollectorIdentity(base, prior.Collector, trusted, prior, "") == nil {
+			return nil // Exact three-row classification; baseline sites are immutable.
+		}
 	}
 	if base == debtProcessLeaseCollectorTo && trusted.Collector == base &&
 		current == debtNativeFixtureCollectorTo && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {

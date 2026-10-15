@@ -309,6 +309,7 @@ func TestPersistenceAuthorityDebtNativeFixturePolicyIsFingerprintBound(t *testin
 		"internal/store/persistence_authority_debt_sidecar_test.go",
 		"internal/store/persistence_authority_debt_process_lease_test.go",
 		"internal/store/persistence_authority_debt_native_fixture_test.go",
+		"internal/store/persistence_authority_debt_excluded_fixture_test.go",
 		"internal/checkoutsource/fixture_role.go",
 	} {
 		data, err := os.ReadFile(filepath.Join(root, path))
@@ -316,7 +317,7 @@ func TestPersistenceAuthorityDebtNativeFixturePolicyIsFingerprintBound(t *testin
 			t.Fatal(err)
 		}
 		debtWriteModuleSource(t, copy, path, string(data))
-		if path != "internal/store/persistence_authority_debt_native_fixture_test.go" {
+		if path != "internal/store/persistence_authority_debt_native_fixture_test.go" && path != "internal/store/persistence_authority_debt_excluded_fixture_test.go" {
 			old, err := debtGit(root, "show", "098a84acd3cff157fb6bcaefb1d55ee15994cdb7:"+path)
 			if err != nil {
 				t.Fatal(err)
@@ -333,7 +334,7 @@ func TestPersistenceAuthorityDebtNativeFixturePolicyIsFingerprintBound(t *testin
 		t.Fatal(err)
 	}
 	debtWriteModuleSource(t, copy, policy, strings.Replace(string(data), "uses == 1", "uses >= 1", 1))
-	if digest, err := debtCollectorDigest(copy); err != nil || digest == debtNativeFixtureCollectorTo {
+	if digest, err := debtCollectorDigest(copy); err != nil || digest == debtNativeFixtureCollectorTo || digest == debtExcludedFixtureCollectorTo {
 		t.Fatalf("changed closure provenance not fingerprinted: %s %v", digest, err)
 	}
 	if err := os.Remove(filepath.Join(copy, policy)); err != nil {
@@ -350,7 +351,7 @@ func TestPersistenceAuthorityDebtNativeFixturePolicyIsFingerprintBound(t *testin
 
 func TestPersistenceAuthorityDebtNativeFixtureCollectorTransition(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
-	if digest, err := debtCollectorDigest(root); err != nil || digest != debtNativeFixtureCollectorTo {
+	if digest, err := debtCollectorDigest(root); err != nil || (digest != debtNativeFixtureCollectorTo && digest != debtExcludedFixtureCollectorTo) {
 		t.Fatalf("collector=%q error=%v", digest, err)
 	}
 	for _, mutation := range []string{"exact", "foreign-base", "foreign-head", "unrotated", "reverse", "rebootstrap", "addition", "removal", "increase", "decrease", "foreign-identity"} {

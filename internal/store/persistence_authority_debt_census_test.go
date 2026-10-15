@@ -295,6 +295,11 @@ func debtPartialExcludedAuthorityInfo(file *ast.File, fset *token.FileSet, base 
 
 func debtExcludedSourceFindings(t *testing.T, path string, file *ast.File, info *types.Info) []authorityFinding {
 	t.Helper()
+	return debtClassifyReviewedExcludedFixtures(t, debtExcludedSourceUncertainty(t, path, file, info))
+}
+
+func debtExcludedSourceUncertainty(t *testing.T, path string, file *ast.File, info *types.Info) []authorityFinding {
+	t.Helper()
 	var context []string
 	for _, imported := range file.Imports {
 		name := ""
