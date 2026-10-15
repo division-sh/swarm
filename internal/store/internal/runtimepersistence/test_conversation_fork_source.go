@@ -41,23 +41,9 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 		return result, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, fixture.RunID)
-	evidence := mutationprotocol.RevisionOnly
-	if fixture.kind != conversationForkDataOnlyChat {
-		evidence = mutationprotocol.Story
-		record, err := fixture.Construction.Child.PersistenceRecord()
-		if err != nil {
-			return result, fmt.Errorf("conversation fixture requires complete construction: %w", err)
-		}
-		if record.Identity.RunID != fixture.RunID || record.EntityID != fixture.EntityID ||
-			!record.CreatedAt.Equal(fixture.Turn1At.Add(-30*time.Second).UTC().Truncate(time.Microsecond)) || fixture.Construction.Child.Readiness.BundleHash != bundleHash {
-			return result, fmt.Errorf("conversation construction does not match fixed historical source/identity/time")
-		}
-		input := fixture.Construction.CreatingEvent
-		if input.ID() == "" || input.ID() != fixture.Construction.Child.CreatingInput.EventID || input.RunID() != fixture.RunID || !input.CreatedAt().Equal(fixture.Construction.Child.OccurredAt) {
-			return result, fmt.Errorf("conversation construction requires its original prepared creating event")
-		}
-	} else if fixture.Construction.Child.Identity.InstancePath != "" || fixture.Construction.Parent != nil {
-		return result, fmt.Errorf("data-only conversation fixture cannot carry construction")
+	evidence, err := conversationForkConstructionEvidence(fixture, bundleHash)
+	if err != nil {
+		return result, err
 	}
 	persist := func(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, dialect authoractivityfixture.Dialect) error {
 		var storedHash string
@@ -150,6 +136,28 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 		result.Construction = result.Construction.WithCommitAcknowledgment()
 	}
 	return result, nil
+}
+
+func conversationForkConstructionEvidence(fixture ConversationForkSourceFixture, bundleHash string) (mutationprotocol.Evidence, error) {
+	if fixture.kind == conversationForkDataOnlyChat {
+		if fixture.Construction.Child.Identity.InstancePath != "" || fixture.Construction.Parent != nil {
+			return 0, fmt.Errorf("data-only conversation fixture cannot carry construction")
+		}
+		return mutationprotocol.RevisionOnly, nil
+	}
+	record, err := fixture.Construction.Child.PersistenceRecord()
+	if err != nil {
+		return 0, fmt.Errorf("conversation fixture requires complete construction: %w", err)
+	}
+	if record.Identity.RunID != fixture.RunID || record.EntityID != fixture.EntityID ||
+		!record.CreatedAt.Equal(fixture.Turn1At.Add(-30*time.Second).UTC().Truncate(time.Microsecond)) || fixture.Construction.Child.Readiness.BundleHash != bundleHash {
+		return 0, fmt.Errorf("conversation construction does not match fixed historical source/identity/time")
+	}
+	input := fixture.Construction.CreatingEvent
+	if input.ID() == "" || input.ID() != fixture.Construction.Child.CreatingInput.EventID || input.RunID() != fixture.RunID || !input.CreatedAt().Equal(fixture.Construction.Child.OccurredAt) {
+		return 0, fmt.Errorf("conversation construction requires its original prepared creating event")
+	}
+	return mutationprotocol.Story, nil
 }
 
 func seedConversationForkChatEntityForTest(ctx context.Context, selected any, run, entity string, forkAt time.Time, construction ConversationForkConstruction) error {

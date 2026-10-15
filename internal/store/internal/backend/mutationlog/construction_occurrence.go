@@ -29,6 +29,28 @@ type ConstructionOccurrence struct {
 // ConversationForkConstructionOccurrenceForTest is the sole mint, confined to
 // the fixed admitted witness. It does not accept arbitrary historical writes.
 func ConversationForkConstructionOccurrenceForTest(ctx context.Context, attempt *mutationprotocol.Attempt, parent *pipeline.FlowInstanceActivationPlan, child pipeline.FlowInstanceActivationPlan) (*ConstructionOccurrence, error) {
+	plans, err := conversationForkConstructionPlans(parent, child)
+	if err != nil {
+		return nil, err
+	}
+	id, err := attempt.Identity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	source, ok := correlation.SourceArtifactFactFromContext(ctx)
+	if !ok || source.Validate() != nil || source.BundleHash() != child.Readiness.BundleHash || correlation.RunIDFromContext(ctx) != child.Readiness.RunID {
+		return nil, fmt.Errorf("construction occurrence requires its exact run/source")
+	}
+	value := &ConstructionOccurrence{attemptID: id, runID: child.Readiness.RunID, source: source, at: child.OccurredAt.UTC().Truncate(time.Microsecond), states: map[string][32]byte{}, births: map[[32]byte]bool{}}
+	for _, plan := range plans {
+		if err := value.addConstructionBirth(plan); err != nil {
+			return nil, err
+		}
+	}
+	return value, nil
+}
+
+func conversationForkConstructionPlans(parent *pipeline.FlowInstanceActivationPlan, child pipeline.FlowInstanceActivationPlan) ([]pipeline.FlowInstanceActivationPlan, error) {
 	if child.OccurredAt.IsZero() || !child.OccurredAt.UTC().Truncate(time.Microsecond).Equal(child.Instance.CreatedAt) || !child.OccurredAt.UTC().Truncate(time.Microsecond).Equal(child.Instance.EnteredStageAt) {
 		return nil, fmt.Errorf("conversation construction requires its exact historical occurrence")
 	}
@@ -42,63 +64,56 @@ func ConversationForkConstructionOccurrenceForTest(ctx context.Context, attempt 
 		}
 		plans = append(plans, *parent)
 	}
-	id, err := attempt.Identity(ctx)
+	return plans, nil
+}
+
+func (o *ConstructionOccurrence) addConstructionBirth(plan pipeline.FlowInstanceActivationPlan) error {
+	record, err := plan.PersistenceRecord()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	source, ok := correlation.SourceArtifactFactFromContext(ctx)
-	if !ok || source.Validate() != nil || source.BundleHash() != child.Readiness.BundleHash || correlation.RunIDFromContext(ctx) != child.Readiness.RunID {
-		return nil, fmt.Errorf("construction occurrence requires its exact run/source")
+	state := record.State
+	if state.Identity.RunID != o.runID || !state.UpdatedAt.Equal(o.at) || !state.Transition.CreatesState() {
+		return fmt.Errorf("construction occurrence requires its exact birth operation")
 	}
-	value := &ConstructionOccurrence{attemptID: id, runID: child.Readiness.RunID, source: source, at: child.OccurredAt.UTC().Truncate(time.Microsecond), states: map[string][32]byte{}, births: map[[32]byte]bool{}}
-	for _, plan := range plans {
-		record, err := plan.PersistenceRecord()
-		if err != nil {
-			return nil, err
-		}
-		state := record.State
-		if state.Identity.RunID != value.runID || !state.UpdatedAt.Equal(value.at) || !state.Transition.CreatesState() {
-			return nil, fmt.Errorf("construction occurrence requires its exact birth operation")
-		}
-		if _, duplicate := value.states[state.EntityID]; duplicate {
-			return nil, fmt.Errorf("construction occurrence repeats an entity")
-		}
-		identity, err := constructionFingerprint(state)
-		if err != nil {
-			return nil, err
-		}
-		value.states[state.EntityID] = identity
-		projection := runtimemutationlog.EntityStateProjection{CurrentState: runtimemutationlog.PresentLifecycleState(state.CurrentState)}
-		for _, bucket := range []struct {
-			raw json.RawMessage
-			dst *map[string]any
-		}{{state.Fields, &projection.Fields}, {state.Bookkeeping, &projection.Bookkeeping}, {state.Gates, &projection.Gates}, {state.Accumulator, &projection.Accumulator}} {
-			if err := canonicaljson.DecodePreservingNumberLexemes(bucket.raw, bucket.dst); err != nil {
-				return nil, err
-			}
-		}
-		initial := runtimemutationlog.EntityStateProjection{}
-		if err := canonicaljson.DecodePreservingNumberLexemes(state.InitialFields, &initial.Fields); err != nil {
-			return nil, err
-		}
-		records, err := runtimemutationlog.BuildEntityStateDiffRecords(state.EntityID, runtimemutationlog.EntityStateProjection{}, initial, runtimemutationlog.Writer{Type: "platform", ID: "entity_initial_value", HandlerStep: "create_entity"})
-		if err != nil {
-			return nil, err
-		}
-		remaining, err := runtimemutationlog.BuildEntityStateDiffRecords(state.EntityID, initial, projection, runtimemutationlog.Writer{Type: "platform", ID: "workflow_engine", HandlerStep: "create"})
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, remaining...)
-		for _, birth := range records {
-			key, err := constructionFingerprint(birth)
-			if err != nil {
-				return nil, err
-			}
-			value.births[key] = false
+	if _, duplicate := o.states[state.EntityID]; duplicate {
+		return fmt.Errorf("construction occurrence repeats an entity")
+	}
+	identity, err := constructionFingerprint(state)
+	if err != nil {
+		return err
+	}
+	o.states[state.EntityID] = identity
+	projection := runtimemutationlog.EntityStateProjection{CurrentState: runtimemutationlog.PresentLifecycleState(state.CurrentState)}
+	for _, bucket := range []struct {
+		raw json.RawMessage
+		dst *map[string]any
+	}{{state.Fields, &projection.Fields}, {state.Bookkeeping, &projection.Bookkeeping}, {state.Gates, &projection.Gates}, {state.Accumulator, &projection.Accumulator}} {
+		if err := canonicaljson.DecodePreservingNumberLexemes(bucket.raw, bucket.dst); err != nil {
+			return err
 		}
 	}
-	return value, nil
+	initial := runtimemutationlog.EntityStateProjection{}
+	if err := canonicaljson.DecodePreservingNumberLexemes(state.InitialFields, &initial.Fields); err != nil {
+		return err
+	}
+	records, err := runtimemutationlog.BuildEntityStateDiffRecords(state.EntityID, runtimemutationlog.EntityStateProjection{}, initial, runtimemutationlog.Writer{Type: "platform", ID: "entity_initial_value", HandlerStep: "create_entity"})
+	if err != nil {
+		return err
+	}
+	remaining, err := runtimemutationlog.BuildEntityStateDiffRecords(state.EntityID, initial, projection, runtimemutationlog.Writer{Type: "platform", ID: "workflow_engine", HandlerStep: "create"})
+	if err != nil {
+		return err
+	}
+	records = append(records, remaining...)
+	for _, birth := range records {
+		key, err := constructionFingerprint(birth)
+		if err != nil {
+			return err
+		}
+		o.births[key] = false
+	}
+	return nil
 }
 
 func constructionFingerprint(value any) ([32]byte, error) {
