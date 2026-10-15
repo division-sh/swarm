@@ -9,13 +9,42 @@ import (
 // includes lock-acquisition SQL execution, not pure server-side lock wait.
 // SQL calls are attempted interface invocations, including calls that fail.
 type RevisionCounts struct {
-	Finalizations uint64
-	Duration      time.Duration
-	LockPhases    uint64
-	LockDuration  time.Duration
-	ExecCalls     uint64
-	QueryCalls    uint64
-	QueryRowCalls uint64
+	Finalizations        uint64
+	Duration             time.Duration
+	LockPhases           uint64
+	LockDuration         time.Duration
+	ExecCalls            uint64
+	QueryCalls           uint64
+	QueryRowCalls        uint64
+	CommittedSQL         RevisionSQLCounts
+	UncommittedSQL       RevisionSQLCounts
+	IndeterminateSQL     RevisionSQLCounts
+	RollbackAttemptedSQL RevisionSQLCounts
+}
+
+type RevisionSQLCounts struct {
+	ExecCalls, QueryCalls, QueryRowCalls uint64
+}
+
+func (c *RevisionSQLCounts) add(other RevisionSQLCounts) {
+	c.ExecCalls += other.ExecCalls
+	c.QueryCalls += other.QueryCalls
+	c.QueryRowCalls += other.QueryRowCalls
+}
+
+func (c *RevisionCounts) settle(acknowledged, commitAttempted, rollbackAttempted bool) {
+	calls := RevisionSQLCounts{ExecCalls: c.ExecCalls, QueryCalls: c.QueryCalls, QueryRowCalls: c.QueryRowCalls}
+	switch {
+	case acknowledged:
+		c.CommittedSQL = calls
+	case commitAttempted:
+		c.IndeterminateSQL = calls
+	default:
+		c.UncommittedSQL = calls
+	}
+	if rollbackAttempted {
+		c.RollbackAttemptedSQL = calls
+	}
 }
 
 func (c *RevisionCounts) add(other RevisionCounts) {
@@ -26,6 +55,10 @@ func (c *RevisionCounts) add(other RevisionCounts) {
 	c.ExecCalls += other.ExecCalls
 	c.QueryCalls += other.QueryCalls
 	c.QueryRowCalls += other.QueryRowCalls
+	c.CommittedSQL.add(other.CommittedSQL)
+	c.UncommittedSQL.add(other.UncommittedSQL)
+	c.IndeterminateSQL.add(other.IndeterminateSQL)
+	c.RollbackAttemptedSQL.add(other.RollbackAttemptedSQL)
 }
 
 func revisionAttempt(ctx context.Context) *Attempt {
