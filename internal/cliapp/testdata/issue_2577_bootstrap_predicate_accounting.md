@@ -25,6 +25,44 @@ Both-store original reservation, exact replay, rejected foreign account and
 revision-preservation proofs establish the writer/reader ownership independently
 of that generated fingerprint.
 
+## Integration With The Merged Instance Owner
+
+The local post-#2617 integration uses master `0fe666d986` and preserves the
+accepted provider checkpoint `e7c11cb003`. The `newRuntime` startup consumer
+keeps master's removal of the manager's route installer, verifier and restorer
+roles and the coordinator's `FlowRoutes` role. Those retired materialized route
+roles do not become session-provider authority. The exact admitted instance
+reader and construction/publication owners remain the runtime dependencies.
+
+`EventBus.PrepareInboundDeliveryBatch` now composes master's run proposal and
+same-batch construction preview with the existing private inbound publication
+seal. It does not restore route-topology writes or select another source,
+connection or capture. `PublicationCommand.ValidateInbound` still requires the
+original admission and exact output ordinal, content and authorization; generic
+publication and reconstructed commands cannot erase that responsibility.
+
+The only provider test adapters affected by those retired interfaces are
+`newSessionPublicationFixture`, `activeInputFixture.publicationBus` and
+`reconstructPublication`. Both bus fixtures consume the real selected-store
+`pipeline.FlowInstanceIndexReader` instead of the removed descriptor/route
+interfaces. The reconstruction probe copies every surviving exported field;
+its original generic/API/fan-out refusals and event-conservation checks remain.
+
+Affected execution witnesses are the original
+`TestPrepareInboundDeliveryBatch*`,
+`TestProviderRawSettlementAdmissionRequiresCompleteInboundAuthority`,
+`TestGenericPublicationCannotMintProviderRawSettlementAdmission`,
+`TestWhatsAppBusinessCommitTemporalFencesBothStores`,
+`TestWhatsAppBusinessReconstructionAuthorityMatrixBothStores`,
+`TestWhatsAppBusinessCommandReconstructionCannotDropFenceBothStores`,
+`TestWhatsAppSessionCaptureNormalizedPublicationBothStores`,
+`TestWhatsAppSessionPublicationOutputAuthorizationBeforeMutationBothStores`
+and `TestWhatsAppInboundPublicationRollbackAndLostAcknowledgmentBothStores`.
+The startup-order and authored-target witnesses remain
+`TestServeRestoresNativeOwnershipBeforeRetainedProofExecution` and the
+`TestSessionActivity*` projection roots. Receipts keep their exact source pins;
+this accounting is not a new served timing exposure or physical qualification.
+
 Only after those named tests pass is the predicate JSON regenerated using
 `SWARM_UPDATE_ADMISSION_PREDICATE_CENSUS=1`. Ordinary census and hostile mutation
 controls rerun without that variable. Hash equality is drift detection, not
