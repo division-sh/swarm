@@ -1,17 +1,28 @@
 # WhatsApp Physical Qualification Runbook
 
 **NOT READY: preparation checkpoint, not the user's final sitting packet.**
-The current publishing-base preparation is signed `2195b4a047` on master
-`1dccd66a2d`; all 61 accepted provider patches are unchanged. The final issue
+The current publishing base is master `7956d66def`, including #2691/#2692.
+The bounded P01 readback repair is signed `6b2bf8e0a7` under
+[#2577/6198923816](https://github.com/division-sh/swarm/issues/2577#issuecomment-6198923816).
+The final issue
 comment must bind the complete commit/tree, supplied binary SHA256, actual Go,
 SDK pin, clean preflight, hosted run/attempt/selection and reviewer-g approval.
 Do not ask the user to sit before those non-user holds are closed.
 
 The first live unpaired rehearsal rendered an authenticated current QR through
 an offline terminal tool, but its later expiry readback failed with
-`unclassified_runtime_error`. That RED is OPEN under
+`unclassified_runtime_error`. That original RED is retained under
 [#2577/6198554641](https://github.com/division-sh/swarm/issues/2577#issuecomment-6198554641),
-not a passing pairing wait or physical P01. No account or phone has paired.
+not relabeled as a pass. At `6b2bf8e0a7`, all four deterministic SQLite/PostgreSQL
+cuts pass under race x3, with strict execution-health and scope negatives. The
+real pinned binary rendered a current QR in a private terminal, then a single
+read-only check after the normal unscanned window returned qr_expired, no code,
+paired=false, connected=false and the same operation. Public list remained
+unbound/not READY; shutdown joined with exit zero. This is agent-feasible
+rehearsal, not physical P01 or interoperability. No account or phone has paired.
+Fresh final-head preflight and normal hosted qualification remain required;
+the first repair-head preflight correctly caught the changed startup consumer
+fingerprint, which is refreshed with explicit owner/caller/proof accounting.
 The deterministic notice-producer/source-switch packet is also awaiting the
 bounded runbook review requested in
 [#2577/6198521524](https://github.com/division-sh/swarm/issues/2577#issuecomment-6198521524).
