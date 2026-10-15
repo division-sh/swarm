@@ -54,6 +54,7 @@ type serveNativeProtocolPeer struct {
 	malformedAck   string
 	withholdAck    string
 	clientTrust    servedNativeClientTrust
+	disconnect     func()
 	onACKTimeout   func(string)
 }
 
@@ -81,6 +82,14 @@ func newServeNativeProtocolPeer(t *testing.T) *serveNativeProtocolPeer {
 	var sockets []*websocket.Conn
 	var workers sync.WaitGroup
 	closing := false
+	peer.disconnect = func() {
+		mu.Lock()
+		owned := append([]*websocket.Conn(nil), sockets...)
+		mu.Unlock()
+		for _, conn := range owned {
+			_ = conn.CloseNow()
+		}
+	}
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		if closing {
