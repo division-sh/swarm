@@ -311,10 +311,10 @@ func (g *gate) waitClass(ctx context.Context, transientOnly bool) error {
 	if g == nil {
 		return nil
 	}
-	defer g.reportM25LeaseTraces(transientOnly)
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	defer g.reportM25LeaseTraces(ctx, transientOnly)
 	g.mu.Lock()
 	active := g.active
 	drained := g.drained
