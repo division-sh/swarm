@@ -15,7 +15,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
-	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -124,10 +123,13 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
 				stores := openStandingRuntimeContextStore(t, backend, "reset-candidates")
-				cfg, err := config.Load(writeServeRuntimeTestConfig(t))
+				loadedConfig, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{
+					RepoRoot: repoRootForTest(), ExplicitPath: writeServeRuntimeTestConfig(t),
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
+				cfg := loadedConfig.Config
 				stubServeRuntimeWorkspaceLifecycle(t)
 				process := worklifetime.NewProcess()
 				instance := uuid.NewString()
