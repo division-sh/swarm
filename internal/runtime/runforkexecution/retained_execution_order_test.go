@@ -2,7 +2,6 @@ package runforkexecution
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -27,7 +26,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -176,14 +174,11 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 		t.Run(backend, func(t *testing.T) {
 			var selected SelectedContractForkLifecycle
 			var owner SelectedContractExecutionOwner
-			var db *sql.DB
 			if backend == "postgres" {
-				_, db, _ = testutil.StartPostgres(t)
-				pg := storetest.AdmitPostgresRuntimeStore(t, db)
+				pg := storetest.StartPostgresRuntimeStore(t)
 				selected, owner = pg, selectedContractExecutionOwnerForTest(t, pg)
 			} else {
 				sqlite := storetest.StartSQLiteRuntimeStore(t)
-				db = storetest.DatabaseForTest(sqlite)
 				selected, owner = sqlite, selectedRuntimeOutcomeSQLiteOwner(t, sqlite)
 			}
 			ctx := runForkTestContext(t)
@@ -218,7 +213,7 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 					FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: sourceID, EntityID: sourceID,
 				})
 			}
-			seedSelectedRuntimeOutcomeSource(t, ctx, backend, db, selected, loaded, sourceID, eventID, route, time.Unix(1700002200, 0).UTC())
+			seedSelectedRuntimeOutcomeSource(t, ctx, backend, selected, loaded, sourceID, eventID, route, time.Unix(1700002200, 0).UTC())
 			probe := &retainedExecutionOrderProbe{
 				SelectedContractForkLifecycle: owner.ports.fork, SelectedContractReplayPersistence: owner.ports.replay,
 				started: make(chan struct{}), release: make(chan struct{}), cleanup: errors.New("activation cleanup diagnostic"),
@@ -258,6 +253,9 @@ func proveRetainedAcknowledgment(t *testing.T, fault string) {
 			}
 			var result SelectedContractExecutionResult
 			if staged {
+				// This surface is unkeyed; direct execution below retains its
+				// separate exact durable-operation ACK assertions.
+				request.ForkOperation = nil
 				prepared, err := owner.Prepare(ctx, request)
 				if err != nil {
 					t.Fatal(err)
