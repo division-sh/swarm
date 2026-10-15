@@ -183,6 +183,7 @@ type Registration struct {
 	CanonicalEvidence  string
 	SettlementRecovery string
 	Proof              string
+	ProofFile          string // Required when the proof lives in the SDK primitive's package rather than the launch package.
 	PrimitiveKeys      []string
 	PrelaunchFailure   State
 	PostlaunchFailure  State
@@ -199,11 +200,11 @@ var registrations = []Registration{
 	registration(KindServeRegistration, EffectWriteOrUnknown, "provider_registration", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestProviderRegistrationApplyEffectOutcomes"),
 	registration(KindChannelConfirmation, EffectWriteOrUnknown, "channel_confirmation", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelConfirmationEffectOutcomes"),
 	registration(KindChannelDelivery, EffectWriteOrUnknown, "channel_delivery", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelDeliveryEffectOutcomes"),
-	registration(KindChannelConfirmation, EffectWriteOrUnknown, "channel_confirmation_whatsapp", "in_process", "internal/runtime/effects/effects.go", []string{"internal/sessionprovider/channel_execution_unix.go:executeChannelSend:sdk_send:1"}, "TestWhatsAppChannelConfirmationJournalBothStores"),
-	registration(KindChannelDelivery, EffectWriteOrUnknown, "channel_delivery_whatsapp", "in_process", "internal/runtime/effects/effects.go", []string{"internal/sessionprovider/channel_execution_unix.go:executeChannelSend:sdk_send:1"}, "TestWhatsAppChannelDeliveryJournalBothStores"),
+	registration(KindChannelConfirmation, EffectWriteOrUnknown, "channel_confirmation_whatsapp", "in_process", "internal/runtime/effects/effects.go", []string{"internal/sessionprovider/channel_execution_unix.go:executeChannelSend:sdk_send:1"}, "TestWhatsAppChannelConfirmationJournalBothStores").withProofFile("internal/sessionprovider/channel_execution_test.go"),
+	registration(KindChannelDelivery, EffectWriteOrUnknown, "channel_delivery_whatsapp", "in_process", "internal/runtime/effects/effects.go", []string{"internal/sessionprovider/channel_execution_unix.go:executeChannelSend:sdk_send:1"}, "TestWhatsAppChannelDeliveryJournalBothStores").withProofFile("internal/sessionprovider/channel_execution_test.go"),
 	registration(KindChannelActionAck, EffectWriteOrUnknown, "channel_action_ack", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelActionAckEffectOutcomes"),
 	registration(KindChannelNativeSetting, EffectWriteOrUnknown, "channel_native_setting", "http", "internal/runtime/registration/provider_http.go", []string{"internal/runtime/registration/provider_http.go:executeProviderApply:http_do:1"}, "TestChannelNativeSettingEffectOutcomes"),
-	registration(KindChannelLogout, EffectWriteOrUnknown, "channel_logout_whatsapp", "in_process", "internal/runtime/effects/channel_logout.go", []string{"internal/sessionprovider/runtime_logout_unix.go:executeSessionLogout:sdk_logout:1"}, "TestSessionLogoutJournalBothStores"),
+	registration(KindChannelLogout, EffectWriteOrUnknown, "channel_logout_whatsapp", "in_process", "internal/runtime/effects/channel_logout.go", []string{"internal/sessionprovider/runtime_logout_unix.go:executeSessionLogout:sdk_logout:1"}, "TestSessionLogoutJournalBothStores").withProofFile("internal/sessionprovider/runtime_logout_test.go"),
 	registration(KindManagedCredential, EffectWriteOrUnknown, "managed_credential", "http", "internal/runtime/managedcredentials/store.go", []string{"internal/runtime/managedcredentials/store.go:exchange:http_do:1", "internal/runtime/managedcredentials/store.go:exchangeGitHubAppInstallation:http_do:1"}, "TestManagedCredentialEffectOutcomes"),
 	registration(KindNativeWebSearchHTTP, EffectWriteOrUnknown, "native_web_search", "http", "internal/runtime/tools/executor_native.go", []string{"internal/runtime/tools/executor_native.go:doNormalizedSearch:http_do:1"}, "TestManagedToolEffectOutcomes"),
 	registration(KindMCPHTTPRequest, EffectWriteOrUnknown, "mcp_tools_call_http", "http", "internal/runtime/mcp/client.go", []string{"internal/runtime/mcp/client.go:callHTTPServerWithCredentialKeyResolver:http_do:1"}, "TestManagedMCPEffectOutcomes"),
@@ -238,6 +239,11 @@ func registration(kind Kind, class EffectClass, adapter, transport, launchSite s
 		registration.SettlementRecovery = fmt.Sprintf("authorized=%s; exact zero-process-launch terminal failure may authorize next ordinal; launched/response_observed=%s; postlaunch replay=no_redispatch", StateTerminalFailure, StateOutcomeUncertain)
 	}
 	return registration
+}
+
+func (r Registration) withProofFile(path string) Registration {
+	r.ProofFile = path
+	return r
 }
 
 func Registrations() []Registration {
