@@ -382,6 +382,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 			RecipientPlanning:     *model.RecipientPlanning,
 			SourceRunID:           binding.SourceRunID,
 			ForkRunID:             forkRunID,
+			DataPins:              materialization.DataPins,
 			ForkEventID:           plan.ForkPoint.EventID,
 			SourceEvents:          sourceEventIDs,
 			ExecutionOwner:        executionOwner,

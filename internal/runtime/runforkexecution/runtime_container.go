@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -107,6 +108,7 @@ func buildSelectedContractForkLocalRuntimeContainer(ctx context.Context, req pub
 	if req.Prepared == nil || req.Prepared.operation != req.Operation {
 		return selectedContractForkLocalRuntimeContainer{}, errors.New("selected-contract container requires its exact preparation")
 	}
+	req.DataPins = slices.Clone(req.DataPins)
 	ports, err := req.Owner.require()
 	if err != nil {
 		return selectedContractForkLocalRuntimeContainer{}, fmt.Errorf("%s: %w", runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, err)
@@ -931,10 +933,35 @@ func (c selectedContractForkLocalRuntimeContainer) admitSelectedDeploymentFeeds(
 	if err != nil {
 		return fmt.Errorf("list selected deployment feeds: %w", err)
 	}
-	if err := validateSelectedDeploymentFeedAgreement(c.req.SourcePlan, selectedDeploymentFeedRequests(feeds), c.req.ForkRunID, c.req.LoadedSource.SourceArtifactFact.BundleHash()); err != nil {
+	pins, err := c.selectedDeploymentPinnedSources(ctx)
+	if err != nil {
+		return err
+	}
+	if err := validateSelectedDeploymentFeedAgreement(c.req.SourcePlan, selectedDeploymentFeedRequests(feeds), pins, c.req.ForkRunID, c.req.LoadedSource.SourceArtifactFact.BundleHash()); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (c selectedContractForkLocalRuntimeContainer) selectedDeploymentPinnedSources(ctx context.Context) ([]durabledata.PinnedSource, error) {
+	sources := make([]durabledata.PinnedSource, 0, len(c.req.DataPins))
+	for _, pin := range c.req.DataPins {
+		if err := pin.Validate(); err != nil {
+			return nil, fmt.Errorf("selected deployment child pin: %w", err)
+		}
+		if pin.RunID != c.req.ForkRunID {
+			return nil, errors.New("selected deployment pin belongs to another child")
+		}
+		source, err := c.ports.deploymentFanOut.LoadPinnedSource(ctx, c.req.ForkRunID, c.req.LoadedSource.SourceArtifactFact.BundleHash(), pin.Declaration)
+		if err != nil {
+			return nil, fmt.Errorf("load selected deployment child pin: %w", err)
+		}
+		if source.Declaration != pin.Declaration || source.VersionID != pin.VersionID || source.SchemaDigest != pin.SchemaDigest {
+			return nil, errors.New("selected deployment source differs from native child pin")
+		}
+		sources = append(sources, source)
+	}
+	return sources, nil
 }
 
 func selectedDeploymentFeedRequests(feeds []fanoutobligation.Intent) []fanoutobligation.IntentRequest {
@@ -945,13 +972,42 @@ func selectedDeploymentFeedRequests(feeds []fanoutobligation.Intent) []fanoutobl
 	return requests
 }
 
-func validateSelectedDeploymentFeedAgreement(plan runfork.RunForkPlan, feeds []fanoutobligation.IntentRequest, forkRunID, bundleHash string) error {
-	expected, err := selectedDeploymentSourceDeclarations(plan)
+func validateSelectedDeploymentFeedAgreement(plan runfork.RunForkPlan, feeds []fanoutobligation.IntentRequest, pins []durabledata.PinnedSource, forkRunID, bundleHash string) error {
+	inherited, err := selectedDeploymentSourceDeclarations(plan)
 	if err != nil {
 		return err
 	}
+	expected := make(map[durabledata.DeclarationRef]durabledata.PinnedSource, len(pins))
+	for _, pin := range pins {
+		if err := pin.Declaration.Validate(); err != nil {
+			return err
+		}
+		if err := pin.VersionID.Validate(); err != nil {
+			return err
+		}
+		if err := pin.SchemaDigest.Validate(); err != nil {
+			return err
+		}
+		if pin.RowCount < 0 {
+			return errors.New("selected deployment pin has negative cardinality")
+		}
+		if _, duplicate := expected[pin.Declaration]; duplicate {
+			return errors.New("selected deployment has duplicate child pins")
+		}
+		expected[pin.Declaration] = pin
+	}
+	for declaration := range inherited {
+		if _, present := expected[declaration]; !present {
+			return errors.New("selected deployment is missing an inherited child pin")
+		}
+	}
+	if len(expected) > 0 {
+		if err := plan.ForkPoint.Validate(); err != nil {
+			return fmt.Errorf("selected deployment child pins require an exact source revision: %w", err)
+		}
+	}
 	if len(feeds) != len(expected) {
-		return fmt.Errorf("selected fork has %d deployment feeds, fixed revision requires %d", len(feeds), len(expected))
+		return fmt.Errorf("selected fork has %d deployment feeds, native child pins require %d", len(feeds), len(expected))
 	}
 	seen := make(map[durabledata.DeclarationRef]struct{}, len(feeds))
 	for _, feed := range feeds {
@@ -962,8 +1018,12 @@ func validateSelectedDeploymentFeedAgreement(plan runfork.RunForkPlan, feeds []f
 			return errors.New("selected deployment feed differs from its fork or bundle")
 		}
 		declaration := feed.Deployment.Declaration
-		if _, ok := expected[declaration]; !ok {
-			return errors.New("selected fork has a deployment feed absent from its fixed source revision")
+		pin, ok := expected[declaration]
+		if !ok {
+			return errors.New("selected fork has a deployment feed absent from its native child pins")
+		}
+		if feed.Deployment.VersionID != pin.VersionID || feed.Deployment.SchemaDigest != pin.SchemaDigest || feed.Cardinality != pin.RowCount {
+			return errors.New("selected deployment feed differs from its exact child pin metadata")
 		}
 		if _, duplicate := seen[declaration]; duplicate {
 			return errors.New("selected fork has duplicate deployment feed declarations")
