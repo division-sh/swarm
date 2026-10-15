@@ -54,14 +54,8 @@ type sessionPublicationStore interface {
 	runtimereplycontext.Store
 	runtimerunlifecycle.OperationOwner
 	runtimedelivery.Store
-	runtimebus.FlowInstanceRoutePersistence
-	runtimebus.FlowInstanceRouteRecordReader
-	runtimebus.FlowInstanceRouteSetPersistence
-	runtimebus.FlowInstanceRouteTopologyPersistence
-	runtimebus.FlowInstanceRouteRollbackPersistence
+	runtimepipeline.FlowInstanceIndexReader
 	runtimebus.ActiveAgentDescriptorLister
-	runtimebus.ActiveFlowInstanceDescriptorLister
-	runtimebus.SelectedRunTargetOwnerLister
 	runtimebus.PreparedPublishEventReader
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
@@ -155,9 +149,7 @@ func newSessionPublicationFixture(t *testing.T, backend string) *sessionPublicat
 		WorkOwner: owner, ReceiverExecution: eventreceiver.NormalExecution(), DeliveryAuthority: authority,
 		PipelineObligations: f.selected.PipelineObligations(), PayloadAdmitter: payload, ProviderOutputVerifier: f.catalog,
 		Durable: runtimebus.DurableDependencies{ReplyContext: f.selected, RunLifecycle: f.selected, DeliveryLifecycle: f.selected,
-			ConstructionPublications: f.selected,
-			FlowRoutes:               f.selected, FlowRouteRecords: f.selected, FlowRouteSets: f.selected, FlowRouteTopology: f.selected,
-			FlowRouteRollback: f.selected, ActiveAgents: f.selected, ActiveFlows: f.selected, TargetOwners: f.selected,
+			ConstructionPublications: f.selected, Instances: f.selected, ActiveAgents: f.selected,
 			PreparedEvents: f.selected, TargetFailureRecorder: f.selected, RunOrigins: f.selected, StandingRestarts: f.selected},
 	})
 	if err != nil {
