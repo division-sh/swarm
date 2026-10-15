@@ -122,6 +122,18 @@ func assertSelectedProfileFencedImage(t *testing.T, f agentClaimProfileFixture, 
 	if !reflect.DeepEqual(before, current) {
 		t.Fatal("live selected fence hid or replaced durable active membership/profile evidence")
 	}
+	active, err := f.store.(deliverylifecycle.ActiveSnapshotReader).ReadActiveDeliverySnapshots(f.ctx)
+	if err != nil || len(active) != len(current) {
+		t.Fatalf("native read role changed complete fenced membership: %+v err=%v", active, err)
+	}
+	seen := make(map[string]bool, len(active))
+	for _, snapshot := range active {
+		member, found := current[snapshot.DeliveryID]
+		if !found || seen[snapshot.DeliveryID] || !reflect.DeepEqual(snapshot, member.Snapshot) {
+			t.Fatalf("native read role lost exact fenced/ordinary membership: %+v", snapshot)
+		}
+		seen[snapshot.DeliveryID] = true
+	}
 	member, found := current[claimed.DeliveryID]
 	if !found || !reflect.DeepEqual(member.Snapshot, claimed) || member.Selected != selected.request.Preparation.Actors[0] {
 		t.Fatalf("fenced selected claim lost its original immutable preparation: %+v expected=%+v", member, claimed)
