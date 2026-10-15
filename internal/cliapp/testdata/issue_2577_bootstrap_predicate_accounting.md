@@ -347,3 +347,30 @@ preflight then correctly caught this changed consumer fingerprint; regenerate
 only after the owner/caller and proof mapping above. This is not a claim of
 final qualification or physical interoperability; exact-head preflight, the
 agent-feasible live QR wait and normal hosted qualification remain separate.
+
+### P01 Duplicate Disconnect / Retirement Boundary
+
+Reviewer-g's #2577 comment 6199462678 identifies a distinct same-owner defect:
+the second observed disconnect erased the first terminal snapshot. The bounded
+repair makes repeated observed disconnects idempotent, but leaves generic
+retirement as a clearing refusal; later disconnects cannot recreate that state.
+No execution-health, disclosure-scope or failure admission is relaxed.
+
+`TestWhatsAppPairingDuplicateDisconnectReadbackBothStores` cuts at the existing
+SDK-disconnect lifetime owner over actual selected SQLite/PostgreSQL stores and
+the original unpaired SDK connection. Both failed and observed-expired states
+are checked after events one and two through native pairing readback, onboarding
+get and connected-channel list. Scope and zero-code observations must stay
+exact, while standing readiness and channel execution remain unavailable.
+Generic retirement followed by another event, and actual runtime retirement
+followed by another event, must both refuse. These are read-owner cuts, not a
+claim that the external socket peer generated duplicate SDK callbacks. The
+existing four served public controls retain real transport execution proof.
+
+Before the repair, all four store/status leaves fail specifically on event two;
+event one and the retirement refusals pass. Raw RED SHA256:
+5b623d8af40ac635097ebb9d4807a4cb0800622fe4f8bf0895bfe01242ff0997.
+The existing isolated authorization matrix also repeats the disconnect before
+each scope/error check. Fresh focused/race, exact-head preflight and real
+QR-render/expiry receipts are required for this successor; old passes are not
+relabeled as its qualification.
