@@ -321,7 +321,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.runtimeIngressPostgresOwner = ingressOwner
-	if err := startupOwner.BindAgentRecoveryReader(store); err != nil {
+	if err := storestartupownership.BindPostgresAgentRecoveryReader(startupOwner, store); err != nil {
 		return nil, err
 	}
 	return store, nil
@@ -622,7 +622,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.runtimeIngressSQLiteOwner = ingressOwner
-	if err := startupOwner.BindAgentRecoveryReader(store); err != nil {
+	if err := storestartupownership.BindSQLiteAgentRecoveryReader(startupOwner, store); err != nil {
 		return nil, err
 	}
 	return store, nil
