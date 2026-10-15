@@ -29,9 +29,9 @@ import (
 	"github.com/google/uuid"
 )
 
-func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
+func proveSelectedQ1SessionExecutionPreservationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, variant := range []string{"sibling_then_refork", "refork_without_sibling"} {
+		for _, variant := range []string{"sibling_source_forked", "refork_replay_scope_advanced"} {
 			t.Run(backend+"/"+variant, func(t *testing.T) {
 				ctx := runForkTestContext(t)
 				var selected startupownership.Store
@@ -107,15 +107,18 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 					}
 					return page
 				}
-				execute := func(sourceID, point string) SelectedContractExecutionResult {
-					t.Helper()
-					callsBefore, lookupBefore := providerCalls.Load(), lookupCalls.Load()
-					result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+				request := func(sourceID, point string) SelectedContractExecutionRequest {
+					return SelectedContractExecutionRequest{
 						SourceRunID: sourceID, At: point, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
 						ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 						AgentRuntime: SelectedContractAgentRuntimeOptions{Config: selectedForkAPIProviderConfig(selection.BackendOpenAICompatible, "request-A", provider.URL), ProviderCredentials: credentialStore,
 							ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected), QuiescenceTimeout: selectedForkCapabilityProofQuiescenceTimeout},
-					})
+					}
+				}
+				execute := func(sourceID, point string) SelectedContractExecutionResult {
+					t.Helper()
+					callsBefore, lookupBefore := providerCalls.Load(), lookupCalls.Load()
+					result, err := executeLiveSelectedContractRunFork(ctx, request(sourceID, point))
 					if err != nil {
 						t.Fatalf("selected session fork: source=%s point=%s provider_delta=%d lookup_delta=%d err=%v", sourceID, point, providerCalls.Load()-callsBefore, lookupCalls.Load()-lookupBefore, err)
 					}
@@ -131,7 +134,7 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 					}
 					sessionIDs[page.Conversation.SessionID] = true
 					for _, turn := range page.Turns {
-						if turn.TurnID == "" || turnIDs[turn.TurnID] || turn.TriggerEventID != result.ForkEvents[0].ForkEventID || turn.CompletionEvidence.Request.RequestedModel != "request-A" || turn.ResolvedModel != "reported-Q1" || !turn.ParseOK || turn.Failure != nil {
+						if turn.TurnID == "" || turnIDs[turn.TurnID] || turn.CompletedAt.IsZero() || turn.TriggerEventID != result.ForkEvents[0].ForkEventID || turn.CompletionEvidence.Request.RequestedModel != "request-A" || turn.ResolvedModel != "reported-Q1" || !turn.ParseOK || turn.Failure != nil {
 							t.Fatalf("fork reused or misattributed completion: %+v", turn)
 						}
 						turnIDs[turn.TurnID] = true
@@ -155,30 +158,49 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 					t.Fatalf("past publication cut used current session/claim state: %+v", plan.PendingWork)
 				}
 				current, err := selected.(deliverylifecycle.Store).Snapshot(ctx, pending.DeliveryID)
-				if err != nil || current.Status != deliverylifecycle.StatusDelivered || current.ClaimVersion == 0 {
+				if err != nil || current.Status != deliverylifecycle.StatusDelivered || current.ClaimVersion == 0 || current.RunID != firstID || current.EventID != firstPoint || current.SettledAt.IsZero() || current.ActiveSessionID != "" || current.Failure != nil {
 					t.Fatalf("refork source did not actually execute/settle its session input: %+v err=%v", current, err)
 				}
-				children := int32(2)
-				var siblingID string
-				if variant == "sibling_then_refork" {
-					siblingID = execute(runID, eventID).Materialization.ForkRunID
-					children++
+				sourceID, point := firstID, firstPoint
+				wantRefusal := "selected-contract committed replay-scope marker policy blocked: source_committed_replay_scope_advanced_after_fork_point"
+				if variant == "sibling_source_forked" {
+					sourceID, point = runID, eventID
+					wantRefusal = "selected-contract source event admission state forked is unsupported"
 				}
-				grandchild := execute(firstID, firstPoint)
-				if siblingID == firstID || grandchild.Materialization.ForkRunID == firstID || grandchild.Materialization.ForkRunID == siblingID {
-					t.Fatal("independent sibling/refork operations shared a child run")
+				refused, err := executeLiveSelectedContractRunFork(ctx, request(sourceID, point))
+				if err == nil || err.Error() != wantRefusal {
+					t.Fatalf("existing session execution refusal changed: got=%v want=%s result=%+v", err, wantRefusal, refused)
+				}
+				if refused.Activation.Activated || refused.ExecutedEventCount != 0 || len(refused.ForkEvents) != 0 {
+					t.Fatalf("refused execution activated or published child work: %+v", refused)
+				}
+				if variant == "sibling_source_forked" && (refused.Materialization.ForkRunID != "" || refused.ForkLocalRuntimeContainer != nil) {
+					t.Fatalf("source-status refusal unexpectedly materialized a sibling: %+v", refused)
+				}
+				if refused.Materialization.ForkRunID != "" {
+					// Refork admission can acknowledge a paused materialization before
+					// the replay guard refuses execution and the existing owner discards it.
+					conversations, err := reads.ListOperatorConversations(ctx, operatorread.OperatorConversationListOptions{RunID: refused.Materialization.ForkRunID, AgentID: "test-agent"})
+					if err != nil || len(conversations.Conversations) != 0 {
+						t.Fatalf("refused child retained a provider conversation: %+v err=%v", conversations, err)
+					}
 				}
 				after := readTurns(firstID)
-				if !reflect.DeepEqual(before.Turns, after.Turns) || before.Conversation.SessionID != after.Conversation.SessionID {
+				if !reflect.DeepEqual(before, after) {
 					t.Fatalf("refork changed retained source conversation: before=%+v after=%+v", before, after)
 				}
 				again, err := owner.ports.fork.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: firstID, At: firstPoint})
 				if err != nil || !reflect.DeepEqual(plan.PendingWork, again.PendingWork) || !reflect.DeepEqual(plan.ReplayResumeAdmission, again.ReplayResumeAdmission) {
 					t.Fatalf("sibling/refork changed older-cut decisions: before=%+v after=%+v err=%v", plan, again, err)
 				}
-				if providerCalls.Load() != 2*children || lookupCalls.Load() != children || len(sessionIDs) != int(children) || len(turnIDs) != 2*int(children) {
+				settled, err := selected.(deliverylifecycle.Store).Snapshot(ctx, pending.DeliveryID)
+				if err != nil || !reflect.DeepEqual(current, settled) {
+					t.Fatalf("refused execution changed physical settlement: before=%+v after=%+v err=%v", current, settled, err)
+				}
+				if providerCalls.Load() != 2 || lookupCalls.Load() != 1 || len(sessionIDs) != 1 || len(turnIDs) != 2 {
 					t.Fatalf("whole lineage accounting: provider=%d lookup=%d sessions=%d turns=%d", providerCalls.Load(), lookupCalls.Load(), len(sessionIDs), len(turnIDs))
 				}
+				t.Logf("first child settled with two provider calls, one tool call, one session and two turns; %s; second-child provider/tool calls=0; older-cut and conversation unchanged", wantRefusal)
 			})
 		}
 	}

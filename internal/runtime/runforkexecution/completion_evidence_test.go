@@ -47,7 +47,7 @@ func assertCompletion2270SelectedCLIReadback(t testing.TB, ctx context.Context, 
 }
 
 func TestSelectedCompletion2270EvidenceBothStores(t *testing.T) {
-	t.Run("q1_session_sibling_refork", proveSelectedQ1SessionSiblingReforkBothStores)
+	t.Run("q1_session_execution_preservation", proveSelectedQ1SessionExecutionPreservationBothStores)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, protocol := range []struct {
 			backend, credential, first, last string
