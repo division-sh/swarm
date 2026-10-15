@@ -18,7 +18,9 @@ func TestConversationForkHistoricalConstructionHasClosedConsumers(t *testing.T) 
 	root := pipeline.WorkflowRepoRoot()
 	want := map[string]map[string]int{
 		"CommitConversationForkConstructionForTest":     {"internal/store/internal/runtimepersistence/test_conversation_fork_source.go": 2},
-		"InsertConversationForkConstructionDiffForTest": {"internal/store/internal/backend/pipelinepersistence/workflow_engine_mutation_commit.go": 1},
+		"ConversationForkConstructionOccurrenceForTest": {"internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go": 1},
+		"InsertConstructionEntityStateDiff":             {"internal/store/internal/backend/pipelinepersistence/workflow_engine_mutation_commit.go": 2},
+		"ValidateBirthOccurrence":                       {"internal/store/internal/backend/pipelinepersistence/flow_instance_activation_commit.go": 1, "internal/store/internal/backend/mutationlog/construction_occurrence.go": 1},
 		"PrepareConversationForkConstructionForTest":    {"internal/store/storetest/conversation_fork.go": 1},
 	}
 	got := map[string]map[string]int{}
@@ -38,6 +40,14 @@ func TestConversationForkHistoricalConstructionHasClosedConsumers(t *testing.T) 
 			return err
 		}
 		ast.Inspect(file, func(node ast.Node) bool {
+			if call, ok := node.(*ast.CallExpr); ok {
+				if name, ok := call.Fun.(*ast.Ident); ok && want[name.Name] != nil {
+					if got[name.Name] == nil {
+						got[name.Name] = map[string]int{}
+					}
+					got[name.Name][filepath.ToSlash(relative)]++
+				}
+			}
 			selector, ok := node.(*ast.SelectorExpr)
 			if !ok || want[selector.Sel.Name] == nil {
 				return true
