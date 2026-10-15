@@ -153,19 +153,12 @@ func runTestArgs(testArgs []string, output io.Writer, completion bool, workloadP
 	}
 	var service *testpostgres.Service
 	settle := func(success bool, beforeComplete func()) (serviceErr, leaseErr error) {
-		settlementCtx, cancelSettlement := context.WithTimeout(context.Background(), authoritySettlementTimeout)
-		defer cancelSettlement()
-		leaseErr = lease.Join(settlementCtx)
-		if service != nil {
-			serviceErr = service.Close(settlementCtx)
-		}
-		if beforeComplete != nil {
-			beforeComplete()
-		}
-		if leaseErr == nil {
-			leaseErr = lease.Complete(settlementCtx, success && serviceErr == nil && receivedSignal.Load() == 0)
-		}
-		return serviceErr, leaseErr
+		return settleRunAuthorities(lease, service, func() bool {
+			if beforeComplete != nil {
+				beforeComplete()
+			}
+			return success && receivedSignal.Load() == 0
+		})
 	}
 	completeLease := func(success bool) int {
 		serviceErr, leaseErr := settle(success, nil)
