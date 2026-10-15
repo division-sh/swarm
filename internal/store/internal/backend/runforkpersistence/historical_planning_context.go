@@ -83,7 +83,7 @@ func requireHistoricalPlanningRun(ctx context.Context, tx *sql.Tx, run runlifecy
 	return nil
 }
 
-// Only the existing serialized planning reader enters this synchronous owner.
+// Each existing synchronous snapshot read enters this owner within its own TX.
 // Reject concurrent use rather than introducing another lock or SQL lifetime.
 func beginHistoricalPlanningRead(ctx context.Context, tx *sql.Tx, source semanticview.Source, run runlifecycle.Snapshot) (func() error, error) {
 	scope, err := historicalPlanningForTx(ctx, tx)
