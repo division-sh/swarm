@@ -64,7 +64,10 @@ func TestReviewedSnapshotCandidateOverlayTypeChecks(t *testing.T) {
 	// This reviewed candidate includes the explicitly tagged #2413 fixture.
 	// The production preflight still refuses files outside its active build view.
 	t.Setenv("GOFLAGS", "-tags=issue2413")
-	rows := q10CurrentEndpointRecipes(t)
+	var rows []recipe
+	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
+		t.Fatal(err)
+	}
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	if err != nil {
 		t.Fatal(err)

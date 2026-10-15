@@ -31,12 +31,6 @@ import (
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
 
-type fixtureSetupSuccessor2617 struct {
-	Original  recipe
-	Candidate string
-	Edits     []reviewedSuccessorEdit
-}
-
 // These settled fixture receipts compose with, but do not replace, the earlier
 // historical transformation and current-endpoint packets.
 func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) {
