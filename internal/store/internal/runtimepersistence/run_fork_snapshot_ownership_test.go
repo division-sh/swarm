@@ -384,7 +384,13 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 							if planErr == nil && !runForkTestHasPlanBlocker(got, runfork.RunForkBlockerEntitySnapshotMetadataUnproven) {
 								t.Fatalf("invalid historical metadata admitted: %#v", got)
 							}
-							if _, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID}); err == nil {
+							request := runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID}
+							if phase == "exact_replay" {
+								_, err = f.store.RequireMaterializedRunFork(f.ctx, forkRunID, request)
+							} else {
+								_, err = f.store.MaterializeRunFork(f.ctx, request)
+							}
+							if err == nil {
 								t.Fatal("invalid historical metadata materialized")
 							}
 							if after := snapshotOwnershipCounts(t, f, f.runID); after != before {
