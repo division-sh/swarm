@@ -3,12 +3,14 @@ package runforkexecution
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"reflect"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -128,14 +130,24 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int) 
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
-	if err := request.Owner.RetireSelectedContexts(ctx); err != nil {
-		t.Fatalf("join the root receiver after exact feed settlement: %v", err)
+	outcomes, err := storetest.ReadFanOutPublishedOutcomeStorage(ctx, loader.Store, materialized.ForkRunID)
+	if err != nil || len(outcomes) != rows {
+		t.Fatalf("exact pin-feed publication count: outcomes=%+v err=%v", outcomes, err)
 	}
-	request.Owner.ports.contexts.mu.Lock()
-	remaining := len(request.Owner.ports.contexts.entries)
-	request.Owner.ports.contexts.mu.Unlock()
-	if remaining != 0 {
-		t.Fatalf("settled pin feed leaked %d retained contexts after joined retirement", remaining)
+	receiver, err := identity.AdmitExecutableNodeDeclaration(semanticview.RootExecutionFlowID(loaded.Source), "root-collector")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for ordinal, outcome := range outcomes {
+		var payload any
+		if err := json.Unmarshal(outcome.Payload, &payload); err != nil || outcome.Ordinal != ordinal || outcome.Kind != "committed" || !reflect.DeepEqual(payload, want[ordinal]) {
+			t.Fatalf("actual feed publication lost its immutable row: outcome=%+v payload=%+v err=%v", outcome, payload, err)
+		}
+		deliveries, err := storetest.ReadEventDeliveryDiagnosticRows(ctx, loader.Store, outcome.EventID)
+		if err != nil || len(deliveries) != 1 || deliveries[0].SubscriberType != "node" || deliveries[0].SubscriberID != receiver.Key() ||
+			deliveries[0].Status != "delivered" || deliveries[0].FlowInstance != materialized.ForkRunID {
+			t.Fatalf("actual pinned row did not settle through its exact receiver: deliveries=%+v err=%v", deliveries, err)
+		}
 	}
 	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, loader.Store)
 	if err != nil {
@@ -153,5 +165,14 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int) 
 	after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, loader.Store)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("activated pin replay mutated durable state: %v", err)
+	}
+	if err := request.Owner.RetireSelectedContexts(ctx); err != nil {
+		t.Fatalf("join the root receiver after exact feed settlement and replay: %v", err)
+	}
+	request.Owner.ports.contexts.mu.Lock()
+	remaining := len(request.Owner.ports.contexts.entries)
+	request.Owner.ports.contexts.mu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("settled pin feed leaked %d retained contexts after joined retirement", remaining)
 	}
 }
