@@ -132,12 +132,14 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			}
 			return fmt.Errorf("selected-contract fork source state %s is unsupported", state)
 		}
-		planRequest := runfork.RunForkPlanRequest{
-			SourceRunID: sourceRunID, At: strings.TrimSpace(req.At),
-			AtStart: req.Preparation.ForkPoint.Kind == runfork.RunForkPointRunStart,
-		}
 		point := req.Preparation.ForkPoint
-		planRequest.ResolvedPoint = &point
+		if at := strings.TrimSpace(req.At); at != "" && at != point.EventID && at != point.Input {
+			return fmt.Errorf("selected materialization selector differs from its captured fork point")
+		}
+		planRequest := runfork.RunForkPlanRequest{
+			SourceRunID: sourceRunID, At: point.Input, ResolvedPoint: &point,
+			AtStart: point.Kind == runfork.RunForkPointRunStart,
+		}
 		plan, err := port.plan(txctx, tx, planRequest)
 		if err != nil {
 			return err
