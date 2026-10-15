@@ -262,7 +262,7 @@ func requireLifecycleRootLoopForkRevision(t *testing.T, rt servedControlProofRun
 func readLifecycleStoredLoop(t *testing.T, rt servedControlProofRuntime, runID, entityID string) loopruntime.Activation {
 	t.Helper()
 	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(accumulator AS TEXT) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, entityID).Scan(&raw); err != nil {
+	if err := rt.DB.QueryRow(`SELECT CAST(accumulator AS TEXT) FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, runID, entityID).Scan(&raw); err != nil {
 		t.Fatal(err)
 	}
 	var bucket map[string]map[string]any

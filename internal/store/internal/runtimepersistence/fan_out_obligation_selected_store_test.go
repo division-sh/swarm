@@ -2160,11 +2160,11 @@ func seedFanOutEntityRevision(t *testing.T, ctx context.Context, db *sql.DB, pos
 	t.Helper()
 	entityID := uuid.NewString()
 	mutationID := uuid.NewString()
-	stateQuery := `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,slug,name,current_state,gates,fields,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at) VALUES (?,?, 'root/one','fan_out_fixture','fan-out-fixture','Fan Out Fixture','queued','{}',?,'{}','{}',1,?,?,?)`
+	stateQuery := `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,slug,name,fields,created_at,updated_at) VALUES (?,?, 'root/one','fan_out_fixture','fan-out-fixture','Fan Out Fixture',?,?,?)`
 	mutationQuery := `INSERT INTO entity_mutations (mutation_id,run_id,entity_id,domain,path,old_value,new_value,writer_type,writer_id,handler_step,created_at) VALUES (?,?,?,'authored_field','items','null',?,'platform','fan-out-test','source',?)`
-	stateArgs := []any{runID, entityID, `{"items":` + itemsJSON + `}`, createdAt, createdAt, createdAt}
+	stateArgs := []any{runID, entityID, `{"items":` + itemsJSON + `}`, createdAt, createdAt}
 	if postgres {
-		stateQuery = `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,slug,name,current_state,gates,fields,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at) VALUES ($1::uuid,$2::uuid,'root/one','fan_out_fixture','fan-out-fixture','Fan Out Fixture','queued','{}'::jsonb,$3::jsonb,'{}'::jsonb,'{}'::jsonb,1,$4,$4,$4)`
+		stateQuery = `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,slug,name,fields,created_at,updated_at) VALUES ($1::uuid,$2::uuid,'root/one','fan_out_fixture','fan-out-fixture','Fan Out Fixture',$3::jsonb,$4,$4)`
 		mutationQuery = `INSERT INTO entity_mutations (mutation_id,run_id,entity_id,domain,path,old_value,new_value,writer_type,writer_id,handler_step,created_at) VALUES ($1::uuid,$2::uuid,$3::uuid,'authored_field','items','null'::jsonb,$4::jsonb,'platform','fan-out-test','source',$5)`
 		stateArgs = []any{runID, entityID, `{"items":` + itemsJSON + `}`, createdAt}
 	}

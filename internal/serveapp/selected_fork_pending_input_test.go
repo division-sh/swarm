@@ -219,15 +219,10 @@ func TestExplicitTargetRestrictsConnectedSiblingsBothStores(t *testing.T) {
 			}
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": seed.RunID, "idempotency_key": "target-resume"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			var childState, siblingState string
-			if err := rt.DB.QueryRow(`SELECT current_state FROM entity_state WHERE run_id=$1 AND flow_instance='child'`, seed.RunID).Scan(&childState); err != nil {
-				t.Fatal(err)
-			}
-			if err := rt.DB.QueryRow(`SELECT current_state FROM entity_state WHERE run_id=$1 AND flow_instance='sibling'`, seed.RunID).Scan(&siblingState); err != nil {
-				t.Fatal(err)
-			}
-			if childState != "done" || siblingState != "ready" {
-				t.Fatalf("unselected sibling executed: child=%s sibling=%s", childState, siblingState)
+			_, child := requireReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, "child", "child", childEntity)
+			_, sibling := requireReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, "sibling", "sibling", siblingEntity)
+			if child.CurrentState != "done" || sibling.CurrentState != "ready" {
+				t.Fatalf("unselected sibling executed: child=%s sibling=%s", child.CurrentState, sibling.CurrentState)
 			}
 			assertNoUnselectedTargetActivation(t, rt, seed.RunID)
 			requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
@@ -260,9 +255,9 @@ func requirePendingInputPublicStates(t *testing.T, rt servedControlProofRuntime,
 		if entity.RunID != runID || !reflect.DeepEqual(entity, full.Entity) {
 			t.Fatal("public input result lost exact run/entity identity")
 		}
-		if entity.CurrentState == "done" {
+		if entity.CurrentState != nil && *entity.CurrentState == "done" {
 			done++
-		} else if entity.CurrentState != "ready" {
+		} else if entity.CurrentState == nil || *entity.CurrentState != "ready" {
 			t.Fatalf("unexpected public state: %+v", entity)
 		}
 	}
@@ -274,7 +269,9 @@ func requirePendingInputPublicStates(t *testing.T, rt servedControlProofRuntime,
 func requirePendingInputStateCount(t *testing.T, rt servedControlProofRuntime, runID, state string, want int) {
 	t.Helper()
 	var count int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND current_state=$2`, runID, state).Scan(&count); err != nil {
+	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state es JOIN flow_instances fi
+ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+WHERE es.run_id=$1 AND fi.current_state=$2`, runID, state).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != want {

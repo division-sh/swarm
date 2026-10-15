@@ -27,7 +27,11 @@ func TestNotifyAllChildrenObservationPreservesPhysicalItemMetadataAndDiagnosticS
 					return err
 				}
 				for i, run := range []string{active.Claim.RunID(), sibling.Claim.RunID()} {
-					if _, err := tx.ExecContext(ctx, `INSERT INTO entity_state(run_id,entity_id,flow_instance,entity_type,current_state,revision,fields,accumulator,updated_at) VALUES($1,$2,$3,'physical','ready',1,$4,'{}',$5)`, run, uuid.NewString(), instance, []string{`{"mark":"earlier", "number":1.0}`, `{"mark":"later", "number":2.0}`}[i], now.Add(time.Duration(i)*time.Second)); err != nil {
+					entity := uuid.NewString()
+					if i == 0 {
+						seedWorkflowHeaderProjectionFixture(t, ctx, tx, run, entity, instance, "physical", "physical", "ready", `{}`, now)
+					}
+					if _, err := tx.ExecContext(ctx, `INSERT INTO entity_state(run_id,entity_id,flow_instance,entity_type,fields,created_at,updated_at) VALUES($1,$2,$3,'physical',$4,$5,$6)`, run, entity, instance, []string{`{"mark":"earlier", "number":1.0}`, `{"mark":"later", "number":2.0}`}[i], now, now.Add(time.Duration(i)*time.Second)); err != nil {
 						return err
 					}
 				}
@@ -98,7 +102,9 @@ func TestNotifyAllChildrenObservationPreservesPhysicalItemMetadataAndDiagnosticS
 				`SELECT event_name, event_id, payload FROM events ORDER BY created_at, event_id`,
 				`SELECT event_id, subscriber_type, subscriber_id, outcome, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), '') FROM event_receipts ORDER BY event_id, subscriber_type, subscriber_id`,
 				`SELECT event_id, subscriber_type, subscriber_id, status, COALESCE(reason_code, ''), COALESCE(CAST(failure AS TEXT), ''), COALESCE(CAST(delivery_target_route AS TEXT), '') FROM event_deliveries ORDER BY event_id, subscriber_type, subscriber_id`,
-				`SELECT flow_instance, current_state, fields FROM entity_state ORDER BY flow_instance`,
+				`SELECT es.flow_instance, CASE WHEN fi.stage_defined THEN fi.current_state ELSE NULL END AS current_state, es.fields
+				 FROM entity_state es LEFT JOIN flow_instances fi ON fi.run_id=es.run_id AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance
+				 ORDER BY es.flow_instance, es.run_id, es.entity_id`,
 				`SELECT run_id, instance_path, flow_template, status, config FROM flow_instances ORDER BY run_id, instance_path`,
 				`SELECT original_event_id, failure FROM dead_letters ORDER BY created_at`,
 			}

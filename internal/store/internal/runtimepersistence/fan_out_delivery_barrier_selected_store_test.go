@@ -889,7 +889,7 @@ func seedFanOutBarrierLoopState(t *testing.T, ctx context.Context, db *sql.DB, r
 	}
 	raw, _ := json.Marshal(buckets)
 	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, "root", ".", "fan_out_fixture", "work", string(raw), at)
-	if _, err := db.ExecContext(ctx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,current_state,gates,fields,bookkeeping,accumulator,revision,entered_state_at,created_at,updated_at) VALUES ($1,$2,'root','fan_out_fixture','work','{}','{"entity_type":"fan_out_fixture"}','{}',$3,1,$4,$4,$4)`, runID, entityID, string(raw), at); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,fields,created_at,updated_at) VALUES ($1,$2,'root','fan_out_fixture','{"entity_type":"fan_out_fixture"}',$3,$3)`, runID, entityID, at); err != nil {
 		t.Fatal(err)
 	}
 }

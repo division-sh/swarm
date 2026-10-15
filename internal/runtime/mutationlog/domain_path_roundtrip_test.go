@@ -33,7 +33,7 @@ func TestMutationDomainPathChronologicalFold(t *testing.T) {
 				atomic = got.Bookkeeping
 			}
 			want := map[string]any{"a.b": json.Number("9007199254740993"), "a": map[string]any{"b": "independent"}}
-			if got.CurrentState != "completed" || !reflect.DeepEqual(got.Fields, map[string]any{"a": map[string]any{"c": "retained"}}) || !reflect.DeepEqual(atomic, want) {
+			if got.CurrentState == nil || *got.CurrentState != "completed" || !reflect.DeepEqual(got.Fields, map[string]any{"a": map[string]any{"c": "retained"}}) || !reflect.DeepEqual(atomic, want) {
 				t.Fatalf("domain interpretation/chronology changed: %#v", got)
 			}
 			if err := ApplyEntityStateProjectionMutation(&got, domain, "a.b", nil); err != nil {

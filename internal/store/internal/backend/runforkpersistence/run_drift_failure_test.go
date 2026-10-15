@@ -74,7 +74,7 @@ func (c runDriftFailureConn) QueryContext(_ context.Context, query string, args 
 			case "coordinates":
 				rows.values = []driver.Value{"foreign-run", "00000000-0000-0000-0000-000000000002", int64(1), true, int64(1)}
 			case "state":
-				rows.values = []driver.Value{"00000000-0000-0000-0000-000000000003", "imported", "company", "waiting", "[]", "{}", "{}", "{}"}
+				rows.values = []driver.Value{"00000000-0000-0000-0000-000000000003", "imported", "company", "[]"}
 			case "header":
 				rows.values = []driver.Value{"00000000-0000-0000-0000-000000000003", "worker", nil, "worker", "", int64(1), "{}", "{}", "{}", nil, nil, nil, nil}
 			}

@@ -1,35 +1,19 @@
 package runtimepersistence
 
 import (
-	"context"
-	"database/sql"
-	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
-	"github.com/google/uuid"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/lib/pq"
 )
 
-func workflowFieldRowShadow(t *testing.T, f receiverConfigActivationFixture, run, entity string) (string, [4]any) {
-	t.Helper()
-	var state string
-	var raw [4][]byte
-	if err := f.db.QueryRowContext(f.ctx, `SELECT current_state,gates,bookkeeping,accumulator,fields FROM entity_state WHERE run_id=$1 AND entity_id=$2`, run, entity).Scan(&state, &raw[0], &raw[1], &raw[2], &raw[3]); err != nil {
-		t.Fatal(err)
-	}
-	var fields [4]any
-	for i := range raw {
-		if err := json.Unmarshal(raw[i], &fields[i]); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return state, fields
-}
-
-func TestWorkflowProjectionObsoleteFieldRowsKeepExactRunScopeAndNativeTransactionBothStores(t *testing.T) {
+func TestWorkflowProjectionDataSchemaRejectsLifecycleShadowsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f, plan := newWorkflowTargetConstructionFixture(t, backend)
@@ -37,69 +21,73 @@ func TestWorkflowProjectionObsoleteFieldRowsKeepExactRunScopeAndNativeTransactio
 				t.Fatalf("actual construction: %+v %v", out, err)
 			}
 			run, entity := correlation.RunIDFromContext(f.ctx), plan.Instance.EntityID
-			beforeState, before := workflowFieldRowShadow(t, f, run, entity)
-			if changed, err := SetWorkflowProjectionObsoleteFieldRowsForTest(f.ctx, f.store, uuid.NewString()); err == nil || changed != 0 {
-				t.Fatalf("absent-run fault: rows=%d err=%v", changed, err)
+			owner := flowidentity.RunScopedFlowInstance{RunID: run, Route: plan.Identity.Route()}
+			reader := f.store.(pipeline.WorkflowTargetPersistenceReader)
+			before, err := reader.LoadWorkflowTargetPersistence(f.ctx, owner, identity.NormalizeEntityID(entity))
+			if err != nil || before.Presence != pipeline.WorkflowTargetPersistenceComplete || before.State.EntityID != entity || before.Lifecycle.State.CurrentState != "active" {
+				t.Fatalf("schema witness lacks exact constructed header/data: %+v err=%v", before, err)
 			}
-			ctx, cancel := context.WithCancel(f.ctx)
-			cancel()
-			if changed, err := SetWorkflowProjectionObsoleteFieldRowsForTest(ctx, f.store, run); !errors.Is(err, context.Canceled) || changed != 0 {
-				t.Fatalf("cancelled shadow fault: rows=%d err=%v", changed, err)
+			query := `SELECT name FROM pragma_table_info('entity_state')`
+			if backend == "postgres" {
+				query = `SELECT column_name FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='entity_state'`
 			}
-			if state, after := workflowFieldRowShadow(t, f, run, entity); state != beforeState || !reflect.DeepEqual(after, before) {
-				t.Fatal("refused shadow fault changed fields")
-			}
-			probe, restore, err := InstallTransactionProbeForTest(f.store, transactiontest.Options{})
+			rows, err := f.db.QueryContext(f.ctx, query)
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer restore()
-			if changed, err := SetWorkflowProjectionObsoleteFieldRowsForTest(f.ctx, f.store, run); err != nil || changed != 1 {
-				t.Fatalf("exact shadow fault: rows=%d err=%v", changed, err)
-			}
-			if counts := probe.Snapshot(); counts.Total.Begun != 1 || counts.Total.WriteCommits != 1 || counts.Total.ReadCommits != 0 || counts.Active != 0 {
-				t.Fatalf("shadow fault escaped exact native coordinator: %+v", counts)
-			}
-			state, after := workflowFieldRowShadow(t, f, run, entity)
-			empty := map[string]any{}
-			want := [4]any{empty, empty, empty, before[3]}
-			if state != "obsolete" || !reflect.DeepEqual(after, want) {
-				t.Fatalf("shadow fault payload or untouched fields changed: state=%s got=%+v want=%+v", state, after, want)
-			}
-		})
-	}
-}
-
-func TestWorkflowProjectionObsoleteFieldRowsRefuseInvalidAndClosedOwnersBothStores(t *testing.T) {
-	run := uuid.NewString()
-	for _, owner := range []any{nil, (*PostgresStore)(nil), (*SQLiteRuntimeStore)(nil), &PostgresStore{}, &SQLiteRuntimeStore{}, &sql.DB{}, &sql.Tx{}} {
-		if changed, err := SetWorkflowProjectionObsoleteFieldRowsForTest(context.Background(), owner, run); err == nil || changed != 0 {
-			t.Fatalf("invalid shadow owner: %T rows=%d err=%v", owner, changed, err)
-		}
-	}
-	for _, backend := range eventRecordContractBackends() {
-		t.Run(backend.name, func(t *testing.T) {
-			f := backend.open(t)
-			for _, run := range []string{"", "invalid", uuid.Nil.String()} {
-				if changed, err := SetWorkflowProjectionObsoleteFieldRowsForTest(testAuthorActivityContext(), f.store, run); err == nil || changed != 0 {
-					t.Fatalf("invalid shadow run: rows=%d err=%v", changed, err)
+			columns := map[string]bool{}
+			for rows.Next() {
+				var name string
+				if err := rows.Scan(&name); err != nil {
+					t.Fatal(errors.Join(err, rows.Close()))
 				}
+				if columns[name] {
+					t.Fatal(errors.Join(errors.New("schema witness returned a duplicate column"), rows.Close()))
+				}
+				columns[name] = true
 			}
-			if err := f.store.(interface{ Close() error }).Close(); err != nil {
+			if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 				t.Fatal(err)
 			}
-			if changed, err := SetWorkflowProjectionObsoleteFieldRowsForTest(testAuthorActivityContext(), f.store, run); err == nil || changed != 0 {
-				t.Fatalf("closed shadow owner: rows=%d err=%v", changed, err)
+			live := []string{"run_id", "entity_id", "flow_instance", "entity_type", "slug", "name", "fields", "created_at", "updated_at"}
+			if len(columns) != len(live) {
+				t.Fatalf("fresh data schema has unexpected columns: %+v", columns)
+			}
+			for _, column := range live {
+				if !columns[column] {
+					t.Fatalf("schema absence witness lost live data column %s", column)
+				}
+			}
+			for _, column := range []string{"current_state", "gates", "bookkeeping", "accumulator", "revision", "entered_state_at"} {
+				t.Run(column, func(t *testing.T) {
+					if columns[column] {
+						t.Fatalf("fresh data schema still admits lifecycle column %s", column)
+					}
+					_, err := f.db.ExecContext(f.ctx, `UPDATE entity_state SET `+column+`=NULL WHERE run_id=$1 AND entity_id=$2`, run, entity)
+					if backend == "postgres" {
+						var native *pq.Error
+						if !errors.As(err, &native) || native.Code != "42703" || !strings.Contains(native.Message, `column "`+column+`"`) {
+							t.Fatalf("retired %s must fail as that undefined column: %T %v", column, err, err)
+						}
+					} else {
+						var native interface{ Code() int }
+						if !errors.As(err, &native) || native.Code() != 1 || !strings.Contains(err.Error(), "no such column: "+column) {
+							t.Fatalf("retired %s must fail as that SQLite missing column: %T %v", column, err, err)
+						}
+					}
+					after, err := reader.LoadWorkflowTargetPersistence(f.ctx, owner, identity.NormalizeEntityID(entity))
+					if err != nil || !reflect.DeepEqual(after, before) {
+						t.Fatalf("refused %s write changed header/data: before=%+v after=%+v err=%v", column, before, after, err)
+					}
+				})
+			}
+			var fields, headers int
+			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, run, entity).Scan(&fields); err != nil || fields != 1 {
+				t.Fatalf("refused shadow writes changed field membership: count=%d err=%v", fields, err)
+			}
+			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, run, entity, plan.Instance.StorageRef).Scan(&headers); err != nil || headers != 1 {
+				t.Fatalf("refused shadow writes changed header membership: count=%d err=%v", headers, err)
 			}
 		})
 	}
-}
-
-func TestWorkflowProjectionObsoleteFieldRowsRespectOriginalSQLiteWriterAdmission(t *testing.T) {
-	verifyWorkflowProjectionFaultSQLiteAdmission(t, projectionShapeFaultCase{
-		name: "ObsoleteFieldRows",
-		apply: func(ctx context.Context, selected any, run, _ string) (int64, error) {
-			return SetWorkflowProjectionObsoleteFieldRowsForTest(ctx, selected, run)
-		},
-	})
 }

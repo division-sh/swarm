@@ -19,7 +19,6 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -105,9 +104,9 @@ func TestSelectedForkReceiverEffectOnlyFailureSettlementBothStores(t *testing.T)
 					}
 				}
 				rt := startWorkspaceGatewayProofRuntime(t, backend, root, "", nil, "127.0.0.1:0")
-				fieldReader, ok := selected.RuntimeDeps().EventStore.(pipeline.WorkflowEntityStatePersistenceReader)
-				if !ok {
-					t.Fatal("source proof requires its original receiver field reader")
+				fieldReader := rt.WorkflowTargets
+				if fieldReader == nil {
+					t.Fatal("source proof requires its original receiver target reader")
 				}
 				if name == "same_name_agent_control" {
 					declarations := semanticview.AgentDeclarations(rt.Runtime.Options.WorkflowModule.SemanticSource())

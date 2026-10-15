@@ -956,9 +956,15 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, result.Materialization.ForkRunID).Scan(&forkStatus); err != nil {
 		t.Fatalf("load fork status: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT current_state FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, result.Materialization.ForkRunID, result.Materialization.ForkRunID).Scan(&forkEntityState); err != nil {
+	forkOwner, err := flowidentity.NewRunScopedFlowInstance(result.Materialization.ForkRunID, flowidentity.StoredRoute(semanticview.RootExecutionFlowID(loaded.Source), result.Materialization.ForkRunID, result.Materialization.ForkRunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	instance, found, err := runtimepipeline.NewWorkflowPersistence(pg).LoadWorkflowInstance(ctx, forkOwner)
+	if err != nil || !found {
 		t.Fatalf("load fork entity state: %v", err)
 	}
+	forkEntityState = instance.CurrentState
 	if sourceStatus != runfork.RunForkSourceFrozenStatus || forkStatus != runfork.RunForkActivatedStatus || forkEntityState == "" {
 		t.Fatalf("post execution = source:%s fork:%s entity:%s", sourceStatus, forkStatus, forkEntityState)
 	}
@@ -5602,13 +5608,11 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, name,
-			current_state, gates, fields, accumulator, revision,
-			entered_state_at, created_at, updated_at
+			fields, created_at, updated_at
 		)
 		VALUES (
 			$1::uuid, $2::uuid, 'flow-a/1', $3, 'Selected Execution Entity',
-			'pending', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
-			$4, $4, $4
+			'{}'::jsonb, $4, $4
 		)
 	`, sourceRunID, entityID, entityType, at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
