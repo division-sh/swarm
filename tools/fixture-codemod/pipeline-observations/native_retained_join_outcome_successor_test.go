@@ -111,6 +111,44 @@ func validateRetainedJoinSuccessor(row recipe, candidate string) error {
 	return nil
 }
 
+func q10RetainedJoinCurrentSource(row recipe) (string, error) {
+	if row.File != "internal/serveapp/fork_retained_join_test.go" || row.Function != "testServedJoinWriterCompletedHistoryRefusal" {
+		return "", fmt.Errorf("unreviewed retained-join current endpoint")
+	}
+	if err := validateRetainedJoinSuccessor(row, row.Successor); err != nil {
+		return "", err
+	}
+	current := row.Successor
+	for _, edit := range []publicationSuccessorEdit{
+		{"\t\t\tfirstRef := joins[0].JoinRef()\n", `			firstRef := joins[0].JoinRef()
+			if joins[0].Generation() != first.Generation() {
+				t.Fatal("first join borrowed another loop generation")
+			}
+`},
+		{"\t\t\tfirst, joins = readNativeRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)\n", `			first, joins = readNativeRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)
+			if complete, err := retainedJoinOutcomesComplete(joins, []timeridentity.JoinRef{firstRef}); err != nil || !complete {
+				t.Fatalf("first retained join lost its exact completed outcome: complete=%t err=%v", complete, err)
+			}
+`},
+		{"\t\t\tcurrentCtx, cancelCurrent := context.WithTimeout(t.Context(), servedProofPollDeadline)\n", `			if !currentRef.Valid() || !currentRef.Declaration().Equal(firstRef.Declaration()) {
+				t.Fatal("repeat lost the declared join in its exact loop generation")
+			}
+			currentCtx, cancelCurrent := context.WithTimeout(t.Context(), servedProofPollDeadline)
+`},
+		{"\t\t\tcurrent, sourceJoins = readNativeRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)\n", `			current, sourceJoins = readNativeRetainedRootJoins(t, rt.ReceiverStateReader, started.RunID)
+			if complete, err := retainedJoinOutcomesComplete(sourceJoins, []timeridentity.JoinRef{firstRef, currentRef}); err != nil || !complete {
+				t.Fatalf("retained joins lost their exact completed outcomes: complete=%t err=%v", complete, err)
+			}
+`},
+	} {
+		if strings.Count(current, edit.before) != 1 {
+			return "", fmt.Errorf("missing exact retained-join current binding %q", edit.before)
+		}
+		current = strings.Replace(current, edit.before, edit.after, 1)
+	}
+	return current, nil
+}
+
 func TestRetainedJoinOutcomeSuccessorPreservesReviewedCaller(t *testing.T) {
 	for _, target := range []struct{ file, function string }{
 		{"internal/serveapp/fork_retained_join_test.go", "testServedJoinWriterCompletedHistoryRefusal"},
@@ -144,12 +182,34 @@ func TestRetainedJoinOutcomeSuccessorPreservesReviewedCaller(t *testing.T) {
 			}
 			actual := selectedCausalObservationBody(t, row.File, row.Function)
 			current, currentErr := canonicalFunction(actual)
-			pinned, pinErr := canonicalFunction(row.Successor)
-			if currentErr != nil || pinErr != nil || current != pinned {
-				t.Fatal("current caller differs from exact Successor")
+			expectedCurrent, endpointErr := q10RetainedJoinCurrentSource(*row)
+			pinned, pinErr := canonicalFunction(expectedCurrent)
+			if currentErr != nil || endpointErr != nil || pinErr != nil || current != pinned {
+				t.Fatal("current caller differs from exact generation-fenced endpoint")
 			}
-			if files, changes, err := prepareFiles("../../..", []recipe{*row}); err != nil || len(files) != 0 || len(changes) != 0 {
+			currentGuard := *row
+			currentGuard.Before, currentGuard.After, currentGuard.Successor = expectedCurrent, expectedCurrent, ""
+			if files, changes, err := prepareFiles("../../..", []recipe{currentGuard}); err != nil || len(files) != 0 || len(changes) != 0 {
 				t.Fatalf("reviewed caller is not inert: %v", err)
+			}
+			for _, cut := range []string{
+				"joins[0].Generation() != first.Generation()",
+				"retainedJoinOutcomesComplete(joins, []timeridentity.JoinRef{firstRef})",
+				"!currentRef.Valid()", "!currentRef.Declaration().Equal(firstRef.Declaration())",
+				"retainedJoinOutcomesComplete(sourceJoins, []timeridentity.JoinRef{firstRef, currentRef})",
+			} {
+				t.Run("current/"+cut, func(t *testing.T) {
+					mutant := strings.Replace(expectedCurrent, cut, "unreviewedJoinEvidence", 1)
+					if mutant == expectedCurrent {
+						t.Fatal("current-endpoint hostile control did not change source")
+					}
+					if _, changed, err := rewriteFunction(row.File, []byte("package proof\n"+mutant), currentGuard); err == nil || changed {
+						t.Fatal("changed generation/completion evidence admitted")
+					}
+				})
+			}
+			if _, changed, err := rewriteFunction(row.File, []byte("package proof\n"+row.Successor), currentGuard); err == nil || changed {
+				t.Fatal("historical successor without current generation assertions admitted")
 			}
 			archive, err := os.ReadFile("../../../internal/serveapp/testdata/future_capabilities/fork_retained_join_success_test.go.txt")
 			if err != nil || fmt.Sprintf("%x", sha256.Sum256(archive)) != "a24e4b0a28a643c56bda44ae35805588dae1e6cc1a90438efa9e07c15055ba59" {
