@@ -3,14 +3,18 @@ package serveapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -19,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/google/uuid"
 )
 
 // Ordinary materialization retains its exact blockers. Selected preparation
@@ -240,10 +245,16 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 	if !ok {
 		t.Fatal("retained join success requires the original selected store owner")
 	}
-	ctx := servedControlProofAuthorActivityContext(t, rt)
+	ctx := servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
+	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 	prepared, err := owner.Prepare(ctx, runforkexecution.SelectedContractExecutionRequest{
 		SourceRunID: request.SourceRunID, At: request.At, ExpectedBundleHash: rt.BundleHash,
-		ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+		ContractSelection: selection,
+		ForkOperation: &runfork.ForkOperationRequest{
+			OperationID: uuid.NewString(), Actor: "retained-join-proof", IdempotencyKey: "retained-join-materialization",
+			TransportHash: "retained-join-proof", SourceRunID: request.SourceRunID, ForkEventID: request.At,
+			TargetBundleHash: rt.BundleHash, ContractSelection: selection,
+		},
 		SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{
 			RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore(),
 		},
@@ -261,11 +272,17 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 	if err != nil {
 		t.Fatal(err)
 	}
-	materializer, ok := owner.Availability().(issue642TimerStagedMaterializer)
+	materializer, ok := owner.Availability().(runforkexecution.SelectedContractForkLifecycle)
 	if !ok {
 		t.Fatal("retained join success requires the canonical selected materialization owner")
 	}
-	sourceBefore := readServedForkRecipientSourceDomain(t, rt, request.SourceRunID)
+	sourceBefore, err := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, request.SourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sourceBefore) != 7 {
+		t.Fatalf("retained join source witness lost table families: %+v", sourceBefore)
+	}
 	before := snapshotForkReceiverApplication(t, rt)
 	child, err := materializer.MaterializeRunForkForSelectedContractExecution(ctx, admitted)
 	if err != nil {
@@ -304,14 +321,154 @@ func requireServedRetainedJoinForkSuccess(t *testing.T, rt servedControlProofRun
 			t.Fatalf("expected exactly one historical child generation %+v, got%d", want, matches)
 		}
 	}
-	again, err := materializer.MaterializeRunForkForSelectedContractExecution(ctx, admitted)
+	sourceAfterFirst, sourceFirstErr := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, request.SourceRunID)
+	if sourceFirstErr != nil {
+		t.Fatalf("read source after first retained join materialization: %v", sourceFirstErr)
+	}
+	operation, semanticHash, err := admitted.ForkOperation.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack, found, err := materializer.LoadForkOperation(ctx, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
+	if err != nil || !found || ack.Validate() != nil || ack.Status != runfork.ForkOperationMaterialized || ack.Result != nil ||
+		ack.ForkRunID != child.ForkRunID || child.SelectedContractBinding == nil || ack.BindingID != child.SelectedContractBinding.BindingID ||
+		ack.SemanticHash != semanticHash || !reflect.DeepEqual(ack.Request, operation) {
+		t.Fatalf("retained join lacks its exact materialized operation ACK: %+v err=%v", ack, err)
+	}
+	childBefore, err := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, ack.ForkRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, freshErr := materializer.MaterializeRunForkForSelectedContractExecution(ctx, admitted)
+	var replay *runfork.ForkOperationReplayRequiredError
+	if freshErr == nil {
+		t.Fatal("fresh materialization silently reused a durable operation")
+	} else if !errors.As(freshErr, &replay) || !failures.OnlyBranches(freshErr, func(branch error) bool { return branch == replay }) ||
+		replay.OperationID != operation.OperationID || replay.ForkRunID != ack.ForkRunID {
+		t.Fatalf("fresh materialization lost its exact operation replay refusal: %T %v", freshErr, freshErr)
+	}
+	readback := admitted
+	readback.ForkOperation = nil
+	again, err := materializer.RequireMaterializedRunForkForSelectedContractExecution(ctx, ack.ForkRunID, readback)
 	_, repeated := readNativeRetainedRootJoins(t, rt.ReceiverStateReader, child.ForkRunID)
-	if err != nil || again.ForkRunID != child.ForkRunID || !reflect.DeepEqual(childJoins, repeated) ||
-		!reflect.DeepEqual(sourceBefore, readServedForkRecipientSourceDomain(t, rt, request.SourceRunID)) {
-		t.Fatalf("repeated materialization changed child/source history: %v", err)
+	sourceAfter, sourceErr := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, request.SourceRunID)
+	if err != nil {
+		t.Errorf("repeated retained join materialization: %v", err)
+	}
+	if again.ForkRunID != child.ForkRunID {
+		t.Errorf("repeated materialization changed child identity: first=%s repeated=%s", child.ForkRunID, again.ForkRunID)
+	}
+	if again.ForkRunStatus != runfork.RunForkMaterializedStatus {
+		t.Errorf("materialization readback activated the child: %+v", again)
+	}
+	if err := compareRetainedJoinActivations(childJoins, repeated); err != nil {
+		t.Errorf("repeated materialization changed child join rows: %v; first=%+v repeated=%+v", err, childJoins, repeated)
+	}
+	if sourceErr != nil {
+		t.Fatalf("read source after repeated retained join materialization: %v", sourceErr)
+	}
+	if !reflect.DeepEqual(sourceBefore, sourceAfter) {
+		for table, original := range sourceBefore {
+			current, present := sourceAfter[table]
+			if !present || !reflect.DeepEqual(original, current) {
+				t.Errorf("retained join source table changed: table=%s present=%t columns=%q -> %q rows=%q -> %q; after-first=%+v",
+					table, present, original.Columns, current.Columns, original.Rows, current.Rows, sourceAfterFirst[table])
+			}
+		}
+		for table := range sourceAfter {
+			if _, present := sourceBefore[table]; !present {
+				t.Errorf("retained join source gained table family: %s %+v", table, sourceAfter[table])
+			}
+		}
+	}
+	stableACK, found, ackErr := materializer.LoadForkOperation(ctx, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
+	if ackErr != nil || !found || !reflect.DeepEqual(ack, stableACK) {
+		t.Errorf("materialization replay changed its immutable ACK: %+v -> %+v err=%v", ack, stableACK, ackErr)
+	}
+	childAfter, childErr := storetest.ReadSelectedForkSourceDomain(ctx, selected.RuntimeDeps().DeliveryStore, ack.ForkRunID)
+	if childErr != nil || !reflect.DeepEqual(childBefore, childAfter) {
+		t.Errorf("materialization-only readback executed child work: %+v -> %+v err=%v", childBefore, childAfter, childErr)
 	}
 	if err := prepared.Close(); err != nil {
 		t.Fatalf("join retained join preparation: %v", err)
+	}
+}
+
+func compareRetainedJoinActivations(first, repeated []joinruntime.Activation) error {
+	if len(first) != len(repeated) {
+		return fmt.Errorf("join cardinality changed: %d -> %d", len(first), len(repeated))
+	}
+	index := func(activations []joinruntime.Activation) (map[string]joinruntime.Activation, error) {
+		byKey := make(map[string]joinruntime.Activation, len(activations))
+		for _, activation := range activations {
+			key := activation.Key()
+			if key == "" {
+				return nil, errors.New("retained join has an empty activation key")
+			}
+			if _, duplicate := byKey[key]; duplicate {
+				return nil, fmt.Errorf("duplicate retained join activation key %q", key)
+			}
+			byKey[key] = activation
+		}
+		return byKey, nil
+	}
+	before, err := index(first)
+	if err != nil {
+		return err
+	}
+	after, err := index(repeated)
+	if err != nil {
+		return err
+	}
+	for key, activation := range before {
+		reloaded, found := after[key]
+		if !found || !reflect.DeepEqual(activation, reloaded) {
+			return fmt.Errorf("retained join activation %q changed (present=%t)", key, found)
+		}
+	}
+	return nil
+}
+
+func TestRetainedJoinComparisonRequiresExactUniqueActivations(t *testing.T) {
+	at := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+	makeActivation := func(id string) joinruntime.Activation {
+		ref, err := timeridentity.NewJoinRef(identitytest.RootNode(t, "join"), "item.done", "review", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ref, err = ref.BindStageEntry(timeridentity.StageEntryRef{RunID: "run", FlowScope: ".", InstanceID: "one", InstancePath: ".", EntityID: "entity", Stage: "review", Cause: "construction"}, loopruntime.Activation{}.Generation())
+		if err != nil {
+			t.Fatal(err)
+		}
+		activation, err := joinruntime.NewActivation(ref, []string{"member"}, nil, at, at.Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return activation
+	}
+	first, second, extra := makeActivation("first"), makeActivation("second"), makeActivation("extra")
+	changed := first
+	changed.DeadlineAt = changed.DeadlineAt.Add(time.Microsecond)
+	for _, test := range []struct {
+		name          string
+		before, after []joinruntime.Activation
+		wantError     bool
+	}{
+		{"permutation", []joinruntime.Activation{first, second}, []joinruntime.Activation{second, first}, false},
+		{"duplicate_before", []joinruntime.Activation{first, first}, []joinruntime.Activation{first, second}, true},
+		{"duplicate_after", []joinruntime.Activation{first, second}, []joinruntime.Activation{first, first}, true},
+		{"missing", []joinruntime.Activation{first, second}, []joinruntime.Activation{first}, true},
+		{"extra", []joinruntime.Activation{first}, []joinruntime.Activation{first, second}, true},
+		{"replaced_key", []joinruntime.Activation{first, second}, []joinruntime.Activation{first, extra}, true},
+		{"changed_value_same_key", []joinruntime.Activation{first, second}, []joinruntime.Activation{changed, second}, true},
+		{"empty_key_before", []joinruntime.Activation{{}}, []joinruntime.Activation{first}, true},
+		{"empty_key_after", []joinruntime.Activation{first}, []joinruntime.Activation{{}}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := compareRetainedJoinActivations(test.before, test.after); (err != nil) != test.wantError {
+				t.Fatalf("exact retained join comparison error=%v, want error=%t", err, test.wantError)
+			}
+		})
 	}
 }
 

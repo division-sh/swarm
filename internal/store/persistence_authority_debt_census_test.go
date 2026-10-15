@@ -909,6 +909,7 @@ func (scan *debtAuthorityTypeScan) debtContainsRawCallbackInput(valueType types.
 func (scan *debtAuthorityTypeScan) debtCollectFixtureStoreConstruction(path string, file *ast.File, info *types.Info) []authorityFinding {
 	var findings []authorityFinding
 	counts := map[string]int{}
+	reopened := debtReviewedNativeReopenCalls(path, file, info)
 	ast.Inspect(file, func(node ast.Node) bool {
 		var result types.Type
 		var inputs []ast.Expr
@@ -941,7 +942,7 @@ func (scan *debtAuthorityTypeScan) debtCollectFixtureStoreConstruction(path stri
 			for _, input := range inputs {
 				raw = raw || scan.debtContainsRawSQLType(info.TypeOf(input))
 			}
-			if !raw && debtOwnedNativeFixtureConstruction(path, node, info) {
+			if !raw && (debtOwnedNativeFixtureConstruction(path, node, info) || reopened[node.Pos()]) {
 				return true
 			}
 			identity := enclosing + ":" + debtResolvedTypeString(result)
