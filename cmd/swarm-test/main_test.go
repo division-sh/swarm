@@ -150,6 +150,9 @@ func TestSwarmTestProvisionFailurePreservesSettlementFailure(t *testing.T) {
 	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
 	script := `#!/bin/sh
 set -eu
+if [ "$1" = "image" ] && [ "$2" = "ls" ]; then
+  exit 0
+fi
 if [ "$1" = "pull" ]; then
   printf '{broken' > "$XDG_STATE_HOME/swarm/test-postgres/runs-v1.json"
   printf 'injected pull failure\n' >&2

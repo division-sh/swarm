@@ -128,8 +128,14 @@ func (r *ServiceRegistry) Provision(ctx context.Context, executable string) (_ *
 	if err := r.Reconcile(ctx); err != nil {
 		return nil, err
 	}
-	if out, err := r.runDocker(ctx, "pull", postgresImage); err != nil {
-		return nil, fmt.Errorf("pull %s: %v output=%s", postgresImage, err, strings.TrimSpace(string(out)))
+	images, err := r.dockerOutput(ctx, "image", "ls", "--quiet", "--no-trunc", postgresImage)
+	if err != nil {
+		return nil, err
+	}
+	if images == "" {
+		if out, err := r.runDocker(ctx, "pull", postgresImage); err != nil {
+			return nil, fmt.Errorf("pull %s: %w output=%s", postgresImage, err, strings.TrimSpace(string(out)))
+		}
 	}
 	daemonID, err := r.dockerOutput(ctx, "info", "--format", "{{.ID}}")
 	if err != nil {
@@ -138,6 +144,9 @@ func (r *ServiceRegistry) Provision(ctx context.Context, executable string) (_ *
 	imageID, err := r.dockerOutput(ctx, "image", "inspect", "--format", "{{.Id}}", postgresImage)
 	if err != nil {
 		return nil, err
+	}
+	if imageID == "" {
+		return nil, fmt.Errorf("inspect %s: empty image ID", postgresImage)
 	}
 	ownerID, err := r.ownerID()
 	if err != nil {
