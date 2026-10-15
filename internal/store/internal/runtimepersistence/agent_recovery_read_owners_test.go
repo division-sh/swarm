@@ -72,6 +72,19 @@ func TestAgentRecoveryReadOwnersRetainNativeCutBothStores(t *testing.T) {
 					state.ConfigRevision != profile.ConfigurationRevision || state.ProcessBinding.BundleHash != profile.BundleHash {
 					t.Fatalf("same-cut lifecycle/profile join changed: %+v profile=%+v found=%t err=%v", state, profile, found, err)
 				}
+				identity, err := state.Identity.Plan()
+				if err != nil {
+					t.Fatal(err)
+				}
+				headJoined := false
+				for _, desired := range plan.Agents {
+					if desired.Identity == identity && desired.ConfigRevision == profile.ConfigurationRevision && desired.Source.BundleHash == profile.BundleHash {
+						headJoined = true
+					}
+				}
+				if !headJoined {
+					t.Fatal("native complete source head does not name the exact captured actor/configuration/source")
+				}
 				assertRecoveryReadOwnerContextRefusal(t, ctx, foreignReader, "different selected store")
 				writer, cancel := context.WithTimeout(f.ctx, 10*time.Second)
 				defer cancel()
