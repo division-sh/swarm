@@ -77,6 +77,8 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 	allowed[historicalBoundaryOwner+"loadRunForkStartFacts/reference:"+historicalBoundaryOwner+"appendRunForkHistoricalFact"] = historicalBoundaryAllowance{1, "start members use the same exact run/family/key/revision admission as inclusive cuts"}
 	allowed[historicalBoundaryOwner+"loadRunForkStartFirstTurn/ledger_sql"] = historicalBoundaryAllowance{1, "the original run-origin event reference is read at creation revision, separately from start membership; no earliest/latest inference"}
 	allowed[historicalBoundaryOwner+"loadRunForkStartFirstTurn/reference:"+historicalBoundaryOwner+"appendRunForkHistoricalFact"] = historicalBoundaryAllowance{1, "real first-turn input uses canonical historical identity and payload/schema admission without becoming an already-admitted start event"}
+	allowed[historicalBoundaryOwner+"loadRequiredRunForkPlan/reference:"+historicalBoundaryOwner+"resolveRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "existing-child readback resolves its persisted source event and revision through the canonical contextual owner"}
+	allowed[historicalBoundaryOwner+"loadRequiredRunForkPlan/reference:"+historicalBoundaryOwner+"resolveSQLiteRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "SQLite existing-child readback resolves the same persisted source event and revision through its thin dialect adapter"}
 	for _, caller := range []string{
 		"resolveSQLiteRunForkRevisionPoint", "lockRunForkSourceRevisionFrontier",
 		"RunForkPostgresOwner.PlanRunFork", "RunForkPostgresOwner.ReadEntityAtEventCutForTest", "RunForkPostgresOwner.LoadRunForkSelectedContractSourceEvents",

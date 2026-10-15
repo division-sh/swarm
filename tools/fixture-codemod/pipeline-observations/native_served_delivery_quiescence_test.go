@@ -75,12 +75,17 @@ func TestServedDeliveryQuiescenceMechanicalCallerRecipesPreserveAllOtherWork(t *
 		if row.Successor != "" {
 			current = row.Successor
 		}
-		currentPin, pinErr := canonicalFunction(current)
 		activeName := row.Function
 		if row.File == forkProofTruthFile && row.Function == forkProofTruthOldName && row.Successor != "" {
 			activeName = forkProofTruthNewName
 		}
-		actual, actualErr := canonicalFunction(selectedCausalObservationBody(t, row.File, activeName))
+		actualSource := selectedCausalObservationBody(t, row.File, activeName)
+		if original, err := fixtureSetupCurrentEndpoint2617(row, actualSource); err == nil {
+			// #642 6190268703: exact finite reversal preserves the prior caller.
+			current, actualSource = original.Successor, original.Successor
+		}
+		currentPin, pinErr := canonicalFunction(current)
+		actual, actualErr := canonicalFunction(actualSource)
 		if err != nil || afterErr != nil || pinErr != nil || actualErr != nil || want != got || actual != currentPin {
 			t.Fatalf("delivery caller changed setup, temporal cuts or assertions: %s", row.Function)
 		}
@@ -138,10 +143,11 @@ func TestServedDeliveryQuiescenceCallerInventoryConsumesOnlyDomainReadPorts(t *t
 	for _, count := range counts {
 		total += count
 	}
-	if len(counts) != 83 || total != 157 || counts["TestServedRunDeliveryQuiescenceReaderPreservesStableStatusCut"] != 1 ||
+	if len(counts) != 84 || total != 159 || counts["TestServedRunDeliveryQuiescenceReaderPreservesStableStatusCut"] != 1 ||
 		counts["proveServedRetainedJoinOutcomeHeld"] != 3 || counts["testServedJoinWriterCompletedHistoryRefusal"] != 5 ||
-		counts["TestIssue642OriginalStartFirstTurnExecutesBothStores"] != 2 {
-		t.Fatalf("delivery family inventory functions=%d,calls=%d,want82/155 plus two exact original-start source/child waits", len(counts), total)
+		counts["TestIssue642OriginalStartFirstTurnExecutesBothStores"] != 2 ||
+		counts["TestServedCompiledTransitionTemplateSiblingForkOnBothStores"] != 2 {
+		t.Fatalf("delivery family inventory functions=%d,calls=%d,want84/159 including exact original-start and sibling source/child waits", len(counts), total)
 	}
 }
 

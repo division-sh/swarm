@@ -42,6 +42,7 @@ func ReadPinnedAuthoredMutationStorage(ctx context.Context, selected any, source
 }
 
 type FanOutPublishedOutcomeStorageEvidence = private.FanOutPublishedOutcomeStorageEvidence
+type SelectedFanOutOutcomeCorrespondence = private.SelectedFanOutOutcomeCorrespondence
 type FanOutRunProgressStorageEvidence = private.FanOutRunProgressStorageEvidence
 type FanOutTriggeredIntentStorageEvidence = private.FanOutTriggeredIntentStorageEvidence
 type FanOutIntentCompletionStorageEvidence = private.FanOutIntentCompletionStorageEvidence
@@ -51,6 +52,9 @@ func ReadReplyReturnStorage(ctx context.Context, selected any, run string) (Repl
 }
 func ReadFanOutPublishedOutcomeStorage(ctx context.Context, selected any, run string) ([]FanOutPublishedOutcomeStorageEvidence, error) {
 	return private.ReadFanOutPublishedOutcomeStorageForTest(ctx, selected, run)
+}
+func ReadSelectedFanOutOutcomeCorrespondence(ctx context.Context, selected any, run, kind, sourceEvent, event, sourceRun string) (SelectedFanOutOutcomeCorrespondence, error) {
+	return private.ReadSelectedFanOutOutcomeCorrespondenceForTest(ctx, selected, run, kind, sourceEvent, event, sourceRun)
 }
 func ReadFanOutRunProgressStorage(ctx context.Context, selected any, run string) (FanOutRunProgressStorageEvidence, error) {
 	return private.ReadFanOutRunProgressStorageForTest(ctx, selected, run)
