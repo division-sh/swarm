@@ -18347,6 +18347,10 @@ platform_tables:
         terminalization closes interrupted version N and atomically creates a separate settled version N+1. Only
         closure_kind=settled is public delivery-outcome evidence; older settled retry versions remain visible.
         A retry_scheduled settlement retains its original absolute retry_eligible_at in this same row and transaction.
+        On both stores the settlement owner rounds the once-computed due upward to the earliest microsecond coordinate
+        at or after the requested due, strictly after the captured completion for every positive representable delay.
+        That identical coordinate is used for the live row, immutable attempt and revision evidence; readback never repairs
+        malformed evidence or computes a new due. Rounding the timestamp must not overflow the backoff duration.
         Later claims and lease expiry do not rewrite that committed decision. Other outcomes and closures have no retry due.
       rule_selection: Exact selections observed by unsuccessful attempts are deliberately not persisted in this ledger.
       ddl: |
