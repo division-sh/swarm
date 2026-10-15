@@ -450,3 +450,20 @@ The initial combined GREEN invocation first stopped at two new test compile
 errors (interface fixture assignment and noncomparable operation comparison),
 before admission; the corrected projection table and unchanged held-QR root
 then passed. This setup failure earns no execution credit.
+
+Reviewer-g's P2 hardening in #2577/6202089115 requires a positive bounded CLI
+request count for EACH separately captured held get, held retry and released
+QR result. The existing resume contract is exactly onboarding_get then ONE
+explicit onboarding_retry. The replay handler enforces that order and both
+requests, so a zero-call success, extra continuation/poll or wrong method
+cannot earn proof.
+This consumer assertion does not change the public result, transport, SDK,
+private state, operation or the retained RED's production predicate.
+
+The strengthened both-store root and the two existing canonical CLI progression
+controls pass race x3: 42 test/subtest records, no failure/skip, joined wrapper
+exit zero. Raw receipt SHA256
+45480e53d21de39f605d96e2dc709a4322223bc1c26e9d75443342839425b0e9.
+An initial local hardening attempt incorrectly allowed only a get and rejected
+the CLI's existing explicit retry; that test-only setup RED is retained and
+corrected to the existing get-then-retry contract, without a production edit.
