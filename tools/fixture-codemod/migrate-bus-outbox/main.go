@@ -229,12 +229,6 @@ func rewriteBlocks(body *ast.BlockStmt) error {
 			if obsoleteStatement(text) {
 				continue
 			}
-			if strings.HasPrefix(text, "ctx :=") {
-				continue
-			}
-			if text == "ctx = runtimepipelinefixture.WithPostCommitActions(ctx, &postCommitActions)" {
-				continue
-			}
 			if strings.HasPrefix(text, "err = eb.PublishDirect(") {
 				statement.(*ast.AssignStmt).Tok = token.DEFINE
 			}
@@ -322,6 +316,9 @@ func clearPositions(node ast.Node) {
 }
 
 func obsoleteStatement(text string) bool {
+	if strings.HasPrefix(text, "ctx :=") || text == "ctx = runtimepipelinefixture.WithPostCommitActions(ctx, &postCommitActions)" {
+		return true
+	}
 	for _, prefix := range []string{"defer db.Close()", "mock.Expect", "if err := tx.Commit()", "if err := tx.Rollback()", "if err := mock.ExpectationsWereMet()", "_ = tx.Rollback()", "runtimepipelinefixture.FlushRollbackActions(", "runtimepipelinefixture.FlushPostCommitActions(", "rollbackActions :=", "postCommitActions :="} {
 		if strings.HasPrefix(text, prefix) {
 			return true
