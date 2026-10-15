@@ -1,5 +1,38 @@
 # WhatsApp Physical Qualification Runbook
 
+## Current Packet And Replacement-QR Hold
+
+The historical preparation narrative below is retained, not the current
+operator packet. The complete credential-free sitting packet is on
+[#2577/6200719888](https://github.com/division-sh/swarm/issues/2577#issuecomment-6200719888),
+subject to the two amendments in
+[6200781989](https://github.com/division-sh/swarm/issues/2577#issuecomment-6200781989).
+P04b must wait for the actual phone notice before a read-only mailbox list
+selects exactly one notice for the quoted ACK; publish acknowledgement alone
+does not establish delivery. No republish or model-helper reset is permitted.
+
+P01's first QR/expiry passed, but a second supplied p_qr on the SAME operation
+refused at b2a300d5ee. The privacy-safe RED and classification are retained in
+[6200968369](https://github.com/division-sh/swarm/issues/2577#issuecomment-6200968369).
+The bounded existing reuse-owner repair is authorized by
+[6201030995](https://github.com/division-sh/swarm/issues/2577#issuecomment-6201030995).
+Its deterministic public control is RED before the repair on both stores,
+GREEN afterward, and the nine-root race x3 packet passes. A real quiet
+same-operation expiry/replacement rehearsal, fresh publishing preflight,
+hosted qualification and exact-head review remain open. No PR qualification
+push or user sitting is authorized by those focused passes alone.
+Replacement must preserve scope and monotone revision while obtaining a
+fresh current QR and expiry; no artificial revision write, new onboarding
+operation, QR recording, phone action or retry-to-green is a substitute.
+
+Keep the original load-sensitive pre-QR REDs distinct from this post-expiry
+refusal and from the accepted paired-PG resume residual. Neither the new fix
+nor a passing rehearsal erases their retained evidence or recurrence rules.
+Final source/binary/helper/receipt identity is bound in the final issue packet,
+not by the superseded preparation hashes below.
+
+## Historical Preparation (Superseded)
+
 **NOT READY: preparation checkpoint, not the user's final sitting packet.**
 The current publishing base is master `7956d66def`, including #2691/#2692.
 The bounded P01 readback repair is signed `6b2bf8e0a7` under
