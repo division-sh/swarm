@@ -52,8 +52,9 @@ The first integrated execution exposed a second stale fixture premise: the
 handwritten semantic bundles had no admitted artifact, while their selected
 contexts did. `sessionBusinessSemanticFixture` now compiles its existing exact
 default artifact through `LoadWorkflowContractBundleFromArtifact`.
-`whatsappPublicationComponentSource` reads, decodes and compiles its original
-selected artifact through the same owner. Neither attaches a requested hash to
+`whatsappPublicationComponentSource` compiles the original immutable artifact
+admitted by its selected-store fixture writer through the same compiler owner.
+Its input is the artifact, not another selected-store capability. Neither attaches a requested hash to
 handwritten semantics or rewrites an existing persisted source. The real compiler's
 structural root and static declarations are retained. Provider-declaration
 overlays remain explicit isolated component inputs, not source-loading proof.
