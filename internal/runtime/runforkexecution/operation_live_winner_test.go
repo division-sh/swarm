@@ -263,18 +263,7 @@ func TestSelectedForkSameKeyRecoversOwnerlessMaterializationBothStores(t *testin
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx, request := ownerlessSelectedOperationFixture(t, backend)
-			prepared, err := request.Owner.Prepare(ctx, request)
-			if err != nil {
-				t.Fatal(err)
-			}
-			prepared.forkOperation = request.ForkOperation
-			materialized, acknowledged, err := request.Owner.materializePrepared(ctx, prepared)
-			if !acknowledged || err != nil {
-				t.Fatal("materialize exact operation:", err)
-			}
-			if err := prepared.Close(); err != nil {
-				t.Fatal("release abandoned preparation:", err)
-			}
+			materialized := abandonSelectedOperationPreparation(t, ctx, request)
 			replay := *request.ForkOperation
 			replay.OperationID = uuid.NewString()
 			request.ForkOperation = &replay
@@ -289,6 +278,22 @@ func TestSelectedForkSameKeyRecoversOwnerlessMaterializationBothStores(t *testin
 			}
 		})
 	}
+}
+
+func abandonSelectedOperationPreparation(t *testing.T, ctx context.Context, request SelectedContractExecutionRequest) runfork.RunForkMaterialization {
+	t.Helper()
+	prepared, err := request.Owner.Prepare(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materialized, acknowledged, err := request.Owner.materializePrepared(ctx, prepared)
+	if !acknowledged || err != nil {
+		t.Fatal("materialize exact operation:", err)
+	}
+	if err := prepared.Close(); err != nil {
+		t.Fatal("release abandoned preparation:", err)
+	}
+	return materialized
 }
 
 func ownerlessSelectedOperationFixture(t *testing.T, backend string) (context.Context, SelectedContractExecutionRequest) {
