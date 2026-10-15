@@ -12,28 +12,7 @@ import (
 func TestAgentFirstClaimProfileSurvivesNativeReopenAndRefusesClosedOwnerBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			var open func() agentFixtureFlowStore
-			if backend == "sqlite" {
-				path := filepath.Join(t.TempDir(), "claim-profile.db")
-				open = func() agentFixtureFlowStore {
-					return newBootstrappedSQLiteRuntimeStoreForPath(t, path)
-				}
-			} else {
-				dsn := testutil.StartPostgresDSN(t)
-				open = func() agentFixtureFlowStore {
-					selected, err := NewPostgresStore(dsn)
-					if err != nil {
-						t.Fatal(err)
-					}
-					t.Cleanup(func() {
-						if err := selected.Close(); err != nil {
-							t.Error(err)
-						}
-					})
-					bootstrapTestPostgresStore(t, selected)
-					return selected
-				}
-			}
+			open := agentClaimProfileReopener(t, backend)
 			f := admitAgentClaimProfileFixture(t, testAuthorActivityContext(), open())
 			_, first, original := f.claim(t)
 			originalStorage := profileFixtureSnapshot(t, f)
@@ -66,5 +45,32 @@ func TestAgentFirstClaimProfileSurvivesNativeReopenAndRefusesClosedOwnerBothStor
 				t.Fatal("closed-owner refusal changed complete reopened storage")
 			}
 		})
+	}
+}
+
+func agentClaimProfileReopener(t *testing.T, backend string) func() agentFixtureFlowStore {
+	t.Helper()
+	if backend == "sqlite" {
+		path := filepath.Join(t.TempDir(), "claim-profile.db")
+		return func() agentFixtureFlowStore {
+			return newBootstrappedSQLiteRuntimeStoreForPath(t, path)
+		}
+	}
+	if backend != "postgres" {
+		t.Fatalf("unsupported native claim-profile backend %q", backend)
+	}
+	dsn := testutil.StartPostgresDSN(t)
+	return func() agentFixtureFlowStore {
+		selected, err := NewPostgresStore(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if err := selected.Close(); err != nil {
+				t.Error(err)
+			}
+		})
+		bootstrapTestPostgresStore(t, selected)
+		return selected
 	}
 }
