@@ -98,6 +98,41 @@ Only after those named tests pass is the predicate JSON regenerated using
 controls rerun without that variable. Hash equality is drift detection, not
 execution proof or complete #2577 closure.
 
+## Canonical Activity Identity Integration
+
+The #2674 integration consumes the canonical
+`contracts.ActivityResultEventsForSite(ActivitySite) (ActivityResultEvents, error)`
+product instead of the retired inferred RuleID shape. Reviewer-g accepted this
+integration in [6192143525](https://github.com/division-sh/swarm/issues/2577#issuecomment-6192143525)
+and confirmed preparation at
+[6192484767](https://github.com/division-sh/swarm/issues/2577#issuecomment-6192484767).
+The initial preflight at a881c0d25f exposed the unrefreshed A10/A27 fingerprints;
+that failed receipt is retained. This update records the actual owner, consumers
+and existing execution controls before regenerating those fingerprints.
+
+| Changed owner | Consumer and preserved boundary | Execution witness |
+| --- | --- | --- |
+| `channelonboarding.ResolveSessionActivitySite` | `pipeline.PipelineCoordinator.compileAuthoredSessionActivity` and `runtime.validateActivityToolTransport` consume the exact authored node/handler/tool/result identity. Canonical identity errors propagate; a missing or ambiguous declaration cannot select native execution. | `TestSessionActivityProjectionJoinsExactDeclarationAndIngress/explicit_rule_site`, `TestSessionActivityProjectionRejectsMissingAndAmbiguousDeclarations`, `TestRuleActivityAdmissionRequiresExplicitID` |
+| `channelonboarding.sessionActivitySiteDeclared` | `compileSessionActivityDeclaration` requires exact Kind, Source, handler, rule index/reference, tool and canonical activity ID before connector/ingress projection. No handler default or rule position is inferred. | The `missing_site_kind`, `handler_with_rule_position`, `rule_without_position`, `unknown_site_kind` children of `TestSessionActivityProjectionRejectsMissingAndAmbiguousDeclarations`; the explicit-rule positive above |
+| `runtime.validateActivitySpec` / `validateActivityToolTransport` | Pass the already validated `ActivitySite` and result product into native transport admission. Preserve master's rule-ID, presentation, collision and approval checks and the provider's source/connector/ingress qualification. | `TestRuleActivityPinnedNamesPreserveEveryInventoriedBinding`, `TestActivitySiteContextCannotBeInferredFromLabelOrIndex`, existing `TestValidateWorkflowContractSurface_*Activity*` controls |
+| `runtime.validateHandlerActivitySurface` / `rejectUnsupportedNestedActivityContexts` / `activitySiteContext` | Retain master's explicit handler/rule Kind and index, presentation-only labels, forbidden handler/rule combinations and nested-context refusal. The native target consumer cannot infer identity from the display label. | `TestRuleActivityValidationRequiresExplicitIDAndPreservesCombinationRefusal`, `TestActivityDiagnosticsUseRulePresentationAndPreserveRefusal`, `TestActivitySiteContextCannotBeInferredFromLabelOrIndex` |
+| `runtime.activityRevisionConsumerExists` | Activity approval consumes the effective source's matched subscription, not a restored raw handler-name lookup. | `TestValidateWorkflowContractSurface_ActivityApprovalBoundary` |
+| `runtime.validateActivityResultEventNameCollisions` / `admitActivityResultEventName` | Preserve master's admitted authored-event producer census and normalized generated-name collision checks. The new helper already exists on master; it is recorded rather than excluded from this whole-file census. | `TestActivityResultEventAdmissionPreservesExactCollisionAndRegistration`, `TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectAuthoredCollision`, `TestValidateWorkflowContractSurface_DurableActivityResultEventsRejectGeneratedCollision` |
+
+Fresh clean-a881 execution uses the managed PostgreSQL runner with race,
+count1 and p1 across the contracts, pipeline and runtime packages. It includes
+all `TestSessionActivity*` projection roots and
+`TestNativeActivityWithoutOriginalActivationJournalsRefusalBothStores` plus
+`TestRuleActivityCallbackJournalAndRestartBothStores` on both stores. All pass
+after joined cleanup; the earlier direct invocation lacking a PostgreSQL DSN
+remains a failed command, not a runtime or whole-packet success. The original
+395 packet retains its own source pin.
+
+The audit rows remain A10/A27 and proof families remain
+2577-authored-session-activity/P08/P10/P21. No row, consumer, negative case,
+scanner scope or admission policy is removed. These are component proofs, not
+physical P01-P09 or the separately held served PostgreSQL resume exposure.
+
 ## N66 Logout Recovery Consumer
 
 `channelonboarding.DestructiveService.Recover` consumes strict pending logout
