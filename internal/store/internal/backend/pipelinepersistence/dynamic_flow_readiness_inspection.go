@@ -118,8 +118,18 @@ func (inspection dynamicFlowReadinessInspection) snapshot(ctx context.Context, s
 			if err != nil {
 				return err
 			}
-			for _, header := range headers {
-				readiness, present, err := inspection.construction(ctx, tx, run, header)
+			history, err := inspection.historical.ReadHistoricalFlowInstanceConstructionEvidenceBatchTx(ctx, tx, run, headers)
+			if err != nil {
+				return err
+			}
+			if len(history) != len(headers) {
+				return fmt.Errorf("historical readiness evidence lost its exact header cardinality")
+			}
+			for index, header := range headers {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				readiness, present, err := inspection.construction(ctx, tx, run, header, history[index])
 				if err != nil {
 					return err
 				}
@@ -159,14 +169,11 @@ func (inspection dynamicFlowReadinessInspection) scopedRuns(ctx context.Context,
 	return runs, rows.Err()
 }
 
-func (inspection dynamicFlowReadinessInspection) construction(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, header pipeline.WorkflowInstance) (pipeline.DynamicFlowRuntimeReadiness, bool, error) {
+func (inspection dynamicFlowReadinessInspection) construction(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, header pipeline.WorkflowInstance, captured HistoricalFlowInstanceConstructionResult) (pipeline.DynamicFlowRuntimeReadiness, bool, error) {
 	corrupt := func(err error) (pipeline.DynamicFlowRuntimeReadiness, bool, error) {
 		return pipeline.DynamicFlowRuntimeReadiness{}, false, &pipeline.FlowInstanceConstructionCorruption{RunID: run.RunID, FlowID: header.WorkflowName, InstancePath: header.StorageRef, Cause: err}
 	}
-	history, projected, err := inspection.historical.ReadHistoricalFlowInstanceConstructionEvidenceTx(ctx, tx, run, header)
-	if err != nil {
-		return pipeline.DynamicFlowRuntimeReadiness{}, false, err
-	}
+	history, projected := captured.Construction, captured.Found
 	receipt, recorded, err := ReadStoredFlowConstructionReceiptTx(ctx, tx, run.RunID, header)
 	if err != nil {
 		return pipeline.DynamicFlowRuntimeReadiness{}, false, err

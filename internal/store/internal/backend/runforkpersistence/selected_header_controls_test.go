@@ -38,7 +38,7 @@ func TestSelectedWorkflowConfigPreservesRecordedControls(t *testing.T) {
 		}
 		for key, want := range map[string]any{
 			"instance_kind": "template", "template_version": "retained-template", "status": "active",
-			"workflow_version": "selected-version", "instance_id": "order-1", "storage_ref": "orders/order-1", "flow_path": "orders/order-1",
+			"workflow_version": "source-version", "instance_id": "order-1", "storage_ref": "orders/order-1", "flow_path": "orders/order-1",
 		} {
 			if !reflect.DeepEqual(actual[key], want) {
 				t.Errorf("header control %s: got %#v want %#v", key, actual[key], want)

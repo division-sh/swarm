@@ -101,7 +101,7 @@ func TestServedCompiledTransitionTemplateSiblingForkOnBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			before := lifecycleStoredSnapshot(t, rt, runID)
-			cut := requireLifecycleTemplatePendingCut(t, rt, selected, runID, frontier.EventID)
+			cut := requireLifecycleTemplatePendingCut(t, rt.BundleHash, selected, runID, frontier.EventID)
 			params := map[string]any{"source_run_id": runID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "template-fork"}
 			var fork, duplicate apiv1.RunForkExecutionResult
 			firstResponseTimeout := 5 * time.Second
@@ -211,7 +211,7 @@ type lifecycleTemplateForkObservation struct {
 	Result  runforkexecution.SelectedContractExecutionResult
 }
 
-func requireLifecycleTemplatePendingCut(t *testing.T, rt servedControlProofRuntime, selected *selectedStoreOwner, runID, eventID string) runfork.RunForkPoint {
+func requireLifecycleTemplatePendingCut(t *testing.T, bundleHash string, selected *selectedStoreOwner, runID, eventID string) runfork.RunForkPoint {
 	t.Helper()
 	if selected == nil {
 		t.Fatal("T17 requires its original selected store")
@@ -229,7 +229,7 @@ func requireLifecycleTemplatePendingCut(t *testing.T, rt servedControlProofRunti
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{
 		RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()}
 	loaded, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
-		SourceRunID: runID, BundleHash: rt.BundleHash, Selection: selection})
+		SourceRunID: runID, BundleHash: bundleHash, Selection: selection})
 	if err != nil {
 		t.Fatal(err)
 	}

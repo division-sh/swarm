@@ -1071,7 +1071,49 @@
     "owner": "internal/runtime/manager/activation_gateway.go::*AgentManager.ProveUnpublishedActivation",
     "audit_rows": "A11,A18",
     "proof_families": "P09,P15",
-    "body_sha256": "43ef3dcd3da44271e53df58a20af49f860804b88ee835ad2f9337ff0ce0e5bf0"
+    "body_sha256": "1042250190fbe9b3ca993cbce7669f2beada124fea1864bb4cb8c8dac17f11d1"
+  },
+  {
+    "owner": "internal/runtime/manager/activation_gateway.go::*AgentManager.ProveUnpublishedFlowActor",
+    "audit_rows": "A11,A18",
+    "proof_families": "P09,P15",
+    "body_sha256": "8cd330adc6e053de734721de05380f5572e2131cefdde197b50bf5659538a3cd"
+  },
+  {
+    "owner": "internal/runtime/manager/activation_gateway.go::*AgentManager.observeUnpublishedActivation",
+    "audit_rows": "A11,A18",
+    "proof_families": "P09,P15",
+    "body_sha256": "3ea20c05760113bea4c764e6dbedef4427eaccfaf33e3c2f0ef4fc0c0568bbfc"
+  },
+  {
+    "owner": "internal/runtime/manager/activation_gateway.go::*AgentManager.proveUnpublishedActivationActor",
+    "audit_rows": "A11,A18",
+    "proof_families": "P09,P15",
+    "body_sha256": "b2fd21591931c481b36ab81faf28b26829755425c19a185aebedd4a1e7f3c042"
+  },
+  {
+    "owner": "internal/runtime/manager/activation_gateway.go::*AgentManager.unpublishedActivationRevision",
+    "audit_rows": "A11,A18",
+    "proof_families": "P09,P15",
+    "body_sha256": "90b09f74f745aa4e623c2e04ca166a04e139718eb115363779188b792c7ac462"
+  },
+  {
+    "owner": "internal/runtime/manager/activation_gateway.go::*AgentManager.unpublishedActivationState",
+    "audit_rows": "A11,A18",
+    "proof_families": "P09,P15",
+    "body_sha256": "8b6e09e295e70095c52911dcff1b28f78991619b47303ac10e056a1704317267"
+  },
+  {
+    "owner": "internal/runtime/manager/activation_gateway.go::proveActivationActorExpectation",
+    "audit_rows": "A11,A18",
+    "proof_families": "P09,P15",
+    "body_sha256": "f1fcca7d9c048b9b723f61b33f661e23a996d1a1f6b23899000e7a34194a8863"
+  },
+  {
+    "owner": "internal/runtime/manager/activation_gateway.go::validateActivationActorReadiness",
+    "audit_rows": "A11,A18",
+    "proof_families": "P09,P15",
+    "body_sha256": "952733c28821b79a99d2e9dabe562bf9a4914212eb9a2c66aea060bfb53d2385"
   },
   {
     "owner": "internal/runtime/manager/agent_manager.go::*AgentManager.InstallStartupTopology",
@@ -1533,7 +1575,7 @@
     "owner": "internal/runtime/runforkexecution/recovery.go::SelectedContractExecutionOwner.RecoverSelectedForkContexts",
     "audit_rows": "A22,A24",
     "proof_families": "P03,P20,P21",
-    "body_sha256": "7533e1152b3331586952679ff4cf6b061eb61d9ab0e93fd780fed3d3523dd9b4"
+    "body_sha256": "8c705d4e1d1b72ad09e59929128fd8d73459d3155f9966f0a66e4b0edc6470b5"
   },
   {
     "owner": "internal/runtime/runforkexecution/recovery.go::admitSelectedRecoverySource",
@@ -1545,25 +1587,31 @@
     "owner": "internal/runtime/runforkexecution/recovery.go::selectedCancellationRecoveryAction",
     "audit_rows": "A22,A24",
     "proof_families": "P03,P20,P21",
-    "body_sha256": "c9cacf0461de1ecc04de006b37725482c909a0a17f9e1b34dec94cc9b0f82393"
-  },
-  {
-    "owner": "internal/runtime/runforkexecution/recovery.go::selectedFiniteFeedRecoveryAction",
-    "audit_rows": "A22,A24",
-    "proof_families": "P03,P20,P21",
-    "body_sha256": "c82d0a483d2590694f621657b5f6f511b5cac3066e76f14d32aafbb20c30919e"
+    "body_sha256": "afcb94a2cd1f2e1373d05f7ab9418e9fb7762c7790019d0c83bd614d55d5ed39"
   },
   {
     "owner": "internal/runtime/runforkexecution/recovery.go::selectedRecoveryActionFor",
     "audit_rows": "A22,A24",
     "proof_families": "P03,P20,P21",
-    "body_sha256": "f49fb0ab2e6f95bbf620c71df17b1883885625bb8d4e46be97deaec3297798c4"
+    "body_sha256": "9f4083f772baf99874032e69fa3c9bad2e516f830abc5815a0f2e5ee416d0c61"
+  },
+  {
+    "owner": "internal/runtime/runforkexecution/recovery.go::validateSelectedRecoveryContinuation",
+    "audit_rows": "A22,A24",
+    "proof_families": "P03,P20,P21",
+    "body_sha256": "cc2ce2df582082f556e8003e366d992210e45751cf51e8e60dcc9beaa29e89db"
+  },
+  {
+    "owner": "internal/runtime/runforkexecution/recovery.go::validateSelectedRecoveryOperation",
+    "audit_rows": "A22,A24",
+    "proof_families": "P03,P20,P21",
+    "body_sha256": "aa0d8a3c0f3dcf7520252def55670edab9acae22dcdb11e0f49599b2342320bf"
   },
   {
     "owner": "internal/runtime/runforkexecution/recovery_inspection.go::InspectSelectedForkRecoveries",
     "audit_rows": "A22,A24",
     "proof_families": "P03,P20,P21",
-    "body_sha256": "be07d22f9a585e072fa9c697116f5f894e4845aeb73b70c9ed634e1ea868a13c"
+    "body_sha256": "0a6be4b7077675b52eb354392e005357f58c93d71ed22b27e21825e9d710485a"
   },
   {
     "owner": "internal/runtime/runtime.go::*PreparedSourceSetGenerationRefresh.Abort",
@@ -1767,7 +1815,7 @@
     "owner": "internal/runtime/runtime.go::*Runtime.stopWithOptions",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "b0af245ed2f5426c5da6d7a26f3f4c27464accdc1c3d22646060585a7c46af00"
+    "body_sha256": "986133cede30ca721bc5a75cb068e35cbb75da36bf18ee95920e6751502605a0"
   },
   {
     "owner": "internal/runtime/runtime.go::*Runtime.verifyBootPublished",
@@ -1869,7 +1917,7 @@
     "owner": "internal/runtime/runtime.go::newRuntime",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "96737500997020a514836cb9b1f96d0be26f2aafc249b83daaa9163e5a9eb346"
+    "body_sha256": "63a8eb2fc03270a27b2ae8f6137e5e7e0b22bed76cbfdbaf36f9f0bf1e8e9124"
   },
   {
     "owner": "internal/runtime/runtime.go::providerCredentialResolverForRuntimeOptions",
@@ -2865,7 +2913,7 @@
     "owner": "internal/serveapp/main.go::buildRuntimeComposition",
     "audit_rows": "A01,A02,A03,A04,A10,A19,A20,A21,A22,A26,A27",
     "proof_families": "P01,P02,P03,P08,P10,P16,P17,P18,P19,P20,P21,P22",
-    "body_sha256": "8c462f5b3386160df2a9fb561e362c4ea1fc2ae17d0b15ffde643ba333aaed17"
+    "body_sha256": "db129331a3fd372c822047dad2fd39359777c4ccf3f42d6d9dc326c836369868"
   },
   {
     "owner": "internal/serveapp/main.go::buildServeRuntimeBundleContext",
@@ -3588,64 +3636,76 @@
     "body_sha256": "f43f6854de2bf026d810e1c79f16f035760cbf800b903d79e38d033c1424f5ff"
   },
   {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::failedSelectedRecovery",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "0bea8c472fc34bd8d46c7e6dde3d3308015c239da71b7756b01bb060267970c9"
+  },
+  {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::listSelectedForkRecoveryEntries",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
     "body_sha256": "3fd95d54c67216c35209a1558bb6439e86f8a0b94d0f545a03e92f1781e12dab"
   },
   {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::loadSelectedForkRecoveryOperationTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "369e1d36588fe532b694712f9bda1ffd21ac8c8eb5fcfb268081d592e27f1eee"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::loadSelectedRecoveryExecutionTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "2fe4f4706f1af5a7ff8e1f9dfd41d5a010cb6a3fbc505a20e7bdf3df419a7350"
+  },
+  {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::loadSelectedRecoveryRecordTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "e025cc5b1191678c3f170c14e24081bffee67741d970c9e3a44164e546d1e98d"
+    "body_sha256": "1e959e944cda55f648b8bbfec92ce2f72d490e35a288a5ca18d5afb670d5afc2"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::planInterruptedSelectedRecoveryTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "c15c078b5d1187832e8bb3d9eab13c6056120b6ac0ed15a1fa2e4333b11ff67b"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::planPausedUnkeyedSelectedRecoveryTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "d0d491e3a093c040d00de9c74cb17bf73488f6a73f2bb093fdf3e72650c72b49"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::planSelectedRecoveryTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "3dfdec59cde9b0ec0ff6903c3dc12275c4daf421e4236005b95507d7077556b5"
+    "body_sha256": "bd63e8a67678872ec743bad667b1083fe3bb2cbfc57107139918525cdd4adca0"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::recoverFailedSelectedForkTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "5d4948bb005aac873f47e0c808fa6c5f542101057d17d96a78bb8d51224e5d6c"
+    "body_sha256": "702816c4e8c5447fdce04a3501ec34c5c801a107e8b0510fc121c0f9f8e308b1"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::recoverSelectedForkTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "9e997f8a66d89d876be8d0baab48a81ef301ecae0ce44ca52ac6127c561936b7"
+    "body_sha256": "bc2f81e33c29cba577368f2e7b227e8e0edf60e3d420d4d6141455d583de1d3b"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::retireSelectedRecoveryPredecessorTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "e9e39e4081496f1f8f1b45297a44fc483a62e6164848fc4c24c47d126ae918ca"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::sameSelectedForkPointIdentity",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "cbab63fc6cf5922fd40b383b7ff4adf9915f1112bc6b7000faba2bc8bb642585"
-  },
-  {
-    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedFiniteFeedRecoveryOperationTx",
-    "audit_rows": "A22,A24",
-    "proof_families": "P20,P21",
-    "body_sha256": "6f85959c468dc5aea2dde1f2b8167354cb7d8eb48bc504d2fd88fbac274dbc46"
-  },
-  {
-    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedFiniteFeedRecoveryPinsTx",
-    "audit_rows": "A22,A24",
-    "proof_families": "P20,P21",
-    "body_sha256": "082b88f90a6de0bf3c281827822aa05bb4b4109d0743ec1bea62d3a536e72fda"
-  },
-  {
-    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedFiniteFeedRecoveryTopologiesTx",
-    "audit_rows": "A22,A24",
-    "proof_families": "P20,P21",
-    "body_sha256": "7e88cbf9dfde64dec8c3c420825a983f8d4c09e02e6aa49d22e803d4bf2c6a3a"
-  },
-  {
-    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedForkActivatedOperationTx",
-    "audit_rows": "A22,A24",
-    "proof_families": "P20,P21",
-    "body_sha256": "fe1633ba1c250edcb694a60b47e266c4988dc429e5e231af988bf78b07849fba"
+    "body_sha256": "28ab02bc38045d8c92898f2e761c253ff0639bc8e832643f2ba6198269552c07"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedForkActiveEffectsTx",
@@ -3657,19 +3717,43 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedForkOperationForRecoveryTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "6081fed1a66d2a3ff8c12d87895aa9d00d5d75e53fbb9dc40096505634f5c760"
+    "body_sha256": "c773a858b31eef5987e820008ba54643cfd2fc01aab99e3cc71c8db5f7d54159"
   },
   {
-    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::settleInterruptedSelectedFiniteFeedOperationTx",
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedForkRecoveryEffectsSettledTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "5fae9a8a1aeea7111d7fa48e3283c32566e6974805d9511e3677bfbba66ce0f8"
+    "body_sha256": "d725fca130fbdd669a84e84bfa7bd1daf11971e5400af9e51f537e358c4d5e15"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedForkRecoveryPinsTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "d4daffe1f049d1a1a41031eeb9c7205169007c20537c0aafe892db07a337c388"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedForkRecoveryTopologiesTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "d669366500c13efef9f2be894f6a6a503c3f05d7f5a2f73128b73bc127150625"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedRecoveryContinuationDisposition",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "c30ae8bff7aa5bc99bb7742fe5348a494ba31a52d09b02139e6b74e9c297e176"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::settleInterruptedSelectedForkOperationTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "9d6c2c04429aa1b6c8568f72b8234524ffc9211406b61660d9a974d53cc56dca"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::settledSelectedRecoveryTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "e48e20e26788193cd9aa90b72b31082f3ef845f87966c39ea00513268b1b0c53"
+    "body_sha256": "63375971734bc667c752fc885847a342334208498c6ed6cc8983fc3177c4226c"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery_inspection.go::*RunForkPostgresOwner.InspectSelectedForkRecovery",
@@ -3687,7 +3771,7 @@
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery_inspection.go::inspectSelectedRecoveryTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "497984defb2336512582efc79bb9fa9df2b09771142d3d7dcc574cdb41e549cb"
+    "body_sha256": "26130a14d5a57f8c405eae90c51a06e2a1e636bfa39587cbb4d650c2fcbd841d"
   },
   {
     "owner": "internal/store/internal/startupownership/possession_observation.go::*StartupPostgresOwner.ProbePossession",

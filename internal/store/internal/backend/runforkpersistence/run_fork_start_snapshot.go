@@ -25,11 +25,22 @@ func loadRunForkPointSnapshot(ctx context.Context, tx *sql.Tx, runID string, poi
 	if point.Kind != runfork.RunForkPointRunStart {
 		return loadRunForkRevisionSnapshot(ctx, tx, runID, point.Revision)
 	}
+	snapshot, err := loadRunForkStartSnapshot(ctx, tx, runID, point.Revision)
+	if err != nil {
+		return nil, err
+	}
+	resolver := capturedConstructionResolver{tx: tx, snapshots: make(map[constructionCut]*runForkRevisionSnapshot), active: make(map[string]bool)}
+	return resolver.resolve(ctx, snapshot)
+}
+
+// Lineage resolution uses the same exclusive membership with its existing
+// cycle guard, rather than opening a second resolver or reading a revision cut.
+func loadRunForkStartSnapshot(ctx context.Context, tx *sql.Tx, runID string, expectedRevision int64) (*runForkRevisionSnapshot, error) {
 	revision, projection, err := runforkrevision.LoadStartProjection(ctx, tx, runID)
 	if err != nil {
 		return nil, err
 	}
-	if revision != point.Revision {
+	if revision != expectedRevision {
 		return nil, fmt.Errorf("fixed start point differs from immutable creation revision")
 	}
 	snapshot := &runForkRevisionSnapshot{RunID: runID, Revision: revision, StartProjection: &projection}
@@ -41,10 +52,7 @@ func loadRunForkPointSnapshot(ctx context.Context, tx *sql.Tx, runID string, poi
 		}
 	}
 	snapshot.sort()
-	// Resolve construction provenance without expanding the original start's
-	// fact membership to later rows in this run.
-	resolver := capturedConstructionResolver{tx: tx, snapshots: make(map[constructionCut]*runForkRevisionSnapshot), active: make(map[string]bool)}
-	return resolver.resolve(ctx, snapshot)
+	return snapshot, nil
 }
 
 // Restrict the database read before ranking or decoding; the creating ingress

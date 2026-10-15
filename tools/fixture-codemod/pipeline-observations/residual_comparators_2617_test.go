@@ -51,6 +51,13 @@ func residualComparatorMatches2617(row recipe, actual string, corpus []recipe, p
 		if row.Family != pin.Family || row.File != pin.File || row.Function != pin.Function {
 			continue
 		}
+		if row.File == "internal/runtime/runforkexecution/constructed_agent_input_execution_test.go" && row.Function == "proveSelectedConstructedAgentInput" {
+			original, err := fixtureSetupCurrentEndpoint2617(row, actual)
+			if err != nil {
+				return false
+			}
+			row, actual = original, original.Successor
+		}
 		count := 0
 		for _, candidate := range corpus {
 			if sameReviewedRecipeKey(candidate, row) {
@@ -162,16 +169,28 @@ func TestResidualComparators2617PreserveHistoryAndRejectUnlistedCurrentPairs(t *
 				}
 			}
 			for _, cut := range pin.LostCuts {
-				changed := strings.Replace(actual, cut, "unreviewedCut", 1)
-				if changed == actual {
-					t.Fatalf("missing row-specific lost cut: %s", cut)
+				cuts := []string{cut}
+				if row.Function == "proveSelectedConstructedAgentInput" && cut == "result.ExecutedEventCount != 1" {
+					// #642/6191161328 separates ACK from real settlement, without
+					// dropping the prior synchronous endpoint or its negative proof.
+					before642, err := fixtureSetupCurrentEndpoint2617(row, actual)
+					if err != nil || !strings.Contains(before642.Successor, cut) {
+						t.Fatalf("historical execution-count oracle disappeared: %v", err)
+					}
+					cuts = []string{"result.ExecutedEventCount != 0", "delivery.AgentDeliveries == 1 && delivery.Delivered == 1", "count != 1"}
 				}
-				mutant := row
-				mutant.Successor = changed
-				changedRows := append([]recipe{}, rows...)
-				changedRows[index] = mutant
-				if residualComparatorMatches2617(row, changed, rows, packet) || residualComparatorMatches2617(mutant, changed, changedRows, packet) {
-					t.Fatalf("changed actual or self-authorizing pair accepted: %s", cut)
+				for _, currentCut := range cuts {
+					changed := strings.Replace(actual, currentCut, "unreviewedCut", 1)
+					if changed == actual {
+						t.Fatalf("missing row-specific lost cut: %s", currentCut)
+					}
+					mutant := row
+					mutant.Successor = changed
+					changedRows := append([]recipe{}, rows...)
+					changedRows[index] = mutant
+					if residualComparatorMatches2617(row, changed, rows, packet) || residualComparatorMatches2617(mutant, changed, changedRows, packet) {
+						t.Fatalf("changed actual or self-authorizing pair accepted: %s", currentCut)
+					}
 				}
 			}
 			if row.Function == "proveSelectedConstructedAgentInput" && residualComparatorMatches2617(row, packet.SelectedAgentInputHistorical.Body, rows, packet) {

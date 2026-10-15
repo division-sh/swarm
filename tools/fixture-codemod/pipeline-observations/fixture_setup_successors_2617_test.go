@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
@@ -27,6 +28,11 @@ import (
 // reviewer-c6173181699 retains the exact admitted keyed-parent tree proof.
 // #2287/6148375122 appends the CAS and two join presentation endpoints;
 // every prior setup, mechanical receipt and execution assertion is retained.
+// reviewer-a6190268703 appends the two exact #642 owner/caller successors.
+// reviewer-a6190555639 appends the exact delegated catalog harness.
+// reviewer-a6191161328 appends three exact #642 lineage/execution successors.
+// reviewer-a6191625495 appends the exact native source-outcome seed successor.
+// LIGHT under6191161328/6192796272 appends the native retained-join handoff.
 //
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
@@ -48,18 +54,25 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 		"native-pipeline-delivery-exact-join-semantic/internal/runtime/pipeline/workflow_join_lifecycle_test.go/TestWorkflowJoinCountWaitsDespiteEmptyStateMembersOnBothStores",
 		"native-pipeline-delivery-exact-join-semantic/internal/runtime/pipeline/workflow_join_lifecycle_test.go/TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog",
 		"native-shared-coordinator-authority/internal/runtime/node_delivery_startup_recovery_test.go/TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity",
-		"native-shared-coordinator-authority/internal/runtime/node_delivery_startup_recovery_test.go/TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries":
+		"native-shared-coordinator-authority/internal/runtime/node_delivery_startup_recovery_test.go/TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries",
+		"native-selected-construction-raw-argument-retirement/internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go/selectedContractExecutionOwnerForCatalogTest",
+		"native-selected-construction-raw-argument-retirement/internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go/selectedContractExecutionOwnerForCatalogHarness",
+		"native-served-delivery-quiescence-caller/internal/serveapp/fork_retained_join_test.go/testServedJoinWriterCompletedHistoryRefusal",
+		"native-handler-source-coordinator/internal/runtime/pipeline/workflow_timer_replay_selected_store_external_test.go/TestWorkflowTimerCauseReplayReopenAndIsolationBothStores",
+		"native-run-setup-family144/internal/runtime/runforkexecution/constructed_agent_input_execution_test.go/proveSelectedConstructedAgentInput",
+		"native-run-setup-family144/internal/runtime/runforkexecution/execution_test.go/TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation",
+		"native-run-setup-family144/internal/runtime/runforkexecution/runtime_outcome_test.go/seedSelectedRuntimeOutcomeSource":
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "501485801119fc04c640401945b123bff6fd2644afad7e48ad7b85d548a36528" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "16e52fcf2712e80d5b18aba3e3a3c05ae004c3e4cf2b0f27eb7fc9ee6ad39cb3" {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 39 {
+	if len(pins) != 47 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
@@ -114,7 +127,14 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			row.Function != "TestWorkflowJoinCountWaitsDespiteEmptyStateMembersOnBothStores" &&
 			row.Function != "TestWorkflowJoinFailurePersistsCanonicalDeliveryOutcomeAndRuntimeLog" &&
 			row.Function != "TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity" &&
-			row.Function != "TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries" {
+			row.Function != "TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries" &&
+			row.Function != "selectedContractExecutionOwnerForCatalogTest" &&
+			row.Function != "selectedContractExecutionOwnerForCatalogHarness" &&
+			row.Function != "testServedJoinWriterCompletedHistoryRefusal" &&
+			row.Function != "TestWorkflowTimerCauseReplayReopenAndIsolationBothStores" &&
+			row.Function != "proveSelectedConstructedAgentInput" &&
+			row.Function != "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation" &&
+			row.Function != "seedSelectedRuntimeOutcomeSource" {
 			continue
 		}
 		matched++
@@ -160,13 +180,13 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			}
 		})
 	}
-	if matched != 8 {
-		t.Fatalf("fixture comparator endpoints=%d, want8", matched)
+	if matched != 15 {
+		t.Fatalf("fixture comparator endpoints=%d, want15", matched)
 	}
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "501485801119fc04c640401945b123bff6fd2644afad7e48ad7b85d548a36528" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "16e52fcf2712e80d5b18aba3e3a3c05ae004c3e4cf2b0f27eb7fc9ee6ad39cb3" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -177,7 +197,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 39 {
+	if len(pins) != 47 {
 		t.Fatal("fixture successor row count changed")
 	}
 	for index, pin := range pins {
@@ -241,6 +261,167 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 				}
 			}
 		})
+	}
+}
+
+func TestIssue642FixtureSuccessorsPreservePriorPacketAndDelegatedOwner(t *testing.T) {
+	var pins []fixtureSetupSuccessor2617
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 47 {
+		t.Fatalf("exact #642 successor inventory changed: %v", err)
+	}
+	var prior bytes.Buffer
+	encoder := json.NewEncoder(&prior)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(pins[:36]); err != nil || fmt.Sprintf("%x", sha256.Sum256(prior.Bytes())) != "1cafae311b85749160553e56ca1a3123336ba397882464c9c0709a16d04e10ca" {
+		t.Fatal("an original history/Successor/mechanical receipt was rewritten")
+	}
+	prior.Reset()
+	var rawPins []json.RawMessage
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &rawPins); err != nil {
+		t.Fatal(err)
+	}
+	if err := encoder.Encode(rawPins[:39]); err != nil || fmt.Sprintf("%x", sha256.Sum256(prior.Bytes())) != "997a93df95f26aafdc82edb30cddc68378451e362cb7cc549aa45d6b8eb341d4" {
+		t.Fatal("an earlier #642 successor was rewritten")
+	}
+	prior.Reset()
+	if err := encoder.Encode(rawPins[:42]); err != nil || fmt.Sprintf("%x", sha256.Sum256(prior.Bytes())) != "7558f1939d627ff145c5641f322bc51b51f32b6562805b452fe608638639d6d0" {
+		t.Fatal("an authorized #642 completion successor was rewritten")
+	}
+	prior.Reset()
+	if err := encoder.Encode(rawPins[:43]); err != nil || fmt.Sprintf("%x", sha256.Sum256(prior.Bytes())) != "dc9462f1af05ec13e8fc9c03570c48082fe74b126bb6d0da8597dd4b2689ba62" {
+		t.Fatal("the preceding 43 fixture successors were rewritten")
+	}
+	prior.Reset()
+	if err := encoder.Encode(rawPins[:44]); err != nil || fmt.Sprintf("%x", sha256.Sum256(prior.Bytes())) != "3698f8e49a693211ba853bb110ce400011ec3c828d3af40289505711202daf28" {
+		t.Fatal("the pre-integration #642 receipt packet was rewritten")
+	}
+	prior.Reset()
+	masterPins := append(append([]json.RawMessage(nil), rawPins[:36]...), rawPins[44:]...)
+	if err := encoder.Encode(masterPins); err != nil || fmt.Sprintf("%x", sha256.Sum256(prior.Bytes())) != "501485801119fc04c640401945b123bff6fd2644afad7e48ad7b85d548a36528" {
+		t.Fatal("the merged master's receipt packet was rewritten")
+	}
+	nativeJoin := pins[43]
+	if !sameReviewedRecipeKey(nativeJoin.Original, pins[37].Original) || nativeJoin.Original.Successor != pins[37].Candidate {
+		t.Fatal("native retained join successor crossed its predecessor")
+	}
+	helper := selectedCausalObservationBody(t, nativeJoin.Original.File, "requireServedRetainedJoinForkSuccess")
+	const helperPin = "bc4ec0ce6b477d248dc1833bfed4c1f066907bb30617ae89543171876aafa56d"
+	if !historicalCurrentSourcePinned(helper, helperPin) {
+		t.Fatal("native retained join helper changed its exact observations or assertions")
+	}
+	for _, cut := range []string{"storetest.ReadSelectedForkApplicationStorageSnapshot", "compareRetainedJoinActivations(childJoins, repeated)", "reflect.DeepEqual(ack, stableACK)", "reflect.DeepEqual(childBefore, childAfter)", "len(sourceBefore) != 7", "reflect.DeepEqual(sourceBefore, sourceAfter)"} {
+		mutant := strings.Replace(helper, cut, "unreviewedJoinObservation", 1)
+		if mutant == helper || historicalCurrentSourcePinned(mutant, helperPin) {
+			t.Fatalf("native retained join helper pin missed %s", cut)
+		}
+	}
+	if pins[36].Original.File != "internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go" || pins[36].Original.Function != "selectedContractExecutionOwnerForCatalogTest" ||
+		pins[37].Original.File != "internal/serveapp/fork_retained_join_test.go" || pins[37].Original.Function != "testServedJoinWriterCompletedHistoryRefusal" ||
+		pins[38].Original.File != pins[36].Original.File || pins[38].Original.Function != "selectedContractExecutionOwnerForCatalogHarness" {
+		t.Fatal("unreviewed #642 successor key")
+	}
+	for i, key := range [][2]string{
+		{"internal/runtime/pipeline/workflow_timer_replay_selected_store_external_test.go", "TestWorkflowTimerCauseReplayReopenAndIsolationBothStores"},
+		{"internal/runtime/runforkexecution/constructed_agent_input_execution_test.go", "proveSelectedConstructedAgentInput"},
+		{"internal/runtime/runforkexecution/execution_test.go", "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation"},
+	} {
+		if pins[39+i].Original.File != key[0] || pins[39+i].Original.Function != key[1] {
+			t.Fatal("unreviewed #642 completion successor key")
+		}
+	}
+	seed := pins[42]
+	if seed.Original.Family != "native-run-setup-family144" || seed.Original.File != "internal/runtime/runforkexecution/runtime_outcome_test.go" ||
+		seed.Original.Function != "seedSelectedRuntimeOutcomeSource" || seed.Original.Successor != "" {
+		t.Fatal("source-outcome seed successor has the wrong key or invented prior endpoint")
+	}
+	var recipes []recipe
+	if err := json.Unmarshal(recipeBytes, &recipes); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range recipes {
+		if !sameReviewedRecipeKey(row, seed.Original) {
+			continue
+		}
+		for _, cut := range []string{"backend == \"postgres\"", "runtimefailures.ClassConnectorFailure", "RunID: runID, EventID: eventID, EntityID: runID, CreatedAt: at, Failure: failure", "commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)", "storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)", "if err := storetest.SeedSelectedSourceOutcome", "t.Fatal(err)"} {
+			mutant := strings.Replace(seed.Candidate, cut, "unreviewedOutcome", 1)
+			changed := row
+			changed.Successor = mutant
+			if mutant == seed.Candidate {
+				t.Fatalf("missing source-outcome guard cut: %s", cut)
+			}
+			if _, err := fixtureSetupCurrentEndpoint2617(changed, mutant); err == nil {
+				t.Fatalf("self-authorizing source-outcome pair accepted: %s", cut)
+			}
+		}
+	}
+	scan := selectedCausalObservationBody(t, pins[40].Original.File, "CommitSelectedForkEvent")
+	const scanPin = "5d887d501b83625c68bf5f08be3010db393a9e06fc2f9012d7409b688dbdec8e"
+	if !historicalCurrentSourcePinned(scan, scanPin) {
+		t.Fatal("delegated scan observer changed")
+	}
+	for _, cut := range []string{"p.observed <- err", "p.SelectedContractReplayPersistence.CommitSelectedForkEvent(ctx, req)", "p.store.ScanDeliveryContinuations", "len(result.DeliveryHandoffs) == 0", "return result, errSelectedHistoricalScanCut"} {
+		mutant := strings.Replace(scan, cut, "unreviewedScan", 1)
+		if mutant == scan || historicalCurrentSourcePinned(mutant, scanPin) {
+			t.Fatalf("scan observer pin missed %s", cut)
+		}
+	}
+	restored, err := restoreRetainedJoinRefusalBranch(pins[37].Candidate)
+	if err != nil || !canonicalComparatorEqual2617(restored, pins[37].Original.Successor) {
+		t.Fatalf("#642 positive sibling changed the recorded refusal: %v", err)
+	}
+	for _, entry := range []struct {
+		name, arguments string
+	}{
+		{"TestServedJoinWriterCompletedHistoryRefusalBothStores", "false, false"},
+		{"TestServedJoinWriterCompletedHistoryRefusalSeparateCheckpointBothStores", "true, false"},
+		{"TestServedJoinWriterForkRetainedGenerationsBothStores", "false, true"},
+		{"TestServedJoinWriterForkRetainedGenerationsSeparateCheckpointBothStores", "true, true"},
+	} {
+		actual := selectedCausalObservationBody(t, pins[37].Original.File, entry.name)
+		want := "func " + entry.name + "(t *testing.T) { testServedJoinWriterCompletedHistoryRefusal(t, " + entry.arguments + ") }"
+		if !canonicalComparatorEqual2617(actual, want) {
+			t.Fatalf("original refusal/positive sibling selection changed: %s", entry.name)
+		}
+	}
+	const delegate = "selectedContractExecutionOwnerForCatalogTestWithReplay"
+	source := selectedCausalObservationBody(t, pins[36].Original.File, delegate)
+	const digest = "6aa0b7864d08a276004e9497f247a5039207ff2c1d8f2e8e1c6a10b4abd51efa"
+	if !historicalCurrentSourcePinned(source, digest) {
+		t.Fatal("reviewed catalog delegate's native dependencies/overrides/retirement changed")
+	}
+	for _, cut := range []string{"NewSelectedContractExecutionOwner", "replay = selected", "fork = forkOverride[0]", "owner.RetireSelectedContexts"} {
+		mutant := strings.Replace(source, cut, "unreviewedOwner", 1)
+		if mutant == source || historicalCurrentSourcePinned(mutant, digest) {
+			t.Fatalf("delegate pin failed to reject %s mutation", cut)
+		}
+	}
+	for _, pin := range []struct {
+		name, digest string
+		cuts         []string
+	}{
+		{"selectedContractExecutionOwnerForCatalogHarness", "", []string{"t, h, nil, forkOverride..."}},
+		{"selectedContractExecutionOwnerForCatalogHarnessWithReplay", "af49a44db4e729f63c1af928ef8d4bc344bec027d5d605952a66b7d3a6bda299",
+			[]string{"replay == nil && len(forkOverride) == 0", "bindCatalogSelectedOwner(t, h, owner)", "h.selectedOwners = append(h.selectedOwners, owner)", "t, h, replay, forkOverride..."}},
+		{"constructCatalogSelectedExecutionOwner", "cbf2fc07867a758a104c852faa2a8d51293dc4f4a21a1a91a7fd00b38e09d7e2",
+			[]string{"if h.pg != nil", "selected := h.sqlite", "t, h.pg, replay, forkOverride...", "replay = selected", "fork = forkOverride[0]", "owner.RetireSelectedContexts"}},
+	} {
+		current := selectedCausalObservationBody(t, pins[38].Original.File, pin.name)
+		accepted := func(candidate string) bool {
+			if pin.digest == "" {
+				return canonicalComparatorEqual2617(candidate, pins[38].Candidate)
+			}
+			return historicalCurrentSourcePinned(candidate, pin.digest)
+		}
+		if !accepted(current) {
+			t.Fatalf("reviewed harness delegate changed: %s", pin.name)
+		}
+		for _, cut := range pin.cuts {
+			mutant := strings.Replace(current, cut, "unreviewedOwner", 1)
+			if mutant == current || accepted(mutant) {
+				t.Fatalf("harness pin failed to reject %s/%s", pin.name, cut)
+			}
+		}
 	}
 }
 
