@@ -236,6 +236,9 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 							t.Fatalf("delivery did not retain the exact admitted receiver grant: got=%#v want=%#v", armed.Authority, receiverAuthority)
 						}
 					}
+					if got := routeEvidenceHead(t, ctx, fixture.db, runID); got != beforeClaimRevision {
+						t.Fatalf("physical authority activation advanced fork history: got revision %d, want %d", got, beforeClaimRevision)
+					}
 					claimed, err := claimDeliveryFixture(ctx, fixture.store, event, route)
 					if err != nil {
 						t.Fatal(err)
@@ -247,19 +250,25 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 						t.Fatalf("real claim lost its current lifecycle and lease: %#v", claimed.Snapshot)
 					}
 					claimRevision := routeEvidenceHead(t, ctx, fixture.db, runID)
-					if claimRevision != beforeClaimRevision {
-						t.Fatalf("physical claim advanced fork history: got revision %d, want %d", claimRevision, beforeClaimRevision)
+					// #2672/6186986119 retains the lifecycle transition until Q1's
+					// historical reader/writer cutover; worker authority stays excluded.
+					if claimRevision != beforeClaimRevision+1 {
+						t.Fatalf("retained in-progress transition advanced fork history: got revision %d, want %d", claimRevision, beforeClaimRevision+1)
+					}
+					if pendingHistory := routeEvidenceSnapshot(t, ctx, fixture.db, runID, live.DeliveryID, beforeClaimRevision); !reflect.DeepEqual(pendingHistory, historical) {
+						t.Fatalf("claim changed the older pending delivery: before=%#v after=%#v", historical, pendingHistory)
 					}
 					claimHistory := routeEvidenceSnapshot(t, ctx, fixture.db, runID, live.DeliveryID, claimRevision)
 					assertRouteEvidenceEqual(t, claimHistory.Route, route)
-					if claimHistory.Status != runtimedelivery.StatusPending || claimHistory.ClaimVersion != 0 || !claimHistory.ClaimExpiresAt.IsZero() {
-						t.Fatalf("physical claim rewrote the retained pending delivery: %#v", claimHistory)
+					if claimHistory.Status != runtimedelivery.StatusInProgress || claimHistory.ClaimVersion != 0 || !claimHistory.ClaimExpiresAt.IsZero() ||
+						!claimHistory.StartedAt.Equal(claimed.Snapshot.StartedAt) || !claimHistory.NextEligibleAt.IsZero() {
+						t.Fatalf("retained claim lifecycle or excluded worker authority disagrees: %#v", claimHistory)
 					}
 					if claimHistory.Authority.Validate() == nil {
 						t.Fatal("historical readback of a live claim grants execution authority")
 					}
 					var claimFact []byte
-					if err := fixture.db.QueryRowContext(ctx, `SELECT fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='event_deliveries' AND fact_key=$2 AND revision<=$3 ORDER BY revision DESC LIMIT 1`, runID, live.DeliveryID, claimRevision).Scan(&claimFact); err != nil {
+					if err := fixture.db.QueryRowContext(ctx, `SELECT fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='event_deliveries' AND fact_key=$2 AND revision=$3`, runID, live.DeliveryID, claimRevision).Scan(&claimFact); err != nil {
 						t.Fatal(err)
 					}
 					var claimFields map[string]json.RawMessage
@@ -273,6 +282,9 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 					}
 					if err := CaptureRunForkSnapshotForTest(ctx, fixture.store, runID); err != nil {
 						t.Fatal(err)
+					}
+					if got := routeEvidenceHead(t, ctx, fixture.db, runID); got != claimRevision {
+						t.Fatalf("unchanged broad capture advanced retained lifecycle history: got revision %d, want %d", got, claimRevision)
 					}
 					captured := routeEvidenceSnapshot(t, ctx, fixture.db, runID, live.DeliveryID, routeEvidenceHead(t, ctx, fixture.db, runID))
 					assertRouteEvidenceEqual(t, captured.Route, route)
