@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -86,7 +87,7 @@ func TestSelectedRunTargetOwnersUseConstructedHeadersBothStores(t *testing.T) {
 						return []pipeline.FlowInstanceObservation{observed}, nil
 					},
 				}
-				check := func(want int) {
+				check := func(t *testing.T, want int) {
 					t.Helper()
 					for name, lookup := range lookups {
 						owners, err := lookup(f.ctx)
@@ -120,7 +121,66 @@ func TestSelectedRunTargetOwnersUseConstructedHeadersBothStores(t *testing.T) {
 						}
 					}
 				}
-				check(1)
+				check(t, 1)
+				reader := f.store.(pipeline.WorkflowInstancePersistenceReader)
+				identity := flowidentity.RunScopedFlowInstance{RunID: runID, Route: target.Route()}
+				before, found, err := reader.LoadWorkflowInstance(f.ctx, identity)
+				if err != nil || !found || before.Status != "active" || (before.EntityType != "") != fielded {
+					t.Fatalf("load exact active fielded/fieldless member: found=%t instance=%+v err=%v", found, before, err)
+				}
+				initial, err := reader.ListWorkflowInstances(f.ctx, runID)
+				if err != nil || len(initial) != 2 {
+					t.Fatalf("initial header directory: instances=%+v err=%v", initial, err)
+				}
+				initialIdentities := map[string]string{target.InstancePath: target.EntityID, plan.Identity.InstancePath: plan.Identity.EntityID}
+				for _, instance := range initial {
+					entity, present := initialIdentities[instance.StorageRef]
+					if !present || instance.EntityID != entity || instance.StorageRef == target.InstancePath && !reflect.DeepEqual(instance, before) {
+						t.Fatalf("initial directory changed exact constructed membership: %+v", instance)
+					}
+					delete(initialIdentities, instance.StorageRef)
+				}
+				for _, status := range []string{"draining", "terminated"} {
+					t.Run(status, func(t *testing.T) {
+						expected := before
+						expected.Status = status
+						var changed int64
+						var err error
+						if status == "draining" {
+							changed, err = SetWorkflowProjectionDrainingForTest(f.ctx, f.store, runID, target.InstancePath)
+						} else {
+							expected.TerminatedAt = before.UpdatedAt.Add(time.Minute)
+							changed, err = SetWorkflowProjectionTerminatedForTest(f.ctx, f.store, runID, target.InstancePath, expected.TerminatedAt)
+						}
+						if err != nil || changed != 1 {
+							t.Fatalf("install exact %s projection: changed=%d err=%v", status, changed, err)
+						}
+						current, found, err := reader.LoadWorkflowInstance(f.ctx, identity)
+						if err != nil || !found || !reflect.DeepEqual(current, expected) {
+							t.Fatalf("inactive member lost header/data identity or changed other facts: got=%+v want=%+v found=%t err=%v", current, expected, found, err)
+						}
+						instances, err := reader.ListWorkflowInstances(f.ctx, runID)
+						if err != nil || len(instances) != len(initial) {
+							t.Fatalf("inactive member disappeared from header directory: instances=%+v err=%v", instances, err)
+						}
+						wanted := make(map[string]pipeline.WorkflowInstance, len(initial))
+						for _, instance := range initial {
+							wanted[instance.StorageRef] = instance
+						}
+						wanted[target.InstancePath] = expected
+						for _, instance := range instances {
+							want, present := wanted[instance.StorageRef]
+							if !present || !reflect.DeepEqual(instance, want) {
+								t.Fatalf("inactive directory changed membership/header/data: got=%+v want=%+v", instance, want)
+							}
+							delete(wanted, instance.StorageRef)
+						}
+						if len(wanted) != 0 {
+							t.Fatalf("inactive directory omitted retained headers: %+v", wanted)
+						}
+						check(t, 1)
+					})
+				}
 				foreignRun := uuid.NewString()
 				requireRunFixtureForTest(t, f.ctx, f.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: foreignRun, Artifact: f.bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 				foreignScope, err := pipeline.NewFlowInstanceLookupScope(source, fact, foreignRun, []string{"review"}, nil)
@@ -135,7 +195,7 @@ func TestSelectedRunTargetOwnersUseConstructedHeadersBothStores(t *testing.T) {
 				if _, err := f.db.ExecContext(f.ctx, `DELETE FROM flow_instances WHERE run_id=$1 AND instance_path='review'`, runID); err != nil {
 					t.Fatal(err)
 				}
-				check(0)
+				check(t, 0)
 				var rows int
 				wantFields := 0
 				if fielded {
