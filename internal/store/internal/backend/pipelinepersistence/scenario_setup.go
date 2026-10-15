@@ -257,25 +257,32 @@ func validateScenarioConstruction(ctx context.Context, req runtimepipeline.Scena
 		if entity.EntityID != req.RunID {
 			continue
 		}
-		fields, gates, _, _, err := scenarioSetupEntityJSON(entity)
-		if err != nil {
+		if err := validateScenarioConstructionSeed(entity, plan); err != nil {
 			return nil, err
-		}
-		record, err := plan.PersistenceRecord()
-		if err != nil {
-			return nil, err
-		}
-		matchesType := entity.EntityType == record.EntityType
-		if record.EntityType == "" {
-			matchesType = entity.EntityType == "default" && len(entity.Fields) == 0
-		}
-		if !matchesType || entity.CurrentState == nil || *entity.CurrentState != record.CurrentState ||
-			!scenarioSetupJSONEqual(string(fields), record.Fields) || !scenarioSetupJSONEqual(string(gates), record.Gates) {
-			return nil, fmt.Errorf("scenario construction changed explicit imported fields, stage or gates")
 		}
 		return []runtimepipeline.FlowInstanceActivationPlan{plan}, nil
 	}
 	return nil, fmt.Errorf("scenario construction has no exact root seed")
+}
+
+func validateScenarioConstructionSeed(entity runtimepipeline.ScenarioSetupEntityRequest, plan runtimepipeline.FlowInstanceActivationPlan) error {
+	fields, gates, _, _, err := scenarioSetupEntityJSON(entity)
+	if err != nil {
+		return err
+	}
+	record, err := plan.PersistenceRecord()
+	if err != nil {
+		return err
+	}
+	matchesType := entity.EntityType == record.EntityType
+	if record.EntityType == "" {
+		matchesType = entity.EntityType == "default" && len(entity.Fields) == 0
+	}
+	if !matchesType || entity.CurrentState == nil || *entity.CurrentState != record.CurrentState ||
+		!scenarioSetupJSONEqual(string(fields), record.Fields) || !scenarioSetupJSONEqual(string(gates), record.Gates) {
+		return fmt.Errorf("scenario construction changed explicit imported fields, stage or gates")
+	}
+	return nil
 }
 
 func requireScenarioImportWithoutHeader(ctx context.Context, tx *sql.Tx, runID string, entity runtimepipeline.ScenarioSetupEntityRequest) error {
