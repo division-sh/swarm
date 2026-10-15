@@ -157,9 +157,7 @@ func TestSelectedAgentClaimReadsOriginalPreparationWithoutOrdinaryCaptureBothSto
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := owner.QuiesceRunForkSelectedContractRuntimeExecution(ctx, execution); err != nil {
-				t.Fatal(err)
-			}
+			proveSelectedProfileFencedMembership(t, ctx, ordinary, f, execution, terminal, foreignOwner)
 			beforeRetained, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, selected)
 			if err != nil {
 				t.Fatal(err)
