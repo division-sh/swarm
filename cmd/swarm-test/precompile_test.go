@@ -20,6 +20,13 @@ func precompileFixtureGoHeader() string {
 	return fmt.Sprintf("#!/bin/sh\nset -eu\nif [ \"$1\" = env ]; then exec %q \"$@\"; fi\nif [ \"${2-}\" = -exec=/bin/true ]; then exit 0; fi\n", filepath.Join(runtime.GOROOT(), "bin", "go"))
 }
 
+func requirePrecompileSupport(t *testing.T) {
+	t.Helper()
+	if !precompileAvailable() {
+		t.Skip("precompile intentionally bypasses unsupported native ownership or missing /bin/true")
+	}
+}
+
 func TestPrecompileArgsConservativelySelectSafeForms(t *testing.T) {
 	for _, args := range [][]string{
 		{"./p"}, {"file.go", "file_test.go"}, {"./p/...", "./q"},
@@ -48,9 +55,7 @@ func TestPrecompileArgsConservativelySelectSafeForms(t *testing.T) {
 }
 
 func TestPrecompileUsesOnlyOwnedBuildAndDiscardsSuccess(t *testing.T) {
-	if preflightDescendantJoinMode != "native" {
-		t.Skip("precompile intentionally bypasses unsupported native ownership")
-	}
+	requirePrecompileSupport(t)
 	t.Setenv("GOFLAGS", "")
 	args := []string{"./p", "-json", "-race", "-count=1", "-run=^TestOne$"}
 	original := append([]string(nil), args...)
@@ -75,9 +80,7 @@ func TestPrecompileUsesOnlyOwnedBuildAndDiscardsSuccess(t *testing.T) {
 }
 
 func TestPrecompileEnvironmentAndFailureRefusals(t *testing.T) {
-	if preflightDescendantJoinMode != "native" {
-		t.Skip("precompile intentionally bypasses unsupported native ownership")
-	}
+	requirePrecompileSupport(t)
 	t.Setenv("GOFLAGS", "")
 	for _, mode := range []string{"shell_flags", "persisted_flags", "foreign_os", "foreign_arch", "invalid_environment", "metadata_failure", "build_failure", "cancel_before_spawn", "cancel_after_metadata", "cancel_after_build", "join_failure"} {
 		t.Run(mode, func(t *testing.T) {
