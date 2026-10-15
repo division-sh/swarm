@@ -87,7 +87,7 @@ func TestDeliveryAuthorityActivationSerializesWithFreezeBothStores(t *testing.T)
 				// Both operations reach this real write only after owning the
 				// existing native ordering fence. The contender must actually
 				// wait on that fence (PG) or roll back BUSY (SQLite), not just start.
-				point := "writer"
+				point := "delivery_authority"
 				if first == "freeze" {
 					point = "source_freeze"
 				}

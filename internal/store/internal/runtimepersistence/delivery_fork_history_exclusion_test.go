@@ -118,5 +118,89 @@ func TestDeliveryOperationalWritesDoNotAdvanceForkHistoryBothStores(t *testing.T
 				t.Fatalf("refused renewal changed settled evidence: got=%+v want=%+v err=%v", preserved, after, err)
 			}
 		})
+		t.Run(backend.name+"/retained_lifecycle", func(t *testing.T) {
+			fixture := backend.open(t)
+			store := fixture.store.(completionSettlementTestStore)
+			completion := newCompletionSettlementFixture(t, store, fixture.db, backend.name == "sqlite")
+			proveRetainedDeliveryLifecycleAccounting(t, fixture, completion)
+		})
 	}
+}
+
+func proveRetainedDeliveryLifecycleAccounting(t *testing.T, fixture authorActivityReceiptFixture, completion completionSettlementFixture) {
+	t.Helper()
+	ctx, store := testAuthorActivityContext(), completion.store
+	event := managedCompletionTestEventWithIdentity(completion.authority, uuid.NewString(), "delivery.history")
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(completion.agentID), AgentIdentity: completion.authority.Normal.Identity}
+	if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, []events.DeliveryRoute{route}); err != nil {
+		t.Fatal(err)
+	}
+	publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, !completion.sqlite, event.RunID())
+	probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restore()
+	phase := func(name string, want uint64, write func() error) {
+		t.Helper()
+		before := probe.Snapshot().Total.Revision
+		if err := write(); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		after := probe.Snapshot().Total.Revision
+		if got := after.Finalizations - before.Finalizations; got != want {
+			t.Fatalf("%s revision finalizations=%d, want=%d", name, got, want)
+		}
+		requireCompleteRunForkRevision(t, ctx, fixture, event.RunID())
+		t.Logf("retained lifecycle accounting: phase=%s finalizations=%d history_sql=%d", name, want,
+			after.ExecCalls+after.QueryCalls+after.QueryRowCalls-before.ExecCalls-before.QueryCalls-before.QueryRowCalls)
+	}
+	var current runtimedelivery.ClaimedObligation
+	claim := func() error {
+		var err error
+		current, err = claimDeliveryFixture(ctx, store, event, route)
+		return err
+	}
+	bind := func() error {
+		bound, err := store.BindAgentSession(ctx, current.Claim, completion.sessionID)
+		if err == nil && (!bound.Acknowledged || bound.Snapshot.ActiveSessionID != completion.sessionID) {
+			t.Fatal("retained session binding was not acknowledged exactly")
+		}
+		return err
+	}
+	phase("initial_status", 1, claim)
+	phase("session_bind", 1, bind)
+	phase("unchanged_session_bind", 0, bind)
+	phase("lease_renewal", 0, func() error {
+		renewed, err := store.RenewClaim(ctx, current.Claim)
+		if err == nil && !renewed.Acknowledged {
+			t.Fatal("physical renewal was not acknowledged")
+		}
+		return err
+	})
+	setProviderOriginLease(t, completion, current.Claim, time.Now().UTC().Add(-time.Second))
+	previous := current.Claim
+	phase("reclaim_session_clear", 1, claim)
+	if current.Snapshot.ActiveSessionID != "" || current.Claim.Version() != previous.Version()+1 {
+		t.Fatal("reclaim did not clear the previous session under a fresh claim")
+	}
+	phase("stale_session_bind", 0, func() error {
+		if _, err := store.BindAgentSession(ctx, previous, completion.sessionID); !errors.Is(err, runtimedelivery.ErrConflict) {
+			t.Fatalf("stale session binding error=%v, want conflict", err)
+		}
+		return nil
+	})
+	setProviderOriginLease(t, completion, current.Claim, time.Now().UTC().Add(-time.Second))
+	phase("unchanged_reclaim", 0, claim)
+	phase("retry_settlement", 1, func() error {
+		failed, err := store.SettleFailure(ctx, current.Claim, runtimedelivery.Settlement{
+			Disposition: runtimedelivery.FailureRetry, Failure: testRetryableFailure(), RetryBase: time.Nanosecond,
+			RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
+		})
+		if err == nil && failed.Status != runtimedelivery.StatusFailed {
+			t.Fatal("retry did not retain its failed lifecycle state")
+		}
+		return err
+	})
+	phase("retry_status", 1, claim)
 }
