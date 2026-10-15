@@ -262,11 +262,12 @@ func TestPersistenceAuthorityDebtServedObservationRetirementPinsAll48LiveBodies(
 			if err != nil {
 				t.Fatal(err)
 			}
-			current, err := debtServedSetupDeclarations(filepath.Join(root, pin.File))
+			current, err := os.ReadFile(filepath.Join(root, pin.File))
 			if err != nil {
 				t.Fatal(err)
 			}
-			debtSourceBlobCopyDeclaration(t, copy, pin.File, pin.Function, current[pin.Function])
+			// Preserve the exact whole-file input authenticated by the join packet.
+			debtWriteModuleSource(t, copy, pin.File, string(current))
 		}
 	}
 	const path = "internal/store/testdata/persistence_authority_served_observation_retirements.json"
@@ -276,17 +277,20 @@ func TestPersistenceAuthorityDebtServedObservationRetirementPinsAll48LiveBodies(
 		t.Fatal("complete live-source comparison image refused:", failures)
 	}
 	pin := stages[0][0]
-	raw, err := os.ReadFile(filepath.Join(copy, pin.File))
-	if err != nil {
-		t.Fatal(err)
-	}
 	decls, err := debtServedDebugDeclarations(filepath.Join(copy, pin.File))
 	if err != nil {
 		t.Fatal(err)
 	}
 	current := decls[pin.Function]
 	mutant := strings.Replace(current, "{", "{foreignRetirement();", 1)
-	debtWriteModuleSource(t, copy, pin.File, strings.Replace(string(raw), current, mutant, 1))
+	if current == "" || mutant == current {
+		t.Fatal("retirement hostility lost its exact declaration")
+	}
+	debtSourceBlobCopyDeclaration(t, copy, pin.File, pin.Function, mutant)
+	changed, err := debtServedDebugDeclarations(filepath.Join(copy, pin.File))
+	if err != nil || changed[pin.Function] == current {
+		t.Fatal("retirement hostile source mutation did not execute:", err)
+	}
 	if failures := authorityDebtRatchet(empty, retained, old, old, proof); len(failures) == 0 {
 		t.Fatal("changed live source received retirement credit")
 	}
