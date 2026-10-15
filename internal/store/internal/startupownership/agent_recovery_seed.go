@@ -11,7 +11,21 @@ import (
 
 // Assembly binds existing readers once, before acquiring a process. Neither a
 // caller's old image nor a later substitute reader can seed the retained owner.
-func (p *processOperations) BindAgentRecoveryReader(reader startuprecovery.AgentRecoveryReader) error {
+func BindPostgresAgentRecoveryReader(owner *StartupPostgresOwner, reader startuprecovery.AgentRecoveryReader) error {
+	if owner == nil {
+		return errors.New("agent recovery requires its PostgreSQL construction owner")
+	}
+	return owner.bindAgentRecoveryReader(reader)
+}
+
+func BindSQLiteAgentRecoveryReader(owner *StartupSQLiteOwner, reader startuprecovery.AgentRecoveryReader) error {
+	if owner == nil {
+		return errors.New("agent recovery requires its SQLite construction owner")
+	}
+	return owner.bindAgentRecoveryReader(reader)
+}
+
+func (p *processOperations) bindAgentRecoveryReader(reader startuprecovery.AgentRecoveryReader) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if reader == nil || p.recoveryReader != nil || p.current != nil {
