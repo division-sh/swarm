@@ -96,7 +96,10 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			})
 			requireServedRunStatus(t, rt.Endpoint, child, "completed")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, child)
-			requireLifecycleFlowEntity(t, rt, child, "", "done")
+			_, childHeader := requireReceiverTargetState(t, rt.ReceiverStateReader, child, ".", child, child)
+			if childHeader.CurrentState != "done" {
+				t.Fatalf("exact first-turn child did not reach done: %+v", childHeader)
+			}
 			page, err := selected.Observability().ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{
 				Filter: operatorread.OperatorEventListFilter{RunID: child}, Limit: 10, ExcludeRuntimeLogs: true,
 			})
