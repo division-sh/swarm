@@ -294,6 +294,7 @@ jobs:
       pull-requests: read
     env:
       GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
       VERSION: ${{ needs.prepare.outputs.version }}
       SOURCE_SHA: ${{ needs.prepare.outputs.sha }}
       PREVIOUS: ${{ needs.prepare.outputs.previous }}
@@ -397,7 +398,7 @@ jobs:
           done
           assets=$(gh release view "$VERSION" --json assets --jq '[.assets[].name] | sort | join("\n")')
           test "$assets" = "$(printf '%s\n' SHA256SUMS "swarm_${VERSION}_darwin_arm64.tar.gz" "swarm_${VERSION}_linux_amd64.tar.gz" | LC_ALL=C sort)"
-          git ls-remote --tags origin "refs/tags/$VERSION" "refs/tags/$VERSION^{}" > "$RUNNER_TEMP/release-final-tag.txt"
+          git -C "$GITHUB_WORKSPACE" ls-remote --tags origin "refs/tags/$VERSION" "refs/tags/$VERSION^{}" > "$RUNNER_TEMP/release-final-tag.txt"
           cmp "$RUNNER_TEMP/release-final-tag.txt" "$RUNNER_TEMP/release-tag.txt"
           latest=$(python3 - <<'PY'
           import json
