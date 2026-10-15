@@ -17,6 +17,7 @@ import (
 
 type AgentRecoveryReader interface {
 	deliverylifecycle.ActiveSnapshotReader
+	deliverylifecycle.FirstAgentClaimProfileReader
 	agenttopology.SourceSetHeadReader
 	manager.AgentLifecycleStateReader
 	bus.RunLifecycleReadPersistence
@@ -24,7 +25,6 @@ type AgentRecoveryReader interface {
 	InspectSnapshot(context.Context, func(context.Context) error) error
 	InspectAuthority(context.Context) (startupownership.AuthorityInspection, error)
 	ObserveOrdinaryRunSource(context.Context, correlation.SourceArtifactFact, string) (bool, error)
-	ReadFirstAgentClaimProfile(context.Context, deliverylifecycle.Snapshot) (deliverylifecycle.AgentClaimProfile, error)
 	ReadSelectedAgentPreparation(context.Context, deliverylifecycle.Snapshot) (runfork.SelectedForkPreparedActor, error)
 }
 
