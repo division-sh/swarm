@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/division-sh/swarm/internal/operatorchannel"
 )
 
 func (p *PairingReadback) UnmarshalJSON(raw []byte) error {
@@ -61,6 +63,22 @@ func (r Result) SessionPreparationPending() (bool, error) {
 		return false, fmt.Errorf("%w: session preparation readback contradicts its retained responsibility", ErrInvalidRequest)
 	}
 	return true, nil
+}
+
+// The SDK can finish connecting before its first QR batch arrives. Project
+// only that owned, non-executable snapshot; keep the private QR state intact.
+func (r *Result) projectInitialSessionPreparation() {
+	if r.Pairing == nil || r.Pairing.Status != "awaiting_qr" ||
+		r.Operation.SessionAccount != (operatorchannel.SessionAccountAdmission{}) || r.Binding != nil {
+		return
+	}
+	pairing := *r.Pairing
+	pairing.Status = PairingStatusPreparing
+	projected := *r
+	projected.Pairing = &pairing
+	if pending, err := projected.SessionPreparationPending(); err == nil && pending {
+		r.Pairing = &pairing
+	}
 }
 
 // SessionPairingPending consumes authenticated pairing progress, not account,
