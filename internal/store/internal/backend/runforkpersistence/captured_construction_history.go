@@ -15,8 +15,9 @@ import (
 )
 
 type constructionCut struct {
-	runID    string
-	revision int64
+	runID          string
+	revision       int64
+	exclusiveStart bool
 }
 
 type capturedConstructionResolver struct {
@@ -29,7 +30,10 @@ func (r *capturedConstructionResolver) resolve(ctx context.Context, snapshot *ru
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	cut := constructionCut{runID: snapshot.RunID, revision: snapshot.Revision}
+	if snapshot == nil || snapshot.mutationsOnly {
+		return nil, fmt.Errorf("captured construction requires a complete immutable cut")
+	}
+	cut := constructionCut{runID: snapshot.RunID, revision: snapshot.Revision, exclusiveStart: snapshot.StartProjection != nil}
 	if r.active[snapshot.RunID] {
 		return nil, fmt.Errorf("captured construction has cyclic immutable lineage")
 	}
@@ -41,6 +45,9 @@ func (r *capturedConstructionResolver) resolve(ctx context.Context, snapshot *ru
 	var origin runlifecycle.RunOrigin
 	var original *runForkRevisionSnapshot
 	for i := range snapshot.EntityMetadata {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		metadata := &snapshot.EntityMetadata[i]
 		if metadata.ConstructionKind != "constructed" {
 			continue
@@ -96,6 +103,9 @@ func (r *capturedConstructionResolver) resolve(ctx context.Context, snapshot *ru
 			return nil, err
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	r.snapshots[cut] = snapshot
 	return snapshot, nil
 }
@@ -105,18 +115,27 @@ func (r *capturedConstructionResolver) sourceCut(ctx context.Context, origin run
 		return nil, err
 	}
 	runID, revision := origin.SourceRunID(), origin.ForkRevision()
-	cut := constructionCut{runID: runID, revision: revision}
+	cut := constructionCut{runID: runID, revision: revision, exclusiveStart: origin.ForkPointKind() == runlifecycle.ForkOriginPointRunStart}
 	if resolved := r.snapshots[cut]; resolved != nil && !r.active[runID] {
-		return resolved, validateCapturedOriginBoundary(origin, resolved)
+		if err := validateCapturedOriginBoundary(origin, resolved); err != nil {
+			return nil, err
+		}
+		return resolved, nil
 	}
 	if r.active[runID] {
 		return nil, fmt.Errorf("captured construction has cyclic immutable lineage")
 	}
-	var recorded int64
-	if err := r.tx.QueryRowContext(ctx, `SELECT revision FROM run_fork_revisions WHERE run_id=$1 AND revision=$2`, runID, revision).Scan(&recorded); err != nil {
-		return nil, fmt.Errorf("read captured construction lineage cut: %w", err)
+	var snapshot *runForkRevisionSnapshot
+	var err error
+	if origin.ForkPointKind() == runlifecycle.ForkOriginPointRunStart {
+		snapshot, err = loadRunForkStartSnapshot(ctx, r.tx, runID, revision)
+	} else {
+		var recorded int64
+		if err := r.tx.QueryRowContext(ctx, `SELECT revision FROM run_fork_revisions WHERE run_id=$1 AND revision=$2`, runID, revision).Scan(&recorded); err != nil {
+			return nil, fmt.Errorf("read captured construction lineage cut: %w", err)
+		}
+		snapshot, err = loadRunForkRevisionSnapshotRaw(ctx, r.tx, runID, recorded, false)
 	}
-	snapshot, err := loadRunForkRevisionSnapshotRaw(ctx, r.tx, runID, recorded, false)
 	if err != nil {
 		return nil, err
 	}
@@ -126,9 +145,38 @@ func (r *capturedConstructionResolver) sourceCut(ctx context.Context, origin run
 	return r.resolve(ctx, snapshot)
 }
 
+func (r *capturedConstructionResolver) inclusive(ctx context.Context, runID string, revision int64) (*runForkRevisionSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if r.tx == nil || revision <= 0 {
+		return nil, fmt.Errorf("captured construction requires its transaction and positive revision")
+	}
+	if r.active[runID] {
+		return nil, fmt.Errorf("captured construction has cyclic immutable lineage")
+	}
+	if snapshot := r.snapshots[constructionCut{runID: runID, revision: revision}]; snapshot != nil {
+		return snapshot, nil
+	}
+	snapshot, err := loadRunForkRevisionSnapshotRaw(ctx, r.tx, runID, revision, false)
+	if err != nil {
+		return nil, err
+	}
+	return r.resolve(ctx, snapshot)
+}
+
 func validateCapturedOriginBoundary(origin runlifecycle.RunOrigin, snapshot *runForkRevisionSnapshot) error {
 	if snapshot.RunID != origin.SourceRunID() || snapshot.Revision != origin.ForkRevision() {
 		return fmt.Errorf("captured construction lineage cut disagrees with its immutable origin")
+	}
+	if origin.ForkPointKind() == runlifecycle.ForkOriginPointRunStart {
+		if snapshot.StartProjection == nil {
+			return fmt.Errorf("captured construction start requires its exclusive immutable projection")
+		}
+		return snapshot.StartProjection.Validate()
+	}
+	if snapshot.StartProjection != nil {
+		return fmt.Errorf("captured construction cannot use a start projection as an inclusive cut")
 	}
 	if origin.ForkPointKind() == runlifecycle.ForkOriginPointDeploymentRevision {
 		return nil

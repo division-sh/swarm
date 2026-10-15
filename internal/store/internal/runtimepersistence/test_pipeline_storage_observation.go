@@ -18,6 +18,42 @@ type FanOutPublishedOutcomeStorageEvidence struct {
 	Payload       json.RawMessage
 }
 
+type SelectedFanOutOutcomeCorrespondence struct {
+	Outcomes, ExactContinued int
+}
+
+// Observe the original fixed-T storage relation, including NULLs and missing
+// lineage/event/delivery rows. This read grants no execution authority.
+func ReadSelectedFanOutOutcomeCorrespondenceForTest(ctx context.Context, selected any, runID, kind, sourceEventID, eventID, sourceRunID string) (SelectedFanOutOutcomeCorrespondence, error) {
+	var evidence SelectedFanOutOutcomeCorrespondence
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return evidence, err
+	}
+	for _, id := range []string{runID, sourceEventID, eventID, sourceRunID} {
+		if err := validateSelectedForkStorageIdentity(id); err != nil {
+			return evidence, err
+		}
+	}
+	if kind != "continued" && kind != "committed" {
+		return evidence, fmt.Errorf("selected fan-out correspondence requires continued or committed outcomes")
+	}
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT COUNT(*), COUNT(CASE WHEN o.outcome_kind='continued'
+			AND CAST(o.source_event_id AS TEXT)=$3 AND CAST(o.event_id AS TEXT)=$4
+			AND o.inherited_disposition IS NULL AND o.failure IS NULL
+			AND EXISTS(SELECT 1 FROM run_fork_selected_contract_executions x WHERE x.fork_run_id=o.run_id
+				AND x.fork_event_id=o.event_id AND x.source_event_id=o.source_event_id AND x.source_run_id=$5)
+			AND EXISTS(SELECT 1 FROM events e WHERE e.event_id=o.event_id AND e.run_id=o.run_id AND e.created_at=o.created_at)
+			AND EXISTS(SELECT 1 FROM event_deliveries d WHERE d.event_id=o.event_id AND d.run_id=o.run_id AND d.status='delivered')
+			THEN 1 END) FROM fan_out_outcomes o WHERE o.run_id=$1 AND o.outcome_kind=$2`,
+			runID, kind, sourceEventID, eventID, sourceRunID).Scan(&evidence.Outcomes, &evidence.ExactContinued)
+	})
+	if err != nil {
+		return SelectedFanOutOutcomeCorrespondence{}, err
+	}
+	return evidence, nil
+}
+
 type FanOutProgressIntentStorageEvidence struct {
 	Cursor, Cardinality      int
 	Status, SourceMutationID string

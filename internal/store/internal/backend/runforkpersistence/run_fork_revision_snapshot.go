@@ -236,6 +236,7 @@ type runForkRevisionSnapshot struct {
 	ReplyContexts         []runForkRevisionReplyContext
 	FanOutFacts           []runForkRevisionFanOutFact
 	admittedFacts         map[runForkHistoricalFactKey]struct{}
+	mutationsOnly         bool
 }
 
 type runForkHistoricalFactKey struct {
@@ -327,6 +328,13 @@ func loadRunForkRevisionSnapshot(ctx context.Context, tx *sql.Tx, runID string, 
 // The oracle shares fork admission and ordering, but needs only mutation
 // coordinates; unrelated historical families are not its evidence operands.
 func loadRunForkRevisionSnapshotScope(ctx context.Context, tx *sql.Tx, runID string, revision int64, mutationsOnly bool) (*runForkRevisionSnapshot, error) {
+	scope, err := historicalPlanningForTx(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if scope != nil && !mutationsOnly {
+		return scope.resolver.inclusive(ctx, runID, revision)
+	}
 	snapshot, err := loadRunForkRevisionSnapshotRaw(ctx, tx, runID, revision, mutationsOnly)
 	if err != nil || mutationsOnly {
 		return snapshot, err
@@ -359,7 +367,7 @@ func loadRunForkRevisionSnapshotRaw(ctx context.Context, tx *sql.Tx, runID strin
 		return nil, fmt.Errorf("load run fork revision snapshot: %w", err)
 	}
 	defer func() { err = errors.Join(err, rows.Close()) }()
-	snapshot := &runForkRevisionSnapshot{RunID: runID, Revision: revision}
+	snapshot := &runForkRevisionSnapshot{RunID: runID, Revision: revision, mutationsOnly: mutationsOnly}
 	for rows.Next() {
 		var fact runForkHistoricalFactContext
 		var raw []byte

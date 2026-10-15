@@ -1370,6 +1370,17 @@ seam_families:
       route generations. Tests consume and settle the real local carriers;
       the adapters do not expose production tokenless subscription or
       retirement authority.
+  - id: retained_template_fork_failure_observation
+    layer: test_fixture_semantics
+    classification: valid_consumer
+    paths:
+      - internal/serveapp/lifecycle_template_sibling_fork_success_test.go
+    search_dimensions: [typed_connect_recipient_evaluation]
+    notes: >
+      #642 6190268703: logLifecycleTemplateForkTopology is failure-only
+      observation. It composes ConnectReceiverDefinitions with the existing
+      compiled graph's EvaluateMaterializedRecipients and logs its evaluation;
+      it neither dispatches nor grants routing authority.
   - id: locked_entity_operation_test_adapter
     layer: test_fixture_semantics
     classification: valid_consumer

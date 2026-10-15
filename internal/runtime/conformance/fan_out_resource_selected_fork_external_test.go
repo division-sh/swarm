@@ -413,7 +413,7 @@ func TestSelectedDeploymentExternalEffectRecoveryBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					if failed != 0 || pending != 0 {
-						logSelectedDeploymentForkFailure(t, f.db, childID)
+						logSelectedDeploymentForkFailure(t, f.selected, childID)
 						t.Fatalf("R5 settled cut created incomplete delivery: failed=%d pending=%d", failed, pending)
 					}
 				}

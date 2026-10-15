@@ -9,25 +9,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/google/uuid"
 )
-
-type selectedDeploymentForkSettlementProbe struct {
-	runforkexecution.SelectedContractForkLifecycle
-	committed chan string
-	evaluated chan string
-}
-
-func (p selectedDeploymentForkSettlementProbe) BindSelectedDeploymentFanOutGrant(grant startupownership.GrantEvidence) (pipeline.FanOutObligationOwner, error) {
-	owner, err := p.SelectedContractForkLifecycle.BindSelectedDeploymentFanOutGrant(grant)
-	if owner == nil || err != nil {
-		return owner, err
-	}
-	return selectedDeploymentSettlementOwner{FanOutObligationOwner: owner, committed: p.committed, evaluated: p.evaluated}, nil
-}
 
 // R6a: a committed final ordinal cannot make a selected fork quiescent while
 // its receiver is still an exact, stamped pending obligation.
@@ -54,14 +38,10 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 			gate.held.Store(true)
 			t.Cleanup(func() { gate.held.Store(false) })
 			gate.Store = f.selected
-			settled := make(chan string, 16)
-			evaluated := make(chan string, 16)
-			selectedFork, ok := f.selected.(runforkexecution.SelectedContractForkLifecycle)
-			if !ok {
-				t.Fatalf("selected store lacks selected-fork lifecycle: %T", f.selected)
-			}
-			forkStore := selectedDeploymentForkSettlementProbe{SelectedContractForkLifecycle: selectedFork, committed: settled, evaluated: evaluated}
-			owner, recovered := deploymentForkOwnerWithOverrides(t, f, gate, forkStore)
+			observed := newSelectedDeploymentSettlementObservation()
+			owner, recovered := deploymentForkOwnerWithExecutor(t, f, gate, nil, nil, func(executor startupownership.FanOutExecutor) startupownership.FanOutExecutor {
+				return &selectedDeploymentSettlementExecutor{FanOutExecutor: executor, observed: observed}
+			})
 			defer func() { _ = owner.FenceSelectedContexts() }()
 			if len(recovered) != 0 {
 				t.Fatalf("fresh R6a source has selected recovery: %+v", recovered)
@@ -103,13 +83,8 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 			case <-ctx.Done():
 				t.Fatalf("R6a selected final receiver claim not reached: %v", ctx.Err())
 			}
-			for matched := false; !matched; {
-				select {
-				case eventID := <-settled:
-					matched = eventID == finalEventID
-				case <-ctx.Done():
-					t.Fatalf("R6a final publication settlement not reached: %v", ctx.Err())
-				}
+			if err := observed.waitCommitted(ctx, finalEventID); err != nil {
+				t.Fatalf("R6a final publication settlement not reached: %v", err)
 			}
 			var childID, operationState, executionState, feedStatus, deliveryStatus string
 			var cursor, cardinality, outcomes, receipts, attempts int
@@ -117,13 +92,14 @@ func TestDeploymentSourceSelectedLastRowPendingBlocksQuiescenceBothStores(t *tes
 			if err := f.db.QueryRowContext(ctx, `SELECT CAST(fork_run_id AS TEXT),state FROM run_fork_operations WHERE idempotency_key=$1`, key).Scan(&childID, &operationState); err != nil {
 				t.Fatal(err)
 			}
-			select {
-			case runID := <-evaluated:
+			evaluated, _ := observed.snapshot()
+			if len(evaluated) == 0 {
+				t.Fatal("selected fork publication did not pass through BeginFanOutEvaluation")
+			}
+			for _, runID := range evaluated {
 				if runID != childID {
 					t.Fatalf("selected composite evaluation used run %q, want exact fork %q", runID, childID)
 				}
-			default:
-				t.Fatal("selected fork publication did not pass through BeginFanOutEvaluation")
 			}
 			if err := f.db.QueryRowContext(ctx, `SELECT state FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, childID).Scan(&executionState); err != nil {
 				t.Fatal(err)

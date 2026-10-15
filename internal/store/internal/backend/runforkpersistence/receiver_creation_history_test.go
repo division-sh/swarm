@@ -2,6 +2,8 @@ package runforkpersistence
 
 import (
 	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -39,10 +41,20 @@ func TestReceiverConstructionHistoryExactCoordinates(t *testing.T) {
 		FlowTemplate: "child", FlowInstance: "child", FlowConfig: config, Mode: "static",
 		InitialMaterialization: initial.InitialMaterialization,
 	}}
-	exact := pipeline.WorkflowInstance{InstanceID: "child", StorageRef: "child", EntityID: entityID, WorkflowName: "child", WorkflowVersion: recordedHeader.WorkflowVersion(), Mode: "static", ParentFlowID: ".", ParentFlowInstance: forkRun, ParentEntityID: forkRun}
+	exact := pipeline.WorkflowInstance{InstanceID: "child", StorageRef: "child", EntityID: entityID, WorkflowName: "child", WorkflowVersion: recordedHeader.WorkflowVersion(), Mode: "static", ParentFlowID: ".", ParentFlowInstance: forkRun, ParentEntityID: forkRun, CreatedAt: at}
+	childParent := flowidentity.ParentRoute{FlowID: ".", FlowInstance: forkRun, EntityID: forkRun}
+	childConfig, err := recordedHeader.Project(identity.Route(), childParent, "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	childHeader, err := pipeline.DecodeWorkflowInstanceRecordedHeader(identity.Route(), childConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
 	construction := historicalFlowInstanceConstructionCut{
 		plan:  runfork.RunForkPlan{SourceRunID: sourceRun, ForkPoint: runfork.RunForkPoint{Revision: 1}, Entities: []runfork.RunForkEntityState{state}},
 		route: identity.Route(),
+		birth: runForkReceiverBirth{owner: flowidentity.RunScopedFlowInstance{RunID: forkRun, Route: identity.Route()}, header: childHeader, createdAt: at},
 	}
 	for _, cell := range []struct {
 		name   string
@@ -57,6 +69,7 @@ func TestReceiverConstructionHistoryExactCoordinates(t *testing.T) {
 		{"parent_declaration", func(h *pipeline.WorkflowInstance) { h.ParentFlowID = "foreign" }},
 		{"mode", func(h *pipeline.WorkflowInstance) { h.Mode = "template" }},
 		{"entity_type", func(h *pipeline.WorkflowInstance) { h.EntityType = "foreign" }},
+		{"version", func(h *pipeline.WorkflowInstance) { h.WorkflowVersion = "foreign" }},
 	} {
 		t.Run(cell.name, func(t *testing.T) {
 			header := exact
@@ -71,6 +84,66 @@ func TestReceiverConstructionHistoryExactCoordinates(t *testing.T) {
 			}
 		})
 	}
+	t.Run("source_birth_and_physical_versions_must_agree", func(t *testing.T) {
+		selectedConfig, err := recordedHeader.Project(identity.Route(), childParent, "selected-v2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		selectedHeader, err := pipeline.DecodeWorkflowInstanceRecordedHeader(identity.Route(), selectedConfig)
+		if err != nil {
+			t.Fatal(err)
+		}
+		selected := construction
+		header := exact
+		before, err := json.Marshal(selected.plan)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observed, found, err := selected.project(runlifecycle.Snapshot{RunID: forkRun}, header, identity)
+		if err != nil || !found || observed.WorkflowVersion != "v1" || observed.SourceOwner.RunID != sourceRun || observed.SourceRevision != 1 {
+			t.Fatalf("historical version lost its immutable birth/source cut: observation=%+v found=%t err=%v", observed, found, err)
+		}
+		for _, fault := range []string{"version", "birth_and_header_rewritten", "birth_missing", "birth_run", "birth_route", "birth_parent", "birth_time", "birth_version_missing"} {
+			t.Run(fault, func(t *testing.T) {
+				badCut, badHeader := selected, header
+				switch fault {
+				case "version":
+					badHeader.WorkflowVersion = "foreign"
+				case "birth_and_header_rewritten":
+					badCut.birth.header = selectedHeader
+					badHeader.WorkflowVersion = "selected-v2"
+				case "birth_missing":
+					badCut.birth = runForkReceiverBirth{}
+				case "birth_run":
+					badCut.birth.owner.RunID = sourceRun
+				case "birth_route":
+					badCut.birth.owner.Route = flowidentity.StoredRoute("other", "other", "other")
+				case "birth_parent":
+					foreignConfig, err := recordedHeader.Project(identity.Route(), parent, "selected-v2")
+					if err != nil {
+						t.Fatal(err)
+					}
+					badCut.birth.header, err = pipeline.DecodeWorkflowInstanceRecordedHeader(identity.Route(), foreignConfig)
+					if err != nil {
+						t.Fatal(err)
+					}
+				case "birth_time":
+					badCut.birth.createdAt = at.Add(time.Second)
+				case "birth_version_missing":
+					badCut.birth.header = pipeline.WorkflowInstanceRecordedHeader{}
+				}
+				_, found, err := badCut.project(runlifecycle.Snapshot{RunID: forkRun}, badHeader, identity)
+				var corruption *pipeline.FlowInstanceConstructionCorruption
+				if found || !errors.As(err, &corruption) || corruption.RunID != forkRun || corruption.InstancePath != header.StorageRef {
+					t.Fatalf("crossed birth/version was not exact corruption: found=%t err=%v", found, err)
+				}
+			})
+		}
+		after, err := json.Marshal(selected.plan)
+		if err != nil || !reflect.DeepEqual(before, after) || recordedHeader.WorkflowVersion() != "v1" {
+			t.Fatal("selected version observation changed immutable source construction")
+		}
+	})
 	cut := &runForkRevisionSnapshot{RunID: sourceRun, EntityMetadata: []runForkRevisionEntityMetadata{{EntityID: entityID, FlowInstance: "child", ConstructionKind: "constructed"}}}
 	if _, found, err := findProjectedFlowInstanceMetadata(cut, forkRun, "later"); err != nil || found {
 		t.Fatalf("later native receiver adopted absent history: %+v %v", found, err)

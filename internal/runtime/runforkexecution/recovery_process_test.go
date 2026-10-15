@@ -303,7 +303,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 		return
 	}
 	if strings.HasPrefix(os.Getenv("SWARM_SELECTED_CRASH_CUT"), "retained_activity_") {
-		runSelectedActivityResultCrashHelper(t, ctx, backend, db, selected, owner, capability)
+		runSelectedActivityResultCrashHelper(t, ctx, selected, owner, capability)
 		return
 	}
 	if strings.HasPrefix(os.Getenv("SWARM_SELECTED_CRASH_CUT"), "retained_handler_fan_out_") {
