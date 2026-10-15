@@ -95,6 +95,10 @@ func (b *Backend) runTransactionOutcome(ctx context.Context, opts *sql.TxOptions
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
+	if opts == nil || !opts.ReadOnly {
+		write := b.agentRecoveryWrites.ObserveWriteStart()
+		defer write.End()
+	}
 	poolStarted := time.Now()
 	conn, err := b.db.Conn(ctx)
 	if err != nil {

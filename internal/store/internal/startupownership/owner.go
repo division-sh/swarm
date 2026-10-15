@@ -219,6 +219,10 @@ type postgresSession struct {
 	fanOutStore      runtimestartupownership.FanOutServingStore
 }
 
+func (s *postgresSession) AgentRecoveryWriteObserver() *runtimestartupownership.AgentRecoveryWriteObserver {
+	return s.owner.backend.AgentRecoveryWriteObserver()
+}
+
 func (s *postgresSession) Authority() (runtimestartupownership.Authority, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -419,6 +423,10 @@ type sqliteSession struct {
 	fenced           bool
 	released         bool
 	fanOutStore      runtimestartupownership.FanOutServingStore
+}
+
+func (s *sqliteSession) AgentRecoveryWriteObserver() *runtimestartupownership.AgentRecoveryWriteObserver {
+	return s.owner.backend.AgentRecoveryWriteObserver()
 }
 
 func (s *sqliteSession) Authority() (runtimestartupownership.Authority, error) {

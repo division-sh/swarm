@@ -871,6 +871,10 @@ func runAuthorityTransactionWithProof(
 	if fn == nil {
 		return false, nil
 	}
+	if session.backend != nil && (opts == nil || !opts.ReadOnly) {
+		write := session.backend.agentRecoveryWrites.ObserveWriteStart()
+		defer write.End()
+	}
 	probe := session.testTransactions.Begin(opts != nil && opts.ReadOnly, true)
 	defer func() { probe.Finish(err) }()
 	beginStarted := time.Now()

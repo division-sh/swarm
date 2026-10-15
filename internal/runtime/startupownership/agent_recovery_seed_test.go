@@ -16,6 +16,7 @@ type agentRecoverySeedSessionProbe struct {
 	*retainedSessionProbe
 	read          func(context.Context) (AgentRecoverySeedRead, error)
 	authorityRead func() (Authority, error)
+	writes        *AgentRecoveryWriteObserver
 }
 
 func (s *agentRecoverySeedSessionProbe) Authority() (Authority, error) {
@@ -29,10 +30,19 @@ func (s *agentRecoverySeedSessionProbe) ReadAgentRecoverySeed(ctx context.Contex
 	return s.read(ctx)
 }
 
+func (s *agentRecoverySeedSessionProbe) AgentRecoveryWriteObserver() *AgentRecoveryWriteObserver {
+	return s.writes
+}
+
 func newAgentRecoverySeedCapability(t *testing.T) (*processCapability, *agentRecoverySeedSessionProbe, AgentRecoverySeedRead) {
 	t.Helper()
+	return newAgentRecoverySeedCapabilityWithWrites(t, &AgentRecoveryWriteObserver{})
+}
+
+func newAgentRecoverySeedCapabilityWithWrites(t *testing.T, writes *AgentRecoveryWriteObserver) (*processCapability, *agentRecoverySeedSessionProbe, AgentRecoverySeedRead) {
+	t.Helper()
 	session, plan := testRetainedSession(t)
-	reader := &agentRecoverySeedSessionProbe{retainedSessionProbe: session}
+	reader := &agentRecoverySeedSessionProbe{retainedSessionProbe: session, writes: writes}
 	capability, err := newProcessCapability(reader, time.Hour, 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
