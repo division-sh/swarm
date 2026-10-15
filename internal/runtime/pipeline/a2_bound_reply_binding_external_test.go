@@ -2,9 +2,7 @@ package pipeline_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -25,10 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
-	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/google/uuid"
 )
 
@@ -292,8 +287,8 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 				if len(failureLogs) != 1 || !reflect.DeepEqual(failureLogs[0], wantFailure) {
 					t.Fatalf("handler diagnostic discarded or changed canonical refusal: got=%+v want=%+v", failureLogs, wantFailure)
 				}
-				var replies int
-				if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE source_event_id=$1 AND event_name=$2", requestID, source.ResolveFlowEventReference("provider", "provider.replied")).Scan(&replies); err != nil || replies != 0 {
+				replies, err := storetest.CountGateSourceNamedEvents(ctx, selected.events, source.ResolveFlowEventReference("provider", "provider.replied"), requestID)
+				if err != nil || replies != 0 {
 					t.Fatalf("refused provider output persisted a fresh reply: count=%d err=%v", replies, err)
 				}
 				retained, err := selected.events.LoadReplyContext(ctx, recordID)
@@ -329,8 +324,8 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 			if err != nil {
 				t.Fatal(err)
 			}
-			var replyID string
-			if err := selected.db.QueryRowContext(ctx, "SELECT event_id FROM events WHERE source_event_id=$1 AND event_name=$2", requestID, source.ResolveFlowEventReference("provider", "provider.replied")).Scan(&replyID); err != nil {
+			replyID, err := storetest.ReadTemplateSourceNamedEventIdentity(ctx, selected.events, source.ResolveFlowEventReference("provider", "provider.replied"), requestID)
+			if err != nil {
 				t.Fatalf("provider response absent: %v logs=%s", err, logger.String())
 			}
 			reply, found, err := selected.events.LoadPreparedPublishEvent(ctx, replyID)
@@ -342,14 +337,14 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 				if route.Recipient.ID() != collector.Key() || route.Target.Route() != record.Origin || !reflect.DeepEqual(siblingBefore, loadSibling()) {
 					t.Fatalf("exact A reply expanded to a later independently subscribed B: %#v", route)
 				}
-				var deliveries int
-				if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node'", replyID).Scan(&deliveries); err != nil || deliveries != 1 {
+				deliveries, err := storetest.CountGateEventNodeDeliveries(ctx, selected.events, replyID)
+				if err != nil || deliveries != 1 {
 					t.Fatalf("exact reply persisted extra sibling deliveries: count=%d err=%v", deliveries, err)
 				}
 			}
 			assertExactJoinDeliveryStatus(t, selected, ctx, replyID, collector.Key(), "dead_letter")
-			var raw string
-			if err := selected.db.QueryRowContext(ctx, "SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_id=$2", replyID, collector.Key()).Scan(&raw); err != nil {
+			raw, err := storetest.ReadGateSubscriberFailure(ctx, selected.events, replyID, collector.Key())
+			if err != nil {
 				t.Fatal(err)
 			}
 			var refusal failures.Envelope
@@ -408,9 +403,8 @@ func testA2BoundReplyJourney(t *testing.T, corruptEntryField, siblingFlow string
 						t.Fatalf("publish real provider ordinary trigger: %v", err)
 					}
 					a2KnownTargetWaitForSettlement(t, ctx, bus, probe.Probe, ordinaryTrigger, provider.Key(), "completed", "delivered", logger)
-					var ordinaryID string
-					if err := selected.db.QueryRowContext(ctx, "SELECT event_id FROM events WHERE source_event_id=$1 AND event_name=$2",
-						ordinaryTrigger.ID(), source.ResolveFlowEventReference("provider", "provider.notified")).Scan(&ordinaryID); err != nil {
+					ordinaryID, err := storetest.ReadTemplateSourceNamedEventIdentity(ctx, selected.events, source.ResolveFlowEventReference("provider", "provider.notified"), ordinaryTrigger.ID())
+					if err != nil {
 						t.Fatalf("real provider ordinary output absent: %v logs=%s", err, logger.String())
 					}
 					ordinary, found, err := selected.events.LoadPreparedPublishEvent(ctx, ordinaryID)
@@ -458,43 +452,9 @@ func a2BoundReplySourceSnapshot(t *testing.T, ctx context.Context, selected gate
 	if concretePath == "" {
 		t.Fatal("source snapshot requires the actual delivery's concrete path")
 	}
-	// A fieldless source may have a header without state. Measure both persisted
-	// halves without inventing an entity ID or deriving a semantic owner from path.
-	snapshot := make(map[string][][]any)
-	for _, table := range []struct{ name, path, order string }{{"flow_instances", "instance_path", "instance_path"}, {"entity_state", "flow_instance", "entity_id"}} {
-		rows, err := selected.db.QueryContext(ctx, "SELECT * FROM "+table.name+" WHERE run_id=$1 AND "+table.path+"=$2 ORDER BY "+table.order, runID, concretePath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		columns, err := rows.Columns()
-		if err != nil {
-			rows.Close()
-			t.Fatal(err)
-		}
-		snapshot[table.name] = nil
-		for rows.Next() {
-			values, destinations := make([]any, len(columns)), make([]any, len(columns))
-			for index := range values {
-				destinations[index] = &values[index]
-			}
-			if err := rows.Scan(destinations...); err != nil {
-				rows.Close()
-				t.Fatal(err)
-			}
-			for index, value := range values {
-				if raw, ok := value.([]byte); ok {
-					values[index] = string(raw)
-				}
-			}
-			snapshot[table.name] = append(snapshot[table.name], values)
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			t.Fatal(err)
-		}
-		if err := rows.Close(); err != nil {
-			t.Fatal(err)
-		}
+	snapshot, err := storetest.ReadBoundReplySourceStorage(ctx, selected.events, runID, concretePath)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return snapshot
 }
@@ -526,31 +486,10 @@ func a2CorruptBoundReplyEntry(t *testing.T, ctx context.Context, selected gateRe
 	if err != nil {
 		t.Fatal(err)
 	}
-	dialect := authoractivityfixture.DialectSQLite
-	query := `UPDATE reply_contexts SET origin_route=? WHERE reply_context_id=? AND run_id=? AND state='open' AND accepted_reply_event_id IS NULL`
-	if selected.postgres {
-		dialect = authoractivityfixture.DialectPostgres
-		query = `UPDATE reply_contexts SET origin_route=$1::jsonb WHERE reply_context_id=$2 AND run_id=$3::uuid AND state='open' AND accepted_reply_event_id IS NULL`
-	}
 	// Deliberate persisted hostility, not a replacement reader or claim closure.
 	// The selected-store fixture owner commits the single corrupt row and its
 	// existing reply-context revision fact through the native transaction protocol.
-	if err := eventfixture.RunMutation(ctx, selected.db, dialect, func(ctx context.Context, attempt *eventfixture.Attempt) error {
-		if err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-			result, err := tx.ExecContext(ctx, query, string(raw), original.ID, original.RunID)
-			if err != nil {
-				return err
-			}
-			rows, err := result.RowsAffected()
-			if err != nil || rows != 1 {
-				return fmt.Errorf("corrupt exact retained reply entry: rows=%d err=%v", rows, err)
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-		return attempt.AddFact(original.RunID, runforkrevisionfixture.FamilyReplyContexts, original.ID)
-	}).Err(); err != nil {
+	if err := storetest.CorruptOpenReplyOrigin(ctx, selected.events, original.RunID, original.ID, string(raw)); err != nil {
 		t.Fatalf("commit retained reply entry hostility: %v", err)
 	}
 	corrupted, err := selected.events.LoadReplyContext(ctx, original.ID)

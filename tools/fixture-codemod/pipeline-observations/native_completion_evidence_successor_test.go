@@ -29,6 +29,7 @@ func TestNativeCompletionEvidenceSuccessorPreservesHistoryAndRefusals(t *testing
 	if err := json.Unmarshal(recipeBytes, &current); err != nil {
 		t.Fatal(err)
 	}
+	current = catchUp2542HistoricalRows(t, current, true)
 	if len(current) != history.PopulationSize {
 		t.Fatal("completion successor changed the finite recipe population")
 	}

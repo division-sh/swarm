@@ -25,6 +25,11 @@ const selectedConfigSetup1801 = `loadedConfig, err := cliapp.LoadRuntimeConfigWi
 // USER6170905244 and reviewer-g6183746080 permit only this selected-file setup
 // edit. Full reversal pins every backend, scenario and non-config statement.
 func validateSelectedConfigSuccessor1801(row recipe, source string) error {
+	var integrationErr error
+	row, source, integrationErr = catchUp2542PriorMasterPair(row, source)
+	if integrationErr != nil {
+		return integrationErr
+	}
 	if row.Family != "native-run-setup-family144" || row.File != selectedConfigFile1801 || row.Function != selectedConfigFunction1801 || row.Removed || row.Mechanical != nil {
 		return fmt.Errorf("selected-config recipe identity changed")
 	}

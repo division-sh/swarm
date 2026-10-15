@@ -18,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestActivateSelectedContractRunForkDelegatesNonSelectedActivation(t *testing.T) {
@@ -355,9 +354,7 @@ func TestActivateSelectedContractRunForkPreservesPlannerBlockersBeforeMutation(t
 // Complete both-store execution is covered by the staged replay tests.
 func selectedContractGateOwnerForTest(t *testing.T) SelectedContractExecutionOwner {
 	t.Helper()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	return selectedContractExecutionOwnerForTest(t, storetest.AdmitPostgresRuntimeStore(t, db))
+	return selectedContractExecutionOwnerForTest(t, storetest.StartPostgresRuntimeStore(t))
 }
 
 type fakeSelectedContractActivationStore struct {

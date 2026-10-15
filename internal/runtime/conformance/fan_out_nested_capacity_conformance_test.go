@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -64,7 +65,7 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 	if holdChild {
 		gates = append(gates, newNestedChildHandlerGate(t, "account.task.requested"))
 	}
-	rt, db := newNestedServingRuntime(t, backend, source, nil, probe, gates...)
+	rt := newNestedServingRuntime(t, backend, source, nil, probe, gates...)
 	t.Cleanup(func() {
 		if t.Failed() {
 			t.Logf("nested serving failure counters: %+v", probe.snapshot())
@@ -85,7 +86,7 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 	publishNotifyAllChildrenRunCreatingEvent(t, ctx, rt, source, runID, "portfolio.opened", map[string]any{"portfolio_id": "portfolio-main"})
 	if probe.rejection != nil {
 		publishNotifyAllChildrenEventAsync(t, ctx, rt, source, runID, "portfolio.accounts.register.requested", map[string]any{"portfolio_id": "portfolio-main", "account_ids": accounts})
-		probe.rejection.assertReleasedBeforeRetry(t, ctx, db, probe, runID, len(accounts))
+		probe.rejection.assertReleasedBeforeRetry(t, ctx, rt.selected, probe, runID, len(accounts))
 	} else {
 		publishNotifyAllChildrenEvent(t, ctx, rt, source, runID, "portfolio.accounts.register.requested", map[string]any{"portfolio_id": "portfolio-main", "account_ids": accounts})
 	}
@@ -111,7 +112,9 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 		deadline := time.Now().Add(5 * time.Second)
 		var parentStatus string
 		for time.Now().Before(deadline) {
-			if err := db.QueryRowContext(ctx, `SELECT status FROM fan_out_obligation_barriers WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`, held.Key.RunID, held.Key.TriggeringDeliveryID, held.Key.ElementRef.FlowPath, held.Key.ElementRef.Family, held.Key.ElementRef.SemanticPath).Scan(&parentStatus); err != nil {
+			var err error
+			parentStatus, err = storetest.ReadNestedFanOutBarrierStatus(ctx, rt.selected, held.Key)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if parentStatus == "fired" {
@@ -122,11 +125,12 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 		if parentStatus != "fired" {
 			t.Fatalf("parent direct barrier waited on held grandchild: %s", parentStatus)
 		}
-		assertNestedExactBarrier(t, ctx, db, held.Key, "fired", fanoutbarrier.Summary{Total: len(accounts), Succeeded: len(accounts)})
-		var intents, owed int
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(cardinality-cursor),0) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&intents, &owed); err != nil {
+		assertNestedExactBarrier(t, ctx, rt.selected, held.Key, "fired", fanoutbarrier.Summary{Total: len(accounts), Succeeded: len(accounts)})
+		backlog, err := storetest.ReadNestedRunFanOutOwed(ctx, rt.selected, runID)
+		if err != nil {
 			t.Fatal(err)
 		}
+		intents, owed := backlog.Intents, backlog.Owed
 		if intents != len(accounts)+2 || owed < 0 || owed > 2*(len(accounts)-1) || owed%2 != 0 {
 			t.Fatalf("held real child backlog: intents=%d owed=%d want=%d/even[0,%d]", intents, owed, len(accounts)+2, 2*(len(accounts)-1))
 		}
@@ -134,9 +138,9 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 		if err != nil || len(view.Deliveries) != 1 || view.Deliveries[0].Terminal || view.NoDelivery != nil {
 			t.Fatalf("held actual child public disposition=%+v err=%v", view, err)
 		}
-		assertNestedPredecessorsSettledWhileChildHeld(t, ctx, db, nestedPublicReader(t, rt.selected), parents, signal.EventID)
+		assertNestedPredecessorsSettledWhileChildHeld(t, ctx, rt.selected, nestedPublicReader(t, rt.selected), parents, signal.EventID)
 		effectName := eventidentity.ExternalizeForFlow(view.Deliveries[0].Target.FlowInstance, []string{"account.task.completed"}, "account.task.completed")
-		if ids := nestedEventIDs(t, ctx, db, runID, effectName, signal.EventID); len(ids) != 0 {
+		if ids := nestedEventIDs(t, ctx, rt.selected, runID, effectName, signal.EventID); len(ids) != 0 {
 			t.Fatalf("held child published business effects early: %v", ids)
 		}
 		// The durable continuation may issue sibling work while the child
@@ -169,10 +173,10 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 	for _, parent := range parents {
 		assertNestedDeliveredEvent(t, ctx, reader, parent.ID, 1)
 	}
-	assertNestedSiblingTaskEffects(t, ctx, rt.selected, db, runID,
+	assertNestedSiblingTaskEffects(t, ctx, rt.selected, runID,
 		"account.task.requested", "account.task.completed", parents)
-	assertNestedExactBarrier(t, ctx, db, held.Key, "fired", fanoutbarrier.Summary{Total: len(accounts), Succeeded: len(accounts)})
-	completionID := loadNotifyAllChildrenSingleEventID(t, ctx, rt.selected, db, runID, source.ResolveFlowEventReference("portfolio", "portfolio.notify.completed"))
+	assertNestedExactBarrier(t, ctx, rt.selected, held.Key, "fired", fanoutbarrier.Summary{Total: len(accounts), Succeeded: len(accounts)})
+	completionID := loadNotifyAllChildrenSingleEventID(t, ctx, rt.selected, runID, source.ResolveFlowEventReference("portfolio", "portfolio.notify.completed"))
 	completion, err := reader.LoadOperatorEvent(ctx, completionID)
 	if err != nil || completion.Payload["total"] != float64(len(accounts)) || completion.Payload["succeeded"] != float64(len(accounts)) {
 		t.Fatalf("parent direct-membership public summary=%+v err=%v", completion, err)
@@ -189,21 +193,15 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 	for _, parent := range parents {
 		view := assertNestedDeliveredEvent(t, ctx, reader, parent.ID, 1)
 		name := eventidentity.ExternalizeForFlow(view.Deliveries[0].Target.FlowInstance, []string{"account.tasks.completed"}, "account.tasks.completed")
-		completionRows, err := db.QueryContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2`, runID, name)
+		completionRows, err := storetest.ReadNestedRunNamedEventIDs(ctx, rt.selected, runID, name)
 		if err != nil {
 			t.Fatal(err)
 		}
 		count := 0
-		for completionRows.Next() {
-			var id string
-			if err := completionRows.Scan(&id); err != nil {
-				t.Fatal(err)
-			}
+		for _, id := range completionRows {
 			childCompletions = append(childCompletions, id)
 			count++
 		}
-		err = completionRows.Err()
-		completionRows.Close()
 		if err != nil || count != 1 {
 			t.Fatalf("nested sibling %s completion name=%s count=%d err=%v", parent.AccountID, name, count, err)
 		}
@@ -266,19 +264,15 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 		if r.LoadedAt.Before(parentReturned) || r.Publications != 2 || r.Key == held.Key {
 			t.Fatalf("nested intent requires independent post-parent turn: parent=%+v nested=%+v", held, r)
 		}
-		assertNestedExactBarrier(t, ctx, db, r.Key, "fired", fanoutbarrier.Summary{Total: 2, Succeeded: 2})
+		assertNestedExactBarrier(t, ctx, rt.selected, r.Key, "fired", fanoutbarrier.Summary{Total: 2, Succeeded: 2})
 	}
-	rows, err := db.QueryContext(ctx, `SELECT flow_instance,current_state,fields FROM entity_state WHERE run_id=$1`, runID)
+	rows, err := storetest.ReadNestedRunEntityStates(ctx, rt.selected, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	states := map[string]string{}
-	for rows.Next() {
-		var path, state string
-		var raw []byte
-		if err := rows.Scan(&path, &state, &raw); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range rows {
+		path, state, raw := row.Path, row.State, row.Fields
 		var fields map[string]any
 		if err := json.Unmarshal(raw, &fields); err != nil {
 			t.Fatal(err)
@@ -292,8 +286,6 @@ func proveNestedCapacityOneHandoff(t *testing.T, backend string, accounts []stri
 			states[key] = path
 		}
 	}
-	err = rows.Err()
-	rows.Close()
 	if err != nil || len(states) != 2*len(accounts) {
 		t.Fatalf("nested actual task state count=%d err=%v", len(states), err)
 	}

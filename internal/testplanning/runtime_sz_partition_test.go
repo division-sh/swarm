@@ -13,7 +13,9 @@ import (
 )
 
 const originalRuntimeSZRun = `^Test[S-Z].*$`
-const originalRuntimeSZChildren = "948ca28d566a020c6689516404b061fa4bde16aa1250fa34ea630c622a4682e2"
+
+// Original full-06 children plus three template and two supplemental controls.
+const pinnedRuntimeSZChildren = "19740b886a96d1fc893094b9c2e5435f06037d82292d783c73bcd86dcac70218"
 
 var runtimeSZUnits = []string{"store-runtime-selected", "store-runtime-s-z-rest"}
 
@@ -88,8 +90,8 @@ func validateRuntimeSZChildren(policy Policy) error {
 	if err != nil {
 		return err
 	}
-	if actual := fmt.Sprintf("%x", sha256.Sum256(data)); actual != originalRuntimeSZChildren {
-		return fmt.Errorf("original full-06 required children changed: %s", actual)
+	if actual := fmt.Sprintf("%x", sha256.Sum256(data)); actual != pinnedRuntimeSZChildren {
+		return fmt.Errorf("pinned S-Z required children changed: %s", actual)
 	}
 	return nil
 }

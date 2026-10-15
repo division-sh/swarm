@@ -11,6 +11,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -93,10 +95,18 @@ func TestUnstartedClaimedTurnTerminationBothStores(t *testing.T) {
 					t.Fatal("termination winner admitted a provider attempt")
 				}
 				command := effects.CanceledTurnCommand{Origin: intent.Origin}
+				process, err := agentfixture.ProcessCapability(t, cleanup, fixture.store)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := startupownership.SeedAgentRecovery(cleanup, process); err != nil {
+					t.Fatal(err)
+				}
 				result, err := fixture.store.(effects.CanceledTurnStore).CommitCanceledTurn(cleanup, command)
 				if err != nil || result.Validate() != nil || result.Delivery.Status != deliverylifecycle.StatusCanceled || result.Delivery.ReasonCode != "terminate" {
 					t.Fatalf("unstarted exact origin did not settle: %+v err=%v", result, err)
 				}
+				assertAgentRecoveryReseedsAfterNativeMutation(t, cleanup, fixture.store, process)
 				repeat, err := fixture.store.(effects.CanceledTurnStore).CommitCanceledTurn(cleanup, command)
 				if err != nil || repeat.Validate() != nil || !repeat.Delivery.SettledAt.Equal(result.Delivery.SettledAt) {
 					t.Fatalf("unstarted retry changed outcome: %+v err=%v", repeat, err)

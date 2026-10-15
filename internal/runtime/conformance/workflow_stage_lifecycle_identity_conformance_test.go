@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -31,7 +30,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -102,27 +100,25 @@ func TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends(t
 
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T) (any, stageLifecycleIdentityStore, *sql.DB)
+		setup func(*testing.T) (any, stageLifecycleIdentityStore)
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (any, stageLifecycleIdentityStore, *sql.DB) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected := storetest.AdmitPostgresRuntimeStore(t, db)
-				return selected, selected, db
+			setup: func(t *testing.T) (any, stageLifecycleIdentityStore) {
+				selected := storetest.StartPostgresRuntimeStore(t)
+				return selected, selected
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (any, stageLifecycleIdentityStore, *sql.DB) {
+			setup: func(t *testing.T) (any, stageLifecycleIdentityStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
-				return selected, selected, storetest.DatabaseForTest(selected)
+				return selected, selected
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, lifecycleStore, db := tc.setup(t)
+			selected, lifecycleStore := tc.setup(t)
 			runtime, processCapability, publications := newStageLifecycleIdentityRuntime(t, selected, module)
 			startStageLifecycleIdentityRuntime(t, runtime)
 			runtimeCtx := testAuthorActivityContextForBundle(context.Background(), runtime.Options.SourceArtifactFact)
@@ -147,7 +143,7 @@ func TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends(t
 			if initial.CurrentState != "collecting" || initial.Status != "active" {
 				t.Fatalf("committed construction = %#v, want initial collecting/active", initial)
 			}
-			setupDeliveryID := assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, db, setupEventID, activation)
+			setupDeliveryID := assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, setupEventID, activation)
 			instance := assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "review", "active")
 			reviewEntry := assertStageLifecycleEntryIdentity(t, instance, flowIdentity, "delivery", setupEventID, setupDeliveryID)
 
@@ -170,7 +166,7 @@ func TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends(t
 			runtimeCtx = testAuthorActivityContextForBundle(context.Background(), runtime.Options.SourceArtifactFact)
 			runCtx = runtimecorrelation.WithRunID(runtimeCtx, runID)
 			assertStageLifecycleIndexedConstruction(t, runCtx, lifecycleStore, module.source, flowIdentity)
-			if deliveryID := assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, db, setupEventID, activation); deliveryID != setupDeliveryID {
+			if deliveryID := assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, setupEventID, activation); deliveryID != setupDeliveryID {
 				t.Fatal("restart replaced the admitted setup delivery")
 			}
 			instance = assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "review", "active")
@@ -231,7 +227,7 @@ func TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends(t
 			memberBEventID := publishStageLifecycleIdentityEvent(t, runCtx, runtime.Bus, module.source, activation, "scout.member.done", map[string]any{
 				"member_id": memberB, "batch_id": batchID, "value": 22,
 			})
-			assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, db, memberBEventID, activation)
+			assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, memberBEventID, activation)
 			instance, join := waitStageLifecycleJoin(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, batchID, 1, "awaiting", "active")
 			if join.Status != joinruntime.StatusOpen || join.Completed() != 1 || join.Expected() != 2 {
 				t.Fatalf("partial keyed join = %#v, want open 1/2", join)
@@ -244,7 +240,7 @@ func TestKeyedStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBackends(t
 			memberAEventID := publishStageLifecycleIdentityEvent(t, runCtx, runtime.Bus, module.source, activation, "scout.member.done", map[string]any{
 				"member_id": memberA, "batch_id": batchID, "value": 11,
 			})
-			assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, db, memberAEventID, activation)
+			assertStageLifecycleDeliveryRoute(t, runCtx, lifecycleStore, memberAEventID, activation)
 			instance = assertStageLifecycleInstanceIdentity(t, runCtx, runtime.Pipeline, flowIdentity, activation.EntityID, "complete", "active")
 			if !instance.TerminatedAt.IsZero() {
 				t.Fatal("ordinary final-stage entry synthesized an operational termination occurrence")
@@ -546,7 +542,7 @@ func publishStageLifecycleIdentityEvent(t *testing.T, ctx context.Context, bus *
 	return eventID
 }
 
-func assertStageLifecycleDeliveryRoute(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, db *sql.DB, eventID string, activation stageLifecycleIdentityActivation) string {
+func assertStageLifecycleDeliveryRoute(t *testing.T, ctx context.Context, selected stageLifecycleIdentityStore, eventID string, activation stageLifecycleIdentityActivation) string {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	var (
@@ -590,7 +586,7 @@ func assertStageLifecycleDeliveryRoute(t *testing.T, ctx context.Context, select
 				failure += ": " + cause
 			}
 		}
-		t.Fatalf("authored keyed delivery status=%s reason=%s failure=%q attributes=%#v logs=%s err=%v, want delivered", snapshot.Status, snapshot.ReasonCode, failure, failureAttributes, stageLifecycleRuntimeLogs(db), err)
+		t.Fatalf("authored keyed delivery status=%s reason=%s failure=%q attributes=%#v logs=%s err=%v, want delivered", snapshot.Status, snapshot.ReasonCode, failure, failureAttributes, stageLifecycleRuntimeLogs(selected), err)
 	}
 	return deliveryID
 }
@@ -623,22 +619,13 @@ func assertStageLifecycleEntryIdentity(t *testing.T, instance runtimepipeline.Wo
 	return entry
 }
 
-func stageLifecycleRuntimeLogs(db *sql.DB) string {
-	if db == nil {
+func stageLifecycleRuntimeLogs(selected any) string {
+	if selected == nil {
 		return ""
 	}
-	rows, err := db.Query(`SELECT payload FROM events WHERE event_name = 'platform.runtime_log' ORDER BY created_at DESC LIMIT 20`)
+	logs, err := storetest.ReadStageLifecycleRuntimeLogPayloads(context.Background(), selected)
 	if err != nil {
 		return err.Error()
-	}
-	defer rows.Close()
-	var logs []string
-	for rows.Next() {
-		var payload string
-		if err := rows.Scan(&payload); err != nil {
-			return err.Error()
-		}
-		logs = append(logs, payload)
 	}
 	raw, _ := json.Marshal(logs)
 	return string(raw)

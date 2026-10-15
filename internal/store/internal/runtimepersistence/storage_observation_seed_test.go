@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/google/uuid"
 	"strings"
@@ -35,15 +36,30 @@ func seedDeliveryRecoveryClaim(t *testing.T, fixture authorActivityReceiptFixtur
 	t.Helper()
 	runID := uuid.NewString()
 	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	ctx = correlation.WithRunID(ctx, runID)
+	source, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("delivery observation fixture requires its original source")
+	}
+	selected, ok := fixture.store.(agentFixtureFlowStore)
+	if !ok {
+		t.Fatalf("delivery observation fixture requires native agent lifecycle roles: %T", fixture.store)
+	}
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "recovery.requested", "gateway", "", nil, 0, runID, events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: mustTestAgentIdentityForRun(runID, "agent-a", "recovery/instance-a")}
-	selected := fixture.store.(deliveryFixtureStore)
-	if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
+	admission := admitAgentClaimProfileIdentity(t, ctx, selected, route.AgentIdentity, source)
+	event, err := bindSemanticEventFixturePayload(event)
+	if err != nil {
 		t.Fatal(err)
 	}
+	commitSelectedReceiverClaimEvent(t, ctx, selected, event, route, admission.authority)
 	claimed, err := claimDeliveryFixture(ctx, selected, event, route)
 	if err != nil {
 		t.Fatal(err)
+	}
+	profile, err := ReadFirstAgentClaimProfileForTest(ctx, selected, claimed.Snapshot)
+	if err != nil || !profile.MatchesFirstAdmission(event, route, admission.authority) {
+		t.Fatalf("delivery observation fixture did not capture its actual first admission: %+v err=%v", profile, err)
 	}
 	return claimed
 }

@@ -1,11 +1,13 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestChannelNativeInstallAbruptProcessDeathPublicJourney(t *testing.T) {
@@ -16,15 +18,7 @@ func TestChannelNativeInstallAbruptProcessDeathPublicJourney(t *testing.T) {
 				t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 				first := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
 				h.endpoint = first.endpoint(t)
-				driver := "sqlite"
-				if backend == servedparity.BackendExplicitPostgres {
-					driver = "postgres"
-				}
-				db, err := sql.Open(driver, h.storeDSN)
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() { _ = db.Close() })
+				reader := channelProcessStorageObservation(t, h)
 				var arrived <-chan struct{}
 				var release func()
 				if cut == "launched" {
@@ -43,7 +37,7 @@ func TestChannelNativeInstallAbruptProcessDeathPublicJourney(t *testing.T) {
 				if cut == "launched" {
 					state = "launched"
 				}
-				operation, setting := waitChannelNativeProcessAttempt(t, db, state)
+				operation, setting := waitChannelNativeProcessAttempt(t, reader, state)
 				if err := first.kill(); err != nil || first.waitError() == nil {
 					t.Fatalf("native process did not die abruptly: %v / %v", err, first.waitError())
 				}
@@ -56,8 +50,8 @@ func TestChannelNativeInstallAbruptProcessDeathPublicJourney(t *testing.T) {
 				if cut == "launched" {
 					wantAttempt, wantSetting = "outcome_uncertain", "uncertain"
 				}
-				afterOperation, afterSetting := waitChannelNativeProcessAttempt(t, db, wantAttempt)
-				readback := waitChannelNativeProcessSetting(t, db, setting, wantSetting)
+				afterOperation, afterSetting := waitChannelNativeProcessAttempt(t, reader, wantAttempt)
+				readback := waitChannelNativeProcessSetting(t, reader, setting, wantSetting)
 				if operation != afterOperation || setting != afterSetting || readback.Valid != (cut == "settled") {
 					t.Fatalf("native recovery lost exact outcome: op=%s/%s setting=%s/%s readback=%v want=%s", operation, afterOperation, setting, afterSetting, readback, wantSetting)
 				}
@@ -72,41 +66,37 @@ func TestChannelNativeInstallAbruptProcessDeathPublicJourney(t *testing.T) {
 	}
 }
 
-func waitChannelNativeProcessSetting(t *testing.T, db *sql.DB, setting, want string) sql.NullString {
+func waitChannelNativeProcessSetting(t *testing.T, reader storetest.ChannelProcessObservation, setting, want string) sql.NullString {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		var state string
-		var readback sql.NullString
-		if err := db.QueryRow(`SELECT state,readback_hash FROM channel_native_settings WHERE setting_id=$1`, setting).Scan(&state, &readback); err != nil {
+		observed, err := reader.ReadChannelNativeProcessSettingStorage(context.Background(), setting)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if state == want {
-			return readback
+		if observed.State == want {
+			return observed.Readback
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("native setting state=%s want=%s readback=%v", state, want, readback)
+			t.Fatalf("native setting state=%s want=%s readback=%v", observed.State, want, observed.Readback)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-func waitChannelNativeProcessAttempt(t *testing.T, db *sql.DB, state string) (string, string) {
+func waitChannelNativeProcessAttempt(t *testing.T, reader storetest.ChannelProcessObservation, state string) (string, string) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		var operation, setting, actual string
-		err := db.QueryRow(`SELECT CAST(o.operation_id AS TEXT),CAST(s.setting_id AS TEXT),a.state
-			FROM channel_native_settings s JOIN runtime_external_effect_operations o ON o.operation_id=s.install_operation_id
-			JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id WHERE o.authority_kind='channel_native_setting'`).Scan(&operation, &setting, &actual)
+		observed, err := reader.ReadChannelNativeProcessAttemptStorage(context.Background())
 		if err != nil && err != sql.ErrNoRows {
 			t.Fatal(err)
 		}
-		if err == nil && actual == state {
-			return operation, setting
+		if err == nil && observed.State == state {
+			return observed.OperationID, observed.SettingID
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("native install attempt=%s want=%s: %v", actual, state, err)
+			t.Fatalf("native install attempt=%s want=%s: %v", observed.State, state, err)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

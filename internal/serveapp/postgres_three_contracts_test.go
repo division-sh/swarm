@@ -87,13 +87,21 @@ func TestServePostgresLossAndRestartFromDurableState(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Cleanup(func() { _ = observer.Close() })
+			t.Cleanup(func() {
+				_ = observer.Close()
+			})
+			var reader receiverProofStateReader
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+				reader = requireReceiverProofStateReader(t, p.deps.EventStore)
+			})
 			stubServeRuntimeWorkspaceLifecycle(t)
 			oldBuild := buildStoresForServe
 			buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 				return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: storebackend.Selection{Backend: storebackend.BackendPostgres}, PostgresDSN: server.dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
 			}
-			t.Cleanup(func() { buildStoresForServe = oldBuild })
+			t.Cleanup(func() {
+				buildStoresForServe = oldBuild
+			})
 			root := writeServedEventPublishFollowUpFixture(t)
 			configPath := filepath.Join(t.TempDir(), "swarm.yaml")
 			if err := os.WriteFile(configPath, []byte("runtime:\n  recovery_on_startup: true\nworkspace: {}\n"), 0600); err != nil {
@@ -104,7 +112,7 @@ func TestServePostgresLossAndRestartFromDurableState(t *testing.T) {
 			serve.waitForReadyLine()
 			endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/v1/rpc"
 			initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.received", "bundle_hash": servedEventPublishFixtureBundleHash(t, root), "payload": map[string]any{"item_id": "durable-before-loss"}, "idempotency_key": "2444-before-loss"})
-			entityID := requireServedEventPublishEntityState(t, observer, "postgres", initial.RunID, "", "waiting")
+			entityID := requireServedEventPublishEntityState(t, reader, "postgres", initial.RunID, "", "waiting")
 			requireServedEntityReadback(t, endpoint, initial.RunID, entityID, "waiting")
 			var beforeAuthority string
 			if err := observer.QueryRow(`SELECT lease_id::text FROM runtime_process_generation WHERE singleton_id=1`).Scan(&beforeAuthority); err != nil {
@@ -156,12 +164,12 @@ func TestServePostgresLossAndRestartFromDurableState(t *testing.T) {
 				t.Fatal("restart reused predecessor process authority")
 			}
 			follow := requireServedEventPublishRPCResult(t, nextEndpoint, map[string]any{"event_name": "item.processed", "run_id": initial.RunID, "payload": map[string]any{"item_id": "review"}, "idempotency_key": "2444-after-loss"})
-			requireServedEventPublishEntityState(t, observer, "postgres", initial.RunID, entityID, "done")
-			requireServedRunStatusWithDebug(t, nextEndpoint, observer, "postgres", initial.RunID, "completed")
+			requireServedEventPublishEntityState(t, reader, "postgres", initial.RunID, entityID, "done")
+			requireServedRunStatusWithDebug(t, nextEndpoint, reader, "postgres", initial.RunID, "completed")
 			if follow.RunID != initial.RunID || follow.NewRunCreated {
 				t.Fatalf("successor lost durable run identity: %#v", follow)
 			}
-			if n := servedEventPublishScalarCount(t, observer, "postgres", "application_events_by_run", initial.RunID, ""); n != 2 {
+			if n := servedEventPublishScalarCount(t, reader, "postgres", "application_events_by_run", initial.RunID, ""); n != 2 {
 				t.Fatalf("application events=%d want 2, no duplicate processing", n)
 			}
 			if code := restarted.stop(); code != 0 {

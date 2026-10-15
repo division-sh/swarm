@@ -34,6 +34,7 @@ const (
 	AuthoredSubscriptionFailurePatternUnauthorized   AuthoredSubscriptionFailure = "pattern_unauthorized"
 	AuthoredSubscriptionFailureTimerPatternForbidden AuthoredSubscriptionFailure = "timer_pattern_forbidden"
 	AuthoredSubscriptionFailureSemanticScopeInvalid  AuthoredSubscriptionFailure = "semantic_scope_invalid"
+	AuthoredSubscriptionFailureUnanchoredAgentOrigin AuthoredSubscriptionFailure = "agent_origin_unanchored"
 )
 
 // AuthoredSubscriptionRequest carries the complete scope needed to classify
@@ -256,6 +257,12 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 			return failedAuthoredSubscription(result, AuthoredSubscriptionFailurePatternUnauthorized,
 				fmt.Sprintf("%s %q subscription %q cannot be resolved in its declaring scope", req.ConsumerKind, req.ConsumerID, req.Authored))
 		}
+		if req.ConsumerKind == AuthoredSubscriptionConsumerAgent {
+			if control := unanchoredAgentControlOrigin(req.FlowPath, pattern); control != "" {
+				return failedAuthoredSubscription(result, AuthoredSubscriptionFailureUnanchoredAgentOrigin,
+					fmt.Sprintf("agent %q subscription %q admits control event %q without an activity-order anchor", req.ConsumerID, req.Authored, control))
+			}
+		}
 		result.class = AuthoredSubscriptionLocalPattern
 		result.persistedValue = req.Authored
 		result.routePatterns = []string{pattern}
@@ -263,26 +270,7 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 	}
 
 	if req.ConsumerKind == AuthoredSubscriptionConsumerAgent {
-		resolved, err := admitSameScopeAgentExact(req.FlowPath, req.Authored)
-		if err != nil {
-			return failedAuthoredSubscription(result, AuthoredSubscriptionFailureQualifiedExact,
-				fmt.Sprintf("agent %q subscription %q: %v", req.ConsumerID, req.Authored, err))
-		}
-		result.class = AuthoredSubscriptionLocalExact
-		if strings.Contains(req.Authored, "/") {
-			result.class = AuthoredSubscriptionSameScopeAgentExact
-		}
-		result.localEvent = req.Authored
-		if req.FlowPath != "" && strings.HasPrefix(resolved, req.FlowPath+"/") {
-			result.localEvent = strings.TrimPrefix(resolved, req.FlowPath+"/")
-		}
-		if !receiverDeclaresSubscriptionEvent(source, req, result.localEvent) {
-			return failedAuthoredSubscription(result, AuthoredSubscriptionFailureReceiverEventMissing,
-				missingReceiverEventMessage(req, result.localEvent))
-		}
-		result.persistedValue = resolved
-		result.routePatterns = []string{resolved}
-		return result
+		return classifyAgentExactSubscription(source, req, result)
 	}
 
 	if strings.Contains(req.Authored, "/") {
@@ -302,6 +290,46 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 	result.persistedValue = req.Authored
 	result.routePatterns = []string{resolved}
 	return result
+}
+
+func classifyAgentExactSubscription(source Source, req AuthoredSubscriptionRequest, result AuthoredSubscriptionAdmission) AuthoredSubscriptionAdmission {
+	resolved, err := admitSameScopeAgentExact(req.FlowPath, req.Authored)
+	if err != nil {
+		return failedAuthoredSubscription(result, AuthoredSubscriptionFailureQualifiedExact,
+			fmt.Sprintf("agent %q subscription %q: %v", req.ConsumerID, req.Authored, err))
+	}
+	if control := unanchoredAgentControlOrigin(req.FlowPath, resolved); control != "" {
+		return failedAuthoredSubscription(result, AuthoredSubscriptionFailureUnanchoredAgentOrigin,
+			fmt.Sprintf("agent %q subscription %q admits control event %q without an activity-order anchor", req.ConsumerID, req.Authored, control))
+	}
+	result.class = AuthoredSubscriptionLocalExact
+	if strings.Contains(req.Authored, "/") {
+		result.class = AuthoredSubscriptionSameScopeAgentExact
+	}
+	result.localEvent = req.Authored
+	if req.FlowPath != "" && strings.HasPrefix(resolved, req.FlowPath+"/") {
+		result.localEvent = strings.TrimPrefix(resolved, req.FlowPath+"/")
+	}
+	if !receiverDeclaresSubscriptionEvent(source, req, result.localEvent) {
+		return failedAuthoredSubscription(result, AuthoredSubscriptionFailureReceiverEventMissing,
+			missingReceiverEventMessage(req, result.localEvent))
+	}
+	result.persistedValue = resolved
+	result.routePatterns = []string{resolved}
+	return result
+}
+
+func unanchoredAgentControlOrigin(flowPath, pattern string) string {
+	// RoutePatternsAt projects the explicit dot scope as root, not a private flow.
+	if flowPath == "." {
+		pattern = strings.TrimPrefix(pattern, "./")
+	}
+	for _, control := range [...]string{"platform.boot", "platform.runtime_log", "event.replayed"} {
+		if eventidentity.MatchPattern(pattern, control) {
+			return control
+		}
+	}
+	return ""
 }
 
 func receiverDeclaresSubscriptionEvent(source Source, req AuthoredSubscriptionRequest, localEvent string) bool {

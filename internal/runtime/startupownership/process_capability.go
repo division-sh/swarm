@@ -160,6 +160,11 @@ type processCapability struct {
 	monitorDone     chan struct{}
 	monitorCadence  time.Duration
 	monitorDeadline time.Duration
+
+	agentRecoverySeed          *agentRecoverySeed
+	agentRecoveryWrites        *AgentRecoveryWriteObserver
+	agentRecoverySeedProbe     atomic.Pointer[AgentRecoverySeedFaultProbeForTest]
+	agentRecoverySeedFaultUsed atomic.Bool
 }
 
 type generationGrant struct {
@@ -195,6 +200,11 @@ func newProcessCapability(session RetainedSession, cadence, deadline time.Durati
 	}
 	if err := session.InstallTerminalOwner(p, deadline); err != nil {
 		return nil, err
+	}
+	if owner, ok := session.(agentRecoveryWriteObserverOwner); ok {
+		if err := owner.AgentRecoveryWriteObserver().bindProcess(p); err != nil {
+			return nil, err
+		}
 	}
 	p.startPossessionMonitor()
 	return p, nil
@@ -488,6 +498,7 @@ func (p *processCapability) terminalize(result TerminalResult) {
 	p.doneOnce.Do(func() {
 		p.mu.Lock()
 		p.terminal = result
+		p.agentRecoverySeed = nil
 		grants := make([]*generationGrant, 0, len(p.grants))
 		for _, grant := range p.grants {
 			grants = append(grants, grant)

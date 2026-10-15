@@ -9,6 +9,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -149,7 +150,7 @@ func TestFiniteRunStartDoesNotVetoOrdinaryServicePublicationBothStores(t *testin
 		if published.Error != nil {
 			t.Fatalf("existing-run service publication gained a finite-start veto: %#v", published)
 		}
-		if got := dataRunCount(t, fixture, "events", "run_id", runID); got != 2 {
+		if got := dataRunObservedCount(t, fixture, storetest.CountPhysicalRunEvents, runID); got != 2 {
 			t.Fatalf("ordinary service publications persisted %d events, want 2", got)
 		}
 	})
@@ -177,7 +178,7 @@ func TestFiniteRunStartReceiptReplayAndConflictBothStores(t *testing.T) {
 		if conflict.Error == nil || asMap(t, conflict.Error.Data)["code"] != IdempotencyConflictCode {
 			t.Fatalf("finite admission replaced committed request conflict: %#v", conflict)
 		}
-		if got := dataRunCount(t, fixture, "events", "run_id", runID); got != 1 {
+		if got := dataRunObservedCount(t, fixture, storetest.CountPhysicalRunEvents, runID); got != 1 {
 			t.Fatalf("replay/conflict persisted %d events, want 1", got)
 		}
 	})

@@ -26,12 +26,13 @@ func TestIssue2394StopFailureEnvelopeBothStores(t *testing.T) {
 			t.Run(string(backend)+"/"+fault, func(t *testing.T) {
 				rig := newIssue2394StopRig(t, backend)
 				rt := rig.start(t)
-				runID, eventID, _ := createServedControlWaitingRun(t, rt, "stop-failure-"+uuid.NewString())
+				runID, eventID, _ := createServedControlWaitingRun(t, rt.Backend, rt.BundleHash, rt.Endpoint, rt.Probe, rt.ReceiverStateReader, "stop-failure-"+uuid.NewString())
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID})
 				seedIssue2394StopIntents(t, rt, runID, eventID)
-				assertIssue2394StopMatrix(t, readIssue2394StopSnapshot(t, rt.DB, runID), false)
+				assertIssue2394StopMatrix(t, readIssue2394StopSnapshot(t, rt.ReceiverStateReader, runID), false)
 				cause := "fan-out capsule requires exact node"
-				removeFault := func() {}
+				removeFault := func() {
+				}
 				if fault == "invalid_capsule" {
 					var raw []byte
 					if err := rt.DB.QueryRow(`SELECT capsule FROM fan_out_intents WHERE run_id=$1 AND semantic_path='stop-fixture-19'`, runID).Scan(&raw); err != nil {
@@ -53,21 +54,19 @@ func TestIssue2394StopFailureEnvelopeBothStores(t *testing.T) {
 					cause = "issue2394_cancel_statement"
 					removeFault = installIssue2394StopStatementFault(t, rt, runID, cause)
 				}
-				before := readIssue2394StopSnapshot(t, rt.DB, runID)
+				before := readIssue2394StopSnapshot(t, rt.ReceiverStateReader, runID)
 				key := uuid.NewString()
 				response := requestServedJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{"run_id": runID, "idempotency_key": key})
 				if response.Error == nil {
 					t.Fatal("faulted cancellation returned success")
 				}
-				// Check rollback before envelope assertions, so an untyped failure
-				// cannot conceal a partial stop or falsely completed idempotency.
-				assertIssue2394StopUnchanged(t, before, rt.DB, runID)
-				requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.stop", key, 0)
-				_, ownerErr := rt.Runtime.RunControl.Stop(servedControlProofAuthorActivityContext(t, rt), runcontrol.TransitionRequest{RunID: runID})
+				assertIssue2394StopUnchanged(t, before, rt.ReceiverStateReader, runID)
+				requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.stop", key, 0)
+				_, ownerErr := rt.Runtime.RunControl.Stop(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), runcontrol.TransitionRequest{RunID: runID})
 				if ownerErr == nil || !issue2394ErrorChainContains(ownerErr, cause) {
 					t.Errorf("selected stop owner lost %s cause: %v", fault, ownerErr)
 				}
-				assertIssue2394StopUnchanged(t, before, rt.DB, runID)
+				assertIssue2394StopUnchanged(t, before, rt.ReceiverStateReader, runID)
 				ownerFailure, typed := runtimefailures.EnvelopeFromError(ownerErr)
 				if !typed {
 					t.Errorf("selected stop owner returned no typed stage envelope: %v", ownerErr)

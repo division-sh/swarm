@@ -31,7 +31,7 @@ func TestMailboxSourceAdmissionBeforeReplayAndAtCommitBothStores(t *testing.T) {
 						params := mailboxPrincipalMutationParams(t, f, kind, method)
 						req := mailboxPrincipalRequest(t, rt, method, params)
 						if kind != "notice" {
-							before := mailboxCompletionRunEffects(t, rt, f.base.RunID)
+							before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID)
 							installed := false
 							restore := func() {
 								if installed {
@@ -61,7 +61,7 @@ func TestMailboxSourceAdmissionBeforeReplayAndAtCommitBothStores(t *testing.T) {
 								t.Fatalf("source changed after acquisition was not rejected at commit: replay=%t err=%v", replayed, err)
 							}
 							restore()
-							if after := mailboxCompletionRunEffects(t, rt, f.base.RunID); !reflect.DeepEqual(before, after) {
+							if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID); !reflect.DeepEqual(before, after) {
 								t.Fatal("source race partially committed domain state")
 							}
 							var completions int
@@ -72,18 +72,18 @@ func TestMailboxSourceAdmissionBeforeReplayAndAtCommitBothStores(t *testing.T) {
 						var result map[string]any
 						requireServedJSONRPCResult(t, rt.Endpoint, method, params, &result)
 						waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, f.base.RunID)
-						before := mailboxCompletionRunEffects(t, rt, f.base.RunID)
+						before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID)
 						for _, ctx := range []context.Context{context.Background(), correlation.WithSourceArtifactFact(f.ctx, mustServeTestPersistedSourceArtifactFact(unavailable))} {
-							_, replayed, err := mailboxTokenlessMutation(ctx, rt, owner, req, params)
+							_, replayed, err := mailboxTokenlessMutation(ctx, rt.Runtime, owner, req, params)
 							if err == nil || replayed || !strings.Contains(strings.ToLower(err.Error()), "source") {
 								t.Fatalf("completion bypassed missing/foreign source admission: replay=%t err=%v", replayed, err)
 							}
 						}
-						_, replayed, err := mailboxTokenlessMutation(f.ctx, rt, owner, req, params)
+						_, replayed, err := mailboxTokenlessMutation(f.ctx, rt.Runtime, owner, req, params)
 						if err != nil || !replayed {
 							t.Fatalf("source-positive control lost completion: replay=%t err=%v", replayed, err)
 						}
-						if after := mailboxCompletionRunEffects(t, rt, f.base.RunID); !reflect.DeepEqual(before, after) {
+						if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID); !reflect.DeepEqual(before, after) {
 							t.Fatal("source refusal/replay changed committed domain state")
 						}
 					})

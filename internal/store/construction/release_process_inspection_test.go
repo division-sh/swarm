@@ -59,6 +59,14 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 			if err != nil || !reflect.DeepEqual(want, got) {
 				t.Fatalf("independent inspection lost canonical target evidence: want=%+v got=%+v err=%v", want, got, err)
 			}
+			lifecycle, err := storetest.ReadLifecycleBusinessStorage(ctx, writer, identity.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, err := readReleaseInspectionLifecycle(ctx, observer, identity.RunID); err != nil || !reflect.DeepEqual(lifecycle, got) {
+				t.Fatalf("independent unaccepted inspection lost physical lifecycle rows: %+v %v", got, err)
+			}
+			requireReleaseInspectionMailboxAndDiagnostics(t, writer, observer, identity.RunID)
 			var retained context.Context
 			if err := observer.InspectSnapshot(ctx, func(scoped context.Context) error {
 				retained = scoped
@@ -73,6 +81,12 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 			if snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(retained, observer); err == nil || snapshot != nil {
 				t.Fatalf("retired snapshot returned physical evidence: %v %v", snapshot, err)
 			}
+			if rows, err := storetest.ReadLifecycleBusinessStorage(retained, observer, identity.RunID); err == nil || rows != nil {
+				t.Fatalf("retired inspection returned lifecycle rows: %+v %v", rows, err)
+			}
+			if value, err := storetest.ReadServedEventRunIDStorage(retained, observer, "b3c04b72-07f1-4097-a1f0-779955000005"); err == nil || errors.Is(err, sql.ErrNoRows) || value != "" {
+				t.Fatalf("retired inspection reached event-run SQL: %s/%v", value, err)
+			}
 			if cut, err := storetest.ReadReceiverEntityAtEventCut(retained, observer, identity.RunID, entityID.String(), "b3c04b72-07f1-4097-a1f0-779955000005"); err == nil || !reflect.DeepEqual(cut, runfork.RunForkEntityState{}) {
 				t.Fatalf("retired inspection snapshot returned historical evidence: %+v %v", cut, err)
 			}
@@ -86,6 +100,9 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 			if snapshot, err := readReleaseInspectionStorageSnapshot(cancelled, observer); !errors.Is(err, context.Canceled) || snapshot != nil {
 				t.Fatalf("cancelled observer returned partial evidence: %v %v", snapshot, err)
 			}
+			if rows, err := readReleaseInspectionLifecycle(cancelled, observer, identity.RunID); !errors.Is(err, context.Canceled) || rows != nil {
+				t.Fatalf("cancelled inspection returned lifecycle rows: %+v %v", rows, err)
+			}
 			foreign := identity
 			foreign.RunID = "b3c04b72-07f1-4097-a1f0-779955000003"
 			if target, err := readReleaseInspectionTarget(ctx, observer, foreign, entityID); err != nil || target.Presence != pipeline.WorkflowTargetPersistenceAbsent {
@@ -96,6 +113,9 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 			}
 			if snapshot, err := readReleaseInspectionStorageSnapshot(ctx, observer); err == nil || snapshot != nil {
 				t.Fatalf("closed observer returned storage evidence: %v %v", snapshot, err)
+			}
+			if rows, err := readReleaseInspectionLifecycle(ctx, observer, identity.RunID); err == nil || rows != nil {
+				t.Fatalf("closed inspection returned lifecycle rows: %+v %v", rows, err)
 			}
 			if target, err := readReleaseInspectionTarget(ctx, observer, identity, entityID); err == nil || !reflect.DeepEqual(target, pipeline.WorkflowTargetPersistenceRecord{}) {
 				t.Fatalf("closed observer returned target evidence: %+v %v", target, err)
@@ -109,6 +129,66 @@ func TestReleaseProcessReadOnlyInspectionRetainsNativeEvidenceBothStores(t *test
 			}
 		})
 	}
+}
+
+func requireReleaseInspectionMailboxAndDiagnostics(t *testing.T, writer any, observer storetest.ReleaseProcessReadOnlyInspection, runID string) {
+	t.Helper()
+	ctx := context.Background()
+	want, err := storetest.ReadMailboxCompletionRunEffects(ctx, writer, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	if err := observer.InspectSnapshot(ctx, func(scoped context.Context) error {
+		var err error
+		got, err = storetest.ReadMailboxCompletionRunEffects(scoped, observer, runID)
+		return err
+	}); err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("independent unaccepted inspection changed full mailbox rows: %v %v", got, err)
+	}
+	summary, err := storetest.ReadServedRunDebugSummary(ctx, writer, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := storetest.ReadServedRunDebugSummary(ctx, observer, runID); err != nil || got != summary || len(strings.Split(got, "\n")) != 11 {
+		t.Fatalf("independent unaccepted inspection lost diagnostic sections/fields: %s %v", got, err)
+	}
+	logs, err := storetest.ReadServedRuntimeLogDebugSummary(ctx, observer, runID)
+	if err != nil || logs != "runtime_logs: []" || !strings.HasSuffix(summary, logs) {
+		t.Fatalf("independent unaccepted log section changed physical output: %s/%v", logs, err)
+	}
+	if value, err := storetest.ReadServedEventRunIDStorage(ctx, observer, "b3c04b72-07f1-4097-a1f0-779955000005"); !errors.Is(err, sql.ErrNoRows) || value != "" {
+		t.Fatalf("unaccepted observer did not reach exact physical event absence: %s/%v", value, err)
+	}
+	requireReleaseInspectionUnaccepted(t, ctx, observer)
+	requireReleaseInspectionWriterStage(t, observer, runID)
+}
+
+func requireReleaseInspectionWriterStage(t *testing.T, observer storetest.ReleaseProcessReadOnlyInspection, runID string) {
+	t.Helper()
+	if err := observer.InspectSnapshot(context.Background(), func(scoped context.Context) error {
+		out := storetest.ObserveWriterStage(t, scoped, observer, runID, "b3c04b72-07f1-4097-a1f0-779955000002", "wrong-filter")
+		if out.EntityID != "b3c04b72-07f1-4097-a1f0-779955000002" || out.State != "" {
+			t.Fatalf("independent header-absence observation lost requested exact entity: %+v", out)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	requireReleaseInspectionUnaccepted(t, context.Background(), observer)
+}
+
+func readReleaseInspectionLifecycle(ctx context.Context, observer storetest.ReleaseProcessReadOnlyInspection, runID string) ([]storetest.LifecycleBusinessStorageRow, error) {
+	var rows []storetest.LifecycleBusinessStorageRow
+	err := observer.InspectSnapshot(ctx, func(scoped context.Context) error {
+		var err error
+		rows, err = storetest.ReadLifecycleBusinessStorage(scoped, observer, runID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func readReleaseInspectionTarget(ctx context.Context, observer storetest.ReleaseProcessReadOnlyInspection, identity runtimeflowidentity.RunScopedFlowInstance, entityID runtimeidentity.EntityID) (pipeline.WorkflowTargetPersistenceRecord, error) {

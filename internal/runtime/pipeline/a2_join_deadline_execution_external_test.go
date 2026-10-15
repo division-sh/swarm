@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -210,8 +211,8 @@ func TestA2JoinDeadlineExecutionRetainsEntryAndPartialContextOnBothStores(t *tes
 				if err := bus.PublishAcknowledged(ctx, late); !errors.As(err, &terminal) || terminal.Stage != "ready" {
 					t.Fatalf("new late publication did not retain strict terminal-owner refusal: %v", err)
 				}
-				var publications int
-				if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE event_id=$1", late.ID()).Scan(&publications); err != nil {
+				publications, err := storetest.CountTemplateEventIdentity(ctx, selected.events, late.ID())
+				if err != nil {
 					t.Fatal(err)
 				}
 				if after := load(); !reflect.DeepEqual(after, final) || publications != 0 {

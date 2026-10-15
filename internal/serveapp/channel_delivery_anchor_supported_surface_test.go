@@ -309,24 +309,15 @@ func waitChannelAnchorDispatchEdit(t *testing.T, h *channelOnboardingE2EHarness,
 	}
 }
 
-func startChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool) (*channelOnboardingE2EHarness, *sql.DB, string) {
+func startChannelAnchorJourney(t *testing.T, backend servedparity.Backend, token string, withSummary bool) (*channelOnboardingE2EHarness, storetest.ChannelProcessObservation, string) {
 	t.Helper()
 	return startChannelAnchorJourneyWithDraftTTL(t, backend, token, withSummary, 0)
 }
 
-func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration) (*channelOnboardingE2EHarness, *sql.DB, string) {
+func startChannelAnchorJourneyWithDraftTTL(t *testing.T, backend servedparity.Backend, token string, withSummary bool, draftTTL time.Duration) (*channelOnboardingE2EHarness, storetest.ChannelProcessObservation, string) {
 	t.Helper()
 	h, hash := startChannelAnchorPublicJourney(t, backend, token, withSummary, draftTTL, nil)
-	driver := "sqlite"
-	if backend == servedparity.BackendExplicitPostgres {
-		driver = "postgres"
-	}
-	db, err := sql.Open(driver, h.storeDSN)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return h, db, hash
+	return h, channelProcessStorageObservation(t, h), hash
 }
 
 func startChannelAnchorJourneyRuntime(t *testing.T, backend servedparity.Backend, token string, withSummary bool) (*channelOnboardingE2EHarness, string) {
@@ -608,26 +599,22 @@ func TestScalar2556ChannelAnchorSourcePreservesGateText(t *testing.T) {
 	}
 }
 
-func waitChannelAnchorCard(t *testing.T, db *sql.DB, runID string, kind decisioncard.AnchorKind, flowInstance string) string {
+func waitChannelAnchorCard(t *testing.T, reader storetest.ChannelAnchorObservation, runID string, kind decisioncard.AnchorKind, flowInstance string) string {
 	t.Helper()
-	return waitChannelAnchorCardInState(t, db, runID, kind, flowInstance, "")
+	return waitChannelAnchorCardInState(t, reader, runID, kind, flowInstance, "")
 }
 
-func waitChannelAnchorCardInState(t *testing.T, db *sql.DB, runID string, kind decisioncard.AnchorKind, flowInstance, status string) string {
+func waitChannelAnchorCardInState(t *testing.T, reader storetest.ChannelAnchorObservation, runID string, kind decisioncard.AnchorKind, flowInstance, status string) string {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		rows, err := db.Query(`SELECT card_id,CAST(anchor AS TEXT) FROM decision_cards WHERE run_id=$1 AND anchor_kind=$2 AND ($3='' OR status=$3)`, runID, string(kind), status)
+		rows, err := reader.ReadChannelAnchorCardsStorage(context.Background(), runID, string(kind), status)
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer rows.Close()
 		id := ""
-		for rows.Next() {
-			var candidate, raw string
-			if err := rows.Scan(&candidate, &raw); err != nil {
-				t.Fatal(err)
-			}
+		for _, row := range rows {
+			candidate, raw := row.CardID, row.AnchorJSON
 			anchor, err := decisioncard.DecodeAnchor(string(kind), []byte(raw))
 			if err != nil {
 				t.Fatal(err)
@@ -643,11 +630,6 @@ func waitChannelAnchorCardInState(t *testing.T, db *sql.DB, runID string, kind d
 				id = candidate
 			}
 		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
 		if id != "" {
 			return id
 		}
@@ -658,14 +640,11 @@ func waitChannelAnchorCardInState(t *testing.T, db *sql.DB, runID string, kind d
 	}
 }
 
-func waitChannelAnchorReceipt(t *testing.T, db *sql.DB, cardID string) int {
+func waitChannelAnchorReceipt(t *testing.T, reader storetest.ChannelAnchorObservation, cardID string) int {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		var raw string
-		err := db.QueryRow(`SELECT CAST(r.provider_reference AS TEXT) FROM channel_delivery_receipts r
-			JOIN channel_delivery_plans p ON p.delivery_id=r.delivery_id
-			WHERE p.source_id=$1 AND r.state='sent' ORDER BY r.settled_at LIMIT 1`, cardID).Scan(&raw)
+		raw, err := reader.ReadFirstSentSourceReceiptStorage(context.Background(), cardID)
 		if err == nil {
 			var reference struct {
 				Delivery struct {
@@ -684,39 +663,20 @@ func waitChannelAnchorReceipt(t *testing.T, db *sql.DB, cardID string) int {
 	}
 }
 
-func waitChannelAnchorDecision(t *testing.T, db *sql.DB, cardID string) {
+func waitChannelAnchorDecision(t *testing.T, reader storetest.ChannelAnchorObservation, cardID string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		var status, verdict string
-		if err := db.QueryRow(`SELECT status,COALESCE(verdict,'') FROM decision_cards WHERE card_id=$1`, cardID).Scan(&status, &verdict); err != nil {
+		state, err := reader.ReadChannelAnchorDecisionStorage(context.Background(), cardID)
+		if err != nil {
 			t.Fatal(err)
 		}
+		status, verdict := state.Status, state.Verdict
 		if status == "decided" && verdict == "approve" {
 			return
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("authenticated channel action did not decide actual card: %s/%s", status, verdict)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-func waitChannelRejectedCallback(t *testing.T, db *sql.DB, token string) {
-	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		var count int
-		query := `SELECT COUNT(*) FROM operator_channel_action_intents
-			WHERE state='settled' AND disposition IN ('stale','rejected') AND CAST(fact AS TEXT) LIKE $1`
-		if err := db.QueryRow(query, "%"+token+"%").Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		if count > 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("stale callback has no durable non-mutation disposition")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

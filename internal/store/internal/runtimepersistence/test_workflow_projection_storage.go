@@ -11,10 +11,108 @@ import (
 	"github.com/google/uuid"
 )
 
+func ReadBoundReplySourceStorageForTest(ctx context.Context, selected any, runID, path string) (map[string][][]any, error) {
+	if path == "" {
+		return nil, fmt.Errorf("source snapshot requires the actual delivery's concrete path")
+	}
+	headers, err := readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) ([][]any, error) {
+		return pipelinepersistence.ReadBoundReplyFlowHeadersStorageTx(ctx, tx, runID, path)
+	})
+	if err != nil {
+		return nil, err
+	}
+	fields, err := readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) ([][]any, error) {
+		return pipelinepersistence.ReadBoundReplyEntityStatesStorageTx(ctx, tx, runID, path)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string][][]any{"flow_instances": headers, "entity_state": fields}, nil
+}
+
 type WorkflowControlProjectionStorage = pipelinepersistence.WorkflowControlProjectionStorage
 type WorkflowDuplicateProjectionStorage = pipelinepersistence.WorkflowDuplicateProjectionStorage
 type WorkflowEnginePhysicalCounts = pipelinepersistence.WorkflowEnginePhysicalCounts
 type WorkflowStateObservationRow = pipelinepersistence.WorkflowStateObservationRow
+
+type WorkflowRunFieldsRevisionStorage = pipelinepersistence.WorkflowRunFieldsRevisionStorage
+type WorkflowAccumulatorStorage = pipelinepersistence.WorkflowAccumulatorStorage
+
+func ReadRootFlowAccumulatorStorageForTest(ctx context.Context, selected any, runID string) ([]byte, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) ([]byte, error) {
+		return pipelinepersistence.ReadRootFlowAccumulatorStorageTx(ctx, tx, runID)
+	})
+}
+
+func ReadWorkflowAccumulatorStorageForTest(ctx context.Context, selected any, runID, path string) (WorkflowAccumulatorStorage, error) {
+	return readFanOutSemanticStorage(ctx, selected, []string{runID}, func(ctx context.Context, tx *sql.Tx) (WorkflowAccumulatorStorage, error) {
+		return pipelinepersistence.ReadWorkflowAccumulatorStorageTx(ctx, tx, runID, path)
+	})
+}
+
+func ReadWorkflowRunFieldsRevisionStorageForTest(ctx context.Context, selected any, runID string) (WorkflowRunFieldsRevisionStorage, error) {
+	if _, err := workflowProjectionNativePostgres(selected); err != nil {
+		return WorkflowRunFieldsRevisionStorage{}, err
+	}
+	var out WorkflowRunFieldsRevisionStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = pipelinepersistence.ReadWorkflowRunFieldsRevisionStorageTx(ctx, tx, runID)
+		return err
+	})
+	if err != nil {
+		return WorkflowRunFieldsRevisionStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadWorkflowRunHeaderRevisionStorageForTest(ctx context.Context, selected any, runID string) (int64, error) {
+	if _, err := workflowProjectionNativePostgres(selected); err != nil {
+		return 0, err
+	}
+	var revision int64
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		revision, err = pipelinepersistence.ReadWorkflowRunHeaderRevisionStorageTx(ctx, tx, runID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return revision, nil
+}
+
+func ReadWorkflowRunFieldsStorageForTest(ctx context.Context, selected any, runID string) (string, error) {
+	if _, err := workflowProjectionNativePostgres(selected); err != nil {
+		return "", err
+	}
+	var fields string
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		fields, err = pipelinepersistence.ReadWorkflowRunFieldsStorageTx(ctx, tx, runID)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return fields, nil
+}
+
+func CountWorkflowRunFieldRowsForTest(ctx context.Context, selected any, runID string) (int, error) {
+	if _, err := workflowProjectionNativePostgres(selected); err != nil {
+		return 0, err
+	}
+	var count int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		count, err = pipelinepersistence.CountWorkflowFieldRowsForRun(ctx, tx, runID)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
 
 func CountWorkflowHeadersCreatedSinceForTest(ctx context.Context, selected any, since time.Time) (int, error) {
 	if _, err := workflowProjectionNativePostgres(selected); err != nil {

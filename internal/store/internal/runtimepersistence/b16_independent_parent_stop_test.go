@@ -33,7 +33,7 @@ func TestB16IndependentPostgresParentStopRetainedGroup(t *testing.T) {
 	if primary.backend == other.backend || primary.pipelinePostgresOwner.PostgresPipelineClaimsForTest() == other.pipelinePostgresOwner.PostgresPipelineClaimsForTest() {
 		t.Fatal("independent parent accidentally shares backend or claim registry")
 	}
-	before := readStopCommitEvidence(t, db, fixture.runID)
+	before := readStopCommitEvidence(t, db, raw, fixture.runID)
 	if _, err := owner.CommitFanOutChunk(ctx, command); err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestB16IndependentPostgresParentStopRetainedGroup(t *testing.T) {
 		t.Fatalf("independent stop after finite group handoff: %v", err)
 	}
 	assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 32, 32)
-	after := readStopCommitEvidence(t, db, fixture.runID)
+	after := readStopCommitEvidence(t, db, raw, fixture.runID)
 	if after.status != "cancelled" || after.control != "stopped" || after.canceled != 1 || after.pending != 0 || after.events != before.events+2 || after.revisions != before.revisions+4 {
 		t.Fatalf("publication, two acknowledged segments and stop accounting: before=%+v after=%+v", before, after)
 	}

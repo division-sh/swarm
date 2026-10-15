@@ -2,7 +2,6 @@ package runforkexecution
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -20,7 +19,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -174,14 +172,12 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 		} {
 			t.Run(backend+"/"+tc.phase+"/"+[]string{"selected", "original"}[tc.at], func(t *testing.T) {
 				var selected startupownership.Store
-				var db *sql.DB
 				var owner SelectedContractExecutionOwner
 				if backend == "sqlite" {
 					s := storetest.StartSQLiteRuntimeStore(t)
-					selected, db, owner = s, storetest.Database(s), selectedContractSQLiteExecutionOwnerForTest(t, s)
+					selected, owner = s, selectedContractSQLiteExecutionOwnerForTest(t, s)
 				} else {
-					_, db, _ = testutil.StartPostgres(t)
-					s := storetest.AdmitPostgresRuntimeStore(t, db)
+					s := storetest.StartPostgresRuntimeStore(t)
 					selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
 				}
 				ctx, cancel := context.WithCancel(runForkTestContext(t))
@@ -195,7 +191,7 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				runID, eventID := uuid.NewString(), uuid.NewString()
-				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, runID, eventID)
+				seedSelectedOperationSource(t, ctx, selected, loaded, runID, eventID)
 				base := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)}
 				sibling, err := base.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: runID, Selection: runforkadmission.SelectedContractSelection(loaded.Source)})
 				if err != nil {
@@ -216,7 +212,7 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 				request := SelectedContractExecutionRequest{SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: probe,
 					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}
-				before := selectedPreparationDatabaseSnapshot(t, db, backend)
+				before := selectedPreparationDatabaseSnapshot(t, selected)
 				baseline := process.ActiveCount()
 				var p *PreparedSelectedFork
 				var workspaceProbe *sourceCleanupWorkspace
@@ -225,12 +221,12 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 					if executeErr != nil || !result.Activation.Activated {
 						t.Fatalf("execution: %v", executeErr)
 					}
-					beforeStop := selectedPreparationDatabaseSnapshot(t, db, backend)
-					_, selected, stopErr := owner.StopSelectedFork(ctx, runcontrol.TransitionRequest{RunID: result.Materialization.ForkRunID})
-					if !selected {
+					beforeStop := selectedPreparationDatabaseSnapshot(t, selected)
+					_, didSelect, stopErr := owner.StopSelectedFork(ctx, runcontrol.TransitionRequest{RunID: result.Materialization.ForkRunID})
+					if !didSelect {
 						t.Fatal("stop lost exact selected context")
 					}
-					if afterStop := selectedPreparationDatabaseSnapshot(t, db, backend); !reflect.DeepEqual(beforeStop, afterStop) {
+					if afterStop := selectedPreparationDatabaseSnapshot(t, selected); !reflect.DeepEqual(beforeStop, afterStop) {
 						t.Fatal("failed cleanup advanced terminal mutation or executed work")
 					}
 					err = stopErr
@@ -259,7 +255,7 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 							err = p.Close()
 						}()
 					}
-					if after := selectedPreparationDatabaseSnapshot(t, db, backend); !reflect.DeepEqual(before, after) {
+					if after := selectedPreparationDatabaseSnapshot(t, selected); !reflect.DeepEqual(before, after) {
 						t.Fatal("preparation/cleanup mutated domain state")
 					}
 				}

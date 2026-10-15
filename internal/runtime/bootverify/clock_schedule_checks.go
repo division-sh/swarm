@@ -29,7 +29,7 @@ func clockScheduleContractFailure(source semanticview.Source, schedule semanticv
 	if strings.HasPrefix(ref.Authored, "platform.") || runtimecontracts.PlatformEventCatalogContains(source.PlatformSpec(), ref.Canonical) {
 		return "schedules emit ordinary instance business events, not platform-control events"
 	}
-	if !ref.HasSchema || !ref.IsAuthored(source) {
+	if !ref.HasSchema || !ref.IsAuthoredDeclaration(source) {
 		return fmt.Sprintf("schedule %s emit %s requires an authored business event declaration", schedule.Name, schedule.Declaration.Emit)
 	}
 	schema, found, err := source.ResolveEffectiveCompiledFlowEventSchema(schedule.FlowID, schedule.Declaration.Emit)

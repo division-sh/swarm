@@ -56,7 +56,7 @@ func TestB18PausedPreparedGroupRetainsAcceptedWorkBothStores(t *testing.T) {
 			for _, member := range members {
 				assertDirectiveReceipt(t, db, member.Claim.EventID(), "processed", nil)
 			}
-			after := readStopCommitEvidence(t, db, fixture.runID)
+			after := readStopCommitEvidence(t, db, raw, fixture.runID)
 			if after.status != "cancelled" || after.control != "stopped" || after.canceled != 1 || after.pending != 0 {
 				t.Fatalf("stop after paused accepted group: %+v", after)
 			}

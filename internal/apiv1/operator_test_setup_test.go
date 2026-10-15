@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,14 +14,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	bundle := testSetupValidationBundle(t)
 	source := semanticview.Wrap(bundle)
 	bundleHash := bundle.SourceArtifact.BundleHash()
@@ -46,7 +43,7 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 	if entityResult["alias"] != "subject" || entityResult["entity_id"] != entityID || entityResult["flow_instance"] != "operating" || entityResult["entity_type"] != "product" || entityResult["current_state"] != "waiting" {
 		t.Fatalf("setup entity result = %#v", entityResult)
 	}
-	assertTestSetupPersistence(t, db, bundleHash, runID, entityID, "waiting", "seeded", true)
+	assertTestSetupPersistence(t, pg, bundleHash, runID, entityID, "waiting", "seeded", true)
 	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows = %d, want 1", count)
 	}
@@ -55,7 +52,7 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 	if replay.Error != nil {
 		t.Fatalf("test.setup_entities replay error = %#v", replay.Error)
 	}
-	assertTestSetupPersistence(t, db, bundleHash, runID, entityID, "waiting", "seeded", true)
+	assertTestSetupPersistence(t, pg, bundleHash, runID, entityID, "waiting", "seeded", true)
 	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows after replay = %d, want 1", count)
 	}
@@ -67,16 +64,16 @@ func TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency(t *testing
 	if data := asMap(t, conflict.Error.Data); data["code"] != IdempotencyConflictCode {
 		t.Fatalf("test.setup_entities conflict data = %#v", data)
 	}
-	assertTestSetupPersistence(t, db, bundleHash, runID, entityID, "waiting", "seeded", true)
+	assertTestSetupPersistence(t, pg, bundleHash, runID, entityID, "waiting", "seeded", true)
 
-	if _, err := db.Exec(`DELETE FROM api_idempotency`); err != nil {
+	if err := storetest.RemoveScenarioSetupReplayReceipts(context.Background(), pg); err != nil {
 		t.Fatalf("delete setup api idempotency rows: %v", err)
 	}
 	expiredReplay := rpcCall(t, handler, testSetupBody(bundleHash, runID, entityID, "waiting", "seeded", true, "idem-setup-after-expiry"))
 	if expiredReplay.Error != nil {
 		t.Fatalf("test.setup_entities replay after idempotency expiry error = %#v", expiredReplay.Error)
 	}
-	assertTestSetupPersistence(t, db, bundleHash, runID, entityID, "waiting", "seeded", true)
+	assertTestSetupPersistence(t, pg, bundleHash, runID, entityID, "waiting", "seeded", true)
 	if count := countAPIIdempotencyRows(t, pg); count != 1 {
 		t.Fatalf("api_idempotency rows after expired replay = %d, want 1", count)
 	}
@@ -194,8 +191,7 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, _ := testutil.StartPostgres(t)
-			pg := storetest.AdmitPostgresRuntimeStore(t, db)
+			pg := storetest.StartPostgresRuntimeStore(t)
 			bundle := testSetupValidationBundle(t)
 			handler := testSetupHandler(t, pg, semanticview.Wrap(bundle))
 			entity := validTestSetupEntity(uuid.NewString(), "waiting", "seeded", true)
@@ -215,7 +211,7 @@ func TestOperatorTestSetupRejectsContractInvalidEntities(t *testing.T) {
 			if count := countAPIIdempotencyRows(t, pg); count != 0 {
 				t.Fatalf("api_idempotency rows after invalid setup = %d, want 0", count)
 			}
-			if count := countTestSetupEntityRows(t, db); count != 0 {
+			if count := countTestSetupEntityRows(t, pg); count != 0 {
 				t.Fatalf("entity_state rows after invalid setup = %d, want 0", count)
 			}
 		})
@@ -299,16 +295,13 @@ func validTestSetupEntity(entityID, currentState, note string, reviewReady bool)
 	}
 }
 
-func assertTestSetupPersistence(t *testing.T, db *sql.DB, expectedBundleHash, runID, entityID, currentState, note string, reviewReady bool) {
+func assertTestSetupPersistence(t *testing.T, selected any, expectedBundleHash, runID, entityID, currentState, note string, reviewReady bool) {
 	t.Helper()
-	var runStatus, originKind, bundleHash string
-	if err := db.QueryRow(`
-		SELECT status, origin_kind, bundle_hash
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, runID).Scan(&runStatus, &originKind, &bundleHash); err != nil {
+	run, err := storetest.ReadPostgresScenarioSetupRunStorage(context.Background(), selected, runID)
+	if err != nil {
 		t.Fatalf("load setup run row: %v", err)
 	}
+	runStatus, originKind, bundleHash := run.Status, run.OriginKind, run.BundleHash
 	if runStatus != "running" || originKind != string(storerunlifecycle.OriginScenarioSetup) {
 		t.Fatalf("setup run row status=%q origin=%q, want running/scenario_setup", runStatus, originKind)
 	}
@@ -316,39 +309,25 @@ func assertTestSetupPersistence(t *testing.T, db *sql.DB, expectedBundleHash, ru
 		t.Fatalf("setup run row source artifact hash = %q, want %q", bundleHash, expectedBundleHash)
 	}
 
-	var flowInstance, entityType, gotState, gotNote, gateJSON string
-	if err := db.QueryRow(`
-		SELECT flow_instance, entity_type, current_state, fields->>'note', gates->>'review_ready'
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, runID, entityID).Scan(&flowInstance, &entityType, &gotState, &gotNote, &gateJSON); err != nil {
+	entity, err := storetest.ReadPostgresScenarioSetupEntityStorage(context.Background(), selected, runID, entityID)
+	if err != nil {
 		t.Fatalf("load setup entity row: %v", err)
 	}
+	flowInstance, entityType, gotState, gotNote, gateJSON := entity.FlowInstance, entity.EntityType, entity.CurrentState, entity.Note, entity.ReviewReady
 	if flowInstance != "operating" || entityType != "product" || gotState != currentState || gotNote != note || gateJSON != fmt.Sprintf("%t", reviewReady) {
 		t.Fatalf("setup entity row = flow:%q type:%q state:%q note:%q gate:%q", flowInstance, entityType, gotState, gotNote, gateJSON)
 	}
 
-	var mutations int
-	if err := db.QueryRow(`
-		SELECT COUNT(*)
-		FROM entity_mutations
-		WHERE run_id = $1::uuid
-		  AND entity_id = $2::uuid
-		  AND writer_type = 'platform'
-		  AND writer_id = 'test.setup_entities'
-	`, runID, entityID).Scan(&mutations); err != nil {
+	mutations, err := storetest.CountPostgresScenarioSetupMutations(context.Background(), selected, runID, entityID)
+	if err != nil {
 		t.Fatalf("count setup mutations: %v", err)
 	}
 	if mutations != 3 {
 		t.Fatalf("setup mutation rows = %d, want 3", mutations)
 	}
 
-	var payload json.RawMessage
-	if err := db.QueryRow(`
-		SELECT fields
-		FROM entity_state
-		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, runID, entityID).Scan(&payload); err != nil {
+	payload, err := storetest.ReadPostgresScenarioSetupFieldsStorage(context.Background(), selected, runID, entityID)
+	if err != nil {
 		t.Fatalf("reload setup fields: %v", err)
 	}
 	decoded := map[string]any{}
@@ -360,10 +339,10 @@ func assertTestSetupPersistence(t *testing.T, db *sql.DB, expectedBundleHash, ru
 	}
 }
 
-func countTestSetupEntityRows(t *testing.T, db *sql.DB) int {
+func countTestSetupEntityRows(t *testing.T, selected any) int {
 	t.Helper()
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM entity_state`).Scan(&count); err != nil {
+	count, err := storetest.CountPhysicalEntities(context.Background(), selected)
+	if err != nil {
 		t.Fatalf("count entity_state rows: %v", err)
 	}
 	return count

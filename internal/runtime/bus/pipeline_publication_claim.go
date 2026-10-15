@@ -18,6 +18,13 @@ type pipelinePublicationClaim struct {
 	opMu     sync.Mutex
 	released atomic.Bool
 	retired  atomic.Bool
+	// A later occurrence in one engine batch borrows identity validation but
+	// never owns release/settlement of the first occurrence's native claim.
+	batchBorrowed bool
+}
+
+func (c *pipelinePublicationClaim) borrowForEngineBatch() *pipelinePublicationClaim {
+	return &pipelinePublicationClaim{bus: c.bus, eventID: c.eventID, claim: c.claim, batchBorrowed: true}
 }
 
 func (eb *EventBus) claimPipelinePublication(ctx context.Context, eventID string) (*pipelinePublicationClaim, error) {
@@ -50,6 +57,9 @@ func (c *pipelinePublicationClaim) Release(ctx context.Context) error {
 	ctx, err = c.bus.admitSourceArtifactFact(ctx)
 	if err != nil {
 		return err
+	}
+	if c.batchBorrowed {
+		return nil
 	}
 	if c.retired.Load() {
 		return nil
@@ -92,7 +102,7 @@ func (c *pipelinePublicationClaim) Settle(ctx context.Context, disposition runti
 	if err != nil {
 		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
-	if c.retired.Load() || !c.released.CompareAndSwap(false, true) {
+	if c.batchBorrowed || c.retired.Load() || !c.released.CompareAndSwap(false, true) {
 		return runtimepipelineobligation.SettlementOutcome{}, runtimepipelineobligation.ErrStaleClaim
 	}
 	if c.bus.pipelineObligations == nil {
@@ -144,7 +154,7 @@ func (c *pipelinePublicationClaim) MarkDecisionProcessedOutcome(ctx context.Cont
 	if err != nil {
 		return runtimepipelineobligation.SettlementOutcome{}, err
 	}
-	if c.retired.Load() || c.released.Load() {
+	if c.batchBorrowed || c.retired.Load() || c.released.Load() {
 		return runtimepipelineobligation.SettlementOutcome{}, runtimepipelineobligation.ErrStaleClaim
 	}
 	if c.bus.pipelineObligations == nil {

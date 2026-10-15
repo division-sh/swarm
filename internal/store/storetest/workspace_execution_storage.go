@@ -3,6 +3,7 @@ package storetest
 import (
 	"context"
 
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
 )
@@ -27,6 +28,7 @@ type ConversationForkDomainStorage = private.ConversationForkDomainStorage
 type ConversationForkTurnDiagnostic = private.ConversationForkTurnDiagnostic
 type AuthoredHTTPToolEffectStorage = private.AuthoredHTTPToolEffectStorage
 type SelectedSourceOutcomeFixture = private.SelectedSourceOutcomeFixture
+type SelectedSourceEntityFixture = private.SelectedSourceEntityFixture
 type WorkspaceMockInvocationStorage = private.WorkspaceMockInvocationStorage
 type WorkspaceInvocationPhases = private.WorkspaceInvocationPhases
 type WorkspaceEffectFailureStorage = private.WorkspaceEffectFailureStorage
@@ -78,4 +80,12 @@ func ReadSelectedForkSourceDomain(ctx context.Context, selected any, runID strin
 }
 func SeedSelectedSourceOutcome(ctx context.Context, selected any, fixture SelectedSourceOutcomeFixture) error {
 	return private.SeedSelectedSourceOutcomeForTest(ctx, selected, fixture)
+}
+
+func SeedSelectedSourceEntity(ctx context.Context, selected any, fixture SelectedSourceEntityFixture) error {
+	return private.SeedSelectedSourceEntityForTest(ctx, selected, fixture)
+}
+
+func RequireSelectedSourceArtifactPresence(ctx context.Context, selected any, source correlation.SourceArtifactFact) error {
+	return private.RequireSelectedSourceArtifactPresenceForTest(ctx, selected, source)
 }

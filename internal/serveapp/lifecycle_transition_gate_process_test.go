@@ -20,12 +20,18 @@ func TestServedCompiledGateOutcomeRestartOnBothStores(t *testing.T) {
 			start, ready, _ := mailboxCompletionProcessHarness(t, backend, root)
 			first, rt := start(true)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "gate-cut-seed"})
-			entityID := requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, "", "review")
-			params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, "", "review")
+			params := lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, "approve")
 			response := make(chan gateCompletionHTTPResult, 1)
-			go func() { response <- gateCompletionHTTP(context.Background(), rt.Endpoint, params) }()
+			go func() {
+				response <- gateCompletionHTTP(context.Background(), rt.Endpoint, params)
+			}()
 			reached := make(chan error, 1)
-			go func() { var b [1]byte; _, err := io.ReadFull(ready, b[:]); reached <- err }()
+			go func() {
+				var b [1]byte
+				_, err := io.ReadFull(ready, b[:])
+				reached <- err
+			}()
 			select {
 			case err := <-reached:
 				if err != nil {
@@ -34,7 +40,7 @@ func TestServedCompiledGateOutcomeRestartOnBothStores(t *testing.T) {
 			case <-time.After(20 * time.Second):
 				t.Fatalf("gate commit barrier not reached\n%s", first.output.String())
 			}
-			requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "approved")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "approved")
 			before := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 			if len(before) != 1 {
 				t.Fatalf("gate did not commit before crash: %#v", before)
@@ -62,7 +68,7 @@ func TestServedCompiledGateOutcomeRestartOnBothStores(t *testing.T) {
 				t.Fatal("killed process retained HTTP request")
 			}
 			second, rt := start(false)
-			requireServedEventPublishEntityState(t, rt.DB, backend, seed.RunID, entityID, "done")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "done")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			after := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 			if len(after) != 1 || !reflect.DeepEqual(readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, outcomeID), before[0]) || after[0].TriggerEventID != outcomeID || after[0].From != "approved" || after[0].To != "done" {
@@ -73,13 +79,13 @@ func TestServedCompiledGateOutcomeRestartOnBothStores(t *testing.T) {
 			if entity.Fields["result"] != "approved" {
 				t.Fatalf("recovered gate consumer=%#v", entity)
 			}
-			settled := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			settled := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			var decision map[string]any
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decision)
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != settled {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != settled {
 				t.Fatal("recovered gate duplicate mutated history")
 			}
-			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 1)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.completed", 1)
 			if err := second.stop(); err != nil {
 				t.Fatalf("recovered stop: %v\n%s", err, second.output.String())
 			}

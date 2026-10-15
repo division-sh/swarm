@@ -60,7 +60,7 @@ func TestServedRunDebugStoragePreservesFourNativeFieldsBothStores(t *testing.T) 
 					if err != nil {
 						t.Fatal(err)
 					}
-					got := readServedRunDebugSection(ctx, fixture.store, backend, "runs", lookup)
+					got := readServedRunDebugInspectionSection(ctx, fixture.store, backend, "runs", lookup)
 					counts := probe.Snapshot()
 					restore()
 					if got != want || counts.Total.Begun != 1 || counts.Total.ReadCommits != 1 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
@@ -104,7 +104,7 @@ func TestServedRunDebugStorageRefusesUnavailableSnapshotsBothStores(t *testing.T
 			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Now().UTC())
 			cancelled, cancel := context.WithCancel(ctx)
 			cancel()
-			if got := readServedRunDebugSection(cancelled, fixture.store, backend, "runs", runID); !strings.HasPrefix(got, "runs: ") || !strings.Contains(got, context.Canceled.Error()) || strings.Contains(got, "[running") {
+			if got := readServedRunDebugInspectionSection(cancelled, fixture.store, backend, "runs", runID); !strings.HasPrefix(got, "runs: ") || !strings.Contains(got, context.Canceled.Error()) || strings.Contains(got, "[running") {
 				t.Fatalf("cancelled snapshot returned evidence: %q", got)
 			}
 			if err := runUnrevisionedEventFixtureTransactionForTest(ctx, fixture.store, func(ctx context.Context, tx *sql.Tx) error {
@@ -121,7 +121,7 @@ func TestServedRunDebugStorageRefusesUnavailableSnapshotsBothStores(t *testing.T
 					t.Error(err)
 				}
 			}()
-			if got := readServedRunDebugSection(ctx, fixture.store, backend, "runs", runID); !strings.HasPrefix(got, "runs: ") || !strings.Contains(got, "runs") || got == "runs: []" || strings.Contains(got, "[running") {
+			if got := readServedRunDebugInspectionSection(ctx, fixture.store, backend, "runs", runID); !strings.HasPrefix(got, "runs: ") || !strings.Contains(got, "runs") || got == "runs: []" || strings.Contains(got, "[running") {
 				t.Fatalf("unavailable snapshot returned partial evidence: %q", got)
 			}
 		})

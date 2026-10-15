@@ -147,8 +147,8 @@ func TestA2UntilAndFinalArrivalHaveOneDurableCloseWinnerOnBothStores(t *testing.
 				}
 				a2KnownTargetWaitForSettlement(t, ctx, bus, probe, input, node.Key(), signal.Status, status, logger)
 				if status == "dead_letter" {
-					var raw string
-					if err := selected.db.QueryRowContext(ctx, "SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1", input.ID()).Scan(&raw); err != nil {
+					raw, err := storetest.ReadGateEventFailure(ctx, selected.events, input.ID())
+					if err != nil {
 						t.Fatal(err)
 					}
 					var failure failures.Envelope

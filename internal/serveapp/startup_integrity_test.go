@@ -30,8 +30,8 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 				var sqliteStore *store.SQLiteRuntimeStore
 				var configPath, sqlitePath string
 				if backend == "postgres" {
-					_, database, _ := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
-					db, artifacts = database, storetest.NewPostgresStoreForTest(database)
+					_, database, selected := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+					db, artifacts = database, selected
 					configPath = writeServeRuntimeTestConfig(t)
 				} else {
 					isolateCLIAPIConfigEnv(t)

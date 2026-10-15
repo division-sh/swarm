@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -60,7 +61,6 @@ import (
 	runtimeworkspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -282,9 +282,7 @@ func TestCanonicalSessionWatchdogSurface_RoundTripsThroughConversationReader(t *
 
 func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	registerDifferentTestAuthorActivityCatalog(t, pg, "review.requested")
 
 	requireCanonicalConversationSurface(t, ctx, pg)
@@ -396,56 +394,30 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		t.Fatalf("RunManaged(second): %v", err)
 	}
 
-	var (
-		deliveryStatus   string
-		activeSessionID  string
-		sessionStatus    string
-		sessionFlow      string
-		liveSessionCount int
-	)
-	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(d.status, ''), COALESCE(a.active_session_id::text, '')
-		FROM event_deliveries d
-		JOIN event_delivery_attempts a
-		  ON a.delivery_id = d.delivery_id
-		 AND a.claim_version = d.current_attempt_version
-		 AND a.open_marker = TRUE
-		WHERE d.event_id = $1::uuid
-		  AND d.subscriber_type = 'agent'
-		  AND d.subscriber_id = 'agent-1'
-	`, event2.ID()).Scan(&deliveryStatus, &activeSessionID); err != nil {
+	delivery, err := storetest.ReadPostgresAgentOneDeliverySessionStorage(ctx, pg, event2.ID())
+	if err != nil {
 		t.Fatalf("load second delivery: %v", err)
 	}
+	deliveryStatus, activeSessionID := delivery.Status, delivery.ActiveSessionID
 	if deliveryStatus != "in_progress" {
 		t.Fatalf("second delivery status = %q, want in_progress", deliveryStatus)
 	}
 	if activeSessionID != session.ID {
 		t.Fatalf("second delivery active_session_id = %q, want %q", activeSessionID, session.ID)
 	}
-	if err := db.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(status, ''),
-			COALESCE(flow_instance, '')
-		FROM agent_sessions
-		WHERE session_id = $1::uuid
-	`, session.ID).Scan(&sessionStatus, &sessionFlow); err != nil {
+	liveSession, err := storetest.ReadPostgresSessionFlowStorage(ctx, pg, session.ID)
+	if err != nil {
 		t.Fatalf("load live session row: %v", err)
 	}
+	sessionStatus, sessionFlow := liveSession.Status, liveSession.FlowInstance
 	if sessionStatus != "active" {
 		t.Fatalf("session status = %q, want active", sessionStatus)
 	}
 	if sessionFlow != "support/inst-1" {
 		t.Fatalf("session flow_instance = %q, want support/inst-1", sessionFlow)
 	}
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM agent_sessions
-		WHERE run_id = $1::uuid
-		  AND agent_id = 'agent-1'
-		  AND flow_instance = 'support/inst-1'
-		  AND memory_enabled = TRUE
-		  AND status = 'active'
-	`, runID).Scan(&liveSessionCount); err != nil {
+	liveSessionCount, err := storetest.CountPostgresAgentOneSupportLiveSessions(ctx, pg, runID)
+	if err != nil {
 		t.Fatalf("count live session lineage: %v", err)
 	}
 	if liveSessionCount != 1 {
@@ -467,9 +439,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 
 func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	registerDifferentTestAuthorActivityCatalog(t, pg, "review.requested")
 
 	requireCanonicalConversationSurface(t, ctx, pg)
@@ -597,31 +567,19 @@ printf '{"result":"ok"}'
 		t.Fatalf("session ID rotated from stderr prose: got %q, want %q", session.ID, originalSessionID)
 	}
 
-	var (
-		deliveryStatus  string
-		activeSessionID string
-	)
-	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(d.status, ''), COALESCE(a.active_session_id::text, '')
-		FROM event_deliveries d
-		JOIN event_delivery_attempts a
-		  ON a.delivery_id = d.delivery_id
-		 AND a.claim_version = d.current_attempt_version
-		 AND a.open_marker = TRUE
-		WHERE d.event_id = $1::uuid
-		  AND d.subscriber_type = 'agent'
-		  AND d.subscriber_id = 'agent-1'
-	`, evt.ID()).Scan(&deliveryStatus, &activeSessionID); err != nil {
+	delivery, err := storetest.ReadPostgresAgentOneDeliverySessionStorage(ctx, pg, evt.ID())
+	if err != nil {
 		t.Fatalf("load delivery: %v", err)
 	}
+	deliveryStatus, activeSessionID := delivery.Status, delivery.ActiveSessionID
 	if deliveryStatus != "in_progress" {
 		t.Fatalf("delivery status = %q, want in_progress", deliveryStatus)
 	}
 	if activeSessionID != originalSessionID {
 		t.Fatalf("delivery active_session_id = %q, want original %q", activeSessionID, originalSessionID)
 	}
-	var sessionCount int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_sessions WHERE agent_id = 'agent-1'`).Scan(&sessionCount); err != nil {
+	sessionCount, err := storetest.CountPostgresAgentOneSessions(ctx, pg)
+	if err != nil {
 		t.Fatalf("count sessions: %v", err)
 	}
 	if sessionCount != 1 {
@@ -1079,9 +1037,7 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 }
 
 func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWithoutPlatformReset(t *testing.T) {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	module := loadConformanceRuntimeWorkflowModule(t)
 	bundle, ok := runtimesemanticview.Bundle(module.source)
 	if !ok || bundle == nil {
@@ -1132,26 +1088,16 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 		t.Fatalf("Start error = %v, want boot-fatal recovery exhaustion failure", err)
 	}
 
-	var resetCount int
-	if err := db.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM events
-		WHERE event_name = 'platform.reset'
-	`).Scan(&resetCount); err != nil {
+	resetCount, err := storetest.CountEventNameStorage(ctx, pg, "platform.reset")
+	if err != nil {
 		t.Fatalf("count platform.reset events: %v", err)
 	}
 	if resetCount != 0 {
 		t.Fatalf("platform.reset event count = %d, want 0", resetCount)
 	}
 
-	var recoveryFailedPayloadRaw []byte
-	if err := db.QueryRowContext(ctx, `
-		SELECT payload
-		FROM events
-		WHERE event_name = 'platform.recovery_failed'
-		ORDER BY created_at DESC
-		LIMIT 1
-	`).Scan(&recoveryFailedPayloadRaw); err != nil {
+	recoveryFailedPayloadRaw, err := storetest.ReadPostgresRecoveryFailedPayloadStorage(ctx, pg)
+	if err != nil {
 		t.Fatalf("load platform.recovery_failed event: %v", err)
 	}
 	var recoveryFailedPayload map[string]any
@@ -1199,9 +1145,7 @@ func (h conformanceRuntimeLoggerHook) Log(ctx context.Context, level runtimediag
 
 func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
 	runID := uuid.NewString()
@@ -1284,21 +1228,11 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 		t.Fatalf("detail.orphaned_sessions[0].termination_detail = %q, want admin_cli", got)
 	}
 
-	var (
-		status            string
-		terminationReason string
-		terminationDetail string
-	)
-	if err := db.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(status, ''),
-			COALESCE(termination_reason, ''),
-			COALESCE(termination_detail, '')
-		FROM agent_sessions
-		WHERE session_id = $1::uuid
-	`, lease.SessionID).Scan(&status, &terminationReason, &terminationDetail); err != nil {
+	termination, err := storetest.ReadPostgresSessionTerminationStorage(ctx, pg, lease.SessionID)
+	if err != nil {
 		t.Fatalf("load reset session row: %v", err)
 	}
+	status, terminationReason, terminationDetail := termination.Status, termination.Reason, termination.Detail
 	if status != "terminated" {
 		t.Fatalf("status = %q, want terminated", status)
 	}
@@ -1309,14 +1243,8 @@ func TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityRead
 		t.Fatalf("termination_detail = %q, want admin_cli", terminationDetail)
 	}
 
-	var resetPayloadRaw []byte
-	if err := db.QueryRowContext(ctx, `
-		SELECT payload
-		FROM events
-		WHERE event_name = 'platform.reset'
-		ORDER BY created_at DESC
-		LIMIT 1
-	`).Scan(&resetPayloadRaw); err != nil {
+	resetPayloadRaw, err := storetest.ReadPostgresResetPayloadStorage(ctx, pg)
+	if err != nil {
 		t.Fatalf("load platform.reset event: %v", err)
 	}
 	var resetPayload map[string]any
@@ -1465,9 +1393,7 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 
 func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityReader(t *testing.T) {
 	ctx := testAuthorActivityContext(context.Background())
-	_, db, cleanup := testutil.StartPostgres(t)
-	defer cleanup()
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	registerDifferentTestAuthorActivityCatalog(t, pg, "system.parent", "system.recover.replay", "system.recover.skip")
 
 	requireCanonicalRuntimeLogSurface(t, ctx, pg)
@@ -1531,7 +1457,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		droppedEventID, events.EventType("system.recover.drop"), "runtime", "", []byte(`{}`), 0,
 		droppedRunID, "", events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC(),
 	))
-	if _, err := db.ExecContext(ctx, `UPDATE events SET run_id = NULL WHERE event_id = $1::uuid`, droppedEventID); err != nil {
+	if err := storetest.ClearEventRunForRecovery(ctx, pg, droppedEventID); err != nil {
 		t.Fatalf("plant missing-run recovery corruption: %v", err)
 	}
 
@@ -1553,9 +1479,6 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	if err := rm.Recover(ctx); err != nil {
 		t.Fatalf("Recover before delivery continuation startup: %v", err)
 	}
-	if err := continuations.Start(ctx); err != nil {
-		t.Fatalf("start delivery continuation coordinator: %v", err)
-	}
 	defer func() {
 		retireCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -1563,8 +1486,23 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 			t.Fatalf("retire delivery continuation coordinator: %v", err)
 		}
 	}()
+	if err := continuations.Start(ctx); err != nil {
+		t.Fatalf("start delivery continuation coordinator: %v", err)
+	}
 	select {
 	case delivery := <-replayDeliveries:
+		carrier, err := worklifetime.NewEventDeliveryCarrierGuard(delivery)
+		if err != nil {
+			t.Fatalf("guard continued local delivery: %v", err)
+		}
+		completeCarrier := sync.OnceValues(func() (worklifetime.DeliveryContinuationResolution, error) {
+			return carrier.Complete(nil)
+		})
+		defer func() {
+			if _, err := completeCarrier(); err != nil {
+				t.Errorf("join continued local delivery ownership: %v", err)
+			}
+		}()
 		if delivery.ID() != replayChildID {
 			t.Fatalf("continued local delivery id = %q, want %q", delivery.ID(), replayChildID)
 		}
@@ -1576,17 +1514,13 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		if !ok {
 			t.Fatalf("continued local delivery disposition = %q, want acquired", claimResult.Disposition)
 		}
-		carrier, err := worklifetime.NewEventDeliveryCarrierGuard(delivery)
-		if err != nil {
-			t.Fatalf("guard continued local delivery: %v", err)
-		}
 		if resolution, err := carrier.Consume(nil); err != nil || resolution != worklifetime.DeliveryContinuationConsumed {
 			t.Fatalf("transfer continued local delivery into attempt: %v", err)
 		}
 		if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 			t.Fatalf("settle continued local delivery: %v", err)
 		}
-		if _, err := carrier.Complete(nil); err != nil {
+		if _, err := completeCarrier(); err != nil {
 			t.Fatalf("complete continued local delivery ownership: %v", err)
 		}
 	case <-time.After(5 * time.Second):
@@ -1890,33 +1824,15 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForToolWrites(t 
 }
 
 func TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-
+	pg := storetest.StartPostgresRuntimeStore(t)
+	ctx, runID, entityID := constructConformanceGateMutationSubject(t, pg)
 	requireMutationSurface(t, pg)
-
-	entityID := uuid.NewString()
-	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'mutation-flow/inst-1', 'default', 'queued', '{}'::jsonb, '{}'::jsonb, '{}'::jsonb
-		)
-	`, runID, entityID); err != nil {
-		t.Fatalf("seed entity_state: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, handler_step
-		) VALUES (
-			$1::uuid, $2::uuid, 'gate', '', 'null'::jsonb, 'true'::jsonb, 'platform', 'test', 'seed'
-		)
-	`, runID, entityID); err == nil {
+	err := storetest.ProbeWorkflowGateEmptyPath(ctx, pg, runID, entityID)
+	if err == nil {
 		t.Fatal("malformed gate mutation with an empty path was accepted")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "check constraint") {
+		t.Fatalf("empty gate path did not reach the database constraint: %v", err)
 	}
 }
 

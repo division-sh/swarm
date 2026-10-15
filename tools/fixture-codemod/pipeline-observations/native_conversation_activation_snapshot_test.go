@@ -23,6 +23,12 @@ func TestNativeConversationActivationSuccessorPreservesExactSourceAndAssertions(
 	if selected == nil || selected.Successor == "" || selected.Family != "native-served-delivery-quiescence-caller" {
 		t.Fatal("missing exact conversation activation successor")
 	}
+	actual := selectedCausalObservationBody(t, selected.File, selected.Function)
+	prior, actual, err := catchUp2542PriorMasterPair(*selected, actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected = &prior
 	const cut = "\t// Empty delivery queues do not join committed source-agent activation.\n\trt.Probe.RequireEventPersisted(initial.EventID)\n"
 	if strings.Count(selected.Successor, cut) != 1 {
 		t.Fatal("missing or repeated exact source activation fence")
@@ -32,7 +38,7 @@ func TestNativeConversationActivationSuccessorPreservesExactSourceAndAssertions(
 	if err != nil || beforeErr != nil || restored != before {
 		t.Fatal("activation successor changed an original assertion or other operation")
 	}
-	active, err := canonicalFunction(selectedCausalObservationBody(t, selected.File, selected.Function))
+	active, err := canonicalFunction(actual)
 	want, wantErr := canonicalFunction(selected.Successor)
 	if err != nil || wantErr != nil || active != want {
 		t.Fatal("current conversation source differs from its exact activation successor")

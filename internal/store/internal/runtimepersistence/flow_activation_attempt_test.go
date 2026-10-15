@@ -2,7 +2,6 @@ package runtimepersistence_test
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +12,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -34,20 +32,17 @@ type flowActivationAttemptTestStore interface {
 func TestFlowActivationAttemptBatchRetirementBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		open func(*testing.T) (flowActivationAttemptTestStore, *sql.DB, bool)
+		open func(*testing.T) flowActivationAttemptTestStore
 	}{
-		{"postgres", func(t *testing.T) (flowActivationAttemptTestStore, *sql.DB, bool) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			return storetest.AdmitPostgresRuntimeStore(t, db), db, false
+		{"postgres", func(t *testing.T) flowActivationAttemptTestStore {
+			return storetest.StartPostgresRuntimeStore(t)
 		}},
-		{"sqlite", func(t *testing.T) (flowActivationAttemptTestStore, *sql.DB, bool) {
-			selected := storetest.StartSQLiteRuntimeStore(t)
-			return selected, storetest.Database(selected), true
+		{"sqlite", func(t *testing.T) flowActivationAttemptTestStore {
+			return storetest.StartSQLiteRuntimeStore(t)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, _, _ := tc.open(t)
+			selected := tc.open(t)
 			ctx := testAuthorActivityContext()
 			runID := uuid.NewString()
 			hash := mustExternalStoreTestSourceArtifactFact().BundleHash()
@@ -158,20 +153,17 @@ func TestFlowActivationAttemptBatchRetirementBothStores(t *testing.T) {
 func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		open func(*testing.T) (flowActivationAttemptTestStore, *sql.DB, bool)
+		open func(*testing.T) flowActivationAttemptTestStore
 	}{
-		{"postgres", func(t *testing.T) (flowActivationAttemptTestStore, *sql.DB, bool) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			return storetest.AdmitPostgresRuntimeStore(t, db), db, false
+		{"postgres", func(t *testing.T) flowActivationAttemptTestStore {
+			return storetest.StartPostgresRuntimeStore(t)
 		}},
-		{"sqlite", func(t *testing.T) (flowActivationAttemptTestStore, *sql.DB, bool) {
-			selected := storetest.StartSQLiteRuntimeStore(t)
-			return selected, storetest.Database(selected), true
+		{"sqlite", func(t *testing.T) flowActivationAttemptTestStore {
+			return storetest.StartSQLiteRuntimeStore(t)
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			selected, db, sqlite := tc.open(t)
+			selected := tc.open(t)
 			ctx := testAuthorActivityContext()
 			runID, path := uuid.NewString(), "account/attempt"
 			hash := mustExternalStoreTestSourceArtifactFact().BundleHash()
@@ -290,14 +282,11 @@ func TestFlowActivationAttemptAdmissionBothStores(t *testing.T) {
 			if admitted.Attempt.ID() != "2" {
 				t.Fatalf("settled successor must be ordinal 2: %s", admitted.Attempt.ID())
 			}
-			var successorPhase string
-			query := `SELECT phase FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2`
-			if sqlite {
-				query = `SELECT phase FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`
-			}
-			if err := db.QueryRowContext(ctx, query, runID, path).Scan(&successorPhase); err != nil {
+			successorStamp, err := storetest.ReadDescriptorReadinessStampStorage(ctx, selected, runID, path)
+			if err != nil {
 				t.Fatal(err)
 			}
+			successorPhase := successorStamp.Phase
 			if successorPhase != string(runtimepipeline.FlowAttachmentPlanned) {
 				t.Fatalf("successor skipped removed resources: phase=%s", successorPhase)
 			}

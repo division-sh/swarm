@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"context"
-	"database/sql"
 	"reflect"
 	"testing"
 	"time"
@@ -13,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -22,24 +20,21 @@ import (
 func TestEmptyReporterSettlesWithoutConstructedHeaderMutationBothStores(t *testing.T) {
 	for _, backend := range []struct {
 		name string
-		open func(*testing.T) (notifyAllChildrenStore, *sql.DB)
+		open func(*testing.T) notifyAllChildrenStore
 	}{
-		{"sqlite", func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-			selected := storetest.StartSQLiteRuntimeStore(t)
-			return selected, storetest.DatabaseForTest(selected)
+		{"sqlite", func(t *testing.T) notifyAllChildrenStore {
+			return storetest.StartSQLiteRuntimeStore(t)
 		}},
-		{"postgres", func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			return storetest.AdmitPostgresRuntimeStore(t, db), db
+		{"postgres", func(t *testing.T) notifyAllChildrenStore {
+			return storetest.StartPostgresRuntimeStore(t)
 		}},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			selected, db := backend.open(t)
+			selected := backend.open(t)
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{
 				NumericRegistrationRows: true, NumericReporterSink: true, RegistrationUUIDField: true,
 			})
-			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now)
+			runtime := newNotifyAllChildrenRuntime(t, selected, source, time.Now)
 			runID := uuid.NewString()
 			ctx := correlation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "empty-reporter-header", runtime.sourceArtifactFact)); err != nil {
@@ -72,7 +67,7 @@ func TestEmptyReporterSettlesWithoutConstructedHeaderMutationBothStores(t *testi
 			if after := load(); !reflect.DeepEqual(before, after) {
 				t.Fatalf("explicit empty reporter mutated its constructed header: before=%#v after=%#v", before, after)
 			}
-			registrations := loadNotifyAllChildrenNumericRegistrations(t, ctx, selected, db, runID)
+			registrations := loadNotifyAllChildrenNumericRegistrations(t, ctx, selected, runID)
 			if len(registrations) != len(rows) {
 				t.Fatalf("registrations=%d, want %d", len(registrations), len(rows))
 			}

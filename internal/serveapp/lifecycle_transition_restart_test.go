@@ -16,8 +16,8 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -27,7 +27,13 @@ import (
 func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget ...time.Duration) (*cliapp.ServeOptions, func() (*serveRuntimeTestProcess, servedControlProofRuntime)) {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+	var snapshotReader func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		snapshotReader = func(ctx context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error) {
+			return storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, p.deps.EventStore)
+		}
+	})
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	opts := &cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
@@ -43,14 +49,8 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 		dsn, _, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
 		original := buildStoresForServe
-		buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			pg, err := store.NewPostgresStore(dsn)
-			if err != nil {
-				return nil, err
-			}
-			storetest.BootstrapPostgresRuntimeStore(t, pg)
-			db = storetest.DatabaseForTest(pg)
-			return openSelectedPostgresOwner(t, dsn, db, cfg), nil
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
+			return storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})
 		}
 		t.Cleanup(func() { buildStoresForServe = original })
 		opts.ConfigPath = writeServeRuntimeTestConfig(t)
@@ -77,24 +77,24 @@ func lifecycleRestartHarness(t *testing.T, backend, root string, readinessBudget
 			}
 		}
 		endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-		return process, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, opts.SourceRoot), ReceiverStateReader: receiverReader}
+		return process, servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: backend, BundleHash: servedEventPublishFixtureBundleHash(t, opts.SourceRoot), ReceiverStateReader: receiverReader}
 	}
 }
 
-func lifecycleGateDecisionParams(t *testing.T, rt servedControlProofRuntime, runID, verdict string) map[string]any {
+func lifecycleGateDecisionParams(t *testing.T, selectedProofEndpoint string, selectedProofReceiverStateReader receiverProofStateReader, runID, verdict string) map[string]any {
 	t.Helper()
-	cardID := waitLifecycleGateCard(t, rt, runID)
-	return lifecycleDecisionParamsForCard(t, rt, cardID, verdict)
+	cardID := waitLifecycleGateCard(t, selectedProofEndpoint, selectedProofReceiverStateReader, runID)
+	return lifecycleDecisionParamsForCard(t, selectedProofEndpoint, cardID, verdict)
 }
 
-func lifecycleDecisionParamsForCard(t *testing.T, rt servedControlProofRuntime, cardID, verdict string) map[string]any {
+func lifecycleDecisionParamsForCard(t *testing.T, selectedProofEndpoint string, cardID, verdict string) map[string]any {
 	t.Helper()
 	var detail struct {
 		DecisionCard struct {
 			ContentHash string `json:"card_content_hash"`
 		} `json:"decision_card"`
 	}
-	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, &detail)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, &detail)
 	if detail.DecisionCard.ContentHash == "" {
 		t.Fatal("missing frozen card hash")
 	}
@@ -110,44 +110,42 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			first, rt := start()
 			seedParams := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "frozen-start"}
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, seedParams)
-			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
-			params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "review")
+			params := lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, "approve")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			if code := first.stop(); code != 0 {
 				t.Fatalf("first stop=%d", code)
 			}
 			opts.SourceRoot = sourceB
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 			second, rt := start()
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 				t.Fatal("restart mutated pending lifecycle")
 			}
 			missingPin := requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", params)
 			if missingPin.Data["code"] != "BUNDLE_UNAVAILABLE" {
 				t.Fatalf("missing pin=%#v", missingPin)
 			}
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 				t.Fatal("unavailable pin mutated gate")
 			}
 			if code := second.stop(); code != 0 {
 				t.Fatalf("unpinned stop=%d", code)
 			}
-			// Returning to the exact source tree restores executable authority;
-			// the intervening B boot must not rewrite A's frozen decision.
 			opts.SourceRoot = sourceA
 			second, rt = start()
-			if got := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve"); got["card_id"] != params["card_id"] || got["observed_content_hash"] != params["observed_content_hash"] {
+			if got := lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, "approve"); got["card_id"] != params["card_id"] || got["observed_content_hash"] != params["observed_content_hash"] {
 				t.Fatalf("restart reminted frozen card: %#v / %#v", params, got)
 			}
 			var decided map[string]any
 			stale := map[string]any{"card_id": params["card_id"], "verdict": "approve", "observed_content_hash": strings.Repeat("0", len(params["observed_content_hash"].(string))), "idempotency_key": "stale-decision"}
 			requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", stale)
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 				t.Fatal("stale hash mutated pending gate")
 			}
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decided)
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "done")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			var entity operatorread.OperatorEntityFull
 			requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
@@ -166,12 +164,12 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			if !ok || compiled.Edge().Source != "gate" || compiled.Edge().DecisionID != "review_decision" || compiled.Edge().Verdict != "approve" {
 				t.Fatalf("frozen selected gate cause=%#v", compiled)
 			}
-			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 1)
-			requireLifecycleEventCount(t, rt, seed.RunID, "work.changed", 0)
-			settled := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.completed", 1)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.changed", 0)
+			settled := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			conflict := map[string]any{"card_id": params["card_id"], "verdict": "reject", "observed_content_hash": params["observed_content_hash"], "idempotency_key": "contradictory-decision"}
 			requireServedJSONRPCError(t, rt.Endpoint, "mailbox.decide", conflict)
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != settled {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != settled {
 				t.Fatal("contradictory verdict mutated routed gate")
 			}
 			if code := second.stop(); code != 0 {
@@ -183,11 +181,11 @@ func TestServedCompiledGateFrozenTransitionEvidenceOnBothStores(t *testing.T) {
 			if duplicate.EventID != seed.EventID {
 				t.Fatal("restart reminted ingress")
 			}
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != settled {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != settled {
 				t.Fatal("terminal restart/replay changed evidence")
 			}
-			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 1)
-			requireLifecycleEventCount(t, rt, seed.RunID, "work.changed", 0)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.completed", 1)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.changed", 0)
 			if code := third.stop(); code != 0 {
 				t.Fatalf("third stop=%d", code)
 			}
@@ -220,28 +218,28 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 				}
 				first, rt := start()
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "restart-seed"})
-				entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, seed.RunID, "waiting")
+				entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, seed.RunID, "waiting")
 				params := func(event, key string, payload map[string]any) map[string]any {
 					return map[string]any{"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": payload, "idempotency_key": key}
 				}
 				started := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.start", "restart-start", map[string]any{"seed": true}))
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "drafting")
 				requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), started.EventID, "waiting", "drafting")
 				var capParams map[string]any
 				var capRevision string
 				for attempt := 1; attempt <= 2; attempt++ {
-					loop := readLifecycleLoop(t, rt, seed.RunID, entityID)
+					loop := readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID)
 					capRevision = loop.RevisionID
 					payload := map[string]any{"revision_id": loop.RevisionID}
 					admit := requireServedEventPublishRPCResult(t, rt.Endpoint, params("loop.admit", fmt.Sprintf("restart-admit-%d", attempt), payload))
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "review")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "review")
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), admit.EventID, "drafting", "review")
 					capParams = params("loop.repeat", fmt.Sprintf("restart-repeat-%d", attempt), payload)
 					if attempt == 2 {
 						break
 					}
 					repeated := requireServedEventPublishRPCResult(t, rt.Endpoint, capParams)
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "drafting")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "drafting")
 					requireLifecycleCurrentTransition(t, readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID), repeated.EventID, "review", "drafting")
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				}
@@ -256,17 +254,17 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 				if cut == "before_escape_consumer" {
 					state = "escaped"
 				}
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, state)
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, state)
 				if code := first.stop(); code != 0 {
 					t.Fatalf("first stop=%d", code)
 				}
 				opts.TestWorkflowNodeHandlerStartHook = nil
 				setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 				second, rt := start()
-				requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "escaped")
-				receipt := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "done")
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "escaped")
+				receipt := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "done")
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				closed := readLifecycleLoop(t, rt, seed.RunID, entityID)
+				closed := readLifecycleLoop(t, rt.Endpoint, seed.RunID, entityID)
 				if closed.RevisionID != capRevision || closed.Attempt != 2 || closed.Status != loopruntime.StatusClosed || closed.CloseReason != "escaped" {
 					t.Fatalf("restart loop=%#v", closed)
 				}
@@ -283,17 +281,17 @@ func TestServedCompiledTransitionRestartOnBothStores(t *testing.T) {
 				if !ok || compiled.Edge().Source != "loop.escape" || compiled.Edge().LoopID != "revision" {
 					t.Fatalf("restart escape cause=%#v", compiled)
 				}
-				settled := lifecycleStoredSnapshot(t, rt, seed.RunID)
+				settled := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 				if code := second.stop(); code != 0 {
 					t.Fatalf("second stop=%d", code)
 				}
 				third, rt := start()
 				duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, capParams)
-				if duplicate.EventID != cap.EventID || lifecycleStoredSnapshot(t, rt, seed.RunID) != settled {
+				if duplicate.EventID != cap.EventID || lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != settled {
 					t.Fatal("terminal restart changed cap identity/history")
 				}
-				requireLifecycleEventCount(t, rt, seed.RunID, "ordinary.repeated", 1)
-				requireLifecycleEventCount(t, rt, seed.RunID, "loop.escaped", 1)
+				requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "ordinary.repeated", 1)
+				requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "loop.escaped", 1)
 				if code := third.stop(); code != 0 {
 					t.Fatalf("third stop=%d", code)
 				}

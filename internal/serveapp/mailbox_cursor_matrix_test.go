@@ -68,7 +68,7 @@ func newCursorMailboxFixture(t *testing.T, backend servedparity.Backend) cursorM
 	if rt.Postgres != nil {
 		owner = rt.Postgres
 	}
-	f := cursorMailboxFixture{rt: rt, store: owner, ctx: servedControlProofAuthorActivityContext(t, rt)}
+	f := cursorMailboxFixture{rt: rt, store: owner, ctx: servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime)}
 	for id := range cards {
 		var err error
 		f.base, err = owner.GetDecisionCard(f.ctx, id)

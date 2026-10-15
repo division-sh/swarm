@@ -30,7 +30,11 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			reached := make(chan struct{}, 1)
 			release := make(chan struct{})
 			var releaseOnce sync.Once
-			releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
+			releaseHandler := func() {
+				releaseOnce.Do(func() {
+					close(release)
+				})
+			}
 			defer releaseHandler()
 			opts.TestWorkflowNodeHandlerStartHook = func(ctx context.Context, _ string, event events.Event) error {
 				if event.Type() != "work.completed" {
@@ -49,14 +53,12 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			}
 			first, rt := start()
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "gate-cut-seed"})
-			entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
-			params := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+			entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "review")
+			params := lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, "approve")
 			var decision map[string]any
 			requestCtx, cancelRequest := context.WithCancel(context.Background())
 			defer cancelRequest()
 			requestDone := make(chan error, 1)
-			// A committed verdict may await its downstream publication before
-			// answering HTTP; issue it concurrently with the restart barrier.
 			go func() {
 				raw, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": "gate-cut", "method": "mailbox.decide", "params": params})
 				if err != nil {
@@ -88,7 +90,7 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			case <-time.After(15 * time.Second):
 				t.Fatal("gate committed-output barrier not reached")
 			}
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "approved")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "approved")
 			before := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 			if len(before) != 1 {
 				t.Fatalf("gate did not commit before barrier: %#v", before)
@@ -101,8 +103,6 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT event_id FROM events WHERE run_id=$1 AND event_name='work.completed'`, seed.RunID).Scan(&outcomeID); err != nil {
 				t.Fatal(err)
 			}
-			// Dispatch retains a commit-owned context. Graceful drain releases
-			// this test barrier; it is not a substitute for killing a process.
 			releaseHandler()
 			select {
 			case err := <-requestDone:
@@ -112,7 +112,7 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			case <-time.After(15 * time.Second):
 				t.Fatal("released verdict did not complete")
 			}
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "done")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			if code := first.stop(); code != 0 {
 				t.Fatalf("pre-consumer stop=%d", code)
@@ -121,7 +121,7 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			opts.TestWorkflowNodeHandlerStartHook = nil
 			setServeRuntimeRecovery(t, opts.ConfigPath, false, true)
 			second, rt := start()
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "done")
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			after := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 			if len(after) != 1 || !reflect.DeepEqual(readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, outcomeID), before[0]) || after[0].TriggerEventID != outcomeID || after[0].From != "approved" || after[0].To != "done" {
@@ -132,12 +132,12 @@ func proveServedCompiledGateOutcomeRestart(t *testing.T) {
 			if entity.Fields["result"] != "approved" {
 				t.Fatalf("recovered gate consumer=%#v", entity)
 			}
-			settled := lifecycleStoredSnapshot(t, rt, seed.RunID)
+			settled := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", params, &decision)
-			if lifecycleStoredSnapshot(t, rt, seed.RunID) != settled {
+			if lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != settled {
 				t.Fatal("recovered gate duplicate mutated history")
 			}
-			requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", 1)
+			requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.completed", 1)
 			if code := second.stop(); code != 0 {
 				t.Fatalf("recovered stop=%d", code)
 			}

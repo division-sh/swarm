@@ -480,7 +480,7 @@ func TestRunLifecycleServedDeliverySameRevisionHandoffParity(t *testing.T) {
 			}
 			candidate := eventtest.RuntimeControl(
 				uuid.NewString(),
-				"platform.boot",
+				"platform.paused", // #2269 ruling 6170784774: boot has no agent activity anchor.
 				"runtime",
 				"",
 				json.RawMessage(`{}`),
@@ -502,7 +502,10 @@ func TestRunLifecycleServedDeliverySameRevisionHandoffParity(t *testing.T) {
 				Origin: semanticEventRunOriginForTest(t, event.ID(), string(event.Type())),
 				RunID:  runID, StartedAt: event.CreatedAt(),
 			})
-			seedStandaloneConvergenceAgent(t, fixture.store, runtimeCtx, agentIdentity)
+			authority := seedStandaloneConvergenceAgent(t, fixture.store, runtimeCtx, agentIdentity)
+			if err := eventBus.SetDeliveryAuthority(authority); err != nil {
+				t.Fatal(err)
+			}
 			delivery := runtimebustest.SubscribeForRun(t, eventBus, runID, agentID, event.Type())
 			defer runtimebustest.UnsubscribeIdentity(eventBus, agentIdentity)
 			if err := eventBus.Publish(runtimeCtx, event); err != nil {

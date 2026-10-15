@@ -138,9 +138,10 @@ func TestServedDeliveryQuiescenceCallerInventoryConsumesOnlyDomainReadPorts(t *t
 	for _, count := range counts {
 		total += count
 	}
-	if len(counts) != 82 || total != 155 || counts["TestServedRunDeliveryQuiescenceReaderPreservesStableStatusCut"] != 1 ||
-		counts["proveServedRetainedJoinOutcomeHeld"] != 3 || counts["testServedJoinWriterCompletedHistoryRefusal"] != 5 {
-		t.Fatalf("delivery family inventory functions=%d,calls=%d,want81/150 plus three held-witness and two retained-outcome waits", len(counts), total)
+	if len(counts) != 83 || total != 157 || counts["TestServedRunDeliveryQuiescenceReaderPreservesStableStatusCut"] != 1 ||
+		counts["proveServedRetainedJoinOutcomeHeld"] != 3 || counts["testServedJoinWriterCompletedHistoryRefusal"] != 5 ||
+		counts["TestStandingDiagnosticsReadOnlyWholeChainBothStores"] != 2 {
+		t.Fatalf("delivery family inventory functions=%d,calls=%d,want83/157 including held-witness, retained-outcome and standing-diagnostic cuts", len(counts), total)
 	}
 }
 

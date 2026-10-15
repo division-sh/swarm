@@ -52,7 +52,7 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 			if err := waitExactOriginPublications(t.Context(), publication, initialEventID, published.EventID); err != nil {
 				t.Fatal(err)
 			}
-			before := readServedForkRecipientSourceDomain(t, rt, started.RunID)
+			before := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), started.RunID)
 			params := map[string]any{"source_run_id": started.RunID, "fork_event_id": published.EventID, "allow_source_freeze": true, "idempotency_key": "root-source-fork"}
 			var fork apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
@@ -63,7 +63,7 @@ func TestServedForkRootSourceIngressBothStores(t *testing.T) {
 			requireServedRunStatus(t, rt.Endpoint, fork.ForkRunID, "completed")
 			var replay apiv1.RunForkExecutionResult
 			requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-			if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {
+			if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), started.RunID)) {
 				t.Fatal("repeated fork changed the result or source business state")
 			}
 			var replayKind, replayRoute string

@@ -38,14 +38,18 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				var originalSource []byte
-				if err := proof.DB.QueryRow("SELECT source_blob FROM source_artifacts WHERE bundle_hash = $1", proof.BundleHash).Scan(&originalSource); err != nil {
+				if err := func() error {
+					var err error
+					originalSource, err = readServedPersistedSourceBlob(context.Background(), proof.SourceArtifacts, proof.BundleHash)
+					return err
+				}(); err != nil {
 					t.Fatal(err)
 				}
 				initial := requireServedEventPublishRPCResult(t, proof.Endpoint, map[string]any{
 					"event_name": "item.received", "bundle_hash": proof.BundleHash,
 					"payload": map[string]any{"item_id": "before-reset"}, "idempotency_key": uuid.NewString(),
 				})
-				waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, proof.Backend, initial.RunID, initial.EventID, proof.Probe)
+				waitForServedEventPublishNodeDeliveryLifecycle(t, proof.ReceiverStateReader, proof.Backend, initial.RunID, initial.EventID, proof.Probe)
 				params := map[string]any{"include_source_artifacts": clear, "idempotency_key": uuid.NewString()}
 				lease, err := proof.Runtime.WorkOccurrence().Begin(context.Background())
 				if err != nil {
@@ -79,8 +83,9 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 					t.Fatalf("reset passed active predecessor work: %+v", response)
 				default:
 				}
-				var beforeJoin int
-				if err := proof.DB.QueryRow("SELECT COUNT(*) FROM runs WHERE run_id = $1", initial.RunID).Scan(&beforeJoin); err != nil || beforeJoin != 1 {
+
+				beforeJoin, err := readServedRunPhysicalIdentity(proof.ReceiverStateReader, initial.RunID)
+				if err != nil || beforeJoin != 1 {
 					t.Fatalf("cleanup preceded predecessor join: %d, %v", beforeJoin, err)
 				}
 				if err := lease.Done(); err != nil {
@@ -100,8 +105,9 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 				if err := json.Unmarshal(first.Result, &outcome); err != nil {
 					t.Fatal(err)
 				}
-				var oldRuns, artifacts int
-				if err := proof.DB.QueryRow("SELECT COUNT(*) FROM runs WHERE run_id = $1", initial.RunID).Scan(&oldRuns); err != nil || oldRuns != 0 {
+				var artifacts int
+				oldRuns, err := readServedRunPhysicalIdentity(proof.ReceiverStateReader, initial.RunID)
+				if err != nil || oldRuns != 0 {
 					t.Fatalf("predecessor run remains: %d, %v", oldRuns, err)
 				}
 				if err := proof.DB.QueryRow("SELECT COUNT(*) FROM source_artifacts WHERE bundle_hash = $1", proof.BundleHash).Scan(&artifacts); err != nil {
@@ -121,7 +127,11 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 					}
 				} else {
 					var retainedSource []byte
-					if err := proof.DB.QueryRow("SELECT source_blob FROM source_artifacts WHERE bundle_hash = $1", proof.BundleHash).Scan(&retainedSource); err != nil || !bytes.Equal(originalSource, retainedSource) {
+					if err := func() error {
+						var err error
+						retainedSource, err = readServedPersistedSourceBlob(context.Background(), proof.SourceArtifacts, proof.BundleHash)
+						return err
+					}(); err != nil || !bytes.Equal(originalSource, retainedSource) {
 						t.Fatalf("retained admitted source changed: %v", err)
 					}
 					use, _, err := proof.Contexts.AcquireBundleHash(context.Background(), proof.BundleHash)
@@ -140,8 +150,8 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 						"event_name": "item.received", "bundle_hash": proof.BundleHash,
 						"payload": map[string]any{"item_id": "after-reset"}, "idempotency_key": uuid.NewString(),
 					})
-					waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, proof.Backend, later.RunID, later.EventID, proof.Probe)
-					requireServedParitySettlementPostconditions(t, proof.Endpoint, proof.DB, proof.Backend, later.RunID, scenario)
+					waitForServedEventPublishNodeDeliveryLifecycle(t, proof.ReceiverStateReader, proof.Backend, later.RunID, later.EventID, proof.Probe)
+					requireServedParitySettlementPostconditions(t, proof.Endpoint, proof.ReceiverStateReader, proof.Backend, later.RunID, scenario)
 					laterRun = later.RunID
 				}
 				// The domain receipt must survive transport-cache expiry even
@@ -157,8 +167,8 @@ func TestServedResetRetainClearAndHistoricalReplayBothStores(t *testing.T) {
 						t.Fatalf("outcome changed: %v\n%s\n%s", err, first.Result, replay.Result)
 					}
 					if laterRun != "" {
-						var count int
-						if err := proof.DB.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM runs WHERE run_id = $1", laterRun).Scan(&count); err != nil || count != 1 {
+						count, err := readServedRunPhysicalIdentity(proof.ReceiverStateReader, laterRun)
+						if err != nil || count != 1 {
 							t.Fatalf("replay changed later run: %d, %v", count, err)
 						}
 					}
@@ -190,7 +200,7 @@ func TestServedResetCLIDryRunApplyAndReplayBothStores(t *testing.T) {
 				"event_name": "item.received", "bundle_hash": proof.BundleHash,
 				"payload": map[string]any{"item_id": "cli-reset"}, "idempotency_key": uuid.NewString(),
 			})
-			waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, proof.Backend, initial.RunID, initial.EventID, proof.Probe)
+			waitForServedEventPublishNodeDeliveryLifecycle(t, proof.ReceiverStateReader, proof.Backend, initial.RunID, initial.EventID, proof.Probe)
 			stdout, stderr, code := runServedCLICommand(t, proof.Endpoint, []string{"control", "nuke", "--dry-run"})
 			if code != 0 || stderr != "" || !strings.Contains(stdout, "dry_run") {
 				t.Fatalf("dry run: exit=%d stderr=%q stdout=%q", code, stderr, stdout)

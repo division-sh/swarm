@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -36,7 +35,6 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -95,26 +93,23 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T) (fanInBarrierConformanceStore, *sql.DB)
+		setup func(*testing.T) fanInBarrierConformanceStore
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			setup: func(t *testing.T) fanInBarrierConformanceStore {
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
-				backend := storetest.StartSQLiteRuntimeStore(t)
-				return backend, storetest.DatabaseForTest(backend)
+			setup: func(t *testing.T) fanInBarrierConformanceStore {
+				return storetest.StartSQLiteRuntimeStore(t)
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			backend, db := tc.setup(t)
+			backend := tc.setup(t)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
 			seedFanInBarrierRun(t, ctx, backend, source, runID)
@@ -137,7 +132,7 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			}
 			parentTarget := setupRoutes[0].Target.Route()
 			if portfolio.CurrentState != "awaiting" {
-				dumpFanInBarrierEvents(t, ctx, backend, db)
+				dumpFanInBarrierEvents(t, ctx, backend)
 				t.Logf("fan-in runtime diagnostics: %#v", runtime.diagnostics.snapshot())
 				t.Fatalf("portfolio state after setup = %q, want awaiting", portfolio.CurrentState)
 			}
@@ -159,7 +154,7 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 				t.Fatal("partial arrival changed the retained barrier arm")
 			}
 			if portfolio.CurrentState != "awaiting" || activation.Status != joinruntime.StatusOpen || activation.Completed() != 1 {
-				dumpFanInBarrierEvents(t, ctx, backend, db)
+				dumpFanInBarrierEvents(t, ctx, backend)
 				t.Logf("fan-in runtime diagnostics: %#v", runtime.diagnostics.snapshot())
 				t.Fatalf("partial barrier = state:%s activation:%#v, want awaiting open 1/2", portfolio.CurrentState, activation)
 			}
@@ -196,8 +191,8 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 			if !activation.JoinRef().Equal(retainedJoinRef) {
 				t.Fatal("restart changed the retained barrier arm")
 			}
-			requireFanInBarrierReportTargets(t, ctx, backend, db, 2, parentTarget, conformanceNode(t, "portfolio", "portfolio-router").Key())
-			requireA2NestedPeriodReadback(t, ctx, backend, db, parentTarget, portfolio)
+			requireFanInBarrierReportTargets(t, ctx, backend, 2, parentTarget, conformanceNode(t, "portfolio", "portfolio-router").Key())
+			requireA2NestedPeriodReadback(t, ctx, backend, parentTarget, portfolio)
 			if portfolio.CurrentState != "complete" || activation.Status != joinruntime.StatusClosed || activation.CloseReason != joinruntime.CloseReasonComplete {
 				t.Fatalf("completed barrier = state:%s activation:%#v", portfolio.CurrentState, activation)
 			}
@@ -209,27 +204,12 @@ func TestFanInBarrierCanonicalRuntimeCompletesAfterRestartOnBothBackends(t *test
 	}
 }
 
-func requireA2NestedPeriodReadback(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB, parent events.RouteIdentity, period runtimepipeline.WorkflowInstance) {
+func requireA2NestedPeriodReadback(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, parent events.RouteIdentity, period runtimepipeline.WorkflowInstance) {
 	t.Helper()
-	query := `SELECT event_id::text FROM events WHERE event_name LIKE $1 ORDER BY created_at, event_id`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT event_id FROM events WHERE event_name LIKE ? ORDER BY created_at, event_id`
-	}
-	rows, err := db.QueryContext(ctx, query, "%period.reported")
+	ids, err := storetest.ReadFanInPeriodReportedEventIDs(ctx, backend)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			t.Fatal(err)
-		}
-		ids = append(ids, id)
-	}
-	err = rows.Err()
-	rows.Close()
 	if err != nil || len(ids) != 2 {
 		t.Fatalf("forwarded period arrivals: ids=%#v err=%v", ids, err)
 	}
@@ -262,26 +242,23 @@ func TestRootToSingletonFirstDeliveryMaterializesReceiverEntityOnBothBackends(t 
 	source := semanticview.Wrap(bundle)
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T) (fanInBarrierConformanceStore, *sql.DB)
+		setup func(*testing.T) fanInBarrierConformanceStore
 	}{
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
-				backend := storetest.StartSQLiteRuntimeStore(t)
-				return backend, storetest.DatabaseForTest(backend)
+			setup: func(t *testing.T) fanInBarrierConformanceStore {
+				return storetest.StartSQLiteRuntimeStore(t)
 			},
 		},
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			setup: func(t *testing.T) fanInBarrierConformanceStore {
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			backend, _ := tc.setup(t)
+			backend := tc.setup(t)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
 			seedFanInBarrierRun(t, ctx, backend, source, runID)
@@ -410,26 +387,23 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 
 	for _, tc := range []struct {
 		name  string
-		setup func(*testing.T) (fanInBarrierConformanceStore, *sql.DB)
+		setup func(*testing.T) fanInBarrierConformanceStore
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			setup: func(t *testing.T) fanInBarrierConformanceStore {
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (fanInBarrierConformanceStore, *sql.DB) {
-				backend := storetest.StartSQLiteRuntimeStore(t)
-				return backend, storetest.DatabaseForTest(backend)
+			setup: func(t *testing.T) fanInBarrierConformanceStore {
+				return storetest.StartSQLiteRuntimeStore(t)
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			backend, db := tc.setup(t)
+			backend := tc.setup(t)
 			runID := uuid.NewString()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), conformanceSourceArtifactFact(t, source)), runID)
 			seedFanInBarrierRun(t, ctx, backend, source, runID)
@@ -484,14 +458,14 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 			if inserted := commitFanInBarrierEnginePublication(t, ctx, backend, proofBus, event); !inserted {
 				t.Fatal("initial fan-in proof publication was not inserted")
 			}
-			initialSettlement := requireFanInBarrierRouteProof(t, ctx, backend, db, eventID, selectedTarget)
+			initialSettlement := requireFanInBarrierRouteProof(t, ctx, backend, eventID, selectedTarget)
 			initialPublic := requireFanInBarrierPublicRouteProof(t, ctx, backend, eventID, selectedTarget)
 			sink.requireDelivery(t, eventID, selectedTarget)
 			if err := sink.close(true); err != nil {
 				t.Fatalf("retire first proof sink: %v", err)
 			}
 
-			removeFanInBarrierSelectedOwner(t, ctx, backend, db, runID, selectedOwner)
+			removeFanInBarrierSelectedOwner(t, ctx, backend, runID, selectedOwner)
 			restartedBus := newFanInBarrierRouteProofBus(t, backend, source, seedRuntime.manager)
 			restartedSink := newFanInBarrierRouteProofSink(t, ctx, restartedBus, eventType)
 			if inserted := commitFanInBarrierEnginePublication(t, ctx, backend, restartedBus, event); inserted {
@@ -501,7 +475,7 @@ func testFanInSingletonRoutePersistsExactSelectedOwnerOnBothBackends(t *testing.
 			if err := restartedSink.close(false); err != nil {
 				t.Fatalf("retire restarted proof sink: %v", err)
 			}
-			if got := requireFanInBarrierRouteProof(t, ctx, backend, db, eventID, selectedTarget); got != initialSettlement {
+			if got := requireFanInBarrierRouteProof(t, ctx, backend, eventID, selectedTarget); got != initialSettlement {
 				t.Fatalf("duplicate route settlement changed:\ninitial=%s\nreplayed=%s", initialSettlement, got)
 			}
 			if got := requireFanInBarrierPublicRouteProof(t, ctx, backend, eventID, selectedTarget); got != initialPublic {
@@ -632,7 +606,6 @@ func requireFanInBarrierRouteProof(
 	t *testing.T,
 	ctx context.Context,
 	backend fanInBarrierConformanceStore,
-	db *sql.DB,
 	eventID string,
 	wantTarget events.RouteIdentity,
 ) string {
@@ -645,12 +618,8 @@ func requireFanInBarrierRouteProof(
 	if len(routes) != 1 || routes[0].Recipient.ID() != portfolioCollector || !routes[0].Target.ExistingEntity() || routes[0].Target.Route().Normalized() != wantTarget.Normalized() {
 		t.Fatalf("fan-in proof routes = %#v, want portfolio-collector at %#v", routes, wantTarget.Normalized())
 	}
-	query := `SELECT route_settlement::text FROM events WHERE event_id = $1::uuid`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT route_settlement FROM events WHERE event_id = ?`
-	}
-	var raw string
-	if err := db.QueryRowContext(ctx, query, eventID).Scan(&raw); err != nil {
+	raw, err := storetest.ReadFanInEventRouteSettlement(ctx, backend, eventID)
+	if err != nil {
 		t.Fatalf("load fan-in proof settlement: %v", err)
 	}
 	var settlement events.RouteSettlement
@@ -732,19 +701,11 @@ func requireFanInBarrierPublicRouteProof(
 	return string(projection)
 }
 
-func removeFanInBarrierSelectedOwner(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB, runID, entityID string) {
+func removeFanInBarrierSelectedOwner(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, runID, entityID string) {
 	t.Helper()
-	query := `DELETE FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = 'portfolio/selected-period'`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `DELETE FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = 'portfolio/selected-period'`
-	}
-	result, err := db.ExecContext(ctx, query, runID, entityID)
+	removed, err := storetest.DeleteFanInSelectedPeriodOwner(ctx, backend, runID, entityID)
 	if err != nil {
 		t.Fatalf("remove fan-in selected owner: %v", err)
-	}
-	removed, err := result.RowsAffected()
-	if err != nil {
-		t.Fatalf("inspect removed fan-in selected owner: %v", err)
 	}
 	if removed != 1 {
 		t.Fatalf("removed fan-in selected owners = %d, want 1", removed)
@@ -982,31 +943,14 @@ func requireFanInBarrierReportTargets(
 	t *testing.T,
 	ctx context.Context,
 	backend fanInBarrierConformanceStore,
-	db *sql.DB,
 	wantCount int,
 	wantTarget events.RouteIdentity,
 	wantRecipient string,
 ) {
 	t.Helper()
-	query := `SELECT event_id::text FROM events WHERE event_name LIKE $1 ORDER BY created_at, event_id`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT event_id FROM events WHERE event_name LIKE ? ORDER BY created_at, event_id`
-	}
-	rows, err := db.QueryContext(ctx, query, "%operating.reported")
+	eventIDs, err := storetest.ReadFanInOperatingReportedEventIDs(ctx, backend)
 	if err != nil {
 		t.Fatalf("query fan-in report events: %v", err)
-	}
-	defer rows.Close()
-	var eventIDs []string
-	for rows.Next() {
-		var eventID string
-		if err := rows.Scan(&eventID); err != nil {
-			t.Fatalf("scan fan-in report event: %v", err)
-		}
-		eventIDs = append(eventIDs, eventID)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate fan-in report events: %v", err)
 	}
 	if len(eventIDs) != wantCount {
 		t.Fatalf("fan-in report event count = %d, want %d", len(eventIDs), wantCount)
@@ -1105,43 +1049,23 @@ func loadFanInBarrierActivation(t *testing.T, ctx context.Context, instance runt
 	return activation
 }
 
-func dumpFanInBarrierEvents(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore, db *sql.DB) {
+func dumpFanInBarrierEvents(t *testing.T, ctx context.Context, backend fanInBarrierConformanceStore) {
 	t.Helper()
-	query := `SELECT event_id::text, event_name, payload::text FROM events ORDER BY created_at, event_id`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT event_id, event_name, payload FROM events ORDER BY created_at, event_id`
-	}
-	rows, err := db.QueryContext(ctx, query)
+	rows, err := storetest.ReadFanInDiagnosticEvents(ctx, backend)
 	if err != nil {
 		t.Logf("query fan-in events: %v", err)
 		return
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var eventID, eventName, payload string
-		if err := rows.Scan(&eventID, &eventName, &payload); err != nil {
-			t.Logf("scan fan-in event: %v", err)
-			return
-		}
-		routes, routeErr := backend.ListEventDeliveryRoutes(ctx, eventID)
-		t.Logf("fan-in event %s %s payload=%s routes=%#v err=%v", eventID, eventName, payload, routes, routeErr)
+	for _, row := range rows {
+		routes, routeErr := backend.ListEventDeliveryRoutes(ctx, row.EventID)
+		t.Logf("fan-in event %s %s payload=%s routes=%#v err=%v", row.EventID, row.EventName, row.Payload, routes, routeErr)
 	}
-	deliveryQuery := `SELECT event_id::text, subscriber_id, status, COALESCE(reason_code, ''), COALESCE(failure::text, '') FROM event_deliveries ORDER BY created_at, delivery_id`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		deliveryQuery = `SELECT event_id, subscriber_id, status, COALESCE(reason_code, ''), COALESCE(failure, '') FROM event_deliveries ORDER BY created_at, delivery_id`
-	}
-	deliveryRows, err := db.QueryContext(ctx, deliveryQuery)
+	deliveryRows, err := storetest.ReadFanInDiagnosticDeliveries(ctx, backend)
 	if err != nil {
 		t.Logf("query fan-in deliveries: %v", err)
 		return
 	}
-	defer deliveryRows.Close()
-	for deliveryRows.Next() {
-		var eventID, subscriberID, status, reason, failure string
-		if err := deliveryRows.Scan(&eventID, &subscriberID, &status, &reason, &failure); err != nil {
-			t.Logf("scan fan-in delivery: %v", err)
-			return
-		}
-		t.Logf("fan-in delivery event=%s subscriber=%s status=%s reason=%s failure=%s", eventID, subscriberID, status, reason, failure)
+	for _, row := range deliveryRows {
+		t.Logf("fan-in delivery event=%s subscriber=%s status=%s reason=%s failure=%s", row.EventID, row.SubscriberID, row.Status, row.Reason, row.Failure)
 	}
 }

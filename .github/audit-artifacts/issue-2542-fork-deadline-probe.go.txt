@@ -1,0 +1,67 @@
+package serveapp
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"runtime/pprof"
+	"testing"
+	"time"
+
+	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/store/storetest"
+)
+
+// Discriminating probe: the ordinary HTTP deadline and full journey
+// remain unchanged. Observe actual writer ownership while the request is live.
+func TestChannelSourceForkDeadlineDiagnosticProbe(t *testing.T) {
+	priorProjection := projectRuntimePersistenceForServe
+	projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
+		out := priorProjection(owner)
+		collector := storetest.CollectTransactions(t, out.deps.EventStore, storetest.TransactionProbeOptions{})
+		priorCaps := buildSelectedAPICapabilities
+		buildSelectedAPICapabilities = func(selected *selectedStoreOwner, req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
+			caps, err := priorCaps(selected, req)
+			if err != nil {
+				return caps, err
+			}
+			if executor, ok := caps.RunFork.(apiv1.SelectedContractRunForkExecutor); ok {
+				original := executor.ExecuteSelectedContractRunFork
+				executor.ExecuteSelectedContractRunFork = func(ctx context.Context, req runforkexecution.SelectedContractExecutionRequest) (runforkexecution.SelectedContractExecutionResult, error) {
+					start := time.Now()
+					t.Logf("FORK_PROBE begin transaction snapshot: %+v", collector.Snapshot())
+					done, joined := make(chan struct{}), make(chan struct{})
+					go func() {
+						defer close(joined)
+						timer := time.NewTimer(3 * time.Second)
+						defer timer.Stop()
+						select {
+						case <-done:
+							return
+						case <-timer.C:
+						}
+						t.Logf("FORK_PROBE 3s transaction snapshot: %+v", collector.Snapshot())
+						path := fmt.Sprintf("/home/youmew/.cache/swarm-2542-family145/fork-live-%d.stacks", start.UnixNano())
+						if file, err := os.Create(path); err == nil {
+							_ = pprof.Lookup("goroutine").WriteTo(file, 2)
+							_ = file.Close()
+						}
+					}()
+					defer func() {
+						close(done)
+						<-joined
+						t.Logf("FORK_PROBE end elapsed=%s transaction snapshot: %+v", time.Since(start), collector.Snapshot())
+					}()
+					return original(ctx, req)
+				}
+				caps.RunFork = executor
+			}
+			return caps, nil
+		}
+		t.Cleanup(func() { buildSelectedAPICapabilities = priorCaps })
+		return out
+	}
+	t.Cleanup(func() { projectRuntimePersistenceForServe = priorProjection })
+	TestChannelSourceLifecyclePublicJourney(t)
+}

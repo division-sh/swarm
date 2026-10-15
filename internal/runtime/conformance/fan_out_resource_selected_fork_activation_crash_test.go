@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -66,27 +67,32 @@ func TestDeploymentSourceQuiescedBeforeActivationCrashBothStores(t *testing.T) {
 			default:
 				t.Fatal("R6b interruption happened before real selected quiescence")
 			}
-			var operationState, executionState, feedStatus string
-			var cursor, cardinality, events, outcomes int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT state FROM run_fork_operations WHERE idempotency_key=$1 AND fork_run_id=$2`, key, childID).Scan(&operationState); err != nil {
+			operationState, err := storetest.ReadSelectedForkKeyRunStateStorage(f.ctx, f.selected, key, childID)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT state FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 ORDER BY generation DESC LIMIT 1`, childID).Scan(&executionState); err != nil {
+			executionState, err := storetest.ReadLatestSelectedDeploymentExecutionStateStorage(f.ctx, f.selected, childID)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT status,cursor,cardinality FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, childID).Scan(&feedStatus, &cursor, &cardinality); err != nil {
+			feed, err := storetest.ReadDeploymentOriginIntentStateStorage(f.ctx, f.selected, childID)
+			if err != nil {
 				t.Fatal(err)
 			}
+			feedStatus, cursor, cardinality := feed.Status, feed.Cursor, feed.Cardinality
+			var events, outcomes int
 			for _, check := range []struct {
-				query string
-				into  *int
+				read func(context.Context, any, string) (int, error)
+				into *int
 			}{
-				{`SELECT COUNT(*) FROM events WHERE run_id=$1`, &events},
-				{`SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`, &outcomes},
+				{storetest.CountPhysicalRunEvents, &events},
+				{storetest.CountNestedRunFanOutOutcomes, &outcomes},
 			} {
-				if err := f.db.QueryRowContext(f.ctx, check.query, childID).Scan(check.into); err != nil {
+				got, err := check.read(f.ctx, f.selected, childID)
+				if err != nil {
 					t.Fatal(err)
 				}
+				*check.into = got
 			}
 			if operationState != "materialized" || executionState != "quiesced" || feedStatus != "closed" || cursor != 0 || cardinality != 0 || events != 0 || outcomes != 0 {
 				t.Fatalf("R6b exact pre-activation cut: operation=%s execution=%s feed=%s cursor=%d/%d events=%d outcomes=%d", operationState, executionState, feedStatus, cursor, cardinality, events, outcomes)
@@ -115,11 +121,12 @@ func TestDeploymentSourceQuiescedBeforeActivationCrashBothStores(t *testing.T) {
 			if len(rpcErr) != 0 || result.ForkRunID != childID {
 				t.Fatalf("R6b retry did not activate exact child: result=%+v error=%s", result, rpcErr)
 			}
-			var children, finalEvents int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_operations WHERE idempotency_key=$1`, key).Scan(&children); err != nil {
+			children, err := storetest.CountSelectedForkKeyOperationsStorage(f.ctx, f.selected, key)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1`, childID).Scan(&finalEvents); err != nil {
+			finalEvents, err := storetest.CountPhysicalRunEvents(f.ctx, f.selected, childID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if children != 1 || finalEvents != 0 {

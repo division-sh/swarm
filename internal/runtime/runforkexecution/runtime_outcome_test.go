@@ -31,8 +31,6 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -224,16 +222,13 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 				continue
 			}
 			t.Run(target+"/"+tc.name, func(t *testing.T) {
-				var db *sql.DB
 				var selected SelectedContractForkLifecycle
 				var owner SelectedContractExecutionOwner
 				if backend == "postgres" {
-					_, db, _ = testutil.StartPostgres(t)
-					pg := storetest.AdmitPostgresRuntimeStore(t, db)
+					pg := storetest.StartPostgresRuntimeStore(t)
 					selected, owner = pg, selectedContractExecutionOwnerForTest(t, pg)
 				} else {
 					sqlite := storetest.StartSQLiteRuntimeStore(t)
-					db = storetest.DatabaseForTest(sqlite)
 					selected, owner = sqlite, selectedRuntimeOutcomeSQLiteOwner(t, sqlite)
 				}
 				ctx, cancel := context.WithCancel(runForkTestContext(t))
@@ -268,7 +263,7 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					route = selectedExecutionTestAgentRoute(t, sourceID, "source-agent-that-must-not-route", "")
 					route.Target = events.MustExistingEntityTarget(historicalTarget)
 				}
-				seedSelectedRuntimeOutcomeSource(t, ctx, backend, db, selected, loaded, sourceID, eventID, route, at)
+				seedSelectedRuntimeOutcomeSource(t, ctx, backend, selected, loaded, sourceID, eventID, route, at)
 				selection := runforkadmission.SelectedContractSelection(loaded.Source)
 				probe := &selectedRuntimeOutcomeProbe{
 					SelectedContractRuntimeExecutionLifecycle: owner.ports.runtimeExecution,
@@ -328,8 +323,8 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					if forkID != "" || proof != nil || activation.Activated || executed != 0 {
 						t.Fatalf("unacknowledged materialization leaked output: fork=%q proof=%+v activation=%+v events=%d", forkID, proof, activation, executed)
 					}
-					var count int
-					if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM run_fork_selected_contract_bindings`).Scan(&count); err != nil || count != 0 {
+					count, err := storetest.CountSelectedContractBindingStorage(context.Background(), selected)
+					if err != nil || count != 0 {
 						t.Fatalf("unacknowledged materialization wrote binding: count=%d err=%v", count, err)
 					}
 					return
@@ -346,11 +341,12 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 				}
 				if activation.Activated {
 					if tc.materializationCommitted || tc.sourceCommitted {
-						var eventCount, executionCount int
-						if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_id=$2`, forkID, activityidentity.ForkLineageEventID(forkID, eventID)).Scan(&eventCount); err != nil {
+						eventCount, err := storetest.CountRunExactEventStorage(context.Background(), selected, forkID, activityidentity.ForkLineageEventID(forkID, eventID))
+						if err != nil {
 							t.Fatal(err)
 						}
-						if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, forkID).Scan(&executionCount); err != nil {
+						executionCount, err := storetest.CountSelectedRuntimeExecutionStorage(context.Background(), selected, forkID)
+						if err != nil {
 							t.Fatal(err)
 						}
 						if eventCount != 1 || executionCount != 1 {
@@ -371,9 +367,8 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					}
 				}
 				observer := context.Background()
-				var state, status string
-				stateErr := db.QueryRowContext(observer, `SELECT state FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, forkID).Scan(&state)
-				statusErr := db.QueryRowContext(observer, `SELECT status FROM runs WHERE run_id=$1`, forkID).Scan(&status)
+				state, stateErr := storetest.ReadSelectedRuntimeExecutionStateStorage(observer, selected, forkID)
+				status, statusErr := storetest.ReadRunStatusStorage(observer, selected, forkID)
 				if tc.refuseIssue {
 					if !errors.Is(stateErr, sql.ErrNoRows) || !errors.Is(statusErr, sql.ErrNoRows) {
 						t.Fatalf("refused issuance cleanup state:%v run:%v", stateErr, statusErr)
@@ -391,11 +386,12 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					if err := owner.RetireSelectedContexts(context.Background()); err != nil {
 						t.Fatalf("retry retained discard: %v", err)
 					}
-					if err := db.QueryRowContext(observer, `SELECT status FROM runs WHERE run_id=$1`, forkID).Scan(&status); err != nil || status != "cancelled" {
+					status, err = storetest.ReadRunStatusStorage(observer, selected, forkID)
+					if err != nil || status != "cancelled" {
 						t.Fatalf("acknowledged discard lost its completion tombstone: status=%q err=%v", status, err)
 					}
-					var count int
-					if err := db.QueryRowContext(observer, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, forkID).Scan(&count); err != nil || count != 0 {
+					count, err := storetest.CountRunFlowInstanceStorage(observer, selected, forkID)
+					if err != nil || count != 0 {
 						t.Fatalf("acknowledged discard retained installed construction: count=%d err=%v", count, err)
 					}
 				}
@@ -427,11 +423,12 @@ func TestSelectedForkRuntimeConsumersSettleReturnedOutcomes(t *testing.T) {
 					if err != nil || len(recovered) != 1 || recovered[0].RunID != forkID || recovered[0].Disposition != runfork.SelectedForkRecoveryControlOnly {
 						t.Fatalf("acknowledged fork restart recovery=%+v err=%v", recovered, err)
 					}
-					var eventCount, executionCount int
-					if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_id=$2`, forkID, activityidentity.ForkLineageEventID(forkID, eventID)).Scan(&eventCount); err != nil {
+					eventCount, err := storetest.CountRunExactEventStorage(context.Background(), selected, forkID, activityidentity.ForkLineageEventID(forkID, eventID))
+					if err != nil {
 						t.Fatal(err)
 					}
-					if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, forkID).Scan(&executionCount); err != nil {
+					executionCount, err := storetest.CountSelectedRuntimeExecutionStorage(context.Background(), selected, forkID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					if eventCount != 1 || executionCount != 1 {
@@ -447,7 +444,7 @@ func selectedRuntimeOutcomeSQLiteOwner(t *testing.T, selected *store.SQLiteRunti
 	return selectedContractSQLiteExecutionOwnerForTest(t, selected)
 }
 
-func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected SelectedContractForkLifecycle, loaded LoadedSelectedContractSource, runID, eventID string, route events.DeliveryRoute, at time.Time) {
+func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend string, selected SelectedContractForkLifecycle, loaded LoadedSelectedContractSource, runID, eventID string, route events.DeliveryRoute, at time.Time) {
 	t.Helper()
 	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
 		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),
@@ -463,21 +460,9 @@ func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
 	commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
 	if backend == "postgres" {
-		seedSourceOutcomeThatMustNotSuppressFork(t, db, eventID, runID, at)
-		captureSelectedExecutionSourceRevision(t, db, runID)
-		return
+		seedSourceOutcomeThatMustNotSuppressFork(t, runtimecorrelation.WithSourceArtifactFact(ctx, loaded.SourceArtifactFact), selected, runID, eventID, runID, at)
 	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback()
-	if _, err := runforkrevision.CaptureSQLite(ctx, tx, runID, runforkrevision.AllFamilies()...); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
+	storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
 }
 
 func materializeSelectedRuntimeOutcomeFork(t *testing.T, ctx context.Context, owner SelectedContractExecutionOwner, loader SelectedContractSourceLoader, selection runfork.RunForkContractSelection, sourceID, eventID string) runfork.RunForkMaterialization {

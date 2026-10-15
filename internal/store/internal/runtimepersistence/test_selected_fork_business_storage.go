@@ -5,7 +5,25 @@ import (
 	"database/sql"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 )
+
+func ReadRunStatusStorageForTest(ctx context.Context, selected any, runID string) (string, error) {
+	if err := validateStandaloneStorageEvent(selected, runID); err != nil {
+		return "", err
+	}
+	var out string
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = runlifecycle.ReadRunStatusStorageTx(ctx, tx, runID)
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
 
 func ReadVersionOneDeliveredSettlementCountForTest(ctx context.Context, selected any, deliveryID string) (int, error) {
 	if err := validateSelectedForkStorageIdentity(deliveryID); err != nil {

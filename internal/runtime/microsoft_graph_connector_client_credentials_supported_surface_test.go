@@ -22,25 +22,21 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJournal(t *testing.T) {
 	t.Run("postgres", func(t *testing.T) {
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
 
 		const flowInstance = boundedProviderFlowID
 		runID, entityID := boundedInboundTestCoordinates()
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "microsoft-graph-client-credentials-observer")
 		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runMicrosoftGraphClientCredentialsConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "postgres",
 			ctx:           ctx,
-			db:            db,
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
@@ -51,7 +47,6 @@ func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJou
 			runID:         runID,
 			entityID:      entityID,
 			flowInstance:  flowInstance,
-			sqlite:        false,
 		})
 	})
 
@@ -66,7 +61,6 @@ func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJou
 		runMicrosoftGraphClientCredentialsConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "sqlite",
 			ctx:           ctx,
-			db:            storetest.Database(sqliteStore),
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
@@ -77,7 +71,6 @@ func TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJou
 			runID:         runID,
 			entityID:      entityID,
 			flowInstance:  flowInstance,
-			sqlite:        true,
 		})
 	})
 }
@@ -523,25 +516,7 @@ func countMicrosoftGraphActivityAttemptsForSource(t *testing.T, backend slackMan
 func countMicrosoftGraphFailureEventsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) int {
 	t.Helper()
 	failureEventType := boundedProviderFlowID + "/microsoft_graph_send_mail.failed"
-	var count int
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE run_id = ?
-			  AND event_name = ?
-			  AND source_event_id = ?
-		`, backend.runID, failureEventType, sourceEventID).Scan(&count)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE run_id = $1::uuid
-			  AND event_name = $2
-			  AND source_event_id = $3::uuid
-		`, backend.runID, failureEventType, sourceEventID).Scan(&count)
-	}
+	count, err := storetest.CountConnectorNamedSourceEvent(backend.ctx, backend.eventStore, backend.runID, failureEventType, sourceEventID)
 	if err != nil {
 		t.Fatalf("%s count failure events for source event %s: %v", backend.name, sourceEventID, err)
 	}

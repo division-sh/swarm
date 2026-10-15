@@ -119,8 +119,8 @@ func TestA2MembershipSnapshotValidationOnBothStores(t *testing.T) {
 						t.Fatalf("zero members did not retain deferred completion: %#v", arms[0])
 					}
 				}
-				var schedules int
-				if err := selected.db.QueryRowContext(f.ctx, "SELECT COUNT(*) FROM timers WHERE run_id=$1 AND fire_event=$2", runID, wantEvent).Scan(&schedules); err != nil ||
+				schedules, err := storetest.CountRunEventTimerStorage(f.ctx, selected.events, runID, wantEvent)
+				if err != nil ||
 					schedules != 1 || arms[0].Status != wantStatus || len(f.observer.witnesses()) != len(commits)+1 {
 					t.Fatalf("membership entry/arm/schedule was not one selected business commit: schedules=%d status=%s err=%v", schedules, arms[0].Status, err)
 				}
@@ -230,14 +230,28 @@ func (f *a2MembershipAdmission) load(t *testing.T) pipeline.WorkflowInstance {
 func (f *a2MembershipAdmission) footprint(t *testing.T) [6]int {
 	t.Helper()
 	var counts [6]int
+	reads := [...]func() (int, error){
+		func() (int, error) { return storetest.CountRunMutationStorage(f.ctx, f.selected.events, f.owner.RunID) },
+		func() (int, error) { return storetest.CountRunTimerStorage(f.ctx, f.selected.events, f.owner.RunID) },
+		func() (int, error) {
+			return storetest.CountRunFanOutIntentStorage(f.ctx, f.selected.events, f.owner.RunID)
+		},
+		func() (int, error) {
+			return storetest.CountRunFanOutBarrierStorage(f.ctx, f.selected.events, f.owner.RunID)
+		},
+		func() (int, error) {
+			return storetest.CountNestedRunFanOutOutcomes(f.ctx, f.selected.events, f.owner.RunID)
+		},
+		func() (int, error) {
+			return storetest.CountA2MembershipRefusalEvents(f.ctx, f.selected.events, f.owner.RunID)
+		},
+	}
 	for index, table := range []string{"entity_mutations", "timers", "fan_out_intents", "fan_out_obligation_barriers", "fan_out_outcomes", "events"} {
-		query := "SELECT COUNT(*) FROM " + table + " WHERE run_id=$1"
-		if table == "events" {
-			query += " AND event_name IN ('platform.join_complete','platform.join_timeout','items.child','batch.completed')"
-		}
-		if err := f.selected.db.QueryRowContext(f.ctx, query, f.owner.RunID).Scan(&counts[index]); err != nil {
+		count, err := reads[index]()
+		if err != nil {
 			t.Fatalf("read %s refusal footprint: %v", table, err)
 		}
+		counts[index] = count
 	}
 	return counts
 }
@@ -251,8 +265,8 @@ func (f *a2MembershipAdmission) assertUnchanged(t *testing.T, before pipeline.Wo
 
 func (f *a2MembershipAdmission) failure(t *testing.T, eventID, nodeKey string) failures.Envelope {
 	t.Helper()
-	var raw string
-	if err := f.selected.db.QueryRowContext(f.ctx, "SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_id=$2", eventID, nodeKey).Scan(&raw); err != nil {
+	raw, err := storetest.ReadGateSubscriberFailure(f.ctx, f.selected.events, eventID, nodeKey)
+	if err != nil {
 		t.Fatal(err)
 	}
 	var failure failures.Envelope

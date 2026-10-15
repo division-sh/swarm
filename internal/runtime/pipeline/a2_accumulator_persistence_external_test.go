@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -183,18 +184,23 @@ type a2AccumulatorPersistedEvidence struct {
 func (p *a2AccumulatorPersistenceProof) evidence(t *testing.T) a2AccumulatorPersistedEvidence {
 	t.Helper()
 	var evidence a2AccumulatorPersistedEvidence
-	var fields, buckets []byte
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT revision, fields, accumulator FROM entity_state WHERE run_id=$1 AND flow_instance=$2`, p.runID, p.runID).Scan(&evidence.Revision, &fields, &buckets); err != nil {
+	state, err := storetest.ReadWorkflowAccumulatorStorage(p.ctx, p.selected.events, p.runID, p.runID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	evidence.Fields = a2AccumulatorJSONHash(t, fields)
-	evidence.Accumulator = a2AccumulatorJSONHash(t, buckets)
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1`, p.runID).Scan(&evidence.Mutations); err != nil {
+	evidence.Revision = state.Revision
+	evidence.Fields = a2AccumulatorJSONHash(t, state.Fields)
+	evidence.Accumulator = a2AccumulatorJSONHash(t, state.Accumulator)
+	mutations, err := storetest.CountRunMutationStorage(p.ctx, p.selected.events, p.runID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.selected.db.QueryRowContext(p.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='item.recorded'`, p.runID).Scan(&evidence.Publications); err != nil {
+	evidence.Mutations = mutations
+	publications, err := storetest.CountRunEventNameStorage(p.ctx, p.selected.events, p.runID, "item.recorded")
+	if err != nil {
 		t.Fatal(err)
 	}
+	evidence.Publications = publications
 	return evidence
 }
 
@@ -306,8 +312,8 @@ func TestA2AccumulatorKeyedExecutionPersistenceOnBothStores(t *testing.T) {
 						if err := proof.bus.Publish(proof.ctx, event); err == nil || !strings.Contains(err.Error(), "top-level null") {
 							t.Fatalf("null key escaped payload admission: %v", err)
 						}
-						var committed int
-						if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT COUNT(*) FROM events WHERE event_id=$1`, event.ID()).Scan(&committed); err != nil || committed != 0 {
+						committed, err := storetest.CountTemplateEventIdentity(proof.ctx, proof.selected.events, event.ID())
+						if err != nil || committed != 0 {
 							t.Fatalf("null publication was committed: %d %v", committed, err)
 						}
 					} else {
@@ -370,8 +376,8 @@ func TestA2AccumulatorUnkeyedDurableMultiplicityAndOrderOnBothStores(t *testing.
 				t.Fatalf("unkeyed multiplicity/order changed: %#v", state)
 			}
 			for _, publication := range publications {
-				var deliveryID string
-				if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT delivery_id FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node'`, publication.event.ID()).Scan(&deliveryID); err != nil {
+				deliveryID, err := storetest.ReadGateEventNodeDeliveryIdentity(proof.ctx, proof.selected.events, publication.event.ID())
+				if err != nil {
 					t.Fatal(err)
 				}
 				if state.Deliveries[deliveryID] == "" {
@@ -409,14 +415,7 @@ func TestA2AccumulatorPublicationFailureRollsBackOnBothStores(t *testing.T) {
 			proof := newA2AccumulatorPersistenceProof(t, backend.open(t))
 			proof.execute(t, proof.publish(t, "item.keyed", `{"id":"accepted","marker":"before"}`), "")
 			before := proof.evidence(t)
-			fault := `CREATE TRIGGER a2_accumulator_publication_failure BEFORE INSERT ON events WHEN NEW.event_name='item.recorded' BEGIN SELECT RAISE(ABORT,'a2_accumulator_publication_fault'); END`
-			if proof.selected.postgres {
-				if _, err := proof.selected.db.Exec(`CREATE FUNCTION a2_accumulator_publication_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.event_name='item.recorded' THEN RAISE EXCEPTION 'a2_accumulator_publication_fault'; END IF; RETURN NEW; END $$`); err != nil {
-					t.Fatal(err)
-				}
-				fault = `CREATE TRIGGER a2_accumulator_publication_failure BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION a2_accumulator_publication_fail()`
-			}
-			if _, err := proof.selected.db.Exec(fault); err != nil {
+			if err := storetest.SetA2AccumulatorPublicationFailure(context.Background(), proof.selected.events, true); err != nil {
 				t.Fatal(err)
 			}
 			publication := proof.publish(t, "item.keyed", `{"id":"refused-at-commit","marker":"must-not-persist"}`)
@@ -439,15 +438,11 @@ func TestA2AccumulatorPublicationFailureRollsBackOnBothStores(t *testing.T) {
 			if state := proof.accumulator(t, "item.keyed"); len(state.Items) != 1 || state.Received["refused-at-commit"] != "" {
 				t.Fatalf("failed transaction retained admission: %#v", state)
 			}
-			var delivered int
-			if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1 AND status='delivered'`, publication.event.ID()).Scan(&delivered); err != nil || delivered != 0 {
+			delivered, err := storetest.CountGateEventDeliveredRows(proof.ctx, proof.selected.events, publication.event.ID())
+			if err != nil || delivered != 0 {
 				t.Fatalf("failed transaction acknowledged delivery: %d %v", delivered, err)
 			}
-			drop := "DROP TRIGGER a2_accumulator_publication_failure"
-			if proof.selected.postgres {
-				drop += " ON events"
-			}
-			if _, err := proof.selected.db.Exec(drop); err != nil {
+			if err := storetest.SetA2AccumulatorPublicationFailure(context.Background(), proof.selected.events, false); err != nil {
 				t.Fatal(err)
 			}
 		})

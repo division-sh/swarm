@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestIssue2394SupplementalPressureFiniteProbeBothStores(t *testing.T) {
@@ -584,8 +585,8 @@ func assertPressureSoakPopulation(t *testing.T, f *servingMatrixFixture, floor, 
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	var unfinished, owed, retry, blocked int
-	err := f.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(CASE WHEN cursor<cardinality THEN 1 ELSE 0 END),0),COALESCE(SUM(cardinality-cursor),0),COALESCE(SUM(CASE WHEN retry_ready_at IS NOT NULL THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0) FROM fan_out_intents`).Scan(&unfinished, &owed, &retry, &blocked)
+	state, err := storetest.ReadSupplementalGlobalPressure(ctx, f.selected)
+	unfinished, owed, retry, blocked := state.Unfinished, state.Owed, state.Retry, state.Blocked
 	if err != nil || unfinished < floor || unfinished > ceiling || owed != unfinished || retry != 0 || blocked != 0 {
 		t.Fatalf("durable pressure invariant: unfinished=%d owed=%d want=%d..%d retry=%d blocked=%d err=%v", unfinished, owed, floor, ceiling, retry, blocked, err)
 	}

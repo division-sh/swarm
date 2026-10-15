@@ -2,7 +2,6 @@ package runforkadmission_test
 
 import (
 	"context"
-	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -17,9 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -27,9 +24,8 @@ import (
 const revisionSourceRouteBundleHash = sourceartifactfixture.BundleHash
 
 func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverContext(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
 	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), revisionSourceRouteBundleHash))
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	runID := uuid.NewString()
 	pendingEventID := uuid.NewString()
 	completedEventID := uuid.NewString()
@@ -57,17 +53,7 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 		t.Fatalf("settle completed delivery: %v", err)
 	}
 
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin revision capture: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := runforkrevision.Capture(ctx, tx, runID, runforkrevision.AllFamilies()...); err != nil {
-		t.Fatalf("capture revision: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit revision: %v", err)
-	}
+	storetest.CaptureSelectedRunForkRevision(t, ctx, pg, runID, runforkrevision.AllFamilies()...)
 
 	plan, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{
 		SourceRunID: runID,
@@ -107,9 +93,8 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 }
 
 func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
 	ctx := runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(uuid.NewString(), revisionSourceRouteBundleHash))
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	type testCase struct {
 		name              string
 		eventName         string
@@ -218,9 +203,9 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			at := time.Now().UTC()
 			storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 			if !tc.explicitSelector {
-				storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, uuid.NewString(), runID, "platform.precursor",
+				storetest.InsertNativeExistingRunRootEvent(t, ctx, pg, uuid.NewString(), runID, "platform.precursor",
 					eventtest.Producer(events.EventProducerExternal, "platform"), []byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, at.Add(-time.Second))
-				captureRunForkRevision(t, ctx, db, runID)
+				storetest.CaptureSelectedRunForkRevision(t, ctx, pg, runID, runforkrevision.AllFamilies()...)
 			}
 			event := eventtest.ExistingRunRootIngressWithRoutingSource(eventID, events.EventType(tc.eventName), "producer-node", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, tc.routingSource, at)
 			if tc.deliveryStatus != "" {
@@ -236,9 +221,9 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 					}
 				}
 			} else {
-				storetest.InsertCanonicalEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres, event)
+				storetest.InsertNativeCanonicalEventRecord(t, ctx, pg, event)
 			}
-			captureRunForkRevision(t, ctx, db, runID)
+			storetest.CaptureSelectedRunForkRevision(t, ctx, pg, runID, runforkrevision.AllFamilies()...)
 
 			selector := ""
 			if tc.explicitSelector {
@@ -302,23 +287,6 @@ func revisionSourceEntitylessNodeRoute(t testing.TB, nodeID string) events.Deliv
 		Target: events.MustEntitylessReceiverTarget(events.RouteIdentity{
 			FlowID: "fixture", FlowInstance: "fixture/" + strings.TrimSpace(nodeID),
 		}),
-	}
-}
-
-func captureRunForkRevision(t *testing.T, ctx context.Context, db interface {
-	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
-}, runID string) {
-	t.Helper()
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin revision capture: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := runforkrevision.Capture(ctx, tx, runID, runforkrevision.AllFamilies()...); err != nil {
-		t.Fatalf("capture revision: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit revision capture: %v", err)
 	}
 }
 

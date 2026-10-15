@@ -25,8 +25,13 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			var selected *selectedStoreOwner
 			previous := projectRuntimePersistenceForServe
-			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence { selected = owner; return previous(owner) }
-			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
+				selected = owner
+				return previous(owner)
+			}
+			t.Cleanup(func() {
+				projectRuntimePersistenceForServe = previous
+			})
 			root := canonicalrouting.CopySelectedForkPendingInput(t, canonicalrouting.PendingInputMixedCompletion)
 			publication := newExactOriginPublicationProbe(t)
 			childStarted := make(chan struct{}, 1)
@@ -49,7 +54,11 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 				}
 			}
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root, hook)
-			t.Cleanup(func() { once.Do(func() { close(release) }) })
+			t.Cleanup(func() {
+				once.Do(func() {
+					close(release)
+				})
+			})
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "seed"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 			input := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.first", "run_id": seed.RunID, "payload": map[string]any{"token": "proof"}, "idempotency_key": "mixed-input"})
@@ -62,15 +71,15 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			waitServedDeliveryOutcomeCount(t, rt.DB, rt.Backend, input.EventID, "node", completedNode.Key(), "delivered", 1)
+			waitServedDeliveryOutcomeCount(t, rt.ReceiverStateReader, rt.Backend, input.EventID, "node", completedNode.Key(), "delivered", 1)
 			marker := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.marked", "run_id": seed.RunID, "payload": map[string]any{"token": "proof"}, "idempotency_key": "marker"})
-			waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, marker.EventID, "platform", "pipeline", "success", 1)
+			waitServedEventPublishReceiptOutcomeCount(t, rt.ReceiverStateReader, rt.Backend, marker.EventID, "platform", "pipeline", "success", 1)
 			waitMixedForkSourceCheckpoint(t, selected, rt.BundleHash, seed.RunID, input.EventID, marker.EventID, completedNode.Key())
 			family, ok := selected.RunFork()
 			if !ok {
 				t.Fatal("missing fork owner")
 			}
-			ctx := servedControlProofAuthorActivityContext(t, rt)
+			ctx := servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime)
 			plan, err := family.Plan(ctx, runfork.RunForkPlanRequest{SourceRunID: seed.RunID, At: marker.EventID})
 			if err != nil {
 				t.Fatal(err)
@@ -109,26 +118,22 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, input.EventID, marker.EventID); err != nil {
 				t.Fatal(err)
 			}
-			before := snapshotForkReceiverApplication(t, rt)
+			before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 			response := requestServedJSONRPC(t, rt.Endpoint, "run.fork", map[string]any{"source_run_id": seed.RunID, "fork_event_id": marker.EventID, "allow_source_freeze": true, "idempotency_key": "mixed-fork"})
 			if response.Error == nil {
 				t.Fatal("historical non-agent delivery replay was enabled")
 			}
-			_, refusal := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: seed.RunID, At: marker.EventID, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash,
-				SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
-				AgentRuntime: rt.ForkRuntime,
-			})
+			_, refusal := family.Execute(ctx, runforkexecution.SelectedContractExecutionRequest{SourceRunID: seed.RunID, At: marker.EventID, AllowSourceFreeze: true, ExpectedBundleHash: rt.BundleHash, SourceLoader: runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()}, AgentRuntime: rt.ForkRuntime})
 			if refusal == nil || refusal.Error() != "selected-contract fork execution materialization blocked: non_agent_delivery_replay_unsupported" {
 				t.Fatalf("historical replay refusal changed: %v", refusal)
 			}
-			after := snapshotForkReceiverApplication(t, rt)
+			after := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 			if !reflect.DeepEqual(before["runs"], after["runs"]) {
-				t.Logf("changed runs columns=%v", before["runs/columns"])
-				for _, row := range before["runs"] {
+				t.Logf("changed runs columns=%v", before["runs"].Columns)
+				for _, row := range before["runs"].Rows {
 					t.Logf("runs before: %s", row)
 				}
-				for _, row := range after["runs"] {
+				for _, row := range after["runs"].Rows {
 					t.Logf("runs after: %s", row)
 				}
 			}
@@ -137,10 +142,12 @@ func TestSelectedForkPendingInputMixedCompletionBothStores(t *testing.T) {
 					t.Fatalf("refused historical replay changed table %s", table)
 				}
 			}
-			once.Do(func() { close(release) })
+			once.Do(func() {
+				close(release)
+			})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			requirePendingInputStateCount(t, rt, seed.RunID, "done", 2)
-			requirePendingInputStateCount(t, rt, seed.RunID, "archived", 1)
+			requirePendingInputStateCount(t, rt.ReceiverStateReader, seed.RunID, "done", 2)
+			requirePendingInputStateCount(t, rt.ReceiverStateReader, seed.RunID, "archived", 1)
 		})
 	}
 }

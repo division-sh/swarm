@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/division-sh/swarm/internal/events"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"reflect"
 	"strings"
 )
 
@@ -44,6 +45,14 @@ func (p pipelineTestCommittedPublication) ValidateCommittedDurablePublication() 
 		return fmt.Errorf("pipeline test committed publication requires event identity")
 	}
 	return nil
+}
+
+func (p pipelineTestCommittedPublication) ValidatePlannedPublication(expected runtimeengine.DurablePublicationPlan) error {
+	plan, ok := expected.(pipelineTestPublicationPlan)
+	if !ok || !reflect.DeepEqual(plan.intent, p.intent) || plan.DurablePublicationEventID() != p.eventID {
+		return fmt.Errorf("test committed publication differs from its plan")
+	}
+	return p.ValidateCommittedDurablePublication()
 }
 
 func (b *recordingPipelineBus) PrepareEngineMutationPublications(ctx context.Context, intents []runtimeengine.EmitIntent, prospective PreparedWorkflowPublicationState) ([]runtimeengine.DurablePublicationPlan, error) {

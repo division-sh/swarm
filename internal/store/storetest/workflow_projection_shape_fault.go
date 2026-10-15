@@ -37,6 +37,10 @@ func SetWorkflowProjectionAccumulatorArray(ctx context.Context, selected any, ru
 	return private.SetWorkflowProjectionAccumulatorArrayForTest(ctx, selected, run, key)
 }
 
+func SetRootFlowAccumulatorWire(ctx context.Context, selected any, run string, raw []byte) (int64, error) {
+	return private.SetRootFlowAccumulatorWireForTest(ctx, selected, run, raw)
+}
+
 func SetWorkflowProjectionMalformedTransitionHistory(ctx context.Context, selected any, run, key string) (int64, error) {
 	return private.SetWorkflowProjectionMalformedTransitionHistoryForTest(ctx, selected, run, key)
 }

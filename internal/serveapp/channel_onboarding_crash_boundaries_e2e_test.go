@@ -1,7 +1,6 @@
 package serveapp
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -61,7 +60,6 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				harness.opts.TestChannelOnboardingBarrier = barrier.Reach
 			}
 			harness.start(t)
-
 			if boundary == channelonboarding.TestAfterAuthorityRetirementBeforeCleanup {
 				runChannelOnboardingDestructiveCrashBoundary(t, backend, harness, barrier, uncheckpointedBarrier)
 				return
@@ -84,13 +82,7 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				if backend == servedparity.BackendExplicitPostgres {
 					driver = "postgres"
 				}
-				db, err := sql.Open(driver, harness.storeDSN)
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() { _ = db.Close() })
-				// Neither crash cut may interrupt the predecessor's provider write.
-				cardMessageID := waitChannelCardMessageID(t, db, driver, "telegram-ingress")
+				cardMessageID := waitChannelCardMessageID(t, channelAnchorStorageObservation(t, harness), driver, "telegram-ingress")
 				if boundary == channelonboarding.TestAfterCredentialWriteBeforeCheckpoint {
 					native := waitNativeQualification(t, harness, predecessor.Operation.OperationID, channelnative.QualificationQualified, time.Time{})
 					t.Logf("E2E-13 predecessor settled before credential cut: operation=%s setting=%s generation=%d locale=%s/%d observed=%s card_message_id=%d", predecessor.Operation.OperationID, native.SettingID, native.SettingGeneration, native.ClientLanguage, native.LocaleRevision, native.ObservedAt.Format(time.RFC3339Nano), cardMessageID)
@@ -141,8 +133,7 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 					t.Fatalf("%s E2E-14 predecessor checkpoint = %#v", backend, before.Operation)
 				}
 				beforeRow = requireChannelOnboardingOperationRow(t, harness, responsibilityID)
-				if beforeRow.Identity.Interface.Selector != predecessor.Identity.Interface.Selector || beforeRow.Identity.BindingRevision <= predecessor.Identity.BindingRevision ||
-					beforeRow.Identity.ConversationScope != "shared" || beforeRow.Identity.ConversationRef == predecessor.Identity.ConversationRef {
+				if beforeRow.Identity.Interface.Selector != predecessor.Identity.Interface.Selector || beforeRow.Identity.BindingRevision <= predecessor.Identity.BindingRevision || beforeRow.Identity.ConversationScope != "shared" || beforeRow.Identity.ConversationRef == predecessor.Identity.ConversationRef {
 					t.Fatalf("%s E2E-14 committed rebind did not retain the exact successor identity: predecessor=%#v successor=%#v", backend, predecessor.Identity, beforeRow.Identity)
 				}
 				if beforeRow.Activation == nil || predecessor.Activation == nil || beforeRow.Activation.Revision <= predecessor.Activation.Revision || beforeRow.Activation.Revision != before.Operation.ActivationRevision {
@@ -169,8 +160,7 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 					t.Fatalf("%s E2E-16 predecessor checkpoint = %#v", backend, before.Operation)
 				}
 				beforeRow = requireChannelOnboardingOperationRow(t, harness, responsibilityID)
-				if predecessor.Activation == nil || beforeRow.Activation == nil || beforeRow.Activation.Revision <= predecessor.Activation.Revision ||
-					beforeRow.Identity.BindingRevision != predecessor.Identity.BindingRevision || beforeRow.Identity.ConversationRef != predecessor.Identity.ConversationRef {
+				if predecessor.Activation == nil || beforeRow.Activation == nil || beforeRow.Activation.Revision <= predecessor.Activation.Revision || beforeRow.Identity.BindingRevision != predecessor.Identity.BindingRevision || beforeRow.Identity.ConversationRef != predecessor.Identity.ConversationRef {
 					t.Fatalf("%s E2E-16 successor handoff changed identity or did not advance activation: predecessor=%#v successor=%#v", backend, predecessor, beforeRow)
 				}
 				if beforeRow.Readiness == nil || beforeRow.Readiness.Ready {
@@ -180,7 +170,6 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 					t.Fatalf("%s E2E-16 effects before promotion = %d/%d, want predecessor 1/1", backend, registrations, deliveries)
 				}
 			}
-
 			crashChannelOnboardingServeAtBarrier(t, harness, barrier, command)
 			if boundary == channelonboarding.TestAfterActivationCommitBeforePublication {
 				recoveredPublication = restartChannelOnboardingAtProcessPublicationBoundary(t, backend, harness, responsibilityID, predecessorCredentialCount, beforeRow)
@@ -192,7 +181,6 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 			if after.Operation.OperationID != before.Operation.OperationID || after.Operation.Coordinate.RuntimeInstanceID == before.Operation.Coordinate.RuntimeInstanceID {
 				t.Fatalf("%s %s restart identity = before %#v after %#v", backend, boundary, before.Operation, after.Operation)
 			}
-
 			if boundary == channelonboarding.TestAfterCredentialWriteBeforeCheckpoint {
 				if len(after.Operation.CredentialAdmissions) != len(after.Operation.CredentialReservations) || after.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity {
 					t.Fatalf("%s E2E-13 rediscovered checkpoint = %#v", backend, after.Operation)
@@ -205,15 +193,7 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				requireChannelOnboardingCommandSuccess(t, resume)
 				after = getChannelOnboardingRPC(t, harness, responsibilityID)
 				afterRow := requireChannelOnboardingOperationRow(t, harness, responsibilityID)
-				if afterRow.Identity.Interface.Selector != predecessor.Identity.Interface.Selector ||
-					afterRow.Identity.Status != predecessor.Identity.Status ||
-					afterRow.Identity.AccountReference != predecessor.Identity.AccountReference ||
-					afterRow.Identity.ConversationRef != predecessor.Identity.ConversationRef ||
-					afterRow.Identity.ConversationScope != predecessor.Identity.ConversationScope ||
-					afterRow.Identity.ProofID != predecessor.Identity.ProofID ||
-					afterRow.Identity.BindingRevision != predecessor.Identity.BindingRevision+1 ||
-					afterRow.Identity.ProofRevision != predecessor.Identity.ProofRevision+1 ||
-					afterRow.Identity.ProofStatus != "active" {
+				if afterRow.Identity.Interface.Selector != predecessor.Identity.Interface.Selector || afterRow.Identity.Status != predecessor.Identity.Status || afterRow.Identity.AccountReference != predecessor.Identity.AccountReference || afterRow.Identity.ConversationRef != predecessor.Identity.ConversationRef || afterRow.Identity.ConversationScope != predecessor.Identity.ConversationScope || afterRow.Identity.ProofID != predecessor.Identity.ProofID || afterRow.Identity.BindingRevision != predecessor.Identity.BindingRevision+1 || afterRow.Identity.ProofRevision != predecessor.Identity.ProofRevision+1 || afterRow.Identity.ProofStatus != "active" {
 					t.Fatalf("%s E2E-13 fresh reconnect identity = predecessor %#v successor %#v", backend, predecessor.Identity, afterRow.Identity)
 				}
 				if afterRow.Activation == nil || predecessor.Activation == nil || afterRow.Activation.Revision <= predecessor.Activation.Revision {
@@ -231,9 +211,7 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				wantRegistrations, wantDeliveries = 3, 4
 				afterRow := requireChannelOnboardingOperationRow(t, harness, responsibilityID)
 				assertChannelOnboardingIdentityPreserved(t, string(backend)+" E2E-14 restart", beforeRow, afterRow)
-				if afterRow.Activation == nil || afterRow.Activation.Revision != recoveredPublication.ActivationRevision || afterRow.Operation == nil ||
-					afterRow.Operation.Coordinate.RuntimeInstanceID != recoveredPublication.ActivationRuntimeInstanceID ||
-					afterRow.Readiness == nil || afterRow.Readiness.ActivationGeneration == predecessor.Readiness.ActivationGeneration {
+				if afterRow.Activation == nil || afterRow.Activation.Revision != recoveredPublication.ActivationRevision || afterRow.Operation == nil || afterRow.Operation.Coordinate.RuntimeInstanceID != recoveredPublication.ActivationRuntimeInstanceID || afterRow.Readiness == nil || afterRow.Readiness.ActivationGeneration == predecessor.Readiness.ActivationGeneration {
 					t.Fatalf("%s E2E-14 did not retain the exact recovery publication: barrier=%#v recovered=%#v", backend, recoveredPublication, afterRow)
 				}
 				if count := channelOnboardingCredentialCount(t, harness.credentialPath); count != predecessorCredentialCount {
@@ -248,8 +226,7 @@ func runChannelOnboardingCrashBoundaryE2E(t *testing.T, boundary channelonboardi
 				wantRegistrations, wantDeliveries = 2, 2
 				afterRow := requireChannelOnboardingOperationRow(t, harness, responsibilityID)
 				assertChannelOnboardingIdentityPreserved(t, string(backend)+" E2E-16 restart", predecessor, afterRow)
-				if afterRow.Activation == nil || predecessor.Activation == nil || afterRow.Activation.Revision <= predecessor.Activation.Revision ||
-					afterRow.Readiness == nil || afterRow.Readiness.ActivationGeneration == predecessor.Readiness.ActivationGeneration {
+				if afterRow.Activation == nil || predecessor.Activation == nil || afterRow.Activation.Revision <= predecessor.Activation.Revision || afterRow.Readiness == nil || afterRow.Readiness.ActivationGeneration == predecessor.Readiness.ActivationGeneration {
 					t.Fatalf("%s E2E-16 successor did not replace predecessor: predecessor=%#v successor=%#v", backend, predecessor, afterRow)
 				}
 			}

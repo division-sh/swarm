@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -32,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/google/uuid"
 )
@@ -271,7 +271,7 @@ func assertDeploymentResourceRows(t *testing.T, f *deploymentResourceFixture, se
 	t.Helper()
 	defer func() {
 		if t.Failed() {
-			logDeploymentResourceFailure(t, f.db, runID)
+			logDeploymentResourceFailure(t, f.selected, runID)
 		}
 	}()
 	ctx := f.ctx
@@ -282,59 +282,58 @@ func assertDeploymentResourceRows(t *testing.T, f *deploymentResourceFixture, se
 	}
 	var intents, committed, children, delivered int
 	for _, check := range []struct {
-		query string
+		read  func() (int, error)
 		value *int
 	}{
-		{`SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`, &intents},
-		{`SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed'`, &committed},
-		{`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND flow_template='account'`, &children},
-		{`SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='portfolio/account.registered' AND d.status='delivered'`, &delivered},
+		{func() (int, error) { return storetest.CountRunFanOutIntentStorage(ctx, f.selected, runID) }, &intents},
+		{func() (int, error) { return storetest.CountDeploymentCommittedOutcomesStorage(ctx, f.selected, runID) }, &committed},
+		{func() (int, error) { return storetest.CountAccountDeploymentReceiversStorage(ctx, f.selected, runID) }, &children},
+		{func() (int, error) {
+			return storetest.CountPortfolioDeliveredDeploymentRowsStorage(ctx, f.selected, runID)
+		}, &delivered},
 	} {
-		if err := f.db.QueryRowContext(ctx, check.query, runID).Scan(check.value); err != nil {
+		count, err := check.read()
+		if err != nil {
 			t.Fatal(err)
 		}
+		*check.value = count
 	}
 	if intents != 1 || committed != len(compiled.Rows) || children != len(compiled.Rows) || delivered != len(compiled.Rows) {
 		var events, deliveries, receipts, routes int
 		for _, check := range []struct {
-			query string
+			read  func() (int, error)
 			value *int
 		}{
-			{`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='portfolio/account.registered'`, &events},
-			{`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`, &deliveries},
-			{`SELECT COUNT(*) FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'`, &receipts},
-			{`SELECT COUNT(*) FROM decision_card_route_obligations r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1`, &routes},
+			{func() (int, error) {
+				return storetest.CountRunNamedEventStorage(ctx, f.selected, runID, "portfolio/account.registered")
+			}, &events},
+			{func() (int, error) { return storetest.CountRunDeliveryStorage(ctx, f.selected, runID) }, &deliveries},
+			{func() (int, error) { return storetest.CountDeploymentPipelineReceiptsStorage(ctx, f.selected, runID) }, &receipts},
+			{func() (int, error) { return storetest.CountDeploymentRouteObligationsStorage(ctx, f.selected, runID) }, &routes},
 		} {
-			if err := f.db.QueryRowContext(ctx, check.query, runID).Scan(check.value); err != nil {
+			count, err := check.read()
+			if err != nil {
 				t.Fatal(err)
 			}
+			*check.value = count
 		}
-		statusRows, err := f.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM event_deliveries WHERE run_id=$1 GROUP BY status ORDER BY status`, runID)
+		statusRows, err := storetest.ReadDeploymentDeliveryStatusStorage(ctx, f.selected, runID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		var deliveryStatuses []string
-		for statusRows.Next() {
-			var status string
-			var count int
-			if err := statusRows.Scan(&status, &count); err != nil {
-				statusRows.Close()
-				t.Fatal(err)
-			}
+		for _, row := range statusRows {
+			status, count := row.Status, row.Count
 			deliveryStatuses = append(deliveryStatuses, fmt.Sprintf("%s=%d", status, count))
 		}
-		if err := statusRows.Err(); err != nil {
-			statusRows.Close()
-			t.Fatal(err)
-		}
-		statusRows.Close()
 		t.Fatalf("deployment source did not settle through real receivers: intents=%d committed=%d events=%d deliveries=%d delivery_statuses=%v pipeline_receipts=%d routes=%d children=%d delivered=%d want=%d", intents, committed, events, deliveries, deliveryStatuses, receipts, routes, children, delivered, len(compiled.Rows))
 	}
-	var pinnedVersion, intentVersion string
-	if err := f.db.QueryRowContext(ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='portfolio' AND event_name='portfolio/account.registered'`, runID).Scan(&pinnedVersion); err != nil {
+	pinnedVersion, err := storetest.ReadPortfolioAccountResourcePinStorage(ctx, f.selected, runID)
+	if err != nil {
 		t.Fatalf("load exact run pin: %v", err)
 	}
-	if err := f.db.QueryRowContext(ctx, `SELECT source_resource_version_id FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&intentVersion); err != nil {
+	intentVersion, err := storetest.ReadDeploymentIntentVersionStorage(ctx, f.selected, runID)
+	if err != nil {
 		t.Fatalf("load exact deployment intent source: %v", err)
 	}
 	if pinnedVersion != string(compiled.VersionID) || intentVersion != pinnedVersion {
@@ -392,15 +391,15 @@ func waitDeploymentResourceLargeRun(t *testing.T, f *deploymentResourceFixture, 
 	defer ticker.Stop()
 	lastLogged := time.Time{}
 	for {
-		var cardinality, cursor int
-		var status string
 		queryStarted := time.Now()
-		if err := f.db.QueryRowContext(ctx, `SELECT status,cardinality,cursor FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, runID).Scan(&status, &cardinality, &cursor); err != nil {
-			stats := f.db.Stats()
+		progress, err := storetest.ReadDeploymentOriginIntentStateStorage(ctx, f.selected, runID)
+		if err != nil {
+			stats := storetest.ObserveSelectedPool(t, f.selected)
 			t.Fatalf("load deployment progress after %s (query %s, pool in_use=%d open=%d wait_count=%d wait_duration=%s): %v", time.Since(started), time.Since(queryStarted), stats.InUse, stats.OpenConnections, stats.WaitCount, stats.WaitDuration, err)
 		}
+		status, cardinality, cursor := progress.Status, progress.Cardinality, progress.Cursor
 		if expected == 1362 && (lastLogged.IsZero() || time.Since(lastLogged) >= 10*time.Second || cursor == expected) {
-			stats := f.db.Stats()
+			stats := storetest.ObserveSelectedPool(t, f.selected)
 			t.Logf("deployment progress elapsed=%s status=%s cursor=%d/%d query=%s pool in_use=%d open=%d wait_count=%d wait_duration=%s", time.Since(started), status, cursor, cardinality, time.Since(queryStarted), stats.InUse, stats.OpenConnections, stats.WaitCount, stats.WaitDuration)
 			lastLogged = time.Now()
 		}
@@ -414,16 +413,20 @@ func waitDeploymentResourceLargeRun(t *testing.T, f *deploymentResourceFixture, 
 			settlementStarted := time.Now()
 			var outcomes, events, delivered int
 			for _, check := range []struct {
-				query string
+				read  func(context.Context, any, string) (int, error)
 				value *int
 			}{
-				{`SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed'`, &outcomes},
-				{`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='portfolio/account.registered'`, &events},
-				{`SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='portfolio/account.registered' AND d.status='delivered'`, &delivered},
+				{storetest.CountDeploymentCommittedOutcomesStorage, &outcomes},
+				{func(ctx context.Context, owner any, run string) (int, error) {
+					return storetest.CountRunNamedEventStorage(ctx, owner, run, "portfolio/account.registered")
+				}, &events},
+				{storetest.CountPortfolioDeliveredDeploymentRowsStorage, &delivered},
 			} {
-				if err := f.db.QueryRowContext(ctx, check.query, runID).Scan(check.value); err != nil {
+				got, err := check.read(ctx, f.selected, runID)
+				if err != nil {
 					t.Fatalf("load deployment settlement progress: %v", err)
 				}
+				*check.value = got
 			}
 			if outcomes == expected && events == expected && delivered == expected {
 				elapsed := time.Since(started)
@@ -513,83 +516,56 @@ func startDeploymentProgressProbe(t *testing.T, f *deploymentResourceFixture, ru
 	}
 }
 
-func logDeploymentResourceFailure(t *testing.T, db *sql.DB, runID string) {
+func logDeploymentResourceFailure(t *testing.T, selected any, runID string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	rows, err := db.QueryContext(ctx, `SELECT status,cardinality,cursor FROM fan_out_intents WHERE run_id=$1 ORDER BY deployment_feed_id`, runID)
+	rows, err := storetest.ReadDeploymentIntentDiagnosticsStorage(ctx, selected, runID)
 	if err != nil {
 		t.Logf("deployment diagnostic intents: %v", err)
 		return
 	}
 	var intents []string
-	for rows.Next() {
-		var status string
-		var cardinality, cursor int
-		if err := rows.Scan(&status, &cardinality, &cursor); err != nil {
-			rows.Close()
-			t.Logf("deployment diagnostic intent scan: %v", err)
-			return
-		}
+	for _, row := range rows {
+		status, cardinality, cursor := row.Status, row.Cardinality, row.Cursor
 		intents = append(intents, fmt.Sprintf("%s:%d/%d", status, cursor, cardinality))
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		t.Logf("deployment diagnostic intent rows: %v", err)
-		return
-	}
-	rows.Close()
 	var outcomes, events, deliveries, receivers int
 	for _, check := range []struct {
-		query string
+		name  string
+		read  func() (int, error)
 		value *int
 	}{
-		{`SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`, &outcomes},
-		{`SELECT COUNT(*) FROM events WHERE run_id=$1`, &events},
-		{`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`, &deliveries},
-		{`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, &receivers},
+		{"outcomes", func() (int, error) { return storetest.CountNestedRunFanOutOutcomes(ctx, selected, runID) }, &outcomes},
+		{"events", func() (int, error) { return storetest.CountPhysicalRunEvents(ctx, selected, runID) }, &events},
+		{"deliveries", func() (int, error) { return storetest.CountRunDeliveryStorage(ctx, selected, runID) }, &deliveries},
+		{"receiver_instances", func() (int, error) { return storetest.CountRunFlowInstanceStorage(ctx, selected, runID) }, &receivers},
 	} {
-		if err := db.QueryRowContext(ctx, check.query, runID).Scan(check.value); err != nil {
-			t.Logf("deployment diagnostic count %q: %v", check.query, err)
+		count, err := check.read()
+		if err != nil {
+			t.Logf("deployment diagnostic count %q: %v", check.name, err)
 			return
 		}
+		*check.value = count
 	}
-	statusRows, err := db.QueryContext(ctx, `SELECT status,COUNT(*) FROM event_deliveries WHERE run_id=$1 GROUP BY status ORDER BY status`, runID)
+	statusRows, err := storetest.ReadDeploymentDeliveryStatusStorage(ctx, selected, runID)
 	if err != nil {
 		t.Logf("deployment diagnostic delivery statuses: %v", err)
 		return
 	}
 	var statuses []string
-	for statusRows.Next() {
-		var status string
-		var count int
-		if err := statusRows.Scan(&status, &count); err != nil {
-			statusRows.Close()
-			t.Logf("deployment diagnostic delivery status scan: %v", err)
-			return
-		}
+	for _, row := range statusRows {
+		status, count := row.Status, row.Count
 		statuses = append(statuses, fmt.Sprintf("%s=%d", status, count))
 	}
-	if err := statusRows.Err(); err != nil {
-		statusRows.Close()
-		t.Logf("deployment diagnostic delivery status rows: %v", err)
-		return
-	}
-	statusRows.Close()
 	t.Logf("deployment failure snapshot run=%s intents=%v outcomes=%d events=%d deliveries=%d delivery_statuses=%v receiver_instances=%d", runID, intents, outcomes, events, deliveries, statuses, receivers)
-	logRows, err := db.QueryContext(ctx, `SELECT event_name, payload FROM events WHERE run_id=$1 ORDER BY created_at LIMIT 12`, runID)
+	logRows, err := storetest.ReadDeploymentRecentEventStorage(ctx, selected, runID)
 	if err != nil {
 		t.Logf("deployment diagnostic events: %v", err)
 		return
 	}
-	defer logRows.Close()
-	for logRows.Next() {
-		var name string
-		var payload []byte
-		if err := logRows.Scan(&name, &payload); err != nil {
-			t.Logf("deployment diagnostic event scan: %v", err)
-			return
-		}
+	for _, row := range logRows {
+		name, payload := row.Name, row.Payload
 		if name == "platform.runtime_log" {
 			t.Logf("deployment runtime diagnostic: %s", payload)
 		}
@@ -657,15 +633,18 @@ func TestDeploymentResourceRunStartEmptyVersionDoesNotInventReceiverBothStores(t
 			runID := startDeploymentResourceRun(t, f, server, "--data", "portfolio/account.registered="+file)
 			waitNotifyAllChildrenRuntimeWithin(t, f.runtime, runID, 30*time.Second)
 			for _, check := range []struct {
-				name, query string
+				name string
+				read func() (int, error)
 			}{
-				{"row events", `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='portfolio/account.registered'`},
-				{"row deliveries", `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE d.run_id=$1 AND e.event_name='portfolio/account.registered'`},
-				{"receivers", `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND flow_template='account'`},
-				{"outcomes", `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`},
+				{"row events", func() (int, error) {
+					return storetest.CountRunNamedEventStorage(f.ctx, f.selected, runID, "portfolio/account.registered")
+				}},
+				{"row deliveries", func() (int, error) { return storetest.CountPortfolioAllDeploymentRowsStorage(f.ctx, f.selected, runID) }},
+				{"receivers", func() (int, error) { return storetest.CountAccountDeploymentReceiversStorage(f.ctx, f.selected, runID) }},
+				{"outcomes", func() (int, error) { return storetest.CountNestedRunFanOutOutcomes(f.ctx, f.selected, runID) }},
 			} {
-				var count int
-				if err := f.db.QueryRowContext(f.ctx, check.query, runID).Scan(&count); err != nil || count != 0 {
+				count, err := check.read()
+				if err != nil || count != 0 {
 					t.Fatalf("empty deployment feed invented %s: count=%d err=%v", check.name, count, err)
 				}
 			}

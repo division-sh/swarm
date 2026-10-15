@@ -21,6 +21,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -242,12 +243,20 @@ func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store comple
 	if strings.TrimSpace(flowInstance) != "" {
 		memory = agentmemory.Plan{Enabled: true}
 	}
+	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, nil, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+		ExecutionMode: "live", ID: agentID, Identity: identity, Role: "worker", Type: "managed",
+		Model: "regular", LLMBackend: "anthropic", ResolvedLLMBackend: "anthropic",
+		Memory: memory, FlowID: "global", FlowPath: flowInstance, Config: json.RawMessage(`{}`),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
-			ExecutionMode: "live", ID: agentID, Identity: identity, Role: "worker", Type: "managed",
-			Model: "regular", LLMBackend: "anthropic", ResolvedLLMBackend: "anthropic",
-			Memory: memory, FlowID: "global", FlowPath: flowInstance,
-		}),
+		Config: resolved.Actor,
 		Status: "active", StartedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("seed managed turn fixture agent: %v", err)

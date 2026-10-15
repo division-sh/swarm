@@ -62,14 +62,17 @@ func TestRunServeRuntimeDevScratchPersistsExactBundleAndRunSource(t *testing.T) 
 }
 
 func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
+	var reader receiverProofStateReader
 	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		reader = requireReceiverProofStateReader(t, p.deps.EventStore)
+	})
 	repo := canonicalrouting.CopyRootIngressServedFollowUp(t)
 	opts := devScratchRuntimeOptions(t, repo)
 	process := startServeRuntimeTestProcessAtRepo(t, repo, opts)
 	process.waitForReadyLine()
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
-
 	var identity apiv1.RuntimeIdentityResult
 	requireServedJSONRPCResult(t, endpoint, "runtime.identity", map[string]any{}, &identity)
 	if len(identity.SourceArtifacts) != 1 {
@@ -78,11 +81,7 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 	var started struct {
 		RunID string `json:"run_id"`
 	}
-	requireServedJSONRPCResult(t, endpoint, "run.start", map[string]any{
-		"bundle_hash": identity.SourceArtifacts[0].BundleHash,
-		"event_name":  "item.received",
-		"payload":     map[string]any{"item_id": "dev-scratch-fork"},
-	}, &started)
+	requireServedJSONRPCResult(t, endpoint, "run.start", map[string]any{"bundle_hash": identity.SourceArtifacts[0].BundleHash, "event_name": "item.received", "payload": map[string]any{"item_id": "dev-scratch-fork"}}, &started)
 	if strings.TrimSpace(started.RunID) == "" {
 		t.Fatal("run.start returned no run_id")
 	}
@@ -93,28 +92,16 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 		EventID string `json:"event_id"`
 		RunID   string `json:"run_id"`
 	}
-	requireServedJSONRPCResult(t, endpoint, "event.publish", map[string]any{
-		"bundle_hash":     identity.SourceArtifacts[0].BundleHash,
-		"run_id":          started.RunID,
-		"event_name":      "item.processed",
-		"payload":         map[string]any{"item_id": "review"},
-		"idempotency_key": "issue-2361-dev-scratch-fork-point",
-	}, &published)
+	requireServedJSONRPCResult(t, endpoint, "event.publish", map[string]any{"bundle_hash": identity.SourceArtifacts[0].BundleHash, "run_id": started.RunID, "event_name": "item.processed", "payload": map[string]any{"item_id": "review"}, "idempotency_key": "issue-2361-dev-scratch-fork-point"}, &published)
 	if published.RunID != started.RunID || strings.TrimSpace(published.EventID) == "" {
 		t.Fatalf("event.publish result = %#v", published)
 	}
 	waitServedRunDeliveryQuiescence(t, deliveryReader, started.RunID)
 	requireServedRunStatus(t, endpoint, started.RunID, "completed")
-
 	var fork apiv1.RunForkExecutionResult
-	forkResponse := requestServedJSONRPCWithTimeout(t, endpoint, "run.fork", map[string]any{
-		"source_run_id":       started.RunID,
-		"fork_event_id":       published.EventID,
-		"allow_source_freeze": true,
-		"idempotency_key":     "issue-2361-dev-scratch-run-fork",
-	}, 30*time.Second)
+	forkResponse := requestServedJSONRPCWithTimeout(t, endpoint, "run.fork", map[string]any{"source_run_id": started.RunID, "fork_event_id": published.EventID, "allow_source_freeze": true, "idempotency_key": "issue-2361-dev-scratch-run-fork"}, 30*time.Second)
 	if forkResponse.Error != nil {
-		logServedForkHandlerDiagnostics(t, servedControlProofRuntime{DB: db})
+		logServedForkHandlerDiagnostics(t, reader)
 		var kind, authority string
 		var route []byte
 		if err := db.QueryRow(`SELECT routing_source_kind, COALESCE(routing_source_authority, ''), source_route FROM events WHERE event_id=?`, published.EventID).Scan(&kind, &authority, &route); err != nil {
@@ -132,14 +119,9 @@ func TestRunServeRuntimeDevScratchRunForkLifecycleSQLite(t *testing.T) {
 	}
 	waitServedRunDeliveryQuiescence(t, deliveryReader, fork.ForkRunID)
 	requireServedRunStatus(t, endpoint, fork.ForkRunID, "completed")
-
 	var runReadback map[string]any
 	requireServedJSONRPCResult(t, endpoint, "run.get", map[string]any{"run_id": fork.ForkRunID}, &runReadback)
-	for method, params := range map[string]map[string]any{
-		"entity.list":       {"run_id": fork.ForkRunID, "limit": 500},
-		"event.list":        {"filter": map[string]any{"run_id": fork.ForkRunID}, "limit": 500},
-		"conversation.list": {"run_id": fork.ForkRunID, "limit": 500},
-	} {
+	for method, params := range map[string]map[string]any{"entity.list": {"run_id": fork.ForkRunID, "limit": 500}, "event.list": {"filter": map[string]any{"run_id": fork.ForkRunID}, "limit": 500}, "conversation.list": {"run_id": fork.ForkRunID, "limit": 500}} {
 		var readback map[string]any
 		requireServedJSONRPCResult(t, endpoint, method, params, &readback)
 		if len(readback) == 0 {

@@ -354,22 +354,22 @@ func TestA2MultiUntilIndependentRecipientEntriesAndRestartOnBothStores(t *testin
 			}
 			beforeReplay := []pipeline.WorkflowInstance{load(0), load(1)}
 			replay = append(replay, trigger, halt)
-			var eventsBefore, revisionsBefore int
-			if err := selected.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM events WHERE run_id=$1),
-				(SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1)`, runID).Scan(&eventsBefore, &revisionsBefore); err != nil {
+			beforeStorage, err := storetest.ReadRunPublicationHistoryStorage(ctx, selected.events, runID)
+			if err != nil {
 				t.Fatal(err)
 			}
+			eventsBefore, revisionsBefore := beforeStorage.Events, beforeStorage.Revisions
 			for _, event := range replay {
 				if err := bus.PublishAcknowledged(ctx, event); err != nil {
 					t.Fatalf("duplicate real publication: %v", err)
 				}
 			}
 			waitForGateRecoveryQuiescence(t, bus, ctx)
-			var eventsAfter, revisionsAfter int
-			if err := selected.db.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM events WHERE run_id=$1),
-				(SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1)`, runID).Scan(&eventsAfter, &revisionsAfter); err != nil {
+			afterStorage, err := storetest.ReadRunPublicationHistoryStorage(ctx, selected.events, runID)
+			if err != nil {
 				t.Fatal(err)
 			}
+			eventsAfter, revisionsAfter := afterStorage.Events, afterStorage.Revisions
 			if eventsAfter != eventsBefore || revisionsAfter != revisionsBefore {
 				t.Fatalf("duplicate until/member/completion made new publications/history: events=%d/%d revisions=%d/%d", eventsAfter, eventsBefore, revisionsAfter, revisionsBefore)
 			}
@@ -410,24 +410,8 @@ func a2MultiUntilEntryArms(t *testing.T, instance pipeline.WorkflowInstance, ent
 
 func a2MultiUntilChildren(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, parentID, name string, want int) []events.Event {
 	t.Helper()
-	rows, err := selected.db.QueryContext(ctx, `SELECT CAST(event_id AS TEXT) FROM events
-		WHERE source_event_id=$1 AND (event_name=$2 OR event_name LIKE $3) ORDER BY event_id`, parentID, name, "%/"+name)
+	ids, err := storetest.ReadSourceNamedChildEventIDs(ctx, selected.events, parentID, name)
 	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			t.Fatal(err)
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if err := rows.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if len(ids) != want {

@@ -10,7 +10,138 @@ type StandaloneRunStorage struct {
 	RunID, Status, TriggerEventType string
 }
 
+type StopRunControlClockStorage struct{ Status, Control, Updated string }
+
+func ReadStopRunControlClockStorageTx(ctx context.Context, tx *sql.Tx, runID string) (StopRunControlClockStorage, error) {
+	var out StopRunControlClockStorage
+	if err := tx.QueryRowContext(ctx, `SELECT r.status,c.control_status,CAST(c.updated_at AS TEXT) FROM runs r JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`, runID).Scan(&out.Status, &out.Control, &out.Updated); err != nil {
+		return StopRunControlClockStorage{}, err
+	}
+	return out, nil
+}
+
+type PostgresRunCompletionIdentityStorage struct{ RunID, BundleHash string }
+type PostgresRunStatusClockStorage struct {
+	Status  string
+	EndedAt sql.NullTime
+}
+type PostgresRunStatusCountsStorage struct {
+	Status                  string
+	EventCount, EntityCount int
+}
+
+func ReadPostgresRunCompletionIdentityStorageTx(ctx context.Context, tx *sql.Tx, eventID string) (PostgresRunCompletionIdentityStorage, error) {
+	var out PostgresRunCompletionIdentityStorage
+	err := tx.QueryRowContext(ctx, `
+		SELECT r.run_id::text, r.bundle_hash
+		FROM events e
+		JOIN runs r ON r.run_id = e.run_id
+		WHERE e.event_id = $1::uuid
+	`, eventID).Scan(&out.RunID, &out.BundleHash)
+	if err != nil {
+		return PostgresRunCompletionIdentityStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadPostgresRunStatusClockStorageTx(ctx context.Context, tx *sql.Tx, runID string) (PostgresRunStatusClockStorage, error) {
+	var out PostgresRunStatusClockStorage
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), ended_at
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&out.Status, &out.EndedAt)
+	if err != nil {
+		return PostgresRunStatusClockStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadPostgresRunStatusCountsStorageTx(ctx context.Context, tx *sql.Tx, runID string) (PostgresRunStatusCountsStorage, error) {
+	var out PostgresRunStatusCountsStorage
+	err := tx.QueryRowContext(ctx, `
+		SELECT COALESCE(status, ''), event_count,
+		       (SELECT COUNT(DISTINCT entity_id) FROM entity_state WHERE run_id = runs.run_id)
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&out.Status, &out.EventCount, &out.EntityCount)
+	if err != nil {
+		return PostgresRunStatusCountsStorage{}, err
+	}
+	return out, nil
+}
+
+func CountPostgresExtraRunningStatusRowsTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM runs
+		WHERE run_id <> $1::uuid
+		  AND status = 'running'
+	`, runID).Scan(&count)
+	return count, err
+}
+
+func ReadPostgresRunTriggerEventIdentityStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var eventID string
+	err := tx.QueryRowContext(ctx, `SELECT trigger_event_id::text FROM runs WHERE run_id = $1::uuid`, runID).Scan(&eventID)
+	if err != nil {
+		return "", err
+	}
+	return eventID, nil
+}
+
+func ReadRunStatusStorageTx(ctx context.Context, tx *sql.Tx, runID string) (string, error) {
+	var out string
+	err := tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id=$1`, runID).Scan(&out)
+	return out, err
+}
+
 type StopRunControlStorage struct{ Status, Control string }
+
+type PublicationRunStorage struct {
+	Status, TriggerEventType, TriggerEventID, BundleHash string
+}
+
+type PublicationRunTriggerStorage struct{ Status, TriggerEventType, TriggerEventID string }
+
+func ReadPublicationRunTriggerStorageTx(ctx context.Context, tx *sql.Tx, runID string) (PublicationRunTriggerStorage, error) {
+	var out PublicationRunTriggerStorage
+	err := tx.QueryRowContext(ctx, `SELECT status, COALESCE(trigger_event_type,''), COALESCE(CAST(trigger_event_id AS TEXT),'') FROM runs WHERE run_id=$1`, runID).Scan(&out.Status, &out.TriggerEventType, &out.TriggerEventID)
+	if err != nil {
+		return PublicationRunTriggerStorage{}, err
+	}
+	return out, nil
+}
+
+type RunStartHeaderStorage struct{ Status, TriggerEventType, BundleHash string }
+
+func ReadRunStartHeaderStorageTx(ctx context.Context, tx *sql.Tx, runID string) (RunStartHeaderStorage, error) {
+	var out RunStartHeaderStorage
+	err := tx.QueryRowContext(ctx, `SELECT status, trigger_event_type, bundle_hash FROM runs WHERE run_id=$1`, runID).Scan(&out.Status, &out.TriggerEventType, &out.BundleHash)
+	if err != nil {
+		return RunStartHeaderStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadCreatedPublicationRunStorageTx(ctx context.Context, tx *sql.Tx, runID string) (PublicationRunStorage, error) {
+	var out PublicationRunStorage
+	err := tx.QueryRowContext(ctx, `SELECT status, trigger_event_type, CAST(trigger_event_id AS TEXT), bundle_hash FROM runs WHERE run_id=$1`, runID).Scan(&out.Status, &out.TriggerEventType, &out.TriggerEventID, &out.BundleHash)
+	if err != nil {
+		return PublicationRunStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadExistingPublicationRunStorageTx(ctx context.Context, tx *sql.Tx, runID string) (PublicationRunStorage, error) {
+	var out PublicationRunStorage
+	err := tx.QueryRowContext(ctx, `SELECT status, COALESCE(trigger_event_type,''), COALESCE(CAST(trigger_event_id AS TEXT),''), bundle_hash FROM runs WHERE run_id=$1`, runID).Scan(&out.Status, &out.TriggerEventType, &out.TriggerEventID, &out.BundleHash)
+	if err != nil {
+		return PublicationRunStorage{}, err
+	}
+	return out, nil
+}
 
 func HoldPostgresRunTableReadBarrierTx(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `SET LOCAL lock_timeout='5s'`); err != nil {

@@ -169,7 +169,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 		role string
 	}{{"agent-1", "researcher"}, {"agent-2", "reviewer"}} {
 		if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-			Config:    testOperatorAgentConfigForRun(runID, agent.id, agent.role),
+			Config:    resolveNativeClaimFixtureActor(t, testOperatorAgentConfigForRun(runID, agent.id, agent.role)),
 			Status:    "active",
 			StartedAt: now,
 		}); err != nil {
@@ -195,14 +195,28 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsPromotesCanonicalOw
 	agentOneIdentity := mustTestAgentIdentityForRun(runID, "agent-1", "global")
 	agentOneRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: agentOneIdentity}
 	agentTwoRoute := testAgentDeliveryRoute(t, runID, "agent-2", "global")
+	for _, delivery := range []struct {
+		event events.Event
+		route events.DeliveryRoute
+	}{
+		{eventsByID[failedOldEventID], agentOneRoute},
+		{eventsByID[deadEventID], agentOneRoute},
+		{eventsByID[otherAgentEventID], agentTwoRoute},
+		{eventsByID[failedNewEventID], agentOneRoute},
+	} {
+		seedAgentDeliveryStateFixture(t, ctx, pg, delivery.event, delivery.route, runtimedelivery.StateQueued, nil)
+	}
+	if err := pg.ActivateDeliveryAuthority(ctx, admitAgentClaimProfileAuthority(t, ctx, pg, mustStoreTestSourceArtifactFact(authorActivityTestBundleHash))); err != nil {
+		t.Fatal(err)
+	}
 	oldFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "old_failure", nil)
-	oldSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[failedOldEventID], agentOneRoute, runtimedelivery.StateRetrying, &oldFailure)
+	oldSnapshot := settleDeliveryStateFixture(t, ctx, pg, eventsByID[failedOldEventID], agentOneRoute, runtimedelivery.StateRetrying, &oldFailure)
 	terminalFailureEnvelope := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal_failure", nil)
-	deadSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[deadEventID], agentOneRoute, runtimedelivery.StateExhausted, &terminalFailureEnvelope)
+	deadSnapshot := settleDeliveryStateFixture(t, ctx, pg, eventsByID[deadEventID], agentOneRoute, runtimedelivery.StateExhausted, &terminalFailureEnvelope)
 	otherAgentFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "other_agent_failure", nil)
-	seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[otherAgentEventID], agentTwoRoute, runtimedelivery.StateRetrying, &otherAgentFailure)
+	settleDeliveryStateFixture(t, ctx, pg, eventsByID[otherAgentEventID], agentTwoRoute, runtimedelivery.StateRetrying, &otherAgentFailure)
 	newFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "new_failure", nil)
-	newSnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, eventsByID[failedNewEventID], agentOneRoute, runtimedelivery.StateRetrying, &newFailure)
+	newSnapshot := settleDeliveryStateFixture(t, ctx, pg, eventsByID[failedNewEventID], agentOneRoute, runtimedelivery.StateRetrying, &newFailure)
 	failedNewDeliveryID := newSnapshot.DeliveryID
 	failedOldDeliveryID := oldSnapshot.DeliveryID
 	deadDeliveryID := deadSnapshot.DeliveryID

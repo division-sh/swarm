@@ -18,8 +18,8 @@ func TestFanOutServingM06SameBundleGenerationReplacementOnBothBackends(t *testin
 			ctx, runID := f.startRun(t, 0)
 			trigger := f.submit(t, 0, runID, "same-bundle-successor")
 			turn := waitServingMatrixHeld(t, old)
-			waitServingMatrixTriggerReceipt(t, f.db, trigger)
-			before := readServingLifetimeState(t, f.db, runID)
+			waitServingMatrixTriggerReceipt(t, f.selected, trigger)
+			before := readServingLifetimeState(t, f.selected, runID)
 			assertServingLifetimeUnissued(t, before)
 			oldGrant := f.topology.grants[f.runtimes[0].sourceArtifactFact.BundleHash()]
 			oldEvidence, err := oldGrant.Evidence()
@@ -27,7 +27,7 @@ func TestFanOutServingM06SameBundleGenerationReplacementOnBothBackends(t *testin
 				t.Fatal(err)
 			}
 			successor := newServingMatrixProbe(servingMatrixUnheld, 0)
-			replacement := newNotifyAllChildrenRuntime(t, f.selected, f.db, f.sources[0], time.Now, notifyAllChildrenRuntimeOptions{
+			replacement := newNotifyAllChildrenRuntime(t, f.selected, f.sources[0], time.Now, notifyAllChildrenRuntimeOptions{
 				processTopology: f.topology, fanOutWorkers: &workers,
 				fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 					successor.PipelineCoordinator = pc

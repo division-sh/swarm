@@ -21,7 +21,7 @@ func TestReceiverCompositionEntitylessOnwardBothStores(t *testing.T) {
 				params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "onward-request"}
 				if existing {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "onward-seed"})
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "active")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "active")
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "onward-request"}
 				}
 				started := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
@@ -63,8 +63,8 @@ func TestReceiverCompositionEntitylessOnwardBothStores(t *testing.T) {
 				if !child || !grandchild {
 					t.Fatalf("missing nested execution child=%t grandchild=%t", child, grandchild)
 				}
-				requireReceiverConstructedInstance(t, rt, started.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "pending", started.RunID, "ready", 2, map[string]any{})
-				requireReceiverConstructedInstance(t, rt, started.RunID, "sink/tail", "sink/tail", flowidentity.EntityID("sink/tail"), "receipt", "done", "sink", "ready", 2, map[string]any{"result": "emitted"})
+				requireReceiverConstructedInstance(t, rt.BundleHash, rt.ReceiverStateReader, started.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "pending", started.RunID, "ready", 2, map[string]any{})
+				requireReceiverConstructedInstance(t, rt.BundleHash, rt.ReceiverStateReader, started.RunID, "sink/tail", "sink/tail", flowidentity.EntityID("sink/tail"), "receipt", "done", "sink", "ready", 2, map[string]any{"result": "emitted"})
 				var rawFields string
 				if err := rt.DB.QueryRow(`SELECT CAST(fields AS TEXT) FROM entity_state WHERE run_id=$1 AND flow_instance='sink/tail' AND current_state='done'`, started.RunID).Scan(&rawFields); err != nil {
 					t.Fatal(err)
@@ -76,7 +76,7 @@ func TestReceiverCompositionEntitylessOnwardBothStores(t *testing.T) {
 				if fields["result"] != "emitted" {
 					t.Fatalf("grandchild did not consume the emitted payload: %#v", fields)
 				}
-				requireReceiverPublicReadback(t, rt, started.RunID)
+				requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, started.RunID)
 				var readback operatorread.OperatorEventListResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": started.RunID}, "limit": 100}, &readback)
 				var onward int
@@ -85,8 +85,6 @@ func TestReceiverCompositionEntitylessOnwardBothStores(t *testing.T) {
 						continue
 					}
 					onward++
-					// The public singular entity projection is the admitted target,
-					// not the causal source. Check both rather than conflating them.
 					if event.EntityID != flowidentity.EntityID("sink/tail") {
 						t.Fatalf("public target projection changed: %s", event.EntityID)
 					}

@@ -1,0 +1,107 @@
+[
+  {
+    "File": "internal/serveapp/lifecycle_emitter_competing_exit_test.go",
+    "Function": "TestServedLifecycleEmitterCompetingExitPublication",
+    "SHA256": "4cd2ea376c7bc72170346fe0739610ef06c8d00ce5e8e87f23af41bc253fb726"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_emitter_test.go",
+    "Function": "TestServedLifecycleEmitterGateJourney",
+    "SHA256": "223467794bc9bd41b1f27dbfed30cff28d15f2f39ef4c8ae13b9a21bc2ce9b97"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_emitter_test.go",
+    "Function": "TestServedLifecycleEmitterLoopEscapeJourney",
+    "SHA256": "9af5c0b57e5aa670afeef639434e18b8d44c284837be69e9e78a1d86013e11bb"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_release_process_test.go",
+    "Function": "TestReleaseCompiledLifecycleJourneysBothStores",
+    "SHA256": "2cb693f2d9dcfa2b309e0d8765cd446529c34fc1774d2bf1ed0c7f1d3a8305ca"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_fork_test.go",
+    "Function": "requireLifecycleFrozenGateControlRefusal",
+    "SHA256": "b27d2a850ca6b11b1c8379cbe55c137cd031cf4be675cb705b07797999707413"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_fork_test.go",
+    "Function": "requireLifecycleRootLoopForkRevision",
+    "SHA256": "b770596ac29e6011d43ea9382db5767214f2532b3d006a4bcecb925a14e3b2b9"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_fork_test.go",
+    "Function": "runLifecycleRootForkPolicy",
+    "SHA256": "1f21991b4bf3fed9edc51d0e0aa020d046bbd58d1ab676cfb4391c981ad2780b"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_gate_process_test.go",
+    "Function": "TestServedCompiledGateOutcomeRestartOnBothStores",
+    "SHA256": "f385c77d2740d9936d66b590f8fd011642169aacefd541931e52d7893fb87b61"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_gate_restart_test.go",
+    "Function": "proveServedCompiledGateOutcomeRestart",
+    "SHA256": "91628c4e5e799b76204135f02adc315587ff0d4558bfb91b8c114fedc317acea"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_gate_test.go",
+    "Function": "TestServedCompiledGateAdvanceOnlyOnBothStores",
+    "SHA256": "ff4039d549df0a01b091d7578f128359bcce89d2c7d5985116760cb389c030ec"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_nested_test.go",
+    "Function": "TestServedCompiledTransitionNestedCarrierCollisionOnBothStores",
+    "SHA256": "1ffd7c5d58133360a490c4a852c3f86cd33417905c8d2f1b7a195599e518934e"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_node_recovery_test.go",
+    "Function": "TestServedCompiledLoopNodeRecoveryReexecutionOnBothStores",
+    "SHA256": "8f540065376ec2aeb3e768c1360aba7d469f1272d19a3a4271deff683ca0e01b"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_replay_test.go",
+    "Function": "TestServedCompiledLoopTransitionReplayOnBothStores",
+    "SHA256": "1c31f994bb5f4386ebf9db076585d034354ed1b3488f567365b43b2c8ce27d64"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_restart_test.go",
+    "Function": "TestServedCompiledGateFrozenTransitionEvidenceOnBothStores",
+    "SHA256": "8de47f7e18c159bf1255d22a6e8ce6ee4158941d2f2d27464e0190f36ca19368"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_restart_test.go",
+    "Function": "TestServedCompiledTransitionRestartOnBothStores",
+    "SHA256": "bf6e6145fcb1264fb1e70cb4441db688fde9c8605a0b239789de4024fe9b66ae"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_served_test.go",
+    "Function": "TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores",
+    "SHA256": "0a33588aa6e223d153ddebf80de020a3649851ed7cb825da4290457b23fc36ed"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_static_fork_test.go",
+    "Function": "TestServedCompiledTransitionStaticForkEvidenceOnBothStores",
+    "SHA256": "c669112e353d6e62ff5e49697ac72ed4df56f9fd1c5de57db3337c170661f431"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_template_test.go",
+    "Function": "TestServedCompiledTransitionNestedTemplatesFirstJourneyOnBothStores",
+    "SHA256": "3bdc203d1325ea4afcbf22c6ebd9f0e60ce5d9656ba898d6c725a63d1150cf24"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_template_test.go",
+    "Function": "prepareLifecycleTemplateSiblings",
+    "SHA256": "a6ca6759f915b55af26669576e1ce1fe32742e443a694c78575f2e830890e8c5"
+  },
+  {
+    "File": "internal/serveapp/lifecycle_transition_template_test.go",
+    "Function": "requireLifecycleTemplateVerdict",
+    "SHA256": "5a53eb67c0a3015fc215f148ecdb4208a97dffa835e6a70514d5ead61b2dbbb5"
+  },
+  {
+    "File": "internal/serveapp/receiver_fork_test.go",
+    "Function": "TestReceiverCompositionForkBothStores",
+    "SHA256": "80b8e23e149437f24b88991acd4b7b66a9f7f3379f40a43970a76191556ffc35"
+  }
+]

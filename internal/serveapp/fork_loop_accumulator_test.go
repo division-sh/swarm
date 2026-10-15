@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -15,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
@@ -27,18 +29,17 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 					selected = owner
 					return previous(owner)
 				}
-				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+				t.Cleanup(func() {
+					projectRuntimePersistenceForServe = previous
+				})
 				root := canonicalrouting.CopyForkLoopAccumulator(t, clearOnAdmit)
 				publication := newExactOriginPublicationProbe(t)
 				rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-				started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-					"event_name": "work.requested", "bundle_hash": rt.BundleHash,
-					"payload": map[string]any{"token": "loop-notice-proof"}, "idempotency_key": "accumulator-start",
-				})
+				started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"token": "loop-notice-proof"}, "idempotency_key": "accumulator-start"})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-				waitForkReceiverSourceCompletion(t, rt, started.RunID)
-				first := readForkLoopActivation(t, rt, started.RunID)
-				initial := readForkHandlerAccumulators(t, rt, started.RunID)
+				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, started.RunID)
+				first := readForkLoopActivation(t, rt.ReceiverStateReader, started.RunID)
+				initial := readForkHandlerAccumulators(t, rt.ReceiverStateReader, started.RunID)
 				wantInitial := 1
 				if clearOnAdmit {
 					wantInitial = 0
@@ -51,12 +52,12 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 					"payload": map[string]any{"revision_id": first.RevisionID, "token": "loop-notice-proof"}, "idempotency_key": "accumulator-repeat",
 				})
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, started.RunID)
-				waitForkReceiverSourceCompletion(t, rt, started.RunID)
-				current := readForkLoopActivation(t, rt, started.RunID)
+				waitForkReceiverSourceCompletion(t, rt.ReceiverStateReader, started.RunID)
+				current := readForkLoopActivation(t, rt.ReceiverStateReader, started.RunID)
 				if current.Attempt != 2 || current.ActivationID != first.ActivationID || current.RevisionID == first.RevisionID {
 					t.Fatalf("ordinary repeat: first=%+v current=%+v", first, current)
 				}
-				source := readForkHandlerAccumulators(t, rt, started.RunID)
+				source := readForkHandlerAccumulators(t, rt.ReceiverStateReader, started.RunID)
 				wantCount := 2
 				if clearOnAdmit {
 					wantCount = 0
@@ -80,12 +81,12 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 				if err := waitExactOriginPublications(t.Context(), publication, started.EventID, repeated.EventID); err != nil {
 					t.Fatal(err)
 				}
-				before := readServedForkRecipientSourceDomain(t, rt, started.RunID)
+				before := readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), started.RunID)
 				family, ok := selected.RunFork()
 				if !ok {
 					t.Fatal("missing selected fork owner")
 				}
-				plan, err := family.Plan(servedControlProofAuthorActivityContext(t, rt), runfork.RunForkPlanRequest{SourceRunID: started.RunID, At: frontier})
+				plan, err := family.Plan(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), runfork.RunForkPlanRequest{SourceRunID: started.RunID, At: frontier})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -98,7 +99,7 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 				var fork apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &fork)
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
-				child := readForkHandlerAccumulators(t, rt, fork.ForkRunID)
+				child := readForkHandlerAccumulators(t, rt.ReceiverStateReader, fork.ForkRunID)
 				if len(child) != len(source) {
 					t.Fatalf("child bucket count=%d source=%d; source=%#v child=%#v", len(child), len(source), source, child)
 				}
@@ -121,8 +122,6 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 							t.Fatalf("historical bucket contents or identity changed: source=%#v child=%#v", value, child[ref.Key()])
 						}
 					} else {
-						// R precedes this delivery's admission. This bucket is newly
-						// written by child execution, not copied from post-R state.
 						bucket, ok := child[ref.Key()].(map[string]any)
 						if !ok {
 							t.Fatalf("missing child current bucket %q", ref.Key())
@@ -142,18 +141,16 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 						if !reflect.DeepEqual(bucket["received"], map[string]any{"loop-notice-proof": canonicaljson.HashBytes(canonical)}) {
 							t.Fatalf("current child dedup evidence: %#v", bucket)
 						}
-						// Accumulation retains the authored payload, not injected event
-						// metadata. Prove its lineage through the actual delivery/effect.
-						requireForkLoopStateEffect(t, rt, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), want.RevisionID)
+						requireForkLoopStateEffect(t, rt.Endpoint, rt.ReceiverStateReader, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), want.RevisionID)
 					}
 					if _, exists := child[key]; exists {
 						t.Fatal("child retained source generation key")
 					}
 				}
-				requireForkLoopStateEffect(t, rt, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), readForkLoopActivation(t, rt, fork.ForkRunID).RevisionID)
+				requireForkLoopStateEffect(t, rt.Endpoint, rt.ReceiverStateReader, fork.ForkRunID, activityidentity.ForkLineageEventID(fork.ForkRunID, frontier), readForkLoopActivation(t, rt.ReceiverStateReader, fork.ForkRunID).RevisionID)
 				var replay apiv1.RunForkExecutionResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", params, &replay)
-				if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(child, readForkHandlerAccumulators(t, rt, fork.ForkRunID)) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt, started.RunID)) {
+				if !reflect.DeepEqual(fork, replay) || !reflect.DeepEqual(child, readForkHandlerAccumulators(t, rt.ReceiverStateReader, fork.ForkRunID)) || !reflect.DeepEqual(before, readServedForkRecipientSourceDomain(t, rt.Runtime.Bus.Store(), started.RunID)) {
 					t.Fatal("repeated fork changed child accumulators or source history")
 				}
 			})
@@ -161,10 +158,16 @@ func TestServedForkAccumulatorRetainedGenerationBothStores(t *testing.T) {
 	}
 }
 
-func readForkHandlerAccumulators(t *testing.T, rt servedControlProofRuntime, runID string) map[string]any {
+func readForkHandlerAccumulators(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID string) map[string]any {
 	t.Helper()
 	var raw string
-	if err := rt.DB.QueryRow(`SELECT CAST(accumulator AS TEXT) FROM entity_state WHERE run_id=$1 AND entity_id=$2`, runID, flowidentity.EntityID("review")).Scan(&raw); err != nil {
+	if err := func() error {
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (string, error) {
+			return storetest.ReadEntityAccumulatorTextStorage(ctx, selectedProofReceiverStateReader, runID, flowidentity.EntityID("review"))
+		})
+		raw = observed
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
 	var state map[string]map[string]any

@@ -26,7 +26,7 @@ func TestB16ParentStopVersusPublicationGroupBothCommitOrders(t *testing.T) {
 				fixture, baseCtx, group, members, owner, command := prepareP16PublicationGroup(t, raw, db, backend, 34)
 				ctx, cancel := context.WithTimeout(baseCtx, 10*time.Second)
 				defer cancel()
-				before := readStopCommitEvidence(t, db, fixture.runID)
+				before := readStopCommitEvidence(t, db, raw, fixture.runID)
 				stop := func() error {
 					outcome, err := raw.StopRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: fixture.runID})
 					if !outcome.Acknowledged && err == nil {
@@ -62,7 +62,7 @@ func TestB16ParentStopVersusPublicationGroupBothCommitOrders(t *testing.T) {
 					if err := group.ValidateCommitted(ctx, b16Claims(members)); err != nil {
 						t.Fatal(err)
 					}
-					published := readStopCommitEvidence(t, db, fixture.runID)
+					published := readStopCommitEvidence(t, db, raw, fixture.runID)
 					if published.status != before.status || published.control != before.control || published.canceled != 0 || published.revisions != before.revisions+1 {
 						t.Fatalf("refused stop partly changed parent: before=%+v after=%+v", before, published)
 					}
@@ -84,7 +84,7 @@ func TestB16ParentStopVersusPublicationGroupBothCommitOrders(t *testing.T) {
 					wantCursor, wantEvents, wantRevisions = 32, before.events+2, before.revisions+3
 				}
 				assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, wantCursor, wantCursor)
-				after := readStopCommitEvidence(t, db, fixture.runID)
+				after := readStopCommitEvidence(t, db, raw, fixture.runID)
 				if after.status != "cancelled" || after.control != "stopped" || after.canceled != 1 || after.pending != 0 || after.events != wantEvents || after.revisions != wantRevisions {
 					t.Fatalf("group/stop accounting: before=%+v after=%+v expected events=%d revisions=%d", before, after, wantEvents, wantRevisions)
 				}
@@ -137,7 +137,7 @@ func TestB16ParentStopContendsWithGroupSettlementCommit(t *testing.T) {
 			if err := group.ValidateCommitted(ctx, b16Claims(members)); err != nil {
 				t.Fatal(err)
 			}
-			before := readStopCommitEvidence(t, db, fixture.runID)
+			before := readStopCommitEvidence(t, db, raw, fixture.runID)
 			var outcome pipelineobligation.PublicationGroupOutcome
 			settle := func() error {
 				var err error
@@ -162,7 +162,7 @@ func TestB16ParentStopContendsWithGroupSettlementCommit(t *testing.T) {
 				assertDirectiveReceipt(t, db, result.Claim.EventID(), "processed", nil)
 			}
 			assertFanOutCursorAndOutcomeCount(t, ctx, db, fixture, 32, 32)
-			after := readStopCommitEvidence(t, db, fixture.runID)
+			after := readStopCommitEvidence(t, db, raw, fixture.runID)
 			if after.status != "cancelled" || after.control != "stopped" || after.canceled != 1 || after.pending != 0 || after.events != before.events || after.revisions != before.revisions+2 {
 				t.Fatalf("segment and parent need exactly two revisions without rewriting prefix: before=%+v after=%+v", before, after)
 			}

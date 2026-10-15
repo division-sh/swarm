@@ -49,3 +49,26 @@ func CountLifecycleDiagnosticEvents(ctx context.Context, tx *sql.Tx, postgres bo
 	}
 	return count, nil
 }
+
+func ReadLastThreeFanOutRuntimeLogPayloadsTx(ctx context.Context, tx *sql.Tx, runID string) ([][]byte, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT payload FROM events WHERE run_id=$1 AND event_name='platform.runtime_log' ORDER BY insertion_sequence DESC LIMIT 3`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out [][]byte
+	for rows.Next() {
+		var payload []byte
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		out = append(out, append([]byte(nil), payload...))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

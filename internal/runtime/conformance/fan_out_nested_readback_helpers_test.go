@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"testing"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type nestedOperatorReader interface {
@@ -26,24 +26,12 @@ func nestedPublicReader(t *testing.T, selected notifyAllChildrenStore) nestedOpe
 	return reader
 }
 
-// SQL discovers exact durable identities; all payload and delivery assertions
+// The selected event owner discovers exact durable identities; all payload and delivery assertions
 // below use the operator surface, not private fan-out planner representations.
-func nestedEventIDs(t *testing.T, ctx context.Context, db *sql.DB, runID, eventName, parentID string) []string {
+func nestedEventIDs(t *testing.T, ctx context.Context, selected notifyAllChildrenStore, runID, eventName, parentID string) []string {
 	t.Helper()
-	rows, err := db.QueryContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name=$2 AND source_event_id=$3 ORDER BY event_id`, runID, eventName, parentID)
+	ids, err := storetest.ReadNestedSourceEventIDs(ctx, selected, runID, eventName, parentID)
 	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			t.Fatal(err)
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
 	return ids
@@ -69,12 +57,12 @@ func assertNestedDeliveredEvent(t *testing.T, ctx context.Context, reader nested
 // The public surface exposes delivery completion, not platform-pipeline
 // receipts. Check both facts at this held boundary, without inventing a group
 // receipt or requiring the retired one-revision-per-member history layout.
-func assertNestedPredecessorsSettledWhileChildHeld(t *testing.T, ctx context.Context, db *sql.DB, reader nestedOperatorReader, parents []notifyAllChildrenItemEvent, heldEventID string) {
+func assertNestedPredecessorsSettledWhileChildHeld(t *testing.T, ctx context.Context, selected notifyAllChildrenStore, reader nestedOperatorReader, parents []notifyAllChildrenItemEvent, heldEventID string) {
 	t.Helper()
 	for _, parent := range parents {
 		assertNestedDeliveredEvent(t, ctx, reader, parent.ID, 1)
-		var outcome string
-		if err := db.QueryRowContext(ctx, `SELECT outcome FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, parent.ID).Scan(&outcome); err != nil || outcome != "success" {
+		outcome, err := storetest.ReadNestedPipelineReceiptOutcome(ctx, selected, parent.ID)
+		if err != nil || outcome != "success" {
 			t.Fatalf("nested predecessor %s handoff not durably settled before child execution: outcome=%q err=%v", parent.ID, outcome, err)
 		}
 	}
@@ -86,14 +74,14 @@ func assertNestedPredecessorsSettledWhileChildHeld(t *testing.T, ctx context.Con
 
 // Each account sibling uses the SAME task identity values. Only event lineage
 // and exact sibling account ownership may separate its recipient effects.
-func assertNestedSiblingTaskEffects(t *testing.T, ctx context.Context, selected notifyAllChildrenStore, db *sql.DB, runID, taskEvent, effectEvent string, parents []notifyAllChildrenItemEvent) {
+func assertNestedSiblingTaskEffects(t *testing.T, ctx context.Context, selected notifyAllChildrenStore, runID, taskEvent, effectEvent string, parents []notifyAllChildrenItemEvent) {
 	t.Helper()
 	reader := nestedPublicReader(t, selected)
 	seenEvents := make(map[string]bool, 4*len(parents))
 	for _, parent := range parents {
 		parentView := assertNestedDeliveredEvent(t, ctx, reader, parent.ID, 1)
 		taskName := eventidentity.ExternalizeForFlow(parentView.Deliveries[0].Target.FlowInstance, []string{taskEvent}, taskEvent)
-		ids := nestedEventIDs(t, ctx, db, runID, taskName, parent.ID)
+		ids := nestedEventIDs(t, ctx, selected, runID, taskName, parent.ID)
 		if len(ids) != 2 {
 			t.Fatalf("nested sibling %s direct task count=%d, want 2", parent.AccountID, len(ids))
 		}
@@ -110,7 +98,7 @@ func assertNestedSiblingTaskEffects(t *testing.T, ctx context.Context, selected 
 			}
 			seenTasks[task] = true
 			effectName := eventidentity.ExternalizeForFlow(view.Deliveries[0].Target.FlowInstance, []string{effectEvent}, effectEvent)
-			effectIDs := nestedEventIDs(t, ctx, db, runID, effectName, id)
+			effectIDs := nestedEventIDs(t, ctx, selected, runID, effectName, id)
 			if len(effectIDs) != 1 || seenEvents[effectIDs[0]] {
 				t.Fatalf("nested task %s exact recipient effect IDs=%v", id, effectIDs)
 			}
@@ -126,15 +114,13 @@ func assertNestedSiblingTaskEffects(t *testing.T, ctx context.Context, selected 
 	}
 }
 
-func assertNestedExactBarrier(t *testing.T, ctx context.Context, db *sql.DB, key fanoutobligation.IntentKey, status string, want fanoutbarrier.Summary) {
+func assertNestedExactBarrier(t *testing.T, ctx context.Context, selected notifyAllChildrenStore, key fanoutobligation.IntentKey, status string, want fanoutbarrier.Summary) {
 	t.Helper()
-	var gotStatus string
-	var raw []byte
-	if err := db.QueryRowContext(ctx, `SELECT status,summary FROM fan_out_obligation_barriers
-		WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`,
-		key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath).Scan(&gotStatus, &raw); err != nil {
+	stored, err := storetest.ReadNestedFanOutBarrier(ctx, selected, key)
+	if err != nil {
 		t.Fatal(err)
 	}
+	gotStatus, raw := stored.Status, stored.Summary
 	var got fanoutbarrier.Summary
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)

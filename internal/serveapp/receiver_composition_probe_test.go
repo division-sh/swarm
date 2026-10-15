@@ -21,7 +21,7 @@ func TestReceiverCompositionSharedChildJourney(t *testing.T) {
 				params := map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "shared-request"}
 				if existing {
 					seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "shared-seed"})
-					requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "active")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "active")
 					params = map[string]any{"event_name": "work.requested", "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "shared-request"}
 				}
 				started := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
@@ -61,8 +61,8 @@ func TestReceiverCompositionSharedChildJourney(t *testing.T) {
 					t.Fatal("shared static child has no successful execution")
 				}
 				rows.Close()
-				requireReceiverConstructedInstance(t, rt, started.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "pending", started.RunID, "ready", 1, map[string]any{})
-				requireReceiverPublicReadback(t, rt, started.RunID)
+				requireReceiverConstructedInstance(t, rt.BundleHash, rt.ReceiverStateReader, started.RunID, "sink", "sink", flowidentity.EntityID("sink"), "receipt", "pending", started.RunID, "ready", 1, map[string]any{})
+				requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, started.RunID)
 			})
 		}
 	}

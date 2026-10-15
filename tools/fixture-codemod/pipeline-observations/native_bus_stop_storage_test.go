@@ -20,8 +20,15 @@ func TestNativeBusStopStoragePreservesPhysicalPredicatesAndEveryField(t *testing
 		matched++
 		control := selectedCausalObservationBody(t, "internal/store/internal/backend/runlifecycle/standalone_fixture_storage.go", "ReadStopRunControlStorageTx")
 		deliveries := selectedCausalObservationBody(t, "internal/store/internal/backend/delivery/read_projections.go", "ReadStopPendingDeliveryCountTx")
+		deliveries = requestKeyDeclaration(t, []byte("package proof\n"+deliveries), "ReadStopPendingDeliveryCountTx")
 		revisions := selectedCausalObservationBody(t, "internal/store/internal/backend/runforkrevision/postgres.go", "CountActivityJournalRevisionsForTest")
-		if !reflect.DeepEqual(eventDeliveryDiagnosticSQL(t, row.Before), eventDeliveryDiagnosticSQL(t, control+"\n"+deliveries+"\n"+revisions)) {
+		if !family145CheckStopWitnessAmendment(t, "internal/store/internal/backend/delivery/read_projections.go", "ReadStopPendingDeliveryCountTx", deliveries) {
+			t.Fatal("stop status correction lost its exact authorized source")
+		}
+		// Preserve the historical query correspondence separately from the
+		// authorized semantic correction proved by native claim/retry execution.
+		originalDeliveries := family145StopWitnessPrevious(t, "internal/store/internal/backend/delivery/read_projections.go", "ReadStopPendingDeliveryCountTx", deliveries)
+		if !reflect.DeepEqual(eventDeliveryDiagnosticSQL(t, row.Before), eventDeliveryDiagnosticSQL(t, control+"\n"+originalDeliveries+"\n"+revisions)) {
 			t.Fatal("stop witness changed physical status/default/pending/revision predicates")
 		}
 		if !strings.Contains(row.After, "ReadRunStopStorage(context.Background(), f.store, f.event.RunID())") ||

@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -31,8 +32,8 @@ func TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable(t *testing.T) 
 				t.Fatalf("empty import compiled %d rows", len(empty.Rows))
 			}
 			sourceRunID := startDeploymentResourceRun(t, f, server, "--data", selectedDeploymentEvent+"="+path)
-			var sourcePin string
-			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, sourceRunID).Scan(&sourcePin); err != nil {
+			sourcePin, err := storetest.ReadRootReadyResourcePinStorage(f.ctx, f.selected, sourceRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if sourcePin != string(empty.VersionID) {
@@ -57,17 +58,20 @@ func TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable(t *testing.T) 
 				t.Fatalf("empty fork lost exact pin or child: %+v", result)
 			}
 			for _, runID := range []string{sourceRunID, result.ForkRunID} {
-				for _, query := range []string{
-					`SELECT COUNT(*) FROM events WHERE run_id=$1`,
-					`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`,
-					`SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`,
+				for _, check := range []struct {
+					name string
+					read func(context.Context, any, string) (int, error)
+				}{
+					{"events", storetest.CountPhysicalRunEvents},
+					{"event_deliveries", storetest.CountRunDeliveryStorage},
+					{"fan_out_outcomes", storetest.CountNestedRunFanOutOutcomes},
 				} {
-					var count int
-					if err := f.db.QueryRowContext(f.ctx, query, runID).Scan(&count); err != nil {
+					count, err := check.read(f.ctx, f.selected, runID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					if count != 0 {
-						t.Fatalf("empty run %s produced %d rows for %s", runID, count, query)
+						t.Fatalf("empty run %s produced %d rows for %s", runID, count, check.name)
 					}
 				}
 			}
@@ -76,8 +80,8 @@ func TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable(t *testing.T) 
 			if len(rpcErr) != 0 || !reflect.DeepEqual(replay, result) {
 				t.Fatalf("quiesced empty fork replay differs: first=%+v replay=%+v error=%s", result, replay, rpcErr)
 			}
-			var generationsBefore int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, result.ForkRunID).Scan(&generationsBefore); err != nil {
+			generationsBefore, err := storetest.CountSelectedRuntimeExecutionStorage(f.ctx, f.selected, result.ForkRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if generationsBefore != 1 {
@@ -106,11 +110,12 @@ func TestDeploymentSourceEmptyVersionForkIsQuiescentAndReplayable(t *testing.T) 
 			if len(rpcErr) != 0 || !reflect.DeepEqual(restartedReplay, result) {
 				t.Fatalf("empty restarted fork lost durable result: first=%+v replay=%+v error=%s", result, restartedReplay, rpcErr)
 			}
-			var generationsAfter, eventsAfter int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, result.ForkRunID).Scan(&generationsAfter); err != nil {
+			generationsAfter, err := storetest.CountSelectedRuntimeExecutionStorage(f.ctx, f.selected, result.ForkRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1`, result.ForkRunID).Scan(&eventsAfter); err != nil {
+			eventsAfter, err := storetest.CountPhysicalRunEvents(f.ctx, f.selected, result.ForkRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if generationsAfter != generationsBefore || eventsAfter != 0 {
@@ -159,11 +164,12 @@ func TestDeploymentSourceSelectedControlOnlyRepeatedStopBothStores(t *testing.T)
 			if !selected || !errors.Is(err, runcontrol.ErrAlreadyTerminal) {
 				t.Fatalf("R8 repeated stop: selected=%t error=%v", selected, err)
 			}
-			var executionCount, eventCount int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, result.ForkRunID).Scan(&executionCount); err != nil {
+			executionCount, err := storetest.CountSelectedRuntimeExecutionStorage(f.ctx, f.selected, result.ForkRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1`, result.ForkRunID).Scan(&eventCount); err != nil {
+			eventCount, err := storetest.CountPhysicalRunEvents(f.ctx, f.selected, result.ForkRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if executionCount != 1 || eventCount != 0 {
@@ -182,10 +188,12 @@ func TestDeploymentSourceSelectedControlOnlyRepeatedStopBothStores(t *testing.T)
 			if !terminalOnly {
 				t.Fatalf("R8 stopped child recovered execution: %+v", recovery)
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`, result.ForkRunID).Scan(&executionCount); err != nil {
+			executionCount, err = storetest.CountSelectedRuntimeExecutionStorage(f.ctx, f.selected, result.ForkRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1`, result.ForkRunID).Scan(&eventCount); err != nil {
+			eventCount, err = storetest.CountPhysicalRunEvents(f.ctx, f.selected, result.ForkRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if executionCount != 1 || eventCount != 0 {

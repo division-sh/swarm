@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
@@ -14,9 +15,10 @@ import (
 // persistence adapters may retain it; public selected-store facades expose
 // closed semantic operations instead.
 type Backend struct {
-	db               *sql.DB
-	testTransactions transactiontest.Slot
-	readStatements   struct {
+	db                  *sql.DB
+	testTransactions    transactiontest.Slot
+	agentRecoveryWrites runtimestartupownership.AgentRecoveryWriteObserver
+	readStatements      struct {
 		sync.Mutex
 		closed bool
 		owned  []*sql.Stmt
@@ -35,6 +37,15 @@ type Backend struct {
 	}
 	firstBusyObservation         sync.Once
 	firstCancellationObservation sync.Once
+}
+
+// AgentRecoveryWriteObserver is constructed with this native backend, not when
+// a process binds later. Active pre-bind writes therefore remain observable.
+func (b *Backend) AgentRecoveryWriteObserver() *runtimestartupownership.AgentRecoveryWriteObserver {
+	if b == nil {
+		return nil
+	}
+	return &b.agentRecoveryWrites
 }
 
 func (b *Backend) InstallTransactionProbeForTest(options transactiontest.Options) (*transactiontest.Collector, func(), error) {

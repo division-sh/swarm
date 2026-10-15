@@ -59,9 +59,9 @@ func TestAskHumanAcknowledgedPostCommitErrorKeepsCardWithoutDuplicateBothStores(
 		t.Run(backend, func(t *testing.T) {
 			var selected humanTaskToolStore
 			if backend == "sqlite" {
-				selected = newSQLiteRuntimeToolStoreForTest(t)
+				selected = storetest.StartSQLiteRuntimeStore(t)
 			} else {
-				selected = newPostgresHumanTaskToolStoreForTest(t)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			}
 			const flowPath = "gateway/provider"
 			actor := models.AgentConfig{
@@ -138,18 +138,12 @@ func TestAskHumanAcknowledgedPostCommitErrorKeepsCardWithoutDuplicateBothStores(
 			if err != nil || replayed.(map[string]any)["card_id"] != cardID {
 				t.Fatalf("same-operation replay = %#v, %v", replayed, err)
 			}
-			var cards, continuations int
-			query := "SELECT COUNT(*) FROM decision_cards WHERE card_id = ?"
-			continuationQuery := "SELECT COUNT(*) FROM human_task_continuations WHERE card_id = ?"
-			if backend == "postgres" {
-				query = "SELECT COUNT(*) FROM decision_cards WHERE card_id = $1"
-				continuationQuery = "SELECT COUNT(*) FROM human_task_continuations WHERE card_id = $1"
-			}
-			db := storetest.DatabaseForTest(selected)
-			if err := db.QueryRowContext(ctx, query, cardID).Scan(&cards); err != nil {
+			cards, err := storetest.CountHumanTaskToolCardStorage(ctx, selected, cardID)
+			if err != nil {
 				t.Fatal(err)
 			}
-			if err := db.QueryRowContext(ctx, continuationQuery, cardID).Scan(&continuations); err != nil {
+			continuations, err := storetest.CountHumanTaskToolContinuationStorage(ctx, selected, cardID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if cards != 1 || continuations != 1 || wrapped.writes != 2 {
@@ -162,7 +156,8 @@ func TestAskHumanAcknowledgedPostCommitErrorKeepsCardWithoutDuplicateBothStores(
 			if refused != nil || err == nil {
 				t.Fatalf("unacknowledged refusal = %#v, %v", refused, err)
 			}
-			if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'human_task'").Scan(&cards); err != nil {
+			cards, err = storetest.CountAllHumanTaskToolCardsStorage(ctx, selected)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if cards != 1 {

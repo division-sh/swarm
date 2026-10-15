@@ -9,3 +9,7 @@ import (
 func SetEventChainDepth(ctx context.Context, selected any, eventID string, depth int) error {
 	return private.SetEventChainDepthForTest(ctx, selected, eventID, depth)
 }
+
+func ClearEventRunForRecovery(ctx context.Context, selected any, eventID string) error {
+	return private.ClearEventRunForRecoveryForTest(ctx, selected, eventID)
+}

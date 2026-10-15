@@ -32,8 +32,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	storetest "github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testsql"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -52,9 +50,7 @@ func templateInstanceFlowNodeID(t testing.TB, flowID, nodeID string) string {
 func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScopeSeparately(t *testing.T) {
 	bundle := loadRuntimeTempBundle(t, templateInstanceDeliveryFixtureFiles())
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := seedRuntimeTestRunForSource(t, pg, source)
 	var pc *runtimepipeline.PipelineCoordinator
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -106,28 +102,23 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsReceiptAndReplayScope
 
 	lifecycleNodeID := templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator")
 	workflowRuntimeNodeID := templateInstanceRootNodeID(t, "workflow-runtime")
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, eventID, lifecycleNodeID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 0, eventID, workflowRuntimeNodeID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 1, eventID, lifecycleNodeID)
-	assertRuntimeCommittedReplayScope(t, ctx, db, eventID)
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM events
-		WHERE event_name = 'operating/inst-1/opco.ceo_ready'
-	`, 1)
+	waitRuntimeNodeDeliveryOutcome(t, ctx, pg, eventID, lifecycleNodeID)
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 0, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, eventID, workflowRuntimeNodeID)
+	})
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 1, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, eventID, lifecycleNodeID)
+	})
+	assertRuntimeCommittedReplayScope(t, ctx, pg, eventID)
+	waitRuntimeStorageCount(t, ctx, pg, "CountEventNameStorage", 1, func() (int, error) {
+		return storetest.CountEventNameStorage(ctx, pg, "operating/inst-1/opco.ceo_ready")
+	})
 }
 
 func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandlerExecution(t *testing.T) {
 	bundle := loadRuntimeTempBundle(t, templateInstanceDeliveryFixtureFiles())
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := seedRuntimeTestRunForSource(t, pg, source)
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{ContractBundle: source, SourceArtifactFact: runtimeTestSourceArtifactFact(t, source)})
 	if err != nil {
@@ -171,18 +162,15 @@ func TestTemplateInstanceNoTargetSystemNodeDeliveryPersistsAuthorityBeforeHandle
 	case <-time.After(2 * time.Second):
 		t.Fatal("workflow-runtime carrier did not receive concrete template event")
 	}
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 1, eventID, templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator"))
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 0, eventID, templateInstanceRootNodeID(t, "workflow-runtime"))
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_receipts
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 0, eventID, templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator"))
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 1, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, eventID, templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator"))
+	})
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 0, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, eventID, templateInstanceRootNodeID(t, "workflow-runtime"))
+	})
+	assertRuntimeStorageCount(t, "CountTemplateNodeReceipt", 0, func() (int, error) {
+		return storetest.CountTemplateNodeReceipt(ctx, pg, eventID, templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator"))
+	})
 }
 
 func seedTemplateInstanceDeliveryRouteOwner(t testing.TB, ctx context.Context, selected runtimebus.FlowInstanceActivationCommitOwner, pc *runtimepipeline.PipelineCoordinator, source semanticview.Source) runtimepipeline.CommittedFlowInstanceActivation {
@@ -198,9 +186,7 @@ func seedTemplateInstanceDeliveryRouteOwner(t testing.TB, ctx context.Context, s
 func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(t *testing.T) {
 	bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyTemplateInstanceEmpireStyle(t))
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := seedRuntimeTestRunForSource(t, pg, source)
 	var manager *runtimemanager.AgentManager
 	var activationCalls atomic.Int32
@@ -276,42 +262,34 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 	portfolioNodeID := templateInstanceRootNodeID(t, "portfolio-node")
 	lifecycleNodeID := templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator")
 	workflowRuntimeNodeID := templateInstanceRootNodeID(t, "workflow-runtime")
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, spinup.ID(), portfolioNodeID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 1, spinup.ID(), portfolioNodeID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-		  AND settled_at IS NOT NULL AND created_at < settled_at
-	`, 1, spinup.ID(), portfolioNodeID)
-	assertRuntimeCommittedReplayScope(t, ctx, db, spinup.ID())
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 0, spinup.ID(), workflowRuntimeNodeID)
-	instancePath := requireRuntimeInitializedOperatingPath(t, ctx, db, source)
-	autoEventID := waitRuntimeEventID(t, ctx, db, `
-		SELECT event_id::text FROM events
-		WHERE event_name = $1
-	`, []any{instancePath + "/opco.product_initialization_requested"})
-	assertRuntimeEventPayloadInitializationConfig(t, ctx, db, autoEventID)
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, autoEventID, lifecycleNodeID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 1, autoEventID, lifecycleNodeID)
-	assertRuntimeCommittedReplayScope(t, ctx, db, autoEventID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 0, autoEventID, workflowRuntimeNodeID)
-	componentEventID := waitRuntimeEventID(t, ctx, db, `
-		SELECT event_id::text FROM events
-		WHERE event_name = $1
-	`, []any{instancePath + "/component_scaffold.spawn_requested"})
-	assertRuntimeEventPayloadProductOnly(t, ctx, db, componentEventID)
+	waitRuntimeNodeDeliveryOutcome(t, ctx, pg, spinup.ID(), portfolioNodeID)
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 1, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, spinup.ID(), portfolioNodeID)
+	})
+	assertRuntimeStorageCount(t, "CountTemplateNodeDeliveryChronology", 1, func() (int, error) {
+		return storetest.CountTemplateNodeDeliveryChronology(ctx, pg, spinup.ID(), portfolioNodeID)
+	})
+	assertRuntimeCommittedReplayScope(t, ctx, pg, spinup.ID())
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 0, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, spinup.ID(), workflowRuntimeNodeID)
+	})
+	instancePath := requireRuntimeInitializedOperatingPath(t, ctx, pg, source)
+	autoEventID := waitRuntimeStoredEventID(t, ctx, pg, "ReadTemplateNamedEventIdentity", func() (string, error) {
+		return storetest.ReadTemplateNamedEventIdentity(ctx, pg, instancePath+"/opco.product_initialization_requested")
+	})
+	assertRuntimeEventPayloadInitializationConfig(t, ctx, pg, autoEventID)
+	waitRuntimeNodeDeliveryOutcome(t, ctx, pg, autoEventID, lifecycleNodeID)
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 1, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, autoEventID, lifecycleNodeID)
+	})
+	assertRuntimeCommittedReplayScope(t, ctx, pg, autoEventID)
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 0, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, autoEventID, workflowRuntimeNodeID)
+	})
+	componentEventID := waitRuntimeStoredEventID(t, ctx, pg, "ReadTemplateNamedEventIdentity", func() (string, error) {
+		return storetest.ReadTemplateNamedEventIdentity(ctx, pg, instancePath+"/component_scaffold.spawn_requested")
+	})
+	assertRuntimeEventPayloadProductOnly(t, ctx, pg, componentEventID)
 	if got := activationCalls.Load(); got != 1 {
 		t.Fatalf("flow activation calls = %d, want one successful activation", got)
 	}
@@ -320,9 +298,7 @@ func TestTemplateInstanceAutoEmitDispatchesLocalHandlerAndEmpireStyleSideEffect(
 func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliveryRows(t *testing.T) {
 	bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyTemplateInstanceActivationConfigSubscriber(t))
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := seedRuntimeTestRunForSource(t, pg, source)
 	durable := externalRuntimeTestDurableDependencies(pg)
 	var manager *runtimemanager.AgentManager
@@ -384,11 +360,10 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	if err := bus.Publish(ctx, spinup); err != nil {
 		t.Fatalf("Publish spinup: %v", err)
 	}
-	instancePath := requireRuntimeInitializedOperatingPath(t, ctx, db, source)
-	autoEventID := waitRuntimeEventID(t, ctx, db, `
-		SELECT event_id::text FROM events
-		WHERE event_name = $1
-	`, []any{instancePath + "/opco.product_initialization_requested"})
+	instancePath := requireRuntimeInitializedOperatingPath(t, ctx, pg, source)
+	autoEventID := waitRuntimeStoredEventID(t, ctx, pg, "ReadTemplateNamedEventIdentity", func() (string, error) {
+		return storetest.ReadTemplateNamedEventIdentity(ctx, pg, instancePath+"/opco.product_initialization_requested")
+	})
 
 	renderedAgentID := "ceo"
 	scope, err := runtimepipeline.NewFlowInstanceLookupScope(source, runtimeTestSourceArtifactFact(t, source), templateInstanceDeliveryRunID, []string{"operating"}, nil)
@@ -403,30 +378,31 @@ func TestTemplateInstanceActivationConfigSubscriberPersistsRenderedRouteAndDeliv
 	if !found || len(readiness.Plan.Agents) != 1 || readiness.Plan.Agents[0].Identity.AgentID() != renderedAgentID {
 		t.Fatalf("constructed agent expectations = %+v, found=%t, want only %s", readiness.Plan.Agents, found, renderedAgentID)
 	}
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'agent'
-		  AND subscriber_id = $2
-	`, 1, autoEventID, renderedAgentID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_id = 'ceo-{product_id}'
-	`, 0, autoEventID)
+	waitRuntimeStorageCount(t, ctx, pg, "CountTemplateAgentDelivery", 1, func() (int, error) {
+		return storetest.CountTemplateAgentDelivery(ctx, pg, autoEventID, renderedAgentID)
+	})
+	assertRuntimeStorageCount(t, "CountTemplatePlaceholderDelivery", 0, func() (int, error) {
+		return storetest.CountTemplatePlaceholderDelivery(ctx, pg, autoEventID)
+	})
 }
 
 func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRoute(t *testing.T) {
 	bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyTemplateConnectRollback(t))
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := seedRuntimeTestRunForSource(t, pg, source)
-	testsql.InstallPostgresEventDeliveryFailureAfterFlowMaterialization(t, ctx, db, testsql.EventCorruptionClaim{
-		Invariant: "store.event_record.named_operation_atomicity",
-		Reason:    "prove late delivery failure rolls back the event and connect-created lifecycle facts",
-	}, "consumer")
+	fault, err := storetest.NewPublicationFailure(pg, storetest.PublicationAfterMaterialization, "consumer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := fault.RestoreForTest(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := fault.InstallForTest(ctx); err != nil {
+		t.Fatal(err)
+	}
 	var manager *runtimemanager.AgentManager
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
 		ContractBundle:     source,
@@ -490,24 +466,22 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 	if err == nil || !strings.Contains(err.Error(), "injected delivery route persistence failure") {
 		t.Fatalf("Publish error = %v, want injected delivery route persistence failure", err)
 	}
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM events
-		WHERE event_id = $1::uuid
-	`, 0, evt.ID())
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid
-	`, 0, evt.ID())
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM flow_instances
-		WHERE flow_template = 'consumer'
-	`, 0)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM flow_instances
-	`, 2)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM entity_state
-	`, 0)
+	assertRuntimeStorageCount(t, "CountTemplateEventIdentity", 0, func() (int, error) {
+		return storetest.CountTemplateEventIdentity(ctx, pg, evt.ID())
+	})
+	assertRuntimeStorageCount(t, "CountTemplateEventDeliveries", 0, func() (int, error) {
+		return storetest.CountTemplateEventDeliveries(ctx, pg, evt.ID())
+	})
+	assertRuntimeStorageCount(t, "CountTemplateInstances", 0, func() (int, error) {
+		return storetest.CountTemplateInstances(ctx, pg, "consumer")
+	})
+	assertRuntimeStorageCount(t, "CountPhysicalFlowInstances", 2, func() (int, error) {
+		snapshot, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, pg)
+		return len(snapshot["flow_instances"].Rows), err
+	})
+	assertRuntimeStorageCount(t, "CountPhysicalEntities", 0, func() (int, error) {
+		return storetest.CountPhysicalEntities(ctx, pg)
+	})
 	scope, err := runtimepipeline.NewFlowInstanceLookupScope(source, runtimeTestSourceArtifactFact(t, source), templateInstanceDeliveryRunID, []string{"consumer"}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -526,9 +500,7 @@ func TestTemplateInstanceConnectLifecyclePublishRollbackDoesNotLeakInstanceOrRou
 func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInternalCarrierAndEmpireStyleSideEffect(t *testing.T) {
 	bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyTemplateInstanceEmpireOutbox(t))
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := seedRuntimeTestRunForSource(t, pg, source)
 	var pc *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
@@ -601,66 +573,52 @@ func TestTemplateInstanceAcknowledgedPublishDispatchesRoutedSystemNodeWithoutInt
 	portfolioNodeID := templateInstanceRootNodeID(t, "portfolio-node")
 	lifecycleNodeID := templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator")
 	workflowRuntimeNodeID := templateInstanceRootNodeID(t, "workflow-runtime")
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, mailbox.ID(), approvalNodeID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 1, mailbox.ID(), approvalNodeID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-		  AND settled_at IS NOT NULL AND created_at < settled_at
-	`, 1, mailbox.ID(), approvalNodeID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 0, mailbox.ID(), workflowRuntimeNodeID)
+	waitRuntimeNodeDeliveryOutcome(t, ctx, pg, mailbox.ID(), approvalNodeID)
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 1, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, mailbox.ID(), approvalNodeID)
+	})
+	assertRuntimeStorageCount(t, "CountTemplateNodeDeliveryChronology", 1, func() (int, error) {
+		return storetest.CountTemplateNodeDeliveryChronology(ctx, pg, mailbox.ID(), approvalNodeID)
+	})
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 0, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, mailbox.ID(), workflowRuntimeNodeID)
+	})
 
-	spinupEventID := waitRuntimeEventID(t, ctx, db, `
-		SELECT event_id::text FROM events
-		WHERE event_name = 'opco.spinup_requested'
-	`, nil)
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, spinupEventID, portfolioNodeID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 1, spinupEventID, portfolioNodeID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-		  AND settled_at IS NOT NULL AND created_at < settled_at
-	`, 1, spinupEventID, portfolioNodeID)
-	assertRuntimeCommittedReplayScope(t, ctx, db, spinupEventID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 0, spinupEventID, workflowRuntimeNodeID)
+	spinupEventID := waitRuntimeStoredEventID(t, ctx, pg, "ReadTemplateNamedEventIdentity", func() (string, error) {
+		return storetest.ReadTemplateNamedEventIdentity(ctx, pg, "opco.spinup_requested")
+	})
+	waitRuntimeNodeDeliveryOutcome(t, ctx, pg, spinupEventID, portfolioNodeID)
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 1, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, spinupEventID, portfolioNodeID)
+	})
+	assertRuntimeStorageCount(t, "CountTemplateNodeDeliveryChronology", 1, func() (int, error) {
+		return storetest.CountTemplateNodeDeliveryChronology(ctx, pg, spinupEventID, portfolioNodeID)
+	})
+	assertRuntimeCommittedReplayScope(t, ctx, pg, spinupEventID)
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 0, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, spinupEventID, workflowRuntimeNodeID)
+	})
 
-	instancePath := requireRuntimeInitializedOperatingPath(t, ctx, db, source)
-	autoEventID := waitRuntimeEventID(t, ctx, db, `
-		SELECT event_id::text FROM events
-		WHERE event_name = $1
-	`, []any{instancePath + "/opco.product_initialization_requested"})
-	assertRuntimeEventPayloadInitializationConfig(t, ctx, db, autoEventID)
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, autoEventID, lifecycleNodeID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 1, autoEventID, lifecycleNodeID)
-	assertRuntimeCommittedReplayScope(t, ctx, db, autoEventID)
-	componentEventID := waitRuntimeEventID(t, ctx, db, `
-		SELECT event_id::text FROM events
-		WHERE event_name = $1
-	`, []any{instancePath + "/component_scaffold.spawn_requested"})
-	assertRuntimeEventPayloadProductOnly(t, ctx, db, componentEventID)
+	instancePath := requireRuntimeInitializedOperatingPath(t, ctx, pg, source)
+	autoEventID := waitRuntimeStoredEventID(t, ctx, pg, "ReadTemplateNamedEventIdentity", func() (string, error) {
+		return storetest.ReadTemplateNamedEventIdentity(ctx, pg, instancePath+"/opco.product_initialization_requested")
+	})
+	assertRuntimeEventPayloadInitializationConfig(t, ctx, pg, autoEventID)
+	waitRuntimeNodeDeliveryOutcome(t, ctx, pg, autoEventID, lifecycleNodeID)
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 1, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, autoEventID, lifecycleNodeID)
+	})
+	assertRuntimeCommittedReplayScope(t, ctx, pg, autoEventID)
+	componentEventID := waitRuntimeStoredEventID(t, ctx, pg, "ReadTemplateNamedEventIdentity", func() (string, error) {
+		return storetest.ReadTemplateNamedEventIdentity(ctx, pg, instancePath+"/component_scaffold.spawn_requested")
+	})
+	assertRuntimeEventPayloadProductOnly(t, ctx, pg, componentEventID)
 }
 
 func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyleSideEffect(t *testing.T) {
 	bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyTemplateInstanceEmpireOutbox(t))
 	source := semanticview.Wrap(bundle)
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := seedRuntimeTestRunForSource(t, pg, source)
 	var pc *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
@@ -734,44 +692,37 @@ func TestTemplateInstanceRootOutboxEventDispatchesRoutedSystemNodeAndEmpireStyle
 	portfolioNodeID := templateInstanceRootNodeID(t, "portfolio-node")
 	lifecycleNodeID := templateInstanceFlowNodeID(t, "operating", "lifecycle-orchestrator")
 	workflowRuntimeNodeID := templateInstanceRootNodeID(t, "workflow-runtime")
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, mailbox.ID(), approvalNodeID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 1, mailbox.ID(), approvalNodeID)
+	waitRuntimeNodeDeliveryOutcome(t, ctx, pg, mailbox.ID(), approvalNodeID)
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 1, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, mailbox.ID(), approvalNodeID)
+	})
 
-	spinupEventID := waitRuntimeEventID(t, ctx, db, `
-		SELECT event_id::text FROM events
-		WHERE event_name = 'opco.spinup_requested'
-	`, nil)
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, spinupEventID, portfolioNodeID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 1, spinupEventID, portfolioNodeID)
-	assertRuntimeCommittedReplayScope(t, ctx, db, spinupEventID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 0, spinupEventID, workflowRuntimeNodeID)
+	spinupEventID := waitRuntimeStoredEventID(t, ctx, pg, "ReadTemplateNamedEventIdentity", func() (string, error) {
+		return storetest.ReadTemplateNamedEventIdentity(ctx, pg, "opco.spinup_requested")
+	})
+	waitRuntimeNodeDeliveryOutcome(t, ctx, pg, spinupEventID, portfolioNodeID)
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 1, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, spinupEventID, portfolioNodeID)
+	})
+	assertRuntimeCommittedReplayScope(t, ctx, pg, spinupEventID)
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 0, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, spinupEventID, workflowRuntimeNodeID)
+	})
 
-	instancePath := requireRuntimeInitializedOperatingPath(t, ctx, db, source)
-	autoEventID := waitRuntimeEventID(t, ctx, db, `
-		SELECT event_id::text FROM events
-		WHERE event_name = $1
-	`, []any{instancePath + "/opco.product_initialization_requested"})
-	assertRuntimeEventPayloadInitializationConfig(t, ctx, db, autoEventID)
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, autoEventID, lifecycleNodeID)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2
-	`, 1, autoEventID, lifecycleNodeID)
-	assertRuntimeCommittedReplayScope(t, ctx, db, autoEventID)
-	componentEventID := waitRuntimeEventID(t, ctx, db, `
-		SELECT event_id::text FROM events
-		WHERE event_name = $1
-	`, []any{instancePath + "/component_scaffold.spawn_requested"})
-	assertRuntimeEventPayloadProductOnly(t, ctx, db, componentEventID)
+	instancePath := requireRuntimeInitializedOperatingPath(t, ctx, pg, source)
+	autoEventID := waitRuntimeStoredEventID(t, ctx, pg, "ReadTemplateNamedEventIdentity", func() (string, error) {
+		return storetest.ReadTemplateNamedEventIdentity(ctx, pg, instancePath+"/opco.product_initialization_requested")
+	})
+	assertRuntimeEventPayloadInitializationConfig(t, ctx, pg, autoEventID)
+	waitRuntimeNodeDeliveryOutcome(t, ctx, pg, autoEventID, lifecycleNodeID)
+	assertRuntimeStorageCount(t, "CountTemplateNodeDelivery", 1, func() (int, error) {
+		return storetest.CountTemplateNodeDelivery(ctx, pg, autoEventID, lifecycleNodeID)
+	})
+	assertRuntimeCommittedReplayScope(t, ctx, pg, autoEventID)
+	componentEventID := waitRuntimeStoredEventID(t, ctx, pg, "ReadTemplateNamedEventIdentity", func() (string, error) {
+		return storetest.ReadTemplateNamedEventIdentity(ctx, pg, instancePath+"/component_scaffold.spawn_requested")
+	})
+	assertRuntimeEventPayloadProductOnly(t, ctx, pg, componentEventID)
 }
 
 type runtimeTestWorkflowModule struct {
@@ -896,30 +847,29 @@ func seedRuntimeTestRunForSource(t *testing.T, selected *store.PostgresStore, so
 	return ctx
 }
 
-func waitRuntimeDBCount(t *testing.T, ctx context.Context, db *sql.DB, query string, want int, args ...any) {
+func waitRuntimeStorageCount(t *testing.T, ctx context.Context, selected any, observation string, want int, read func() (int, error)) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		var got int
-		if err := db.QueryRowContext(ctx, query, args...).Scan(&got); err != nil {
+		got, err := read()
+		if err != nil {
 			t.Fatalf("query count: %v", err)
 		}
 		if got == want {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("count = %d, want %d for query %s\n%s", got, want, strings.TrimSpace(query), runtimeTestEventDiagnostics(ctx, db))
+			t.Fatalf("count = %d, want %d for observation %s\n%s", got, want, observation, runtimeTestEventDiagnostics(ctx, selected))
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }
 
-func waitRuntimeEventID(t *testing.T, ctx context.Context, db *sql.DB, query string, args []any) string {
+func waitRuntimeStoredEventID(t *testing.T, ctx context.Context, selected any, observation string, read func() (string, error)) string {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		var got string
-		err := db.QueryRowContext(ctx, query, args...).Scan(&got)
+		got, err := read()
 		if err == nil && got != "" {
 			return got
 		}
@@ -927,84 +877,40 @@ func waitRuntimeEventID(t *testing.T, ctx context.Context, db *sql.DB, query str
 			t.Fatalf("query event id: %v", err)
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for event id from query %s\n%s", strings.TrimSpace(query), runtimeTestEventDiagnostics(ctx, db))
+			t.Fatalf("timed out waiting for event id from observation %s\n%s", observation, runtimeTestEventDiagnostics(ctx, selected))
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }
 
-func runtimeTestEventDiagnostics(ctx context.Context, db *sql.DB) string {
-	rows, err := db.QueryContext(ctx, `
-		SELECT e.event_name, COALESCE(e.produced_by, ''), COALESCE(r.subscriber_id, ''),
-		       COALESCE(r.outcome, ''), COALESCE(r.reason_code, ''), COALESCE(r.side_effects::text, '')
-		FROM events e
-		LEFT JOIN event_receipts r ON r.event_id = e.event_id
-		ORDER BY e.created_at, e.event_id, r.subscriber_id
-	`)
+func runtimeTestEventDiagnostics(ctx context.Context, selected any) string {
+	sections, err := storetest.ReadNotifyAllChildrenDiagnosticStorage(ctx, selected)
 	if err != nil {
 		return "event diagnostics unavailable: " + err.Error()
 	}
-	defer rows.Close()
 	var out strings.Builder
-	for rows.Next() {
-		var eventType, producer, subscriber, outcome, reason, sideEffects string
-		if err := rows.Scan(&eventType, &producer, &subscriber, &outcome, &reason, &sideEffects); err != nil {
-			return "event diagnostics scan: " + err.Error()
+	for _, section := range sections {
+		if section.Failure != "" {
+			fmt.Fprintf(&out, "diagnostics unavailable: %s\n", section.Failure)
+			continue
 		}
-		fmt.Fprintf(&out, "event=%s producer=%s subscriber=%s outcome=%s reason=%s side_effects=%s\n", eventType, producer, subscriber, outcome, reason, sideEffects)
-	}
-	deliveryRows, err := db.QueryContext(ctx, `
-		SELECT e.event_name, d.subscriber_type, d.subscriber_id, d.status
-		FROM event_deliveries d
-		JOIN events e ON e.event_id = d.event_id
-		ORDER BY e.created_at, d.subscriber_type, d.subscriber_id
-	`)
-	if err == nil {
-		defer deliveryRows.Close()
-		for deliveryRows.Next() {
-			var eventType, subscriberType, subscriberID, status string
-			if err := deliveryRows.Scan(&eventType, &subscriberType, &subscriberID, &status); err != nil {
-				break
-			}
-			fmt.Fprintf(&out, "delivery event=%s subscriber=%s[%s] status=%s\n", eventType, subscriberType, subscriberID, status)
-		}
-	}
-	instanceRows, err := db.QueryContext(ctx, `SELECT flow_template, instance_path, status FROM flow_instances ORDER BY created_at, run_id, instance_path`)
-	if err == nil {
-		defer instanceRows.Close()
-		for instanceRows.Next() {
-			var template, instance, status string
-			if err := instanceRows.Scan(&template, &instance, &status); err != nil {
-				break
-			}
-			fmt.Fprintf(&out, "flow_instance=%s template=%s status=%s\n", instance, template, status)
-		}
-	}
-	deadLetterRows, err := db.QueryContext(ctx, `
-		SELECT COALESCE(original_event, ''), COALESCE(handler_node, ''), COALESCE(failure::text, '')
-		FROM dead_letters
-		ORDER BY created_at, dead_letter_id
-	`)
-	if err == nil {
-		defer deadLetterRows.Close()
-		for deadLetterRows.Next() {
-			var eventType, handler, failure string
-			if err := deadLetterRows.Scan(&eventType, &handler, &failure); err != nil {
-				break
-			}
-			fmt.Fprintf(&out, "dead_letter event=%s handler=%s failure=%s\n", eventType, handler, failure)
+		for _, row := range section.Rows {
+			fmt.Fprintf(&out, "%v: %v\n", section.Columns, row)
 		}
 	}
 	return out.String()
 }
 
-func requireRuntimeInitializedOperatingPath(t *testing.T, ctx context.Context, db *sql.DB, source semanticview.Source) string {
+func requireRuntimeInitializedOperatingPath(t *testing.T, ctx context.Context, selected any, source semanticview.Source) string {
 	t.Helper()
-	waitRuntimeDBCount(t, ctx, db, `SELECT COUNT(*) FROM flow_instances WHERE run_id = $1::uuid AND flow_template = 'operating'`, 1, templateInstanceDeliveryRunID)
-	var path, raw string
-	if err := db.QueryRowContext(ctx, `SELECT fi.instance_path, es.fields::text FROM flow_instances fi JOIN entity_state es ON es.run_id=fi.run_id AND es.entity_id=fi.entity_id WHERE fi.run_id = $1::uuid AND fi.flow_template = 'operating'`, templateInstanceDeliveryRunID).Scan(&path, &raw); err != nil {
+	waitRuntimeStorageCount(t, ctx, selected, "run operating instances", 1, func() (int, error) {
+		return storetest.CountRunOperatingInstances(ctx, selected, templateInstanceDeliveryRunID)
+	})
+	row, err := storetest.ReadRunOperatingInstanceFields(ctx, selected, templateInstanceDeliveryRunID)
+	if err != nil {
 		t.Fatal(err)
 	}
+	path, raw := row.Path, row.Fields
 	assertRuntimeInitializationConfig(t, raw)
 	plans := pinrouting.CompileConnectGraph(source).Plans()
 	if len(plans) != 1 || plans[0].InstanceKey() == nil {
@@ -1023,10 +929,10 @@ func requireRuntimeInitializedOperatingPath(t *testing.T, ctx context.Context, d
 	return path
 }
 
-func assertRuntimeEventPayloadInitializationConfig(t *testing.T, ctx context.Context, db *sql.DB, eventID string) {
+func assertRuntimeEventPayloadInitializationConfig(t *testing.T, ctx context.Context, selected any, eventID string) {
 	t.Helper()
-	var raw string
-	if err := db.QueryRowContext(ctx, `SELECT payload::text FROM events WHERE event_id = $1::uuid`, eventID).Scan(&raw); err != nil {
+	raw, err := storetest.ReadTemplateEventPayloadText(ctx, selected, eventID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	assertRuntimeInitializationConfig(t, raw)
@@ -1044,13 +950,10 @@ func assertRuntimeInitializationConfig(t *testing.T, raw string) {
 	}
 }
 
-func assertRuntimeEventPayloadProductOnly(t *testing.T, ctx context.Context, db *sql.DB, eventID string) {
+func assertRuntimeEventPayloadProductOnly(t *testing.T, ctx context.Context, selected any, eventID string) {
 	t.Helper()
-	var raw string
-	if err := db.QueryRowContext(ctx, `
-		SELECT payload::text FROM events
-		WHERE event_id = $1::uuid
-	`, eventID).Scan(&raw); err != nil {
+	raw, err := storetest.ReadTemplateEventPayloadText(ctx, selected, eventID)
+	if err != nil {
 		t.Fatalf("query event payload: %v", err)
 	}
 	var payload map[string]any
@@ -1067,39 +970,25 @@ func assertRuntimeEventPayloadProductOnly(t *testing.T, ctx context.Context, db 
 	}
 }
 
-func assertRuntimeDBCount(t *testing.T, ctx context.Context, db *sql.DB, query string, want int, args ...any) {
+func assertRuntimeStorageCount(t *testing.T, observation string, want int, read func() (int, error)) {
 	t.Helper()
-	var got int
-	if err := db.QueryRowContext(ctx, query, args...).Scan(&got); err != nil {
+	got, err := read()
+	if err != nil {
 		t.Fatalf("query count: %v", err)
 	}
 	if got != want {
-		t.Fatalf("count = %d, want %d for query %s", got, want, strings.TrimSpace(query))
+		t.Fatalf("count = %d, want %d for observation %s", got, want, observation)
 	}
 }
 
-func waitRuntimeNodeDeliveryOutcome(t *testing.T, ctx context.Context, db *sql.DB, eventID, nodeID string) {
+func waitRuntimeNodeDeliveryOutcome(t *testing.T, ctx context.Context, selected any, eventID, nodeID string) {
 	t.Helper()
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*)
-		FROM event_deliveries d
-		JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
-		  ON o.delivery_id = d.delivery_id
-		 AND o.claim_version = d.claim_version
-		WHERE d.event_id = $1::uuid
-		  AND d.subscriber_type = 'node'
-		  AND d.subscriber_id = $2
-		  AND d.status = 'delivered'
-		  AND d.settled_at IS NOT NULL
-		  AND o.outcome = 'delivered'
-	`, 1, eventID, nodeID)
+	waitRuntimeStorageCount(t, ctx, selected, "exact settled node attempt", 1, func() (int, error) {
+		return storetest.CountTemplateNodeDeliveredAttempt(ctx, selected, eventID, nodeID)
+	})
 }
 
-func assertRuntimeCommittedReplayScope(t *testing.T, ctx context.Context, db *sql.DB, eventID string) {
+func assertRuntimeCommittedReplayScope(t *testing.T, ctx context.Context, selected any, eventID string) {
 	t.Helper()
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*)
-		FROM committed_replay_scopes
-		WHERE event_id = $1::uuid AND scope = 'subscribed'
-	`, 1, eventID)
+	assertRuntimeStorageCount(t, "subscribed replay scope", 1, func() (int, error) { return storetest.CountTemplateSubscribedReplayScope(ctx, selected, eventID) })
 }

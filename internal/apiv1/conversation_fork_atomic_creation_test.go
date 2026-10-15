@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,12 +19,26 @@ import (
 	"github.com/google/uuid"
 )
 
-func requireForkCommitCounts(t *testing.T, db *sql.DB, forks, completions int) {
+func conversationForkCommitCounts(t *testing.T, selected forkCommitOmissionProbeStore) (int, int) {
 	t.Helper()
+	forks, err := storetest.CountConversationForkStorage(context.Background(), selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completions, err := storetest.CountConversationForkCompletionStorage(context.Background(), selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return forks, completions
+}
+
+func requireForkCommitCounts(t *testing.T, selected forkCommitOmissionProbeStore, forks, completions int) {
+	t.Helper()
+	actualForks, actualCompletions := conversationForkCommitCounts(t, selected)
 	for table, want := range map[string]int{"conversation_forks": forks, "api_idempotency": completions} {
-		var got int
-		if err := db.QueryRow("SELECT count(*) FROM " + table).Scan(&got); err != nil {
-			t.Fatal(err)
+		got := actualForks
+		if table == "api_idempotency" {
+			got = actualCompletions
 		}
 		if got != want {
 			t.Fatalf("%s rows=%d want=%d", table, got, want)
@@ -36,7 +49,7 @@ func requireForkCommitCounts(t *testing.T, db *sql.DB, forks, completions int) {
 func TestConversationForkAtomicCreationControls(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			ctx, selected, db, now, sessionID, turnID := newConversationForkCommitFixture(t, backend)
+			ctx, selected, _, now, sessionID, turnID := newConversationForkCommitFixture(t, backend)
 			req := runfork.APIConversationForkCreateRequest{
 				Creation:    runfork.ConversationForkCreateRequest{SourceSessionID: sessionID, ForkPoint: runfork.ConversationForkPointSelector{Kind: "turn", TurnID: turnID}, CreatedBy: "actor", Now: now},
 				Idempotency: apiidempotency.Request{Method: "conversation.fork", Actor: apiidempotency.BearerActor("actor"), IdempotencyKey: "same-key", RequestHash: "same-hash", ResourceID: sessionID, Now: now, TTL: 24 * time.Hour},
@@ -57,35 +70,23 @@ func TestConversationForkAtomicCreationControls(t *testing.T) {
 				if _, err := selected.CreateAPIConversationFork(ctx, invalid); err == nil {
 					t.Fatal("wrong named method admitted")
 				}
-				requireForkCommitCounts(t, db, 0, 0)
+				requireForkCommitCounts(t, selected, 0, 0)
 			})
 			t.Run("completion_insert_rollback", func(t *testing.T) {
 				// Fault the actual completion INSERT, after the fork INSERT in the
 				// same transaction. No production callback or result is forged.
-				var install, cleanup []string
-				if backend == "sqlite" {
-					install = []string{`CREATE TRIGGER fail_fork_completion BEFORE INSERT ON api_idempotency BEGIN SELECT RAISE(ABORT, 'fork completion fault'); END`}
-					cleanup = []string{`DROP TRIGGER fail_fork_completion`}
-				} else {
-					install = []string{`CREATE FUNCTION fail_fork_completion() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fork completion fault'; END $$`, `CREATE TRIGGER fail_fork_completion BEFORE INSERT ON api_idempotency FOR EACH ROW EXECUTE FUNCTION fail_fork_completion()`}
-					cleanup = []string{`DROP TRIGGER fail_fork_completion ON api_idempotency`, `DROP FUNCTION fail_fork_completion()`}
-				}
-				for _, stmt := range install {
-					if _, err := db.Exec(stmt); err != nil {
-						t.Fatal(err)
-					}
+				if err := storetest.InstallConversationForkCompletionInsertFailure(context.Background(), selected); err != nil {
+					t.Fatal(err)
 				}
 				defer func() {
-					for _, stmt := range cleanup {
-						if _, err := db.Exec(stmt); err != nil {
-							t.Error(err)
-						}
+					if err := storetest.RemoveConversationForkCompletionInsertFailure(context.Background(), selected); err != nil {
+						t.Error(err)
 					}
 				}()
 				if _, err := selected.CreateAPIConversationFork(ctx, req); err == nil || !strings.Contains(err.Error(), "fork completion fault") {
 					t.Fatalf("completion fault: %v", err)
 				}
-				requireForkCommitCounts(t, db, 0, 0)
+				requireForkCommitCounts(t, selected, 0, 0)
 			})
 			var firstID string
 			t.Run("same_key_concurrency", func(t *testing.T) {
@@ -117,7 +118,7 @@ func TestConversationForkAtomicCreationControls(t *testing.T) {
 				if fresh != 1 {
 					t.Fatalf("fresh creations=%d want=1", fresh)
 				}
-				requireForkCommitCounts(t, db, 1, 1)
+				requireForkCommitCounts(t, selected, 1, 1)
 			})
 			t.Run("hash_conflict", func(t *testing.T) {
 				conflict := req
@@ -127,7 +128,7 @@ func TestConversationForkAtomicCreationControls(t *testing.T) {
 				if !errors.As(err, &typed) || typed.ResourceID != firstID {
 					t.Fatalf("conflict=%v", err)
 				}
-				requireForkCommitCounts(t, db, 1, 1)
+				requireForkCommitCounts(t, selected, 1, 1)
 			})
 			t.Run("actor_key_and_unkeyed_distinct", func(t *testing.T) {
 				actor := req
@@ -144,25 +145,26 @@ func TestConversationForkAtomicCreationControls(t *testing.T) {
 					}
 					ids[result.Fork.ForkID] = true
 				}
-				requireForkCommitCounts(t, db, 5, 3)
+				requireForkCommitCounts(t, selected, 5, 3)
 			})
 			t.Run("ttl_expiry", func(t *testing.T) {
 				// Retention starts at successful completion, not request preparation.
 				// Reach the last persisted boundary without a wall-clock sleep, so
 				// all earlier completions are expired when the new fork commits.
 				var expiresAt time.Time
+				expiry, err := storetest.ReadConversationForkCompletionExpiryStorage(context.Background(), selected)
+				if err != nil {
+					t.Fatal(err)
+				}
 				if backend == "sqlite" {
-					var raw string
-					if err := db.QueryRow(`SELECT expires_at FROM api_idempotency ORDER BY expires_at DESC LIMIT 1`).Scan(&raw); err != nil {
-						t.Fatal(err)
-					}
+					raw := expiry.SQLiteText
 					var err error
 					expiresAt, err = time.Parse("2006-01-02 15:04:05.999999999 -0700 MST", raw)
 					if err != nil {
 						t.Fatalf("decode persisted completion expiry %q: %v", raw, err)
 					}
-				} else if err := db.QueryRow(`SELECT expires_at FROM api_idempotency ORDER BY expires_at DESC LIMIT 1`).Scan(&expiresAt); err != nil {
-					t.Fatal(err)
+				} else {
+					expiresAt = expiry.PostgresTime
 				}
 				expired := req
 				expired.Idempotency.Now, expired.Creation.Now = expiresAt, expiresAt
@@ -173,7 +175,7 @@ func TestConversationForkAtomicCreationControls(t *testing.T) {
 				if !result.Fork.ExpiresAt.Equal(expired.Creation.Now.Add(24 * time.Hour)) {
 					t.Fatalf("fork TTL=%v", result.Fork.ExpiresAt)
 				}
-				requireForkCommitCounts(t, db, 6, 1)
+				requireForkCommitCounts(t, selected, 6, 1)
 			})
 		})
 	}
@@ -181,11 +183,12 @@ func TestConversationForkAtomicCreationControls(t *testing.T) {
 
 // This closes a real HTTP connection after successful handler execution but
 // before sending any response bytes. It is response loss, not SIGKILL or lost
-// PostgreSQL COMMIT acknowledgement. Retry uses a reconstructed selected owner.
+// PostgreSQL COMMIT acknowledgement. Retry uses an independent native peer at
+// the same location, not a reconstructed coordinator over the original pool.
 func TestConversationForkLostHTTPResponseReplays(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			_, selected, db, now, sessionID, turnID := newConversationForkCommitFixture(t, backend)
+			_, selected, reopen, now, sessionID, turnID := newConversationForkCommitFixture(t, backend)
 			makeHandler := func(s forkCommitOmissionProbeStore) *Handler {
 				return testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorConversationForkHandlers(testOperatorCapabilities{
 					ConversationForkLifecycle: s, ConversationForks: s, Idempotency: s, Now: func() time.Time { return now },
@@ -231,13 +234,17 @@ func TestConversationForkLostHTTPResponseReplays(t *testing.T) {
 			}
 			firstID := asMap(t, asMap(t, first.Result)["fork"])["fork_id"]
 			server.Close()
-			requireForkCommitCounts(t, db, 1, 1)
+			requireForkCommitCounts(t, selected, 1, 1)
 			var reconstructed forkCommitOmissionProbeStore
 			if backend == "sqlite" {
-				reconstructed = storetest.AdmitSQLiteRuntimeStore(t, db)
+				reconstructed = reopen.sqlite()
 			} else {
-				reconstructed = storetest.AdmitPostgresRuntimeStore(t, db)
+				reconstructed = reopen.postgres()
 			}
+			if reconstructed == selected {
+				t.Fatal("replay reused the predecessor native owner")
+			}
+			requireForkCommitCounts(t, reconstructed, 1, 1)
 			retryHandler := makeHandler(reconstructed)
 			retryServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { retryHandler.ServeHTTP(w, testAuthorActivityRequest(r)) }))
 			defer retryServer.Close()
@@ -262,12 +269,12 @@ func TestConversationForkLostHTTPResponseReplays(t *testing.T) {
 			if result["idempotency_replayed"] != true || asMap(t, result["fork"])["fork_id"] != firstID {
 				t.Fatalf("retry=%+v first=%v", result, firstID)
 			}
-			requireForkCommitCounts(t, db, 1, 1)
+			requireForkCommitCounts(t, selected, 1, 1)
 			conflict := rpcCall(t, retryHandler, strings.Replace(body, turnID, uuid.NewString(), 1))
 			if conflict.Error == nil || asMap(t, conflict.Error.Data)["code"] != IdempotencyConflictCode {
 				t.Fatalf("same public key with changed request must conflict: %+v", conflict.Error)
 			}
-			requireForkCommitCounts(t, db, 1, 1)
+			requireForkCommitCounts(t, selected, 1, 1)
 			t.Logf("%s actual HTTP EOF after commit; reconstructed owner and new listener replay fork=%v; durable forks=1 completions=1", backend, firstID)
 		})
 	}

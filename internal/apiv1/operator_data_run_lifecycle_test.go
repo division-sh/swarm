@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -16,7 +15,6 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -60,20 +58,19 @@ type dataRunLifecycleStore interface {
 type dataRunLifecycleFixture struct {
 	primary       dataRunLifecycleStore
 	reconstructed dataRunLifecycleStore
-	db            *sql.DB
 }
 
 func forEachDataRunLifecycleStore(t *testing.T, run func(*testing.T, dataRunLifecycleFixture)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) {
 		primary, reconstructed := storetest.StartSQLiteRuntimeStorePair(t)
-		run(t, dataRunLifecycleFixture{primary: primary, reconstructed: reconstructed, db: storetest.Database(primary)})
+		run(t, dataRunLifecycleFixture{primary: primary, reconstructed: reconstructed})
 	})
 	t.Run("postgres", func(t *testing.T) {
-		_, db, _ := testutil.StartPostgres(t)
-		primary := storetest.AdmitPostgresRuntimeStore(t, db)
-		reconstructed := storetest.AdmitPostgresRuntimeStore(t, db)
-		run(t, dataRunLifecycleFixture{primary: primary, reconstructed: reconstructed, db: db})
+		dsn, _, _ := testutil.StartPostgres(t)
+		primary, reopen := storetest.StartPostgresRuntimeStoreWithReopen(t, dsn)
+		reconstructed := reopen()
+		run(t, dataRunLifecycleFixture{primary: primary, reconstructed: reconstructed})
 	})
 }
 
@@ -130,12 +127,8 @@ func TestRunCreationRequestBindingAcrossSelectedStores(t *testing.T) {
 		if err != nil || binding.Imports[0].SchemaDigest != sourceReceipt.Result.SchemaDigest {
 			t.Fatalf("created request schema = %q, source = %#v, %v", binding.Imports[0].SchemaDigest, sourceReceipt.Result.SchemaDigest, err)
 		}
-		var storedHash string
-		query := "SELECT request_hash FROM resource_run_creation_operations WHERE run_id = ?"
-		if _, ok := fixture.primary.(*store.PostgresStore); ok {
-			query = "SELECT request_hash FROM resource_run_creation_operations WHERE run_id = $1"
-		}
-		if err := fixture.db.QueryRowContext(ctx, query, runID).Scan(&storedHash); err != nil || binding.RequestHash != storedHash {
+		storedHash, err := storetest.ReadRunCreationRequestHashStorage(ctx, fixture.primary, runID)
+		if err != nil || binding.RequestHash != storedHash {
 			t.Fatalf("binding hash = %q, stored = %q, error = %v", binding.RequestHash, storedHash, err)
 		}
 		raw, err := json.Marshal(binding)
@@ -179,13 +172,7 @@ func TestRunCreationRequestBindingAcrossSelectedStores(t *testing.T) {
 		if !errors.As(err, &appErr) || appErr.Code != string(durabledata.CodeOperationMissing) {
 			t.Fatalf("missing binding error = %v, want %s", err, durabledata.CodeOperationMissing)
 		}
-		update := "UPDATE resource_run_creation_operations SET request_hash = ? WHERE run_id = ?"
-		if _, ok := fixture.primary.(*store.PostgresStore); ok {
-			update = "UPDATE resource_run_creation_operations SET request_hash = $1 WHERE run_id = $2"
-		}
-		if _, err := fixture.db.ExecContext(ctx, update, "resource-run-creation-request-v1:sha256:"+strings.Repeat("f", 64), rejectedID); err != nil {
-			t.Fatalf("corrupt retained hash: %v", err)
-		}
+		storetest.RequireResourceReceiptFault(t, ctx, fixture.primary, rejectedID, "", "run/request hash conflict")
 		_, err = executeDataShowOperation(ctx, map[string]any{
 			"view": "operation", "detail": "request_binding",
 			"operation_ref": map[string]any{"kind": "run_creation", "run_id": rejectedID},
@@ -232,13 +219,13 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 					if response.Error == nil {
 						t.Fatalf("duplicate child request succeeded: %#v", response)
 					}
-					if got := dataRunCount(t, fixture, "resource_run_creation_operations", "run_id", runID); got != 0 {
+					if got := dataRunObservedCount(t, fixture, storetest.CountRunDataCreationOperationsStorage, runID); got != 0 {
 						t.Fatalf("run-creation receipts = %d, want 0", got)
 					}
-					if got := dataRunCount(t, fixture, "resource_source_invocations", "source_invocation_id", sourceID); got != 0 {
+					if got := dataRunObservedCount(t, fixture, storetest.CountResourceSourceInvocationStorage, sourceID); got != 0 {
 						t.Fatalf("source receipts = %d, want 0", got)
 					}
-					if got := dataRunCount(t, fixture, "runs", "run_id", runID); got != 0 {
+					if got := dataRunObservedCount(t, fixture, storetest.CountPhysicalRunIdentity, runID); got != 0 {
 						t.Fatalf("runs = %d, want 0", got)
 					}
 				})
@@ -271,9 +258,9 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 						"imports": []any{dataRunFusedImport(sourceID, scanRef, durabledata.AbsentHead(), []byte("{\"topic\":\"must-not-commit\"}\n"))},
 						"pins":    []any{},
 					}
-					beforeEvents := dataRunCount(t, fixture, "events", "run_id", ordinaryRunID)
-					beforeRuns := dataRunCount(t, fixture, "runs", "run_id", ordinaryRunID)
-					beforeRunReceipts := dataRunCount(t, fixture, "resource_run_creation_operations", "run_id", ordinaryRunID)
+					beforeEvents := dataRunObservedCount(t, fixture, storetest.CountPhysicalRunEvents, ordinaryRunID)
+					beforeRuns := dataRunObservedCount(t, fixture, storetest.CountPhysicalRunIdentity, ordinaryRunID)
+					beforeRunReceipts := dataRunObservedCount(t, fixture, storetest.CountRunDataCreationOperationsStorage, ordinaryRunID)
 					idempotencyKey := uuid.NewString()
 					body := dataRunStartBody(ordinaryRunID, idempotencyKey, data)
 					if method == "event.publish" {
@@ -283,16 +270,16 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 					if response.Error == nil || asMap(t, response.Error.Data)["code"] != string(durabledata.CodeRunDataImmutable) {
 						t.Fatalf("existing-run data response = %#v, want %s", response, durabledata.CodeRunDataImmutable)
 					}
-					if got := dataRunCount(t, fixture, "events", "run_id", ordinaryRunID); got != beforeEvents {
+					if got := dataRunObservedCount(t, fixture, storetest.CountPhysicalRunEvents, ordinaryRunID); got != beforeEvents {
 						t.Fatalf("existing-run rejection event count = %d, want unchanged %d", got, beforeEvents)
 					}
-					if got := dataRunCount(t, fixture, "runs", "run_id", ordinaryRunID); got != beforeRuns {
+					if got := dataRunObservedCount(t, fixture, storetest.CountPhysicalRunIdentity, ordinaryRunID); got != beforeRuns {
 						t.Fatalf("existing-run rejection run count = %d, want unchanged %d", got, beforeRuns)
 					}
-					if got := dataRunCount(t, fixture, "resource_run_creation_operations", "run_id", ordinaryRunID); got != beforeRunReceipts {
+					if got := dataRunObservedCount(t, fixture, storetest.CountRunDataCreationOperationsStorage, ordinaryRunID); got != beforeRunReceipts {
 						t.Fatalf("existing-run rejection receipt count = %d, want unchanged %d", got, beforeRunReceipts)
 					}
-					if got := dataRunCount(t, fixture, "resource_source_invocations", "source_invocation_id", sourceID); got != 0 {
+					if got := dataRunObservedCount(t, fixture, storetest.CountResourceSourceInvocationStorage, sourceID); got != 0 {
 						t.Fatalf("existing-run rejection source receipts = %d, want 0", got)
 					}
 				})
@@ -332,7 +319,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			if err != nil || parent.Summary.Outcome != "created" || parent.Summary.PinCount != 1 || len(parent.Evidence.RunBinding) != 2 {
 				t.Fatalf("fused parent receipt = %#v, %v", parent, err)
 			}
-			if got := dataRunCount(t, fixture, "fan_out_intents", "run_id", runID); got != 1 {
+			if got := dataRunObservedCount(t, fixture, storetest.CountRunFanOutIntentStorage, runID); got != 1 {
 				t.Fatalf("event-plus-feed created %d feed intents, want 1", got)
 			}
 			pins, err := fixture.reconstructed.LoadDataPins(ctx, firstVersion)
@@ -356,13 +343,13 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			if conflict.Error == nil || asMap(t, conflict.Error.Data)["code"] != "RUN_DATA_IMMUTABLE" {
 				t.Fatalf("changed event payload did not receive typed fused-run refusal: error=%+v data=%+v", conflict.Error, conflict.Error.Data)
 			}
-			if got := dataRunCount(t, fixture, "runs", "run_id", runID); got != 1 {
+			if got := dataRunObservedCount(t, fixture, storetest.CountPhysicalRunIdentity, runID); got != 1 {
 				t.Fatalf("changed event payload created %d runs, want one", got)
 			}
-			if got := dataRunCount(t, fixture, "events", "run_id", runID); got != 1 {
+			if got := dataRunObservedCount(t, fixture, storetest.CountPhysicalRunEvents, runID); got != 1 {
 				t.Fatalf("changed event payload created %d events, want one", got)
 			}
-			if got := dataRunCount(t, fixture, "fan_out_intents", "run_id", runID); got != 1 {
+			if got := dataRunObservedCount(t, fixture, storetest.CountRunFanOutIntentStorage, runID); got != 1 {
 				t.Fatalf("changed event payload created %d feeds, want one", got)
 			}
 		})
@@ -387,10 +374,10 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			if replay.Error == nil || asMap(t, replay.Error.Data)["code"] != string(durabledata.CodeRunDataRejected) {
 				t.Fatalf("failed fused replay = %#v", replay)
 			}
-			if got := dataRunCount(t, fixture, "runs", "run_id", runID); got != 0 {
+			if got := dataRunObservedCount(t, fixture, storetest.CountPhysicalRunIdentity, runID); got != 0 {
 				t.Fatalf("failed fused run count = %d", got)
 			}
-			if got := dataRunCount(t, fixture, "events", "run_id", runID); got != 0 {
+			if got := dataRunObservedCount(t, fixture, storetest.CountPhysicalRunEvents, runID); got != 0 {
 				t.Fatalf("failed fused event count = %d", got)
 			}
 			parent, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID)
@@ -418,9 +405,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			if err != nil || len(snapshot.Versions) != 0 || snapshot.Head.Before.State != "absent" {
 				t.Fatalf("failed child resource snapshot = %#v, %v", snapshot, err)
 			}
-			corruptRunCreationChildJSONColumn(t, ctx, fixture, "context_json", runID, rejectedSourceID, func(value map[string]any) {
-				value["declaration"].(map[string]any)["business_key"] = "hostile"
-			})
+			storetest.RequireResourceReceiptFault(t, ctx, fixture.primary, runID, rejectedSourceID, "child/context business key")
 			var domainErr *durabledata.DomainError
 			if _, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
 				t.Fatalf("corrupt failed-child context load error = %v, want %s", err, durabledata.CodeIntegrity)
@@ -456,7 +441,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				parent.Summary.Rejection.Code != durabledata.RunCreationRejectionFusedHead || parent.Binding.State != "none" {
 				t.Fatalf("head-conflict receipt = %#v, %v", parent, err)
 			}
-			if got := dataRunCount(t, fixture, "runs", "run_id", runID); got != 0 {
+			if got := dataRunObservedCount(t, fixture, storetest.CountPhysicalRunIdentity, runID); got != 0 {
 				t.Fatalf("head-conflict run count = %d", got)
 			}
 		})
@@ -489,28 +474,7 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 				parent.Summary.Rejection.VersionID != missingVersion {
 				t.Fatalf("missing explicit pin receipt = %#v, %v", parent, err)
 			}
-			selectSummary := `SELECT summary_json FROM resource_run_creation_operations WHERE run_id = ?`
-			updateSummary := `UPDATE resource_run_creation_operations SET summary_json = ? WHERE run_id = ?`
-			if _, ok := fixture.primary.(*store.PostgresStore); ok {
-				selectSummary = `SELECT summary_json FROM resource_run_creation_operations WHERE run_id = $1::uuid`
-				updateSummary = `UPDATE resource_run_creation_operations SET summary_json = $1 WHERE run_id = $2::uuid`
-			}
-			var raw []byte
-			if err := fixture.db.QueryRowContext(ctx, selectSummary, runID).Scan(&raw); err != nil {
-				t.Fatal(err)
-			}
-			var summary map[string]any
-			if err := json.Unmarshal(raw, &summary); err != nil {
-				t.Fatal(err)
-			}
-			delete(summary, "rejection")
-			corrupt, err := json.Marshal(summary)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if _, err := fixture.db.ExecContext(ctx, updateSummary, corrupt, runID); err != nil {
-				t.Fatal(err)
-			}
+			storetest.RequireResourceReceiptFault(t, ctx, fixture.primary, runID, "", "run/missing rejection")
 			var domainErr *durabledata.DomainError
 			if _, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
 				t.Fatalf("missing typed rejection corruption error = %v, want %s", err, durabledata.CodeIntegrity)
@@ -784,21 +748,15 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 }
 
 func TestRunCreationReceiptRejectsAggregateCorruptionAcrossSelectedStores(t *testing.T) {
-	tests := []struct {
-		name   string
-		column string
-		mutate func(map[string]any)
-	}{
-		{name: "summary kind", column: "summary_json", mutate: func(value map[string]any) { value["kind"] = "event_publish" }},
-		{name: "summary counts", column: "summary_json", mutate: func(value map[string]any) { value["pin_count"] = float64(0) }},
-		{name: "summary outcome union", column: "summary_json", mutate: func(value map[string]any) { value["outcome"] = "data_rejected" }},
-		{name: "summary event identity", column: "summary_json", mutate: func(value map[string]any) { value["event_id"] = uuid.NewString() }},
-		{name: "summary completion", column: "summary_json", mutate: func(value map[string]any) { value["completed_at"] = "0001-01-01T00:00:00Z" }},
-		{name: "binding tagged union", column: "binding_json", mutate: func(value map[string]any) { value["run_id"] = uuid.NewString() }},
-		{name: "binding evidence", column: "evidence_json", mutate: func(value map[string]any) {
-			value["run_binding"] = []any{map[string]any{"kind": "pin"}}
-		}},
-		{name: "request hash agreement", column: "request_json", mutate: func(value map[string]any) { value["event_id"] = uuid.NewString() }},
+	tests := []string{
+		"summary kind",
+		"summary counts",
+		"summary outcome union",
+		"summary event identity",
+		"summary completion",
+		"binding tagged union",
+		"binding evidence",
+		"request hash agreement",
 	}
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
 		ctx := context.Background()
@@ -825,9 +783,7 @@ func TestRunCreationReceiptRejectsAggregateCorruptionAcrossSelectedStores(t *tes
 				t.Fatalf("wait for pinless run fixture settlement: %v", err)
 			}
 			cancelWait()
-			corruptRunCreationJSONColumn(t, ctx, fixture, "summary_json", runID, func(value map[string]any) {
-				value["status"] = "bogus"
-			})
+			storetest.RequireResourceReceiptFault(t, ctx, fixture.primary, runID, "", "run/pinless status")
 			var domainErr *durabledata.DomainError
 			if _, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
 				t.Fatalf("corrupt pinless status load error = %v, want %s", err, durabledata.CodeIntegrity)
@@ -838,7 +794,7 @@ func TestRunCreationReceiptRejectsAggregateCorruptionAcrossSelectedStores(t *tes
 		})
 		expectedHead := durabledata.AbsentHead()
 		for index, test := range tests {
-			t.Run(test.name, func(t *testing.T) {
+			t.Run(test, func(t *testing.T) {
 				runID := uuid.NewString()
 				data := map[string]any{
 					"imports": []any{dataRunFusedImport(uuid.NewString(), scanRef, expectedHead,
@@ -860,14 +816,14 @@ func TestRunCreationReceiptRejectsAggregateCorruptionAcrossSelectedStores(t *tes
 					t.Fatal(err)
 				}
 				expectedHead = snapshot.Head.After
-				corruptRunCreationJSONColumn(t, ctx, fixture, test.column, runID, test.mutate)
+				storetest.RequireResourceReceiptFault(t, ctx, fixture.primary, runID, "", storetest.ResourceReceiptFaultCase("run/"+test))
 				var domainErr *durabledata.DomainError
 				if _, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
-					t.Fatalf("corrupt %s load error = %v, want %s", test.name, err, durabledata.CodeIntegrity)
+					t.Fatalf("corrupt %s load error = %v, want %s", test, err, durabledata.CodeIntegrity)
 				}
 				replay := rpcCall(t, handler, dataRunEventPublishBody(runID, uuid.NewString(), data))
 				if replay.Error == nil {
-					t.Fatalf("corrupt %s replay succeeded: %#v", test.name, replay)
+					t.Fatalf("corrupt %s replay succeeded: %#v", test, replay)
 				}
 			})
 		}
@@ -875,13 +831,10 @@ func TestRunCreationReceiptRejectsAggregateCorruptionAcrossSelectedStores(t *tes
 }
 
 func TestRunCreationReceiptRejectsTypedColumnCorruptionAcrossSelectedStores(t *testing.T) {
-	tests := []struct {
-		name, column string
-		value        func() any
-	}{
-		{name: "actor", column: "actor", value: func() any { return "hostile-actor" }},
-		{name: "bundle", column: "bundle_hash", value: func() any { return "bundle-v2:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }},
-		{name: "completed at", column: "completed_at", value: func() any { return time.Date(2035, 1, 2, 3, 4, 5, 0, time.UTC) }},
+	tests := []string{
+		"actor",
+		"bundle",
+		"completed at",
 	}
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
 		ctx := context.Background()
@@ -896,7 +849,7 @@ func TestRunCreationReceiptRejectsTypedColumnCorruptionAcrossSelectedStores(t *t
 		}
 		publish := eventPublishTestHandlerWithStores(t, fixture.primary, fixture.primary, fixture.primary, bus, source)
 		for _, test := range tests {
-			t.Run(test.name, func(t *testing.T) {
+			t.Run(test, func(t *testing.T) {
 				runID := uuid.NewString()
 				data := map[string]any{"imports": []any{}, "pins": []any{}}
 				body := dataRunEventPublishBody(runID, uuid.NewString(), data)
@@ -909,13 +862,13 @@ func TestRunCreationReceiptRejectsTypedColumnCorruptionAcrossSelectedStores(t *t
 					t.Fatalf("wait for run fixture settlement: %v", err)
 				}
 				cancelWait()
-				corruptRunCreationScalarColumn(t, ctx, fixture, test.column, runID, test.value())
+				storetest.RequireResourceReceiptFault(t, ctx, fixture.primary, runID, "", storetest.ResourceReceiptFaultCase("run/typed "+test))
 				var domainErr *durabledata.DomainError
 				if _, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
-					t.Fatalf("typed %s corruption load error = %v, want %s", test.name, err, durabledata.CodeIntegrity)
+					t.Fatalf("typed %s corruption load error = %v, want %s", test, err, durabledata.CodeIntegrity)
 				}
 				if replay := rpcCall(t, publish, dataRunEventPublishBody(runID, uuid.NewString(), data)); replay.Error == nil {
-					t.Fatalf("typed %s corruption replay succeeded: %#v", test.name, replay)
+					t.Fatalf("typed %s corruption replay succeeded: %#v", test, replay)
 				}
 			})
 		}
@@ -946,93 +899,20 @@ func TestFailedFusedRunRejectsTypedRevisionAndCoordinatedContextCorruptionAcross
 		if response.Error == nil || asMap(t, response.Error.Data)["code"] != string(durabledata.CodeRunDataRejected) {
 			t.Fatalf("failed fused fixture = %#v", response)
 		}
-		observedRevisionUpdate := `UPDATE resource_run_creation_child_evaluations SET observed_head_revision = ? WHERE parent_run_id = ? AND source_invocation_id = ?`
-		if _, ok := fixture.primary.(*store.PostgresStore); ok {
-			observedRevisionUpdate = `UPDATE resource_run_creation_child_evaluations SET observed_head_revision = $1 WHERE parent_run_id = $2::uuid AND source_invocation_id = $3::uuid`
-		}
-		retryRunCreationHostileSQL(t, fixture, func() error {
-			_, err := fixture.db.ExecContext(ctx, observedRevisionUpdate, 1, runID, sourceID)
-			return err
-		})
+		revisionFault := storetest.RequireResourceReceiptFault(t, ctx, fixture.primary, runID, sourceID, "child/observed revision")
 		var domainErr *durabledata.DomainError
 		if _, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
 			t.Fatalf("typed failed-fused observed revision corruption error = %v, want %s", err, durabledata.CodeIntegrity)
 		}
-		retryRunCreationHostileSQL(t, fixture, func() error {
-			_, err := fixture.db.ExecContext(ctx, observedRevisionUpdate, 0, runID, sourceID)
-			return err
-		})
-
-		query := `SELECT context_json FROM resource_run_creation_child_evaluations WHERE parent_run_id = ? AND source_invocation_id = ?`
-		if _, ok := fixture.primary.(*store.PostgresStore); ok {
-			query = `SELECT context_json FROM resource_run_creation_child_evaluations WHERE parent_run_id = $1::uuid AND source_invocation_id = $2::uuid`
-		}
-		var contextJSON []byte
-		if err := fixture.db.QueryRowContext(ctx, query, runID, sourceID).Scan(&contextJSON); err != nil {
+		if err := revisionFault.RestoreForTest(ctx); err != nil {
 			t.Fatal(err)
-		}
-		var evaluation durabledata.SourceEvaluationContext
-		if err := json.Unmarshal(contextJSON, &evaluation); err != nil {
-			t.Fatal(err)
-		}
-		query = `SELECT request_json, evidence_json FROM resource_run_creation_operations WHERE run_id = ?`
-		if _, ok := fixture.primary.(*store.PostgresStore); ok {
-			query = `SELECT request_json, evidence_json FROM resource_run_creation_operations WHERE run_id = $1::uuid`
-		}
-		var requestJSON, evidenceJSON []byte
-		if err := fixture.db.QueryRowContext(ctx, query, runID).Scan(&requestJSON, &evidenceJSON); err != nil {
-			t.Fatal(err)
-		}
-		var parentCommand durabledata.RunCreationCommand
-		if err := json.Unmarshal(requestJSON, &parentCommand); err != nil {
-			t.Fatal(err)
-		}
-		schema := []byte(`{"type":"object","additionalProperties":false,"required":["alternate"],"properties":{"alternate":{"type":"string"}},"x-swarm-dataset-key":"alternate"}`)
-		evaluation.Declaration = durabledata.Declaration{
-			Name: scanRef.EventName, Ref: scanRef, OwnerFlowID: evaluation.Declaration.OwnerFlowID,
-			BusinessKey: "alternate", SchemaDigest: durabledata.SchemaDigestFor(schema), CanonicalSchema: schema,
-		}
-		command := durabledata.SourceCommand{
-			Operation: "import", SourceInvocationID: sourceID, ParentRunID: runID, Actor: parentCommand.Actor,
-			BundleHash: parentCommand.BundleHash, Declaration: scanRef, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: input,
-		}
-		projection, defects, err := evaluation.FusedProjection(command)
-		if err != nil || projection.Outcome != "validation_rejected" || len(defects) == 0 {
-			t.Fatalf("hostile failed fused projection = %#v, %#v, %v", projection, defects, err)
 		}
 
-		var evidence durabledata.RunCreationEvidence
-		if err := json.Unmarshal(evidenceJSON, &evidence); err != nil {
-			t.Fatal(err)
+		contextFault, projection, defects := storetest.CaptureFailedFusedContextCorruption(t, ctx, fixture.primary, runID, sourceID)
+		if projection.Outcome != "validation_rejected" || len(defects) == 0 {
+			t.Fatalf("hostile failed fused projection = %#v, %#v", projection, defects)
 		}
-		evidence.ChildEvaluations = []durabledata.FusedChildEvaluation{projection}
-		evidence.ChildDefects = nil
-		for _, defect := range defects {
-			evidence.ChildDefects = append(evidence.ChildDefects, durabledata.FusedChildDefect{SourceInvocationID: sourceID, Defect: defect})
-		}
-		contextJSON, _ = json.Marshal(evaluation)
-		projectionJSON, _ := json.Marshal(projection)
-		defectsJSON, _ := json.Marshal(defects)
-		evidenceJSON, _ = json.Marshal(evidence)
-		childUpdate := `UPDATE resource_run_creation_child_evaluations SET context_json = ?, evaluation_json = ?, defects_json = ? WHERE parent_run_id = ? AND source_invocation_id = ?`
-		parentUpdate := `UPDATE resource_run_creation_operations SET evidence_json = ? WHERE run_id = ?`
-		if _, ok := fixture.primary.(*store.PostgresStore); ok {
-			childUpdate = `UPDATE resource_run_creation_child_evaluations SET context_json = $1, evaluation_json = $2, defects_json = $3 WHERE parent_run_id = $4::uuid AND source_invocation_id = $5::uuid`
-			parentUpdate = `UPDATE resource_run_creation_operations SET evidence_json = $1 WHERE run_id = $2::uuid`
-		}
-		tx, err := fixture.db.BeginTx(ctx, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tx.ExecContext(ctx, childUpdate, contextJSON, projectionJSON, defectsJSON, runID, sourceID); err != nil {
-			_ = tx.Rollback()
-			t.Fatal(err)
-		}
-		if _, err := tx.ExecContext(ctx, parentUpdate, evidenceJSON, runID); err != nil {
-			_ = tx.Rollback()
-			t.Fatal(err)
-		}
-		if err := tx.Commit(); err != nil {
+		if err := contextFault.InstallForTest(ctx); err != nil {
 			t.Fatal(err)
 		}
 
@@ -1074,26 +954,15 @@ func TestSuccessfulFusedRunRequiresExactSourceCommitAggregateAcrossSelectedStore
 			t.Fatalf("wait for successful fused fixture settlement: %v", err)
 		}
 		cancelWait()
-		requestQuery := `SELECT request_json FROM resource_source_invocations WHERE source_invocation_id = ?`
-		if _, ok := fixture.primary.(*store.PostgresStore); ok {
-			requestQuery = `SELECT request_json FROM resource_source_invocations WHERE source_invocation_id = $1::uuid`
-		}
-		var requestJSON []byte
-		if err := fixture.db.QueryRowContext(ctx, requestQuery, sourceID).Scan(&requestJSON); err != nil {
+		requestJSON, err := storetest.ReadSourceRequestWire(ctx, fixture.primary, sourceID)
+		if err != nil {
 			t.Fatal(err)
 		}
 		var sourceCommand durabledata.SourceCommand
 		if err := json.Unmarshal(requestJSON, &sourceCommand); err != nil {
 			t.Fatal(err)
 		}
-		query := `DELETE FROM resource_version_provenance WHERE producer_kind = 'import' AND producer_id = ?`
-		if _, ok := fixture.primary.(*store.PostgresStore); ok {
-			query = `DELETE FROM resource_version_provenance WHERE producer_kind = 'import' AND producer_id = $1::uuid`
-		}
-		retryRunCreationHostileSQL(t, fixture, func() error {
-			_, err := fixture.db.ExecContext(ctx, query, sourceID)
-			return err
-		})
+		storetest.RequireImportProvenanceRemoval(t, ctx, fixture.primary, sourceID)
 		var domainErr *durabledata.DomainError
 		if _, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
 			t.Fatalf("missing fused commit aggregate load error = %v, want %s", err, durabledata.CodeIntegrity)
@@ -1260,21 +1129,15 @@ func TestFusedRunBindingRejectsCorruptCanonicalSourceEvaluationAcrossSelectedSto
 		if err := bus.WaitForQuiescence(quiescenceCtx); err != nil {
 			t.Fatalf("wait for fused publication settlement: %v", err)
 		}
-		requestQuery := `SELECT request_json FROM resource_source_invocations WHERE source_invocation_id = ?`
-		if _, ok := fixture.primary.(*store.PostgresStore); ok {
-			requestQuery = `SELECT request_json FROM resource_source_invocations WHERE source_invocation_id = $1::uuid`
-		}
-		var requestJSON []byte
-		if err := fixture.db.QueryRowContext(ctx, requestQuery, sourceID).Scan(&requestJSON); err != nil {
+		requestJSON, err := storetest.ReadSourceRequestWire(ctx, fixture.primary, sourceID)
+		if err != nil {
 			t.Fatal(err)
 		}
 		var exactCommand durabledata.SourceCommand
 		if err := json.Unmarshal(requestJSON, &exactCommand); err != nil {
 			t.Fatal(err)
 		}
-		corruptSourceOperationJSONColumn(t, ctx, fixture, "evaluation_json", sourceID, func(value map[string]any) {
-			value["declaration"].(map[string]any)["business_key"] = "hostile"
-		})
+		storetest.RequireResourceReceiptFault(t, ctx, fixture.primary, sourceID, "", "source/evaluation business key")
 		var domainErr *durabledata.DomainError
 		if _, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
 			t.Fatalf("corrupt fused source load error = %v, want %s", err, durabledata.CodeIntegrity)
@@ -1284,117 +1147,6 @@ func TestFusedRunBindingRejectsCorruptCanonicalSourceEvaluationAcrossSelectedSto
 			t.Fatalf("corrupt fused source exact replay error = %v, want %s", err, durabledata.CodeIntegrity)
 		}
 	})
-}
-
-func corruptRunCreationJSONColumn(t testing.TB, ctx context.Context, fixture dataRunLifecycleFixture, column, runID string, mutate func(map[string]any)) {
-	t.Helper()
-	query := fmt.Sprintf("SELECT %s FROM resource_run_creation_operations WHERE run_id = ?", column)
-	update := fmt.Sprintf("UPDATE resource_run_creation_operations SET %s = ? WHERE run_id = ?", column)
-	if _, ok := fixture.primary.(*store.PostgresStore); ok {
-		query = fmt.Sprintf("SELECT %s FROM resource_run_creation_operations WHERE run_id = $1::uuid", column)
-		update = fmt.Sprintf("UPDATE resource_run_creation_operations SET %s = $1 WHERE run_id = $2::uuid", column)
-	}
-	var raw []byte
-	retryRunCreationHostileSQL(t, fixture, func() error {
-		return fixture.db.QueryRowContext(ctx, query, runID).Scan(&raw)
-	})
-	var value map[string]any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		t.Fatal(err)
-	}
-	mutate(value)
-	corrupt, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	retryRunCreationHostileSQL(t, fixture, func() error {
-		_, err := fixture.db.ExecContext(ctx, update, corrupt, runID)
-		return err
-	})
-}
-
-func corruptRunCreationScalarColumn(t testing.TB, ctx context.Context, fixture dataRunLifecycleFixture, column, runID string, value any) {
-	t.Helper()
-	query := fmt.Sprintf("UPDATE resource_run_creation_operations SET %s = ? WHERE run_id = ?", column)
-	if _, ok := fixture.primary.(*store.PostgresStore); ok {
-		query = fmt.Sprintf("UPDATE resource_run_creation_operations SET %s = $1 WHERE run_id = $2::uuid", column)
-	}
-	retryRunCreationHostileSQL(t, fixture, func() error {
-		_, err := fixture.db.ExecContext(ctx, query, value, runID)
-		return err
-	})
-}
-
-func corruptRunCreationChildJSONColumn(t testing.TB, ctx context.Context, fixture dataRunLifecycleFixture, column, runID, sourceID string, mutate func(map[string]any)) {
-	t.Helper()
-	query := fmt.Sprintf("SELECT %s FROM resource_run_creation_child_evaluations WHERE parent_run_id = ? AND source_invocation_id = ?", column)
-	update := fmt.Sprintf("UPDATE resource_run_creation_child_evaluations SET %s = ? WHERE parent_run_id = ? AND source_invocation_id = ?", column)
-	if _, ok := fixture.primary.(*store.PostgresStore); ok {
-		query = fmt.Sprintf("SELECT %s FROM resource_run_creation_child_evaluations WHERE parent_run_id = $1::uuid AND source_invocation_id = $2::uuid", column)
-		update = fmt.Sprintf("UPDATE resource_run_creation_child_evaluations SET %s = $1 WHERE parent_run_id = $2::uuid AND source_invocation_id = $3::uuid", column)
-	}
-	var raw []byte
-	retryRunCreationHostileSQL(t, fixture, func() error {
-		return fixture.db.QueryRowContext(ctx, query, runID, sourceID).Scan(&raw)
-	})
-	var value map[string]any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		t.Fatal(err)
-	}
-	mutate(value)
-	corrupt, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	retryRunCreationHostileSQL(t, fixture, func() error {
-		_, err := fixture.db.ExecContext(ctx, update, corrupt, runID, sourceID)
-		return err
-	})
-}
-
-func corruptSourceOperationJSONColumn(t testing.TB, ctx context.Context, fixture dataRunLifecycleFixture, column, sourceID string, mutate func(map[string]any)) {
-	t.Helper()
-	query := fmt.Sprintf("SELECT %s FROM resource_source_invocations WHERE source_invocation_id = ?", column)
-	update := fmt.Sprintf("UPDATE resource_source_invocations SET %s = ? WHERE source_invocation_id = ?", column)
-	if _, ok := fixture.primary.(*store.PostgresStore); ok {
-		query = fmt.Sprintf("SELECT %s FROM resource_source_invocations WHERE source_invocation_id = $1::uuid", column)
-		update = fmt.Sprintf("UPDATE resource_source_invocations SET %s = $1 WHERE source_invocation_id = $2::uuid", column)
-	}
-	var raw []byte
-	retryRunCreationHostileSQL(t, fixture, func() error {
-		return fixture.db.QueryRowContext(ctx, query, sourceID).Scan(&raw)
-	})
-	var value map[string]any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		t.Fatal(err)
-	}
-	mutate(value)
-	corrupt, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	retryRunCreationHostileSQL(t, fixture, func() error {
-		_, err := fixture.db.ExecContext(ctx, update, corrupt, sourceID)
-		return err
-	})
-}
-
-func retryRunCreationHostileSQL(t testing.TB, fixture dataRunLifecycleFixture, operation func() error) {
-	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		err := operation()
-		if err == nil {
-			return
-		}
-		_, postgres := fixture.primary.(*store.PostgresStore)
-		text := strings.ToLower(err.Error())
-		busy := strings.Contains(text, "sqlite_busy") || strings.Contains(text, "database is locked") || strings.Contains(text, "database table is locked")
-		if postgres || !busy || time.Now().After(deadline) {
-			t.Fatal(err)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 }
 
 func dataRunLifecycleCatalog(t *testing.T, bundleHash string, amended bool) (durabledata.Catalog, durabledata.DeclarationRef, durabledata.DeclarationRef) {
@@ -1523,15 +1275,11 @@ func dataRunHasPin(pins []durabledata.Pin, runID, state string) bool {
 	return false
 }
 
-func dataRunCount(t *testing.T, fixture dataRunLifecycleFixture, table, field, id string) int {
+func dataRunObservedCount(t *testing.T, fixture dataRunLifecycleFixture, observe func(context.Context, any, string) (int, error), id string) int {
 	t.Helper()
-	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s = ?", table, field)
-	if _, ok := fixture.primary.(*store.PostgresStore); ok {
-		query = fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s = $1::uuid", table, field)
-	}
-	var count int
-	if err := fixture.db.QueryRowContext(context.Background(), query, id).Scan(&count); err != nil {
-		t.Fatalf("count %s by %s: %v", table, field, err)
+	count, err := observe(context.Background(), fixture.primary, id)
+	if err != nil {
+		t.Fatalf("read exact native count for %s: %v", id, err)
 	}
 	return count
 }

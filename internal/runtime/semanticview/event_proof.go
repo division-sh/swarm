@@ -127,10 +127,33 @@ func (p FlowEventProof) EventKey() string {
 	return p.DisplayName()
 }
 
-// IsAuthored reports whether the proof's exact canonical event identity is an
-// authored declaration. Concrete template-instance identities are runtime
-// occurrences, not additional authored declarations.
+// IsAuthored binds story classification to a declaration or its explicit
+// creation emission. A concrete creation emission uses that same authored line;
+// other concrete identities do not become additional authored declarations.
 func (p FlowEventProof) IsAuthored(source Source) bool {
+	if p.IsAuthoredDeclaration(source) {
+		return true
+	}
+	if source == nil || !p.HasSchema {
+		return false
+	}
+	canonical := runtimeeventidentity.Normalize(p.Canonical)
+	if canonical == "" {
+		return false
+	}
+	if scope, found := FlowScopeByID(source, p.FlowID); found && scope.AutoEmitEvent != "" {
+		creation := ResolveFlowEventProof(source, scope.ID, scope.AutoEmitEvent)
+		if creation.HasSchema && (canonical == creation.Canonical ||
+			p.Local == creation.Local && concreteTemplateInstanceLocalEventForProof(source, scope, canonical) == creation.Local) {
+			return true
+		}
+	}
+	return false
+}
+
+// IsAuthoredDeclaration preserves schema-declaration eligibility independently
+// of the authored story classification of a creation emission.
+func (p FlowEventProof) IsAuthoredDeclaration(source Source) bool {
 	if source == nil || !p.HasSchema {
 		return false
 	}

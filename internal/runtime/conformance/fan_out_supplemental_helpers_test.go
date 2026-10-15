@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -17,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/notifyallchildren"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 type supplementalDuration struct {
@@ -257,12 +255,9 @@ func newSupplementalServingFixture(t *testing.T, backend string, p *supplemental
 	t.Helper()
 	f := &servingMatrixFixture{started: make([]bool, 1)}
 	if backend == "postgres" {
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		f.selected, f.db = storetest.AdmitPostgresRuntimeStore(t, db), db
+		f.selected = storetest.StartPostgresRuntimeStore(t)
 	} else {
-		s := storetest.StartSQLiteRuntimeStore(t)
-		f.selected, f.db = s, storetest.DatabaseForTest(s)
+		f.selected = storetest.StartSQLiteRuntimeStore(t)
 	}
 	source := notifyallchildren.LoadSource(t, notifyallchildren.Options{NumericRegistrationRows: true, NumericReporterSink: true})
 	f.sources = []semanticview.Source{source}
@@ -273,7 +268,7 @@ func newSupplementalServingFixture(t *testing.T, backend string, p *supplemental
 	}
 	storetest.RequireBundleDataCatalog(t, testAuthorActivityContextForBundle(context.Background(), fact), f.selected, bundle)
 	f.topology = newNotifyAllChildrenProcessTopology(t, testAuthorActivityContextForBundle(context.Background(), fact), f.selected, source)
-	rt := newNotifyAllChildrenRuntime(t, f.selected, f.db, source, time.Now, notifyAllChildrenRuntimeOptions{
+	rt := newNotifyAllChildrenRuntime(t, f.selected, source, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: f.topology,
 		fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 			p.PipelineCoordinator = pc
@@ -327,7 +322,7 @@ func assertSupplementalEffects(t *testing.T, f *servingMatrixFixture, runID stri
 	if err != nil || s.Intents != intents || s.Cardinality != want || s.Cursor != want || s.Committed != want || s.SemanticRejected != 0 || s.Owed != 0 || s.Unsettled != 0 {
 		t.Fatalf("supplemental summary=%+v want=%d err=%v", s, want, err)
 	}
-	actual := loadNotifyAllChildrenNumericRegistrations(t, ctx, f.selected, f.db, runID)
+	actual := loadNotifyAllChildrenNumericRegistrations(t, ctx, f.selected, runID)
 	if len(actual) != want {
 		t.Fatalf("exact supplemental effects=%d want=%d", len(actual), want)
 	}
@@ -340,28 +335,24 @@ func assertSupplementalEffects(t *testing.T, f *servingMatrixFixture, runID stri
 			}
 		}
 	}
-	var outcomes, distinctEvents int
-	if err := f.db.QueryRowContext(ctx, `SELECT COUNT(*),COUNT(DISTINCT event_id) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed'`, runID).Scan(&outcomes, &distinctEvents); err != nil || outcomes != want || distinctEvents != want {
+	counts, err := storetest.ReadSupplementalCommittedOutcomeCardinality(ctx, f.selected, runID)
+	outcomes, distinctEvents := counts.Outcomes, counts.DistinctEvents
+	if err != nil || outcomes != want || distinctEvents != want {
 		t.Fatalf("durable outcomes=%d distinct events=%d want=%d err=%v", outcomes, distinctEvents, want, err)
 	}
-	assertSupplementalHistory(t, ctx, f.db, runID, intents, cardinality)
+	assertSupplementalHistory(t, ctx, f.selected, runID, intents, cardinality)
 }
 
-func assertSupplementalHistory(t *testing.T, ctx context.Context, db *sql.DB, runID string, intents, cardinality int) {
+func assertSupplementalHistory(t *testing.T, ctx context.Context, selected any, runID string, intents, cardinality int) {
 	t.Helper()
-	rows, err := db.QueryContext(ctx, `SELECT fact_key,fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations' ORDER BY fact_key,revision`, runID)
+	rows, err := storetest.ReadSupplementalFanOutObligationHistory(ctx, selected, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	var previous string
 	var versions, observed int
-	for rows.Next() {
-		var key string
-		var raw []byte
-		if err := rows.Scan(&key, &raw); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range rows {
+		key, raw := row.Key, row.Fact
 		var fact struct {
 			Kind        string `json:"fact_kind"`
 			Cursor      int    `json:"cursor"`
@@ -388,9 +379,6 @@ func assertSupplementalHistory(t *testing.T, ctx context.Context, db *sql.DB, ru
 			t.Fatalf("intent %s history version%d: %+v", key, versions, fact)
 		}
 		versions++
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	if observed != intents || versions != 2 {
 		t.Fatalf("durable intent histories=%d final versions=%d want=%d", observed, versions, intents)

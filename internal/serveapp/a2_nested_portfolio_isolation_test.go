@@ -54,8 +54,8 @@ func TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores(t *testing.T) {
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, runID)
 				parents[index] = requireA2PortfolioKeyedEntity(t, rt, runID, "portfolio", "portfolio_id", portfolio)
 				payload := map[string]any{"portfolio_id": portfolio, "period_id": periodKey, "expected_operating_ids": []any{"op-a", "op-b"}}
-				forwarded := requireA2PortfolioEmission(t, rt, runID, parents[index].Entity.FlowInstance+"/period.setup", setup.EventID, payload)
-				periods[index] = requireA2PortfolioEntity(t, rt, runID, forwarded.Deliveries[0].Target.FlowInstance)
+				forwarded := requireA2PortfolioEmission(t, rt.Endpoint, runID, parents[index].Entity.FlowInstance+"/period.setup", setup.EventID, payload)
+				periods[index] = requireA2PortfolioEntity(t, rt.Endpoint, runID, forwarded.Deliveries[0].Target.FlowInstance)
 				requireA2PortfolioDelivery(t, forwarded, "portfolio/period", "portfolio-collector", periods[index], "materializing_entity")
 				if periods[index].Fields["portfolio_id"] != portfolio || periods[index].Fields["period_id"] != periodKey {
 					t.Fatalf("nested constructor selected wrong parent: %+v", periods[index])
@@ -75,7 +75,7 @@ func TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores(t *testing.T) {
 				revenue int
 			}{{0, "op-b", 22}, {1, "op-a", 111}, {0, "op-a", 11}, {1, "op-b", 222}} {
 				index, portfolio := arrival.owner, portfolios[arrival.owner]
-				otherBefore := requireA2PortfolioEntity(t, rt, runID, periods[1-index].Entity.FlowInstance)
+				otherBefore := requireA2PortfolioEntity(t, rt.Endpoint, runID, periods[1-index].Entity.FlowInstance)
 				trigger := publish(map[string]any{
 					"run_id": runID, "event_name": "operating.report.triggered", "idempotency_key": "a2-nested-" + portfolio + "-" + arrival.member,
 					"payload": map[string]any{"portfolio_id": portfolio, "period_id": periodKey, "operating_id": arrival.member, "revenue": arrival.revenue},
@@ -84,16 +84,16 @@ func TestA2NestedPortfolioSamePeriodAndMemberIsolationBothStores(t *testing.T) {
 				payload := map[string]any{"portfolio_id": portfolio, "period_id": periodKey, "operating_id": arrival.member, "revenue": float64(arrival.revenue)}
 				requested, operating := requireA2PortfolioOperatingCreation(t, rt, trigger, payload, "operating_instance_id")
 				report := map[string]any{"portfolio_id": portfolio, "period_id": periodKey, "operating_id": arrival.member, "operating_instance_id": requested.EventID, "revenue": float64(arrival.revenue)}
-				reported := requireA2PortfolioEmission(t, rt, runID, operating.Entity.FlowInstance+"/operating.reported", requested.EventID, report)
+				reported := requireA2PortfolioEmission(t, rt.Endpoint, runID, operating.Entity.FlowInstance+"/operating.reported", requested.EventID, report)
 				requireA2PortfolioDelivery(t, reported, "portfolio", "portfolio-router", parents[index], "existing_entity")
-				forwarded := requireA2PortfolioEmission(t, rt, runID, parents[index].Entity.FlowInstance+"/period.reported", reported.EventID, payload)
+				forwarded := requireA2PortfolioEmission(t, rt.Endpoint, runID, parents[index].Entity.FlowInstance+"/period.reported", reported.EventID, payload)
 				requireA2PortfolioDelivery(t, forwarded, "portfolio/period", "portfolio-collector", periods[index], "existing_entity")
 				if arrival.member == "op-a" && index == 0 || arrival.member == "op-b" && index == 1 {
 					periods[index] = waitA2PortfolioComplete(t, rt, runID, periods[index].Entity.FlowInstance)
 				} else {
-					periods[index] = requireA2PortfolioEntity(t, rt, runID, periods[index].Entity.FlowInstance)
+					periods[index] = requireA2PortfolioEntity(t, rt.Endpoint, runID, periods[index].Entity.FlowInstance)
 				}
-				if !reflect.DeepEqual(otherBefore, requireA2PortfolioEntity(t, rt, runID, periods[1-index].Entity.FlowInstance)) {
+				if !reflect.DeepEqual(otherBefore, requireA2PortfolioEntity(t, rt.Endpoint, runID, periods[1-index].Entity.FlowInstance)) {
 					t.Fatal("same period/member key in another portfolio changed sibling state or arm")
 				}
 			}

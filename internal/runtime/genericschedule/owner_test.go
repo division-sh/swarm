@@ -493,6 +493,14 @@ func (p lifecycleProofCommit) ValidateCommittedDurablePublication() error {
 	return p.plan.ValidateDurablePublicationPlan()
 }
 
+func (p lifecycleProofCommit) ValidatePlannedPublication(expected runtimeengine.DurablePublicationPlan) error {
+	plan, ok := expected.(lifecycleProofPlan)
+	if !ok || plan.intent.Event.ID() != p.plan.intent.Event.ID() {
+		return errors.New("lifecycle proof commit differs from its planned occurrence")
+	}
+	return p.ValidateCommittedDurablePublication()
+}
+
 type lifecycleProofStore struct {
 	activation    Activation
 	missing       bool

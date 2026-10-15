@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,7 +49,6 @@ func deploymentResourceSourceWithAgent(t *testing.T, includeAgent bool) semantic
 
 type deploymentResourceFixture struct {
 	selected    notifyAllChildrenStore
-	db          *sql.DB
 	postgresDSN string
 	source      semanticview.Source
 	runtime     notifyAllChildrenRuntime
@@ -82,13 +80,10 @@ func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source
 	f := &deploymentResourceFixture{source: source}
 	switch backend {
 	case "sqlite":
-		selected := storetest.StartSQLiteRuntimeStore(t)
-		f.selected, f.db = selected, storetest.DatabaseForTest(selected)
+		f.selected = storetest.StartSQLiteRuntimeStore(t)
 	case "postgres":
-		dsn, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		f.postgresDSN = dsn
-		f.selected, f.db = storetest.AdmitPostgresRuntimeStore(t, db), db
+		f.postgresDSN = testutil.StartPostgresDSN(t)
+		f.selected, _ = storetest.StartPostgresRuntimeStoreWithReopen(t, f.postgresDSN)
 	default:
 		t.Fatalf("unknown selected backend %q", backend)
 	}
@@ -101,7 +96,7 @@ func newDeploymentResourceFixtureWithSource(t *testing.T, backend string, source
 
 func (f *deploymentResourceFixture) boot(t *testing.T) {
 	t.Helper()
-	f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.db, f.source, time.Now, notifyAllChildrenRuntimeOptions{
+	f.runtime = newNotifyAllChildrenRuntime(t, f.selected, f.source, time.Now, notifyAllChildrenRuntimeOptions{
 		processTopology: f.topology,
 		fanOutExecutor: func(coordinator *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
 			return deploymentFanOutDiagnostic{FanOutExecutor: coordinator, t: t}

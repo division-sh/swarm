@@ -15,6 +15,7 @@ import (
 
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -68,20 +69,15 @@ func TestDeploymentSourceFixedTPublishedBeforePipelineChangedPinBothStores(t *te
 			case <-time.After(10 * time.Second):
 				t.Fatal("R3a did not reach the committed publication before pipeline dispatch")
 			}
-			var deliveryID, deliveryStatus, persistedRunID string
-			var handoffStamped bool
-			var pipelineReceipts, attempts int
-			err := f.db.QueryRowContext(f.ctx, `SELECT CAST(d.delivery_id AS TEXT),d.status,d.continuation_handoff_at IS NOT NULL,CAST(e.run_id AS TEXT),
-				(SELECT COUNT(*) FROM event_receipts r WHERE r.event_id=e.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'),
-				(SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id)
-				FROM events e JOIN event_deliveries d ON d.event_id=e.event_id WHERE e.event_id=$1`, pointEventID).
-				Scan(&deliveryID, &deliveryStatus, &handoffStamped, &persistedRunID, &pipelineReceipts, &attempts)
+			cut, err := storetest.ReadDeploymentPreReceiptDeliveryCutStorage(f.ctx, f.selected, pointEventID)
 			if err != nil {
 				if err == sql.ErrNoRows {
 					t.Fatal("R3a probe fired without committed event and delivery rows")
 				}
 				t.Fatal(err)
 			}
+			deliveryID, deliveryStatus, persistedRunID := cut.ID, cut.Status, cut.EventRunID
+			handoffStamped, pipelineReceipts, attempts := cut.Handoff, cut.Receipts, cut.Attempts
 			if persistedRunID != sourceRunID || deliveryID == "" || deliveryStatus != "pending" || pipelineReceipts != 0 || handoffStamped || attempts != 0 {
 				t.Fatalf("R3a requires committed row before pipeline receipt or handoff at T: source=%s event_run=%s delivery=%q status=%q receipt=%d handoff=%t attempts=%d", sourceRunID, persistedRunID, deliveryID, deliveryStatus, pipelineReceipts, handoffStamped, attempts)
 			}
@@ -136,8 +132,8 @@ func TestDeploymentSourceFixedTPublishedBeforePipelineChangedPinBothStores(t *te
 			if !seen["old"] || !seen["new"] {
 				t.Fatalf("R3a fork failed to retain old pending and new pin rows: %+v", seen)
 			}
-			var newFeedOutcomes int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed'`, result.ForkRunID).Scan(&newFeedOutcomes); err != nil {
+			newFeedOutcomes, err := storetest.CountDeploymentCommittedOutcomesStorage(f.ctx, f.selected, result.ForkRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if newFeedOutcomes != 1 {

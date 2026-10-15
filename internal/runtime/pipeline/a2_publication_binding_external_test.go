@@ -346,8 +346,8 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 					}
 					cancel()
 					assertExactJoinDeliveryStatus(t, selected, ctx, triggerID, worker.Key(), "in_progress")
-					var publications int
-					if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events WHERE source_event_id=$1", triggerID).Scan(&publications); err != nil || publications != 0 {
+					publications, err := storetest.CountSourceEventPublications(ctx, selected.events, triggerID)
+					if err != nil || publications != 0 {
 						t.Fatalf("rejected first publication leaked: count=%d err=%v", publications, err)
 					}
 					root, found, err := pc.Load(ctx, testRunScopedWorkflowInstanceForRun(runID, runID))
@@ -392,24 +392,24 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 						t.Fatalf("upstream worker did not complete: status=%s err=%v", completed.Status, err)
 					}
 					assertExactJoinDeliveryStatus(t, selected, ctx, triggerID, worker.Key(), "delivered")
-					var outputID string
-					if err := selected.db.QueryRowContext(ctx, "SELECT event_id FROM events WHERE source_event_id=$1", triggerID).Scan(&outputID); err != nil {
+					outputID, err := storetest.ReadSourceEventPublicationIdentity(ctx, selected.events, triggerID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					blocked, found, err := selected.events.LoadPreparedPublishEvent(ctx, outputID)
 					if err != nil || !found || len(blocked.DeliveryRoutes) != 0 || blocked.Settlement.Reason() != events.NoDeliveryResolutionBlocked {
 						t.Fatalf("missing key did not retain route refusal: publication=%#v found=%v err=%v", blocked, found, err)
 					}
-					var raw string
-					if err := selected.db.QueryRowContext(ctx, "SELECT CAST(failure AS TEXT) FROM dead_letters WHERE original_event_id=$1", outputID).Scan(&raw); err != nil {
+					raw, err := storetest.ReadGateDeadLetterFailure(ctx, selected.events, outputID)
+					if err != nil {
 						t.Fatal(err)
 					}
 					var refusal failures.Envelope
 					if err := json.Unmarshal([]byte(raw), &refusal); err != nil || refusal.Detail.Code != pinrouting.ConnectFailureInstanceSourceValueMissing.Code() {
 						t.Fatalf("missing key lacks typed refusal: %s err=%v", raw, err)
 					}
-					var routes int
-					if err := selected.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM event_deliveries WHERE event_id=$1", outputID).Scan(&routes); err != nil || routes != 0 {
+					routes, err := storetest.CountTemplateEventDeliveries(ctx, selected.events, outputID)
+					if err != nil || routes != 0 {
 						t.Fatalf("missing key invented an executable receiver: count=%d err=%v", routes, err)
 					}
 					root, found, err := pc.Load(ctx, testRunScopedWorkflowInstanceForRun(runID, runID))
@@ -428,12 +428,11 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 					_, _, settleErr := probe.WaitAfter(settleCtx, completedCursor, lifecycleprobe.Signal{Kind: lifecycleprobe.DeliveryStatusChanged, EventID: triggerID, SubscriberType: "node", SubscriberID: worker.Key()})
 					quietErr := bus.WaitForQuiescence(settleCtx)
 					settleCancel()
-					var failure string
-					readErr := selected.db.QueryRowContext(ctx, "SELECT CAST(COALESCE(failure, '{}') AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_id=$2", triggerID, worker.Key()).Scan(&failure)
+					failure, readErr := storetest.ReadGateSubscriberFailureOrEmptyObject(ctx, selected.events, triggerID, worker.Key())
 					t.Fatalf("real worker output: status=%s err=%v settlement=%v quiet=%v read=%v failure=%s logs=%s", completed.Status, err, settleErr, quietErr, readErr, failure, logger.String())
 				}
-				var outputID string
-				if err := selected.db.QueryRowContext(ctx, "SELECT event_id FROM events WHERE source_event_id=$1 AND event_name=$2", triggerID, "item.completed").Scan(&outputID); err != nil {
+				outputID, err := storetest.ReadTemplateSourceNamedEventIdentity(ctx, selected.events, "item.completed", triggerID)
+				if err != nil {
 					t.Fatal(err)
 				}
 				prepared, found, err := selected.events.LoadPreparedPublishEvent(ctx, outputID)
@@ -450,8 +449,8 @@ func testA2StageEntryPublicationBinding(t *testing.T, scenarios []int) {
 						t.Fatalf("retry of new output invented a newer arm: %#v", route)
 					}
 					assertExactJoinDeliveryStatus(t, selected, ctx, outputID, collectors[0].Key(), "dead_letter")
-					var raw string
-					if err := selected.db.QueryRowContext(ctx, "SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_id=$2", outputID, collectors[0].Key()).Scan(&raw); err != nil {
+					raw, err := storetest.ReadGateSubscriberFailure(ctx, selected.events, outputID, collectors[0].Key())
+					if err != nil {
 						t.Fatal(err)
 					}
 					var refusal failures.Envelope

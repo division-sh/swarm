@@ -106,7 +106,7 @@ func requireReceiverInitializationPublicProviderIngressCases(t *testing.T, rt se
 	if !seed.NewRunCreated || seed.RunID == "" || seed.EventID == "" {
 		t.Fatalf("target-free creation acknowledgment=%+v", seed)
 	}
-	waitPublicationSiteCompletion(t, rt, seed.RunID)
+	waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed.RunID)
 	const path = "telegram-chat/ti-1531b1e4416a29704d690346"
 	entityID := flowidentity.EntityID(path)
 	record, receiver := requireReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, "telegram-chat", path, entityID)

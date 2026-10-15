@@ -2,17 +2,13 @@ package runtimepersistence_test
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -23,9 +19,7 @@ func TestContextualRuntimeProducerLineageReadbackParity(t *testing.T) {
 	}{
 		{name: "sqlite", open: func(t *testing.T) any { return storetest.StartSQLiteRuntimeStore(t) }},
 		{name: "postgres", open: func(t *testing.T) any {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			return storetest.AdmitPostgresRuntimeStore(t, db)
+			return storetest.StartPostgresRuntimeStore(t)
 		}},
 	}
 	manifestations := []struct {
@@ -72,11 +66,7 @@ func TestContextualRuntimeProducerLineageReadbackParity(t *testing.T) {
 						}
 						event = eventtest.InExecutionMode(event, mode)
 						if manifestation.directWrite {
-							dialect := authoractivityfixture.DialectSQLite
-							if backend.name == "postgres" {
-								dialect = authoractivityfixture.DialectPostgres
-							}
-							storetest.InsertCanonicalEventRecord(t, ctx, selectedDatabase(t, selectedStore), dialect, event)
+							storetest.InsertNativeCanonicalEventRecord(t, ctx, selectedStore, event)
 						} else {
 							storetest.CommitSemanticEvent(t, ctx, selectedStore, event)
 						}
@@ -88,18 +78,5 @@ func TestContextualRuntimeProducerLineageReadbackParity(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func selectedDatabase(t *testing.T, selectedStore any) *sql.DB {
-	t.Helper()
-	switch selected := selectedStore.(type) {
-	case *store.PostgresStore:
-		return storetest.DatabaseForTest(selected)
-	case *store.SQLiteRuntimeStore:
-		return storetest.DatabaseForTest(selected)
-	default:
-		t.Fatalf("selected store %T has no canonical database", selectedStore)
-		return nil
 	}
 }

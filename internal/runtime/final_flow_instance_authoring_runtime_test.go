@@ -2,7 +2,6 @@ package runtime_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -26,7 +25,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -38,8 +36,8 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		t.Fatalf("final flow-instance authoring hard invalidities = %#v, want none", got)
 	}
 
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+	pg := storetest.StartPostgresRuntimeStore(t)
+
 	if bundle.SourceArtifact == nil {
 		t.Fatal("flow activation proof requires its compiled source artifact")
 	}
@@ -50,7 +48,7 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	ctx := correlation.WithRunID(correlation.WithSourceArtifactFact(testAuthorActivityContext(context.Background()), fact), templateInstanceDeliveryRunID)
 	ctx = correlation.WithRuntimeInstanceID(ctx, authorActivityTestRuntimeInstanceID)
 	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()))
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID, Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	var manager *runtimemanager.AgentManager
 	var pc *runtimepipeline.PipelineCoordinator
@@ -159,10 +157,9 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 1 || !preflight.UsesCanonicalRouteAuthority() {
 		t.Fatalf("preflight failure/routes/canonical = %q/%#v/%v, want one canonical template route", preflight.TargetFailure, preflight.DeliveryRoutes, preflight.UsesCanonicalRouteAuthority())
 	}
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM entity_state
-		WHERE flow_instance LIKE 'account/%'
-	`, 0)
+	assertRuntimeStorageCount(t, "CountTemplateAccountEntities", 0, func() (int, error) {
+		return storetest.CountTemplateAccountEntities(ctx, pg)
+	})
 
 	if err := bus.PublishAcknowledged(ctx, evt); err != nil {
 		t.Fatalf("PublishAcknowledged final account.ready: %v", err)
@@ -171,34 +168,21 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 		if !t.Failed() {
 			return
 		}
-		dumpFinalFlowInstanceAuthoringRuntimeProofState(t, ctx, db, evt.ID())
+		dumpFinalFlowInstanceAuthoringRuntimeProofState(t, ctx, pg, evt.ID())
 	})
 	templateNodeID := identitytest.FlowNode(t, finalflowinstanceauthoring.TemplateFlowID, finalflowinstanceauthoring.TemplateNodeID).Key()
-	waitRuntimeNodeDeliveryOutcome(t, ctx, db, evt.ID(), templateNodeID)
-	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM entity_state
-		WHERE flow_instance LIKE 'account/%'
-		  AND current_state = 'reviewed'
-		  AND fields @> $1::jsonb
-	`, 1, `{"account_id":"acct-42","score":"91","decision":"approved"}`)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM entity_state
-		WHERE flow_instance LIKE 'account/%'
-	`, 1)
+	waitRuntimeNodeDeliveryOutcome(t, ctx, pg, evt.ID(), templateNodeID)
+	waitRuntimeStorageCount(t, ctx, pg, "CountPostgresReviewedTemplateAccount", 1, func() (int, error) {
+		return storetest.CountPostgresReviewedTemplateAccount(ctx, pg, `{"account_id":"acct-42","score":"91","decision":"approved"}`)
+	})
+	assertRuntimeStorageCount(t, "CountTemplateAccountEntities", 1, func() (int, error) {
+		return storetest.CountTemplateAccountEntities(ctx, pg)
+	})
 
-	flowInstance, entityID := loadFinalFlowInstanceAuthoringTemplateIdentity(t, ctx, db)
-	assertRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM event_deliveries
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'node'
-		  AND subscriber_id = $2
-		  AND status = 'delivered'
-		  AND delivery_target_route @> $3::jsonb
-	`, 1, evt.ID(), templateNodeID, finalFlowInstanceAuthoringDeliveryTargetRouteJSON(t, events.RouteIdentity{
-		FlowID:       finalflowinstanceauthoring.TemplateFlowID,
-		FlowInstance: flowInstance,
-		EntityID:     entityID,
-	}))
+	flowInstance, entityID := loadFinalFlowInstanceAuthoringTemplateIdentity(t, ctx, pg)
+	assertRuntimeStorageCount(t, "CountPostgresTemplateDeliveredNodeTarget", 1, func() (int, error) {
+		return storetest.CountPostgresTemplateDeliveredNodeTarget(ctx, pg, evt.ID(), templateNodeID, finalFlowInstanceAuthoringDeliveryTargetRouteJSON(t, events.RouteIdentity{FlowID: finalflowinstanceauthoring.TemplateFlowID, FlowInstance: flowInstance, EntityID: entityID}))
+	})
 
 	loaded, ok, err := pc.Load(ctx, runtimeflowidentity.RunScopedFlowInstance{
 		RunID: templateInstanceDeliveryRunID,
@@ -220,20 +204,13 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	}
 }
 
-func loadFinalFlowInstanceAuthoringTemplateIdentity(t *testing.T, ctx context.Context, db *sql.DB) (string, string) {
+func loadFinalFlowInstanceAuthoringTemplateIdentity(t *testing.T, ctx context.Context, selected any) (string, string) {
 	t.Helper()
-	var flowInstance string
-	var entityID string
-	if err := db.QueryRowContext(ctx, `
-		SELECT flow_instance, entity_id::text
-		FROM entity_state
-		WHERE flow_instance LIKE 'account/%'
-		ORDER BY created_at DESC
-		LIMIT 1
-	`).Scan(&flowInstance, &entityID); err != nil {
+	row, err := storetest.ReadLatestTemplateAccountIdentity(ctx, selected)
+	if err != nil {
 		t.Fatalf("load account_case instance identity: %v", err)
 	}
-	return flowInstance, entityID
+	return row.Path, row.EntityID
 }
 
 func finalFlowInstanceAuthoringDeliveryTargetRouteJSON(t *testing.T, target events.RouteIdentity) string {
@@ -245,75 +222,30 @@ func finalFlowInstanceAuthoringDeliveryTargetRouteJSON(t *testing.T, target even
 	return strings.TrimSpace(string(encoded))
 }
 
-func dumpFinalFlowInstanceAuthoringRuntimeProofState(t *testing.T, ctx context.Context, db *sql.DB, eventID string) {
+func dumpFinalFlowInstanceAuthoringRuntimeProofState(t *testing.T, ctx context.Context, selected any, eventID string) {
 	t.Helper()
-	rows, err := db.QueryContext(ctx, `
-		SELECT subscriber_type, subscriber_id, status, COALESCE(reason_code, ''), COALESCE(failure::text, ''),
-		       COALESCE(delivery_target_route::text, '')
-		FROM event_deliveries
-		WHERE event_id = $1::uuid
-		ORDER BY subscriber_type, subscriber_id
-	`, eventID)
+	deliveries, err := storetest.ReadTemplateEventDeliveryDiagnostics(ctx, selected, eventID)
 	if err != nil {
 		t.Logf("event_deliveries diagnostic query failed: %v", err)
 		return
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var subscriberType, subscriberID, status, reason, failure, target string
-		if err := rows.Scan(&subscriberType, &subscriberID, &status, &reason, &failure, &target); err != nil {
-			t.Logf("event_deliveries diagnostic scan failed: %v", err)
-			return
-		}
-		t.Logf("event_delivery: type=%s id=%s status=%s reason=%s failure=%s target=%s", subscriberType, subscriberID, status, reason, failure, target)
+	for _, row := range deliveries {
+		t.Logf("event_delivery: type=%s id=%s status=%s reason=%s failure=%s target=%s", row.SubscriberType, row.SubscriberID, row.Status, row.Reason, row.Failure, row.Target)
 	}
-	if err := rows.Err(); err != nil {
-		t.Logf("event_deliveries diagnostic rows failed: %v", err)
-	}
-
-	receiptRows, err := db.QueryContext(ctx, `
-		SELECT subscriber_type, subscriber_id, outcome, COALESCE(idempotency_key, ''), COALESCE(side_effects::text, '')
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		ORDER BY subscriber_type, subscriber_id, idempotency_key
-	`, eventID)
+	receipts, err := storetest.ReadTemplateEventReceiptDiagnostics(ctx, selected, eventID)
 	if err != nil {
 		t.Logf("event_receipts diagnostic query failed: %v", err)
 		return
 	}
-	defer receiptRows.Close()
-	for receiptRows.Next() {
-		var subscriberType, subscriberID, outcome, idempotencyKey, sideEffects string
-		if err := receiptRows.Scan(&subscriberType, &subscriberID, &outcome, &idempotencyKey, &sideEffects); err != nil {
-			t.Logf("event_receipts diagnostic scan failed: %v", err)
-			return
-		}
-		t.Logf("event_receipt: type=%s id=%s outcome=%s key=%s side_effects=%s", subscriberType, subscriberID, outcome, idempotencyKey, sideEffects)
+	for _, row := range receipts {
+		t.Logf("event_receipt: type=%s id=%s outcome=%s key=%s side_effects=%s", row.SubscriberType, row.SubscriberID, row.Outcome, row.IdempotencyKey, row.SideEffects)
 	}
-	if err := receiptRows.Err(); err != nil {
-		t.Logf("event_receipts diagnostic rows failed: %v", err)
-	}
-
-	stateRows, err := db.QueryContext(ctx, `
-		SELECT entity_id::text, flow_instance, current_state, fields::text
-		FROM entity_state
-		WHERE flow_instance LIKE 'account/%'
-		ORDER BY created_at
-	`)
+	states, err := storetest.ReadTemplateAccountDiagnostics(ctx, selected)
 	if err != nil {
 		t.Logf("entity_state diagnostic query failed: %v", err)
 		return
 	}
-	defer stateRows.Close()
-	for stateRows.Next() {
-		var entityID, flowInstance, currentState, fields string
-		if err := stateRows.Scan(&entityID, &flowInstance, &currentState, &fields); err != nil {
-			t.Logf("entity_state diagnostic scan failed: %v", err)
-			return
-		}
-		t.Logf("entity_state: entity=%s flow_instance=%s state=%s fields=%s", entityID, flowInstance, currentState, fields)
-	}
-	if err := stateRows.Err(); err != nil {
-		t.Logf("entity_state diagnostic rows failed: %v", err)
+	for _, row := range states {
+		t.Logf("entity_state: entity=%s flow_instance=%s state=%s fields=%s", row.EntityID, row.Path, row.State, row.Fields)
 	}
 }

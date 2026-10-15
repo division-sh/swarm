@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,7 +35,6 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
@@ -59,7 +57,7 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 	publishedResult := asMap(t, published.Result)
 	publishedRunID := stringValue(t, publishedResult["run_id"], "run_id")
 	publishedEventID := stringValue(t, publishedResult["event_id"], "event_id")
-	assertRunBundleIdentity(t, fixture.db, publishedRunID, runtimeContextTestBundleHashB)
+	assertRunBundleIdentity(t, fixture.pg, publishedRunID, runtimeContextTestBundleHashB)
 	if got := countEventsByName(t, fixture.pg, "triage.requested"); got != 1 {
 		t.Fatalf("triage.requested count after event.publish = %d, want 1", got)
 	}
@@ -74,7 +72,7 @@ func TestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle(t *tes
 	if started.Error != nil {
 		t.Fatalf("run.start error = %#v", started.Error)
 	}
-	assertRunBundleIdentity(t, fixture.db, runID, runtimeContextTestBundleHashB)
+	assertRunBundleIdentity(t, fixture.pg, runID, runtimeContextTestBundleHashB)
 	if got := countEventsByName(t, fixture.pg, "triage.requested"); got != 2 {
 		t.Fatalf("triage.requested count after run.start = %d, want 2", got)
 	}
@@ -145,7 +143,7 @@ func TestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle(t *testing
 	if got := countEventRowsByRunID(t, fixture.pg, runID); got != 1 {
 		t.Fatalf("event rows for existing run = %d, want 1", got)
 	}
-	assertRunBundleIdentity(t, fixture.db, runID, runtimeContextTestBundleHashB)
+	assertRunBundleIdentity(t, fixture.pg, runID, runtimeContextTestBundleHashB)
 	got := fixture.probeB.require(t, "existing-run selected-context dispatch")
 	if got.ID() != eventID || got.RunID() != runID {
 		t.Fatalf("existing-run delivery id/run = %s/%s, want %s/%s", got.ID(), got.RunID(), eventID, runID)
@@ -654,7 +652,6 @@ func TestOperatorRuntimeContextManagerFailsClosedForAmbiguousRuntimeConsumers(t 
 }
 
 type operatorRuntimeContextFixture struct {
-	db      *sql.DB
 	pg      *store.PostgresStore
 	sourceA semanticview.Source
 	sourceB semanticview.Source
@@ -669,8 +666,7 @@ type operatorRuntimeContextFixture struct {
 
 func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixture {
 	t.Helper()
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	seedRuntimeContextSourceArtifact(t, pg, authorActivityTestSourceArtifact)
 	seedRuntimeContextSourceArtifact(t, pg, runtimeContextTestSourceArtifactB)
 
@@ -700,7 +696,6 @@ func newOperatorRuntimeContextFixture(t *testing.T) operatorRuntimeContextFixtur
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
 	return operatorRuntimeContextFixture{
-		db:      db,
 		pg:      pg,
 		sourceA: sourceA,
 		sourceB: sourceB,

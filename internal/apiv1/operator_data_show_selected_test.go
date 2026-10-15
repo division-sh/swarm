@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -113,34 +114,9 @@ func dataShowReadOnlyHandlers(t *testing.T, fixture dataRunLifecycleFixture) map
 	t.Helper()
 	snapshot := func() map[string][]string {
 		t.Helper()
-		state := map[string][]string{}
-		for _, table := range []string{"resource_declarations", "resource_bundle_declarations", "resource_bundle_import_shapes", "resource_heads", "resource_head_history", "resource_versions", "resource_version_provenance", "resource_version_pins", "resource_source_invocations", "resource_prune_invocations", "resource_prune_pin_evidence", "resource_run_creation_operations", "resource_run_creation_child_evaluations", "resource_run_creation_child_reservations"} {
-			func() {
-				rows, err := fixture.db.QueryContext(context.Background(), "SELECT * FROM "+table)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer rows.Close()
-				columns, err := rows.Columns()
-				if err != nil {
-					t.Fatal(err)
-				}
-				for rows.Next() {
-					values := make([]any, len(columns))
-					pointers := make([]any, len(columns))
-					for i := range values {
-						pointers[i] = &values[i]
-					}
-					if err := rows.Scan(pointers...); err != nil {
-						t.Fatal(err)
-					}
-					state[table] = append(state[table], fmt.Sprintf("%#v", values))
-				}
-				if err := rows.Err(); err != nil {
-					t.Fatal(err)
-				}
-				sort.Strings(state[table])
-			}()
+		state, err := storetest.ReadResourcePhysicalSnapshot(context.Background(), fixture.primary)
+		if err != nil {
+			t.Fatal(err)
 		}
 		return state
 	}

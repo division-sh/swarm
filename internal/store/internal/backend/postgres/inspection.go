@@ -34,6 +34,28 @@ func (b *Backend) InspectSnapshot(ctx context.Context, inspect func(context.Cont
 	})
 }
 
+// InspectRetainedAgentRecovery reuses the original retained lease transaction.
+// No SQL transaction or mutation capability crosses this read-only aperture.
+func (b *Backend) InspectRetainedAgentRecovery(ctx context.Context, lease *AdvisoryLockLease, inspect func(context.Context) error) error {
+	if !b.Valid() || ctx == nil || lease == nil || inspect == nil {
+		return errors.New("agent recovery inspection requires its selected backend, retained lease and reader")
+	}
+	if tx, err := b.inspectionTransaction(ctx); err != nil {
+		return err
+	} else if tx != nil {
+		return errors.New("agent recovery cannot adopt a caller's inspection snapshot")
+	}
+	lease.mu.Lock()
+	current := !lease.released && lease.session != nil && lease.session.backend == b
+	lease.mu.Unlock()
+	if !current {
+		return errors.New("agent recovery retained lease differs from its selected backend")
+	}
+	return lease.ProveCurrentWithRead(ctx, 0, func(native context.Context, tx *sql.Tx) error {
+		return b.inspectTransaction(native, tx, inspect)
+	})
+}
+
 func (b *Backend) inspectTransaction(ctx context.Context, tx *sql.Tx, inspect func(context.Context) error) error {
 	active := &atomic.Bool{}
 	active.Store(true)

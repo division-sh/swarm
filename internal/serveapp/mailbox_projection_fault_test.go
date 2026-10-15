@@ -88,11 +88,11 @@ func runMailboxResponseProjectionRollback(t *testing.T) {
 						f := mailboxCompletionFixtureInRuntime(t, rt, owner)
 						params := mailboxPrincipalMutationParams(t, f, kind, method)
 						req := mailboxPrincipalRequest(t, rt, method, params)
-						before := mailboxCompletionRunEffects(t, rt, f.base.RunID)
+						before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID)
 						witness := filepath.Join(t.TempDir(), "projection-reached")
 						t.Setenv("SWARM_TEST_MAILBOX_PROJECTION_WITNESS", witness)
 						t.Setenv("SWARM_TEST_MAILBOX_PROJECTION_RESOURCE", req.ResourceID)
-						_, replayed, err := mailboxTokenlessMutation(f.ctx, rt, owner, req, params)
+						_, replayed, err := mailboxTokenlessMutation(f.ctx, rt.Runtime, owner, req, params)
 						if err == nil || !strings.Contains(err.Error(), "mailbox_exact_response_projection_cut") || replayed {
 							t.Fatalf("exact response projection did not fail: replay=%t err=%v", replayed, err)
 						}
@@ -100,7 +100,7 @@ func runMailboxResponseProjectionRollback(t *testing.T) {
 						if err != nil || string(seen) != req.ResourceID {
 							t.Fatalf("wrong projection fault cut: %s err=%v", seen, err)
 						}
-						if after := mailboxCompletionRunEffects(t, rt, f.base.RunID); !reflect.DeepEqual(before, after) {
+						if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, f.base.RunID); !reflect.DeepEqual(before, after) {
 							t.Fatalf("projection error committed domain: %s", mailboxEffectsDifference(before, after))
 						}
 						var count int

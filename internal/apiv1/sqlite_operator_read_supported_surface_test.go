@@ -45,8 +45,8 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 		identityFields.FlowInstancePath, base.Add(-5*time.Minute), base); err != nil {
 		t.Fatalf("seed sqlite session: %v", err)
 	}
-	storetest.InsertExistingRunRootEventRecord(
-		t, ctx, storetest.DatabaseForTest(sqliteStore), "sqlite", eventID, runID, events.EventType("operator.read"),
+	storetest.InsertNativeExistingRunRootEvent(
+		t, ctx, sqliteStore, eventID, runID, events.EventType("operator.read"),
 		eventtest.Producer(events.EventProducerExternal, "operator-read-fixture"), []byte(`{}`),
 		events.EventEnvelope{Scope: events.EventScopeGlobal}, base.Add(-4*time.Minute),
 	)

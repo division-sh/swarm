@@ -45,7 +45,7 @@ func TestReceiverCompositionFailureSettlementBothStores(t *testing.T) {
 				"event_name": "work.seeded", "bundle_hash": rt.BundleHash,
 				"payload": map[string]any{"seed": true}, "idempotency_key": "receiver-seed",
 			})
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "active")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "active")
 			params := map[string]any{"event_name": "work.requested", "run_id": seed.RunID,
 				"source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "receiver-reject"}
 			published := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
@@ -122,8 +122,8 @@ func TestReceiverCompositionFailureSettlementBothStores(t *testing.T) {
 			}
 			// Async pipeline acknowledgement owns durable handoff, not the later
 			// receiver outcome proved above. The exact node still refuses once.
-			waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, published.EventID, "platform", "pipeline", "success", 1)
-			requireReceiverPublicReadback(t, rt, seed.RunID)
+			waitServedEventPublishReceiptOutcomeCount(t, rt.ReceiverStateReader, rt.Backend, published.EventID, "platform", "pipeline", "success", 1)
+			requireReceiverPublicReadback(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID)
 		})
 	}
 }

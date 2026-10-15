@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/telegramapi"
@@ -59,7 +59,6 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	publicListen := publicListener.Addr().String()
 	redirectExternalHosts(t, map[string]string{"hooks.channel-onboarding.test": "http://" + publicListen})
 
-	var db *sql.DB
 	var resetSelectedStore func()
 	diagnosticDSN := ""
 	opts := cliapp.ServeOptions{
@@ -74,12 +73,6 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	case servedparity.BackendDefaultSQLite:
 		sqlitePath := filepath.Join(t.TempDir(), "channel-onboarding.sqlite")
 		diagnosticDSN = sqlitePath
-		var err error
-		db, err = sql.Open("sqlite", sqlitePath)
-		if err != nil {
-			t.Fatalf("open SQLite channel diagnostics: %v", err)
-		}
-		t.Cleanup(func() { _ = db.Close() })
 		opts.ConfigPath = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, channelOnboardingHostWorkspaceFields())
 		opts.StoreMode = "sqlite"
 		opts.StoreModeSet = true
@@ -89,29 +82,21 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 			}
 		}
 	case servedparity.BackendExplicitPostgres:
-		dsn, postgresDB, _ := testutil.StartPostgres(t)
+		dsn, emptyStore := testutil.StartEmptyPostgresStore(t)
 		diagnosticDSN = dsn
-		db = postgresDB
+		if count, err := emptyStore.PublicTableCount(context.Background()); err != nil || count != 0 {
+			t.Fatalf("PostgreSQL channel selected store before admission: tables=%d err=%v", count, err)
+		}
 		opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 		opts.StoreMode = "postgres"
 		opts.StoreModeSet = true
 		resetSelectedStore = func() {
-			resetDB, err := sql.Open("postgres", dsn)
-			if err != nil {
-				t.Fatalf("open PostgreSQL channel selected store for reset: %v", err)
+			if err := emptyStore.ResetPublicSchema(context.Background()); err != nil {
+				t.Fatalf("reset PostgreSQL channel selected store: %v", err)
 			}
-			if _, err := resetDB.ExecContext(context.Background(), `DROP SCHEMA public CASCADE`); err != nil {
-				_ = resetDB.Close()
-				t.Fatalf("drop PostgreSQL channel selected-store schema: %v", err)
+			if count, err := emptyStore.PublicTableCount(context.Background()); err != nil || count != 0 {
+				t.Fatalf("PostgreSQL channel selected store after reset: tables=%d err=%v", count, err)
 			}
-			if _, err := resetDB.ExecContext(context.Background(), `CREATE SCHEMA public`); err != nil {
-				_ = resetDB.Close()
-				t.Fatalf("create PostgreSQL channel selected-store schema: %v", err)
-			}
-			if err := resetDB.Close(); err != nil {
-				t.Fatalf("close PostgreSQL channel selected-store reset handle: %v", err)
-			}
-			assertChannelOnboardingPostgresDSNEmpty(t, dsn, "after selected-store reset")
 		}
 	default:
 		t.Fatalf("unsupported backend %q", backend)
@@ -331,8 +316,8 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	if err := crashProcess.stop(); err != nil {
 		t.Fatalf("%s final channel serve shutdown: %v", backend, err)
 	}
-	if db == nil {
-		t.Fatalf("%s selected store database was not captured", backend)
+	if diagnosticDSN == "" {
+		t.Fatalf("%s selected store location was not captured", backend)
 	}
 	for _, scenario := range scenariosForChannelOnboardingJourney() {
 		servedparity.AssertSettlementPostconditions(t, scenario, servedparity.SettlementCounts{})
@@ -373,29 +358,24 @@ func waitNativeInboxCommand(t *testing.T, provider *channelOnboardingTelegramPro
 func channelOnboardingOperationDiagnostic(t *testing.T, backend servedparity.Backend, dsn, operationID string) string {
 	t.Helper()
 	driver := "sqlite"
-	placeholder := "?"
 	if backend == servedparity.BackendExplicitPostgres {
 		driver = "postgres"
-		placeholder = "$1"
 	}
-	db, err := sql.Open(driver, dsn)
+	source, err := storetest.OpenChannelObservation(driver, dsn)
 	if err != nil {
 		return err.Error()
 	}
-	defer db.Close()
-	var phase, failureCode, failureMessage, bundleHash, bundleIdentity, inventory, runtimeInstance, plan, target string
-	var publication, targetGeneration int64
-	err = db.QueryRowContext(context.Background(), `SELECT phase,failure_code,failure_message,bundle_hash,bundle_identity,
-		pack_inventory_generation,runtime_instance_id,context_publication_generation,plan_generation,target_selector,target_generation
-		FROM channel_onboarding_operations WHERE operation_id=`+placeholder, operationID).Scan(
-		&phase, &failureCode, &failureMessage, &bundleHash, &bundleIdentity,
-		&inventory, &runtimeInstance, &publication, &plan, &target, &targetGeneration,
-	)
+	defer source.Close()
+	reader, err := storetest.ObserveChannelProcessStorage(source)
+	if err != nil {
+		return err.Error()
+	}
+	out, err := reader.ReadChannelOnboardingOperationDiagnosticStorage(context.Background(), operationID)
 	if err != nil {
 		return err.Error()
 	}
 	return fmt.Sprintf("phase=%s failure=%s:%s bundle=%s identity=%s inventory=%s runtime_instance=%s publication=%d plan=%s target=%s target_generation=%d",
-		phase, failureCode, failureMessage, bundleHash, bundleIdentity, inventory, runtimeInstance, publication, plan, target, targetGeneration)
+		out.Phase, out.FailureCode, out.FailureMessage, out.BundleHash, out.BundleIdentity, out.Inventory, out.RuntimeInstance, out.Publication, out.Plan, out.Target, out.TargetGeneration)
 }
 
 func assertChannelOnboardingProjectClaimsReleased(t *testing.T, label string) {
@@ -624,27 +604,6 @@ func TestChannelOnboardingCrashServeProcessHelper(t *testing.T) {
 	if code := runFrom(ctx, repoRootForTest(), opts); code != 0 {
 		t.Fatalf("channel onboarding crash serve exited %d", code)
 	}
-}
-
-func assertChannelOnboardingPostgresStoreEmpty(t testing.TB, db *sql.DB, label string) {
-	t.Helper()
-	var tableCount int
-	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'`).Scan(&tableCount); err != nil {
-		t.Fatalf("inspect PostgreSQL channel store %s: %v", label, err)
-	}
-	if tableCount != 0 {
-		t.Fatalf("PostgreSQL channel store %s has %d public tables, want 0", label, tableCount)
-	}
-}
-
-func assertChannelOnboardingPostgresDSNEmpty(t testing.TB, dsn, label string) {
-	t.Helper()
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		t.Fatalf("open PostgreSQL channel store %s: %v", label, err)
-	}
-	defer db.Close()
-	assertChannelOnboardingPostgresStoreEmpty(t, db, label)
 }
 
 func serveRuntimeAPIListenerFromOutputIfPresent(output string) string {
@@ -1134,11 +1093,10 @@ func channelOnboardingHostWorkspaceFields() []string {
 
 func writeChannelOnboardingPostgresRuntimeConfig(t *testing.T, dsn string) string {
 	t.Helper()
-	connection, err := testpostgres.ParseConnection(dsn)
+	parameters, err := testpostgres.ParseConnectionParameters(dsn)
 	if err != nil {
 		t.Fatalf("parse channel onboarding PostgreSQL DSN: %v", err)
 	}
-	parameters := connection.Parameters()
 	t.Setenv("PGPASSWORD", parameters.Password)
 	configText := fmt.Sprintf(`runtime:
   recovery_on_startup: false

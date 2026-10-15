@@ -73,6 +73,17 @@ func TestWorkflowSchedulerObservationKeepsPhysicalHistoryAndExactScopeBothStores
 			if counts := probe.Snapshot(); counts.Total.ReadCommits != 1 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
 				t.Fatalf("observation escaped original read coordinator: %+v", counts)
 			}
+			for _, scope := range []struct {
+				run, event string
+				want       int
+			}{{run, "timer.task_timeout", 5}, {otherRun, "timer.task_timeout", 1}, {run, "foreign.event", 0}} {
+				if got, err := CountRunEventTimerStorageForTest(ctx, f.store, scope.run, scope.event); err != nil || got != scope.want {
+					t.Fatalf("run/event timer history changed (including cancelled, other entity/path/owner): %+v got=%d err=%v", scope, got, err)
+				}
+			}
+			if counts := probe.Snapshot(); counts.Total.ReadCommits != 4 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
+				t.Fatalf("scoped timer observations merged cuts or escaped native owner: %+v", counts)
+			}
 			if got, err := CountWorkflowSchedulerTimersForTest(ctx, f.store, uuid.NewString(), path); err != nil || got != 0 {
 				t.Fatalf("absent scope count: %d %v", got, err)
 			}
@@ -80,6 +91,9 @@ func TestWorkflowSchedulerObservationKeepsPhysicalHistoryAndExactScopeBothStores
 			cancel()
 			if got, err := CountWorkflowSchedulerTimersForTest(cancelled, f.store, entity, path); !errors.Is(err, context.Canceled) || got != 0 {
 				t.Fatalf("cancelled read supplied evidence: %d %v", got, err)
+			}
+			if got, err := CountRunEventTimerStorageForTest(cancelled, f.store, run, "timer.task_timeout"); !errors.Is(err, context.Canceled) || got != 0 {
+				t.Fatalf("cancelled run/event read supplied evidence: %d %v", got, err)
 			}
 			for _, key := range [][2]string{{"", path}, {"invalid", path}, {uuid.Nil.String(), path}, {entity, ""}, {entity, " /mutation-flow/ "}} {
 				if got, err := CountWorkflowSchedulerTimersForTest(ctx, f.store, key[0], key[1]); err == nil || got != 0 {
@@ -91,6 +105,9 @@ func TestWorkflowSchedulerObservationKeepsPhysicalHistoryAndExactScopeBothStores
 			}
 			if got, err := CountWorkflowSchedulerTimersForTest(ctx, f.store, entity, path); err == nil || got != 0 {
 				t.Fatalf("closed owner supplied evidence: %d %v", got, err)
+			}
+			if got, err := CountRunEventTimerStorageForTest(ctx, f.store, run, "timer.task_timeout"); err == nil || got != 0 {
+				t.Fatalf("closed owner supplied run/event evidence: %d %v", got, err)
 			}
 		})
 	}

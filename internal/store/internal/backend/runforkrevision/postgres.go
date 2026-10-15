@@ -3,6 +3,7 @@ package runforkrevision
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
@@ -112,4 +113,81 @@ func CountActivityJournalRevisionsForTest(ctx context.Context, tx *sql.Tx, runID
 		return 0, err
 	}
 	return count, nil
+}
+
+func CountRunFactRevisionRowsForTest(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1`, runID).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func ReadLatestRunRevisionStorageForTestTx(ctx context.Context, tx *sql.Tx, runID string) (int64, error) {
+	var revision int64
+	err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(revision),0) FROM run_fork_revisions WHERE run_id=$1`, runID).Scan(&revision)
+	return revision, err
+}
+
+func CountServingLifetimeHistoryStorageTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations'`, runID).Scan(&count)
+	return count, err
+}
+
+type FanOutObligationHistoryStorage struct {
+	Key  string
+	Fact []byte
+}
+
+type RunRevisionFactStorage struct {
+	Family, Key string
+	Fact        []byte
+	Present     bool
+}
+
+func ReadLatestFanOutObligationFactStorageTx(ctx context.Context, tx *sql.Tx, runID string) (FanOutObligationHistoryStorage, error) {
+	var out FanOutObligationHistoryStorage
+	err := tx.QueryRowContext(ctx, `SELECT fact_key,fact
+		FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations'
+		ORDER BY revision DESC LIMIT 1`, runID).Scan(&out.Key, &out.Fact)
+	return out, err
+}
+
+func ReadRunRevisionFactStorageTx(ctx context.Context, tx *sql.Tx, runID string, revision int64) (RunRevisionFactStorage, error) {
+	var out RunRevisionFactStorage
+	err := tx.QueryRowContext(ctx, `SELECT family,fact_key,fact,present
+		FROM run_fork_fact_revisions WHERE run_id=$1 AND revision=$2`, runID, revision).Scan(&out.Family, &out.Key, &out.Fact, &out.Present)
+	return out, err
+}
+
+// Preserve the complete physical revision witness. These bytes are not
+// historical payload admission or authority to restore executable work.
+func ReadFanOutObligationHistoryStorageForTestTx(ctx context.Context, tx *sql.Tx, runID string) ([]FanOutObligationHistoryStorage, error) {
+	return readFanOutObligationHistoryStorageTx(ctx, tx, runID, `SELECT fact_key,fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations' ORDER BY revision,fact_key`)
+}
+
+func ReadSupplementalFanOutObligationHistoryTx(ctx context.Context, tx *sql.Tx, runID string) ([]FanOutObligationHistoryStorage, error) {
+	return readFanOutObligationHistoryStorageTx(ctx, tx, runID, `SELECT fact_key,fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations' ORDER BY fact_key,revision`)
+}
+
+func readFanOutObligationHistoryStorageTx(ctx context.Context, tx *sql.Tx, runID, query string) ([]FanOutObligationHistoryStorage, error) {
+	rows, err := tx.QueryContext(ctx, query, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FanOutObligationHistoryStorage
+	for rows.Next() {
+		var row FanOutObligationHistoryStorage
+		if err := rows.Scan(&row.Key, &row.Fact); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		row.Fact = append([]byte(nil), row.Fact...)
+		out = append(out, row)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

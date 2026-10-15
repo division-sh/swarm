@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -74,27 +75,31 @@ func standaloneTextDataCommand2456(t *testing.T, f *deploymentResourceFixture, s
 func standaloneTextDataCounts2456(t *testing.T, f *deploymentResourceFixture) (versions, history, receipts, revision int, head string) {
 	t.Helper()
 	for _, item := range []struct {
-		query string
-		out   *int
+		read func(context.Context, any) (int, error)
+		out  *int
 	}{
-		{`SELECT COUNT(*) FROM resource_versions WHERE flow_path='.' AND event_name='root.ready'`, &versions},
-		{`SELECT COUNT(*) FROM resource_head_history WHERE flow_path='.' AND event_name='root.ready'`, &history},
-		{`SELECT COUNT(*) FROM resource_source_invocations`, &receipts},
+		{storetest.CountRootReadyResourceVersionsStorage, &versions},
+		{storetest.CountRootReadyResourceHeadHistoryStorage, &history},
+		{storetest.CountGlobalResourceSourceInvocationsStorage, &receipts},
 	} {
-		if err := f.db.QueryRowContext(f.ctx, item.query).Scan(item.out); err != nil {
+		got, err := item.read(f.ctx, f.selected)
+		if err != nil {
 			t.Fatal(err)
 		}
+		*item.out = got
 	}
-	if err := f.db.QueryRowContext(f.ctx, `SELECT COALESCE(version_id, ''), revision FROM resource_heads WHERE flow_path='.' AND event_name='root.ready'`).Scan(&head, &revision); err != nil {
+	observed, err := storetest.ReadRootReadyResourceHeadStorage(f.ctx, f.selected)
+	if err != nil {
 		t.Fatal(err)
 	}
+	head, revision = observed.Version, observed.Revision
 	return
 }
 
 func standaloneTextDataReceiptCount2456(t *testing.T, f *deploymentResourceFixture, sourceID string) int {
 	t.Helper()
-	var count int
-	if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM resource_source_invocations WHERE source_invocation_id=$1`, sourceID).Scan(&count); err != nil {
+	count, err := storetest.CountResourceSourceInvocationStorage(f.ctx, f.selected, sourceID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	return count
@@ -311,7 +316,7 @@ func TestStandaloneTextFileImportSupport2456BothStores(t *testing.T) {
 			if code := standaloneTextDataShowShapeCode2456(t, f.ctx, server.URL, bundleHash, ref, wrongSchema); code != string(durabledata.CodeIntegrity) {
 				t.Fatalf("wrong-schema API error = %s, want %s", code, durabledata.CodeIntegrity)
 			}
-			if _, err := f.db.ExecContext(f.ctx, `UPDATE resource_bundle_import_shapes SET shape_json=$1 WHERE bundle_hash=$2 AND flow_path='.' AND event_name='root.ready'`, []byte(`{"bad":true}`), bundleHash); err != nil {
+			if err := storetest.CorruptRootReadyImportShapeFault(f.ctx, f.selected, bundleHash); err != nil {
 				t.Fatalf("tamper selected import shape: %v", err)
 			}
 			var domain *durabledata.DomainError
@@ -380,8 +385,7 @@ func TestStandaloneTextFileEmptyKeyedRequiredDirectory2456BothStores(t *testing.
 				imported.Candidate.Manifest.RowCount != 0 || imported.Candidate.VersionID != check.Candidate.VersionID {
 				t.Fatalf("empty keyed import: code=%d result=%#v stderr=%s", code, imported, stderr)
 			}
-			var jsonl []byte
-			if err := f.db.QueryRowContext(f.ctx, `SELECT canonical_jsonl FROM resource_versions WHERE version_id=$1`, string(imported.Candidate.VersionID)).Scan(&jsonl); err != nil || len(jsonl) != 0 {
+			if jsonl, err := storetest.ReadResourceVersionJSONLStorage(f.ctx, f.selected, string(imported.Candidate.VersionID)); err != nil || len(jsonl) != 0 {
 				t.Fatalf("stored zero-row JSONL = %q, %v", jsonl, err)
 			}
 			versions, history, receipts, revision, head = standaloneTextDataCounts2456(t, f)

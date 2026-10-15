@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -40,16 +39,16 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 							// connections; it grants no private API endpoint.
 							recipients := []string{"", "child/", "sibling/", "child/nested/"}
 							for _, recipient := range recipients {
-								requireLifecycleFlowEntity(t, rt, seed.RunID, recipient, "waiting")
+								requireLifecycleFlowEntity(t, rt.ReceiverStateReader, seed.RunID, recipient, "waiting")
 							}
 							params := map[string]any{"event_name": "work." + handler, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"choice": choice}, "idempotency_key": key}
 							selected := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 							for _, recipient := range recipients {
-								requireLifecycleFlowEntity(t, rt, seed.RunID, recipient, "done")
+								requireLifecycleFlowEntity(t, rt.ReceiverStateReader, seed.RunID, recipient, "done")
 							}
 							waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 							for _, recipient := range recipients {
-								entityID := requireLifecycleFlowEntity(t, rt, seed.RunID, recipient, "done")
+								entityID := requireLifecycleFlowEntity(t, rt.ReceiverStateReader, seed.RunID, recipient, "done")
 								history := readLifecycleTransitionHistory(t, rt.ReceiverStateReader, seed.RunID, entityID)
 								if len(history) != 1 || history[0].From != "active" || history[0].To != "done" {
 									t.Fatalf("history=%#v", history)
@@ -68,25 +67,26 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 								path := fmt.Sprintf("nodes[\"controller\"].handlers[%q].rules[%d]", "work."+handler, index)
 								display := fmt.Sprintf("rules[%d]: when payload.choice == '%s'", index, choice)
 								if record.From != "waiting" || record.To != "active" || record.TriggerEventID != selected.EventID || record.Evidence.FlowID() != flow || selection.Ref().Flow().String() != flow || selection.Ref().Family() != "handler_rule" || selection.DisplayLabel() != display || selection.Ref().SemanticPath() != path || !reflect.DeepEqual(record.GuardsEvaluated, guards) || !reflect.DeepEqual(record.Evidence.GuardsEvaluated(), guards) {
-									t.Fatalf("wrong exact selected history: %#v selection=%#v guards=%#v want flow=%s event=%s path=%s\n%s\n%s", record, selection, record.GuardsEvaluated, flow, selected.EventID, path, lifecycleStoredSnapshot(t, rt, seed.RunID), servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+									t.Fatalf("wrong exact selected history: %#v selection=%#v guards=%#v want flow=%s event=%s path=%s\n%s\n%s", record, selection, record.GuardsEvaluated, flow, selected.EventID, path, lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID), servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID))
 								}
 								var entity operatorread.OperatorEntityFull
 								requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": seed.RunID, "entity_id": entityID}, &entity)
 								if entity.Fields["result"] != recipient+handler+"/"+choice {
 									t.Fatalf("wrong public output: %#v", entity)
 								}
-								requireLifecycleEventCount(t, rt, seed.RunID, recipient+"work.completed", 1)
+								requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, recipient+"work.completed", 1)
 							}
-							var entities int
-							if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1`, seed.RunID).Scan(&entities); err != nil {
+
+							entities, err := readServedRunFieldRows(rt.ReceiverStateReader, seed.RunID)
+							if err != nil {
 								t.Fatal(err)
 							}
 							if entities != len(recipients) {
 								t.Fatalf("public input recipient mismatch: %d entity rows, want %d", entities, len(recipients))
 							}
-							before := lifecycleStoredSnapshot(t, rt, seed.RunID)
+							before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 							duplicate := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
-							if duplicate.EventID != selected.EventID || lifecycleStoredSnapshot(t, rt, seed.RunID) != before {
+							if duplicate.EventID != selected.EventID || lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID) != before {
 								t.Fatal("duplicate changed selected transition")
 							}
 						})
@@ -97,7 +97,7 @@ func TestServedCompiledTransitionSelectedCarrierEvidenceOnBothStores(t *testing.
 	}
 }
 
-func requireLifecycleFlowEntity(t *testing.T, rt servedControlProofRuntime, runID, prefix, state string) string {
+func requireLifecycleFlowEntity(t *testing.T, reader receiverProofStateReader, runID, prefix, state string) string {
 	t.Helper()
 	instance := strings.TrimSuffix(prefix, "/")
 	if instance == "" {
@@ -105,16 +105,21 @@ func requireLifecycleFlowEntity(t *testing.T, rt servedControlProofRuntime, runI
 	}
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
 		var entityID string
-		err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND current_state=$3`, runID, instance, state).Scan(&entityID)
-		if err == nil {
-			return entityID
-		}
-		if err != sql.ErrNoRows {
+		var found bool
+		err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+			var err error
+			entityID, found, err = storetest.ReadWorkflowStateEntityStorage(ctx, reader, runID, instance, state)
+			return err
+		})
+		if err != nil {
 			t.Fatal(err)
+		}
+		if found {
+			return entityID
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("flow %s did not reach %s\n%s", instance, state, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+	t.Fatalf("flow %s did not reach %s\n%s", instance, state, servedInspectionRunDebugSummary(reader, runID))
 	return ""
 }
 
@@ -450,27 +455,20 @@ func TestServedCompiledLoopEscapeSuppressesOrdinaryRepeatOnBothStores(t *testing
 }
 
 // SQL is read-only proof of all business rows and persisted transition evidence.
-func lifecycleStoredSnapshot(t *testing.T, rt servedControlProofRuntime, runID string) string {
+func lifecycleStoredSnapshot(t *testing.T, reader receiverProofStateReader, runID string) string {
 	t.Helper()
-	rows, err := rt.DB.Query(`SELECT f.entity_id,f.current_state,f.revision,CAST(e.fields AS TEXT),CAST(f.config AS TEXT),CAST(f.accumulator AS TEXT)
-		FROM flow_instances f LEFT JOIN entity_state e ON e.run_id=f.run_id AND e.flow_instance=f.instance_path AND e.entity_id=f.entity_id
-		WHERE f.run_id=$1 ORDER BY f.entity_id`, runID)
+	var rows []storetest.LifecycleBusinessStorageRow
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		rows, err = storetest.ReadLifecycleBusinessStorage(ctx, reader, runID)
+		return err
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	result := ""
-	for rows.Next() {
-		var id, state, config, loops string
-		var fields sql.NullString
-		var revision int
-		if err := rows.Scan(&id, &state, &revision, &fields, &config, &loops); err != nil {
-			t.Fatal(err)
-		}
-		result += fmt.Sprintf("%s/%s/%d/%t:%s/%s/%s\n", id, state, revision, fields.Valid, fields.String, config, loops)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
+	for _, row := range rows {
+		result += fmt.Sprintf("%s/%s/%d/%t:%s/%s/%s\n", row.EntityID, row.CurrentState, row.Revision, row.Fields.Valid, row.Fields.String, row.Config, row.Accumulator)
 	}
 	if result == "" {
 		t.Fatal("no persisted lifecycle proof rows")

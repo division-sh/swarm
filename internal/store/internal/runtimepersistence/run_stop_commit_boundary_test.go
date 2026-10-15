@@ -166,7 +166,7 @@ func TestRunStopCommitUncertaintyPreservesRealOutcomeBothStores(t *testing.T) {
 				fixture := seedFanOutOwnerFixture(t, ctx, db, owner, backend == "postgres", 3, time.Now().UTC())
 				ctx, cancel = context.WithTimeout(testAuthorActivityContextForBundle(fixture.bundleHash), 10*time.Second)
 				defer cancel()
-				before := readStopCommitEvidence(t, db, fixture.runID)
+				before := readStopCommitEvidence(t, db, owner, fixture.runID)
 				cause := errors.New("injected stop COMMIT acknowledgement unavailable")
 				var calls atomic.Int32
 				connector.arm(func(tx driver.Tx) error {
@@ -181,7 +181,7 @@ func TestRunStopCommitUncertaintyPreservesRealOutcomeBothStores(t *testing.T) {
 				if !errors.Is(err, cause) || !typed || failure.Class != runtimefailures.ClassOutcomeUncertain || failure.Detail.Code != "run_stop_commit_unconfirmed" || failure.Detail.Attributes["stage"] != "commit" || failure.Retryable || state.Acknowledged || state.State.RunID != "" || calls.Load() != 1 {
 					t.Fatalf("uncertain stop: state=%+v error=%v failure=%+v calls=%d", state, err, failure, calls.Load())
 				}
-				after := readStopCommitEvidence(t, db, fixture.runID)
+				after := readStopCommitEvidence(t, db, owner, fixture.runID)
 				if !committed {
 					if after != before {
 						t.Fatalf("unacknowledged rollback changed state: before=%+v after=%+v", before, after)
@@ -193,7 +193,7 @@ func TestRunStopCommitUncertaintyPreservesRealOutcomeBothStores(t *testing.T) {
 					if outcome, err := owner.StopRunControlOutcome(ctx, runcontrol.TransitionRequest{RunID: fixture.runID}); !errors.Is(err, runcontrol.ErrAlreadyTerminal) || outcome.Acknowledged {
 						t.Fatalf("uncertain committed stop repeated transition: outcome=%+v err=%v", outcome, err)
 					}
-					if again := readStopCommitEvidence(t, db, fixture.runID); again != after {
+					if again := readStopCommitEvidence(t, db, owner, fixture.runID); again != after {
 						t.Fatalf("terminal refusal changed committed evidence: before=%+v after=%+v", after, again)
 					}
 				}
@@ -225,7 +225,7 @@ func TestRunStopKnownCommitRejectionBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			before := readStopCommitEvidence(t, db, fixture.runID)
+			before := readStopCommitEvidence(t, db, owner, fixture.runID)
 			var commitErr error
 			var calls int
 			connector.arm(func(tx driver.Tx) error {
@@ -249,7 +249,7 @@ func TestRunStopKnownCommitRejectionBothStores(t *testing.T) {
 					t.Fatalf("lost sqlite deferred constraint cause: %v", err)
 				}
 			}
-			if after := readStopCommitEvidence(t, db, fixture.runID); after != before {
+			if after := readStopCommitEvidence(t, db, owner, fixture.runID); after != before {
 				t.Fatalf("known rejected commit changed durable state: before=%+v after=%+v", before, after)
 			}
 			var children int
@@ -268,7 +268,7 @@ func TestIssue2394StopCommitRaceBothStores(t *testing.T) {
 				fixture, planCtx, bus, plans, serving, group, claim := prepareStopRacePublications(t, owner, db, backend)
 				ctx, cancel := context.WithTimeout(planCtx, 10*time.Second)
 				defer cancel()
-				before := readStopCommitEvidence(t, db, fixture.runID)
+				before := readStopCommitEvidence(t, db, owner, fixture.runID)
 				entered, release := make(chan struct{}), make(chan struct{})
 				var once sync.Once
 				unblock := func() { once.Do(func() { close(release) }) }
@@ -348,7 +348,7 @@ func TestIssue2394StopCommitRaceBothStores(t *testing.T) {
 					if !errors.Is(secondErr, pipelineobligation.ErrBusy) || !typed || failure.Detail.Code != "pipeline_parent_claim_busy" || failure.Detail.Attributes["stage"] != "pipeline_claim" || failure.Detail.Attributes["purpose"] != string(pipelineobligation.PurposePublication) {
 						t.Fatalf("stop stole committed publication before mandatory handoff: error=%v failure=%+v", secondErr, failure)
 					}
-					if snapshot := readStopCommitEvidence(t, db, fixture.runID); snapshot.status != before.status || snapshot.control != before.control || snapshot.canceled != 0 || snapshot.revisions != before.revisions+1 {
+					if snapshot := readStopCommitEvidence(t, db, owner, fixture.runID); snapshot.status != before.status || snapshot.control != before.control || snapshot.canceled != 0 || snapshot.revisions != before.revisions+1 {
 						t.Fatalf("busy stop partially mutated chunk-winning run: before=%+v after=%+v", before, snapshot)
 					}
 					if err := bus.FinalizeFanOutPublications(ctx, group, committed.Publications); err != nil {
@@ -357,7 +357,7 @@ func TestIssue2394StopCommitRaceBothStores(t *testing.T) {
 					if err := bus.DispatchFanOutPublications(context.WithoutCancel(ctx), group, committed.Publications); err != nil {
 						t.Fatal(err)
 					}
-					if snapshot := readStopCommitEvidence(t, db, fixture.runID); snapshot.status != before.status || snapshot.control != before.control || snapshot.canceled != 0 || snapshot.revisions != before.revisions+2 {
+					if snapshot := readStopCommitEvidence(t, db, owner, fixture.runID); snapshot.status != before.status || snapshot.control != before.control || snapshot.canceled != 0 || snapshot.revisions != before.revisions+2 {
 						t.Fatalf("handoff requires one chunk and one complete settlement-segment revision, no stop revision: before=%+v after=%+v", before, snapshot)
 					}
 					if err := stop(); err != nil {
@@ -386,7 +386,7 @@ func TestIssue2394StopCommitRaceBothStores(t *testing.T) {
 						}
 					}
 				}
-				after := readStopCommitEvidence(t, db, fixture.runID)
+				after := readStopCommitEvidence(t, db, owner, fixture.runID)
 				// The approved group contract has one revision per physical segment,
 				// not the retired per-member intermediate settlement cuts.
 				if after.status != "cancelled" || after.control != "stopped" || after.canceled != 1 || after.pending != 0 || after.events != before.events+wantPrefix || after.revisions != before.revisions+1+wantPrefix {
@@ -401,7 +401,7 @@ func TestIssue2394StopCommitRaceBothStores(t *testing.T) {
 				if _, err := serving.CommitFanOutChunk(ctx, rejectedFanOutChunk(claim, wantPrefix, 1, time.Now().UTC())); !errors.Is(err, fanoutobligation.ErrStaleClaim) {
 					t.Fatalf("late old claim retained mutation authority: %v", err)
 				}
-				if final := readStopCommitEvidence(t, db, fixture.runID); final != after {
+				if final := readStopCommitEvidence(t, db, owner, fixture.runID); final != after {
 					t.Fatalf("stale commit changed state: before=%+v after=%+v", after, final)
 				}
 			})
@@ -511,19 +511,28 @@ type stopCommitEvidence struct {
 	events                                 int
 }
 
-func readStopCommitEvidence(t *testing.T, db *sql.DB, runID string) stopCommitEvidence {
+func readStopCommitEvidence(t *testing.T, db *sql.DB, selected selectedFanOutLifecycleOwner, runID string) stopCommitEvidence {
 	t.Helper()
 	var e stopCommitEvidence
 	if err := db.QueryRow(`SELECT r.status,COALESCE(c.control_status,'') FROM runs r LEFT JOIN run_control_state c ON c.run_id=r.run_id WHERE r.run_id=$1`, runID).Scan(&e.status, &e.control); err != nil {
 		t.Fatal(err)
 	}
 	for query, target := range map[string]*int{
-		`SELECT COUNT(*) FROM events WHERE run_id=$1`:                                                             &e.events,
-		`SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND status='canceled'`:                              &e.canceled,
-		`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status IN ('pending','processing','retrying')`: &e.pending,
-		`SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`:                                                   &e.outcomes,
-		`SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1`:                                                 &e.revisions,
+		"nonterminal_deliveries":                                                     &e.pending,
+		`SELECT COUNT(*) FROM events WHERE run_id=$1`:                                &e.events,
+		`SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND status='canceled'`: &e.canceled,
+		`SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`:                      &e.outcomes,
+		`SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1`:                    &e.revisions,
 	} {
+		if target == &e.pending {
+			// Keep this independent cut in the original unordered witness inventory.
+			count, err := CountRunStopNonterminalDeliveriesForTest(context.Background(), selected, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			*target = count
+			continue
+		}
 		if err := db.QueryRow(query, runID).Scan(target); err != nil {
 			t.Fatal(err)
 		}

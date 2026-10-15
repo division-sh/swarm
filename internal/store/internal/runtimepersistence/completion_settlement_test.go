@@ -17,10 +17,13 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -758,6 +761,13 @@ func proveCompletionProviderHeadSettlement(t *testing.T, fixture completionSettl
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "provider-head:success")
 	handle := beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "success")
 	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "provider-head-current", "provider-head-next")
+	process, err := agentfixture.ProcessCapability(t, ctx, fixture.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := startupownership.SeedAgentRecovery(ctx, process); err != nil {
+		t.Fatal(err)
+	}
 	settled, err := handle.SettleCompletion(ctx, settlement)
 	if err != nil {
 		t.Fatalf("settle completion with provider head: %v", err)
@@ -765,6 +775,7 @@ func proveCompletionProviderHeadSettlement(t *testing.T, fixture completionSettl
 	if !settled.Committed || settled.Disposition != runtimeeffects.CompletionSettlementCurrent || settled.Drained() {
 		t.Fatalf("current settlement result=%+v", settled)
 	}
+	assertAgentRecoveryReseedsAfterNativeMutation(t, ctx, fixture.store, process)
 	requireProviderHead(t, fixture.db, fixture.sqlite, fixture.sessionID, "provider-head-next")
 	requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateSettled)
 	requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateSettled, 1, 0)
@@ -1516,6 +1527,20 @@ func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettl
 	}
 	actor.ID, actor.Identity, actor.Role, actor.Type = agentID, identity, "worker", "managed"
 	actor.Model, actor.Memory, actor.FlowID, actor.FlowPath = "regular", memory, "global", flowInstance
+	if len(actor.Config) == 0 {
+		actor.Config = json.RawMessage(`{}`)
+	}
+	if actor.ExecutionMode == "live" {
+		profile, err := selection.ResolveActiveBackend(actor.ResolvedLLMBackend)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolved, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, nil, actor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		actor = resolved.Actor
+	}
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, actor),
 		Status: "active", StartedAt: now,
@@ -1577,9 +1602,21 @@ func claimCompletionOriginEventForTest(t testing.TB, ctx context.Context, store 
 		Recipient:     events.MustAgentDeliveryRecipient(authority.Normal.Identity.AgentID()),
 		AgentIdentity: authority.Normal.Identity,
 	}
-	if err := commitSemanticEventFixtureWithRoutes(ctx, store, originEvent, []events.DeliveryRoute{route}); err != nil {
-		t.Fatalf("commit completion origin delivery: %v", err)
+	ctx = runtimecorrelation.WithRunID(ctx, originEvent.RunID())
+	source, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("completion origin fixture requires its exact source")
 	}
+	selected, ok := store.(agentFixtureFlowStore)
+	if !ok {
+		t.Fatalf("completion origin fixture requires native lifecycle roles: %T", store)
+	}
+	deliveryAuthority := admitAgentClaimProfileAuthority(t, ctx, selected, source)
+	originEvent, err := bindSemanticEventFixturePayload(originEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitSelectedReceiverClaimEvent(t, ctx, selected, originEvent, route, deliveryAuthority)
 	claimed, err := claimDeliveryFixture(ctx, store.(deliveryFixtureStore), originEvent, route)
 	if err != nil {
 		t.Fatalf("claim completion origin delivery: %v", err)

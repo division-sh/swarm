@@ -2,7 +2,6 @@ package runtime_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -18,7 +17,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
@@ -53,9 +51,7 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 			resultEventType := "repo-scaffold/inst-1/" + tc.resultEventName
 			bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyArtifactActionResultDelivery(t, "template", false))
 			source := semanticview.Wrap(bundle)
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			pg := storetest.AdmitPostgresRuntimeStore(t, db)
+			pg := storetest.StartPostgresRuntimeStore(t)
 			ctx := seedRuntimeTestRunForSource(t, pg, source)
 			var pc *runtimepipeline.PipelineCoordinator
 			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -125,25 +121,15 @@ func TestRuleResultEventsFlowThroughDurableCallbackDelivery(t *testing.T) {
 			if err := bus.Publish(ctx, requestEvent); err != nil {
 				t.Fatalf("Publish request event: %v", err)
 			}
-			resultEventID := waitRuntimeEventID(t, ctx, db, `
-				SELECT event_id::text
-				FROM events
-				WHERE event_name = $1 AND source_event_id = $2::uuid
-			`, []any{resultEventType, tc.requestEventID})
-			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind, "repo-scaffold/inst-1", artifactActionResultEntityID)
-			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID, "repo-scaffold/inst-1", artifactActionResultEntityID)
-			waitArtifactActionResultHandlerStarted(t, ctx, db, resultHandlerStarted, resultEventID)
-			waitArtifactActionResultDBCount(t, ctx, db, `
-				SELECT COUNT(*)
-				FROM event_deliveries
-				WHERE event_id = $1::uuid
-				  AND subscriber_type = 'node'
-				  AND subscriber_id = $3
-				  AND status = 'delivered'
-				  AND settled_at IS NOT NULL
-				  AND delivery_target_route @> $2::jsonb
-			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON("repo-scaffold/inst-1", artifactActionResultEntityID), repoNodeID)
-			waitRuntimeNodeDeliveryOutcome(t, ctx, db, resultEventID, repoNodeID)
+			resultEventID := waitRuntimeStoredEventID(t, ctx, pg, "ReadTemplateSourceNamedEventIdentity", func() (string, error) {
+				return storetest.ReadTemplateSourceNamedEventIdentity(ctx, pg, resultEventType, tc.requestEventID)
+			})
+			assertArtifactActionResultEventContext(t, ctx, pg, resultEventID, tc.resultKind, "repo-scaffold/inst-1", artifactActionResultEntityID)
+			assertArtifactActionResultNodeRoute(t, ctx, pg, resultEventID, "repo-scaffold/inst-1", artifactActionResultEntityID)
+			waitArtifactActionResultHandlerStarted(t, ctx, pg, resultHandlerStarted, resultEventID)
+			waitArtifactActionResultSettledCount(t, ctx, pg, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON("repo-scaffold/inst-1", artifactActionResultEntityID), repoNodeID)
+			waitRuntimeNodeDeliveryOutcome(t, ctx, pg, resultEventID, repoNodeID)
+			assertArtifactActionResultDiagnosticReadback(t, ctx, pg, resultEventID, repoNodeID)
 		})
 	}
 }
@@ -207,9 +193,7 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 			childRequest := tc.requestFlowPath != tc.wantFlowPath
 			bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyArtifactActionResultDelivery(t, "static", childRequest))
 			source := semanticview.Wrap(bundle)
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
-			pg := storetest.AdmitPostgresRuntimeStore(t, db)
+			pg := storetest.StartPostgresRuntimeStore(t)
 			ctx := seedRuntimeTestRunForSource(t, pg, source)
 			var pc *runtimepipeline.PipelineCoordinator
 			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{
@@ -315,10 +299,11 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 
 			requestEventID := tc.requestEventID
 			if childRequest {
-				requestEventID = waitRuntimeEventID(t, ctx, db, `SELECT event_id::text FROM events WHERE event_name=$1 AND source_event_id=$2::uuid`,
-					[]any{"repo-scaffold/child-1/repo_scaffold.repo_commit_requested", tc.requestEventID})
-				var rawSource string
-				if err := db.QueryRowContext(ctx, `SELECT source_route::text FROM events WHERE event_id=$1::uuid`, requestEventID).Scan(&rawSource); err != nil {
+				requestEventID = waitRuntimeStoredEventID(t, ctx, pg, "ReadTemplateSourceNamedEventIdentity", func() (string, error) {
+					return storetest.ReadTemplateSourceNamedEventIdentity(ctx, pg, "repo-scaffold/child-1/repo_scaffold.repo_commit_requested", tc.requestEventID)
+				})
+				rawSource, err := storetest.ReadPostgresArtifactCallbackSourceRoute(ctx, pg, requestEventID)
+				if err != nil {
 					t.Fatal(err)
 				}
 				var sourceRoute events.RouteIdentity
@@ -329,25 +314,15 @@ func TestRuleResultEventsFlowThroughStaticServiceCallbackDelivery(t *testing.T) 
 					t.Fatalf("child request borrowed parent state ownership: %s", rawSource)
 				}
 			}
-			resultEventID := waitRuntimeEventID(t, ctx, db, `
-				SELECT event_id::text
-				FROM events
-				WHERE event_name = $1 AND source_event_id = $2::uuid
-			`, []any{resultEventType, requestEventID})
-			assertArtifactActionResultEventContext(t, ctx, db, resultEventID, tc.resultKind, tc.wantFlowPath, parent.EntityID)
-			assertArtifactActionResultNodeRoute(t, ctx, db, resultEventID, tc.wantFlowPath, parent.EntityID)
-			waitArtifactActionResultHandlerStarted(t, ctx, db, resultHandlerStarted, resultEventID)
-			waitArtifactActionResultDBCount(t, ctx, db, `
-				SELECT COUNT(*)
-				FROM event_deliveries
-				WHERE event_id = $1::uuid
-				  AND subscriber_type = 'node'
-				  AND subscriber_id = $3
-				  AND status = 'delivered'
-				  AND settled_at IS NOT NULL
-				  AND delivery_target_route @> $2::jsonb
-			`, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON(tc.wantFlowPath, parent.EntityID), repoNodeID)
-			waitRuntimeNodeDeliveryOutcome(t, ctx, db, resultEventID, repoNodeID)
+			resultEventID := waitRuntimeStoredEventID(t, ctx, pg, "ReadTemplateSourceNamedEventIdentity", func() (string, error) {
+				return storetest.ReadTemplateSourceNamedEventIdentity(ctx, pg, resultEventType, requestEventID)
+			})
+			assertArtifactActionResultEventContext(t, ctx, pg, resultEventID, tc.resultKind, tc.wantFlowPath, parent.EntityID)
+			assertArtifactActionResultNodeRoute(t, ctx, pg, resultEventID, tc.wantFlowPath, parent.EntityID)
+			waitArtifactActionResultHandlerStarted(t, ctx, pg, resultHandlerStarted, resultEventID)
+			waitArtifactActionResultSettledCount(t, ctx, pg, 1, resultEventID, artifactActionResultDeliveryTargetRouteJSON(tc.wantFlowPath, parent.EntityID), repoNodeID)
+			waitRuntimeNodeDeliveryOutcome(t, ctx, pg, resultEventID, repoNodeID)
+			assertArtifactActionResultDiagnosticReadback(t, ctx, pg, resultEventID, repoNodeID)
 		})
 	}
 }
@@ -375,16 +350,13 @@ func artifactActionResultWorkflowInstance() runtimepipeline.WorkflowInstance {
 	}
 }
 
-func assertArtifactActionResultEventContext(t *testing.T, ctx context.Context, db *sql.DB, eventID, resultKind, wantFlowInstance, wantEntityID string) {
+func assertArtifactActionResultEventContext(t *testing.T, ctx context.Context, selected any, eventID, resultKind, wantFlowInstance, wantEntityID string) {
 	t.Helper()
-	var entityID, flowInstance, sourceRouteJSON, payloadJSON string
-	if err := db.QueryRowContext(ctx, `
-		SELECT COALESCE(entity_id::text, ''), COALESCE(flow_instance, ''), source_route::text, payload::text
-		FROM events
-		WHERE event_id = $1::uuid
-	`, eventID).Scan(&entityID, &flowInstance, &sourceRouteJSON, &payloadJSON); err != nil {
+	observed, err := storetest.ReadPostgresArtifactCallbackEventContext(ctx, selected, eventID)
+	if err != nil {
 		t.Fatalf("query result event context: %v", err)
 	}
+	entityID, flowInstance, sourceRouteJSON, payloadJSON := observed.EntityID, observed.FlowInstance, observed.SourceRoute, observed.Payload
 	if entityID != wantEntityID {
 		t.Fatalf("result event entity_id = %q, want %q", entityID, wantEntityID)
 	}
@@ -413,38 +385,21 @@ func assertArtifactActionResultEventContext(t *testing.T, ctx context.Context, d
 	}
 }
 
-func assertArtifactActionResultNodeRoute(t *testing.T, ctx context.Context, db *sql.DB, eventID, wantFlowInstance, wantEntityID string) {
+func assertArtifactActionResultNodeRoute(t *testing.T, ctx context.Context, selected any, eventID, wantFlowInstance, wantEntityID string) {
 	t.Helper()
 	wantRoute := artifactActionResultDeliveryTargetRouteJSON(wantFlowInstance, wantEntityID)
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		var got int
-		if err := db.QueryRowContext(ctx, `
-			SELECT COUNT(*)
-			FROM event_deliveries
-			WHERE event_id = $1::uuid
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = $3
-			  AND delivery_target_route @> $2::jsonb
-		`, eventID, wantRoute, artifactActionResultNodeID(t)).Scan(&got); err != nil {
+		got, err := storetest.CountPostgresTemplateNodeTarget(ctx, selected, eventID, wantRoute, artifactActionResultNodeID(t))
+		if err != nil {
 			t.Fatalf("query result delivery route: %v", err)
 		}
 		if got == 1 {
 			return
 		}
 		if time.Now().After(deadline) {
-			var rows string
-			if err := db.QueryRowContext(ctx, `
-				SELECT COALESCE(jsonb_agg(jsonb_build_object(
-					'subscriber_type', subscriber_type,
-					'subscriber_id', subscriber_id,
-					'status', status,
-					'reason_code', reason_code,
-					'delivery_target_route', delivery_target_route
-				))::text, '[]')
-				FROM event_deliveries
-				WHERE event_id = $1::uuid
-			`, eventID).Scan(&rows); err != nil {
+			rows, err := storetest.ReadPostgresArtifactCallbackTargetDiagnostics(ctx, selected, eventID)
+			if err != nil {
 				t.Fatalf("query result delivery route debug rows: %v", err)
 			}
 			t.Fatalf("delivery route for event %s missing route %s; rows=%s", eventID, wantRoute, rows)
@@ -453,7 +408,7 @@ func assertArtifactActionResultNodeRoute(t *testing.T, ctx context.Context, db *
 	}
 }
 
-func waitArtifactActionResultHandlerStarted(t *testing.T, ctx context.Context, db *sql.DB, started <-chan string, eventID string) {
+func waitArtifactActionResultHandlerStarted(t *testing.T, ctx context.Context, selected any, started <-chan string, eventID string) {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
 	for {
@@ -463,17 +418,12 @@ func waitArtifactActionResultHandlerStarted(t *testing.T, ctx context.Context, d
 				return
 			}
 		case <-deadline:
-			var deliveries, receipts string
-			if err := db.QueryRowContext(ctx, `
-				SELECT COALESCE(jsonb_agg(to_jsonb(d))::text, '[]')
-				FROM event_deliveries d WHERE event_id = $1::uuid
-			`, eventID).Scan(&deliveries); err != nil {
+			deliveries, err := storetest.ReadPostgresArtifactCallbackDeliveries(ctx, selected, eventID)
+			if err != nil {
 				t.Fatalf("query callback delivery diagnostics: %v", err)
 			}
-			if err := db.QueryRowContext(ctx, `
-				SELECT COALESCE(jsonb_agg(to_jsonb(r))::text, '[]')
-				FROM event_receipts r WHERE event_id = $1::uuid
-			`, eventID).Scan(&receipts); err != nil {
+			receipts, err := storetest.ReadPostgresArtifactCallbackReceipts(ctx, selected, eventID)
+			if err != nil {
 				t.Fatalf("query callback receipt diagnostics: %v", err)
 			}
 			t.Fatalf("callback handler did not start for result event %s; deliveries=%s receipts=%s", eventID, deliveries, receipts)
@@ -481,34 +431,20 @@ func waitArtifactActionResultHandlerStarted(t *testing.T, ctx context.Context, d
 	}
 }
 
-func waitArtifactActionResultDBCount(t *testing.T, ctx context.Context, db *sql.DB, query string, want int, args ...any) {
+func waitArtifactActionResultSettledCount(t *testing.T, ctx context.Context, selected any, want int, eventID, target, nodeID string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		var got int
-		if err := db.QueryRowContext(ctx, query, args...).Scan(&got); err != nil {
+		got, err := storetest.CountPostgresArtifactCallbackSettledTarget(ctx, selected, eventID, target, nodeID)
+		if err != nil {
 			t.Fatalf("query count: %v", err)
 		}
 		if got == want {
 			return
 		}
 		if time.Now().After(deadline) {
-			var diagnostics string
-			if len(args) > 0 {
-				_ = db.QueryRowContext(ctx, `
-					SELECT jsonb_build_object(
-						'deliveries', COALESCE(jsonb_agg(jsonb_build_object(
-						'status', d.status,
-						'target', d.delivery_target_route,
-						'claim_version', d.claim_version,
-						'outcomes', (SELECT COALESCE(jsonb_agg(to_jsonb(o)), '[]'::jsonb) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o WHERE o.delivery_id = d.delivery_id)
-						)), '[]'::jsonb),
-						'receipts', (SELECT COALESCE(jsonb_agg(to_jsonb(r)), '[]'::jsonb) FROM event_receipts r WHERE r.event_id = $1::uuid)
-					)::text
-					FROM event_deliveries d WHERE d.event_id = $1::uuid
-				`, args[0]).Scan(&diagnostics)
-			}
-			t.Fatalf("count = %d, want %d for query %s; deliveries=%s", got, want, strings.TrimSpace(query), diagnostics)
+			diagnostics, _ := storetest.ReadPostgresArtifactCallbackSettlementDiagnostics(ctx, selected, eventID)
+			t.Fatalf("count = %d, want %d for settled callback event %s node %s target %s; deliveries=%s", got, want, eventID, nodeID, target, diagnostics)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
@@ -516,6 +452,55 @@ func waitArtifactActionResultDBCount(t *testing.T, ctx context.Context, db *sql.
 
 func artifactActionResultDeliveryTargetRouteJSON(flowInstance, entityID string) string {
 	return `{"kind":"existing_entity","route":{"flow_instance":"` + flowInstance + `","entity_id":"` + entityID + `"}}`
+}
+
+func assertArtifactActionResultDiagnosticReadback(t *testing.T, ctx context.Context, selected any, eventID, nodeID string) {
+	t.Helper()
+	for _, read := range []func(context.Context, any, string) (string, error){storetest.ReadPostgresArtifactCallbackTargetDiagnostics, storetest.ReadPostgresArtifactCallbackDeliveries} {
+		raw, err := read(ctx, selected, eventID)
+		var rows []struct {
+			SubscriberID string `json:"subscriber_id"`
+		}
+		if err != nil || json.Unmarshal([]byte(raw), &rows) != nil {
+			t.Fatalf("decode native callback diagnostic: %s/%v", raw, err)
+		}
+		found := false
+		for _, row := range rows {
+			found = found || row.SubscriberID == nodeID
+		}
+		if !found {
+			t.Fatalf("callback diagnostic lost real node: %s", raw)
+		}
+	}
+	receipts, err := storetest.ReadPostgresArtifactCallbackReceipts(ctx, selected, eventID)
+	var receiptRows []struct {
+		EventID      string `json:"event_id"`
+		SubscriberID string `json:"subscriber_id"`
+		Outcome      string `json:"outcome"`
+	}
+	if err != nil || json.Unmarshal([]byte(receipts), &receiptRows) != nil || len(receiptRows) != 1 || receiptRows[0].EventID != eventID || receiptRows[0].SubscriberID != "pipeline" || receiptRows[0].Outcome != "success" {
+		t.Fatalf("callback receipt lost actual pipeline identity/outcome: %s/%v", receipts, err)
+	}
+	raw, err := storetest.ReadPostgresArtifactCallbackSettlementDiagnostics(ctx, selected, eventID)
+	var combined struct {
+		Deliveries []struct {
+			Status   string
+			Outcomes []struct{ Outcome string }
+		}
+		Receipts []json.RawMessage
+	}
+	if err != nil || json.Unmarshal([]byte(raw), &combined) != nil || len(combined.Deliveries) == 0 || len(combined.Receipts) == 0 {
+		t.Fatalf("combined callback diagnostic lost actual outcomes/receipts: %s/%v", raw, err)
+	}
+	found := false
+	for _, row := range combined.Deliveries {
+		for _, outcome := range row.Outcomes {
+			found = found || (row.Status == "delivered" && outcome.Outcome == "delivered")
+		}
+	}
+	if !found {
+		t.Fatalf("callback diagnostic lost actual settled attempt: %s", raw)
+	}
 }
 
 func asRuntimeTestString(value any) string {

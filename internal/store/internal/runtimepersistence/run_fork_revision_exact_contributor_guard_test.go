@@ -324,7 +324,7 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 		{"pipelinepersistence/owner_operations.go", "declareEventRevisionFact", []string{"attempt.AddFact(runID.String, family, key)"}},
 		{"delivery/adapter.go", "Adapter.insertExactObligation", []string{"a.persistExactObligation(ctx, tx, obligation)", "attempt.AddFact(obligation.RunID(), privaterunforkrevision.FamilyEventDeliveries, obligation.DeliveryID())"}},
 		{"delivery/adapter.go", "Adapter.persistExactObligation", []string{"a.loadByEventAndRoute(ctx, tx, obligation.EventID(), obligation.RouteIdentity(), true)", "events.SameDeliveryRouteIdentity(record.Route, obligation.Route())", "record.Authority.Equal(obligation.Authority())"}},
-		{"delivery/adapter.go", "Adapter.claimLocked", []string{"a.insertAttempt(ctx, tx, record.DeliveryID, version, token, now, expiresAt)", "a.expireAttempt(ctx, tx, record, now)", "a.recordTransition(ctx, attempt, claimed, \"in_progress\", nil, now)", "declareRetainedDeliveryLifecycle(attempt, record.Snapshot, claimed.Snapshot)"}},
+		{"delivery/adapter.go", "Adapter.claimLocked", []string{"a.insertAttempt(ctx, tx, record.DeliveryID, version, token, now, expiresAt, profile)", "a.expireAttempt(ctx, tx, record, now)", "a.recordTransition(ctx, attempt, claimed, \"in_progress\", nil, now)", "declareRetainedDeliveryLifecycle(attempt, record.Snapshot, claimed.Snapshot)"}},
 		{"delivery/adapter.go", "Adapter.BindAgentSession", []string{"a.bindAgentSessionTx(ctx, tx, attempt, claim, sessionID)"}},
 		{"delivery/adapter.go", "declareRetainedDeliveryLifecycle", []string{"attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)"}},
 		{"delivery/adapter.go", "Adapter.bindAgentSessionTx", []string{"a.requireCurrentClaim(ctx, tx, claim)", "record.Route.AgentIdentity.StorageFields()", "declareRetainedDeliveryLifecycle(attempt, record.Snapshot, updated.Snapshot)"}},
@@ -650,6 +650,32 @@ func validateRetainedDeliveryLifecycleCapture(fn *ast.FuncDecl) error {
 }
 
 func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
+	t.Run("delivery_profile_forwarding", func(t *testing.T) {
+		root := repoRootForRuntimeWriterGuard(t)
+		body, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend/delivery/adapter.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, contract := range revisionExactWriterContracts() {
+			if contract.path != "delivery/adapter.go" || contract.symbol != "Adapter.claimLocked" {
+				continue
+			}
+			if err := validateRevisionExactWriter(string(body), contract); err != nil {
+				t.Fatal(err)
+			}
+			for _, suffix := range []string{")", ", nil)", ", foreignProfile)"} {
+				changed := strings.Replace(string(body), ", expiresAt, profile)", ", expiresAt"+suffix, 1)
+				if changed == string(body) {
+					t.Fatal("profile forwarding mutant did not change the actual writer")
+				}
+				if err := validateRevisionExactWriter(changed, contract); err == nil {
+					t.Fatalf("missing or foreign first-claim profile passed: %s", suffix)
+				}
+			}
+			return
+		}
+		t.Fatal("exact claim writer contract is absent")
+	})
 	contract := revisionExactWriterContract{symbol: "write", calls: []string{"effects.AddFact(runID, revision.FamilyEntityMutations, mutationID)"}}
 	valid := `package p; func write() error { return effects.AddFact(runID, revision.FamilyEntityMutations, mutationID) }`
 	for _, tc := range []struct {

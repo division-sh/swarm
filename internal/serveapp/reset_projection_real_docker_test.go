@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,7 +18,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -32,10 +32,29 @@ func TestResetStartupProjectionDisposalRealDocker(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, mode := range []string{"ordinary", "lost-ack", "remove-rejected"} {
 			t.Run(backend+"/"+mode, func(t *testing.T) {
+				started := time.Now()
 				ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 				defer cancel()
 				docker := workspace.NewDockerManager()
-				if _, err := docker.RunDocker(ctx, "image", "inspect", image); err != nil {
+				phase := func(name string) {
+					deadline, _ := ctx.Deadline()
+					t.Logf("reset projection phase %s elapsed=%s deadline=%s remaining=%s context=%v", name, time.Since(started), deadline.UTC().Format(time.RFC3339Nano), time.Until(deadline), ctx.Err())
+				}
+				runDocker := func(commandCtx context.Context, args ...string) (out string, err error) {
+					commandStarted := time.Now()
+					defer func() {
+						deadline, _ := commandCtx.Deadline()
+						exitCode := 0
+						var exit *exec.ExitError
+						if errors.As(err, &exit) {
+							exitCode = exit.ExitCode()
+						}
+						t.Logf("reset projection Docker %v elapsed=%s remaining=%s context=%v exit=%d error=%v returned-output=%q", args, time.Since(commandStarted), time.Until(deadline), commandCtx.Err(), exitCode, err, out)
+					}()
+					return docker.RunDocker(commandCtx, args...)
+				}
+				phase("setup-start")
+				if _, err := runDocker(ctx, "image", "inspect", image); err != nil {
 					t.Fatal(err)
 				}
 				root := t.TempDir()
@@ -94,7 +113,7 @@ func TestResetStartupProjectionDisposalRealDocker(t *testing.T) {
 						args = append(args, "--label", key+"="+value)
 					}
 					args = append(args, "--entrypoint", "/bin/sh", image, "-c", "sleep 60")
-					id, err := docker.RunDocker(ctx, args...)
+					id, err := runDocker(ctx, args...)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -102,12 +121,12 @@ func TestResetStartupProjectionDisposalRealDocker(t *testing.T) {
 					t.Cleanup(func() {
 						cleanupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 						defer cancel()
-						if _, err := docker.RunDocker(cleanupCtx, "rm", "--force", id); err != nil && !strings.Contains(strings.ToLower(err.Error()), "no such container") {
+						if _, err := runDocker(cleanupCtx, "rm", "--force", id); err != nil && !strings.Contains(strings.ToLower(err.Error()), "no such container") {
 							t.Error(err)
 						}
 					})
 					if running {
-						if _, err := docker.RunDocker(ctx, "start", id); err != nil {
+						if _, err := runDocker(ctx, "start", id); err != nil {
 							t.Fatal(err)
 						}
 					}
@@ -115,8 +134,13 @@ func TestResetStartupProjectionDisposalRealDocker(t *testing.T) {
 				}
 				owned := []string{create(containeridentity.KindScaffold, true, true), create(containeridentity.KindSystem, true, true), create(containeridentity.KindAgent, true, false), create(containeridentity.KindFlow, true, false)}
 				foreign := create(containeridentity.KindScaffold, false, true)
+				phase("containers-ready")
 				settler := workspace.NewDockerManager()
 				settler.SetRunDockerFnForTest(func(ctx context.Context, args ...string) (string, error) {
+					commandStarted := time.Now()
+					defer func() {
+						t.Logf("reset projection Docker %v elapsed=%s context=%v", args, time.Since(commandStarted), ctx.Err())
+					}()
 					if args[0] == "rm" {
 						if _, err := os.Stat(intent.Root); err != nil {
 							t.Errorf("source removed before Docker disposal: %v", err)
@@ -125,7 +149,7 @@ func TestResetStartupProjectionDisposalRealDocker(t *testing.T) {
 							return "", errors.New("injected real resource removal rejection")
 						}
 					}
-					out, err := docker.RunDocker(ctx, args...)
+					out, err := runDocker(ctx, args...)
 					if args[0] == "rm" && err == nil && mode == "lost-ack" {
 						return "", errors.New("injected acknowledgment loss after real removal")
 					}
@@ -136,14 +160,14 @@ func TestResetStartupProjectionDisposalRealDocker(t *testing.T) {
 				if backend == "sqlite" {
 					selected = storetest.StartSQLiteRuntimeStore(t)
 				} else {
-					_, db, cleanup := testutil.StartPostgres(t)
-					t.Cleanup(cleanup)
-					selected = storetest.AdmitPostgresRuntimeStore(t, db)
+					selected = storetest.StartPostgresRuntimeStore(t)
 				}
+				phase("store-ready")
 				capability, err := selected.AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "reset-resource-proof", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()})
 				if err != nil {
 					t.Fatal(err)
 				}
+				phase("capability-acquired")
 				defer func() {
 					if err := capability.Release(context.Background()); err != nil {
 						t.Error(err)
@@ -153,6 +177,7 @@ func TestResetStartupProjectionDisposalRealDocker(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				phase("reset-admitted")
 				contexts, err := runtime.NewRuntimeContextManager(nil)
 				if err != nil {
 					t.Fatal(err)
@@ -165,7 +190,10 @@ func TestResetStartupProjectionDisposalRealDocker(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer reset.Release()
+				phase("settlement-start")
 				err = reset.SettleResources(ctx)
+				phase("settlement-returned")
+				t.Logf("reset projection settlement error=%v", err)
 				if mode == "remove-rejected" {
 					if err == nil {
 						t.Fatal("unsettled real resources accepted")

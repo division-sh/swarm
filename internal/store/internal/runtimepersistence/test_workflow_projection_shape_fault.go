@@ -24,6 +24,22 @@ func SetWorkflowProjectionAccumulatorArrayForTest(ctx context.Context, selected 
 	return applyWorkflowProjectionShapeFault(ctx, selected, run, key, false, pipelinepersistence.SetWorkflowProjectionAccumulatorArrayForTest)
 }
 
+func SetRootFlowAccumulatorWireForTest(ctx context.Context, selected any, run string, raw []byte) (int64, error) {
+	if err := validateWorkflowProjectionFaultRun(run); err != nil {
+		return 0, err
+	}
+	var changed int64
+	err := runWorkflowProjectionFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		changed, err = pipelinepersistence.SetRootFlowAccumulatorWireForTest(ctx, tx, run, raw)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return changed, nil
+}
+
 func SetWorkflowProjectionMalformedTransitionHistoryForTest(ctx context.Context, selected any, run, key string) (int64, error) {
 	return applyWorkflowProjectionShapeFault(ctx, selected, run, key, false, pipelinepersistence.SetWorkflowProjectionMalformedTransitionHistoryForTest)
 }

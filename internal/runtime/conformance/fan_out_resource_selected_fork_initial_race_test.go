@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -59,10 +60,15 @@ func TestDeploymentSourceSelectedForkConcurrentFirstMaterialization(t *testing.T
 				}
 			}
 			var childCount, operationCount int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, sourceRunID).Scan(&childCount); err != nil {
-				t.Fatal(err)
+			{
+				var err error
+				childCount, err = storetest.CountSelectedForkRunsForSource(f.ctx, f.selected, sourceRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_operations WHERE source_run_id=$1`, sourceRunID).Scan(&operationCount); err != nil {
+			operationCount, err := storetest.CountSelectedForkSourceOperationsStorage(f.ctx, f.selected, sourceRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if childCount != 1 || operationCount != 1 {
@@ -82,29 +88,26 @@ func TestDeploymentSourceSelectedForkConcurrentFirstMaterialization(t *testing.T
 					t.Fatalf("contender reported success for a different immutable result: result=%+v resolved=%+v", outcome.result, resolved)
 				}
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM runs WHERE forked_from_run_id=$1`, sourceRunID).Scan(&childCount); err != nil {
-				t.Fatal(err)
+			{
+				var err error
+				childCount, err = storetest.CountSelectedForkRunsForSource(f.ctx, f.selected, sourceRunID)
+				if err != nil {
+					t.Fatal(err)
+				}
 			}
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_operations WHERE source_run_id=$1`, sourceRunID).Scan(&operationCount); err != nil {
+			operationCount, err = storetest.CountSelectedForkSourceOperationsStorage(f.ctx, f.selected, sourceRunID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if childCount != 1 || operationCount != 1 {
 				t.Fatalf("concurrent first materialization committed children=%d operations=%d, want one each", childCount, operationCount)
 			}
-			var runKind, operationKind, bindingKind, operationChildID string
-			var runRevision, operationRevision, bindingRevision int64
-			if err := f.db.QueryRowContext(f.ctx, `
-				SELECT r.forked_from_point_kind, r.forked_from_revision,
-				       o.fork_point_kind, o.fork_revision, o.fork_run_id,
-				       b.fork_point_kind, b.fork_revision
-				FROM runs r
-				JOIN run_fork_operations o ON o.fork_run_id=r.run_id
-				JOIN run_fork_selected_contract_bindings b ON b.binding_id=o.selected_binding_id
-				WHERE r.run_id=$1
-			`, resolved.ForkRunID).Scan(&runKind, &runRevision, &operationKind, &operationRevision,
-				&operationChildID, &bindingKind, &bindingRevision); err != nil {
+			point, err := storetest.ReadSelectedDeploymentPointStorage(f.ctx, f.selected, resolved.ForkRunID)
+			if err != nil {
 				t.Fatalf("read exact first-materialization authority: %v", err)
 			}
+			runKind, operationKind, bindingKind, operationChildID := point.RunKind, point.OperationKind, point.BindingKind, point.ChildID
+			runRevision, operationRevision, bindingRevision := point.RunRevision, point.OperationRevision, point.BindingRevision
 			if runKind != "deployment_revision" || operationKind != runKind || bindingKind != runKind ||
 				runRevision <= 0 || operationRevision != runRevision || bindingRevision != runRevision ||
 				operationChildID != resolved.ForkRunID {

@@ -2,7 +2,6 @@ package runtime_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -29,26 +27,22 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *testing.T) {
 	t.Run("postgres", func(t *testing.T) {
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
 
 		const flowInstance = boundedProviderFlowID
 		runID, entityID := boundedInboundTestCoordinates()
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "slack-managed-credential-observer")
 		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runSlackManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "postgres",
 			ctx:           ctx,
-			db:            db,
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
@@ -59,7 +53,6 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 			runID:         runID,
 			entityID:      entityID,
 			flowInstance:  flowInstance,
-			sqlite:        false,
 		})
 	})
 
@@ -74,7 +67,6 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 		runSlackManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
 			name:          "sqlite",
 			ctx:           ctx,
-			db:            storetest.Database(sqliteStore),
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
@@ -85,7 +77,6 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 			runID:         runID,
 			entityID:      entityID,
 			flowInstance:  flowInstance,
-			sqlite:        true,
 		})
 	})
 }
@@ -93,7 +84,6 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 type slackManagedConnectorBackend struct {
 	name             string
 	ctx              context.Context
-	db               *sql.DB
 	eventStore       runtimebus.EventStore
 	deliveryStore    runtimedelivery.Store
 	inboundStore     runtimepkg.InboundPersistence
@@ -105,7 +95,6 @@ type slackManagedConnectorBackend struct {
 	runID            string
 	entityID         string
 	flowInstance     string
-	sqlite           bool
 }
 
 type slackManagedConnectorCall struct {
@@ -508,7 +497,7 @@ func startSlackManagedConnectorBusAndCoordinator(t *testing.T, backend slackMana
 		ManagedCredentials:  managedStore,
 	})
 
-	startConfiguredChannelActivityNode(t, backend.ctx, pc, bus, backend.db)
+	assertConfiguredChannelClaimedDispatch(t, pc, bus, backend.eventStore)
 	return bus, pc
 }
 
@@ -536,45 +525,7 @@ func loadSlackManagedConnectorInboundEventID(t *testing.T, backend slackManagedC
 
 func loadNormalizedProviderEventID(t *testing.T, backend slackManagedConnectorBackend, eventName, providerEventID string) string {
 	t.Helper()
-	var eventID string
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT normalized.event_id
-			FROM events normalized
-			JOIN events evidence
-			  ON evidence.run_id = normalized.run_id
-			 AND evidence.event_name = 'platform.inbound_recorded'
-			WHERE normalized.run_id = ?
-			  AND normalized.entity_id = ?
-			  AND normalized.event_name = ?
-			  AND json_extract(evidence.payload, '$.provider_event_id') = ?
-			  AND EXISTS (
-				SELECT 1 FROM json_each(evidence.payload, '$.event_ids') ids
-				WHERE ids.value = normalized.event_id
-			  )
-			ORDER BY normalized.created_at DESC
-			LIMIT 1
-		`, backend.runID, backend.entityID, eventName, providerEventID).Scan(&eventID)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT normalized.event_id::text
-			FROM events normalized
-			JOIN events evidence
-			  ON evidence.run_id = normalized.run_id
-			 AND evidence.event_name = 'platform.inbound_recorded'
-			WHERE normalized.run_id = $1::uuid
-			  AND normalized.entity_id = $2::uuid
-			  AND normalized.event_name = $3
-			  AND evidence.payload->>'provider_event_id' = $4
-			  AND EXISTS (
-				SELECT 1 FROM jsonb_array_elements_text(evidence.payload->'event_ids') ids(event_id)
-				WHERE ids.event_id = normalized.event_id::text
-			  )
-			ORDER BY normalized.created_at DESC
-			LIMIT 1
-		`, backend.runID, backend.entityID, eventName, providerEventID).Scan(&eventID)
-	}
+	eventID, err := storetest.ReadConnectorNormalizedProviderEventID(backend.ctx, backend.eventStore, backend.runID, backend.entityID, eventName, providerEventID)
 	if err != nil {
 		t.Fatalf("%s load normalized event id for %s/%s: %v", backend.name, eventName, providerEventID, err)
 	}
@@ -640,25 +591,7 @@ func countSlackManagedConnectorActivityAttemptsForSource(t *testing.T, backend s
 func countSlackManagedConnectorFailureEventsForSource(t *testing.T, backend slackManagedConnectorBackend, sourceEventID string) int {
 	t.Helper()
 	failureEventType := boundedProviderFlowID + "/slack_post_message.failed"
-	var count int
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE run_id = ?
-			  AND event_name = ?
-			  AND source_event_id = ?
-		`, backend.runID, failureEventType, sourceEventID).Scan(&count)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE run_id = $1::uuid
-			  AND event_name = $2
-			  AND source_event_id = $3::uuid
-		`, backend.runID, failureEventType, sourceEventID).Scan(&count)
-	}
+	count, err := storetest.CountConnectorNamedSourceEvent(backend.ctx, backend.eventStore, backend.runID, failureEventType, sourceEventID)
 	if err != nil {
 		t.Fatalf("%s count failure events for source event %s: %v", backend.name, sourceEventID, err)
 	}
@@ -697,23 +630,7 @@ func requireManagedConnectorFailureEventCountEventually(t *testing.T, backend sl
 
 func slackManagedConnectorEventExists(t *testing.T, backend slackManagedConnectorBackend, eventID, eventType string) bool {
 	t.Helper()
-	var count int
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE event_id = ?
-			  AND event_name = ?
-		`, eventID, eventType).Scan(&count)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE event_id = $1::uuid
-			  AND event_name = $2
-		`, eventID, eventType).Scan(&count)
-	}
+	count, err := storetest.CountConnectorNamedEventIdentity(backend.ctx, backend.eventStore, eventID, eventType)
 	if err != nil {
 		t.Fatalf("%s require event %s/%s: %v", backend.name, eventID, eventType, err)
 	}
@@ -722,46 +639,14 @@ func slackManagedConnectorEventExists(t *testing.T, backend slackManagedConnecto
 
 func loadSlackManagedConnectorActivityRequestEvent(t *testing.T, backend slackManagedConnectorBackend, eventID string) events.Event {
 	t.Helper()
-	var raw []byte
-	var created time.Time
-	var err error
-	if backend.sqlite {
-		var payload string
-		var createdRaw string
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT payload, created_at
-			FROM events
-			WHERE event_id = ?
-			  AND event_name = 'platform.activity_requested'
-		`, eventID).Scan(&payload, &createdRaw)
-		raw = []byte(payload)
-		created, _ = time.Parse(time.RFC3339Nano, createdRaw)
-		if created.IsZero() {
-			created = time.Now().UTC()
-		}
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT payload, created_at
-			FROM events
-			WHERE event_id = $1::uuid
-			  AND event_name = 'platform.activity_requested'
-		`, eventID).Scan(&raw, &created)
+	event, found, err := storetest.ReadCanonicalEventRecord(backend.ctx, backend.eventStore, eventID)
+	if err != nil || !found {
+		t.Fatalf("%s load activity request event %s: found=%t error=%v", backend.name, eventID, found, err)
 	}
-	if err != nil {
-		t.Fatalf("%s load activity request event %s: %v", backend.name, eventID, err)
+	if event.Type() != events.EventType("platform.activity_requested") {
+		t.Fatalf("%s activity request event %s has type %q", backend.name, eventID, event.Type())
 	}
-	return eventtest.PersistedProjection(
-		eventID,
-		events.EventType("platform.activity_requested"),
-		"workflow-runtime",
-		"",
-		raw,
-		2,
-		backend.runID,
-		"",
-		events.EventEnvelope{EntityID: backend.entityID},
-		created,
-	)
+	return event
 }
 
 func assertSlackManagedConnectorNoStoredSecret(t *testing.T, backend slackManagedConnectorBackend, secret string) {

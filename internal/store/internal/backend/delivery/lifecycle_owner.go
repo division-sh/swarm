@@ -20,6 +20,7 @@ type CompletionCandidateRequester interface {
 
 type ReceiverExecutionAdmission interface {
 	ReceiverExecutionReadyTx(context.Context, *sql.Tx, events.DeliveryRoute, deliverylifecycle.ExecutionAuthority, bool) (bool, error)
+	ReadReceiverClaimProfileTx(context.Context, *sql.Tx, events.Event, events.DeliveryRoute, deliverylifecycle.ExecutionAuthority) (deliverylifecycle.AgentClaimProfile, error)
 }
 
 type ReceiverTargetPersistence interface {

@@ -1,12 +1,13 @@
 package serveapp
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/telegramapi"
 	"github.com/google/uuid"
 )
@@ -66,13 +67,21 @@ func channelUncertaintySummaryEntry(t *testing.T, provider *telegramapi.Double) 
 func proveChannelUncertainNoticeReadback(t *testing.T, provider *telegramapi.Double, backend, dsn, endpoint, seedID string, observation *channelReconcileObservation, restart func()) {
 	t.Helper()
 	id := onlyPublicChannelNoticeID(t, endpoint, seedID)
-	db, err := sql.Open(backend, dsn)
+	source, err := storetest.OpenChannelObservation(backend, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := source.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	reader, err := storetest.ObserveChannelProcessStorage(source)
+	if err != nil {
+		t.Fatal(err)
+	}
 	summaryMessage, summaryToken := channelUncertaintySummaryEntry(t, provider)
-	waitChannelUncertainNoticeFact(t, db, id, false, false)
+	waitChannelUncertainNoticeFact(t, reader, id, false, false)
 	updateID := 905000
 	readback := func(outcome string, resendable bool) {
 		t.Helper()
@@ -87,7 +96,7 @@ func proveChannelUncertainNoticeReadback(t *testing.T, provider *telegramapi.Dou
 	}
 	callback, signing, _ := provider.Registration()
 	proveChannelManualResendAfterLostNotice(t, provider, callback, signing, observation)
-	waitChannelUncertainNoticeFact(t, db, id, false, true)
+	waitChannelUncertainNoticeFact(t, reader, id, false, true)
 	readback("Not acknowledged", false)
 	restart()
 	readback("Not acknowledged", false)
@@ -110,11 +119,11 @@ func proveChannelUncertainNoticeReadback(t *testing.T, provider *telegramapi.Dou
 			"data":    acknowledge,
 		},
 	})
-	waitChannelUncertainNoticeFact(t, db, id, true, true)
+	waitChannelUncertainNoticeFact(t, reader, id, true, true)
 	readback("Acknowledged", false)
 	restart()
 	readback("Acknowledged", false)
-	waitChannelUncertainNoticeFact(t, db, id, true, true)
+	waitChannelUncertainNoticeFact(t, reader, id, true, true)
 	if got := len(channelPhysicalNoticeMessages(provider)); got != 2 {
 		t.Fatalf("completion/restart replayed or revived the notice: %d physical copies", got)
 	}
@@ -130,30 +139,27 @@ func channelPhysicalNoticeMessages(provider *telegramapi.Double) []int {
 	return messages
 }
 
-func waitChannelUncertainNoticeFact(t *testing.T, db *sql.DB, id string, acknowledged, hasFresh bool) {
+func waitChannelUncertainNoticeFact(t *testing.T, reader storetest.ChannelProcessObservation, id string, acknowledged, hasFresh bool) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		var notified bool
-		var uncertain, sent, total int
-		if err := db.QueryRow(`SELECT COALESCE(notified,false) FROM mailbox WHERE item_id=$1`, id).Scan(&notified); err != nil {
+		notified, err := reader.ReadChannelUncertainNoticeAcknowledgmentStorage(context.Background(), id)
+		if err != nil {
 			t.Fatal(err)
 		}
-		if err := db.QueryRow(`SELECT COUNT(*),
-			SUM(CASE WHEN state='uncertain' THEN 1 ELSE 0 END),
-			SUM(CASE WHEN state='sent' THEN 1 ELSE 0 END)
-			FROM channel_delivery_plans WHERE source_kind='notice' AND source_id=$1`, id).Scan(&total, &uncertain, &sent); err != nil {
+		plans, err := reader.ReadChannelUncertainNoticePlanCountsStorage(context.Background(), id)
+		if err != nil {
 			t.Fatal(err)
 		}
 		expectedTotal, expectedSent := 1, 0
 		if hasFresh {
 			expectedTotal, expectedSent = 2, 1
 		}
-		if notified == acknowledged && uncertain == 1 && sent == expectedSent && total == expectedTotal {
+		if notified == acknowledged && plans.Uncertain == 1 && plans.Sent == expectedSent && plans.Total == expectedTotal {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("canonical notice/effect facts did not settle: notified=%t, plans=%d uncertain=%d sent=%d", notified, total, uncertain, sent)
+			t.Fatalf("canonical notice/effect facts did not settle: notified=%t, plans=%d uncertain=%d sent=%d", notified, plans.Total, plans.Uncertain, plans.Sent)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

@@ -164,3 +164,13 @@ func ReadFlowConstructionPublicationFieldsTx(ctx context.Context, tx *sql.Tx, ow
 	}
 	return pipeline.FlowConstructionPublicationFields(raw, owner, entityID, eventID)
 }
+
+// The replay witness deliberately removes only the selected period's entity,
+// leaving its construction, readiness and original settled routing facts intact.
+func DeleteFanInSelectedPeriodOwnerTx(ctx context.Context, tx *sql.Tx, runID, entityID string) (int64, error) {
+	result, err := tx.ExecContext(ctx, `DELETE FROM entity_state WHERE run_id=$1 AND entity_id=$2 AND flow_instance='portfolio/selected-period'`, runID, entityID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}

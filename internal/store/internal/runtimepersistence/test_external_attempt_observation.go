@@ -8,6 +8,24 @@ import (
 )
 
 type ExternalAttemptStorage = effectpersistence.ExternalAttemptStorage
+type ProviderTurnAttemptLineageStorage = effectpersistence.ProviderTurnAttemptLineageStorage
+
+func ReadProviderTurnAttemptLineageStorageForTest(ctx context.Context, selected any) ([]ProviderTurnAttemptLineageStorage, error) {
+	switch owner := selected.(type) {
+	case *PostgresStore:
+		if owner == nil || owner.effectPostgresOwner == nil {
+			return nil, fmt.Errorf("provider attempt observation requires the original postgres effect owner")
+		}
+		return owner.effectPostgresOwner.ReadProviderTurnAttemptLineageStorageForTest(ctx)
+	case *SQLiteRuntimeStore:
+		if owner == nil || owner.effectSQLiteOwner == nil {
+			return nil, fmt.Errorf("provider attempt observation requires the original sqlite effect owner")
+		}
+		return owner.effectSQLiteOwner.ReadProviderTurnAttemptLineageStorageForTest(ctx)
+	default:
+		return nil, fmt.Errorf("provider attempt observation requires the original native selected owner, got %T", selected)
+	}
+}
 
 func ReadExternalAttemptStorageForTest(ctx context.Context, selected any) ([]ExternalAttemptStorage, error) {
 	switch owner := selected.(type) {

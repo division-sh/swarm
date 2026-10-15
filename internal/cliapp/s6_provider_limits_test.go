@@ -1,0 +1,47 @@
+package cliapp
+
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestS6UnifiedProviderLimitsRejectRetiredFields(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	for _, key := range []string{"rate_limit", "rate_limit_max_wait", "max_concurrency_max_wait", "models"} {
+		for _, value := range []string{"null", "''", "{}", "[]", "0", "false"} {
+			for _, merged := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/merged_%t", key, value, merged), func(t *testing.T) {
+					policy := fmt.Sprintf("{%s: %s, max_concurrency: 2}", key, value)
+					if merged {
+						policy = fmt.Sprintf("{<<: {%s: %s}, max_concurrency: 2}", key, value)
+					}
+					path := filepath.Join(t.TempDir(), "swarm.yaml")
+					writeRuntimeConfigText(t, path, "llm: {provider_limits: {anthropic: "+policy+"}}\n")
+					for _, override := range []string{"", "mock"} {
+						result, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{ExplicitPath: path, BackendOverride: override})
+						if err == nil || !strings.Contains(err.Error(), key) {
+							t.Fatalf("retired field %s admitted with override %q: %v", key, override, err)
+						}
+						located := false
+						for _, diagnostic := range result.Diagnostics {
+							if diagnostic.blocker() && strings.Contains(diagnostic.Message, key) && diagnostic.Path == path && diagnostic.Line > 0 && diagnostic.Column > 0 {
+								located = true
+								break
+							}
+						}
+						if !located {
+							t.Fatalf("retired field lost its selected-source location: %+v", result.Diagnostics)
+						}
+					}
+				})
+			}
+		}
+	}
+	for _, key := range []string{"rate_limit", "rate_limit_max_wait", "max_concurrency_max_wait", "models", "models.regular.max_concurrency"} {
+		if _, admitted := unifiedConfigProviderLimitRule(strings.Split("llm.provider_limits.anthropic."+key, ".")); admitted {
+			t.Fatalf("CLI vocabulary advertises retired policy %s", key)
+		}
+	}
+}

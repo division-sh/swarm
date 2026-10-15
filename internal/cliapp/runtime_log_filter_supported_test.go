@@ -24,7 +24,6 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -45,9 +44,7 @@ func TestRuntimeLogFilterSupportedConsumersBothStores(t *testing.T) {
 			if backend == "sqlite" {
 				selected = storetest.StartSQLiteRuntimeStore(t)
 			} else {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			}
 			instance := uuid.NewString()
 			fact := sourceartifactfixture.Fact()

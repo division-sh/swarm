@@ -223,7 +223,10 @@ func TestNativeReceiverForkMilestoneSuccessorPreservesReviewedCuts(t *testing.T)
 	if selected == nil || selected.Family != "native-served-delivery-quiescence-caller" || selected.File != "internal/serveapp/receiver_fork_test.go" || selected.Successor == "" || selected.Removed || selected.Mechanical != nil {
 		t.Fatal("receiver-fork successor changed its migration identity")
 	}
+	currentRow := *selected
 	actual := selectedCausalObservationBody(t, selected.File, selected.Function)
+	prior, actual := requireCatchUp2672MasterPair(t, *selected, actual)
+	selected = &prior
 	if err := validateReceiverForkMilestoneSuccessor(*selected, actual); err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +265,7 @@ func TestNativeReceiverForkMilestoneSuccessorPreservesReviewedCuts(t *testing.T)
 			}
 		})
 	}
-	if files, changes, err := prepareFiles("../../..", []recipe{*selected}); err != nil || len(files) != 0 || len(changes) != 0 {
+	if files, changes, err := prepareFiles("../../..", []recipe{currentRow}); err != nil || len(files) != 0 || len(changes) != 0 {
 		t.Fatalf("current receiver successor is not inert: %v", err)
 	}
 }

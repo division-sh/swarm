@@ -14,11 +14,13 @@ import (
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
@@ -56,13 +58,28 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 						}
 						event := admitted.Event()
 						agentIdentity := runtimebustest.IdentityForRun(t, event.RunID(), agentID, "")
+						agentRouted := routed
+						if routed && event.Type() == "platform.boot" {
+							// #2269 ruling 6170784774 keeps boot outside agent activity order.
+							admission := semanticview.ClassifyAuthoredSubscription(nil, semanticview.AuthoredSubscriptionRequest{
+								ConsumerKind: semanticview.AuthoredSubscriptionConsumerAgent, ConsumerID: agentID,
+								FlowID: ".", Authored: string(event.Type()), LocalEvents: map[string]struct{}{"boot": {}},
+							})
+							if admission.Admitted() || admission.Failure() != semanticview.AuthoredSubscriptionFailureUnanchoredAgentOrigin || len(admission.RoutePatterns()) != 0 {
+								t.Fatalf("boot gained an unanchored agent route: %+v", admission)
+							}
+							agentRouted = false
+						}
 						var delivery <-chan *runtimebus.LocalDelivery
-						if routed {
+						if agentRouted {
 							requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{
 								Origin: semanticEventRunOriginForTest(t, event.ID(), string(event.Type())),
 								RunID:  event.RunID(), StartedAt: event.CreatedAt(),
 							})
-							seedStandaloneConvergenceAgent(t, fixture.store, ctx, agentIdentity)
+							authority := seedStandaloneConvergenceAgent(t, fixture.store, ctx, agentIdentity)
+							if err := eventBus.SetDeliveryAuthority(authority); err != nil {
+								t.Fatal(err)
+							}
 							delivery = runtimebustest.SubscribeForRun(t, eventBus, event.RunID(), agentID, event.Type())
 							if delivery == nil {
 								t.Fatal("Subscribe returned nil")
@@ -72,7 +89,7 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 						if err := eventBus.Publish(ctx, event); err != nil {
 							t.Fatalf("Publish: %v", err)
 						}
-						if routed {
+						if agentRouted {
 							select {
 							case delivered := <-delivery:
 								got := delivered.Event()
@@ -104,7 +121,7 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 							t.Fatalf("standalone convergence = status:%q run:%q trigger:%q/%q", status, runID, triggerID, triggerType)
 						}
 						wantDeliveries := 0
-						if routed {
+						if agentRouted {
 							wantDeliveries = 1
 						}
 						if got := countRunConvergenceDeliveries(t, fixture, ctx, event.ID()); got != wantDeliveries {
@@ -175,22 +192,27 @@ type standaloneConvergenceAgentStore interface {
 	agentfixture.Store
 }
 
-func seedStandaloneConvergenceAgent(t *testing.T, selected any, ctx context.Context, identity agentidentity.Identity) {
+func seedStandaloneConvergenceAgent(t *testing.T, selected any, ctx context.Context, identity agentidentity.Identity) runtimedelivery.ExecutionAuthority {
 	t.Helper()
 	store, ok := selected.(standaloneConvergenceAgentStore)
 	if !ok {
 		t.Fatalf("standalone convergence store %T cannot persist agents", selected)
 	}
+	source, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("standalone convergence agent requires its exact source")
+	}
 	agentID := identity.AgentID()
-	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+	if err := agentfixture.UpsertStaticForSource(t, ctx, store, runtimemanager.PersistedAgent{
+		Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID: agentID, Identity: identity, Role: "observer", FlowID: "global", Type: "stub", Model: "regular",
 			ExecutionMode: "live", Config: json.RawMessage(`{}`),
-		}),
+		})),
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
-	}); err != nil {
+	}, source); err != nil {
 		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 	}
+	return admitAgentClaimProfileAuthority(t, runtimecorrelation.WithRunID(ctx, identity.RunID), store, source)
 }
 
 func TestSameLabelCausalAndRunScopedEventsCannotConvergeExistingRunParity(t *testing.T) {

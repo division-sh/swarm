@@ -135,11 +135,7 @@ func MaterializeForkPinsTx(
 		return nil, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "fresh fork %s already has resource pins", forkRunID)
 	}
 	for _, pin := range pins {
-		if _, err := tx.ExecContext(ctx, o.query(`
-			INSERT INTO resource_version_pins
-			(run_id, flow_path, event_name, schema_digest, version_id, selection, pinned_at)
-			VALUES (%s, %s, %s, %s, %s, %s, %s)
-		`, 7), pin.RunID, pin.Declaration.FlowPath, pin.Declaration.EventName, pin.SchemaDigest, pin.VersionID, pin.Selection, now.UTC()); err != nil {
+		if err := o.insertPinTx(ctx, tx, pin, now.UTC()); err != nil {
 			return nil, fmt.Errorf("insert fork resource pin: %w", err)
 		}
 	}

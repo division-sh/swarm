@@ -1,15 +1,17 @@
 package serveapp
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
@@ -17,13 +19,12 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 		for _, schedule := range []string{"applied_before_loss", "applied_after_completion"} {
 			t.Run(string(backend)+"/"+schedule, func(t *testing.T) {
 				withSummary := schedule == "applied_after_completion"
-				h, db, bundleHash := startChannelAnchorJourney(t, backend, "uncertain-copy-token", withSummary)
-				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-					"event_name": "work.requested", "bundle_hash": bundleHash,
-					"payload": map[string]any{"seed": true}, "idempotency_key": "uncertain-copy-seed",
-				})
-				cardID := waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
-				oldMessage := waitChannelAnchorReceipt(t, db, cardID)
+				h, _, bundleHash := startChannelAnchorJourney(t, backend, "uncertain-copy-token", withSummary)
+				intentIdentity := captureChannelIntentIdentity(t, h)
+				intentReader := openChannelAnchorObservation(t, h)
+				seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": bundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "uncertain-copy-seed"})
+				cardID := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews")
+				oldMessage := waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), cardID)
 				oldToken, found := telegramCallbackToken(h.provider.Delivery(oldMessage-1), "reject")
 				if !found {
 					t.Fatal("actual gate card lacks the required-input reject action")
@@ -44,39 +45,55 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 						t.Fatal("provider did not retain the unacknowledged edit")
 					}
 				}
-				waitUncertainCopyPlan(t, db, cardID)
-				postUncertainCopyStaleControls(t, h, db, oldMessage, oldToken, 901010)
+				waitUncertainCopyPlan(t, channelSettlementStorageObservation(t, h), cardID)
+				postUncertainCopyStaleControls(t, h, intentReader, intentIdentity, oldMessage, oldToken, 901010)
 				callback, signing, _ := h.provider.Registration()
 				resendToken, inboxMessage := requestChannelRecoveryAction(t, h.provider, callback, signing, "Resend card")
 				postUncertainCopyCallback(t, h, inboxMessage, resendToken, 901020)
 				fresh := waitUncertainCopyDelivery(t, h, inboxMessage, "Input: reason (text) required")
 				postUncertainCopyCallback(t, h, inboxMessage, resendToken, 901020, http.StatusOK)
 				postUncertainCopyCallback(t, h, inboxMessage, resendToken, 901021)
-				waitChannelRejectedCallback(t, db, resendToken)
+				waitObjectChannelDisposition(t, intentReader, objectIntentQuery(intentIdentity, channeldelivery.IntentAction, "901021"), "stale", "rejected")
 				assertUncertainCopyWarning(t, h, cardID, "Decision: pending", 901030, withSummary)
+				if err := intentReader.Close(); err != nil {
+					t.Fatal(err)
+				}
 				h.stop(t)
 				h.start(t)
-				postUncertainCopyStaleControls(t, h, db, oldMessage, oldToken, 901040)
+				intentReader = openChannelAnchorObservation(t, h)
+				postUncertainCopyStaleControls(t, h, intentReader, intentIdentity, oldMessage, oldToken, 901040)
 				assertUncertainCopyWarning(t, h, cardID, "Decision: pending", 901050, withSummary)
 				postUncertainCopyText(t, h, fresh, "fresh-copy-private-reason", 901060)
-				waitUncertainCopyDecision(t, db, cardID)
+				waitUncertainCopyDecision(t, channelAnchorStorageObservation(t, h), cardID)
 				waitChannelReceiptText(t, h, fresh, "Decision: reject", true)
 				if apply != nil {
 					apply()
 					waitChannelReceiptText(t, h, oldMessage, "Input: reason (text) required", false)
 				}
-				postUncertainCopyStaleControls(t, h, db, oldMessage, oldToken, 901070)
+				postUncertainCopyStaleControls(t, h, intentReader, intentIdentity, oldMessage, oldToken, 901070)
 				assertUncertainCopyWarning(t, h, cardID, "Decision: reject", 901080, withSummary)
+				if err := intentReader.Close(); err != nil {
+					t.Fatal(err)
+				}
 				h.stop(t)
 				h.start(t)
-				postUncertainCopyStaleControls(t, h, db, oldMessage, oldToken, 901090)
+				intentReader = openChannelAnchorObservation(t, h)
+				postUncertainCopyStaleControls(t, h, intentReader, intentIdentity, oldMessage, oldToken, 901090)
 				assertUncertainCopyWarning(t, h, cardID, "Decision: reject", 901100, withSummary)
 				var decisions, copies, uncertainty int
-				if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&decisions); err != nil || decisions != 1 {
-					t.Fatalf("old controls or duplicate actions changed completion cardinality: %d, %v", decisions, err)
+				{
+					var err error
+					decisions, err = channelAnchorStorageObservation(t, h).CountRunNamedEventStorage(context.Background(), seed.RunID, "mailbox.card_decided")
+					if err != nil || decisions != 1 {
+						t.Fatalf("old controls or duplicate actions changed completion cardinality: %d, %v", decisions, err)
+					}
 				}
-				if err := db.QueryRow(`SELECT COUNT(*),SUM(CASE WHEN state='uncertain' THEN 1 ELSE 0 END)
-					FROM channel_delivery_plans WHERE source_kind='card' AND source_id=$1`, cardID).Scan(&copies, &uncertainty); err != nil || copies != 2 || uncertainty != 1 {
+				if err := func() error {
+					observed, err := channelSettlementStorageObservation(t, h).ReadCardCopyCountsStorage(context.Background(), cardID)
+					copies = observed.Total
+					uncertainty = observed.Uncertain
+					return err
+				}(); err != nil || copies != 2 || uncertainty != 1 {
 					t.Fatalf("resend/restart settled the predecessor or created extra copies: %d/%d, %v", copies, uncertainty, err)
 				}
 				oldEdits := 0
@@ -91,13 +108,13 @@ func TestChannelDeliveryUncertainCopyAuthorityPublicJourney(t *testing.T) {
 				if oldEdits != 1 {
 					t.Fatalf("uncertain provider write was automatically retried/re-edited: %d", oldEdits)
 				}
-				assertUncertainCopyRebindFence(t, h, db, cardID)
+				assertUncertainCopyRebindFence(t, h, intentReader, cardID)
 			})
 		}
 	}
 }
 
-func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, cardID string) {
+func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness, reader channeldelivery.Observer, cardID string) {
 	t.Helper()
 	oldCommand := waitNativeInboxCommand(t, h.provider, "chat", "1001", "")
 	confirmationIndex := 0
@@ -105,6 +122,9 @@ func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness
 		confirmationIndex++
 	}
 	runChannelOnboardingCLIJourney(t, h.opts.ConfigPath, h.endpoint, h.provider, "rebind", "uncertain-copy-token", 1002, "private", confirmationIndex)
+	// Both are newly received on this ingress; the old destination/control
+	// is not proof that the occurrence was admitted under the old interface.
+	intentIdentity := captureChannelIntentIdentity(t, h)
 	command := waitNativeInboxCommand(t, h.provider, "chat", "1002", "")
 	callback, signing, _ := h.provider.Registration()
 	before := 0
@@ -127,21 +147,7 @@ func assertUncertainCopyRebindFence(t *testing.T, h *channelOnboardingE2EHarness
 	if fmt.Sprint(output["chat_id"]) != "1002" || strings.Contains(fmt.Sprint(output["text"]), "Older copies may be outdated") || strings.Contains(fmt.Sprint(output["text"]), cardID[:8]) {
 		t.Fatalf("rebind exposed old-epoch uncertainty to another destination: %v", output)
 	}
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		var rejected int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_text_intents WHERE provider_event_id='901110'
-			AND state='settled' AND disposition='entry_rejected'`).Scan(&rejected); err != nil {
-			t.Fatal(err)
-		}
-		if rejected == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("old destination retained inbox readback authority after rebind")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitObjectChannelDisposition(t, reader, objectIntentQuery(intentIdentity, channeldelivery.IntentText, "901110"), "entry_rejected")
 	for index := before; ; index++ {
 		output := h.provider.Delivery(index)
 		if output == nil {
@@ -188,19 +194,16 @@ func postUncertainCopyText(t *testing.T, h *channelOnboardingE2EHarness, message
 	}
 }
 
-func postUncertainCopyStaleControls(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, message int, token string, update int) {
+func postUncertainCopyStaleControls(t *testing.T, h *channelOnboardingE2EHarness, reader channeldelivery.Observer, identity channeldelivery.IntentObservationQuery, message int, token string, update int) {
 	t.Helper()
 	postUncertainCopyCallback(t, h, message, token, update)
 	postUncertainCopyCallback(t, h, message, token, update, http.StatusOK)
 	postUncertainCopyCallback(t, h, message, token, update+1)
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		var settled int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_action_intents WHERE state='settled'
-			AND disposition IN ('stale','rejected') AND provider_event_id IN ($1,$2)`, fmt.Sprint(update), fmt.Sprint(update+1)).Scan(&settled); err != nil {
-			t.Fatal(err)
-		}
-		if settled == 2 {
+		first, _ := observeChannelDisposition(t, reader, objectIntentQuery(identity, channeldelivery.IntentAction, fmt.Sprint(update)), "stale", "rejected")
+		second, _ := observeChannelDisposition(t, reader, objectIntentQuery(identity, channeldelivery.IntentAction, fmt.Sprint(update+1)), "stale", "rejected")
+		if first && second {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -216,12 +219,7 @@ func postUncertainCopyStaleControls(t *testing.T, h *channelOnboardingE2EHarness
 			postUncertainCopyCallback(t, h, message, cancel, update+3)
 			postUncertainCopyCallback(t, h, message, cancel, update+3, http.StatusOK)
 			for {
-				var rejected int
-				if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_action_intents WHERE state='settled'
-					AND disposition IN ('stale','rejected') AND provider_event_id=$1`, fmt.Sprint(update+3)).Scan(&rejected); err != nil {
-					t.Fatal(err)
-				}
-				if rejected == 1 {
+				if rejected, _ := observeChannelDisposition(t, reader, objectIntentQuery(identity, channeldelivery.IntentAction, fmt.Sprint(update+3)), "stale", "rejected"); rejected {
 					break
 				}
 				if time.Now().After(deadline) {
@@ -237,29 +235,27 @@ func postUncertainCopyStaleControls(t *testing.T, h *channelOnboardingE2EHarness
 	postUncertainCopyText(t, h, message, answer, update+2, http.StatusOK)
 	deadline = time.Now().Add(15 * time.Second)
 	for {
-		var settled int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM operator_channel_text_intents WHERE state='settled'
-			AND disposition='teaching' AND provider_event_id=$1`, fmt.Sprint(update+2)).Scan(&settled); err != nil {
-			t.Fatal(err)
-		}
-		if settled > 0 {
+		settled, result := observeChannelDisposition(t, reader, objectIntentQuery(identity, channeldelivery.IntentText, fmt.Sprint(update+2)), "teaching")
+		if settled {
 			return
 		}
 		if time.Now().After(deadline) {
-			var state, disposition, fact string
-			err := db.QueryRow(`SELECT state,COALESCE(disposition,''),CAST(fact AS TEXT) FROM operator_channel_text_intents WHERE provider_event_id=$1`, fmt.Sprint(update+2)).Scan(&state, &disposition, &fact)
-			t.Fatalf("stale quoted input lacks a durable non-mutation disposition: %s/%s %s %v", state, disposition, fact, err)
+			t.Fatalf("stale quoted input %+v lacks a durable non-mutation disposition: %+v", objectIntentQuery(identity, channeldelivery.IntentText, fmt.Sprint(update+2)), result)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-func waitUncertainCopyPlan(t *testing.T, db *sql.DB, cardID string) {
+func waitUncertainCopyPlan(t *testing.T, reader storetest.ChannelSettlementObservation, cardID string) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
 		var count int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM channel_delivery_plans WHERE source_id=$1 AND state='uncertain'`, cardID).Scan(&count); err != nil {
+		if err := func() error {
+			observed, err := reader.CountUncertainSourcePlansStorage(context.Background(), cardID)
+			count = observed
+			return err
+		}(); err != nil {
 			t.Fatal(err)
 		}
 		if count == 1 {
@@ -292,14 +288,15 @@ func waitUncertainCopyDelivery(t *testing.T, h *channelOnboardingE2EHarness, aft
 	}
 }
 
-func waitUncertainCopyDecision(t *testing.T, db *sql.DB, cardID string) {
+func waitUncertainCopyDecision(t *testing.T, reader storetest.ChannelAnchorObservation, cardID string) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		var status, verdict string
-		if err := db.QueryRow(`SELECT status,COALESCE(verdict,'') FROM decision_cards WHERE card_id=$1`, cardID).Scan(&status, &verdict); err != nil {
+		observed, err := reader.ReadChannelAnchorDecisionStorage(context.Background(), cardID)
+		if err != nil {
 			t.Fatal(err)
 		}
+		status, verdict := observed.Status, observed.Verdict
 		if status == "decided" && verdict == "reject" {
 			return
 		}

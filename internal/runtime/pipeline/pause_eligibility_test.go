@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -67,8 +68,8 @@ func TestPausedHandedNodeParksUntilContinueBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			event := publish("select")
-			var before int
-			if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='selected'`, runID).Scan(&before); err != nil || before != 0 {
+			before, err := storetest.CountRunEventNameStorage(context.Background(), s.events, runID, "selected")
+			if err != nil || before != 0 {
 				t.Fatalf("paused publication executed: %d %v", before, err)
 			}
 			owner := s.events.PipelineObligations()
@@ -97,8 +98,8 @@ func TestPausedHandedNodeParksUntilContinueBothStores(t *testing.T) {
 			if err := result.Failure(); err != nil {
 				t.Fatal(err)
 			}
-			var after int
-			if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='selected'`, runID).Scan(&after); err != nil || after != 0 {
+			after, err := storetest.CountRunEventNameStorage(context.Background(), s.events, runID, "selected")
+			if err != nil || after != 0 {
 				t.Fatalf("paused node mutation = %d %v", after, err)
 			}
 			if blocked, err := controller.QueueableRunDispatchBlocked(ctx, runID); err != nil || !blocked {
@@ -111,7 +112,8 @@ func TestPausedHandedNodeParksUntilContinueBothStores(t *testing.T) {
 			if err := result.Failure(); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='selected'`, runID).Scan(&after); err != nil || after != 1 {
+			after, err = storetest.CountRunEventNameStorage(context.Background(), s.events, runID, "selected")
+			if err != nil || after != 1 {
 				t.Fatalf("released node mutation = %d %v", after, err)
 			}
 			snapshot, err := s.events.Snapshot(ctx, proof.DeliveryID())

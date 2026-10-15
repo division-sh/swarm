@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
@@ -53,14 +55,11 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 						params, decisionParams                           map[string]any
 					}
 					var completed []completedCase
-					// Each outcome retains a fresh run. Only source admission and process
-					// startup are shared; every result is checked again after restart.
 					for _, outcome := range outcomes {
 						t.Run(outcome, func(t *testing.T) {
 							beforeCalls := calls.Load()
 							exhausted.Store(outcome == "exhausted")
-							params := map[string]any{"event_name": inputName, "bundle_hash": rt.BundleHash,
-								"payload": map[string]any{"case_id": "alpha", "message": "exact-provider-input"}, "idempotency_key": "activity-seed-" + outcome}
+							params := map[string]any{"event_name": inputName, "bundle_hash": rt.BundleHash, "payload": map[string]any{"case_id": "alpha", "message": "exact-provider-input"}, "idempotency_key": "activity-seed-" + outcome}
 							seed := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 							defer func() {
 								if !t.Failed() {
@@ -86,7 +85,7 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 							}()
 							var decisionParams map[string]any
 							if approval {
-								decisionParams = lifecycleGateDecisionParams(t, rt, seed.RunID, outcome)
+								decisionParams = lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, outcome)
 								decisionParams["idempotency_key"] = "activity-decision-" + outcome
 								if calls.Load() != beforeCalls {
 									t.Fatal("provider executed before human approval")
@@ -120,10 +119,10 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 								time.Sleep(20 * time.Millisecond)
 							}
 							if eventID == "" {
-								t.Fatalf("missing generated outcome; calls=%d\n%s", calls.Load(), servedEventPublishDebugSummary(t, rt.DB, rt.Backend, seed.RunID))
+								t.Fatalf("missing generated outcome; calls=%d\n%s", calls.Load(), servedInspectionRunDebugSummary(rt.ReceiverStateReader, seed.RunID))
 							}
-							waitPublicationSiteCompletion(t, rt, seed.RunID)
-							before := requireActivityPublicationReadback(t, rt, seed.RunID, eventID, mode, local)
+							waitPublicationSiteCompletion(t, rt.ReceiverStateReader, seed.RunID)
+							before := requireActivityPublicationReadback(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, eventID, mode, local)
 							if calls.Load()-beforeCalls != wantCalls {
 								t.Fatalf("provider calls=%d want=%d", calls.Load()-beforeCalls, wantCalls)
 							}
@@ -149,8 +148,8 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 								var decision map[string]any
 								requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.decide", row.decisionParams, &decision)
 							}
-							waitPublicationSiteCompletion(t, rt, row.runID)
-							if after := requireActivityPublicationReadback(t, rt, row.runID, row.eventID, mode, row.local); after != row.readback || calls.Load() != wantTotalCalls {
+							waitPublicationSiteCompletion(t, rt.ReceiverStateReader, row.runID)
+							if after := requireActivityPublicationReadback(t, rt.Endpoint, rt.ReceiverStateReader, row.runID, row.eventID, mode, row.local); after != row.readback || calls.Load() != wantTotalCalls {
 								t.Fatalf("restart/duplicate changed generated outcome or re-executed provider: calls=%d", calls.Load())
 							}
 						})
@@ -161,12 +160,15 @@ func TestServedGeneratedActivityPublicationBothStores(t *testing.T) {
 	}
 }
 
-func requireActivityPublicationReadback(t *testing.T, rt servedControlProofRuntime, runID, eventID, mode, local string) string {
+func requireActivityPublicationReadback(t *testing.T, selectedProofEndpoint string, selectedProofReceiverStateReader receiverProofStateReader, runID, eventID, mode, local string) string {
 	t.Helper()
-	var name, kind, rawSource, rawPayload string
-	if err := rt.DB.QueryRow(`SELECT event_name,routing_source_kind,CAST(source_route AS TEXT),CAST(payload AS TEXT) FROM events WHERE event_id=$1 AND run_id=$2`, eventID, runID).Scan(&name, &kind, &rawSource, &rawPayload); err != nil {
+	observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (storetest.ActivityPublicationSourceStorage, error) {
+		return storetest.ReadActivityPublicationSourceStorage(ctx, selectedProofReceiverStateReader, runID, eventID)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
+	name, kind, rawSource, rawPayload := observed.Name, observed.Kind, observed.Route, observed.Payload
 	var source events.RouteIdentity
 	if err := json.Unmarshal([]byte(rawSource), &source); err != nil {
 		t.Fatal(err)
@@ -180,13 +182,19 @@ func requireActivityPublicationReadback(t *testing.T, rt servedControlProofRunti
 	}
 	if strings.Contains(mode, "template") {
 		wantKind = "concrete_template_instance"
-		if err := rt.DB.QueryRow(`SELECT instance_path FROM flow_instances WHERE run_id=$1 AND flow_template=$2`, runID, flow).Scan(&path); err != nil {
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (string, error) {
+			return storetest.ReadActivityPublicationTemplatePathStorage(ctx, selectedProofReceiverStateReader, runID, flow)
+		})
+		if err != nil {
 			t.Fatal(err)
 		}
+		path = observed
 	}
 	wantSource := events.RouteIdentity{FlowID: flow, FlowInstance: path}
-	var entityID string
-	if err := rt.DB.QueryRow(`SELECT entity_id FROM flow_instances WHERE run_id=$1 AND instance_path=$2 AND flow_template=$3`, runID, path, flow).Scan(&entityID); err != nil {
+	entityID, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (string, error) {
+		return storetest.ReadActivityPublicationTemplateEntityStorage(ctx, selectedProofReceiverStateReader, runID, path, flow)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	wantSource.EntityID = entityID
@@ -198,7 +206,7 @@ func requireActivityPublicationReadback(t *testing.T, rt servedControlProofRunti
 		t.Fatalf("generated outcome borrowed declaration/instance/entity: %s %s %+v want=%s %s %+v", name, kind, source, wantName, wantKind, wantSource)
 	}
 	var public operatorread.OperatorEventFull
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": eventID}, &public)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "event.get", map[string]any{"event_id": eventID}, &public)
 	if public.EventName != name || public.EventID != eventID || public.RunID != runID || public.Payload["activity_id"] != "send" {
 		t.Fatalf("generated public outcome: %+v", public)
 	}
@@ -224,8 +232,10 @@ func requireActivityPublicationReadback(t *testing.T, rt servedControlProofRunti
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("generated outcome recipients=%v want=%v", got, want)
 	}
-	var resultCount int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND (event_name LIKE 'send.%' OR event_name LIKE '%/send.%')`, runID).Scan(&resultCount); err != nil {
+	resultCount, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (int, error) {
+		return storetest.CountActivityPublicationResultArmsStorage(ctx, selectedProofReceiverStateReader, runID)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if resultCount != 1 {

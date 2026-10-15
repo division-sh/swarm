@@ -61,7 +61,7 @@ func TestSelectedForkCommittedProcessDeathBothStores(t *testing.T) {
 					construct = func() SelectedContractExecutionOwner { return newSelectedContractExecutionOwnerForTest(t, s) }
 				}
 				checkpoint := killSelectedForkAtCheckpoint(t, backend, dsn, cut)
-				before := selectedPreparationDatabaseSnapshot(t, db, backend)
+				before := selectedPreparationDatabaseSnapshot(t, capabilityStore)
 				ctx := runForkTestContext(t)
 				want := runfork.SelectedForkRecoveryControlOnly
 				if cut == "materialized" {
@@ -79,7 +79,7 @@ func TestSelectedForkCommittedProcessDeathBothStores(t *testing.T) {
 					inspected[0].SelectedSource.RuntimeProjection != nil || inspected[0].SelectedSource.Cleanup != nil {
 					t.Fatalf("read-only crash inspection after %s: %+v %v", cut, inspected, err)
 				}
-				if !reflect.DeepEqual(before, selectedPreparationDatabaseSnapshot(t, db, backend)) {
+				if !reflect.DeepEqual(before, selectedPreparationDatabaseSnapshot(t, capabilityStore)) {
 					t.Fatal("read-only crash inspection changed retained tables before process acquisition")
 				}
 				capability := selectedContractTestProcessCapability(t, ctx, capabilityStore)
@@ -98,7 +98,7 @@ func TestSelectedForkCommittedProcessDeathBothStores(t *testing.T) {
 						t.Fatalf("recovery after %s: %+v err=%v, want %s", cut, recovered, err, want)
 					}
 				}
-				after := selectedPreparationDatabaseSnapshot(t, db, backend)
+				after := selectedPreparationDatabaseSnapshot(t, capabilityStore)
 				for _, table := range []string{"events", "entity_state", "entity_mutations", "run_fork_selected_contract_executions"} {
 					if !reflect.DeepEqual(before[table], after[table]) {
 						t.Errorf("recovery changed execution/business history in %s", table)
@@ -302,7 +302,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	if cut == "native_before_activation" {
 		seedSelectedAgentExecutionSource(t, ctx, capabilityStore, loaded, sourceRun, eventID, time.Unix(1700002303, 0).UTC(), executionmode.Mock)
 	} else {
-		seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
+		seedSelectedOperationSource(t, ctx, selected, loaded, sourceRun, eventID)
 	}
 	checkpoint := func(forkRun string) {
 		pipe := os.NewFile(3, "selected-checkpoint")

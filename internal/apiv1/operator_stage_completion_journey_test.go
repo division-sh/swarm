@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"testing"
 
@@ -14,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
@@ -36,14 +34,13 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected stageCompletionJourneyStore
-			var db *sql.DB
+			var reopen func() stageCompletionJourneyStore
 			if backend == "sqlite" {
-				s := storetest.StartSQLiteRuntimeStore(t)
-				selected, db = s, storetest.DatabaseForTest(s)
+				s, open := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background())
+				selected, reopen = s, func() stageCompletionJourneyStore { return open() }
 			} else {
-				_, opened, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected, db = storetest.AdmitPostgresRuntimeStore(t, opened), opened
+				s, open := storetest.StartPostgresRuntimeStoreWithReopen(t)
+				selected, reopen = s, func() stageCompletionJourneyStore { return open() }
 			}
 			bundle := exactStageCompletionJourneyBundle(t)
 			source := semanticview.Wrap(bundle)
@@ -73,10 +70,10 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 			if started.Error != nil {
 				t.Fatalf("run.start: %#v", started.Error)
 			}
-			stageCompletionWaitForDelivery(t, db, backend, runID, "flow.started")
-			stageCompletionAssertStoredState(t, db, backend, runID, "ready")
+			stageCompletionWaitForDelivery(t, selected, runID, "flow.started")
+			stageCompletionAssertStoredState(t, selected, runID, "ready")
 
-			recovered, recoveredSource := stageCompletionRehydrate(t, selected, db, backend, fact.BundleHash())
+			recovered, recoveredSource := stageCompletionRehydrate(t, selected, reopen, fact.BundleHash())
 			catalog := stageCompletionCatalog(t, recoveredSource)
 			ctx := testAuthorActivityContextForSource(context.Background(), fact)
 			if _, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
@@ -92,9 +89,9 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 			if finished.Error != nil {
 				t.Fatalf("event.publish finish: %#v", finished.Error)
 			}
-			stageCompletionWaitForDelivery(t, db, backend, runID, "flow.finish")
-			stageCompletionAssertStoredState(t, db, backend, runID, "Ready")
-			recovered, recoveredSource = stageCompletionRehydrate(t, selected, db, backend, fact.BundleHash())
+			stageCompletionWaitForDelivery(t, selected, runID, "flow.finish")
+			stageCompletionAssertStoredState(t, selected, runID, "Ready")
+			recovered, recoveredSource = stageCompletionRehydrate(t, selected, reopen, fact.BundleHash())
 			catalog = stageCompletionCatalog(t, recoveredSource)
 			if _, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
 				t.Fatalf("request terminal completion: %v", err)
@@ -119,7 +116,7 @@ func exactStageCompletionJourneyBundle(t *testing.T) *runtimecontracts.WorkflowC
 	return bundle
 }
 
-func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore, db *sql.DB, backend, hash string) (stageCompletionJourneyStore, semanticview.Source) {
+func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore, reopen func() stageCompletionJourneyStore, hash string) (stageCompletionJourneyStore, semanticview.Source) {
 	t.Helper()
 	record, err := selected.GetSourceArtifact(context.Background(), hash)
 	if err != nil {
@@ -134,10 +131,16 @@ func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore
 	if err != nil {
 		t.Fatalf("recompile retained selected source: %v", err)
 	}
-	if backend == "sqlite" {
-		return storetest.AdmitSQLiteRuntimeStore(t, db), semanticview.Wrap(bundle)
+	recovered := reopen()
+	requireStageCompletionIndependentOwner(t, selected, recovered)
+	return recovered, semanticview.Wrap(bundle)
+}
+
+func requireStageCompletionIndependentOwner(t testing.TB, original, recovered stageCompletionJourneyStore) {
+	t.Helper()
+	if recovered == nil || recovered == original {
+		t.Fatal("stage completion rehydration requires an independent native same-location owner")
 	}
-	return storetest.AdmitPostgresRuntimeStore(t, db), semanticview.Wrap(bundle)
 }
 
 func stageCompletionCatalog(t *testing.T, source semanticview.Source) runtimerunlifecycle.FinalCatalog {
@@ -161,7 +164,7 @@ func stageCompletionCatalog(t *testing.T, source semanticview.Source) runtimerun
 	return catalog
 }
 
-func stageCompletionWaitForDelivery(t *testing.T, db *sql.DB, backend, runID, eventName string) {
+func stageCompletionWaitForDelivery(t *testing.T, selected any, runID, eventName string) {
 	t.Helper()
 	nodeID := identitytest.FlowNode(t, "discovery", "pipeline").Key()
 	rootNodeID := ""
@@ -170,29 +173,19 @@ func stageCompletionWaitForDelivery(t *testing.T, db *sql.DB, backend, runID, ev
 		rootNodeID = identitytest.RootNode(t, "root-completion").Key()
 		want = 2
 	}
-	query := `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
-		WHERE e.run_id = ? AND e.event_name = ? AND d.subscriber_type = 'node' AND d.subscriber_id IN (?,?) AND d.status = 'delivered'`
-	if backend == "postgres" {
-		query = `SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
-			WHERE e.run_id = $1::uuid AND e.event_name = $2 AND d.subscriber_type = 'node' AND d.subscriber_id IN ($3,$4) AND d.status = 'delivered'`
-	}
 	requireAPIV1Convergence(t, "case-distinct handler delivery "+eventName, func() (bool, error) {
-		var count int
-		if err := db.QueryRow(query, runID, eventName, nodeID, rootNodeID).Scan(&count); err != nil {
+		count, err := storetest.CountStageCompletionNodeDeliveries(context.Background(), selected, runID, eventName, nodeID, rootNodeID)
+		if err != nil {
 			return false, err
 		}
 		return count == want, fmt.Errorf("delivered %s count=%d, want %d exact root/child deliveries", eventName, count, want)
 	})
 }
 
-func stageCompletionAssertStoredState(t *testing.T, db *sql.DB, backend, runID, want string) {
+func stageCompletionAssertStoredState(t *testing.T, selected any, runID, want string) {
 	t.Helper()
-	query := "SELECT current_state FROM entity_state WHERE run_id = ? AND entity_id = ? AND flow_instance = 'discovery'"
-	if backend == "postgres" {
-		query = "SELECT current_state FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = 'discovery'"
-	}
-	var state string
-	if err := db.QueryRow(query, runID, runtimepipeline.FlowInstanceEntityID("discovery")).Scan(&state); err != nil || state != want {
+	state, err := storetest.ReadStageCompletionDiscoveryState(context.Background(), selected, runID, runtimepipeline.FlowInstanceEntityID("discovery"))
+	if err != nil || state != want {
 		t.Fatalf("stored selected stage = %q, %v, want %q", state, err, want)
 	}
 }

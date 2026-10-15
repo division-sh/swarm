@@ -1577,7 +1577,14 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 			seed: func(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, eventID string, at time.Time) string {
 				t.Helper()
 				event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
-				return seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("done-agent")}, runtimedelivery.StateDelivered, nil).DeliveryID
+				store := postgresDeliveryFixtureStore(db)
+				route := canonicalDeliveryFixtureRoute(t, sourceRunID, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("done-agent")})
+				admission := admitAgentClaimProfileIdentity(t, runtimecorrelation.WithRunID(ctx, sourceRunID), store, route.AgentIdentity, mustStoreTestSourceArtifactFact(authorActivityTestBundleHash))
+				seedDeliveryStateFixture(t, ctx, store, event, route, runtimedelivery.StateQueued, nil)
+				if err := store.ActivateDeliveryAuthority(ctx, admission.authority); err != nil {
+					t.Fatal(err)
+				}
+				return settleDeliveryStateFixture(t, ctx, store, event, route, runtimedelivery.StateDelivered, nil).DeliveryID
 			},
 			work: func(req runfork.RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []runfork.RunForkHistoricalReplayExecutableWork {
 				return []runfork.RunForkHistoricalReplayExecutableWork{runForkHistoricalReplayWorkForDelivery(req, targetDeliveryID)}

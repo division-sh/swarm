@@ -2,27 +2,23 @@ package conformance
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // Count actual committed cursor changes, not claim/release or unrelated history
 // transactions. This is read only after the original workload has settled.
-func assertReporterFanOutSingleChunkHistory(t *testing.T, ctx context.Context, db *sql.DB, runID string) {
+func assertReporterFanOutSingleChunkHistory(t *testing.T, ctx context.Context, selected notifyAllChildrenStore, runID string) {
 	t.Helper()
-	rows, err := db.QueryContext(ctx, `SELECT fact_key,fact FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations' ORDER BY revision,fact_key`, runID)
+	rows, err := storetest.ReadFanOutObligationHistoryStorage(ctx, notifyAllChildrenNativeObservationOwner(selected), runID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	observed := make(map[string][]int)
-	for rows.Next() {
-		var key string
-		var raw []byte
-		if err := rows.Scan(&key, &raw); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range rows {
+		key, raw := row.Key, row.Fact
 		var fact struct {
 			Kind        string `json:"fact_kind"`
 			Cursor      int    `json:"cursor"`
@@ -38,9 +34,6 @@ func assertReporterFanOutSingleChunkHistory(t *testing.T, ctx context.Context, d
 			t.Fatalf("reporter intent %s cardinality=%d, want25", key, fact.Cardinality)
 		}
 		observed[key] = append(observed[key], fact.Cursor)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	if len(observed) != 20 {
 		t.Fatalf("reporter history has %d intents, want20", len(observed))

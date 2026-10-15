@@ -3,7 +3,6 @@ package apiv1
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,10 +35,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -215,9 +211,7 @@ type completeOperatorReplayProofStore interface {
 
 func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing.T) {
 	type fixture struct {
-		store  completeOperatorReplayProofStore
-		db     *sql.DB
-		sqlite bool
+		store completeOperatorReplayProofStore
 	}
 	routeShapes := []struct {
 		name     string
@@ -257,15 +251,13 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 			name: "sqlite",
 			open: func(t *testing.T, ctx context.Context) fixture {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return fixture{store: sqliteStore, db: storetest.DatabaseForTest(sqliteStore), sqlite: true}
+				return fixture{store: sqliteStore}
 			},
 		},
 		{
 			name: "postgres",
 			open: func(t *testing.T, _ context.Context) fixture {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return fixture{store: storetest.AdmitPostgresRuntimeStore(t, db), db: db}
+				return fixture{store: storetest.StartPostgresRuntimeStore(t)}
 			},
 		},
 	} {
@@ -359,7 +351,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					if route.Recipient.ID() == agentID {
 						continue
 					}
-					markOperatorReplayDeliveryTerminal(t, ctx, f.store, f.db, f.sqlite, original, route)
+					markOperatorReplayDeliveryTerminal(t, ctx, f.store, original, route)
 				}
 				persistedOriginal, err := f.store.LoadOperatorEvent(ctx, originalID)
 				if err != nil {
@@ -373,17 +365,12 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 
 				replayAt := createdAt.Add(2 * time.Minute)
 				handler := completeOperatorReplayTestHandler(t, f.store, bus, replayAt)
-				if _, err := updateCompleteReplayChainDepth(ctx, f.db, f.sqlite, originalID, -1); err == nil {
+				if err := storetest.SetEventChainDepth(ctx, f.store, originalID, -1); err == nil {
 					t.Fatal("event schema admitted negative chain_depth")
 				}
-				dialect := authoractivityfixture.DialectPostgres
-				if f.sqlite {
-					dialect = authoractivityfixture.DialectSQLite
+				if err := storetest.CorruptReplayEventTargetRoute(ctx, f.store, originalID); err != nil {
+					t.Fatalf("corrupt replay target route: %v", err)
 				}
-				eventtestsql.CorruptEventStore(t, ctx, f.db, dialect, eventtestsql.EventCorruptionClaim{
-					Invariant: "store.event_record.canonical_readback",
-					Reason:    "prove operator replay rejects a durable target route that is valid JSON but not a route object",
-				}, `UPDATE events SET target_route = ? WHERE event_id = ?`, `UPDATE events SET target_route = $1::jsonb WHERE event_id = $2::uuid`, `"bad"`, originalID)
 				if _, err := f.store.LoadOperatorEvent(ctx, originalID); err == nil || !strings.Contains(err.Error(), "target_route") {
 					t.Fatalf("canonical corrupt read error = %v, want target_route failure", err)
 				}
@@ -396,11 +383,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					t.Fatalf("event rows after corrupt replay = %d, want parent+original", got)
 				}
 
-				targetRoute, err := json.Marshal(original.Envelope().Target)
-				if err != nil {
-					t.Fatalf("encode original target route: %v", err)
-				}
-				if err := updateCompleteReplayTargetRoute(ctx, f.db, f.sqlite, originalID, targetRoute); err != nil {
+				if err := storetest.RestoreReplayEventTargetRoute(ctx, f.store, original); err != nil {
 					t.Fatalf("restore original target route: %v", err)
 				}
 				response := rpcCall(t, handler, eventReplayBody(originalID, nil, "complete-success-"+tc.name+"-"+routeShape.name))
@@ -472,7 +455,6 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity(t *testing.T) {
 	type fixture struct {
 		store completeOperatorReplayProofStore
-		db    *sql.DB
 	}
 	for _, tc := range []struct {
 		name string
@@ -482,15 +464,13 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			name: "sqlite",
 			open: func(t *testing.T, ctx context.Context) fixture {
 				s := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return fixture{store: s, db: storetest.DatabaseForTest(s)}
+				return fixture{store: s}
 			},
 		},
 		{
 			name: "postgres",
 			open: func(t *testing.T, _ context.Context) fixture {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return fixture{store: storetest.AdmitPostgresRuntimeStore(t, db), db: db}
+				return fixture{store: storetest.StartPostgresRuntimeStore(t)}
 			},
 		},
 	} {
@@ -684,7 +664,6 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 func TestOpaqueMissingEventIDReturnsNotFoundAcrossOperatorConsumersParity(t *testing.T) {
 	type fixture struct {
 		store completeOperatorReplayProofStore
-		db    *sql.DB
 	}
 	for _, tc := range []struct {
 		name string
@@ -694,15 +673,13 @@ func TestOpaqueMissingEventIDReturnsNotFoundAcrossOperatorConsumersParity(t *tes
 			name: "sqlite",
 			open: func(t *testing.T, ctx context.Context) fixture {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return fixture{store: sqliteStore, db: storetest.DatabaseForTest(sqliteStore)}
+				return fixture{store: sqliteStore}
 			},
 		},
 		{
 			name: "postgres",
 			open: func(t *testing.T, _ context.Context) fixture {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return fixture{store: storetest.AdmitPostgresRuntimeStore(t, db), db: db}
+				return fixture{store: storetest.StartPostgresRuntimeStore(t)}
 			},
 		},
 	} {
@@ -741,9 +718,17 @@ func TestOpaqueMissingEventIDReturnsNotFoundAcrossOperatorConsumersParity(t *tes
 					}
 				})
 			}
-			for _, table := range []string{"events", "event_deliveries", "api_idempotency"} {
-				var count int
-				if err := f.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
+			for _, witness := range []struct {
+				table string
+				count func(context.Context, any) (int, error)
+			}{
+				{"events", storetest.CountPhysicalEvents},
+				{"event_deliveries", storetest.CountPhysicalEventDeliveries},
+				{"api_idempotency", storetest.CountAPICommandReceipts},
+			} {
+				table := witness.table
+				count, err := witness.count(ctx, f.store)
+				if err != nil {
 					t.Fatalf("count %s: %v", table, err)
 				}
 				if count != 0 {
@@ -857,13 +842,13 @@ type operatorReplayDeliverySessionStore interface {
 	storetest.AgentFixtureStore
 }
 
-func markOperatorReplayDeliveryTerminal(t *testing.T, ctx context.Context, owner operatorReplayDeliverySessionStore, db *sql.DB, sqlite bool, evt events.Event, route events.DeliveryRoute) {
+func markOperatorReplayDeliveryTerminal(t *testing.T, ctx context.Context, owner operatorReplayDeliverySessionStore, evt events.Event, route events.DeliveryRoute) {
 	t.Helper()
 	claimed, err := storetest.ClaimDelivery(ctx, owner, evt, route)
 	if err != nil {
 		t.Fatalf("claim original delivery: %v", err)
 	}
-	sessionID := seedOperatorReplayDeliverySession(t, ctx, owner, db, sqlite, evt.RunID(), route.AgentIdentity)
+	sessionID := seedOperatorReplayDeliverySession(t, ctx, owner, route.AgentIdentity)
 	if _, err := owner.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("bind original delivery session: %v", err)
 	}
@@ -872,11 +857,10 @@ func markOperatorReplayDeliveryTerminal(t *testing.T, ctx context.Context, owner
 	}
 }
 
-func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, selected storetest.AgentFixtureStore, db *sql.DB, sqlite bool, runID string, identity agentidentity.Identity) string {
+func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, selected storetest.AgentFixtureStore, identity agentidentity.Identity) string {
 	t.Helper()
 	identity = identity.Normalize()
-	fields, err := identity.StorageFields()
-	if err != nil {
+	if _, err := identity.StorageFields(); err != nil {
 		t.Fatalf("operator replay identity fields: %v", err)
 	}
 	sessionID := uuid.NewString()
@@ -894,45 +878,10 @@ func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, select
 			t.Fatalf("seed operator replay delivery agent: %v", err)
 		}
 	}
-	query := `
-		INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance
-		) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9)
-	`
-	if sqlite {
-		query = `
-			INSERT INTO agent_sessions (
-				session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-				flow_scope_key, flow_instance_id, flow_instance
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`
-	}
-	identityArgs := []any{
-		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-	}
-	sessionArgs := append([]any{sessionID, runID}, identityArgs...)
-	if _, err := db.ExecContext(ctx, query, sessionArgs...); err != nil {
+	if err := storetest.SeedReplayDeliverySession(ctx, selected, sessionID, identity); err != nil {
 		t.Fatalf("seed operator replay delivery session: %v", err)
 	}
 	return sessionID
-}
-
-func updateCompleteReplayChainDepth(ctx context.Context, db *sql.DB, sqlite bool, eventID string, depth int) (sql.Result, error) {
-	if sqlite {
-		return db.ExecContext(ctx, `UPDATE events SET chain_depth = ? WHERE event_id = ?`, depth, eventID)
-	}
-	return db.ExecContext(ctx, `UPDATE events SET chain_depth = $1 WHERE event_id = $2::uuid`, depth, eventID)
-}
-
-func updateCompleteReplayTargetRoute(ctx context.Context, db *sql.DB, sqlite bool, eventID string, route []byte) error {
-	query := `UPDATE events SET target_route = $1::jsonb WHERE event_id = $2::uuid`
-	if sqlite {
-		query = `UPDATE events SET target_route = ? WHERE event_id = ?`
-	}
-	_, err := db.ExecContext(ctx, query, string(route), eventID)
-	return err
 }
 
 func countOperatorReplayEvents(t *testing.T, ctx context.Context, selected any) int {
@@ -1653,7 +1602,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 			if err != nil {
 				t.Fatalf("claim original delivery %s %s: %v", eventID, subscriber, err)
 			}
-			sessionID := seedOperatorReplayDeliverySession(t, ctx, pg, storetest.DatabaseForTest(pg), false, runID, route.AgentIdentity)
+			sessionID := seedOperatorReplayDeliverySession(t, ctx, pg, route.AgentIdentity)
 			if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 				t.Fatalf("bind original delivery %s %s: %v", eventID, subscriber, err)
 			}

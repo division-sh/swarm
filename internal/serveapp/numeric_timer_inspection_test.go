@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"os"
 	"testing"
@@ -41,30 +40,18 @@ func TestOwnedNumericTimerInspection(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	var db *sql.DB
 	var reader pipeline.WorkflowTimerActivationPersistence
 	if loaded.Config.Store.Backend == "sqlite" {
-		db, err = sql.Open("sqlite", loaded.Config.Store.SQLite.Path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		reader = storetest.AdmitSQLiteRuntimeStore(t, db)
+		selected, _ := storetest.StartSQLiteRuntimeStoreWithReopen(t, ctx, loaded.Config.Store.SQLite.Path)
+		reader = selected
 	} else {
 		dsn, err := postgresDSNFromConfig(ctx, loaded.Config.Database)
 		if err != nil {
 			t.Fatal(err)
 		}
-		db, err = sql.Open("postgres", dsn)
-		if err != nil {
-			t.Fatal(err)
-		}
-		reader = storetest.AdmitPostgresRuntimeStore(t, db)
+		selected, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, dsn)
+		reader = selected
 	}
-	defer func() {
-		if err := db.Close(); err != nil {
-			t.Error(err)
-		}
-	}()
 	activations, err := reader.ListWorkflowTimerActivations(ctx, request.RunID, "", false)
 	if err != nil {
 		t.Fatal(err)

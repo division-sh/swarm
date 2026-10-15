@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"context"
-	"database/sql"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -10,6 +9,7 @@ import (
 
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // Inject one acknowledged precommit refusal only after real evaluation and
@@ -98,7 +98,7 @@ func (r *nestedPreparedRejection) afterTurn(receipt nestedServingReceipt) {
 	}
 }
 
-func (r *nestedPreparedRejection) assertReleasedBeforeRetry(t *testing.T, ctx context.Context, db *sql.DB, p *nestedServingProbe, runID string, cardinality int) {
+func (r *nestedPreparedRejection) assertReleasedBeforeRetry(t *testing.T, ctx context.Context, selected notifyAllChildrenStore, p *nestedServingProbe, runID string, cardinality int) {
 	t.Helper()
 	// This cleanup must precede the runtime's exact registration join.
 	t.Cleanup(r.open)
@@ -114,11 +114,13 @@ func (r *nestedPreparedRejection) assertReleasedBeforeRetry(t *testing.T, ctx co
 		t.Fatalf("prepared refusal disposal: live=%d acquired=%d released=%d returned=%d plans=%v err=%v", live, acquired, released, returned, r.planIDs, lifeErr)
 	}
 	key := r.receipt.Key
-	var cursor, claims, outcomes int
-	if err := db.QueryRowContext(ctx, `SELECT cursor,CASE WHEN claim_owner IS NULL THEN 0 ELSE 1 END FROM fan_out_intents WHERE run_id=$1 AND triggering_delivery_id=$2 AND flow_path=$3 AND declaration_family=$4 AND semantic_path=$5`, key.RunID, key.TriggeringDeliveryID, key.ElementRef.FlowPath, key.ElementRef.Family, key.ElementRef.SemanticPath).Scan(&cursor, &claims); err != nil {
+	progress, err := storetest.ReadNestedFanOutCursorClaim(ctx, selected, key)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`, runID).Scan(&outcomes); err != nil {
+	cursor, claims := progress.Cursor, progress.Claims
+	outcomes, err := storetest.CountNestedRunFanOutOutcomes(ctx, selected, runID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if cursor != 0 || claims != 0 || outcomes != 0 || !r.receipt.CommittedAt.IsZero() || r.receipt.Publications != 0 {
@@ -126,8 +128,8 @@ func (r *nestedPreparedRejection) assertReleasedBeforeRetry(t *testing.T, ctx co
 	}
 	seen := map[string]bool{}
 	for _, id := range r.planIDs {
-		var count int
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_id=$2`, runID, id).Scan(&count); err != nil {
+		count, err := storetest.CountNestedRunEventIdentity(ctx, selected, runID, id)
+		if err != nil {
 			t.Fatal(err)
 		}
 		if id == "" || seen[id] || count != 0 {

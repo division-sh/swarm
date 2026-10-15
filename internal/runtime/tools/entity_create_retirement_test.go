@@ -2,7 +2,6 @@ package tools_test
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"testing"
 
@@ -20,9 +19,9 @@ func TestRetiredCreateEntityCannotMutateEitherStore(t *testing.T) {
 			bundle := loadWave1EntityToolBundle(t, actor, "review", "account", "", "account:\n  status: text\n")
 			var selected runtimetools.EntityPersistence
 			if backend == "sqlite" {
-				selected = newSQLiteRuntimeToolStoreForTest(t)
+				selected = storetest.StartSQLiteRuntimeStore(t)
 			} else {
-				selected = newPostgresHumanTaskToolStoreForTest(t)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			}
 			ctx := runtimetools.WithActor(seedEntityToolSourceRun(t, selected, bundle), actor)
 			for _, allowInternal := range []bool{false, true} {
@@ -41,23 +40,27 @@ func TestRetiredCreateEntityCannotMutateEitherStore(t *testing.T) {
 							t.Fatalf("retired constructor executed: out=%#v err=%v", out, err)
 						}
 					}
-					assertRetiredConstructorNoWrites(t, ctx, storetest.DatabaseForTest(selected), backend)
+					assertRetiredConstructorNoWrites(t, ctx, selected)
 				})
 			}
 		})
 	}
 }
 
-func assertRetiredConstructorNoWrites(t *testing.T, ctx context.Context, db *sql.DB, backend string) {
+func assertRetiredConstructorNoWrites(t *testing.T, ctx context.Context, selected any) {
 	t.Helper()
-	for _, table := range []string{"entity_state", "entity_mutations", "flow_instances", "flow_instance_runtime_readiness"} {
-		query := "SELECT COUNT(*) FROM " + table + " WHERE run_id = ?"
-		if backend == "postgres" {
-			query = "SELECT COUNT(*) FROM " + table + " WHERE run_id = $1::uuid"
-		}
-		var count int
-		if err := db.QueryRowContext(ctx, query, entityToolTestRunID).Scan(&count); err != nil || count != 0 {
-			t.Fatalf("retired constructor changed %s: rows=%d err=%v", table, count, err)
+	for _, cut := range []struct {
+		table string
+		read  func(context.Context, any, string) (int, error)
+	}{
+		{"entity_state", storetest.CountRunEntityStorage},
+		{"entity_mutations", storetest.CountRunMutationStorage},
+		{"flow_instances", storetest.CountRunFlowInstanceStorage},
+		{"flow_instance_runtime_readiness", storetest.CountRunFlowRuntimeReadinessStorage},
+	} {
+		count, err := cut.read(ctx, selected, entityToolTestRunID)
+		if err != nil || count != 0 {
+			t.Fatalf("retired constructor changed %s: rows=%d err=%v", cut.table, count, err)
 		}
 	}
 }

@@ -89,7 +89,7 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, base.Add(-5*time.Minute), base); err != nil {
 		t.Fatalf("seed postgres session: %v", err)
 	}
-	storetest.InsertExistingRunRootEventRecord(t, ctx, db, "postgres", eventID, runID, events.EventType("operator.read"),
+	storetest.InsertNativeExistingRunRootEvent(t, ctx, selected, eventID, runID, events.EventType("operator.read"),
 		eventtest.Producer(events.EventProducerExternal, "operator-read-fixture"), []byte(`{}`),
 		events.EventEnvelope{Scope: events.EventScopeGlobal}, base.Add(-4*time.Minute))
 	storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{

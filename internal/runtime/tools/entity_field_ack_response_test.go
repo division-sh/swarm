@@ -46,11 +46,11 @@ func TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStore
 				var base runtimetools.EntityPersistence
 				var sourceCtx context.Context
 				if backend == "sqlite" {
-					selected := newSQLiteRuntimeToolStoreForTest(t)
+					selected := storetest.StartSQLiteRuntimeStore(t)
 					sourceCtx = seedEntityToolSourceRun(t, selected, bundle)
 					base = selected
 				} else {
-					selected := newPostgresHumanTaskToolStoreForTest(t)
+					selected := storetest.StartPostgresRuntimeStore(t)
 					sourceCtx = seedEntityToolSourceRun(t, selected, bundle)
 					base = selected
 				}

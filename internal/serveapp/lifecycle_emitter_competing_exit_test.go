@@ -58,28 +58,26 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 							if diagnostic != nil {
 								diagnostic.runID, diagnostic.seedEventID = seed.RunID, seed.EventID
 							}
-							entityID := requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, "", "review")
+							entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, "", "review")
 							receiverID = entityID
 							if diagnostic != nil {
 								diagnostic.entityID = entityID
 							}
-							decision := lifecycleGateDecisionParams(t, rt, seed.RunID, "approve")
+							decision := lifecycleGateDecisionParams(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, "approve")
 							decisionReady = time.Now().UTC()
 							_, before := requireReceiverTargetState(t, rt.ReceiverStateReader, seed.RunID, ".", seed.RunID, entityID)
 							if before.CurrentState != "review" {
 								t.Fatalf("contenders did not start at review: %+v", before)
 							}
-							// The supported untargeted publication selects this run's
-							// sole primary entity through the API route owner.
 							cancel := map[string]any{"run_id": seed.RunID, "source_event_id": seed.EventID, "event_name": "work.cancelled", "payload": map[string]any{"seed": true}, "idempotency_key": "competing-cancel"}
 							if exit == "timer" {
-								due = lifecycleCompetingTimerDue(t, rt, seed.RunID, entityID)
+								due = lifecycleCompetingTimerDue(t, rt.ReceiverStateReader, seed.RunID, entityID)
 							}
 							var gateReply, exitReply servedJSONRPCEnvelope
 							switch order {
 							case "gate_first":
 								gateReply = requestServedJSONRPC(t, rt.Endpoint, "mailbox.decide", decision)
-								requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "done")
+								requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "done")
 								if exit == "ordinary" {
 									exitReply = requestServedJSONRPC(t, rt.Endpoint, "event.publish", cancel)
 								}
@@ -90,16 +88,20 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 										t.Fatalf("ordinary exit admission: %#v", exitReply.Error)
 									}
 								}
-								requireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, "cancelled")
+								requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, entityID, "cancelled")
 								gateReply = requestServedJSONRPC(t, rt.Endpoint, "mailbox.decide", decision)
 							case "contended":
 								if exit == "ordinary" {
-									// Both HTTP requests are released together, unlike the
-									// ordered committed-verdict fencing control.
 									start := make(chan struct{})
 									gateDone, exitDone := make(chan lifecycleContenderResult, 1), make(chan lifecycleContenderResult, 1)
-									go func() { <-start; gateDone <- lifecycleContenderRPC(rt.Endpoint, "mailbox.decide", decision) }()
-									go func() { <-start; exitDone <- lifecycleContenderRPC(rt.Endpoint, "event.publish", cancel) }()
+									go func() {
+										<-start
+										gateDone <- lifecycleContenderRPC(rt.Endpoint, "mailbox.decide", decision)
+									}()
+									go func() {
+										<-start
+										exitDone <- lifecycleContenderRPC(rt.Endpoint, "event.publish", cancel)
+									}()
 									close(start)
 									gateResult, exitResult := <-gateDone, <-exitDone
 									if gateResult.err != nil || exitResult.err != nil {
@@ -107,8 +109,6 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 									}
 									gateReply, exitReply = gateResult.reply, exitResult.reply
 								} else {
-									// Compete with the real scheduler at its persisted due
-									// instant; no forged timer occurrence or clock mutation.
 									if time.Until(due) <= 0 {
 										t.Fatal("timer already due before contention setup")
 									}
@@ -121,7 +121,7 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 									}
 								}
 							}
-							entity := lifecycleCompetingTerminalEntity(t, rt, seed.RunID, entityID)
+							entity := lifecycleCompetingTerminalEntity(t, rt.Endpoint, rt.ReceiverStateReader, seed.RunID, entityID)
 							if exit == "timer" && time.Now().Before(due.Add(100*time.Millisecond)) {
 								time.Sleep(time.Until(due.Add(100 * time.Millisecond)))
 							}
@@ -147,11 +147,9 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 								if !won || (code != apiv1.RunAlreadyTerminalCode && !lateTerminal) {
 									t.Fatalf("unexpected ordinary exit rejection: %#v", exitReply.Error)
 								}
-								requireLifecycleEventCount(t, rt, seed.RunID, "work.cancelled", 0)
+								requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.cancelled", 0)
 							}
-							// Publication, durable subscriber delivery, and public entity
-							// state must agree on the same winning gate outcome.
-							requireLifecycleEventCount(t, rt, seed.RunID, "work.completed", count)
+							requireLifecycleEventCount(t, rt.ReceiverStateReader, seed.RunID, "work.completed", count)
 							var deliveries int
 							if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id = d.event_id WHERE e.run_id = $1 AND e.event_name = 'work.completed'`, seed.RunID).Scan(&deliveries); err != nil {
 								t.Fatal(err)
@@ -168,15 +166,11 @@ func TestServedLifecycleEmitterCompetingExitPublication(t *testing.T) {
 								if winner.From != "approved" || winner.To != "done" {
 									t.Fatalf("winning verdict lost consumer transition: %+v", winner)
 								}
-								// The emitted outcome pins the gate commit before its
-								// consumer replaces the current header with approved -> done.
 								winner = readLifecycleTransitionAtCut(t, rt.ReceiverStateReader, seed.RunID, entityID, winner.TriggerEventID)
 							}
 							if winner.From != "review" || winner.To != target {
 								t.Fatalf("losing exit committed historical evidence: %+v", winner)
 							}
-							// Count physical state changes independently: one retained
-							// header record cannot prove exactly one historical exit.
 							mutations := storetest.ObserveEntityMutationHistory(t, t.Context(), rt.ReceiverStateReader, seed.RunID)
 							if err := lifecycleCompetingExitMutationEvidence(mutations, entityID, winner); err != nil {
 								t.Fatal(err)
@@ -282,24 +276,30 @@ func lifecycleContenderRPC(endpoint, method string, params map[string]any) (resu
 	return
 }
 
-func lifecycleCompetingTerminalEntity(t *testing.T, rt servedControlProofRuntime, runID, entityID string) operatorread.OperatorEntityFull {
+func lifecycleCompetingTerminalEntity(t *testing.T, selectedProofEndpoint string, selectedProofReceiverStateReader receiverProofStateReader, runID, entityID string) operatorread.OperatorEntityFull {
 	t.Helper()
 	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
 		var entity operatorread.OperatorEntityFull
-		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
+		requireServedJSONRPCResult(t, selectedProofEndpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
 		if entity.Entity.CurrentState == "done" || entity.Entity.CurrentState == "cancelled" {
 			return entity
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("neither competing exit settled: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+	t.Fatalf("neither competing exit settled: %s", servedInspectionRunDebugSummary(selectedProofReceiverStateReader, runID))
 	return operatorread.OperatorEntityFull{}
 }
 
-func lifecycleCompetingTimerDue(t *testing.T, rt servedControlProofRuntime, runID, entityID string) time.Time {
+func lifecycleCompetingTimerDue(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID, entityID string) time.Time {
 	t.Helper()
 	var raw any
-	if err := rt.DB.QueryRow(`SELECT fire_at FROM timers WHERE run_id = $1 AND entity_id = $2 AND task_type = 'workflow_timer'`, runID, entityID).Scan(&raw); err != nil {
+	if err := func() error {
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (any, error) {
+			return storetest.ReadWorkflowTimerDueValueStorage(ctx, selectedProofReceiverStateReader, runID, entityID)
+		})
+		raw = observed
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
 	if due, ok := raw.(time.Time); ok {

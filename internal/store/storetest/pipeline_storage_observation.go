@@ -41,6 +41,35 @@ func ReadPinnedAuthoredMutationStorage(ctx context.Context, selected any, source
 	return private.ReadPinnedAuthoredMutationStorageForTest(ctx, selected, source)
 }
 
+func SetPinnedAuthoredMutationWire(ctx context.Context, selected any, source fanoutobligation.SourceRef, raw []byte) (int64, error) {
+	return private.SetPinnedAuthoredMutationWireForTest(ctx, selected, source, raw)
+}
+
+type RunPublicationHistoryStorage = private.RunPublicationHistoryStorage
+
+type A2MapHistoryFootprintStorage = private.A2MapHistoryFootprintStorage
+type A2RetainedSourceFootprintStorage = private.A2RetainedSourceFootprintStorage
+
+func ReadA2MapHistoryFootprintStorage(ctx context.Context, selected any, runID string) (A2MapHistoryFootprintStorage, error) {
+	return private.ReadA2MapHistoryFootprintStorageForTest(ctx, selected, runID)
+}
+
+func ReadA2JoinHydrationFootprintStorage(ctx context.Context, selected any, runID string) ([5]int, error) {
+	return private.ReadA2JoinHydrationFootprintStorageForTest(ctx, selected, runID)
+}
+
+func ReadA2CancellationFootprintStorage(ctx context.Context, selected any, runID string) ([5]int, error) {
+	return private.ReadA2CancellationFootprintStorageForTest(ctx, selected, runID)
+}
+
+func ReadA2RetainedSourceFootprintStorage(ctx context.Context, selected any, runID string) (A2RetainedSourceFootprintStorage, error) {
+	return private.ReadA2RetainedSourceFootprintStorageForTest(ctx, selected, runID)
+}
+
+func ReadRunPublicationHistoryStorage(ctx context.Context, selected any, runID string) (RunPublicationHistoryStorage, error) {
+	return private.ReadRunPublicationHistoryStorageForTest(ctx, selected, runID)
+}
+
 type FanOutPublishedOutcomeStorageEvidence = private.FanOutPublishedOutcomeStorageEvidence
 type FanOutRunProgressStorageEvidence = private.FanOutRunProgressStorageEvidence
 type FanOutTriggeredIntentStorageEvidence = private.FanOutTriggeredIntentStorageEvidence

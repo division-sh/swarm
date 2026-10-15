@@ -57,18 +57,18 @@ func CountScatterGatherDomainEvents(ctx context.Context, tx *sql.Tx, runID strin
 	return count, nil
 }
 
+func CountA2MembershipRefusalEventsTx(ctx context.Context, tx *sql.Tx, runID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name IN ('platform.join_complete','platform.join_timeout','items.child','batch.completed')`, runID).Scan(&count)
+	return count, err
+}
+
 func ReadSourceRouteSettlementStorage(ctx context.Context, tx *sql.Tx, runID, eventID string) (SourceRouteSettlementStorage, error) {
 	var out SourceRouteSettlementStorage
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COUNT(DISTINCT CAST(route_settlement AS TEXT)),COALESCE(SUM(LENGTH(CAST(route_settlement AS TEXT))),0) FROM events WHERE run_id=$1 AND source_event_id=$2`, runID, eventID).Scan(&out.Events, &out.DistinctLedgers, &out.Bytes); err != nil {
 		return SourceRouteSettlementStorage{}, err
 	}
 	return out, nil
-}
-
-func CountRunEventNameStorage(ctx context.Context, tx *sql.Tx, run, name string) (int, error) {
-	var count int
-	err := tx.QueryRowContext(ctx, `SELECT count(*) FROM events WHERE run_id=$1 AND event_name=$2`, run, name).Scan(&count)
-	return count, err
 }
 
 func CountChainDepthDiagnosticStorage(ctx context.Context, tx *sql.Tx, postgres bool, runID, entityID, handlerNode string) (int, error) {

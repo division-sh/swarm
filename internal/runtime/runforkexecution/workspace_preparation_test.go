@@ -350,7 +350,7 @@ func proveSelectedWorkspacePreparation(t *testing.T, backend, mode string, real 
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		SourceLoader:      SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)},
 		AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, Config: cfg, ProcessCapability: capability, Workspace: &preparationWorkspace{Lifecycle: lifecycle, trace: trace}}}
-	before := selectedPreparationDatabaseSnapshot(t, db, backend)
+	before := selectedPreparationDatabaseSnapshot(t, selected)
 	var sequence int64
 	if err := db.QueryRow(`SELECT last_sequence FROM author_activity_order WHERE singleton_id=1`).Scan(&sequence); err != nil {
 		t.Fatal(err)
@@ -452,7 +452,7 @@ func proveSelectedWorkspacePreparation(t *testing.T, backend, mode string, real 
 	if process.ActiveCount() != baseline {
 		t.Fatalf("unsettled work: got %d want %d", process.ActiveCount(), baseline)
 	}
-	after := selectedPreparationDatabaseSnapshot(t, db, backend)
+	after := selectedPreparationDatabaseSnapshot(t, selected)
 	// Only the probe-boundary cell may add its exact non-executable failure evidence.
 	if mode == "probe_order" {
 		var valid, total int

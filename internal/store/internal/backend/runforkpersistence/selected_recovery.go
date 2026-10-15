@@ -181,16 +181,22 @@ func admitSelectedRecoveryTx(ctx context.Context, tx *sql.Tx, req runcontrol.Sel
 
 type selectedRecoveryRecord struct {
 	runfork.SelectedForkRecoveryResult
-	binding      runfork.RunForkSelectedContractBinding
-	preparation  runfork.SelectedForkPreparationBinding
-	state        string
-	failure      *failures.Envelope
-	hasExecution bool
+	binding             runfork.RunForkSelectedContractBinding
+	preparation         runfork.SelectedForkPreparationBinding
+	executionGeneration uint64
+	declarations        agenttopology.SelectedDeclarationPlan
+	state               string
+	failure             *failures.Envelope
+	hasExecution        bool
 }
 
 // This is the retained-evidence reader for both boot recovery and verification.
 // Only the mutation caller requests a row lock; no authority is fabricated here.
 func loadSelectedRecoveryRecordTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, entry runfork.SelectedForkRecoveryEntry, sqlite, lock bool) (selectedRecoveryRecord, error) {
+	return loadSelectedRecoveryExecutionTx(ctx, tx, snapshot, entry, "", sqlite, lock)
+}
+
+func loadSelectedRecoveryExecutionTx(ctx context.Context, tx *sql.Tx, snapshot runlifecycle.Snapshot, entry runfork.SelectedForkRecoveryEntry, executionID string, sqlite, lock bool) (selectedRecoveryRecord, error) {
 	runID := entry.Binding.ForkRunID
 	result := selectedRecoveryRecord{SelectedForkRecoveryResult: runfork.SelectedForkRecoveryResult{RunID: runID}}
 	binding, err := loadRunForkSelectedContractBinding(ctx, tx, runID)
@@ -213,20 +219,13 @@ func loadSelectedRecoveryRecordTx(ctx context.Context, tx *sql.Tx, snapshot runl
 	if !snapshot.Origin.Equal(wantOrigin) {
 		return result, fmt.Errorf("selected recovery fork origin differs from its fixed binding")
 	}
-	query := `SELECT execution_id,state,preparation_binding,preparation_fingerprint,failure,
-		source_run_id,binding_id,fork_point_kind,fork_revision,COALESCE(CAST(fork_event_id AS TEXT),''),generation,fence_generation,executable_coordinate_fingerprint,
-		admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,effective_config_fingerprint,
-		declaration_plan_fingerprint,declaration_plan
-		FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 ORDER BY generation DESC LIMIT 1`
-	if !sqlite && lock {
-		query += ` FOR UPDATE`
-	}
+	query, args := selectedRecoveryExecutionQuery(runID, executionID, sqlite, lock)
 	var state, fingerprint string
 	var raw, failureRaw, declarationRaw []byte
 	var bindingID, pointKind string
 	var forkRevision int64
 	execution := runfork.SelectedContractRuntimeExecution{ForkRunID: runID}
-	err = tx.QueryRowContext(ctx, query, runID).Scan(&result.ExecutionID, &state, &raw, &fingerprint, &failureRaw,
+	err = tx.QueryRowContext(ctx, query, args...).Scan(&result.ExecutionID, &state, &raw, &fingerprint, &failureRaw,
 		&execution.SourceRunID, &bindingID, &pointKind, &forkRevision, &execution.ForkEventID, &execution.Generation, &execution.FenceGeneration,
 		&execution.ExecutableCoordinateFingerprint, &execution.AdmissionFingerprint, &execution.ContainerPlanFingerprint,
 		&execution.ActorCensusFingerprint, &execution.EffectiveConfigFingerprint, &execution.DeclarationPlanFingerprint, &declarationRaw)
@@ -291,8 +290,28 @@ func loadSelectedRecoveryRecordTx(ctx context.Context, tx *sql.Tx, snapshot runl
 		failure = &envelope
 	}
 	result.binding, result.preparation = binding, preparation
+	result.executionGeneration = execution.Generation
+	result.declarations = declarations
 	result.state, result.failure, result.hasExecution = state, failure, true
 	return result, nil
+}
+
+func selectedRecoveryExecutionQuery(runID, executionID string, sqlite, lock bool) (string, []any) {
+	query := `SELECT execution_id,state,preparation_binding,preparation_fingerprint,failure,
+		source_run_id,binding_id,fork_point_kind,fork_revision,COALESCE(CAST(fork_event_id AS TEXT),''),generation,fence_generation,executable_coordinate_fingerprint,
+		admission_fingerprint,container_plan_fingerprint,actor_census_fingerprint,effective_config_fingerprint,
+		declaration_plan_fingerprint,declaration_plan
+		FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1`
+	args := []any{runID}
+	if executionID != "" {
+		query += ` AND execution_id=$2`
+		args = append(args, executionID)
+	}
+	query += ` ORDER BY generation DESC LIMIT 1`
+	if !sqlite && lock {
+		query += ` FOR UPDATE`
+	}
+	return query, args
 }
 
 func recoverSelectedForkTx(ctx context.Context, tx *sql.Tx, owner selectedRecoveryTxOwner, attempt *mutationprotocol.Attempt, snapshot runlifecycle.Snapshot, req runcontrol.SelectedForkRecoveryRequest, sqlite bool, changes *privaterunlifecycle.ChannelCardChanges) (runfork.SelectedForkRecoveryResult, error) {

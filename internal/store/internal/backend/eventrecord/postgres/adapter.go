@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -29,7 +30,67 @@ type Execer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
+func CorruptOperatorSnapshotEventPayloadTx(ctx context.Context, tx *sql.Tx, eventID string) error {
+	result, err := tx.ExecContext(ctx, `UPDATE events SET payload_bytes=$1 WHERE event_id=$2`, []byte{0}, eventID)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return fmt.Errorf("operator snapshot event corruption changed%d rows, want1", n)
+	}
+	return nil
+}
+
 func HydrationBatchSize() int { return hydrationBatchSize }
+
+// Physical payload hydration is unscoped by run and never decodes a complete
+// record. The caller retains its original read snapshot and ordinal rows.
+func ReadFanOutOutcomePayloadBytesStorage(ctx context.Context, q Queryer, eventIDs []string) (map[string][]byte, error) {
+	ids, err := normalizeIDs(eventIDs)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]byte, len(ids))
+	for start := 0; start < len(ids); start += hydrationBatchSize {
+		end := min(start+hydrationBatchSize, len(ids))
+		args, slots := make([]any, end-start), make([]string, end-start)
+		for i, id := range ids[start:end] {
+			args[i], slots[i] = id, fmt.Sprintf("$%d::uuid", i+1)
+		}
+		rows, err := q.QueryContext(ctx, `SELECT event_id::text,payload_bytes FROM events WHERE event_id IN (`+strings.Join(slots, ",")+`)`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id string
+			var payload []byte
+			if err := rows.Scan(&id, &payload); err != nil {
+				return nil, errors.Join(err, rows.Close())
+			}
+			out[id] = append([]byte(nil), payload...)
+		}
+		err = rows.Err()
+		closeErr := rows.Close()
+		if err != nil || closeErr != nil {
+			return nil, errors.Join(err, closeErr)
+		}
+	}
+	return out, nil
+}
+
+// This fixed fixture observation reads the authoritative column without
+// substituting the diagnostic JSON projection or granting event admission.
+func ReadActivityForkPayloadBytesStorage(ctx context.Context, q RowQueryer, runID, eventID string) ([]byte, error) {
+	var raw []byte
+	if err := q.QueryRowContext(ctx, `SELECT payload_bytes FROM events WHERE event_id=$1::uuid AND run_id=$2::uuid`, eventID, runID).Scan(&raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
 
 func ReadFixtureLineageStorage(ctx context.Context, q RowQueryer, eventID string) (string, string, error) {
 	var source, payload string

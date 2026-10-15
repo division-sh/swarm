@@ -2,7 +2,6 @@ package runtime_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -46,7 +45,6 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -113,20 +111,17 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			flowInstanceID := flowPath
 			flowInstance := flowPath
 			var (
-				db                  *sql.DB
 				eventStore          runtimebus.EventStore
 				workflowPersistence runtimepipeline.WorkflowPersistence
 				runLifecycle        runtimerunlifecycle.OperationOwner
 				deliveryStore       runtimedelivery.Store
 			)
 			if selected == "postgres" {
-				_, postgresDB, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				pg := storetest.AdmitPostgresRuntimeStore(t, postgresDB)
-				db, eventStore, workflowPersistence, runLifecycle, deliveryStore = postgresDB, pg, runtimepipeline.NewWorkflowPersistence(pg), pg, pg
+				pg := storetest.StartPostgresRuntimeStore(t)
+				eventStore, workflowPersistence, runLifecycle, deliveryStore = pg, runtimepipeline.NewWorkflowPersistence(pg), pg, pg
 			} else {
 				sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				db, eventStore = storetest.Database(sqliteStore), sqliteStore
+				eventStore = sqliteStore
 				workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqliteStore)
 				runLifecycle, deliveryStore = sqliteStore, sqliteStore
 			}
@@ -252,7 +247,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				}
 			}
 
-			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
+			assertConfiguredChannelClaimedDispatch(t, coordinator, bus, eventStore)
 			executor := configuredChannelExecutor(source, activationOwner, credentialStore, coordinator, coordinator)
 			actor := models.AgentConfig{
 				ExecutionMode: "live", ID: "channel-sender", Identity: agentidentitytest.DeclaredForRun(t, runID, "channel-sender", agentOwner, flowPath, flowInstanceID, flowInstance), Role: "worker", FlowID: "global",
@@ -299,7 +294,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			if calls.Load() != 1 {
 				t.Fatalf("provider calls after replay = %d, want one", calls.Load())
 			}
-			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, flowInstance, entityID, 1, 1)
+			assertConfiguredChannelJournal(t, ctx, eventStore, runID, privateToolID, flowInstance, entityID, 1, 1)
 
 			if _, err := executor.Execute(callCtx, "channel.ops.deliver", map[string]any{
 				"presentation": map[string]any{"text": "Changed under same identity"}, "actions": []any{},
@@ -324,7 +319,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			if calls.Load() != 2 {
 				t.Fatalf("provider calls after ack-loss replay = %d, want two total distinct operations", calls.Load())
 			}
-			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, flowInstance, entityID, 2, 2)
+			assertConfiguredChannelJournal(t, ctx, eventStore, runID, privateToolID, flowInstance, entityID, 2, 2)
 
 			if err := credentialStore.Delete(ctx, "telegram_bot_token"); err != nil {
 				t.Fatalf("delete Telegram credential: %v", err)
@@ -362,9 +357,8 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				ChannelActivations:  replacementOwner,
 			})
 
-			stopActivityNode()
 			coordinator = mismatchedCoordinator
-			stopActivityNode = startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
+			assertConfiguredChannelClaimedDispatch(t, coordinator, bus, eventStore)
 			mismatchedExecutor := configuredChannelExecutor(source, activationOwner, credentialStore, mismatchedCoordinator, mismatchedCoordinator)
 			mismatchedCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "mismatched-plan-generation")
 			if _, err := mismatchedExecutor.Execute(mismatchedCtx, "channel.ops.deliver", input); err == nil {
@@ -385,9 +379,8 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				ChannelActivations:  replacementOwner,
 			})
 
-			stopActivityNode()
 			coordinator = reloadedCoordinator
-			stopActivityNode = startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
+			assertConfiguredChannelClaimedDispatch(t, coordinator, bus, eventStore)
 			staleExecutor := configuredChannelExecutor(source, activationOwner, credentialStore, reloadedCoordinator, reloadedCoordinator)
 			staleCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "stale-plan-generation")
 			if _, err := staleExecutor.Execute(staleCtx, "channel.ops.deliver", input); err == nil {
@@ -409,9 +402,8 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				ProviderCredentials: credentialStore,
 				ChannelActivations:  fencedOwner,
 			})
-			stopActivityNode()
 			coordinator = fencedCoordinator
-			stopActivityNode = startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
+			assertConfiguredChannelClaimedDispatch(t, coordinator, bus, eventStore)
 			fencedExecutor := configuredChannelExecutor(source, fencedOwner, credentialStore, fencedCoordinator, fencedCoordinator)
 			fencedCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "replacement-fence")
 			type executionResult struct {
@@ -466,7 +458,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			if calls.Load() != 3 {
 				t.Fatalf("predecessor activity calls after replacement fence = %d, want three total distinct operations", calls.Load())
 			}
-			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, flowInstance, entityID, 6, 3)
+			assertConfiguredChannelJournal(t, ctx, eventStore, runID, privateToolID, flowInstance, entityID, 6, 3)
 			if err := fencedOwner.Replace(testAdmittedChannelActivationPublication(t, credentialStore, binding)); err != nil {
 				t.Fatal(err)
 			}
@@ -630,15 +622,15 @@ func channelToolTextMaximum(t *testing.T, definitions []llm.ToolDefinition, name
 	return 0
 }
 
-func startConfiguredChannelActivityNode(t *testing.T, ctx context.Context, coordinator *runtimepipeline.PipelineCoordinator, bus *runtimebus.EventBus, db *sql.DB) func() {
+func assertConfiguredChannelClaimedDispatch(t *testing.T, coordinator *runtimepipeline.PipelineCoordinator, bus *runtimebus.EventBus, selected any) {
 	t.Helper()
-	if coordinator == nil || bus == nil || db == nil {
-		t.Fatal("configured channel claimed-dispatch fixture requires coordinator, bus, and store")
+	if coordinator == nil || bus == nil {
+		t.Fatal("configured channel claimed dispatch requires coordinator and bus")
 	}
+	storetest.ObserveSelectedPool(t, selected)
 	if nodes := coordinator.BackgroundNodes(); len(nodes) != 0 {
 		t.Fatalf("configured channel background nodes = %d, want claimed event dispatch only", len(nodes))
 	}
-	return func() {}
 }
 
 type channelAckLossExecutor struct {
@@ -923,30 +915,21 @@ func channelRuntimeCredentialStore(t *testing.T, token string) runtimecredential
 	return credentials
 }
 
-func assertConfiguredChannelJournal(t *testing.T, ctx context.Context, db *sql.DB, selected, runID, privateTool, flowInstance, entityID string, wantRequests, wantAttempts int) {
+func assertConfiguredChannelJournal(t *testing.T, ctx context.Context, selected any, runID, privateTool, flowInstance, entityID string, wantRequests, wantAttempts int) {
 	t.Helper()
-	requestQuery := `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = 'platform.activity_requested'`
-	attemptQuery := `SELECT COUNT(*) FROM activity_attempts WHERE run_id = $1::uuid AND tool = $2 AND status = 'succeeded'`
-	sourceQuery := `SELECT source_route FROM events WHERE run_id = $1::uuid AND event_name = 'platform.activity_requested' ORDER BY created_at, event_id LIMIT 1`
-	args := []any{runID}
-	attemptArgs := []any{runID, privateTool}
-	if selected == "sqlite" {
-		requestQuery = `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = 'platform.activity_requested'`
-		attemptQuery = `SELECT COUNT(*) FROM activity_attempts WHERE run_id = ? AND tool = ? AND status = 'succeeded'`
-		sourceQuery = `SELECT source_route FROM events WHERE run_id = ? AND event_name = 'platform.activity_requested' ORDER BY created_at, event_id LIMIT 1`
-	}
-	var requests, attempts int
-	if err := db.QueryRowContext(ctx, requestQuery, args...).Scan(&requests); err != nil {
+	requests, err := storetest.CountRunNamedEventStorage(ctx, selected, runID, "platform.activity_requested")
+	if err != nil {
 		t.Fatalf("count channel request events: %v", err)
 	}
-	if err := db.QueryRowContext(ctx, attemptQuery, attemptArgs...).Scan(&attempts); err != nil {
+	attempts, err := storetest.CountChannelSucceededToolAttempts(ctx, selected, runID, privateTool)
+	if err != nil {
 		t.Fatalf("count channel activity attempts: %v", err)
 	}
 	if requests != wantRequests || attempts != wantAttempts {
 		t.Fatalf("durable channel journal = requests:%d attempts:%d, want %d/%d", requests, attempts, wantRequests, wantAttempts)
 	}
-	var rawRoute []byte
-	if err := db.QueryRowContext(ctx, sourceQuery, runID).Scan(&rawRoute); err != nil {
+	rawRoute, err := storetest.ReadChannelFirstActivitySourceRoute(ctx, selected, runID)
+	if err != nil {
 		t.Fatalf("read channel activity routing source: %v", err)
 	}
 	var route events.RouteIdentity

@@ -296,6 +296,10 @@ func TestStandaloneSelectedReadAccessModeGuard(t *testing.T) {
 		{path: "internal/store/internal/runbundle/owner.go", receiver: "SQLite", method: "Load", required: "RunReadTransaction"},
 	}
 	for _, backend := range []string{"SQLite", "Postgres"} {
+		tests = append(tests,
+			selectedReadGuard{path: "internal/store/internal/backend/delivery/inspection.go", receiver: "Delivery" + backend + "Owner", method: "ReadActiveDeliverySnapshots", required: "RunReadTransaction"},
+			selectedReadGuard{path: "internal/store/internal/startupownership/source_set_inspection.go", receiver: "Startup" + backend + "Owner", method: "InspectSourceSetHead", required: "RunReadTransaction"},
+		)
 		wrapper := "run" + backend + "LifecycleRead"
 		for _, method := range []string{"RequirePresentRun", "RequireActiveRun", "RequirePresentRunSource", "RequireActiveRunSource"} {
 			tests = append(tests, selectedReadGuard{path: lifecyclePath, receiver: "RunLifecycle" + backend + "Owner", method: method, required: wrapper})

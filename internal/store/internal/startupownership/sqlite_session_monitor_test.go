@@ -158,15 +158,22 @@ func proveSQLiteSessionCancellationPreservesPossessionUntilDurableRelease(t *tes
 	}
 }
 
-func newSQLiteProofSession(t *testing.T, maximum int) (*sqliteSession, *sql.DB) {
+func newSQLiteProofSession(t *testing.T, maximum int, enforceConstraints ...bool) (*sqliteSession, *sql.DB) {
 	t.Helper()
+	if len(enforceConstraints) > 1 {
+		t.Fatal("SQLite proof fixture accepts one constraint-enforcement option")
+	}
 	path := filepath.Join(t.TempDir(), "runtime.db")
 	guard, err := WaitSQLiteConstructionGuard(context.Background(), path)
 	if err != nil {
 		t.Fatalf("acquire retained SQLite possession before writes: %v", err)
 	}
 	t.Cleanup(func() { _ = guard.Release() })
-	db, err := sql.Open("sqlite", path)
+	dsn := path
+	if len(enforceConstraints) == 1 && enforceConstraints[0] {
+		dsn += "?_pragma=foreign_keys(1)"
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		t.Fatalf("open SQLite: %v", err)
 	}

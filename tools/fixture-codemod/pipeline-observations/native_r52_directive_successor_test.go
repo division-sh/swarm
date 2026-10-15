@@ -32,6 +32,10 @@ var r52DirectiveSuccessorPins = []r52DirectiveSuccessorPin{
 
 // Finite endpoints authorized by reviewer-b6145065880/6145833450/6146134392/6150892514.
 func reverseR52DirectiveSuccessor(row recipe, actual string, pin r52DirectiveSuccessorPin) error {
+	row, actual, err := catchUp2542PriorMasterPair(row, actual)
+	if err != nil {
+		return err
+	}
 	composition, found, err := sharedCoordinatorComposition2617(row)
 	if err != nil {
 		return err

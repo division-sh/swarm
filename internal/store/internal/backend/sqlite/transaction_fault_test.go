@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,12 +21,18 @@ var errInjectedCommit = errors.New("injected uncertain commit: database is locke
 // Wrap a real SQLite driver only at the transaction exit being tested. All
 // statements and independent readback use SQLite; no production fault hook.
 type exitFaultConnector struct {
-	path             string
-	rollbackFail     atomic.Bool
-	commitAfterError atomic.Bool
-	opens, closes    atomic.Int32
-	beforeBegin      context.CancelFunc
-	afterCommit      context.CancelFunc
+	path                             string
+	rollbackFail                     atomic.Bool
+	commitAfterError                 atomic.Bool
+	opens, closes                    atomic.Int32
+	beforeBegin                      context.CancelFunc
+	afterCommit                      context.CancelFunc
+	closeEntered, closeRelease       chan struct{}
+	rollbackEntered, rollbackRelease chan struct{}
+	closeOnce, rollbackOnce          sync.Once
+	constraintCleanupEntered         chan struct{}
+	constraintCleanupRelease         chan struct{}
+	constraintCleanupOnce            sync.Once
 }
 
 func (c *exitFaultConnector) Driver() driver.Driver { return &modernc.Driver{} }
@@ -43,7 +50,13 @@ type exitFaultConn struct {
 	owner *exitFaultConnector
 }
 
-func (c *exitFaultConn) Close() error { c.owner.closes.Add(1); return c.Conn.Close() }
+func (c *exitFaultConn) Close() error {
+	if c.owner.closeEntered != nil {
+		c.owner.closeOnce.Do(func() { close(c.owner.closeEntered); <-c.owner.closeRelease })
+	}
+	c.owner.closes.Add(1)
+	return c.Conn.Close()
+}
 func (c *exitFaultConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
 	if c.owner.beforeBegin != nil {
 		c.owner.beforeBegin()
@@ -55,6 +68,9 @@ func (c *exitFaultConn) BeginTx(ctx context.Context, opts driver.TxOptions) (dri
 	return &exitFaultTx{Tx: tx, owner: c.owner}, nil
 }
 func (c *exitFaultConn) ExecContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	if query == "PRAGMA ignore_check_constraints=OFF" && c.owner.constraintCleanupEntered != nil {
+		c.owner.constraintCleanupOnce.Do(func() { close(c.owner.constraintCleanupEntered); <-c.owner.constraintCleanupRelease })
+	}
 	return c.Conn.(driver.ExecerContext).ExecContext(ctx, query, args)
 }
 func (c *exitFaultConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
@@ -67,6 +83,9 @@ type exitFaultTx struct {
 }
 
 func (t *exitFaultTx) Rollback() error {
+	if t.owner.rollbackEntered != nil {
+		t.owner.rollbackOnce.Do(func() { close(t.owner.rollbackEntered); <-t.owner.rollbackRelease })
+	}
 	if t.owner.rollbackFail.Swap(false) {
 		return errInjectedCleanup
 	}

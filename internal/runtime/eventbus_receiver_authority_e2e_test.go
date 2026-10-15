@@ -2,7 +2,6 @@ package runtime_test
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 	"sync"
@@ -28,7 +27,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -46,19 +44,11 @@ type closedReceiverE2EStore interface {
 func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			var (
-				db       *sql.DB
-				selected closedReceiverE2EStore
-			)
+			var selected closedReceiverE2EStore
 			if backend == "postgres" {
-				_, postgresDB, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				db = postgresDB
-				selected = storetest.AdmitPostgresRuntimeStore(t, postgresDB)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			} else {
-				sqlite := storetest.StartSQLiteRuntimeStore(t)
-				db = storetest.Database(sqlite)
-				selected = sqlite
+				selected = storetest.StartSQLiteRuntimeStore(t)
 			}
 
 			bundle := loadRuntimeTempBundle(t, closedReceiverAuthorityFixtureFiles())
@@ -73,9 +63,6 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 			})
 
 			workflowPersistence := runtimepipeline.NewWorkflowPersistence(selected)
-			if backend == "sqlite" {
-				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
-			}
 			processOwner := worklifetime.NewProcess()
 			modelRuntime := &closedReceiverManagedLLM{
 				controller: runtimeeffects.NewCompletionController(selected, selected, selected, nil).WithExecutionPosture(executionposture.Live),
@@ -140,7 +127,8 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 				t.Fatalf("publish receiver authority root: %v", err)
 			}
 
-			assertClosedReceiverAuthorityEvidence(t, ctx, db, backend, runID, root.ID())
+			assertClosedReceiverAuthorityEvidence(t, ctx, selected, backend, runID, root.ID())
+			requireClosedReceiverDiagnosticReadback(t, ctx, selected, runID)
 		})
 	}
 }
@@ -253,15 +241,15 @@ func (r *closedReceiverManagedLLM) ContinueForkChatSession(ctx context.Context, 
 	return &llm.Response{Message: llm.Message{Role: "assistant", Content: "noop: " + message.Content}}, nil
 }
 
-func assertClosedReceiverAuthorityEvidence(t *testing.T, ctx context.Context, db *sql.DB, backend, runID, rootEventID string) {
+func assertClosedReceiverAuthorityEvidence(t *testing.T, ctx context.Context, selected any, backend, runID, rootEventID string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if closedReceiverEvidenceReady(t, ctx, db, backend, runID) {
+		if closedReceiverEvidenceReady(t, ctx, selected, runID) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for closed receiver evidence on %s: %s", backend, closedReceiverEvidenceDiagnostic(t, ctx, db, backend, runID))
+			t.Fatalf("timed out waiting for closed receiver evidence on %s: %s", backend, closedReceiverEvidenceDiagnostic(t, ctx, selected, runID))
 		}
 		select {
 		case <-ctx.Done():
@@ -270,27 +258,13 @@ func assertClosedReceiverAuthorityEvidence(t *testing.T, ctx context.Context, db
 		}
 	}
 
-	placeholder, cast := "?", ""
-	if backend == "postgres" {
-		placeholder, cast = "$1", "::uuid"
-	}
-	rows, err := db.QueryContext(ctx, `
-		SELECT o.agent_id, o.authority_kind, a.state, s.actor_id, s.execution_kind
-		FROM runtime_external_effect_operations o
-		JOIN runtime_external_effect_attempts a ON a.operation_id = o.operation_id
-		JOIN managed_agent_capability_surfaces s ON s.surface_id = a.capability_surface_id
-		ORDER BY o.agent_id
-	`)
+	rows, err := storetest.ReadClosedReceiverAuthorityStorage(ctx, selected)
 	if err != nil {
 		t.Fatalf("query receiver effect evidence: %v", err)
 	}
-	defer rows.Close()
 	wantAgents := map[string]bool{"downstream-agent": false, "upstream-agent": false}
-	for rows.Next() {
-		var agentID, authorityKind, state, surfaceActor, executionKind string
-		if err := rows.Scan(&agentID, &authorityKind, &state, &surfaceActor, &executionKind); err != nil {
-			t.Fatalf("scan receiver effect evidence: %v", err)
-		}
+	for _, row := range rows {
+		agentID, authorityKind, state, surfaceActor, executionKind := row.AgentID, row.AuthorityKind, row.State, row.SurfaceActor, row.ExecutionKind
 		if _, ok := wantAgents[agentID]; !ok {
 			continue
 		}
@@ -299,43 +273,32 @@ func assertClosedReceiverAuthorityEvidence(t *testing.T, ctx context.Context, db
 		}
 		wantAgents[agentID] = true
 	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("iterate receiver effect evidence: %v", err)
-	}
 	for agentID, found := range wantAgents {
 		if !found {
 			t.Fatalf("missing persisted receiver authority evidence for %s", agentID)
 		}
 	}
 
-	query := `SELECT event_id, produced_by, produced_by_type, COALESCE(source_event_id, '') FROM events WHERE run_id = ` + placeholder + cast + ` AND event_name = ?`
-	args := []any{runID, "task.completed"}
-	if backend == "postgres" {
-		query = `SELECT event_id::text, produced_by, produced_by_type, COALESCE(source_event_id::text, '') FROM events WHERE run_id = $1::uuid AND event_name = $2`
-	}
-	var completedID, completedBy, completedType, completedSource string
-	if err := db.QueryRowContext(ctx, query, args...).Scan(&completedID, &completedBy, &completedType, &completedSource); err != nil {
+	completed, err := storetest.ReadClosedReceiverEmissionStorage(ctx, selected, runID, "task.completed")
+	if err != nil {
 		t.Fatalf("load upstream emitted event: %v", err)
 	}
+	completedID, completedBy, completedType, completedSource := completed.EventID, completed.ProducedBy, completed.ProducedType, completed.SourceEventID
 	if completedBy != "upstream-agent" || completedType != "agent" || completedSource != rootEventID {
 		t.Fatalf("task.completed lineage = producer %s/%s source %s, want upstream-agent/agent source %s", completedType, completedBy, completedSource, rootEventID)
 	}
-	args[1] = "task.finalized"
-	var finalizedID, finalizedBy, finalizedType, finalizedSource string
-	if err := db.QueryRowContext(ctx, query, args...).Scan(&finalizedID, &finalizedBy, &finalizedType, &finalizedSource); err != nil {
+	finalized, err := storetest.ReadClosedReceiverEmissionStorage(ctx, selected, runID, "task.finalized")
+	if err != nil {
 		t.Fatalf("load node emitted event: %v", err)
 	}
+	finalizedID, finalizedBy, finalizedType, finalizedSource := finalized.EventID, finalized.ProducedBy, finalized.ProducedType, finalized.SourceEventID
 	bridgeNodeID := identitytest.RootNode(t, "bridge-node").Key()
 	if finalizedBy != bridgeNodeID || finalizedType != "node" || finalizedSource != completedID {
 		t.Fatalf("task.finalized lineage = producer %s/%s source %s, want %s/node source %s", finalizedType, finalizedBy, finalizedSource, bridgeNodeID, completedID)
 	}
 
-	receiptQuery := `SELECT COUNT(*) FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' AND r.outcome = 'success'`
-	if backend == "postgres" {
-		receiptQuery = `SELECT COUNT(*) FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' AND r.outcome = 'success'`
-	}
-	var receipts int
-	if err := db.QueryRowContext(ctx, receiptQuery, runID).Scan(&receipts); err != nil {
+	receipts, err := storetest.CountClosedReceiverPipelineSuccessStorage(ctx, selected, runID)
+	if err != nil {
 		t.Fatalf("count receiver pipeline receipts: %v", err)
 	}
 	if receipts < 3 {
@@ -344,176 +307,78 @@ func assertClosedReceiverAuthorityEvidence(t *testing.T, ctx context.Context, db
 	_ = finalizedID
 }
 
-func closedReceiverEvidenceDiagnostic(t testing.TB, ctx context.Context, db *sql.DB, backend, runID string) string {
+func closedReceiverEvidenceDiagnostic(t testing.TB, ctx context.Context, selected any, runID string) string {
 	t.Helper()
-	query := `
-		SELECT e.event_name, COALESCE(e.flow_instance, ''), COALESCE(CAST(e.entity_id AS TEXT), ''),
-		       CAST(e.target_route AS TEXT), d.subscriber_type, d.subscriber_id, d.status,
-		       COALESCE(d.reason_code, ''), COALESCE(CAST(d.failure AS TEXT), '')
-		FROM events e
-		LEFT JOIN event_deliveries d ON d.event_id = e.event_id
-		WHERE e.run_id = ?
-		ORDER BY e.created_at, d.subscriber_type, d.subscriber_id`
-	args := []any{runID}
-	if backend == "postgres" {
-		query = strings.Replace(query, "e.run_id = ?", "e.run_id = $1::uuid", 1)
-	}
-	rows, err := db.QueryContext(ctx, query, args...)
+	rows, err := storetest.ReadClosedReceiverDeliveryStorage(ctx, selected, runID)
 	if err != nil {
 		return "query diagnostic: " + err.Error()
 	}
-	defer rows.Close()
 	var facts []string
-	for rows.Next() {
-		var eventName, flowInstance, entityID, targetRoute string
-		var subscriberType, subscriberID, status, reason, failure sql.NullString
-		if err := rows.Scan(&eventName, &flowInstance, &entityID, &targetRoute, &subscriberType, &subscriberID, &status, &reason, &failure); err != nil {
-			return "scan diagnostic: " + err.Error()
-		}
+	for _, row := range rows {
+		eventName, flowInstance, entityID, targetRoute := row.EventName, row.FlowInstance, row.EntityID, row.TargetRoute
+		subscriberType, subscriberID, status, reason, failure := row.SubscriberType, row.SubscriberID, row.Status, row.Reason, row.Failure
 		facts = append(facts, fmt.Sprintf("%s[%s/%s target=%s]:%s/%s:%s:%s:%s", eventName, flowInstance, entityID, targetRoute, subscriberType.String, subscriberID.String, status.String, reason.String, failure.String))
 	}
-	if err := rows.Err(); err != nil {
-		return "iterate diagnostic: " + err.Error()
-	}
-	receiptQuery := `
-		SELECT e.event_name, r.subscriber_type, r.subscriber_id, r.outcome,
-		       COALESCE(r.reason_code, ''), COALESCE(CAST(r.failure AS TEXT), '')
-		FROM event_receipts r
-		JOIN events e ON e.event_id = r.event_id
-		WHERE e.run_id = ?
-		ORDER BY e.created_at, r.subscriber_type, r.subscriber_id`
-	if backend == "postgres" {
-		receiptQuery = strings.Replace(receiptQuery, "e.run_id = ?", "e.run_id = $1::uuid", 1)
-	}
-	receipts, err := db.QueryContext(ctx, receiptQuery, runID)
+	receipts, err := storetest.ReadClosedReceiverReceiptStorage(ctx, selected, runID)
 	if err != nil {
 		return strings.Join(facts, ", ") + "; query receipts: " + err.Error()
 	}
-	defer receipts.Close()
-	for receipts.Next() {
-		var eventName, subscriberType, subscriberID, outcome, reason, failure string
-		if err := receipts.Scan(&eventName, &subscriberType, &subscriberID, &outcome, &reason, &failure); err != nil {
-			return strings.Join(facts, ", ") + "; scan receipts: " + err.Error()
-		}
+	for _, row := range receipts {
+		eventName, subscriberType, subscriberID, outcome, reason, failure := row.EventName, row.SubscriberType, row.SubscriberID, row.Outcome, row.Reason, row.Failure
 		facts = append(facts, fmt.Sprintf("receipt:%s:%s/%s:%s:%s:%s", eventName, subscriberType, subscriberID, outcome, reason, failure))
 	}
-	if err := receipts.Err(); err != nil {
-		return strings.Join(facts, ", ") + "; iterate receipts: " + err.Error()
-	}
-	agents, err := db.QueryContext(ctx, `
-		SELECT agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-		       flow_scope_key, flow_instance_id, flow_instance, COALESCE(CAST(entity_id AS TEXT), ''),
-		       lifecycle_phase, lifecycle_generation, lifecycle_run_mode, status
-		FROM agents
-		WHERE agent_id IN ('upstream-agent', 'downstream-agent')
-		ORDER BY agent_id`)
+	agents, err := storetest.ReadClosedReceiverAgentStorage(ctx, selected)
 	if err != nil {
 		return strings.Join(facts, ", ") + "; query agents: " + err.Error()
 	}
-	defer agents.Close()
-	for agents.Next() {
-		var agentID, nameOwner, nameSource, routePresence, scope, instanceID, flowInstance, entityID, phase, runMode, status string
-		var generation int64
-		if err := agents.Scan(&agentID, &nameOwner, &nameSource, &routePresence, &scope, &instanceID, &flowInstance, &entityID, &phase, &generation, &runMode, &status); err != nil {
-			return strings.Join(facts, ", ") + "; scan agents: " + err.Error()
-		}
+	for _, row := range agents {
+		agentID, nameOwner, nameSource, routePresence, scope, instanceID, flowInstance, entityID, phase, generation, runMode, status := row.AgentID, row.NameOwner, row.NameSource, row.RoutePresence, row.Scope, row.InstanceID, row.FlowInstance, row.EntityID, row.Phase, row.Generation, row.RunMode, row.Status
 		facts = append(facts, fmt.Sprintf("agent:%s:%s/%s/%s/%s/%s/%s/%s:%s/%d/%s/%s", agentID, nameOwner, nameSource, routePresence, scope, instanceID, flowInstance, entityID, phase, generation, runMode, status))
 	}
-	if err := agents.Err(); err != nil {
-		return strings.Join(facts, ", ") + "; iterate agents: " + err.Error()
-	}
-	routeRows, err := db.QueryContext(ctx, `
-		SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source,
-		       d.agent_route_presence, d.agent_flow_scope_key,
-		       d.agent_flow_instance_id, d.agent_flow_instance_path
-		FROM event_deliveries d
-		JOIN events e ON e.event_id = d.event_id
-		WHERE e.run_id = ? AND d.subscriber_type = 'agent'
-		ORDER BY d.subscriber_id`, runID)
-	if backend == "postgres" {
-		routeRows, err = db.QueryContext(ctx, `
-			SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source,
-			       d.agent_route_presence, d.agent_flow_scope_key,
-			       d.agent_flow_instance_id, d.agent_flow_instance_path
-			FROM event_deliveries d
-			JOIN events e ON e.event_id = d.event_id
-			WHERE e.run_id = $1::uuid AND d.subscriber_type = 'agent'
-			ORDER BY d.subscriber_id`, runID)
-	}
+	routeRows, err := storetest.ReadClosedReceiverAgentRouteStorage(ctx, selected, runID)
 	if err != nil {
 		return strings.Join(facts, ", ") + "; query agent routes: " + err.Error()
 	}
-	defer routeRows.Close()
-	for routeRows.Next() {
-		var agentID, owner, source, presence, scope, instanceID, instancePath string
-		if err := routeRows.Scan(&agentID, &owner, &source, &presence, &scope, &instanceID, &instancePath); err != nil {
-			return strings.Join(facts, ", ") + "; scan agent routes: " + err.Error()
-		}
+	for _, row := range routeRows {
+		agentID, owner, source, presence, scope, instanceID, instancePath := row.AgentID, row.Owner, row.Source, row.Presence, row.Scope, row.InstanceID, row.InstancePath
 		facts = append(facts, fmt.Sprintf("agent-route:%s:%s/%s/%s/%s/%s/%s", agentID, owner, source, presence, scope, instanceID, instancePath))
 	}
-	if err := routeRows.Err(); err != nil {
-		return strings.Join(facts, ", ") + "; iterate agent routes: " + err.Error()
-	}
-	logQuery := `SELECT CAST(payload AS TEXT) FROM events WHERE run_id = ? AND event_name = 'platform.runtime_log' ORDER BY created_at`
-	if backend == "postgres" {
-		logQuery = `SELECT payload::text FROM events WHERE run_id = $1::uuid AND event_name = 'platform.runtime_log' ORDER BY created_at`
-	}
-	logs, err := db.QueryContext(ctx, logQuery, runID)
+	logs, err := storetest.ReadClosedReceiverRuntimeLogStorage(ctx, selected, runID)
 	if err != nil {
 		return strings.Join(facts, ", ") + "; query runtime logs: " + err.Error()
 	}
-	defer logs.Close()
-	for logs.Next() {
-		var payload string
-		if err := logs.Scan(&payload); err != nil {
-			return strings.Join(facts, ", ") + "; scan runtime logs: " + err.Error()
-		}
+	for _, payload := range logs {
 		facts = append(facts, "runtime-log:"+payload)
-	}
-	if err := logs.Err(); err != nil {
-		return strings.Join(facts, ", ") + "; iterate runtime logs: " + err.Error()
 	}
 	return strings.Join(facts, ", ")
 }
 
-func closedReceiverEvidenceReady(t testing.TB, ctx context.Context, db *sql.DB, backend, runID string) bool {
+func closedReceiverEvidenceReady(t testing.TB, ctx context.Context, selected any, runID string) bool {
 	t.Helper()
 	bridgeNodeID := identitytest.RootNode(t, "bridge-node").Key()
-	query := `
-		SELECT
-			(SELECT COUNT(DISTINCT o.agent_id)
-			 FROM runtime_external_effect_operations o
-			 JOIN runtime_external_effect_attempts a ON a.operation_id = o.operation_id
-			 WHERE o.agent_id IN ('upstream-agent','downstream-agent') AND a.state = 'settled'),
-			(SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name IN ('task.completed','task.finalized')),
-			(SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
-			 WHERE e.run_id = ? AND d.status = 'delivered'
-			   AND ((d.subscriber_type = 'agent' AND d.subscriber_id IN ('upstream-agent','downstream-agent'))
-			     OR (d.subscriber_type = 'node' AND d.subscriber_id = ?)))
-	`
-	if backend == "postgres" {
-		query = `
-			SELECT
-				(SELECT COUNT(DISTINCT o.agent_id)
-				 FROM runtime_external_effect_operations o
-				 JOIN runtime_external_effect_attempts a ON a.operation_id = o.operation_id
-				 WHERE o.agent_id IN ('upstream-agent','downstream-agent') AND a.state = 'settled'),
-				(SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name IN ('task.completed','task.finalized')),
-				(SELECT COUNT(*) FROM event_deliveries d JOIN events e ON e.event_id = d.event_id
-				 WHERE e.run_id = $1::uuid AND d.status = 'delivered'
-				   AND ((d.subscriber_type = 'agent' AND d.subscriber_id IN ('upstream-agent','downstream-agent'))
-				     OR (d.subscriber_type = 'node' AND d.subscriber_id = $2)))
-		`
-	}
-	var actors, eventsCount, deliveries int
-	args := []any{runID, runID, bridgeNodeID}
-	if backend == "postgres" {
-		args = []any{runID, bridgeNodeID}
-	}
-	if err := db.QueryRowContext(ctx, query, args...).Scan(&actors, &eventsCount, &deliveries); err != nil {
+	observed, err := storetest.ReadClosedReceiverReadinessStorage(ctx, selected, runID, bridgeNodeID)
+	if err != nil {
 		t.Fatalf("query closed receiver evidence readiness: %v", err)
 	}
+	actors, eventsCount, deliveries := observed.Actors, observed.Events, observed.Deliveries
 	return actors == 2 && eventsCount == 2 && deliveries == 3
+}
+
+func requireClosedReceiverDiagnosticReadback(t *testing.T, ctx context.Context, selected any, runID string) {
+	t.Helper()
+	evidence := closedReceiverEvidenceDiagnostic(t, ctx, selected, runID)
+	for _, fragment := range []string{
+		"task.assigned[", "task.completed[", "task.finalized[",
+		"receipt:task.assigned:platform/pipeline:success:",
+		"receipt:task.completed:platform/pipeline:success:",
+		"receipt:task.finalized:platform/pipeline:success:",
+		"agent:upstream-agent:", "agent:downstream-agent:",
+		"agent-route:upstream-agent:", "agent-route:downstream-agent:",
+	} {
+		if !strings.Contains(evidence, fragment) {
+			t.Fatalf("closed receiver diagnostic lost persisted %q: %s", fragment, evidence)
+		}
+	}
 }
 
 func closedReceiverAuthorityFixtureFiles() map[string]string {

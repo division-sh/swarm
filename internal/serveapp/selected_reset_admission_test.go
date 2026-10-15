@@ -54,7 +54,7 @@ func TestSelectedResetPreparationAdmissionOrderBothStores(t *testing.T) {
 						"event_name": "item.received", "bundle_hash": rt.BundleHash,
 						"payload": map[string]any{"item_id": "reset-preparation"}, "idempotency_key": "seed",
 					})
-					waitForServedEventPublishNodeDeliveryLifecycle(t, rt.DB, rt.Backend, seed.RunID, seed.EventID, rt.Probe)
+					waitForServedEventPublishNodeDeliveryLifecycle(t, rt.ReceiverStateReader, rt.Backend, seed.RunID, seed.EventID, rt.Probe)
 					forkDone := make(chan error, 1)
 					if first == "admission" {
 						go func() {
@@ -92,8 +92,9 @@ func TestSelectedResetPreparationAdmissionOrderBothStores(t *testing.T) {
 							t.Fatalf("reset skipped accepted preparation settlement: %+v", response)
 						default:
 						}
-						var count int
-						if err := rt.DB.QueryRow("SELECT COUNT(*) FROM runs WHERE run_id=$1", seed.RunID).Scan(&count); err != nil || count != 1 {
+
+						count, err := readServedRunPhysicalIdentity(rt.ReceiverStateReader, seed.RunID)
+						if err != nil || count != 1 {
 							t.Fatalf("cleanup preceded selected join: count=%d err=%v", count, err)
 						}
 						release.Do(func() { close(probe.release) })

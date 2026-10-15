@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -31,13 +32,17 @@ func TestOperatorObservabilityEventOwnerFiltersDetailsAndCursor(t *testing.T) {
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
 	olderAgentRoute := testAgentDeliveryRoute(t, runID, "agent-a", "fixture/agent-a")
 	olderNodeRoute := testEntitylessNodeDeliveryRoute("node-a")
+	admission := admitAgentClaimProfileIdentity(t, runtimecorrelation.WithRunID(ctx, runID), pg, olderAgentRoute.AgentIdentity, mustStoreTestSourceArtifactFact(authorActivityTestBundleHash))
 	seedOperatorObservabilityEvent(t, ctx, pg, olderEventID, runID, "task.failed", events.EventProducerExternal, "agent-a", json.RawMessage(`{"entity_id":"`+entityID+`","n":1}`), entityID, base, olderAgentRoute, olderNodeRoute)
 	seedOperatorObservabilityEvent(t, ctx, pg, newerEventID, runID, "task.completed", events.EventProducerExternal, "agent-b", json.RawMessage(`{"entity_id":"`+entityID+`","n":2}`), entityID, base.Add(time.Minute))
 	olderEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, olderEventID)
+	if err := pg.ActivateDeliveryAuthority(ctx, admission.authority); err != nil {
+		t.Fatal(err)
+	}
 	agentFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "retry_exhausted", nil)
 	nodeFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "node_failed", nil)
-	seedDeliveryStateFixture(t, ctx, pg, olderEvent, olderAgentRoute, runtimedelivery.StateExhausted, &agentFailure)
-	seedDeliveryStateFixture(t, ctx, pg, olderEvent, olderNodeRoute, runtimedelivery.StateRetrying, &nodeFailure)
+	settleDeliveryStateFixture(t, ctx, pg, olderEvent, olderAgentRoute, runtimedelivery.StateExhausted, &agentFailure)
+	settleDeliveryStateFixture(t, ctx, pg, olderEvent, olderNodeRoute, runtimedelivery.StateRetrying, &nodeFailure)
 	hasDead := true
 	filtered, err := pg.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{
 		Filter: operatorread.OperatorEventListFilter{

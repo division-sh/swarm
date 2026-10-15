@@ -72,7 +72,7 @@ func TestMailboxMutationCompletionRollbackBothStores(t *testing.T) {
 							return out
 						}
 						before := read()
-						beforeEffects := mailboxCompletionRunEffects(t, f.rt, card.RunID)
+						beforeEffects := mailboxCompletionRunEffects(t, f.rt.ReceiverStateReader, card.RunID)
 						assertCut, remove := installMailboxCompletionFaultWitness(t, f.rt, key)
 						if failed := requestServedJSONRPC(t, f.rt.Endpoint, method, params); failed.Error == nil {
 							t.Fatal("completion fault succeeded")
@@ -81,7 +81,7 @@ func TestMailboxMutationCompletionRollbackBothStores(t *testing.T) {
 						if after := read(); !reflect.DeepEqual(before, after) {
 							t.Fatalf("partial domain commit: before=%v after=%v", before, after)
 						}
-						if after := mailboxCompletionRunEffects(t, f.rt, card.RunID); !reflect.DeepEqual(beforeEffects, after) {
+						if after := mailboxCompletionRunEffects(t, f.rt.ReceiverStateReader, card.RunID); !reflect.DeepEqual(beforeEffects, after) {
 							t.Fatalf("response INSERT failure partially changed continuation/event/entity state:\nbefore=%v\nafter=%v", beforeEffects, after)
 						}
 						var count int
@@ -93,7 +93,7 @@ func TestMailboxMutationCompletionRollbackBothStores(t *testing.T) {
 						var replay map[string]any
 						waitServedRunDeliveryQuiescence(t, f.rt.ReadRunDeliveries, card.RunID)
 						domain := read()
-						effects := mailboxCompletionRunEffects(t, f.rt, card.RunID)
+						effects := mailboxCompletionRunEffects(t, f.rt.ReceiverStateReader, card.RunID)
 						requireServedJSONRPCResult(t, f.rt.Endpoint, method, params, &replay)
 						waitServedRunDeliveryQuiescence(t, f.rt.ReadRunDeliveries, card.RunID)
 						if original["idempotency_replayed"] != false || replay["idempotency_replayed"] != true {
@@ -104,7 +104,7 @@ func TestMailboxMutationCompletionRollbackBothStores(t *testing.T) {
 						if !reflect.DeepEqual(original, replay) || !reflect.DeepEqual(domain, read()) {
 							t.Fatal("replay changed response or domain")
 						}
-						if after := mailboxCompletionRunEffects(t, f.rt, card.RunID); !reflect.DeepEqual(effects, after) {
+						if after := mailboxCompletionRunEffects(t, f.rt.ReceiverStateReader, card.RunID); !reflect.DeepEqual(effects, after) {
 							t.Fatalf("replay duplicated continuation/event/entity effects:\nbefore=%v\nafter=%v", effects, after)
 						}
 						var raw, principal, actor, actorKind string
@@ -127,7 +127,7 @@ func TestMailboxMutationCompletionRollbackBothStores(t *testing.T) {
 			}
 			rt, _ = restart()
 			for _, c := range completed {
-				before := mailboxCompletionRunEffects(t, rt, c.runID)
+				before := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, c.runID)
 				var replay map[string]any
 				requireServedJSONRPCResult(t, rt.Endpoint, c.method, c.params, &replay)
 				if replay["idempotency_replayed"] != true {
@@ -137,7 +137,7 @@ func TestMailboxMutationCompletionRollbackBothStores(t *testing.T) {
 				if !reflect.DeepEqual(c.original, replay) {
 					t.Fatalf("%s restart changed response: %v / %v", c.method, c.original, replay)
 				}
-				if after := mailboxCompletionRunEffects(t, rt, c.runID); !reflect.DeepEqual(before, after) {
+				if after := mailboxCompletionRunEffects(t, rt.ReceiverStateReader, c.runID); !reflect.DeepEqual(before, after) {
 					t.Fatalf("%s restart replay changed domain: %s", c.method, mailboxEffectsDifference(before, after))
 				}
 			}

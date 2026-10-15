@@ -12,15 +12,18 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestRootConnectedTemplatePublicationAcknowledgmentLossBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
 			fault := &rootPublicationAckLoss{}
+			var reader receiverProofStateReader
 			previous := projectRuntimePersistenceForServe
 			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
 				persistence := previous(owner)
+				reader = requireReceiverProofStateReader(t, persistence.deps.EventStore)
 				switch selected := persistence.deps.EventStore.(type) {
 				case *store.PostgresStore:
 					persistence.deps.EventStore = &rootPublicationPostgresAckLoss{PostgresStore: selected, fault: fault}
@@ -32,7 +35,7 @@ func TestRootConnectedTemplatePublicationAcknowledgmentLossBothStores(t *testing
 				return persistence
 			}
 			t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
-			endpoint, db, bundleHash := startPublicInputRollbackRuntime(t, backend)
+			endpoint, _, bundleHash := startPublicInputRollbackRuntime(t, backend)
 			params := map[string]any{
 				"bundle_hash": bundleHash, "event_name": "inbound.telegram.text_message",
 				"payload":         map[string]any{"conversation_reference": "42", "conversation_scope": "direct", "external_account_reference": "42", "provider_message_reference": 1, "text": "acknowledgment proof"},
@@ -64,13 +67,23 @@ func TestRootConnectedTemplatePublicationAcknowledgmentLossBothStores(t *testing
 			if commits != 1 {
 				t.Fatalf("same-key replay attempted %d publication commits", commits)
 			}
-			for label, statement := range map[string]string{
-				"private instance": "SELECT COUNT(*) FROM flow_instances WHERE flow_template = 'telegram-chat'",
-				"root event":       "SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram.text_message'",
-				"API completion":   "SELECT COUNT(*) FROM api_idempotency WHERE method = 'event.publish' AND idempotency_key = 'root-connected-ack-loss'",
+			for label, read := range map[string]func(context.Context) (int, error){
+				"private instance": func(ctx context.Context) (int, error) {
+					return storetest.CountTemplateInstances(ctx, reader, "telegram-chat")
+				},
+				"root event": func(ctx context.Context) (int, error) {
+					return storetest.CountEventNameStorage(ctx, reader, "inbound.telegram.text_message")
+				},
+				"API completion": func(ctx context.Context) (int, error) {
+					return storetest.ReadAPIIdempotencyCardinality(ctx, reader, "event.publish", "root-connected-ack-loss")
+				},
 			} {
 				var count int
-				if err := db.QueryRowContext(context.Background(), statement).Scan(&count); err != nil {
+				if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+					var err error
+					count, err = read(ctx)
+					return err
+				}); err != nil {
 					t.Fatal(err)
 				}
 				if count != 1 {

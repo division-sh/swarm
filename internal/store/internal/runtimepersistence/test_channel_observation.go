@@ -6,6 +6,8 @@ import (
 
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/channeldelivery"
+	decisionstorage "github.com/division-sh/swarm/internal/store/internal/backend/decisioncard"
+	"github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 )
 
 func ObserveChannelIntentForTest(ctx context.Context, selected any, demand render.IntentObservationQuery) (render.IntentObservation, bool, error) {
@@ -50,4 +52,78 @@ func ObserveChannelSentReceiptForTest(ctx context.Context, selected any, deliver
 		return err
 	})
 	return result, found, err
+}
+
+type ChannelAnchorCardStorage = decisionstorage.ChannelAnchorCardStorage
+type ChannelAnchorDecisionStorage = decisionstorage.ChannelAnchorDecisionStorage
+type StandingFlowStorage = standingdisposition.StandingFlowStorage
+
+func ReadStandingFlowStorageForTest(ctx context.Context, selected any, flowID string) (StandingFlowStorage, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return StandingFlowStorage{}, err
+	}
+	_, postgres := selected.(*PostgresStore)
+	var result StandingFlowStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = standingdisposition.ReadStandingFlowStorageTx(ctx, tx, postgres, flowID)
+		return err
+	})
+	if err != nil {
+		return StandingFlowStorage{}, err
+	}
+	return result, nil
+}
+
+func ReadChannelAnchorCardsStorageForTest(ctx context.Context, selected any, runID, kind, status string) ([]ChannelAnchorCardStorage, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var result []ChannelAnchorCardStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = decisionstorage.ReadChannelAnchorCardsStorageTx(ctx, tx, runID, kind, status)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func ReadChannelAnchorDecisionStorageForTest(ctx context.Context, selected any, cardID string) (ChannelAnchorDecisionStorage, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return ChannelAnchorDecisionStorage{}, err
+	}
+	var result ChannelAnchorDecisionStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = decisionstorage.ReadChannelAnchorDecisionStorageTx(ctx, tx, cardID)
+		return err
+	})
+	if err != nil {
+		return ChannelAnchorDecisionStorage{}, err
+	}
+	return result, nil
+}
+
+func ReadFirstSentSourceReceiptStorageForTest(ctx context.Context, selected any, sourceID string) (string, bool, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return "", false, err
+	}
+	var result string
+	var found bool
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = channeldelivery.ReadFirstSentSourceReceiptStorageTx(ctx, tx, sourceID)
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		found = err == nil
+		return err
+	})
+	if err != nil {
+		return "", false, err
+	}
+	return result, found, nil
 }

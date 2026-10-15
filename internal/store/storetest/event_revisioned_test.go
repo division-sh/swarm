@@ -49,19 +49,19 @@ func TestRevisionedExistingRunRootFixturePreservesCanonicalEvidence(t *testing.T
 			if duplicate := ReadSemanticEventFixtureEvidence(t, ctx, selected, runID, eventID); !reflect.DeepEqual(duplicate, after) {
 				t.Fatalf("exact duplicate changed canonical event/history evidence: before=%+v after=%+v", after, duplicate)
 			}
-			if _, err := private.InsertRevisionedExistingRunRootEventForTest(ctx, selected, eventID, runID, "fixture.ready", producer, []byte(`{"value":2}`), events.EventEnvelope{}, at); err == nil {
+			if _, err := private.InsertNativeExistingRunRootEventForTest(ctx, selected, eventID, runID, "fixture.ready", producer, []byte(`{"value":2}`), events.EventEnvelope{}, at); err == nil {
 				t.Fatal("conflicting duplicate was accepted")
 			}
 			canceled, cancel := context.WithCancel(ctx)
 			cancel()
 			canceledID, missingRunID := uuid.NewString(), uuid.NewString()
-			if _, err := private.InsertRevisionedExistingRunRootEventForTest(canceled, selected, canceledID, runID, "fixture.ready", producer, payload, events.EventEnvelope{}, at); !errors.Is(err, context.Canceled) {
+			if _, err := private.InsertNativeExistingRunRootEventForTest(canceled, selected, canceledID, runID, "fixture.ready", producer, payload, events.EventEnvelope{}, at); !errors.Is(err, context.Canceled) {
 				t.Fatalf("canceled fixture error=%v want caller cancellation", err)
 			}
-			if _, err := private.InsertRevisionedExistingRunRootEventForTest(ctx, selected, missingRunID, uuid.NewString(), "fixture.ready", producer, payload, events.EventEnvelope{}, at); err == nil {
+			if _, err := private.InsertNativeExistingRunRootEventForTest(ctx, selected, missingRunID, uuid.NewString(), "fixture.ready", producer, payload, events.EventEnvelope{}, at); err == nil {
 				t.Fatal("existing-run fixture created an event for an absent run")
 			}
-			if _, err := private.InsertRevisionedExistingRunRootEventForTest(ctx, struct{}{}, eventID, runID, "fixture.ready", producer, payload, events.EventEnvelope{}, at); err == nil {
+			if _, err := private.InsertNativeExistingRunRootEventForTest(ctx, struct{}{}, eventID, runID, "fixture.ready", producer, payload, events.EventEnvelope{}, at); err == nil {
 				t.Fatal("event fixture accepted a non-native owner")
 			}
 			for _, id := range []string{canceledID, missingRunID} {

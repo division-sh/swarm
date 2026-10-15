@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -122,10 +123,9 @@ func TestA2JoinCloseLostOwnerResultRecoversOnBothStores(t *testing.T) {
 				}
 				return instance
 			}
-			count := func(query string) int {
+			count := func(n int, err error) int {
 				t.Helper()
-				var n int
-				if err := selected.db.QueryRowContext(ctx, query, runID).Scan(&n); err != nil {
+				if err != nil {
 					t.Fatal(err)
 				}
 				return n
@@ -152,10 +152,10 @@ func TestA2JoinCloseLostOwnerResultRecoversOnBothStores(t *testing.T) {
 			a2KnownTargetWaitForSettlement(t, ctx, bus, probe, first, node.Key(), "completed", "delivered", logger)
 			before := load()
 			initial := exactJoinPersistedArm(t, before)
-			if initial.Status != joinruntime.StatusOpen || initial.Completed() != 1 || count("SELECT COUNT(*) FROM timers WHERE run_id=$1") != 0 {
+			if initial.Status != joinruntime.StatusOpen || initial.Completed() != 1 || count(storetest.CountRunTimerStorage(ctx, selected.events, runID)) != 0 {
 				t.Fatalf("result-loss checkpoint is not an open one-member arm: %#v", initial)
 			}
-			mutations := count("SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1")
+			mutations := count(storetest.CountRunMutationStorage(ctx, selected.events, runID))
 			if err := bus.PublishAcknowledged(ctx, closing); err != nil {
 				t.Fatal(err)
 			}
@@ -197,8 +197,8 @@ func TestA2JoinCloseLostOwnerResultRecoversOnBothStores(t *testing.T) {
 			if err != nil || !reflect.DeepEqual(results, wantResults) || !arm.JoinRef().Equal(initial.JoinRef()) ||
 				arm.Status != joinruntime.StatusClosed || arm.CloseReason != joinruntime.CloseReasonComplete || !arm.OutcomePending || arm.OutcomeFired || arm.Completed() != 2 ||
 				closed.CurrentState != "awaiting" || len(closed.TransitionHistory) != 0 || !reflect.DeepEqual(closed.Fields, before.Fields) ||
-				count("SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1") != mutations+1 || count("SELECT COUNT(*) FROM timers WHERE run_id=$1") != 1 ||
-				count("SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='platform.join_complete'") != 0 {
+				count(storetest.CountRunMutationStorage(ctx, selected.events, runID)) != mutations+1 || count(storetest.CountRunTimerStorage(ctx, selected.events, runID)) != 1 ||
+				count(storetest.CountRunEventNameStorage(ctx, selected.events, runID, "platform.join_complete")) != 0 {
 				t.Fatalf("ack loss lost atomic member/closed_pending/schedule or fabricated effects: arm=%#v state=%#v err=%v", arm, closed, err)
 			}
 			pending := exactJoinPendingSchedule(t, selected, ctx, arm)
@@ -234,7 +234,7 @@ func TestA2JoinCloseLostOwnerResultRecoversOnBothStores(t *testing.T) {
 			outcomesAfter, outcomeErr := deliveries.Outcomes(ctx, deliveryID)
 			if err != nil || deliveryErr != nil || outcomeErr != nil || routeCalls.Load() != 1 || loss.calls.Load() != callsBefore ||
 				!reflect.DeepEqual(load(), closed) || !reflect.DeepEqual(deliveryAfter, deliveryBefore) || !reflect.DeepEqual(outcomesAfter, outcomesBefore) ||
-				count("SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1") != mutations+1 || count("SELECT COUNT(*) FROM timers WHERE run_id=$1") != 1 {
+				count(storetest.CountRunMutationStorage(ctx, selected.events, runID)) != mutations+1 || count(storetest.CountRunTimerStorage(ctx, selected.events, runID)) != 1 {
 				t.Fatalf("exact input re-executed/rewrote committed close after reconstruction: quiet=%v delivery=%v outcomes=%v route_calls=%d", err, deliveryErr, outcomeErr, routeCalls.Load())
 			}
 			assertExactJoinDeliveryCount(t, selected, ctx, closing.ID(), node.Key(), 1)
@@ -258,18 +258,17 @@ func TestA2JoinCloseLostOwnerResultRecoversOnBothStores(t *testing.T) {
 			fired := exactJoinPersistedArm(t, final)
 			// Eight continuation diffs: four fields, stage, stage-entry and
 			// accumulation bookkeeping, and the settled join bucket.
-			var continuationDiffs int
-			if err := selected.db.QueryRowContext(ctx,
-				"SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1 AND caused_by_event=$2", runID, completionID).Scan(&continuationDiffs); err != nil {
+			continuationDiffs, err := storetest.CountRunEventMutationStorage(ctx, selected.events, runID, completionID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if final.Fields["final_expected"] != int64(2) || final.Fields["final_completed"] != int64(2) || final.Fields["final_reason"] != string(joinruntime.CloseReasonComplete) ||
 				!reflect.DeepEqual(final.Fields["final_results"], wantResults) || len(final.TransitionHistory) != 1 || !fired.OutcomeFired || fired.OutcomePending ||
-				!fired.JoinRef().Equal(arm.JoinRef()) || count("SELECT COUNT(*) FROM timers WHERE run_id=$1") != 1 ||
-				count("SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='platform.join_complete'") != 1 ||
-				count("SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1") != mutations+1+8 || continuationDiffs != 8 || routeCalls.Load() != 1 {
+				!fired.JoinRef().Equal(arm.JoinRef()) || count(storetest.CountRunTimerStorage(ctx, selected.events, runID)) != 1 ||
+				count(storetest.CountRunEventNameStorage(ctx, selected.events, runID, "platform.join_complete")) != 1 ||
+				count(storetest.CountRunMutationStorage(ctx, selected.events, runID)) != mutations+1+8 || continuationDiffs != 8 || routeCalls.Load() != 1 {
 				t.Fatalf("lost result duplicated/lost restored business effect: mutations=%d baseline=%d route_calls=%d state=%#v arm=%#v",
-					count("SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1"), mutations, routeCalls.Load(), final, fired)
+					count(storetest.CountRunMutationStorage(ctx, selected.events, runID)), mutations, routeCalls.Load(), final, fired)
 			}
 			assertExactJoinFiredSchedule(t, selected, ctx, pending, completionID)
 			assertExactJoinDeliveryStatus(t, selected, ctx, completionID, node.Key(), "delivered")
