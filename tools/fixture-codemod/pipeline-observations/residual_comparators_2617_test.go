@@ -47,8 +47,9 @@ func loadResidualComparators2617(t *testing.T) residualComparatorPacket2617 {
 }
 
 func residualComparatorMatches2617(row recipe, actual string, corpus []recipe, packet residualComparatorPacket2617) bool {
-	if original, prior, err := embeddedSpecPriorEndpoint1801(row, actual); err == nil {
-		row, actual = original, prior
+	row, actual, err := embeddedSpecHistoricalPair1801(row, actual)
+	if err != nil {
+		return false
 	}
 	for _, pin := range packet.Rows {
 		if row.Family != pin.Family || row.File != pin.File || row.Function != pin.Function {

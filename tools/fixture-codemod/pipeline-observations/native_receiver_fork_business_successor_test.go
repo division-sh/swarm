@@ -27,6 +27,10 @@ const receiverForkBusinessSetup = `				forkCtx := servedControlProofAuthorActivi
 `
 
 func receiverForkBusinessPredecessor(row recipe, actual string) (recipe, string, error) {
+	row, actual, err := embeddedSpecHistoricalPair1801(row, actual)
+	if err != nil {
+		return recipe{}, "", err
+	}
 	var prior string
 	if err := json.Unmarshal(receiverForkBusinessPredecessorBytes, &prior); err != nil {
 		return recipe{}, "", err

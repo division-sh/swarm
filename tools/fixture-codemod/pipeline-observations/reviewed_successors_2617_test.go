@@ -67,8 +67,9 @@ func sameReviewedRecipeKey(left, right recipe) bool {
 }
 
 func matchesReviewedSuccessor2617(row recipe, source string, pin reviewedSuccessor2617) bool {
-	if original, prior, err := embeddedSpecPriorEndpoint1801(row, source); err == nil {
-		row, source = original, prior
+	row, source, err := embeddedSpecHistoricalPair1801(row, source)
+	if err != nil {
+		return false
 	}
 	if original, err := fixtureSetupCurrentEndpoint2617(row, source); err == nil {
 		row, source = original, original.Successor
@@ -156,8 +157,15 @@ func TestReviewedSuccessors2617PreserveExactHistoryAndRejectHostileCompositions(
 			if err != nil {
 				t.Fatal(err)
 			}
-			historicalCandidate := candidate
-			if previous, err := fixtureSetupCurrentEndpoint2617(row, actual); err == nil {
+			historicalRow, historicalSource, err := embeddedSpecHistoricalPair1801(row, actual)
+			if err != nil {
+				t.Fatal(err)
+			}
+			historicalCandidate, err := canonicalFunction(historicalSource)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if previous, err := fixtureSetupCurrentEndpoint2617(historicalRow, historicalSource); err == nil {
 				historicalCandidate, err = canonicalFunction(previous.Successor)
 				if err != nil {
 					t.Fatal(err)
