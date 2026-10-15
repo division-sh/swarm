@@ -12392,7 +12392,9 @@ tool_model:
         Authenticated pairing readback may use the original completed connection attempt without requiring
         execution health. After an observed SDK disconnect, the same authorized owner may retain a zero-code
         terminal observation: qr_expired requires observed QR exhaustion; an independent disconnect reports
-        failure, never expiry. Execution-health admission stays strict. Runtime or source retirement, caller
+        failure, never expiry. Repeated disconnect events for that same occurrence retain its zero-code terminal
+        observation; generic retirement clears it and no later disconnect may recreate it. Execution-health
+        admission stays strict. Runtime or source retirement, caller
         cancellation, scope mismatch, store errors, malformed evidence and construction or connect failure remain
         refusals rather than synthesized terminal observations; the original failure cause stays private.
       session_outbound_encoding_component: >

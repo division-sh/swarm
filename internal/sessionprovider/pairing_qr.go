@@ -285,7 +285,9 @@ func (q *pairingQR) stop() {
 // retirement cancels disclosure instead; neither path retains QR material.
 func (q *pairingQR) stopAfterDisconnect(observed bool) {
 	q.mu.Lock()
-	q.terminal = pairingQRSnapshot{}
+	if !observed {
+		q.terminal = pairingQRSnapshot{}
+	}
 	if observed && q.ctx.Err() == nil && q.status != pairingStopped && q.failure == nil {
 		q.advanceLocked(time.Now())
 		status := pairingFailed
