@@ -278,6 +278,23 @@ func TestPipelineEffectPrimitiveOwnersAreExact(t *testing.T) {
 	}
 }
 
+func TestManagedEffectCrossPackageProofFileInventoryIsExact(t *testing.T) {
+	want := map[string]string{
+		"channel_confirmation_whatsapp": "internal/sessionprovider/channel_execution_test.go",
+		"channel_delivery_whatsapp":     "internal/sessionprovider/channel_execution_test.go",
+		"channel_logout_whatsapp":       "internal/sessionprovider/runtime_logout_test.go",
+	}
+	for _, registration := range Registrations() {
+		if registration.ProofFile != want[registration.Adapter] {
+			t.Fatalf("adapter %s proof file = %q, want %q", registration.Adapter, registration.ProofFile, want[registration.Adapter])
+		}
+		delete(want, registration.Adapter)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing cross-package proof registrations: %v", want)
+	}
+}
+
 func TestManagedEffectRegistrationsAreCompleteAndLive(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", "..", ".."))
 	seen := map[string]struct{}{}
