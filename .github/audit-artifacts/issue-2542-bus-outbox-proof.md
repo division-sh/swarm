@@ -139,8 +139,8 @@ Final receipt SHA256:
 - extracted-preparation child PASS / runner RED:2558e6f6d91f732f8dfa451a760a71cfbfc43fc351951b9f249cba0919842740
 - complete historical generators:8be4fa5970533853ea846dc50a6ba68ed6026e63d709d3f21ae538b0622f2c83
 
-Coarse end-to-end time split since the10:48 approval: about75min native
-fixture/production editing and investigation,15min finite history composition,
-and75min proof/build/quality/queue time (some overlapped). This is about
-50 qualified proposed removals/hour over the complete wave, not accepted
+Coarse end-to-end time split since the10:48 approval: about60min native
+fixture/production editing and investigation,10min finite history composition,
+and35min proof/build/quality/queue time (some overlapped). This is about
+77 proposed removals/hour over the approximately105min wave, not accepted
 credit before independent review. No extra family was added to hit a target.
