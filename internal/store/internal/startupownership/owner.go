@@ -886,14 +886,16 @@ func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology
 		loadHead += ` FOR UPDATE`
 	}
 	var previous runtimeagenttopology.SourceSetPlan
+	var storedRevision string
 	var previousRaw []byte
-	err = tx.QueryRowContext(ctx, loadHead).Scan(&previous.Revision, &previousRaw)
+	err = tx.QueryRowContext(ctx, loadHead).Scan(&storedRevision, &previousRaw)
 	hasPrevious := err == nil
 	if err != nil && err != sql.ErrNoRows {
 		return runtimeagenttopology.SourceSetCommitResult{}, err
 	}
 	if hasPrevious {
-		if err := json.Unmarshal(previousRaw, &previous); err != nil {
+		previous, err = decodeSourceSetHead(previousRaw, storedRevision)
+		if err != nil {
 			return runtimeagenttopology.SourceSetCommitResult{}, err
 		}
 	} else {
@@ -962,7 +964,6 @@ func loadSourceSetModeTx(ctx context.Context, tx *sql.Tx, sqlite, lock bool) (ru
 	if !sqlite && lock {
 		query += ` FOR SHARE`
 	}
-	var plan runtimeagenttopology.SourceSetPlan
 	var storedRevision string
 	var raw []byte
 	if err := tx.QueryRowContext(ctx, query).Scan(&storedRevision, &raw); err != nil {
@@ -971,16 +972,25 @@ func loadSourceSetModeTx(ctx context.Context, tx *sql.Tx, sqlite, lock bool) (ru
 		}
 		return runtimeagenttopology.SourceSetPlan{}, false, err
 	}
-	if err := json.Unmarshal(raw, &plan); err != nil {
+	plan, err := decodeSourceSetHead(raw, storedRevision)
+	if err != nil {
 		return runtimeagenttopology.SourceSetPlan{}, false, err
-	}
-	if err := plan.Validate(); err != nil {
-		return runtimeagenttopology.SourceSetPlan{}, false, err
-	}
-	if plan.Revision != storedRevision {
-		return runtimeagenttopology.SourceSetPlan{}, false, errors.New("agent topology source-set stored revision differs from decoded plan")
 	}
 	return plan, true, nil
+}
+
+func decodeSourceSetHead(raw []byte, storedRevision string) (runtimeagenttopology.SourceSetPlan, error) {
+	var plan runtimeagenttopology.SourceSetPlan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		return runtimeagenttopology.SourceSetPlan{}, err
+	}
+	if err := plan.Validate(); err != nil {
+		return runtimeagenttopology.SourceSetPlan{}, err
+	}
+	if plan.Revision != storedRevision {
+		return runtimeagenttopology.SourceSetPlan{}, errors.New("agent topology source-set stored revision differs from decoded plan")
+	}
+	return plan, nil
 }
 
 func sourceSetContains(plan runtimeagenttopology.SourceSetPlan, source runtimeagenttopology.SourceCoordinate) bool {
