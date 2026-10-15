@@ -52,7 +52,8 @@ func TestOrderingScopeConstructorInventoryIsClosed(t *testing.T) {
 	want := map[string]string{
 		"backend/postgres/transaction.go":       "runTransactionOutcome",
 		"backend/postgres/session_authority.go": "runAuthorityTransactionWithProof",
-		"backend/sqlite/transaction.go":         "runTransactionOnceOutcome",
+		// B's retained scoped cleanup seam is the native SQLite settlement owner.
+		"backend/sqlite/transaction.go": "runTransactionWithConnectionScope",
 	}
 	err := filepath.WalkDir("../..", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {

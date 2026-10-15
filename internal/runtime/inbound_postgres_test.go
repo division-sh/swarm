@@ -131,8 +131,7 @@ func seedBoundedInboundFlow(t *testing.T, ctx context.Context, selected interfac
 
 func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
 	runID, entityID := boundedInboundTestCoordinates()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+	pg := storetest.StartPostgresRuntimeStore(t)
 
 	const (
 		flowInstance      = boundedProviderFlowID
@@ -144,7 +143,6 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 		providerEventName = "inbound.github.raw.push"
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 	ctx = boundedInboundTargetContext(t, ctx, target)
 
@@ -234,8 +232,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 
 func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
 	runID, entityID := boundedInboundTestCoordinates()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+	pg := storetest.StartPostgresRuntimeStore(t)
 
 	const (
 		flowInstance      = boundedProviderFlowID
@@ -247,7 +244,6 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 		providerEventName = "inbound.slack.message"
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 	ctx = boundedInboundTargetContext(t, ctx, target)
 
@@ -337,8 +333,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 
 func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch(t *testing.T) {
 	runID, entityID := boundedInboundTestCoordinates()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+	pg := storetest.StartPostgresRuntimeStore(t)
 
 	const (
 		flowInstance      = boundedProviderFlowID
@@ -350,7 +345,6 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 		providerEventName = "inbound.stripe"
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 	ctx = boundedInboundTargetContext(t, ctx, target)
 
@@ -501,8 +495,7 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 
 func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
 	runID, entityID := boundedInboundTestCoordinates()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+	pg := storetest.StartPostgresRuntimeStore(t)
 
 	const (
 		flowInstance      = boundedProviderFlowID
@@ -514,7 +507,6 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 		providerEventName = "inbound.twilio"
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 	ctx = boundedInboundTargetContext(t, ctx, target)
 
@@ -630,8 +622,7 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 
 func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *testing.T) {
 	runID, entityID := boundedInboundTestCoordinates()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
+	pg := storetest.StartPostgresRuntimeStore(t)
 
 	const (
 		flowInstance      = boundedProviderFlowID
@@ -643,7 +634,6 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 		providerEventName = "inbound.shopify"
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 	ctx = boundedInboundTargetContext(t, ctx, target)
 
@@ -1039,12 +1029,10 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, db, cleanup := testutil.StartPostgres(t)
-			t.Cleanup(cleanup)
+			pg := storetest.StartPostgresRuntimeStore(t)
 
 			tc.runID, tc.entityID = boundedInboundTestCoordinates()
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), tc.runID)
-			pg := storetest.AdmitPostgresRuntimeStore(t, db)
 			target := seedPostgresInboundGatewayRuntime(t, ctx, pg, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
 			ctx = boundedInboundTargetContext(t, ctx, target)
 

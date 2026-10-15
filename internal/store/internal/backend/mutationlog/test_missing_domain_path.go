@@ -25,3 +25,20 @@ func ProbeMissingDomainPathForTest(ctx context.Context, tx *sql.Tx, postgres boo
 	}
 	return fmt.Errorf("malformed mutation was accepted by the schema")
 }
+
+// Return the actual INSERT outcome, including nil if a broken constraint accepts
+// it. The selected owner must roll back even that accepted probe.
+func ProbeEmptyGatePathForTest(ctx context.Context, tx *sql.Tx, postgres bool, run, entity string) error {
+	var present int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM entity_state WHERE run_id=$1 AND entity_id=$2`, run, entity).Scan(&present); err != nil {
+		return err
+	}
+	query := `INSERT INTO entity_mutations (mutation_id,run_id,entity_id,domain,path,old_value,new_value,writer_type,writer_id,handler_step) VALUES ($1,$2,$3,'gate','','null','true','platform','test','seed')`
+	if postgres {
+		query = `INSERT INTO entity_mutations (run_id,entity_id,domain,path,old_value,new_value,writer_type,writer_id,handler_step) VALUES ($1::uuid,$2::uuid,'gate','','null'::jsonb,'true'::jsonb,'platform','test','seed')`
+		_, err := tx.ExecContext(ctx, query, run, entity)
+		return err
+	}
+	_, err := tx.ExecContext(ctx, query, uuid.NewString(), run, entity)
+	return err
+}

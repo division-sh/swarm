@@ -86,9 +86,10 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 				s := storetest.StartSQLiteRuntimeStore(t)
 				selected, db = s, storetest.DatabaseForTest(s)
 			} else {
-				_, opened, cleanup := testutil.StartPostgres(t)
+				dsn, opened, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				selected, db = storetest.AdmitPostgresRuntimeStore(t, opened), opened
+				native, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, dsn)
+				selected, db = native, opened
 			}
 			ctx := context.Background()
 			sharedEntity, terminalEntity := uuid.NewString(), uuid.NewString()

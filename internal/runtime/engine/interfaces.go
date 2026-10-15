@@ -112,6 +112,7 @@ type CommittedDurablePublication interface {
 	CommittedDurablePublicationEventID() string
 	CommittedDurablePublicationIntent() EmitIntent
 	ValidateCommittedDurablePublication() error
+	ValidatePlannedPublication(DurablePublicationPlan) error
 }
 
 type CommittedEngineMutation struct {

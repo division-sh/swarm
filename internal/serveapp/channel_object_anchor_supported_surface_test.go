@@ -1,16 +1,18 @@
 package serveapp
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 type objectChannelResponsePause struct {
@@ -37,30 +39,24 @@ func (p *objectChannelProvider) pauseBusinessResponse(t *testing.T) (<-chan stru
 func TestChannelLearnedObjectRealAnchorProducersPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
-			h, db, p, _, hash := startObjectChannelJourney(t, backend, canonicalrouting.CopyChannelLearnedObjectAnchorJourney(t), channelAnchorLLMRuntime{}, "object-provider-secret")
+			h, reader, p, _, hash := startObjectChannelJourney(t, backend, canonicalrouting.CopyChannelLearnedObjectAnchorJourney(t), channelAnchorLLMRuntime{}, "object-provider-secret")
 			for index, kind := range []decisioncard.AnchorKind{decisioncard.AnchorKindStageGate, decisioncard.AnchorKindHumanTask, decisioncard.AnchorKindProposedEffect} {
 				t.Run(string(kind), func(t *testing.T) {
 					flowInstance := "reviews"
 					if kind == decisioncard.AnchorKindHumanTask {
 						flowInstance = "observers"
 					}
-					seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-						"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true},
-						"idempotency_key": "object-anchor-" + string(kind),
-					})
-					waitObjectCardReceipt(t, db, waitChannelAnchorCard(t, db, seed.RunID, decisioncard.AnchorKindStageGate, "reviews"))
+					seed := requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": "work.requested", "bundle_hash": hash, "payload": map[string]any{"seed": true}, "idempotency_key": "object-anchor-" + string(kind)})
+					waitObjectCardReceipt(t, channelSettlementStorageObservation(t, h), waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, decisioncard.AnchorKindStageGate, "reviews"))
 					if kind != decisioncard.AnchorKindStageGate {
 						event := "observer.requested"
 						if kind == decisioncard.AnchorKindProposedEffect {
 							event = "effect.requested"
 						}
-						requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{
-							"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID,
-							"payload": map[string]any{"seed": true}, "idempotency_key": "object-producer-" + string(kind),
-						})
+						requireServedEventPublishRPCResult(t, h.rpcEndpoint(), map[string]any{"event_name": event, "run_id": seed.RunID, "source_event_id": seed.EventID, "payload": map[string]any{"seed": true}, "idempotency_key": "object-producer-" + string(kind)})
 					}
-					card := waitChannelAnchorCard(t, db, seed.RunID, kind, flowInstance)
-					receipt := waitObjectCardReceipt(t, db, card)
+					card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), seed.RunID, kind, flowInstance)
+					receipt := waitObjectCardReceipt(t, channelSettlementStorageObservation(t, h), card)
 					label := "Approve"
 					if kind == decisioncard.AnchorKindStageGate {
 						label = "approve"
@@ -73,8 +69,8 @@ func TestChannelLearnedObjectRealAnchorProducersPublicJourney(t *testing.T) {
 					}
 					occurrence := fmt.Sprintf("anchor-approve-%d", index)
 					postObjectInputAction(t, p, occurrence, receipt, approve)
-					waitObjectChannelDisposition(t, db, "operator_channel_action_intents", occurrence, "applied")
-					waitChannelAnchorDecision(t, db, card)
+					waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, occurrence), "applied")
+					waitChannelAnchorDecision(t, channelAnchorStorageObservation(t, h), card)
 					if arrived != nil {
 						select {
 						case <-arrived:
@@ -86,11 +82,15 @@ func TestChannelLearnedObjectRealAnchorProducersPublicJourney(t *testing.T) {
 						waitObjectAnchorDispatch(t, h, card, true)
 						waitObjectMessageText(t, p, receipt, "Dispatch: succeeded")
 					}
-					waitObjectTerminalReceipt(t, db, p, card, receipt, "Decision: approve")
-					proveObjectRejectedControl(t, db, p, receipt, approve, fmt.Sprintf("anchor-stale-%d", index))
+					waitObjectTerminalReceipt(t, reader, p, card, receipt, "Decision: approve")
+					proveObjectRejectedControl(t, p, receipt, approve, fmt.Sprintf("anchor-stale-%d", index))
 					var count int
-					if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, seed.RunID).Scan(&count); err != nil || count != 1 {
-						t.Fatalf("duplicate/stale %s completion count=%d: %v", kind, count, err)
+					{
+						var err error
+						count, err = channelAnchorStorageObservation(t, h).CountRunNamedEventStorage(context.Background(), seed.RunID, "mailbox.card_decided")
+						if err != nil || count != 1 {
+							t.Fatalf("duplicate/stale %s completion count=%d: %v", kind, count, err)
+						}
 					}
 				})
 			}
@@ -114,7 +114,7 @@ func TestChannelLearnedObjectRealAnchorProducersPublicJourney(t *testing.T) {
 	}
 }
 
-func proveObjectRejectedControl(t *testing.T, db *sql.DB, p *objectChannelProvider, receipt, token, occurrence string) {
+func proveObjectRejectedControl(t *testing.T, p *objectChannelProvider, receipt, token, occurrence string) {
 	t.Helper()
 	p.mu.Lock()
 	acknowledgments := len(p.calls["/v2/ack"])
@@ -122,7 +122,7 @@ func proveObjectRejectedControl(t *testing.T, db *sql.DB, p *objectChannelProvid
 	fact := map[string]any{"token": token, "cursor": occurrence, "message": map[string]any{"id": receipt}}
 	postObjectChannelFact(t, p, occurrence, fact)
 	postObjectChannelFact(t, p, occurrence, fact)
-	waitObjectChannelDisposition(t, db, "operator_channel_action_intents", occurrence, "rejected")
+	waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentAction, occurrence), "rejected")
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.calls["/v2/ack"]) != acknowledgments {
@@ -207,7 +207,7 @@ func waitObjectAnchorDispatch(t *testing.T, h *channelOnboardingE2EHarness, card
 	}
 }
 
-func waitObjectTerminalReceipt(t *testing.T, db *sql.DB, p *objectChannelProvider, card, receipt, fragment string) {
+func waitObjectTerminalReceipt(t *testing.T, reader storetest.ChannelProcessObservation, p *objectChannelProvider, card, receipt, fragment string) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
@@ -216,9 +216,7 @@ func waitObjectTerminalReceipt(t *testing.T, db *sql.DB, p *objectChannelProvide
 		controls, _ := input["controls"].([]any)
 		terminal := len(controls) == 0 && strings.Contains(fmt.Sprint(input["body"]), fragment)
 		p.mu.Unlock()
-		var settled int
-		err := db.QueryRow(`SELECT COUNT(*) FROM channel_delivery_plans p JOIN channel_delivery_receipts r ON r.effect_operation_id=p.current_receipt_operation_id
-			WHERE p.source_id=$1 AND p.state='sent' AND r.state='sent' AND r.render_id=p.current_render_id`, card).Scan(&settled)
+		settled, err := reader.CountChannelTerminalCurrentReceiptsStorage(context.Background(), card)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -354,7 +354,6 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 			return fmt.Errorf("workflow engine fan-out barrier completion requires exact delivery settlement")
 		}
 	}
-	seen := make(map[string]struct{}, len(c.Publications))
 	for index, publication := range c.Publications {
 		if publication == nil {
 			return fmt.Errorf("workflow engine publication %d is required", index)
@@ -366,10 +365,6 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 		if eventID == "" {
 			return fmt.Errorf("workflow engine publication %d requires event identity", index)
 		}
-		if _, exists := seen[eventID]; exists {
-			return fmt.Errorf("workflow engine publication repeats event %s", eventID)
-		}
-		seen[eventID] = struct{}{}
 	}
 	if deactivation := c.PostCommit.FlowDeactivation; deactivation != nil {
 		if c.State.Status != "terminated" {

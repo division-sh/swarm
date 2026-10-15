@@ -61,7 +61,7 @@ func runChannelOnboardingAdmittedEffectRestart(t *testing.T, backend servedparit
 		opts.StoreModeSet = true
 		enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
 	case servedparity.BackendExplicitPostgres:
-		dsn, _, _ := testutil.StartPostgres(t)
+		dsn := testutil.StartPostgresDSN(t)
 		opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 		opts.StoreMode = "postgres"
 		opts.StoreModeSet = true

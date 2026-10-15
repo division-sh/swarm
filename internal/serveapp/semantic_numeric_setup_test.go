@@ -55,13 +55,13 @@ func TestScenarioSetupSemanticNumericParity(t *testing.T) {
 			if published.RunID != run {
 				t.Fatalf("wrong run %#v", published)
 			}
-			requireServedEventPublishEntityState(t, rt.DB, rt.Backend, run, run, "done")
+			requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, run, run, "done")
 			requireServedEntityReadback(t, rt.Endpoint, run, run, "done")
 			requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": run, "entity_id": run}, &public)
 			if public.Fields["score"] != float64(10) {
 				t.Fatalf("republication lost numeric agreement: %#v", public)
 			}
-			requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, run, servedparity.Scenario{
+			requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, run, servedparity.Scenario{
 				ID: "numeric-setup-republication", Postconditions: []servedparity.Postcondition{servedparity.PostconditionNoNonTerminalDeliveries, servedparity.PostconditionNoPendingPipelineEvents, servedparity.PostconditionNoUnfiredDueTimers}})
 		})
 	}

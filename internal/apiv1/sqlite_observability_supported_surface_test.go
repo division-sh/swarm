@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
@@ -21,7 +20,6 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -276,16 +274,13 @@ type observabilitySurfaceFixture struct {
 func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) observabilitySurfaceFixture {
 	t.Helper()
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-	return newObservabilitySurfaceFixture(t, ctx, sqliteStore, storetest.DatabaseForTest(sqliteStore), true)
+	return newObservabilitySurfaceFixture(t, ctx, sqliteStore)
 }
 
 func newPostgresObservabilitySurfaceFixture(t *testing.T, ctx context.Context) observabilitySurfaceFixture {
 	t.Helper()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.NewPostgresStoreForTest(db)
-	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	return newObservabilitySurfaceFixture(t, ctx, pg, db, false)
+	pg := storetest.StartPostgresRuntimeStore(t)
+	return newObservabilitySurfaceFixture(t, ctx, pg)
 }
 
 type observabilityFixtureStore interface {
@@ -296,7 +291,7 @@ type observabilityFixtureStore interface {
 	storetest.AgentFixtureStore
 }
 
-func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store observabilityFixtureStore, db *sql.DB, sqlite bool) observabilitySurfaceFixture {
+func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store observabilityFixtureStore) observabilitySurfaceFixture {
 	t.Helper()
 	registrar, ok := store.(authorActivityTestCatalogRegistrar)
 	if !ok {
@@ -320,7 +315,7 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 	if err != nil {
 		t.Fatalf("ClaimAgentDelivery: %v", err)
 	}
-	sessionID := seedOperatorReplayDeliverySession(t, ctx, store, db, sqlite, runID, identity)
+	sessionID := seedOperatorReplayDeliverySession(t, ctx, store, identity)
 	if _, err := store.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("BindAgentSession: %v", err)
 	}

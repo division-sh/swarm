@@ -13,6 +13,20 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
 
+type PostgresCompletionCandidateClockStorage struct {
+	Revision int64
+	DueAt    sql.NullTime
+}
+
+func ReadPostgresCompletionCandidateClockStorageTx(ctx context.Context, tx *sql.Tx, runID string) (PostgresCompletionCandidateClockStorage, error) {
+	var out PostgresCompletionCandidateClockStorage
+	err := tx.QueryRowContext(ctx, `SELECT completion_revision, completion_due_at FROM runs WHERE run_id = $1::uuid`, runID).Scan(&out.Revision, &out.DueAt)
+	if err != nil {
+		return PostgresCompletionCandidateClockStorage{}, err
+	}
+	return out, nil
+}
+
 func ReadStandaloneCompletionCandidateTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID string) (runtimerunlifecycle.Candidate, error) {
 	if tx == nil {
 		return runtimerunlifecycle.Candidate{}, fmt.Errorf("standalone candidate evidence requires its selected read transaction")
@@ -880,4 +894,15 @@ func optionalWake(value time.Time) *time.Time {
 	}
 	value = value.UTC()
 	return &value
+}
+
+type DeploymentCompletionClockStorage struct {
+	Revision int64
+	Due      any
+}
+
+func ReadDeploymentCompletionClockStorageTx(ctx context.Context, tx *sql.Tx, run string) (DeploymentCompletionClockStorage, error) {
+	var out DeploymentCompletionClockStorage
+	err := tx.QueryRowContext(ctx, `SELECT completion_revision,completion_due_at FROM runs WHERE run_id=$1`, run).Scan(&out.Revision, &out.Due)
+	return out, err
 }

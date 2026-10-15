@@ -2,7 +2,6 @@ package storetest
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"testing"
 	"time"
@@ -15,13 +14,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
-	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
-	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
-	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
-	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	private "github.com/division-sh/swarm/internal/store/internal/runtimepersistence"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
 
 // AdmitNativeDeliveryEvent keeps fixture payload admission separate from the
@@ -47,100 +40,35 @@ func AcknowledgedPipelineDisposition() *runtimepipelineobligation.Disposition {
 	return &disposition
 }
 
-// InsertCanonicalEventRecord seeds an already-persisted event precondition.
-// The caller must still choose and construct the exact semantic event class;
-// durable encoding and backend SQL remain private to the event record adapters.
-func InsertCanonicalEventRecord(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	dialect authoractivityfixture.Dialect,
-	event events.Event,
-) runtimebus.EventAppendOutcome {
+func InsertNativeExistingRunRootEvent(t testing.TB, ctx context.Context, selected any, eventID, runID string, eventType events.EventType, producer events.ProducerIdentity, payload []byte, envelope events.EventEnvelope, at time.Time) events.Event {
 	t.Helper()
-	if db == nil {
-		t.Fatal("canonical event record fixture requires a database")
+	event, err := private.InsertNativeExistingRunRootEventForTest(ctx, selected, eventID, runID, eventType, producer, payload, envelope, at)
+	if err != nil {
+		t.Fatalf("insert native existing run root event: %v", err)
 	}
-	var err error
-	event, err = eventfixture.BindPayload(event)
+	return event
+}
+
+// InsertNativeCanonicalEventRecord preserves event-only history without
+// manufacturing a publication scope, delivery plan or flow construction.
+func InsertNativeCanonicalEventRecord(t testing.TB, ctx context.Context, selected any, event events.Event) runtimebus.EventAppendOutcome {
+	t.Helper()
+	bound, err := eventfixture.BindPayload(event)
 	if err != nil {
 		t.Fatalf("bind canonical event payload fixture: %v", err)
 	}
-	admitted, err := events.AdmitForPersistence(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+	admitted, err := events.AdmitForPersistence(bound, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
 	if err != nil {
 		t.Fatalf("admit canonical event record fixture: %v", err)
 	}
-	if admitted.Class() == events.EventAdmissionSelectedForkReplay {
-		t.Fatal("selected-fork replay fixture requires exact lineage persistence")
-	}
-	settlement := canonicalFixtureSettlement(t, admitted.Event(), nil)
-	record, err := eventrecord.FromAdmitted(admitted, settlement)
-	if err != nil {
-		t.Fatalf("project canonical event record fixture: %v", err)
-	}
-	var (
-		inserted bool
-		existing eventrecord.Record
-		found    bool
-	)
-	err = runCanonicalEventMutation(ctx, db, dialect, func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
-		switch dialect {
-		case authoractivityfixture.DialectPostgres:
-			inserted, err = eventrecordpostgres.Insert(txctx, attempt, record)
-		case authoractivityfixture.DialectSQLite:
-			inserted, err = eventrecordsqlite.Insert(txctx, attempt, record)
-		}
-		if err != nil || inserted {
-			return err
-		}
-		return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-			switch dialect {
-			case authoractivityfixture.DialectPostgres:
-				existing, found, err = eventrecordpostgres.Load(txctx, tx, record.EventID)
-			case authoractivityfixture.DialectSQLite:
-				existing, found, err = eventrecordsqlite.Load(txctx, tx, record.EventID)
-			}
-			return err
-		})
-	})
+	inserted, err := private.InsertNativeCanonicalEventRecordForTest(ctx, selected, admitted, canonicalFixtureSettlement(t, admitted.Event(), nil))
 	if err != nil {
 		t.Fatalf("insert canonical event record fixture: %v", err)
 	}
 	if inserted {
 		return runtimebus.EventAppendInserted
 	}
-	if !found || !record.Equal(existing) {
-		t.Fatalf("canonical event record fixture %s conflicts with its persisted record", record.EventID)
-	}
 	return runtimebus.EventAppendExactDuplicate
-}
-
-func runCanonicalEventMutation(ctx context.Context, db *sql.DB, dialect authoractivityfixture.Dialect, write func(context.Context, *mutationprotocol.Attempt) error) error {
-	if db == nil {
-		return fmt.Errorf("canonical event record fixture requires a database")
-	}
-	if write == nil {
-		return fmt.Errorf("canonical event record fixture requires a mutation writer")
-	}
-	apply := func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
-		return struct{}{}, write(txctx, attempt)
-	}
-	switch dialect {
-	case authoractivityfixture.DialectPostgres:
-		backend, err := postgresbackend.New(db)
-		if err != nil {
-			return err
-		}
-		return mutationprotocol.RunPostgres(ctx, backend, mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, apply).Err()
-	case authoractivityfixture.DialectSQLite:
-		backend, err := sqlitebackend.New(db)
-		if err != nil {
-			return err
-		}
-		return mutationprotocol.RunSQLite(ctx, backend, "canonical event fixture", mutationprotocol.RevisionOnly, mutationprotocol.Ordinary, nil, nil, apply).Err()
-	default:
-		return fmt.Errorf("canonical event record fixture dialect %q is unsupported", dialect)
-	}
 }
 
 // CommitDeliveryObligationsForPersistedEvent seeds exact executable routes for
@@ -219,60 +147,9 @@ func InsertRevisionedExistingRunRootEventRecord(
 	createdAt time.Time,
 ) events.Event {
 	t.Helper()
-	event, err := private.InsertRevisionedExistingRunRootEventForTest(ctx, selected, eventID, runID, eventType, producer, payload, envelope, createdAt)
+	event, err := private.InsertNativeExistingRunRootEventForTest(ctx, selected, eventID, runID, eventType, producer, payload, envelope, createdAt)
 	if err != nil {
 		t.Fatalf("insert revisioned existing-run root event fixture: %v", err)
-	}
-	return event
-}
-
-func InsertExistingRunRootEventRecord(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	dialect authoractivityfixture.Dialect,
-	eventID string,
-	runID string,
-	eventType events.EventType,
-	producer events.ProducerIdentity,
-	payload []byte,
-	envelope events.EventEnvelope,
-	createdAt time.Time,
-) events.Event {
-	t.Helper()
-	var event events.Event
-	err := runCanonicalEventMutation(ctx, db, dialect, func(txctx context.Context, attempt *mutationprotocol.Attempt) (err error) {
-		event, err = eventfixture.ExistingRunRoot(txctx, attempt, dialect, eventID, runID, eventType, producer, payload, envelope, createdAt)
-		return err
-	})
-	if err != nil {
-		t.Fatalf("construct canonical root event record %s: %v", eventID, err)
-	}
-	return event
-}
-
-func InsertChildEventRecord(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	dialect authoractivityfixture.Dialect,
-	eventID string,
-	runID string,
-	parentEventID string,
-	eventType events.EventType,
-	producer events.ProducerIdentity,
-	payload []byte,
-	envelope events.EventEnvelope,
-	createdAt time.Time,
-) events.Event {
-	t.Helper()
-	var event events.Event
-	err := runCanonicalEventMutation(ctx, db, dialect, func(txctx context.Context, attempt *mutationprotocol.Attempt) (err error) {
-		event, err = eventfixture.Child(txctx, attempt, dialect, eventID, runID, parentEventID, eventType, producer, payload, envelope, createdAt)
-		return err
-	})
-	if err != nil {
-		t.Fatalf("construct canonical child event record %s: %v", eventID, err)
 	}
 	return event
 }
@@ -340,26 +217,20 @@ func InsertDiagnosticDirectEventRecord(
 	return event
 }
 
-func InsertDiagnosticDirectEventRecordForRun(
-	t testing.TB,
-	ctx context.Context,
-	db *sql.DB,
-	dialect authoractivityfixture.Dialect,
-	eventID string,
-	runID string,
-	parentEventID string,
-	producerID string,
-	payload []byte,
-	createdAt time.Time,
-) events.Event {
+func SeedPostForkSourceEvent(t testing.TB, ctx context.Context, selected any, runID, eventID, entityID string, createdAt time.Time) events.Event {
 	t.Helper()
-	var event events.Event
-	err := runCanonicalEventMutation(ctx, db, dialect, func(txctx context.Context, attempt *mutationprotocol.Attempt) (err error) {
-		event, err = eventfixture.DiagnosticDirectForRun(txctx, attempt, dialect, eventID, runID, parentEventID, producerID, payload, createdAt)
-		return err
-	})
+	event, err := private.SeedPostForkSourceEventForTest(ctx, selected, runID, eventID, entityID, createdAt)
 	if err != nil {
-		t.Fatalf("construct canonical diagnostic-direct event record %s: %v", eventID, err)
+		t.Fatalf("seed post-fork source event: %v", err)
+	}
+	return event
+}
+
+func SeedRunDiagnosticDeadLetterHistory(t testing.TB, ctx context.Context, selected any, runID, eventID string, payload []byte, createdAt time.Time) events.Event {
+	t.Helper()
+	event, err := private.SeedRunDiagnosticDeadLetterHistoryForTest(ctx, selected, runID, eventID, payload, createdAt)
+	if err != nil {
+		t.Fatalf("persist diagnostic history pair %s: %v", eventID, err)
 	}
 	return event
 }

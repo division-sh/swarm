@@ -41,7 +41,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
@@ -83,8 +82,6 @@ func (proposedEffectProofModule) GuardRegistry() runtimepipeline.GuardRegistry {
 
 type gateRecoveryStoreCase struct {
 	name        string
-	postgres    bool
-	db          *sql.DB
 	events      gateRecoverySelectedStore
 	lifecycle   runtimerunlifecycle.CandidateStore
 	cards       gateRecoveryDecisionStore
@@ -481,7 +478,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			}
 			items, _, err := selected.cards.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: runID, AnchorKind: string(decisioncard.AnchorKindProposedEffect), Limit: 10})
 			if err != nil || len(items) != 1 {
-				t.Fatalf("pending proposed-effect cards = %#v, %v; handler failure: %s", items, err, proposedEffectProofFailure(t, selected, sourceEvent.ID()))
+				t.Fatalf("pending proposed-effect cards = %#v, %v; handler failure: %s", items, err, proposedEffectProofFailure(t, selected.events, sourceEvent.ID()))
 			}
 			card, err := selected.cards.GetDecisionCard(ctx, items[0].CardID)
 			if err != nil {
@@ -656,7 +653,7 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 				}
 				waitForGateRecoveryQuiescence(t, bus, ctx)
 				assertProposedEffectProofCounts(t, selected.events, runID, 1, 1)
-				assertProposedEffectOutcomeCount(t, selected, runID, wantEvent, 1)
+				assertProposedEffectOutcomeCount(t, selected.events, runID, wantEvent, 1)
 				if _, _, _, routeErr = newCoordinator(otherGateBundle).Intercept(ctx, decision); routeErr != nil {
 					t.Fatalf("%s route replay after commit acknowledgment loss under changed bundle: %v", verdict, routeErr)
 				}
@@ -890,7 +887,7 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 					}
 				}
 			}
-			installProposedEffectCreateFailure(t, selected)
+			installProposedEffectCreateFailure(t, selected.events)
 
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType("support.reply_drafted"), "support-agent", "task-rollback",
 				[]byte(`{"chat_id":"support-room","text":"must roll back"}`), 0, runID,
@@ -918,38 +915,21 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 				t.Fatalf("decision cards after rollback = %#v, %v", items, err)
 			}
 			assertProposedEffectProofCounts(t, selected.events, runID, 0, 0)
-			var continuations int
-			query := `SELECT COUNT(*) FROM proposed_effect_continuations WHERE run_id = ?`
-			if selected.postgres {
-				query = `SELECT COUNT(*) FROM proposed_effect_continuations WHERE run_id = $1::uuid`
-			}
-			if err := selected.db.QueryRowContext(ctx, query, runID).Scan(&continuations); err != nil || continuations != 0 {
+			continuations, err := storetest.CountGateRunProposedEffectContinuations(ctx, selected.events, runID)
+			if err != nil || continuations != 0 {
 				t.Fatalf("proposed-effect continuations after rollback = %d, %v", continuations, err)
 			}
-			deliveryQuery := `SELECT status FROM event_deliveries WHERE event_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`
-			if selected.postgres {
-				deliveryQuery = `SELECT status FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`
-			}
-			var deliveryStatus string
-			if err := selected.db.QueryRowContext(ctx, deliveryQuery, event.ID(), supportNode.Key()).Scan(&deliveryStatus); err != nil || deliveryStatus != "dead_letter" {
+			deliveryStatus, err := storetest.ReadGateNodeDeliveryStatus(ctx, selected.events, event.ID(), supportNode.Key())
+			if err != nil || deliveryStatus != "dead_letter" {
 				t.Fatalf("planted persistence failure delivery status = %q, %v", deliveryStatus, err)
 			}
 		})
 	}
 }
 
-func installProposedEffectCreateFailure(t *testing.T, selected gateRecoveryStoreCase) {
+func installProposedEffectCreateFailure(t *testing.T, selected gateRecoverySelectedStore) {
 	t.Helper()
-	statement := `CREATE TRIGGER fail_proposed_effect_create BEFORE INSERT ON proposed_effect_continuations BEGIN SELECT RAISE(ABORT, 'injected proposed-effect persistence failure'); END`
-	if selected.postgres {
-		statement = `
-			CREATE FUNCTION fail_proposed_effect_create_fn() RETURNS trigger AS $$
-			BEGIN RAISE EXCEPTION 'injected proposed-effect persistence failure'; END;
-			$$ LANGUAGE plpgsql;
-			CREATE TRIGGER fail_proposed_effect_create BEFORE INSERT ON proposed_effect_continuations
-			FOR EACH ROW EXECUTE FUNCTION fail_proposed_effect_create_fn()`
-	}
-	if _, err := selected.db.Exec(statement); err != nil {
+	if err := storetest.InstallGateProposedEffectCreationFailure(testAuthorActivityContext(t, context.Background()), selected); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -983,10 +963,10 @@ func TestDecisionRouteObligationFairnessAdmitsNewWorkBehindFullDeferredPageOnBot
 			for i := 0; i < 200; i++ {
 				eventID := seedGateRecoveryRouteObligation(t, selected, runID, oldAt.Add(time.Duration(i)*time.Millisecond))
 				deferred[eventID] = struct{}{}
-				setGateRecoveryRouteAttempt(t, selected, eventID, 1)
+				setGateRecoveryRouteAttempt(t, selected.events, eventID, 1)
 			}
 			newEventID := seedGateRecoveryRouteObligation(t, selected, runID, time.Now().UTC())
-			setGateRecoveryRouteAttempt(t, selected, newEventID, 2)
+			setGateRecoveryRouteAttempt(t, selected.events, newEventID, 2)
 			bus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{Interceptors: []runtimebus.EventInterceptor{gateRecoveryFairnessInterceptor{deferred: deferred}}})
 			if err != nil {
 				t.Fatal(err)
@@ -1254,14 +1234,9 @@ func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, run
 	return eventID
 }
 
-func setGateRecoveryRouteAttempt(t *testing.T, tc gateRecoveryStoreCase, eventID string, attempt int) {
+func setGateRecoveryRouteAttempt(t *testing.T, selected gateRecoverySelectedStore, eventID string, attempt int) {
 	t.Helper()
-	query := `UPDATE decision_card_route_obligations SET attempt_count = ?, next_attempt_at = ? WHERE event_id = ?`
-	args := []any{attempt, time.Now().UTC().Add(-time.Second), eventID}
-	if tc.postgres {
-		query = `UPDATE decision_card_route_obligations SET attempt_count = $1, next_attempt_at = $2 WHERE event_id = $3::uuid`
-	}
-	if _, err := tc.db.ExecContext(testAuthorActivityContext(t, context.Background()), query, args...); err != nil {
+	if err := storetest.SetGateDecisionRouteAttemptFault(testAuthorActivityContext(t, context.Background()), selected, eventID, attempt, time.Now().UTC().Add(-time.Second)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -1350,7 +1325,7 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	if err := bus.WaitForQuiescence(waitCtx); err != nil {
 		t.Fatal(err)
 	}
-	makeGateRecoveryRouteDue(t, tc, eventID, time.Now().Add(-time.Second))
+	makeGateRecoveryRouteDue(t, tc.events, eventID, time.Now().Add(-time.Second))
 	bus.SetInterceptors(matching)
 	if err := runtimepipeline.NewRecoveryManagerWith(bus).Recover(ctx); err != nil {
 		t.Fatal(err)
@@ -1372,12 +1347,8 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	if completion.Outcome != runtimerunlifecycle.OutcomeTerminallyEligible {
 		t.Fatalf("durable completion outcome = %#v, want terminally eligible", completion)
 	}
-	var status string
-	query := `SELECT status FROM runs WHERE run_id = ?`
-	if tc.postgres {
-		query = `SELECT status FROM runs WHERE run_id = $1::uuid`
-	}
-	if err := tc.db.QueryRowContext(ctx, query, runID).Scan(&status); err != nil || status != "completed" {
+	status, err := storetest.ReadRunStatusStorage(ctx, tc.events, runID)
+	if err != nil || status != "completed" {
 		t.Fatalf("terminal no-emit recovered run status = %q, %v", status, err)
 	}
 	assertGateRecoveryProcessedReceipt(t, tc.events, eventID)
@@ -1490,13 +1461,13 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	}
 
 	bus.SetInterceptors(matching)
-	makeGateRecoveryRouteDue(t, tc, decisionEventID, time.Now().Add(-time.Second))
+	makeGateRecoveryRouteDue(t, tc.events, decisionEventID, time.Now().Add(-time.Second))
 	if err := recovery.Recover(ctx); err != nil {
 		t.Fatalf("Recover after pin restore: %v", err)
 	}
 	assertGateRecoveryActivation(t, matching, ctx, entityID, "operating", gateruntime.StatusRouted)
-	outcomeEventID := gateRecoveryOutcomeEventID(t, tc, decisionEventID)
-	if got := gateRecoveryDeliveryCount(t, tc, outcomeEventID, outcomeAgent); got != 1 {
+	outcomeEventID := gateRecoveryOutcomeEventID(t, tc.events, decisionEventID)
+	if got := gateRecoveryDeliveryCount(t, tc.events, outcomeEventID, outcomeAgent); got != 1 {
 		t.Fatalf("outcome delivery manifest count = %d, want 1", got)
 	}
 	select {
@@ -1515,18 +1486,14 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	if err := recovery.Recover(ctx); err != nil {
 		t.Fatalf("idempotent second Recover: %v", err)
 	}
-	if got := gateRecoveryOutcomeEventCount(t, tc, decisionEventID); got != 1 {
+	if got := gateRecoveryOutcomeEventCount(t, tc.events, decisionEventID); got != 1 {
 		t.Fatalf("authored outcome count after idempotent recovery = %d, want 1", got)
 	}
 }
 
-func makeGateRecoveryRouteDue(t *testing.T, tc gateRecoveryStoreCase, eventID string, due time.Time) {
+func makeGateRecoveryRouteDue(t *testing.T, selected gateRecoverySelectedStore, eventID string, due time.Time) {
 	t.Helper()
-	query := `UPDATE decision_card_route_obligations SET next_attempt_at = ? WHERE event_id = ?`
-	if tc.postgres {
-		query = `UPDATE decision_card_route_obligations SET next_attempt_at = $1 WHERE event_id = $2::uuid`
-	}
-	if _, err := tc.db.ExecContext(testAuthorActivityContext(t, context.Background()), query, due.UTC(), eventID); err != nil {
+	if err := storetest.SetGateDecisionRouteDueFault(testAuthorActivityContext(t, context.Background()), selected, eventID, due.UTC()); err != nil {
 		t.Fatalf("make decision route obligation due: %v", err)
 	}
 }
@@ -1535,7 +1502,7 @@ func openSQLiteGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 	selected := storetest.StartSQLiteRuntimeStore(t)
 	persistence := runtimepipeline.NewWorkflowPersistence(selected)
 	result := gateRecoveryStoreCase{
-		name: "sqlite", db: storetest.Database(selected), events: selected, cards: selected,
+		name: "sqlite", events: selected, cards: selected,
 		lifecycle: selected, persistence: persistence, trace: selected,
 	}
 	if result.trace != selected {
@@ -1545,12 +1512,10 @@ func openSQLiteGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 }
 
 func openPostgresGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	selected := storetest.StartPostgresRuntimeStore(t)
 	persistence := runtimepipeline.NewWorkflowPersistence(selected)
 	result := gateRecoveryStoreCase{
-		name: "postgres", postgres: true, db: db, events: selected, cards: selected,
+		name: "postgres", events: selected, cards: selected,
 		lifecycle: selected, persistence: persistence, trace: selected,
 	}
 	if result.trace != selected {
@@ -1629,31 +1594,14 @@ func assertProposedEffectProofCounts(t *testing.T, selected gateRecoverySelected
 	}
 }
 
-func assertProposedEffectOutcomeCount(t *testing.T, selected gateRecoveryStoreCase, runID, eventType string, want int) {
+func assertProposedEffectOutcomeCount(t *testing.T, selected gateRecoverySelectedStore, runID, eventType string, want int) {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = ?`
-	if selected.postgres {
-		query = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = $2`
-	}
-	var got int
-	if err := selected.db.QueryRowContext(testAuthorActivityContext(t, context.Background()), query, runID, eventType).Scan(&got); err != nil {
+	got, err := storetest.CountRunNamedEventStorage(testAuthorActivityContext(t, context.Background()), selected, runID, eventType)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if got != want {
-		rows, err := selected.db.QueryContext(testAuthorActivityContext(t, context.Background()), `SELECT event_name FROM events WHERE run_id = ? ORDER BY created_at`, runID)
-		if selected.postgres {
-			rows, err = selected.db.QueryContext(testAuthorActivityContext(t, context.Background()), `SELECT event_name FROM events WHERE run_id = $1::uuid ORDER BY created_at`, runID)
-		}
-		var names []string
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var name string
-				if rows.Scan(&name) == nil {
-					names = append(names, name)
-				}
-			}
-		}
+		names, err := storetest.ReadGateRunEventNames(testAuthorActivityContext(t, context.Background()), selected, runID)
 		t.Fatalf("%s event count = %d, want %d; run events=%v readback_error=%v", eventType, got, want, names, err)
 	}
 }
@@ -1678,14 +1626,10 @@ func seedProposedEffectProofDelivery(t *testing.T, selected gateRecoveryStoreCas
 	return route
 }
 
-func proposedEffectProofFailure(t *testing.T, selected gateRecoveryStoreCase, eventID string) string {
+func proposedEffectProofFailure(t *testing.T, selected gateRecoverySelectedStore, eventID string) string {
 	t.Helper()
-	query := `SELECT COALESCE(CAST(failure AS TEXT), '') FROM dead_letters WHERE original_event_id = ? ORDER BY created_at DESC LIMIT 1`
-	if selected.postgres {
-		query = `SELECT COALESCE(failure::text, '') FROM dead_letters WHERE original_event_id = $1::uuid ORDER BY created_at DESC LIMIT 1`
-	}
-	var failure string
-	if err := selected.db.QueryRowContext(testAuthorActivityContext(t, context.Background()), query, eventID).Scan(&failure); err != nil {
+	failure, err := storetest.ReadGateLatestDeadLetterFailure(testAuthorActivityContext(t, context.Background()), selected, eventID)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "<no dead letter>"
 		}
@@ -1810,41 +1754,28 @@ func assertGateRecoveryErrorReceipt(t *testing.T, tc gateRecoverySelectedStore, 
 	}
 }
 
-func gateRecoveryOutcomeEventID(t *testing.T, tc gateRecoveryStoreCase, parentEventID string) string {
+func gateRecoveryOutcomeEventID(t *testing.T, selected gateRecoverySelectedStore, parentEventID string) string {
 	t.Helper()
-	query := `SELECT event_id FROM events WHERE event_name = 'launch.approved' AND source_event_id = ?`
-	if tc.postgres {
-		query = `SELECT event_id::text FROM events WHERE event_name = 'launch.approved' AND source_event_id = $1::uuid`
-	}
-	var eventID string
-	if err := tc.db.QueryRowContext(testAuthorActivityContext(t, context.Background()), query, parentEventID).Scan(&eventID); err != nil {
+	eventID, err := storetest.ReadTemplateSourceNamedEventIdentity(testAuthorActivityContext(t, context.Background()), selected, "launch.approved", parentEventID)
+	if err != nil {
 		t.Fatalf("load authored outcome event: %v", err)
 	}
 	return eventID
 }
 
-func gateRecoveryOutcomeEventCount(t *testing.T, tc gateRecoveryStoreCase, parentEventID string) int {
+func gateRecoveryOutcomeEventCount(t *testing.T, selected gateRecoverySelectedStore, parentEventID string) int {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM events WHERE event_name = 'launch.approved' AND source_event_id = ?`
-	if tc.postgres {
-		query = `SELECT COUNT(*) FROM events WHERE event_name = 'launch.approved' AND source_event_id = $1::uuid`
-	}
-	var count int
-	if err := tc.db.QueryRowContext(testAuthorActivityContext(t, context.Background()), query, parentEventID).Scan(&count); err != nil {
+	count, err := storetest.CountGateSourceNamedEvents(testAuthorActivityContext(t, context.Background()), selected, "launch.approved", parentEventID)
+	if err != nil {
 		t.Fatalf("count authored outcome events: %v", err)
 	}
 	return count
 }
 
-func gateRecoveryDeliveryCount(t *testing.T, tc gateRecoveryStoreCase, eventID, recipient string) int {
+func gateRecoveryDeliveryCount(t *testing.T, selected gateRecoverySelectedStore, eventID, recipient string) int {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM event_deliveries WHERE event_id = ? AND subscriber_id = ?`
-	args := []any{eventID, recipient}
-	if tc.postgres {
-		query = `SELECT COUNT(*) FROM event_deliveries WHERE event_id = $1::uuid AND subscriber_id = $2`
-	}
-	var count int
-	if err := tc.db.QueryRowContext(testAuthorActivityContext(t, context.Background()), query, args...).Scan(&count); err != nil {
+	count, err := storetest.CountGateEventSubscriberDeliveries(testAuthorActivityContext(t, context.Background()), selected, eventID, recipient)
+	if err != nil {
 		t.Fatalf("count authored outcome deliveries: %v", err)
 	}
 	return count

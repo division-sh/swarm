@@ -2,7 +2,6 @@ package runforkexecution
 
 import (
 	"bytes"
-	"database/sql"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,22 +16,19 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
 func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			var db *sql.DB
 			var selected startupownership.Store
 			var owner SelectedContractExecutionOwner
 			if backend == "sqlite" {
 				s := storetest.StartSQLiteRuntimeStore(t)
-				selected, db, owner = s, storetest.Database(s), selectedContractSQLiteExecutionOwnerForTest(t, s)
+				selected, owner = s, selectedContractSQLiteExecutionOwnerForTest(t, s)
 			} else {
-				_, db, _ = testutil.StartPostgres(t)
-				s := storetest.AdmitPostgresRuntimeStore(t, db)
+				s := storetest.StartPostgresRuntimeStore(t)
 				selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
 			}
 			ctx := runForkTestContext(t)
@@ -63,7 +59,7 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 				t.Fatal(err)
 			}
 			sourceRun, eventID := uuid.NewString(), uuid.NewString()
-			seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
+			seedSelectedOperationSource(t, ctx, selected, loaded, sourceRun, eventID)
 			if err := os.RemoveAll(root); err != nil {
 				t.Fatal(err)
 			}
@@ -101,8 +97,8 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 			if err != nil {
 				t.Fatalf("retained selected fork execution: %v", err)
 			}
-			var outputs int
-			if err := db.QueryRowContext(ctx, `SELECT count(*) FROM events WHERE run_id=$1 AND event_name='item.processed'`, result.Materialization.ForkRunID).Scan(&outputs); err != nil || outputs != 1 {
+			outputs, err := storetest.CountRunNamedEventStorage(ctx, selected, result.Materialization.ForkRunID, "item.processed")
+			if err != nil || outputs != 1 {
 				t.Fatalf("selected executor settlement=%d: %v", outputs, err)
 			}
 		})

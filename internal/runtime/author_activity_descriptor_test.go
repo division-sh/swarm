@@ -185,3 +185,38 @@ func TestAuthorActivityEventDescriptorsIncludeCompiledJoinOccurrences(t *testing
 		})
 	}
 }
+
+func TestAuthorActivityEventDescriptorsClassifyCreationEmissions(t *testing.T) {
+	for _, cell := range []struct {
+		name   string
+		bundle func(testing.TB) string
+		story  runtimeauthoractivity.StoryDisposition
+	}{
+		{"reference_only_auto_emit", func(t testing.TB) string { return canonicalrouting.CopySelectedForkLocalReadiness(t, 1, "node") }, runtimeauthoractivity.StoryAuthored},
+		{"connected_without_auto_emit", func(t testing.TB) string { return canonicalrouting.CopySelectedForkReadiness(t, 0, "node") }, runtimeauthoractivity.StoryDifferent},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			repo := canonicalrouting.RepoRoot(t)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, cell.bundle(t), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+			if err != nil {
+				t.Fatal(err)
+			}
+			descriptors, err := AuthorActivityEventDescriptors(semanticview.Wrap(bundle))
+			if err != nil {
+				t.Fatal(err)
+			}
+			count := 0
+			for _, descriptor := range descriptors {
+				if descriptor.EventType == "worker-flow/worker.inspect.requested" {
+					count++
+					if descriptor.Disposition != cell.story {
+						t.Fatalf("creation emission disposition=%+v want=%s", descriptor, cell.story)
+					}
+				}
+			}
+			if count != 1 {
+				t.Fatalf("exact creation/input descriptor count=%d want=1", count)
+			}
+		})
+	}
+}

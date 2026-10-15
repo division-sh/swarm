@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 // Check today's owner first, then give unchanged mechanical oracles their
@@ -58,6 +60,7 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 	if count != 24 {
 		t.Fatalf("mechanical repair target count=%d, want24", count)
 	}
+	rows = catchUp2542HistoricalRows(t, rows, true)
 	digest, err := mechanicalReceiptDigest(rows)
 	if err != nil || digest != "637fcb76a19075ffc1dd93fc6a189652be2a50f2b199647d67cc0ffd58885fed" {
 		t.Fatalf("source-pinned mechanical/current receipts changed: %s/%v", digest, err)
@@ -98,6 +101,25 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 	}
 	if digest, err := mechanicalReceiptDigest(prior); err != nil || digest != "a47db59e4f7118a2c0cca2f463a68c28c32e571d9cea15892635e62d1340d7cf" {
 		t.Fatalf("historical mechanical/current receipt digest changed: %s/%v", digest, err)
+	}
+}
+
+func TestHistoricalMechanicalLaneReceiptsAreFiniteAndSourcePinned(t *testing.T) {
+	lane, err := selectedreadrole.CatchUp2542HistoricalRecipes(filepath.Clean("../../.."), recipeBytes, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := selectedreadrole.BeforeDeliveryRecoveryHistory(filepath.Clean("../../.."), lane, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var originalRows []recipe
+	if err := json.Unmarshal(prior, &originalRows); err != nil {
+		t.Fatal(err)
+	}
+	digest, err := mechanicalReceiptDigest(originalRows)
+	if err != nil || digest != "1574d0e845b717b7f1697ae94d29f64596c6e7fb9b439ee62d6e4bb57e600be5" {
+		t.Fatalf("source-pinned lane mechanical/current receipts changed: %s/%v", digest, err)
 	}
 }
 
