@@ -386,6 +386,13 @@ and require a settled refusal rather than nil or Pending. The original 50ms
 reuse negative, cancellation bounds, one-selection assertion and all production
 owners remain unchanged.
 
+Reviewer-g's follow-up #2577/6204093823 tightens the permanent oracle: after
+joining the exact original done, construction itself must have succeeded, and
+the retained connection must be non-nil and identical to the original attempt's
+connection. Close is unconditional. A constructor error cannot stand in for
+the required closed-original refusal. All prior cancellation, pending-reuse,
+attempt-identity, one-selection and post-close assertions remain.
+
 The disposable old-order RED and corrected-cut GREEN, the fresh G3 seven-root
 race x3 command, carry/source-path checks for G1/G2 and the four completed
 non-serve packages, affected guards, exact-head preflight and the single quiet
