@@ -7,7 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -60,7 +60,7 @@ func TestExecutableDeliveryContinuationHasClosedProductionConsumers(t *testing.T
 				return err
 			}
 			for _, forbidden := range forbiddenText {
-				if strings.Contains(string(raw), forbidden) {
+				if containsRetiredDeliveryDialect(filepath.ToSlash(rel), string(raw), forbidden) {
 					t.Errorf("%s retains forbidden executable-delivery dialect %q", rel, forbidden)
 				}
 			}
@@ -133,8 +133,7 @@ func TestExecutableDeliveryContinuationHasClosedProductionConsumers(t *testing.T
 				return err
 			}
 			for _, forbidden := range forbiddenText {
-				if strings.Contains(string(raw), strconv.Quote(forbidden)) ||
-					strings.Contains(string(raw), forbidden) {
+				if containsRetiredDeliveryDialect(filepath.ToSlash(rel), string(raw), forbidden) {
 					t.Errorf("%s retains forbidden executable-delivery dialect %q", rel, forbidden)
 				}
 			}
@@ -169,6 +168,46 @@ func TestExecutableDeliveryContinuationHasClosedProductionConsumers(t *testing.T
 	for path, count := range wantPipelineSettlements {
 		if pipelineSettlementConsumers[path] != count {
 			t.Fatalf("pipeline settlement calls in %s = %d, want %d", path, pipelineSettlementConsumers[path], count)
+		}
+	}
+}
+
+func containsRetiredDeliveryDialect(path, source, forbidden string) bool {
+	if forbidden == "retry_eligible" {
+		switch path {
+		case "internal/store/internal/backend/delivery/adapter.go", "internal/store/internal/backend/runforkrevision/projection.go", "platform-spec.yaml":
+			// #2592/6192759467 admits this committed-outcome column, not
+			// the retired dispatch event or another eligibility interpreter.
+			source = regexp.MustCompile(`\bretry_eligible_at\b`).ReplaceAllString(source, "")
+		}
+	}
+	return strings.Contains(source, forbidden)
+}
+
+func TestRetiredDeliveryDialectStillRejectsRetryDispatchRestoration(t *testing.T) {
+	for _, path := range []string{"internal/store/internal/backend/delivery/adapter.go", "internal/store/internal/backend/runforkrevision/projection.go", "platform-spec.yaml"} {
+		for _, cell := range []struct {
+			source    string
+			forbidden string
+			want      bool
+		}{
+			{"retry_eligible_at", "retry_eligible", false},
+			{`"retry_eligible_at"`, "retry_eligible", false},
+			{"retry_eligible", "retry_eligible", true},
+			{"retry_eligible_at retry_eligible", "retry_eligible", true},
+			{"retry_eligible_at_extra", "retry_eligible", true},
+			{"other_retry_eligible_at", "retry_eligible", true},
+			{"delivery_retry_eligible_at", "delivery_retry_eligible", true},
+			{"retry_eligible_at dispatchRetryDelay", "dispatchRetryDelay", true},
+		} {
+			if got := containsRetiredDeliveryDialect(path, cell.source, cell.forbidden); got != cell.want {
+				t.Fatalf("path=%s text=%q forbidden=%q got=%t want=%t", path, cell.source, cell.forbidden, got, cell.want)
+			}
+		}
+	}
+	for _, path := range []string{"internal/runtime/deliverycontinuation/coordinator.go", "internal/runtime/manager/runtime.go", "internal/runtime/pipeline/coordinator.go", "other/adapter.go", "openrpc.json"} {
+		if !containsRetiredDeliveryDialect(path, "retry_eligible_at", "retry_eligible") {
+			t.Fatalf("column spelling granted another retry owner: %s", path)
 		}
 	}
 }
