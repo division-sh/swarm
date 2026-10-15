@@ -39,7 +39,7 @@ func TestReceiverDescriptorStillRequiresExactEvidenceAndLiveLease(t *testing.T) 
 		t.Fatal(err)
 	}
 	registry := receiverDescriptorRegistry{authoractivity.NewEventCatalogRegistry()}
-	lease, err := registry.Register(scope, []authoractivity.EventDescriptor{{EventType: "worker-flow/worker.inspect.requested", Disposition: authoractivity.StoryDifferent}})
+	lease, err := registry.Register(scope, []authoractivity.EventDescriptor{{EventType: "worker-flow/worker.inspect.requested", Disposition: authoractivity.StoryAuthored}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,14 +47,17 @@ func TestReceiverDescriptorStillRequiresExactEvidenceAndLiveLease(t *testing.T) 
 	if _, ok, err := PersistedEventDraft(ctx, registry, admitted, "manager", "system"); err == nil || ok || !strings.Contains(err.Error(), "has no author activity descriptor") {
 		t.Fatalf("flow-level declaration must not implicitly authorize an occurrence: ok=%t err=%v", ok, err)
 	}
-	exact, err := authoractivity.WithResolvedEventDescriptor(ctx, scope, authoractivity.EventDescriptor{EventType: name, Disposition: authoractivity.StoryDifferent})
+	exact, err := authoractivity.WithResolvedEventDescriptor(ctx, scope, authoractivity.EventDescriptor{EventType: name, Disposition: authoractivity.StoryAuthored})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, err := PersistedEventDraft(exact, registry, admitted, "manager", "system"); err != nil || ok {
-		t.Fatalf("exact compiled receiver proof should be admitted without an authored story: ok=%t err=%v", ok, err)
+	if draft, ok, err := PersistedEventDraft(exact, registry, admitted, "manager", "system"); err != nil || !ok ||
+		draft.Kind != authoractivity.KindEventEmitted || draft.Transition != "emitted" || draft.SourceOwner != "events" ||
+		draft.SourceIdentity != evt.ID() || draft.DedupKey != "emit:"+evt.ID() || draft.RunID != evt.RunID() || draft.FlowID != evt.FlowInstance() ||
+		draft.EntityID != evt.EntityID() || !draft.OccurredAt.Equal(evt.CreatedAt()) {
+		t.Fatalf("exact compiled creation emission must use the existing event.emitted draft: draft=%+v ok=%t err=%v", draft, ok, err)
 	}
-	wrong, err := authoractivity.WithResolvedEventDescriptor(ctx, scope, authoractivity.EventDescriptor{EventType: "worker-flow/sibling/worker.inspect.requested", Disposition: authoractivity.StoryDifferent})
+	wrong, err := authoractivity.WithResolvedEventDescriptor(ctx, scope, authoractivity.EventDescriptor{EventType: "worker-flow/sibling/worker.inspect.requested", Disposition: authoractivity.StoryAuthored})
 	if err != nil {
 		t.Fatal(err)
 	}

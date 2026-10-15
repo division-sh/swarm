@@ -373,7 +373,11 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 					t.Fatalf("MCP admitted while second candidate blocked: %d", recorder.Code)
 				}
 				var bootEvents int
-				if err := selectedStoreDatabaseForTest(t, stores).QueryRow("SELECT COUNT(*) FROM events WHERE event_name = 'platform.boot'").Scan(&bootEvents); err != nil || bootEvents != 0 {
+				if err := func() error {
+					var err error
+					bootEvents, err = readServedGlobalEventNameCount(context.Background(), requireReceiverProofStateReader(t, stores.RuntimeDeps().EventStore), "platform.boot")
+					return err
+				}(); err != nil || bootEvents != 0 {
 					t.Fatalf("autonomous boot escaped: %d, %v", bootEvents, err)
 				}
 				if failSecond {
@@ -417,7 +421,7 @@ func TestResetCandidateSetFencesConsumersWhileSecondPreparesBothStores(t *testin
 					"event_name": "item.received", "bundle_hash": candidates[1].sourceArtifactFact.BundleHash(),
 					"payload": map[string]any{"item_id": "after-convergence"}, "idempotency_key": uuid.NewString(),
 				})
-				waitForServedEventPublishNodeDeliveryLifecycle(t, selectedStoreDatabaseForTest(t, stores), backend, published.RunID, published.EventID, probe)
+				waitForServedEventPublishNodeDeliveryLifecycle(t, requireReceiverProofStateReader(t, candidates[1].runtime.Bus.Store()), backend, published.RunID, published.EventID, probe)
 				for _, candidate := range candidates {
 					grant, err := candidate.runtime.CurrentStartupGrantEvidence()
 					if err != nil || grant.State != startupownership.GrantAdmitted {

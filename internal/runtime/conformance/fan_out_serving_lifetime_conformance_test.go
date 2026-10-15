@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -30,8 +31,8 @@ func TestFanOutServingM06GenerationRetirementOnBothBackends(t *testing.T) {
 					_, siblingRun := f.startRun(t, 1)
 					trigger := f.submit(t, 0, runID, "retired-caller")
 					turn := waitServingMatrixHeld(t, retiring)
-					waitServingMatrixTriggerReceipt(t, f.db, trigger)
-					before := readServingLifetimeState(t, f.db, runID)
+					waitServingMatrixTriggerReceipt(t, f.selected, trigger)
+					before := readServingLifetimeState(t, f.selected, runID)
 					assertServingLifetimeUnissued(t, before)
 					if stage.phase == servingMatrixCommit && (len(turn.command.Outcomes) != 1 || turn.command.Outcomes[0].Publication == nil) {
 						t.Fatal("retirement commit gate lacks an actual evaluated publication")
@@ -87,9 +88,9 @@ func TestFanOutServingM06GenerationRetirementOnBothBackends(t *testing.T) {
 						t.Fatal("registration Close did not finish after the held caller exited")
 					}
 					assertServingJoinComplete(t, join, f.runtimes[0], nil)
-					after := readServingLifetimeState(t, f.db, runID)
+					after := readServingLifetimeState(t, f.selected, runID)
 					assertServingLifetimeUnchanged(t, before, after)
-					assertServingLifetimeClaimOwner(t, f.db, runID, "")
+					assertServingLifetimeClaimOwner(t, f.selected, runID, "")
 					f.assertSettled(t, 1, siblingRun, 1)
 					assertServingRetiredRegistration(t, f.runtimes[0], retiring)
 					t.Logf("M06/%s: exact grant retired, held lease joined only after caller exit, no semantic mutation, sibling generation remained executable", stage.name)
@@ -108,11 +109,11 @@ func TestFanOutServingM07ActualProcessLossJoinsHeldTurnOnBothBackends(t *testing
 			ctx, runID := f.startRun(t, 0)
 			trigger := f.submit(t, 0, runID, "lost-process-caller")
 			turn := waitServingMatrixHeld(t, probe)
-			waitServingMatrixTriggerReceipt(t, f.db, trigger)
+			waitServingMatrixTriggerReceipt(t, f.selected, trigger)
 			if len(turn.command.Outcomes) != 1 || turn.command.Outcomes[0].Publication == nil {
 				t.Fatal("process-loss gate lacks a real publication command")
 			}
-			before := readServingLifetimeState(t, f.db, runID)
+			before := readServingLifetimeState(t, f.selected, runID)
 			assertServingLifetimeUnissued(t, before)
 			assertServingMatrixContenderWaits(t, f, ctx)
 			loseServingMatrixProcessPossession(t, backend, f.db)
@@ -147,11 +148,11 @@ func TestFanOutServingM07ActualProcessLossJoinsHeldTurnOnBothBackends(t *testing
 				t.Fatal("lost process possession still authorized a claim cleanup mutation")
 			}
 			assertServingJoinComplete(t, join, f.runtimes[0], process)
-			after := readServingLifetimeState(t, f.db, runID)
+			after := readServingLifetimeState(t, f.selected, runID)
 			assertServingLifetimeUnchanged(t, before, after)
-			assertServingLifetimeClaimOwner(t, f.db, runID, turn.claim.Owner)
+			assertServingLifetimeClaimOwner(t, f.selected, runID, turn.claim.Owner)
 			assertServingRetiredRegistration(t, f.runtimes[0], probe)
-			assertServingLifetimeUnchanged(t, after, readServingLifetimeState(t, f.db, runID))
+			assertServingLifetimeUnchanged(t, after, readServingLifetimeState(t, f.selected, runID))
 			t.Log("M07: real retained possession lost; actual evaluated mutation rejected even without caller cancellation; exact runtime+process joins waited for caller; no later admission or semantic mutation")
 		})
 	}
@@ -262,23 +263,31 @@ type servingLifetimeState struct {
 	status                                               string
 }
 
-func readServingLifetimeState(t *testing.T, db *sql.DB, runID string) servingLifetimeState {
+func readServingLifetimeState(t *testing.T, selected notifyAllChildrenStore, runID string) servingLifetimeState {
 	t.Helper()
 	var state servingLifetimeState
-	if err := db.QueryRow(`SELECT cursor,status,claim_generation,CASE WHEN retry_ready_at IS NULL THEN 0 ELSE 1 END FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&state.cursor, &state.status, &state.generation, &state.retry); err != nil {
+	metadata, err := storetest.ReadServingLifetimeMetadataStorage(context.Background(), selected, runID)
+	if err != nil {
 		t.Fatal(err)
 	}
+	state.cursor, state.status, state.generation, state.retry = metadata.Cursor, metadata.Status, metadata.Generation, metadata.Retry
 	for _, query := range []struct {
-		sql string
-		out *int
+		read func() (int, error)
+		out  *int
 	}{
-		{`SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`, &state.outcomes},
-		{`SELECT COUNT(*) FROM events WHERE run_id=$1`, &state.events},
-		{`SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1 AND family='fan_out_obligations'`, &state.history},
+		{func() (int, error) {
+			return storetest.CountNestedRunFanOutOutcomes(context.Background(), selected, runID)
+		}, &state.outcomes},
+		{func() (int, error) { return storetest.CountPhysicalRunEvents(context.Background(), selected, runID) }, &state.events},
+		{func() (int, error) {
+			return storetest.CountServingLifetimeHistoryStorage(context.Background(), selected, runID)
+		}, &state.history},
 	} {
-		if err := db.QueryRow(query.sql, runID).Scan(query.out); err != nil {
+		count, err := query.read()
+		if err != nil {
 			t.Fatal(err)
 		}
+		*query.out = count
 	}
 	return state
 }
@@ -297,10 +306,10 @@ func assertServingLifetimeUnchanged(t *testing.T, before, after servingLifetimeS
 	}
 }
 
-func assertServingLifetimeClaimOwner(t *testing.T, db *sql.DB, runID, want string) {
+func assertServingLifetimeClaimOwner(t *testing.T, selected notifyAllChildrenStore, runID, want string) {
 	t.Helper()
-	var owner string
-	if err := db.QueryRow(`SELECT COALESCE(claim_owner,'') FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&owner); err != nil || owner != want {
+	owner, err := storetest.ReadServingLifetimeClaimOwnerStorage(context.Background(), selected, runID)
+	if err != nil || owner != want {
 		t.Fatalf("exact claim cleanup authority: owner=%q want=%q err=%v", owner, want, err)
 	}
 }
@@ -411,12 +420,11 @@ func loseServingMatrixProcessPossession(t *testing.T, backend string, db *sql.DB
 	})
 }
 
-func waitServingMatrixTriggerReceipt(t *testing.T, db *sql.DB, eventID string) {
+func waitServingMatrixTriggerReceipt(t *testing.T, selected notifyAllChildrenStore, eventID string) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		var outcome string
-		err := db.QueryRow(`SELECT outcome FROM event_receipts WHERE event_id=$1 AND subscriber_type='platform' AND subscriber_id='pipeline'`, eventID).Scan(&outcome)
+		outcome, err := storetest.ReadNestedPipelineReceiptOutcome(context.Background(), selected, eventID)
 		if err == nil {
 			if outcome != "success" {
 				t.Fatalf("trigger did not receive a successful real pipeline receipt: %q", outcome)

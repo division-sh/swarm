@@ -44,6 +44,7 @@ func TestServedResetPendingStartupUsesAdmittedSourcesBothStores(t *testing.T) {
 					var selected any
 					captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
 						proof.DB, proof.Postgres, proof.SQLite = selectedRuntimeStoreForTest(t, persistence)
+						proof.ReceiverStateReader = requireReceiverProofStateReader(t, persistence.deps.EventStore)
 						if proof.SQLite != nil {
 							selected, proof.Backend = proof.SQLite, "sqlite"
 						} else {
@@ -110,8 +111,9 @@ func TestServedResetPendingStartupUsesAdmittedSourcesBothStores(t *testing.T) {
 					if err := proof.DB.QueryRow("SELECT phase FROM runtime_reset_operations").Scan(&actualPhase); err != nil || actualPhase != "completed" {
 						t.Fatalf("recovered phase=%s: %v", actualPhase, err)
 					}
-					var predecessor int
-					if err := proof.DB.QueryRow("SELECT COUNT(*) FROM runs WHERE run_id = $1", initial.RunID).Scan(&predecessor); err != nil || predecessor != 0 {
+
+					predecessor, err := readServedRunPhysicalIdentity(proof.ReceiverStateReader, initial.RunID)
+					if err != nil || predecessor != 0 {
 						t.Fatalf("startup retained predecessor history after explicit pending reset: %d, %v", predecessor, err)
 					}
 					want := 1

@@ -85,7 +85,6 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	runforkrevision "github.com/division-sh/swarm/internal/store/testutil/runforkrevisionfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
@@ -668,8 +667,7 @@ func TestCLI_ServeLifecycleRoutesDiagnosticsToStderr(t *testing.T) {
 }
 
 func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismatch(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
+	pg := storetest.StartPostgresRuntimeStore(t)
 	ctx := context.Background()
 	pinnedArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# pinned-source\n"))
 	otherArtifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# other-source\n"))
@@ -732,29 +730,22 @@ func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismat
 }
 
 func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
-	endpoint, db, bundleHash, _, _ := startServedJoinProofRuntime(t)
-	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name":      "order.started",
-		"bundle_hash":     bundleHash,
-		"payload":         map[string]any{"expected": []any{"a"}, "dispatch_id": "dispatch-1"},
-		"idempotency_key": "join-failure-run-" + uuid.NewString(),
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		reader = requireReceiverProofStateReader(t, p.deps.EventStore)
 	})
+	endpoint, db, bundleHash, _, _ := startServedJoinProofRuntime(t)
+	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "order.started", "bundle_hash": bundleHash, "payload": map[string]any{"expected": []any{"a"}, "dispatch_id": "dispatch-1"}, "idempotency_key": "join-failure-run-" + uuid.NewString()})
 	if !initial.NewRunCreated || initial.RunID == "" || initial.EventID == "" {
 		t.Fatalf("join failure initial run = %#v", initial)
 	}
-	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, initial.EventID, "node", identitytest.RootNode(t, "starter").Key(), "delivered", 1)
-	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", initial.EventID, "platform", "pipeline", "success", 1)
-	entityID := servedJoinTarget(t, db, initial.RunID)
-
-	arrival := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name": "item.completed", "run_id": initial.RunID, "source_event_id": initial.EventID,
-		"payload":         map[string]any{"dispatch_id": "dispatch-1", "member_id": "a", "result": map[string]any{"ok": true}},
-		"idempotency_key": "join-failure-arrival-" + uuid.NewString(),
-	})
-	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, arrival.EventID, "node", identitytest.RootNode(t, "join-node").Key(), "dead_letter", 1)
+	waitServedEventPublishDeliveryStatusCountForRun(t, reader, "postgres", initial.RunID, initial.EventID, "node", identitytest.RootNode(t, "starter").Key(), "delivered", 1)
+	waitServedEventPublishReceiptOutcomeCount(t, reader, "postgres", initial.EventID, "platform", "pipeline", "success", 1)
+	entityID := servedJoinTarget(t, db, reader, initial.RunID)
+	arrival := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.completed", "run_id": initial.RunID, "source_event_id": initial.EventID, "payload": map[string]any{"dispatch_id": "dispatch-1", "member_id": "a", "result": map[string]any{"ok": true}}, "idempotency_key": "join-failure-arrival-" + uuid.NewString()})
+	waitServedEventPublishDeliveryStatusCountForRun(t, reader, "postgres", initial.RunID, arrival.EventID, "node", identitytest.RootNode(t, "join-node").Key(), "dead_letter", 1)
 	joinNode := identitytest.RootNode(t, "join-node").Key()
-	waitServedDeliveryOutcomeCount(t, db, "postgres", arrival.EventID, "node", joinNode, "dead_letter", 1)
-
+	waitServedDeliveryOutcomeCount(t, reader, "postgres", arrival.EventID, "node", joinNode, "dead_letter", 1)
 	type failureReadback struct {
 		EntityID   string `json:"entity_id"`
 		Deliveries []struct {
@@ -774,8 +765,7 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 	}
 	found := false
 	for _, delivery := range event.Deliveries {
-		if delivery.SubscriberType == "node" && delivery.SubscriberID == joinNode && delivery.Status == "dead_letter" &&
-			delivery.Failure != nil && delivery.Failure.Class == runtimefailures.ClassEarlyArrival && delivery.Failure.Detail.Code == "join_not_armed" {
+		if delivery.SubscriberType == "node" && delivery.SubscriberID == joinNode && delivery.Status == "dead_letter" && delivery.Failure != nil && delivery.Failure.Class == runtimefailures.ClassEarlyArrival && delivery.Failure.Detail.Code == "join_not_armed" {
 			found = true
 		}
 	}
@@ -794,42 +784,31 @@ func TestRunServeRuntimeJoinFailureReachesAPIAndCLI(t *testing.T) {
 }
 
 func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		reader = requireReceiverProofStateReader(t, p.deps.EventStore)
+	})
 	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+	})
 	endpoint, db, bundleHash, _, pg := startServedJoinProofRuntime(t)
-	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name": "order.started", "bundle_hash": bundleHash,
-		"payload":         map[string]any{"expected": []any{"a", "b"}, "dispatch_id": "dispatch-1"},
-		"idempotency_key": "join-fork-run-" + uuid.NewString(),
-	})
-	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, initial.EventID, "node", identitytest.RootNode(t, "starter").Key(), "delivered", 1)
-	entityID := servedJoinTarget(t, db, initial.RunID)
-	dispatched := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name": "order.dispatched", "run_id": initial.RunID, "source_event_id": initial.EventID,
-		"payload": map[string]any{}, "idempotency_key": "join-fork-dispatch-" + uuid.NewString(),
-	})
-	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, dispatched.EventID, "node", identitytest.RootNode(t, "dispatcher").Key(), "delivered", 1)
-	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", dispatched.EventID, "platform", "pipeline", "success", 1)
-	arrival := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name": "item.completed", "run_id": initial.RunID, "source_event_id": dispatched.EventID,
-		"payload":         map[string]any{"dispatch_id": "dispatch-1", "member_id": "a", "result": map[string]any{"ok": true}},
-		"idempotency_key": "join-fork-arrival-" + uuid.NewString(),
-	})
-	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, arrival.EventID, "node", identitytest.RootNode(t, "join-node").Key(), "delivered", 1)
-	waitServedEventPublishReceiptOutcomeCount(t, db, "postgres", arrival.EventID, "platform", "pipeline", "success", 1)
-	waitServedJoinSourceTimer(t, db, initial.RunID)
+	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "order.started", "bundle_hash": bundleHash, "payload": map[string]any{"expected": []any{"a", "b"}, "dispatch_id": "dispatch-1"}, "idempotency_key": "join-fork-run-" + uuid.NewString()})
+	waitServedEventPublishDeliveryStatusCountForRun(t, reader, "postgres", initial.RunID, initial.EventID, "node", identitytest.RootNode(t, "starter").Key(), "delivered", 1)
+	entityID := servedJoinTarget(t, db, reader, initial.RunID)
+	dispatched := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "order.dispatched", "run_id": initial.RunID, "source_event_id": initial.EventID, "payload": map[string]any{}, "idempotency_key": "join-fork-dispatch-" + uuid.NewString()})
+	waitServedEventPublishDeliveryStatusCountForRun(t, reader, "postgres", initial.RunID, dispatched.EventID, "node", identitytest.RootNode(t, "dispatcher").Key(), "delivered", 1)
+	waitServedEventPublishReceiptOutcomeCount(t, reader, "postgres", dispatched.EventID, "platform", "pipeline", "success", 1)
+	arrival := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.completed", "run_id": initial.RunID, "source_event_id": dispatched.EventID, "payload": map[string]any{"dispatch_id": "dispatch-1", "member_id": "a", "result": map[string]any{"ok": true}}, "idempotency_key": "join-fork-arrival-" + uuid.NewString()})
+	waitServedEventPublishDeliveryStatusCountForRun(t, reader, "postgres", initial.RunID, arrival.EventID, "node", identitytest.RootNode(t, "join-node").Key(), "delivered", 1)
+	waitServedEventPublishReceiptOutcomeCount(t, reader, "postgres", arrival.EventID, "platform", "pipeline", "success", 1)
+	waitServedJoinSourceTimer(t, db, reader, initial.RunID)
 	waitServedRunDeliveryQuiescence(t, deliveryReader, initial.RunID)
 	forkEventID := seedServedJoinForkFrontier(t, db, initial.RunID, entityID, arrival.EventID)
-	if _, err := pg.PlanRunFork(context.Background(), runfork.RunForkPlanRequest{
-		SourceRunID: initial.RunID,
-		At:          forkEventID,
-	}); err != nil {
+	if _, err := pg.PlanRunFork(context.Background(), runfork.RunForkPlanRequest{SourceRunID: initial.RunID, At: forkEventID}); err != nil {
 		t.Fatalf("plan served join fork frontier: %v", err)
 	}
-
-	rpcErr := requireServedJSONRPCError(t, endpoint, "run.fork", map[string]any{
-		"source_run_id": initial.RunID, "fork_event_id": forkEventID, "allow_source_freeze": true, "idempotency_key": "join-fork-" + uuid.NewString(),
-	})
+	rpcErr := requireServedJSONRPCError(t, endpoint, "run.fork", map[string]any{"source_run_id": initial.RunID, "fork_event_id": forkEventID, "allow_source_freeze": true, "idempotency_key": "join-fork-" + uuid.NewString()})
 	if rpcErr == nil {
 		t.Fatal("join run.fork succeeded, want timer-history rejection")
 	}
@@ -842,8 +821,12 @@ func TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation(t 
 		t.Fatalf("join run.fork failure = %#v, want dependency-unavailable/%s", failure, runfork.RunForkBlockerTimerHistoryUnproven)
 	}
 	var forkRuns, forkTimers int
-	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid`, initial.RunID).Scan(&forkRuns); err != nil {
-		t.Fatalf("count rejected join fork runs: %v", err)
+	{
+		var err error
+		forkRuns, err = readServedSourceForkCardinality(reader, initial.RunID)
+		if err != nil {
+			t.Fatalf("count rejected join fork runs: %v", err)
+		}
 	}
 	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM timers WHERE forked_from_run_id = $1::uuid`, initial.RunID).Scan(&forkTimers); err != nil {
 		t.Fatalf("count rejected join fork timers: %v", err)
@@ -897,7 +880,7 @@ func startServedJoinProofRuntime(t *testing.T) (string, *sql.DB, string, *runtim
 	return endpoint, db, bundleHash, rt, pg
 }
 
-func waitServedJoinSourceTimer(t *testing.T, db *sql.DB, runID string) {
+func waitServedJoinSourceTimer(t *testing.T, db *sql.DB, reader receiverProofStateReader, runID string) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var count int
@@ -916,7 +899,7 @@ func waitServedJoinSourceTimer(t *testing.T, db *sql.DB, runID string) {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("served join source timers for run %s = %d, want 1\n%s", runID, count, servedEventPublishDebugSummary(t, db, "postgres", runID))
+	t.Fatalf("served join source timers for run %s = %d, want 1\n%s", runID, count, servedInspectionRunDebugSummary(reader, runID))
 }
 
 func waitServedRunDeliveryQuiescence(t *testing.T, reader servedRunDeliveryReader, runID string) {
@@ -954,6 +937,8 @@ func waitServedRunDeliveryQuiescence(t *testing.T, reader servedRunDeliveryReade
 }
 
 func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
@@ -979,7 +964,7 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 	if servedDB == nil {
 		t.Fatal("served sqlite SQLDB is required for event.publish proof")
 	}
-	runServedEventPublishFollowUpProof(t, endpoint, servedDB, "sqlite", bundleHash, probe)
+	runServedEventPublishFollowUpProof(t, endpoint, reader, "sqlite", bundleHash, probe)
 }
 
 func requireServedRunForkStoppedReplay(t *testing.T, db *sql.DB, forkRunID string) {
@@ -1006,6 +991,8 @@ func requireServedRunForkStoppedReplay(t *testing.T, db *sql.DB, forkRunID strin
 }
 
 func TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
@@ -1031,10 +1018,12 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite(t *testin
 	if servedDB == nil {
 		t.Fatal("served sqlite SQLDB is required for event.publish target-route proof")
 	}
-	runServedEventPublishTargetRouteProof(t, endpoint, servedDB, "sqlite", bundleHash, probe)
+	runServedEventPublishTargetRouteProof(t, endpoint, servedDB, reader, "sqlite", bundleHash, probe)
 }
 
 func TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -1055,10 +1044,12 @@ func TestRunServeRuntimeEventPublishTargetRouteServedPathPostgres(t *testing.T) 
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	})
 
-	runServedEventPublishTargetRouteProof(t, endpoint, db, "postgres", bundleHash, probe)
+	runServedEventPublishTargetRouteProof(t, endpoint, db, reader, "postgres", bundleHash, probe)
 }
 
 func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
@@ -1088,10 +1079,12 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite
 	if servedDB == nil {
 		t.Fatal("served sqlite SQLDB is required for active-load event.publish proof")
 	}
-	runServedEventPublishActiveLoadProof(t, endpoint, servedDB, "sqlite", bundleHash, probe, agentStarted, release, &releaseOnce)
+	runServedEventPublishActiveLoadProof(t, endpoint, servedDB, reader, "sqlite", bundleHash, probe, agentStarted, release, &releaseOnce)
 }
 
 func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -1117,7 +1110,7 @@ func TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres(t *t
 	})
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 
-	runServedEventPublishActiveLoadProof(t, endpoint, db, "postgres", bundleHash, probe, agentStarted, release, &releaseOnce)
+	runServedEventPublishActiveLoadProof(t, endpoint, db, reader, "postgres", bundleHash, probe, agentStarted, release, &releaseOnce)
 }
 
 func TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres(t *testing.T) {
@@ -1185,7 +1178,7 @@ func TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres(t *testin
 	if postReset.RunID == "" || postReset.RunID == proof.RunID {
 		t.Fatalf("post-reset admission did not create fresh work: %+v", postReset)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, "postgres", postReset.RunID, postReset.EventID, proof.Probe)
+	waitForServedEventPublishNodeDeliveryLifecycle(t, proof.ReceiverStateReader, "postgres", postReset.RunID, postReset.EventID, proof.Probe)
 	if replay := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params); replay.Error != nil {
 		t.Fatalf("completed reset replay failed: %+v", replay.Error)
 	}
@@ -1258,19 +1251,24 @@ func TestRunServeRuntimeNukeWithSourceArtifactsClearsProcessTopologyBeforeCleanu
 }
 
 type servedSessionCleanupProof struct {
-	Endpoint   string
-	DB         *sql.DB
-	BundleHash string
-	RunID      string
-	SessionID  string
-	Contexts   *runtimepkg.RuntimeContextManager
-	Release    func()
-	SourceRoot string
-	Probe      *lifecycletest.Probe
+	ReceiverStateReader receiverProofStateReader
+	Endpoint            string
+	DB                  *sql.DB
+	BundleHash          string
+	RunID               string
+	SessionID           string
+	Contexts            *runtimepkg.RuntimeContextManager
+	Release             func()
+	SourceRoot          string
+	Probe               *lifecycletest.Probe
 }
 
 func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 	t.Helper()
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		reader = requireReceiverProofStateReader(t, p.deps.EventStore)
+	})
 	_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -1281,17 +1279,14 @@ func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	contextsReady := make(chan *runtimepkg.RuntimeContextManager, 1)
-	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-		ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, Verbose: true, TestLifecycleProbe: probe,
-		TestLLMRuntime:          servedSessionCleanupProofLLMRuntime{store: pg, started: started, release: release},
-		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-		TestRuntimeContextsReadyHook: func(contexts *runtimepkg.RuntimeContextManager) {
-			contextsReady <- contexts
-		},
-	})
-	releaseWriter := func() { releaseOnce.Do(func() { close(release) }) }
+	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestLifecycleProbe: probe, TestLLMRuntime: servedSessionCleanupProofLLMRuntime{store: pg, started: started, release: release}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(), TestRuntimeContextsReadyHook: func(contexts *runtimepkg.RuntimeContextManager) {
+		contextsReady <- contexts
+	}})
+	releaseWriter := func() {
+		releaseOnce.Do(func() {
+			close(release)
+		})
+	}
 	t.Cleanup(releaseWriter)
 	var contexts *runtimepkg.RuntimeContextManager
 	select {
@@ -1299,25 +1294,19 @@ func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 	case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
 		t.Fatal("timed out waiting for served runtime context manager")
 	}
-	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name": "item.received", "bundle_hash": bundleHash,
-		"payload": map[string]any{"item_id": "cleanup"}, "idempotency_key": "issue-1927-cleanup-initial-" + uuid.NewString(),
-	})
-	waitForServedEventPublishNodeDeliveryLifecycle(t, db, "postgres", initial.RunID, initial.EventID, probe)
-	hold := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name": "item.agent_hold", "run_id": initial.RunID, "source_event_id": initial.EventID,
-		"payload": map[string]any{"note": "hold session writer"}, "idempotency_key": "issue-1927-cleanup-hold-" + uuid.NewString(),
-	})
+	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.received", "bundle_hash": bundleHash, "payload": map[string]any{"item_id": "cleanup"}, "idempotency_key": "issue-1927-cleanup-initial-" + uuid.NewString()})
+	waitForServedEventPublishNodeDeliveryLifecycle(t, reader, "postgres", initial.RunID, initial.EventID, probe)
+	hold := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.agent_hold", "run_id": initial.RunID, "source_event_id": initial.EventID, "payload": map[string]any{"note": "hold session writer"}, "idempotency_key": "issue-1927-cleanup-hold-" + uuid.NewString()})
 	var sessionID string
 	select {
 	case sessionID = <-started:
 	case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
-		t.Fatalf("timed out waiting for lifecycle-authorized session writer\n%s", servedEventPublishDebugSummary(t, db, "postgres", initial.RunID))
+		t.Fatalf("timed out waiting for lifecycle-authorized session writer\n%s", servedInspectionRunDebugSummary(reader, initial.RunID))
 	}
 	if strings.HasPrefix(sessionID, "error: ") {
 		t.Fatalf("lifecycle-authorized session writer failed: %s", strings.TrimPrefix(sessionID, "error: "))
 	}
-	waitServedEventPublishDeliveryStatusCountForRun(t, db, "postgres", initial.RunID, hold.EventID, "agent", "load-agent", "in_progress", 1)
+	waitServedEventPublishDeliveryStatusCountForRun(t, reader, "postgres", initial.RunID, hold.EventID, "agent", "load-agent", "in_progress", 1)
 	var sessionRunID, status string
 	if err := db.QueryRowContext(context.Background(), `
 		SELECT COALESCE(run_id::text, ''), status
@@ -1329,10 +1318,7 @@ func startServedSessionCleanupProof(t *testing.T) servedSessionCleanupProof {
 	if sessionRunID != initial.RunID || status != "active" {
 		t.Fatalf("in-flight served session = run:%q status:%q, want %s/active", sessionRunID, status, initial.RunID)
 	}
-	return servedSessionCleanupProof{
-		Endpoint: endpoint, DB: db, BundleHash: bundleHash, RunID: initial.RunID,
-		SessionID: sessionID, Contexts: contexts, Release: releaseWriter, SourceRoot: sourceRoot, Probe: probe,
-	}
+	return servedSessionCleanupProof{Endpoint: endpoint, DB: db, ReceiverStateReader: reader, BundleHash: bundleHash, RunID: initial.RunID, SessionID: sessionID, Contexts: contexts, Release: releaseWriter, SourceRoot: sourceRoot, Probe: probe}
 }
 
 func runServedSessionCleanupMutation(t *testing.T, proof servedSessionCleanupProof, method string, params map[string]any, out any) {
@@ -1484,24 +1470,26 @@ func TestServedParityHarnessConversationForkLifecycle(t *testing.T) {
 }
 
 type servedControlProofRuntime struct {
-	Endpoint            string
-	DB                  *sql.DB
-	Backend             string
-	BundleHash          string
-	Probe               *lifecycletest.Probe
-	Runtime             *runtimepkg.Runtime
-	Contexts            *runtimepkg.RuntimeContextManager
-	Postgres            *store.PostgresStore
-	SQLite              *store.SQLiteRuntimeStore
-	ForkRuntime         selectedForkRuntimeProofOptions
-	ReceiverStateReader receiverProofStateReader
-	ReadRunDeliveries   servedRunDeliveryReader
-	WaitReceiverOrigin  func(*testing.T, servedEventPublishRPCResult)
+	SourceArtifacts         sourceArtifactReader
+	Endpoint                string
+	DB                      *sql.DB
+	Backend                 string
+	BundleHash              string
+	Probe                   *lifecycletest.Probe
+	Runtime                 *runtimepkg.Runtime
+	Contexts                *runtimepkg.RuntimeContextManager
+	Postgres                *store.PostgresStore
+	SQLite                  *store.SQLiteRuntimeStore
+	ForkRuntime             selectedForkRuntimeProofOptions
+	ReceiverStateReader     receiverProofStateReader
+	ReadRunDeliveries       servedRunDeliveryReader
+	ReadApplicationSnapshot func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)
+	WaitReceiverOrigin      func(*testing.T, servedEventPublishRPCResult)
 }
 
-func servedControlProofAuthorActivityContext(t *testing.T, rt servedControlProofRuntime) context.Context {
+func servedControlProofAuthorActivityContext(t *testing.T, selectedProofBundleHash string, selectedProofRuntime *runtimepkg.Runtime) context.Context {
 	t.Helper()
-	return servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
+	return servedRuntimeProofAuthorActivityContext(t, selectedProofRuntime, selectedProofBundleHash)
 }
 
 func servedRuntimeProofAuthorActivityContext(t *testing.T, rt *runtimepkg.Runtime, bundleHash string) context.Context {
@@ -1544,7 +1532,11 @@ func startServedLiveAgentProofRuntimeWithLLM(t *testing.T, backend servedparity.
 func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, backend servedparity.Backend, llm servedLiveAgentProofLLMRuntime, faults *servedDirectivePersistenceFaults) servedControlProofRuntime {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+	var receiverReader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
+	})
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
@@ -1565,29 +1557,20 @@ func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, bac
 			servedDB = storetest.DatabaseForTest(servedSQLite)
 			return wrapServedDirectiveFaultPersistence(t, persistence, faults)
 		}
-		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-			SourceRoot:              sourceRoot,
-			PlatformSpecPath:        defaultPlatformSpecPath,
-			APIListenAddr:           "127.0.0.1:0",
-			MCPListenAddr:           "127.0.0.1:0",
-			SelfCheck:               true,
-			Verbose:                 true,
-			TestLifecycleProbe:      probe,
-			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-			TestLLMRuntime:          llm,
-		})
+		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{ConfigPath: writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath), SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestLifecycleProbe: probe, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(), TestLLMRuntime: llm})
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for live-agent served parity proof")
 		}
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, SQLite: servedSQLite}
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, SQLite: servedSQLite}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
 		})
 		if faults != nil {
 			oldProjection := projectRuntimePersistenceForServe
-			t.Cleanup(func() { projectRuntimePersistenceForServe = oldProjection })
+			t.Cleanup(func() {
+				projectRuntimePersistenceForServe = oldProjection
+			})
 			projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
 				return wrapServedDirectiveFaultPersistence(t, oldProjection(owner), faults)
 			}
@@ -1595,21 +1578,8 @@ func startServedLiveAgentProofRuntimeWithLLMAndDirectiveFaults(t *testing.T, bac
 		sourceRoot := writeServedLiveAgentFixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
-		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:              writeServeRuntimeTestConfig(t),
-			SourceRoot:              sourceRoot,
-			PlatformSpecPath:        defaultPlatformSpecPath,
-			StoreMode:               "postgres",
-			StoreModeSet:            true,
-			APIListenAddr:           "127.0.0.1:0",
-			MCPListenAddr:           "127.0.0.1:0",
-			SelfCheck:               true,
-			Verbose:                 true,
-			TestLifecycleProbe:      probe,
-			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-			TestLLMRuntime:          llm,
-		})
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Postgres: pg}
+		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{ConfigPath: writeServeRuntimeTestConfig(t), SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestLifecycleProbe: probe, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(), TestLLMRuntime: llm})
+		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Postgres: pg}
 	default:
 		t.Fatalf("unknown live-agent served parity backend %q", backend)
 		return servedControlProofRuntime{}
@@ -1642,10 +1612,22 @@ func startServedControlProofRuntime(t *testing.T, backend servedparity.Backend) 
 
 func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparity.Backend, fixture func(*testing.T) string) servedControlProofRuntime {
 	t.Helper()
+	var sourceReader sourceArtifactReader
 	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+	var receiverReader receiverProofStateReader
+	var snapshotReader func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		sourceReader = p.sourceReader
+		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		receiverReader = requireReceiverProofStateReader(t, p.deps.EventStore)
+		snapshotReader = func(ctx context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error) {
+			return storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, p.deps.EventStore)
+		}
+	})
 	var contexts *runtimepkg.RuntimeContextManager
-	captureContexts := func(manager *runtimepkg.RuntimeContextManager) { contexts = manager }
+	captureContexts := func(manager *runtimepkg.RuntimeContextManager) {
+		contexts = manager
+	}
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		unsetStoreSelectorEnv(t)
@@ -1659,22 +1641,11 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
 			servedDB, _, servedSQLite = selectedRuntimeStoreForTest(t, persistence)
 		})
-		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:                   writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
-			TestRuntimeContextsReadyHook: captureContexts,
-			SourceRoot:                   sourceRoot,
-			PlatformSpecPath:             defaultPlatformSpecPath,
-			APIListenAddr:                "127.0.0.1:0",
-			MCPListenAddr:                "127.0.0.1:0",
-			SelfCheck:                    true,
-			Verbose:                      true,
-			TestLifecycleProbe:           probe,
-			TestOutboxSweeperConfig:      servedEventPublishProofOutboxSweeperConfig(),
-		})
+		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{ConfigPath: writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath), TestRuntimeContextsReadyHook: captureContexts, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestLifecycleProbe: probe, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()})
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for control served parity proof")
 		}
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, SQLite: servedSQLite}
+		return servedControlProofRuntime{SourceArtifacts: sourceReader, ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, SQLite: servedSQLite}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -1682,21 +1653,8 @@ func startServedControlProofRuntimeWithFixture(t *testing.T, backend servedparit
 		sourceRoot := fixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 		probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
-		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
-			ConfigPath:                   writeServeRuntimeTestConfig(t),
-			TestRuntimeContextsReadyHook: captureContexts,
-			SourceRoot:                   sourceRoot,
-			PlatformSpecPath:             defaultPlatformSpecPath,
-			StoreMode:                    "postgres",
-			StoreModeSet:                 true,
-			APIListenAddr:                "127.0.0.1:0",
-			MCPListenAddr:                "127.0.0.1:0",
-			SelfCheck:                    true,
-			Verbose:                      true,
-			TestLifecycleProbe:           probe,
-			TestOutboxSweeperConfig:      servedEventPublishProofOutboxSweeperConfig(),
-		})
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, Postgres: pg}
+		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{ConfigPath: writeServeRuntimeTestConfig(t), TestRuntimeContextsReadyHook: captureContexts, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true, TestLifecycleProbe: probe, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()})
+		return servedControlProofRuntime{SourceArtifacts: sourceReader, ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, ReceiverStateReader: receiverReader, Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Probe: probe, Runtime: rt, Contexts: contexts, Postgres: pg}
 	default:
 		t.Fatalf("unknown served control backend %q", backend)
 		return servedControlProofRuntime{}
@@ -1726,7 +1684,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if !started.NewRunCreated || strings.TrimSpace(started.RunID) == "" || strings.TrimSpace(started.EventID) == "" {
 		t.Fatalf("initial event.publish result = %#v, want a new run and event", started)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, started.RunID, started.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.ReceiverStateReader, rt.Backend, started.RunID, started.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
 	var published struct {
 		EventID string `json:"event_id"`
 		RunID   string `json:"run_id"`
@@ -1741,8 +1699,8 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if published.RunID != started.RunID || strings.TrimSpace(published.EventID) == "" {
 		t.Fatalf("fork-point event.publish result = %#v", published)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, started.RunID, published.EventID, identitytest.RootNode(t, "item-observer").Key(), rt.Probe)
-	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.DB, rt.Backend, started.RunID, "running")
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.ReceiverStateReader, rt.Backend, started.RunID, published.EventID, identitytest.RootNode(t, "item-observer").Key(), rt.Probe)
+	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, started.RunID, "running")
 
 	forkParams := map[string]any{
 		"source_run_id":       started.RunID,
@@ -1758,7 +1716,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 		"--json",
 	})
 	if code != 0 || strings.TrimSpace(stderr) != "" {
-		t.Fatalf("swarm run fork code=%d stderr=%q stdout=%s\nsource debug:\n%s", code, stderr, stdout, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, started.RunID))
+		t.Fatalf("swarm run fork code=%d stderr=%q stdout=%s\nsource debug:\n%s", code, stderr, stdout, servedInspectionRunDebugSummary(rt.ReceiverStateReader, started.RunID))
 	}
 	var fork apiv1.RunForkExecutionResult
 	if err := json.Unmarshal([]byte(stdout), &fork); err != nil {
@@ -1791,14 +1749,14 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("fork completion candidate did not settle before refusal baseline: %s", servedEventPublishDebugSummary(t, rt.DB, rt.Backend, fork.ForkRunID))
+			t.Fatalf("fork completion candidate did not settle before refusal baseline: %s", servedInspectionRunDebugSummary(rt.ReceiverStateReader, fork.ForkRunID))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	if err := waitExactOriginPublications(t.Context(), publication, started.EventID, published.EventID); err != nil {
 		t.Fatal(err)
 	}
-	beforeRefusal := snapshotForkReceiverApplication(t, rt)
+	beforeRefusal := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 	// A selected fork cannot acquire future ordinary ingress from the loaded
 	// same-hash runtime. Retained controls still own its explicit terminal stop.
 	refused := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{
@@ -1819,7 +1777,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if !ok || details["run_id"] != fork.ForkRunID || details["binding_id"] != bindingID || details["operation"] != "event.publish" {
 		t.Fatalf("selected ingress refusal lost exact binding: %+v", refused)
 	}
-	if afterRefusal := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(beforeRefusal, afterRefusal) {
+	if afterRefusal := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot); !reflect.DeepEqual(beforeRefusal, afterRefusal) {
 		t.Fatalf("refused selected ingress changed persisted state: tables=%v", forkReceiverChangedTables(beforeRefusal, afterRefusal))
 	}
 	var stopped struct {
@@ -1829,7 +1787,7 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 	if !stopped.OK {
 		t.Fatal("selected stop lost terminal acknowledgment")
 	}
-	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.DB, rt.Backend, fork.ForkRunID, "cancelled")
+	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, fork.ForkRunID, "cancelled")
 	requireServedRunForkStoppedReplay(t, rt.DB, fork.ForkRunID)
 
 	for method, params := range map[string]map[string]any{
@@ -1845,13 +1803,13 @@ func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
 		}
 	}
 	requireServedStatusCLIReadback(t, rt.Endpoint, fork.ForkRunID, "  cancelled")
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, fork.ForkRunID, servedparity.MustScenario(servedparity.ScenarioRunForkLifecycle))
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, fork.ForkRunID, servedparity.MustScenario(servedparity.ScenarioRunForkLifecycle))
 }
 
 func runServedLiveAgentEventReplayBackendProof(t *testing.T, backend servedparity.Backend) {
 	t.Helper()
 	rt := startServedLiveAgentProofRuntime(t, backend)
-	runServedLiveAgentEventReplayLifecycleProof(t, rt)
+	runServedLiveAgentEventReplayLifecycleProof(t, rt.Backend, rt.BundleHash, rt.Endpoint, rt.Probe, rt.ReceiverStateReader)
 }
 
 func runServedAgentRestartBackendProof(t *testing.T, backend servedparity.Backend) {
@@ -2239,7 +2197,7 @@ func runServedConversationForkLifecycleProof(t *testing.T, rt servedConversation
 	}
 
 	for _, scenarioID := range []string{servedparity.ScenarioConversationForkLifecycle, servedparity.ScenarioConversationForkChatLifecycle, servedparity.ScenarioConversationForkDeleteLifecycle} {
-		requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, fixture.RunID, servedparity.MustScenario(scenarioID))
+		requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, fixture.RunID, servedparity.MustScenario(scenarioID))
 	}
 }
 
@@ -2288,12 +2246,8 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 	t.Helper()
 	backend := rt.Backend
 	now := time.Now().UTC().Truncate(time.Second)
-	fixture := servedConversationForkSource{
-		RunID: runID, AgentID: "fork-source-agent", SessionID: uuid.NewString(),
-		Turn1ID: uuid.NewString(), Turn2ID: uuid.NewString(), Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), EntityID: uuid.NewString(),
-		Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute),
-	}
-	ctx := servedControlProofAuthorActivityContext(t, rt.servedControlProofRuntime)
+	fixture := servedConversationForkSource{RunID: runID, AgentID: "fork-source-agent", SessionID: uuid.NewString(), Turn1ID: uuid.NewString(), Turn2ID: uuid.NewString(), Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), EntityID: uuid.NewString(), Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute)}
+	ctx := servedControlProofAuthorActivityContext(t, rt.servedControlProofRuntime.BundleHash, rt.servedControlProofRuntime.Runtime)
 	lease, err := rt.Runtime.WorkOccurrence().Begin(ctx)
 	if err != nil {
 		t.Fatalf("admit conversation fixture work: %v", err)
@@ -2343,22 +2297,12 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 	if actorIdentity.IsZero() {
 		t.Fatalf("%s conversation fork source agent was not admitted by startup topology", backend)
 	}
-	history := storetest.SeedConversationForkSource(t, ctx, selected, storetest.ConversationForkSourceFixture{
-		Identity: actorIdentity, RunID: fixture.RunID, SessionID: fixture.SessionID, EntityID: fixture.EntityID,
-		Event1ID: fixture.Event1ID, Event2ID: fixture.Event2ID,
-		CreatedAt: now, Turn1At: fixture.Turn1At, Turn2At: fixture.Turn2At,
-	})
+	history := storetest.SeedConversationForkSource(t, ctx, selected, storetest.ConversationForkSourceFixture{Identity: actorIdentity, RunID: fixture.RunID, SessionID: fixture.SessionID, EntityID: fixture.EntityID, Event1ID: fixture.Event1ID, Event2ID: fixture.Event2ID, CreatedAt: now, Turn1At: fixture.Turn1At, Turn2At: fixture.Turn2At})
 	for i, turn := range []struct {
 		id string
 		at time.Time
-	}{
-		{fixture.Turn1ID, fixture.Turn1At}, {fixture.Turn2ID, fixture.Turn2At},
-	} {
-		storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
-			Store: selectedStore, Selected: selected, Identity: actorIdentity,
-			RunID: fixture.RunID, SessionID: fixture.SessionID, TurnID: turn.id,
-			Memory: runtimeagentmemory.Plan{Enabled: true}, Event: history[i], ParseOK: true, CreatedAt: turn.at,
-		})
+	}{{fixture.Turn1ID, fixture.Turn1At}, {fixture.Turn2ID, fixture.Turn2At}} {
+		storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{Store: selectedStore, Selected: selected, Identity: actorIdentity, RunID: fixture.RunID, SessionID: fixture.SessionID, TurnID: turn.id, Memory: runtimeagentmemory.Plan{Enabled: true}, Event: history[i], ParseOK: true, CreatedAt: turn.at})
 	}
 	return fixture
 }
@@ -2493,7 +2437,13 @@ func startServedTestSetupEntitiesProofRuntimeFromSource(t *testing.T, backend se
 func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend servedparity.Backend, sourceRoot string, realWorkspace bool, hooks ...runtimepipeline.WorkflowNodeHandlerStartHook) servedControlProofRuntime {
 	t.Helper()
 	var deliveryReader servedRunDeliveryReader
-	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { deliveryReader = p.deps.DeliveryStore.SummarizeRun })
+	var snapshotReader func(context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error)
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
+		deliveryReader = p.deps.DeliveryStore.SummarizeRun
+		snapshotReader = func(ctx context.Context) (map[string]storetest.SelectedForkStorageTableSnapshot, error) {
+			return storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, p.deps.EventStore)
+		}
+	})
 	forkOptions := captureServedForkRuntimeOptions(t)
 	configureWorkspace := func() {
 		if !realWorkspace {
@@ -2552,7 +2502,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for test.setup_entities served parity proof")
 		}
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, SQLite: servedSQLite, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
+		return servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: servedDB, SQLite: servedSQLite, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
 	case servedparity.BackendExplicitPostgres:
 		_, db, pg := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
@@ -2576,7 +2526,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 			Verbose:                          true,
 			TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
 		})
-		return servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Postgres: pg, Backend: "postgres", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
+		return servedControlProofRuntime{ReadApplicationSnapshot: snapshotReader, ReadRunDeliveries: deliveryReader, Endpoint: endpoint, DB: db, Postgres: pg, Backend: "postgres", BundleHash: bundleHash, Runtime: rt, ForkRuntime: *forkOptions, ReceiverStateReader: receiverReader}
 	default:
 		t.Fatalf("unknown served test.setup_entities backend %q", backend)
 		return servedControlProofRuntime{}
@@ -2585,7 +2535,7 @@ func startServedTestSetupEntitiesProofRuntimeConfigured(t *testing.T, backend se
 
 func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
-	runID, initialEventID, entityID := createServedControlWaitingRun(t, rt, "run-control-release-"+uuid.NewString())
+	runID, initialEventID, entityID := createServedControlWaitingRun(t, rt.Backend, rt.BundleHash, rt.Endpoint, rt.Probe, rt.ReceiverStateReader, "run-control-release-"+uuid.NewString())
 	keyPrefix := "issue-1864-" + rt.Backend + "-" + runID
 	var owner runtimepipelineobligation.Store
 	if rt.SQLite != nil {
@@ -2593,57 +2543,41 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	} else {
 		owner = rt.Postgres.PipelineObligations()
 	}
-	// Node settlement can precede its initial gate's supersession handoff. The
-	// handed-only proof must start after that real publication work has settled.
-	initialCtx, cancelInitial := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 5*time.Second)
+	initialCtx, cancelInitial := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), 5*time.Second)
 	defer cancelInitial()
 	for {
 		summary, err := owner.SummarizeRun(initialCtx, runID)
 		if err != nil {
-			t.Fatalf("read initial pipeline work: %v\n%s", err, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+			t.Fatalf("read initial pipeline work: %v\n%s", err, servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 		}
 		if summary.TerminalNonSuccess != 0 {
-			t.Fatalf("initial construction has non-success work: %+v\n%s", summary, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+			t.Fatalf("initial construction has non-success work: %+v\n%s", summary, servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 		}
 		if !summary.HasOpenWork() {
 			break
 		}
 		select {
 		case <-initialCtx.Done():
-			t.Fatalf("initial construction did not settle: %+v\n%s", summary, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+			t.Fatalf("initial construction did not settle: %+v\n%s", summary, servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 		case <-time.After(20 * time.Millisecond):
 		}
 	}
 	cancelInitial()
-
 	pauseKey := keyPrefix + "-run-pause"
-	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{
-		"run_id":          runID,
-		"idempotency_key": pauseKey,
-	})
-	requireServedRunControlState(t, rt.DB, rt.Backend, runID, "paused", "paused")
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": pauseKey})
+	requireServedRunControlState(t, rt.ReceiverStateReader, rt.Backend, runID, "paused", "paused")
 	requireServedRunStatus(t, rt.Endpoint, runID, "paused")
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.pause", pauseKey, 1)
-	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{
-		"run_id":          runID,
-		"idempotency_key": pauseKey,
-	})
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.pause", pauseKey, 1)
-
-	queued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "item.processed",
-		"run_id":          runID,
-		"source_event_id": initialEventID,
-		"payload":         map[string]any{"item_id": "review"},
-		"idempotency_key": keyPrefix + "-run-queued",
-	})
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.pause", pauseKey, 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": runID, "idempotency_key": pauseKey})
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.pause", pauseKey, 1)
+	queued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "item.processed", "run_id": runID, "source_event_id": initialEventID, "payload": map[string]any{"item_id": "review"}, "idempotency_key": keyPrefix + "-run-queued"})
 	if queued.RunID != runID || queued.OperatorReferenceEventID != initialEventID || queued.NewRunCreated || queued.EventID == "" {
 		t.Fatalf("%s queued event.publish result = %#v, want existing paused run", rt.Backend, queued)
 	}
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), "pending", 1)
-	waitCtx, cancelWait := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt), 5*time.Second)
+	waitServedEventPublishDeliveryStatusCountForRun(t, rt.ReceiverStateReader, rt.Backend, runID, queued.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), "pending", 1)
+	waitCtx, cancelWait := context.WithTimeout(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), 5*time.Second)
 	defer cancelWait()
-	requireNoServedDeliveryStatusDuring(t, rt.DB, rt.Backend, queued.EventID, "node", "item-observer", "delivered", 250*time.Millisecond)
+	requireNoServedDeliveryStatusDuring(t, rt.ReceiverStateReader, rt.Backend, queued.EventID, "node", "item-observer", "delivered", 250*time.Millisecond)
 	// Use the canonical owner to establish handed-only debt explicitly; the
 	// public publication above remains unhanded while the run is paused.
 	work, err := claimServedPausedPublication(waitCtx, owner, queued.EventID)
@@ -2653,13 +2587,13 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	if _, err := owner.Settle(waitCtx, work.Claim, runtimepipelineobligation.Acknowledged("pipeline_persisted")); err != nil {
 		t.Fatal(err)
 	}
-	requireServedDirectivePipelineReceiptCount(t, rt, queued.EventID, 1)
+	requireServedDirectivePipelineReceiptCount(t, rt.ReceiverStateReader, rt.Backend, queued.EventID, 1)
 	summary, err := owner.SummarizeRun(waitCtx, runID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if summary.HasOpenWork() || summary.TerminalNonSuccess != 0 {
-		t.Fatalf("handed-only public continue has event-level work: %+v\n%s", summary, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+		t.Fatalf("handed-only public continue has event-level work: %+v\n%s", summary, servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 	}
 	synchronizer, ok := rt.Runtime.Bus.DeliveryContinuationOwner().(interface{ Synchronize(context.Context) error })
 	if !ok {
@@ -2668,94 +2602,64 @@ func runServedRunControlLifecycleProof(t *testing.T, rt servedControlProofRuntim
 	if err := synchronizer.Synchronize(waitCtx); err != nil {
 		t.Fatal(err)
 	}
-	requireNoServedDeliveryStatusDuring(t, rt.DB, rt.Backend, queued.EventID, "node", "item-observer", "delivered", 250*time.Millisecond)
-
+	requireNoServedDeliveryStatusDuring(t, rt.ReceiverStateReader, rt.Backend, queued.EventID, "node", "item-observer", "delivered", 250*time.Millisecond)
 	continueKey := keyPrefix + "-run-continue"
-	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{
-		"run_id":          runID,
-		"idempotency_key": continueKey,
-	})
-	requireServedRunControlState(t, rt.DB, rt.Backend, runID, "running", "running", "completed")
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.continue", continueKey, 1)
-	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{
-		"run_id":          runID,
-		"idempotency_key": continueKey,
-	})
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.continue", continueKey, 1)
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, queued.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), "delivered", 1)
-	requireServedEventPublishEntityState(t, rt.DB, rt.Backend, runID, entityID, "done")
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": runID, "idempotency_key": continueKey})
+	requireServedRunControlState(t, rt.ReceiverStateReader, rt.Backend, runID, "running", "running", "completed")
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.continue", continueKey, 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": runID, "idempotency_key": continueKey})
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.continue", continueKey, 1)
+	waitServedEventPublishDeliveryStatusCountForRun(t, rt.ReceiverStateReader, rt.Backend, runID, queued.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), "delivered", 1)
+	requireServedEventPublishEntityState(t, rt.ReceiverStateReader, rt.Backend, runID, entityID, "done")
 	requireServedRunStatus(t, rt.Endpoint, runID, "completed")
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle))
-
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioRunContinueControlLifecycle))
 	stopRunID, pendingEventID, stopEntityID, stopCardID := seedServedRunControlPendingRunWithAgentDelivery(t, rt)
 	stopKey := "issue-1864-" + rt.Backend + "-" + stopRunID + "-run-stop"
-	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
-		"run_id":          stopRunID,
-		"idempotency_key": stopKey,
-	})
-	requireServedRunControlState(t, rt.DB, rt.Backend, stopRunID, "stopped", "cancelled")
-	requireServedStoppedPendingDelivery(t, rt.DB, rt.Backend, pendingEventID, "agent-pending")
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{"run_id": stopRunID, "idempotency_key": stopKey})
+	requireServedRunControlState(t, rt.ReceiverStateReader, rt.Backend, stopRunID, "stopped", "cancelled")
+	requireServedStoppedPendingDelivery(t, rt.ReceiverStateReader, rt.Backend, pendingEventID, "agent-pending")
 	requireServedTerminalDecisionCardStateChangeOnly(t, rt, stopRunID, stopEntityID, stopCardID)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.stop", stopKey, 1)
-	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{
-		"run_id":          stopRunID,
-		"idempotency_key": stopKey,
-	})
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "run.stop", stopKey, 1)
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.stop", stopKey, 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "run.stop", map[string]any{"run_id": stopRunID, "idempotency_key": stopKey})
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "run.stop", stopKey, 1)
 	requireServedTerminalDecisionCardStateChangeOnly(t, rt, stopRunID, stopEntityID, stopCardID)
 	requireServedRunStatus(t, rt.Endpoint, stopRunID, "cancelled")
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, stopRunID, servedparity.MustScenario(servedparity.ScenarioRunStopControlLifecycle))
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, stopRunID, servedparity.MustScenario(servedparity.ScenarioRunStopControlLifecycle))
 }
 
 func runServedRuntimeIngressControlLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
 	keyPrefix := "issue-1864-" + rt.Backend + "-" + uuid.NewString()
 	pauseKey := keyPrefix + "-runtime-pause"
-	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{
-		"idempotency_key": pauseKey,
-	})
-	requireServedRuntimeIngressState(t, rt.DB, rt.Backend, "paused", "platform.paused")
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "runtime.pause", pauseKey, 1)
-	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{
-		"idempotency_key": pauseKey,
-	})
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "runtime.pause", pauseKey, 1)
-	requireServedEventNameCount(t, rt.DB, rt.Backend, "platform.paused", 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{"idempotency_key": pauseKey})
+	requireServedRuntimeIngressState(t, rt.ReceiverStateReader, rt.Backend, "paused", "platform.paused")
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.pause", pauseKey, 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.pause", map[string]any{"idempotency_key": pauseKey})
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.pause", pauseKey, 1)
+	requireServedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "platform.paused", 1)
 	duplicatePause := requireServedJSONRPCError(t, rt.Endpoint, "runtime.pause", map[string]any{})
 	if duplicatePause.Data["code"] != apiv1.RuntimeAlreadyPausedCode {
 		t.Fatalf("%s duplicate runtime.pause data = %#v, want %s", rt.Backend, duplicatePause.Data, apiv1.RuntimeAlreadyPausedCode)
 	}
-
-	queued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "external.observed",
-		"bundle_hash":     rt.BundleHash,
-		"payload":         map[string]any{},
-		"idempotency_key": keyPrefix + "-runtime-queued",
-	})
+	queued := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "external.observed", "bundle_hash": rt.BundleHash, "payload": map[string]any{}, "idempotency_key": keyPrefix + "-runtime-queued"})
 	if !queued.NewRunCreated || queued.RunID == "" || queued.EventID == "" {
 		t.Fatalf("%s runtime-paused event.publish result = %#v, want new queued run", rt.Backend, queued)
 	}
-	requireNoServedReceiptOutcomeDuring(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 250*time.Millisecond)
-
+	requireNoServedReceiptOutcomeDuring(t, rt.ReceiverStateReader, rt.Backend, queued.EventID, "platform", "pipeline", "success", 250*time.Millisecond)
 	resumeKey := keyPrefix + "-runtime-resume"
-	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{
-		"idempotency_key": resumeKey,
-	})
-	requireServedRuntimeIngressState(t, rt.DB, rt.Backend, "running", "platform.resumed")
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "runtime.resume", resumeKey, 1)
-	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{
-		"idempotency_key": resumeKey,
-	})
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "runtime.resume", resumeKey, 1)
-	requireServedEventNameCount(t, rt.DB, rt.Backend, "platform.resumed", 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{"idempotency_key": resumeKey})
+	requireServedRuntimeIngressState(t, rt.ReceiverStateReader, rt.Backend, "running", "platform.resumed")
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.resume", resumeKey, 1)
+	requireServedOKJSONRPC(t, rt.Endpoint, "runtime.resume", map[string]any{"idempotency_key": resumeKey})
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "runtime.resume", resumeKey, 1)
+	requireServedEventNameCount(t, rt.ReceiverStateReader, rt.Backend, "platform.resumed", 1)
 	duplicateResume := requireServedJSONRPCError(t, rt.Endpoint, "runtime.resume", map[string]any{})
 	if duplicateResume.Data["code"] != apiv1.RuntimeNotPausedCode {
 		t.Fatalf("%s duplicate runtime.resume data = %#v, want %s", rt.Backend, duplicateResume.Data, apiv1.RuntimeNotPausedCode)
 	}
-
-	waitServedEventPublishReceiptOutcomeCount(t, rt.DB, rt.Backend, queued.EventID, "platform", "pipeline", "success", 1)
+	waitServedEventPublishReceiptOutcomeCount(t, rt.ReceiverStateReader, rt.Backend, queued.EventID, "platform", "pipeline", "success", 1)
 	requireServedRunStatus(t, rt.Endpoint, queued.RunID, "running")
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, queued.RunID, servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle))
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, queued.RunID, servedparity.MustScenario(servedparity.ScenarioRuntimeResumeIngressLifecycle))
 }
 
 type servedDecisionCardFixture struct {
@@ -2772,51 +2676,36 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 	if !ok || len(items) < 2 {
 		t.Fatalf("%s mailbox.list items = %#v, want notice and decision card", rt.Backend, listed["items"])
 	}
-
 	var detail map[string]any
 	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": fixture.CardID}, &detail)
 	if detail["kind"] != decisioncard.KindDecisionCard {
 		t.Fatalf("%s mailbox.get kind = %#v", rt.Backend, detail)
 	}
-
 	var draft map[string]any
-	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.begin_input", map[string]any{
-		"card_id": fixture.CardID, "verdict": "reject", "observed_content_hash": fixture.ContentHash,
-		"idempotency_key": "begin-" + fixture.CardID,
-	}, &draft)
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.begin_input", map[string]any{"card_id": fixture.CardID, "verdict": "reject", "observed_content_hash": fixture.ContentHash, "idempotency_key": "begin-" + fixture.CardID}, &draft)
 	draftID := strings.TrimSpace(fmt.Sprint(draft["input_draft_id"]))
 	if draftID == "" || draft["status"] != decisioncard.DraftStatusActive {
 		t.Fatalf("%s begin_input = %#v", rt.Backend, draft)
 	}
 	var cancelled map[string]any
-	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.cancel_input", map[string]any{
-		"card_id": fixture.CardID, "input_draft_id": draftID, "idempotency_key": "cancel-" + fixture.CardID,
-	}, &cancelled)
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.cancel_input", map[string]any{"card_id": fixture.CardID, "input_draft_id": draftID, "idempotency_key": "cancel-" + fixture.CardID}, &cancelled)
 	if cancelled["status"] != decisioncard.DraftStatusCancelled {
 		t.Fatalf("%s cancel_input = %#v", rt.Backend, cancelled)
 	}
-
 	deferUntil := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
 	var deferred map[string]any
-	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.defer", map[string]any{
-		"card_id": fixture.CardID, "until": deferUntil.Format(time.RFC3339Nano), "idempotency_key": "defer-" + fixture.CardID,
-	}, &deferred)
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.defer", map[string]any{"card_id": fixture.CardID, "until": deferUntil.Format(time.RFC3339Nano), "idempotency_key": "defer-" + fixture.CardID}, &deferred)
 	if deferred["status"] != decisioncard.StatusPending {
 		t.Fatalf("%s mailbox.defer = %#v", rt.Backend, deferred)
 	}
-
 	var decided map[string]any
-	decideParams := map[string]any{
-		"card_id": fixture.CardID, "verdict": "approve", "observed_content_hash": fixture.ContentHash,
-		"fields":          map[string]any{"score": int64(9007199254740991)},
-		"idempotency_key": "decide-" + fixture.CardID,
-	}
+	decideParams := map[string]any{"card_id": fixture.CardID, "verdict": "approve", "observed_content_hash": fixture.ContentHash, "fields": map[string]any{"score": int64(9007199254740991)}, "idempotency_key": "decide-" + fixture.CardID}
 	unsafeRaw := fmt.Sprintf(`{"jsonrpc":"2.0","id":"unsafe-decision-number","method":"mailbox.decide","params":{"card_id":%q,"verdict":"approve","observed_content_hash":%q,"fields":{"score":9007199254740992},"idempotency_key":%q}}`, fixture.CardID, fixture.ContentHash, "unsafe-decide-"+fixture.CardID)
 	unsafe := requestServedRawJSONRPC(t, rt.Endpoint, unsafeRaw)
 	if unsafe.Error == nil || unsafe.Error.Code != -32600 {
 		t.Fatalf("%s unsafe mailbox.decide = %#v, want invalid request", rt.Backend, unsafe)
 	}
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "mailbox.decide", "unsafe-decide-"+fixture.CardID, 0)
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "mailbox.decide", "unsafe-decide-"+fixture.CardID, 0)
 	var stillPending map[string]any
 	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": fixture.CardID}, &stillPending)
 	if card := servedAnyMap(t, stillPending["decision_card"]); card["status"] != decisioncard.StatusPending {
@@ -2847,13 +2736,9 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 		t.Fatalf("%s persisted decision fields = %#v", rt.Backend, fields)
 	}
 	requireServedDecisionEventSafeInteger(t, rt.DB, rt.Backend, strings.TrimSpace(fmt.Sprint(decided["decision_event_id"])))
-
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		instance, ok, err := fixture.Workflow.Load(runtimecorrelation.WithRunID(context.Background(), fixture.RunID), runtimeflowidentity.RunScopedFlowInstance{
-			RunID: fixture.RunID,
-			Route: runtimeflowidentity.RouteForInstancePath(fixture.RunID),
-		})
+		instance, ok, err := fixture.Workflow.Load(runtimecorrelation.WithRunID(context.Background(), fixture.RunID), runtimeflowidentity.RunScopedFlowInstance{RunID: fixture.RunID, Route: runtimeflowidentity.RouteForInstancePath(fixture.RunID)})
 		if err == nil && ok && instance.CurrentState == "done" {
 			break
 		}
@@ -2862,23 +2747,14 @@ func runServedMailboxDecisionLifecycleProof(t *testing.T, rt servedControlProofR
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-
 	requireServedMailboxSubscription(t, rt.Endpoint, fixture.CardID)
 	var acknowledged map[string]any
-	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.acknowledge", map[string]any{
-		"mailbox_id": fixture.NoticeID, "idempotency_key": "ack-" + fixture.NoticeID,
-	}, &acknowledged)
+	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.acknowledge", map[string]any{"mailbox_id": fixture.NoticeID, "idempotency_key": "ack-" + fixture.NoticeID}, &acknowledged)
 	if acknowledged["kind"] != decisioncard.KindNotice || acknowledged["ok"] != true {
 		t.Fatalf("%s mailbox.acknowledge = %#v", rt.Backend, acknowledged)
 	}
-	for _, scenarioID := range []string{
-		servedparity.ScenarioMailboxNoticeAcknowledgmentLifecycle,
-		servedparity.ScenarioMailboxBeginInputLifecycle,
-		servedparity.ScenarioMailboxCancelInputLifecycle,
-		servedparity.ScenarioMailboxDecisionCardLifecycle,
-		servedparity.ScenarioMailboxDeferDecisionLifecycle,
-	} {
-		requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, fixture.RunID, servedparity.MustScenario(scenarioID))
+	for _, scenarioID := range []string{servedparity.ScenarioMailboxNoticeAcknowledgmentLifecycle, servedparity.ScenarioMailboxBeginInputLifecycle, servedparity.ScenarioMailboxCancelInputLifecycle, servedparity.ScenarioMailboxDecisionCardLifecycle, servedparity.ScenarioMailboxDeferDecisionLifecycle} {
+		requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, fixture.RunID, servedparity.MustScenario(scenarioID))
 	}
 }
 
@@ -2960,20 +2836,7 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 	runID := uuid.NewString()
 	entityID := runID
 	key := keyPrefix + "-entities"
-	params := map[string]any{
-		"bundle_hash":     rt.BundleHash,
-		"run_id":          runID,
-		"idempotency_key": key,
-		"entities": []any{
-			map[string]any{
-				"alias":         "subject",
-				"entity_id":     entityID,
-				"entity_type":   "widget",
-				"current_state": "waiting",
-				"fields":        map[string]any{"score": 5},
-			},
-		},
-	}
+	params := map[string]any{"bundle_hash": rt.BundleHash, "run_id": runID, "idempotency_key": key, "entities": []any{map[string]any{"alias": "subject", "entity_id": entityID, "entity_type": "widget", "current_state": "waiting", "fields": map[string]any{"score": 5}}}}
 	var result struct {
 		RunID    string `json:"run_id"`
 		Entities []struct {
@@ -2994,8 +2857,7 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 	}
 	requireServedTestSetupPersistence(t, rt, runID, entityID)
 	requireServedScenarioRunOriginSurfaces(t, rt.Endpoint, runID)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "test.setup_entities", key, 1)
-
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "test.setup_entities", key, 1)
 	var replay struct {
 		RunID    string `json:"run_id"`
 		Entities []struct {
@@ -3006,21 +2868,14 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 	if replay.RunID != runID || len(replay.Entities) != 1 || replay.Entities[0].EntityID != entityID {
 		t.Fatalf("%s test.setup_entities replay = %#v, want original run/entity", rt.Backend, replay)
 	}
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "test.setup_entities", key, 1)
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "test.setup_entities", key, 1)
 	requireServedTestSetupPersistence(t, rt, runID, entityID)
-
-	published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "widget.scored",
-		"bundle_hash":     rt.BundleHash,
-		"run_id":          runID,
-		"payload":         map[string]any{"delta": 1},
-		"idempotency_key": keyPrefix + "-later-event",
-	})
+	published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "widget.scored", "bundle_hash": rt.BundleHash, "run_id": runID, "payload": map[string]any{"delta": 1}, "idempotency_key": keyPrefix + "-later-event"})
 	if published.RunID != runID || published.NewRunCreated || published.EventID == "" {
 		t.Fatalf("%s scenario event.publish result = %#v, want existing run", rt.Backend, published)
 	}
 	requireServedScenarioRunOriginSurfaces(t, rt.Endpoint, runID)
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioTestSetupEntitiesLifecycle))
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioTestSetupEntitiesLifecycle))
 }
 
 func requireServedScenarioRunOriginSurfaces(t *testing.T, endpoint, runID string) {
@@ -3065,28 +2920,23 @@ func requireServedScenarioRunOriginSurfaces(t *testing.T, endpoint, runID string
 
 func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntime, runID, entityID string) {
 	t.Helper()
-	db := rt.DB
 	backend := rt.Backend
 	bundleHash := rt.Runtime.Options.SourceArtifactFact.BundleHash()
 	if bundleHash == "" || bundleHash != rt.BundleHash {
 		t.Fatalf("%s served runtime source artifact = %q, want exact hash %q", backend, bundleHash, rt.BundleHash)
 	}
-	var status, originKind, trigger, gotHash string
-	var runQuery string
-	var runArgs []any
 	switch backend {
-	case "postgres":
-		runQuery = `SELECT status, origin_kind, COALESCE(trigger_event_type, ''), COALESCE(bundle_hash, '') FROM runs WHERE run_id = $1::uuid`
-		runArgs = []any{runID}
-	case "sqlite":
-		runQuery = `SELECT status, origin_kind, COALESCE(trigger_event_type, ''), COALESCE(bundle_hash, '') FROM runs WHERE run_id = ?`
-		runArgs = []any{runID}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown test.setup_entities proof backend %q", backend)
 	}
-	if err := db.QueryRowContext(context.Background(), runQuery, runArgs...).Scan(&status, &originKind, &trigger, &gotHash); err != nil {
+	run, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) (storetest.ServedSetupRunStorage, error) {
+		return storetest.ReadServedSetupRunStorage(ctx, rt.ReceiverStateReader, runID)
+	})
+	if err != nil {
 		t.Fatalf("%s load test.setup_entities run %s: %v", backend, runID, err)
 	}
+	status, originKind, trigger, gotHash := run.Status, run.OriginKind, run.Trigger, run.BundleHash
 	if status != "running" || originKind != string(storerunlifecycle.OriginScenarioSetup) ||
 		trigger != "" || gotHash != bundleHash {
 		t.Fatalf(
@@ -3095,89 +2945,44 @@ func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntim
 		)
 	}
 
-	var flow, typ, state string
-	var score any
-	var entityQuery string
-	var entityArgs []any
-	switch backend {
-	case "postgres":
-		entityQuery = `
-			SELECT flow_instance, entity_type, current_state, fields->>'score'
-			FROM entity_state
-			WHERE run_id = $1::uuid AND entity_id = $2::uuid
-		`
-		entityArgs = []any{runID, entityID}
-	case "sqlite":
-		entityQuery = `
-			SELECT flow_instance, entity_type, current_state, json_extract(fields, '$.score')
-			FROM entity_state
-			WHERE run_id = ? AND entity_id = ?
-		`
-		entityArgs = []any{runID, entityID}
-	}
-	if err := db.QueryRowContext(context.Background(), entityQuery, entityArgs...).Scan(&flow, &typ, &state, &score); err != nil {
+	entity, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) (storetest.ServedSetupEntityStorage, error) {
+		return storetest.ReadServedSetupEntityStorage(ctx, rt.ReceiverStateReader, runID, entityID)
+	})
+	if err != nil {
 		t.Fatalf("%s load setup entity %s: %v", backend, entityID, err)
 	}
+	flow, typ, state, score := entity.FlowInstance, entity.EntityType, entity.State, entity.Score
 	if flow != runID || typ != "widget" || state != "waiting" || !jsonScalarInt(score, 5) {
 		t.Fatalf("%s setup entity row = flow:%q type:%q state:%q score:%#v", backend, flow, typ, state, score)
 	}
 
-	var mutations int
-	var mutationQuery string
-	var mutationArgs []any
-	switch backend {
-	case "postgres":
-		mutationQuery = `
-			SELECT COUNT(*)
-			FROM entity_mutations
-			WHERE run_id = $1::uuid
-			  AND entity_id = $2::uuid
-		`
-		mutationArgs = []any{runID, entityID}
-	case "sqlite":
-		mutationQuery = `
-			SELECT COUNT(*)
-			FROM entity_mutations
-			WHERE run_id = ?
-			  AND entity_id = ?
-		`
-		mutationArgs = []any{runID, entityID}
-	}
-	if err := db.QueryRowContext(context.Background(), mutationQuery, mutationArgs...).Scan(&mutations); err != nil {
+	mutations, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) (int, error) {
+		return storetest.CountAllRunEntityMutationsStorage(ctx, rt.ReceiverStateReader, runID, entityID)
+	})
+	if err != nil {
 		t.Fatalf("%s count setup entity mutations: %v", backend, err)
 	}
 	if mutations != 3 {
-		rows, err := db.QueryContext(context.Background(), `SELECT writer_type, writer_id, handler_step, domain, path, count(*) FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 GROUP BY writer_type, writer_id, handler_step, domain, path ORDER BY writer_type, writer_id, handler_step, domain, path`, runID, entityID)
+		rows, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) ([]storetest.ServedSetupMutationAuthorityStorage, error) {
+			return storetest.ReadServedSetupMutationAuthoritiesStorage(ctx, rt.ReceiverStateReader, runID, entityID)
+		})
 		if err != nil {
 			t.Fatalf("%s inspect setup mutation ownership: %v", backend, err)
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var writerType, writerID, domain, path string
-			var step sql.NullString
-			var count int
-			if err := rows.Scan(&writerType, &writerID, &step, &domain, &path, &count); err != nil {
-				t.Fatal(err)
-			}
-			t.Logf("setup mutation authority: type=%s writer=%s step=%s domain=%s path=%s count=%d", writerType, writerID, step.String, domain, path, count)
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
+		for _, row := range rows {
+			t.Logf("setup mutation authority: type=%s writer=%s step=%s domain=%s path=%s count=%d", row.WriterType, row.WriterID, row.Step.String, row.Domain, row.Path, row.Count)
 		}
 		t.Fatalf("%s setup constructor mutation rows = %d, want 3", backend, mutations)
 	}
-	rows, err := db.QueryContext(context.Background(), `SELECT domain, path, old_value, new_value FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 AND writer_type='platform' AND writer_id='workflow_engine' AND handler_step='create' ORDER BY domain, path`, runID, entityID)
+	rows, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) ([]storetest.ServedSetupConstructorMutationStorage, error) {
+		return storetest.ReadServedSetupConstructorMutationsStorage(ctx, rt.ReceiverStateReader, runID, entityID)
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
 	var actual []string
-	for rows.Next() {
-		var domain, path, after string
-		var before sql.NullString
-		if err := rows.Scan(&domain, &path, &before, &after); err != nil {
-			t.Fatal(err)
-		}
+	for _, row := range rows {
+		domain, path, after, before := row.Domain, row.Path, row.After, row.Before
 		if before.Valid {
 			t.Fatalf("setup constructor mutation overwrote existing %s/%s: %s", domain, path, before.String)
 		}
@@ -3197,9 +3002,6 @@ func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntim
 				t.Fatalf("setup constructor stage-entry mutation = %s, err=%v", after, err)
 			}
 		}
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
 	}
 	if want := []string{"authored_field/score", "bookkeeping/stage_entry", "lifecycle_state/"}; !reflect.DeepEqual(actual, want) {
 		t.Fatalf("setup constructor mutation identities = %v, want %v", actual, want)
@@ -3227,7 +3029,7 @@ func jsonScalarInt(value any, want int64) bool {
 
 func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) servedDecisionCardFixture {
 	t.Helper()
-	ctx := servedControlProofAuthorActivityContext(t, rt)
+	ctx := servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime)
 	now := time.Now().UTC().Add(-time.Minute)
 	runID, entityID, sourceEventID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	bundleFact := rt.Runtime.Options.SourceArtifactFact
@@ -3245,9 +3047,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		}
 		cards, insertNotice = pg, pg.InsertMailboxItem
 		seedEvent = func(ctx context.Context, evt events.Event) error {
-			storetest.CommitSemanticEventWithInitialFacts(t, ctx, pg, evt, nil,
-				runtimepipelineobligation.ScopeSubscribed,
-				storetest.AcknowledgedPipelineDisposition())
+			storetest.CommitSemanticEventWithInitialFacts(t, ctx, pg, evt, nil, runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition())
 			return nil
 		}
 	case "sqlite":
@@ -3258,31 +3058,21 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 		cards = sqlite
 		insertNotice = sqlite.InsertMailboxItem
 		seedEvent = func(ctx context.Context, evt events.Event) error {
-			storetest.CommitSemanticEventWithInitialFacts(t, ctx, sqlite, evt, nil,
-				runtimepipelineobligation.ScopeSubscribed,
-				storetest.AcknowledgedPipelineDisposition())
+			storetest.CommitSemanticEventWithInitialFacts(t, ctx, sqlite, evt, nil, runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition())
 			return nil
 		}
 	default:
 		t.Fatalf("unknown decision-card proof backend %q", rt.Backend)
 	}
-	evt := eventtest.RunCreatingRootIngress(sourceEventID, "item.received", "", "", json.RawMessage(`{"item_id":"review"}`), 0, runID, "",
-		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), runID), now)
+	evt := eventtest.RunCreatingRootIngress(sourceEventID, "item.received", "", "", json.RawMessage(`{"item_id":"review"}`), 0, runID, "", events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), runID), now)
 	if err := seedEvent(ctx, evt); err != nil {
 		t.Fatalf("seed decision-card source event: %v", err)
 	}
-	noticeID, err := insertNotice(ctx, runtimetools.MailboxItem{
-		EventID: sourceEventID, EntityID: entityID, FlowInstance: runID, FromAgent: "review-agent",
-		Type: "notice", Priority: "normal", Status: "pending", Summary: "review queued", Context: []byte(`{"title":"review queued"}`),
-	})
+	noticeID, err := insertNotice(ctx, runtimetools.MailboxItem{EventID: sourceEventID, EntityID: entityID, FlowInstance: runID, FromAgent: "review-agent", Type: "notice", Priority: "normal", Status: "pending", Summary: "review queued", Context: []byte(`{"title":"review queued"}`)})
 	if err != nil {
 		t.Fatalf("seed mailbox notice: %v", err)
 	}
-
-	outcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {Verdict: "approve", AdvancesTo: "done"},
-		"reject":  {Verdict: "reject", AdvancesTo: "rework"},
-	}
+	outcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "done"}, "reject": {Verdict: "reject", AdvancesTo: "rework"}}
 	routes, err := gateruntime.FreezeRoutes(outcomes, servedDecisionCardTransitionFixture(t, rt.Runtime.Pipeline.SemanticSource(), outcomes))
 	if err != nil {
 		t.Fatalf("FreezeRoutes: %v", err)
@@ -3333,10 +3123,7 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 			}
 		}
 	}
-	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Launch review", map[string]any{"environment": "staging"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {Verdict: "approve", AdvancesTo: "done", Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}}, InputOrder: []string{"score"}},
-		"reject":  {Verdict: "reject", AdvancesTo: "rework", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}, InputOrder: []string{"feedback"}},
-	})
+	snapshot, err := decisioncard.FreezeSnapshot(activation.DecisionID, "Launch review", map[string]any{"environment": "staging"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "done", Input: map[string]runtimecontracts.WorkflowGateInputField{"score": {Type: "integer", Required: true}}, InputOrder: []string{"score"}}, "reject": {Verdict: "reject", AdvancesTo: "rework", Input: map[string]runtimecontracts.WorkflowGateInputField{"feedback": {Type: "text", Required: true}}, InputOrder: []string{"feedback"}}})
 	if err != nil {
 		t.Fatalf("freeze decision card snapshot: %v", err)
 	}
@@ -3344,23 +3131,11 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	if err != nil {
 		t.Fatalf("admit decision card provenance: %v", err)
 	}
-	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		Route: runtimeflowidentity.RouteForInstancePath(runID), FlowID: ".", EntityID: entityID, Stage: activation.Stage,
-		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
-	})
+	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{Route: runtimeflowidentity.RouteForInstancePath(runID), FlowID: ".", EntityID: entityID, Stage: activation.Stage, StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID)})
 	if err != nil {
 		t.Fatalf("new decision card anchor: %v", err)
 	}
-	card, err := decisioncard.New(decisioncard.Card{
-		CardID:        activation.CardID,
-		RunID:         runID,
-		ExecutionMode: executionmode.Live,
-		Anchor:        anchor,
-		Snapshot:      snapshot,
-		BundleHash:    bundleHash, WorkflowVersion: workflowVersion,
-		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
-		Provenance:       provenance, CreatedAt: now,
-	})
+	card, err := decisioncard.New(decisioncard.Card{CardID: activation.CardID, RunID: runID, ExecutionMode: executionmode.Live, Anchor: anchor, Snapshot: snapshot, BundleHash: bundleHash, WorkflowVersion: workflowVersion, EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"}, Provenance: provenance, CreatedAt: now})
 	if err != nil {
 		t.Fatalf("new decision card: %v", err)
 	}
@@ -3396,6 +3171,8 @@ func runServedCreateCarryProjectionBackendProof(t *testing.T, backend servedpari
 
 func runServedCreateCarryProjectionSQLiteProof(t *testing.T) {
 	t.Helper()
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
@@ -3418,11 +3195,13 @@ func runServedCreateCarryProjectionSQLiteProof(t *testing.T) {
 	if servedDB == nil {
 		t.Fatal("served sqlite SQLDB is required for create carry projection proof")
 	}
-	runServedCreateCarryProjectionProof(t, endpoint, servedDB, "sqlite", bundleHash)
+	runServedCreateCarryProjectionProof(t, endpoint, servedDB, reader, "sqlite", bundleHash)
 }
 
 func runServedCreateCarryProjectionPostgresProof(t *testing.T) {
 	t.Helper()
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -3440,10 +3219,10 @@ func runServedCreateCarryProjectionPostgresProof(t *testing.T) {
 		Verbose:                 true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	})
-	runServedCreateCarryProjectionProof(t, endpoint, db, "postgres", bundleHash)
+	runServedCreateCarryProjectionProof(t, endpoint, db, reader, "postgres", bundleHash)
 }
 
-func runServedCreateCarryProjectionProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string) {
+func runServedCreateCarryProjectionProof(t *testing.T, endpoint string, db *sql.DB, reader receiverProofStateReader, backend, bundleHash string) {
 	t.Helper()
 	root := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
 		"event_name":      "validation.triggered",
@@ -3454,9 +3233,9 @@ func runServedCreateCarryProjectionProof(t *testing.T, endpoint string, db *sql.
 	if !root.NewRunCreated || root.RunID == "" || root.EventID == "" {
 		t.Fatalf("%s create carry root result = %#v, want new run", backend, root)
 	}
-	requestedEventID := waitServedEventPublishEventID(t, db, backend, root.RunID, "producer/validation.requested")
+	requestedEventID := waitServedEventPublishEventID(t, reader, backend, root.RunID, "producer/validation.requested")
 
-	requestedPayload := servedEventPayloadObject(t, db, backend, requestedEventID)
+	requestedPayload := servedEventPayloadObject(t, reader, backend, requestedEventID)
 	if requestedPayload["candidate"] != "candidate-1" {
 		t.Fatalf("%s requested payload = %#v, want authored candidate", backend, requestedPayload)
 	}
@@ -3471,27 +3250,22 @@ func runServedCreateCarryProjectionProof(t *testing.T, endpoint string, db *sql.
 	if targetFlow != "validator" || targetInstance == "" {
 		t.Fatalf("%s projected route target = %s/%s, want concrete validator instance", backend, targetFlow, targetInstance)
 	}
-	startedEventID := waitServedEventPublishEventID(t, db, backend, root.RunID, targetInstance+"/validation.started")
-	startedPayload := servedEventPayloadObject(t, db, backend, startedEventID)
+	startedEventID := waitServedEventPublishEventID(t, reader, backend, root.RunID, targetInstance+"/validation.started")
+	startedPayload := servedEventPayloadObject(t, reader, backend, startedEventID)
 	if startedPayload["candidate"] != "candidate-1" || startedPayload["validation_case_id"] != validationCaseID {
 		t.Fatalf("%s downstream payload = %#v, want explicit candidate and projected validation_case_id %s", backend, startedPayload, validationCaseID)
 	}
-	if current := servedEventPayloadObject(t, db, backend, requestedEventID); !reflect.DeepEqual(current, requestedPayload) {
+	if current := servedEventPayloadObject(t, reader, backend, requestedEventID); !reflect.DeepEqual(current, requestedPayload) {
 		t.Fatalf("%s source payload changed after handler execution: before=%#v after=%#v", backend, requestedPayload, current)
 	}
 
-	requireServedParitySettlementPostconditions(t, endpoint, db, backend, root.RunID, servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle))
+	requireServedParitySettlementPostconditions(t, endpoint, reader, backend, root.RunID, servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle))
 }
 
-func servedEventPayloadObject(t *testing.T, db *sql.DB, backend, eventID string) map[string]any {
+func servedEventPayloadObject(t *testing.T, reader servedEventCountReader, backend, eventID string) map[string]any {
 	t.Helper()
-	query := "SELECT payload FROM events WHERE event_id = ?"
-	args := []any{eventID}
-	if backend == "postgres" {
-		query = "SELECT payload::text FROM events WHERE event_id = $1::uuid"
-	}
-	var raw string
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&raw); err != nil {
+	raw, err := readServedPublicationPayloadText(context.Background(), reader, eventID)
+	if err != nil {
 		t.Fatalf("%s load event payload %s: %v", backend, eventID, err)
 	}
 	var payload map[string]any
@@ -3529,6 +3303,8 @@ func servedEventDeliveryProjection(t *testing.T, db *sql.DB, backend, eventID, s
 }
 
 func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	t.Helper()
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
@@ -3565,7 +3341,7 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 					hookMu.Unlock()
 					return fmt.Errorf("served sqlite SQLDB is required for dynamic event.publish proof")
 				}
-				hook = servedEventPublishBlockingHandlerAuthorityHook(servedDB, "sqlite", identitytest.RootNode(t, "portfolio-node").Key(), "opco.spinup_requested", blocked, release)
+				hook = servedEventPublishBlockingHandlerAuthorityHook(&reader, "sqlite", identitytest.RootNode(t, "portfolio-node").Key(), "opco.spinup_requested", blocked, release)
 			}
 			h := hook
 			hookMu.Unlock()
@@ -3576,12 +3352,14 @@ func runServedDynamicAutoEmitSQLiteProof(t *testing.T) {
 	if servedDB == nil {
 		t.Fatal("served sqlite SQLDB is required for dynamic event.publish proof")
 	}
-	runServedDynamicAutoEmitProof(t, endpoint, servedDB, "sqlite", bundleHash, blocked, release, &releaseOnce)
+	runServedDynamicAutoEmitProof(t, endpoint, reader, "sqlite", bundleHash, blocked, release, &releaseOnce)
 }
 
 func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
+	var reader receiverProofStateReader
+	captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { reader = requireReceiverProofStateReader(t, p.deps.EventStore) })
 	t.Helper()
-	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+	_, _, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
 	sourceRoot := writeServedDynamicAutoEmitFixture(t)
@@ -3599,43 +3377,28 @@ func runServedDynamicAutoEmitPostgresProof(t *testing.T) {
 		MCPListenAddr:                    "127.0.0.1:0",
 		SelfCheck:                        true,
 		Verbose:                          true,
-		TestWorkflowNodeHandlerStartHook: servedEventPublishBlockingHandlerAuthorityHook(db, "postgres", identitytest.RootNode(t, "portfolio-node").Key(), "opco.spinup_requested", blocked, release),
+		TestWorkflowNodeHandlerStartHook: servedEventPublishBlockingHandlerAuthorityHook(&reader, "postgres", identitytest.RootNode(t, "portfolio-node").Key(), "opco.spinup_requested", blocked, release),
 		TestOutboxSweeperConfig:          servedEventPublishProofOutboxSweeperConfig(),
 	})
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
 
-	runServedDynamicAutoEmitProof(t, endpoint, db, "postgres", bundleHash, blocked, release, &releaseOnce)
+	runServedDynamicAutoEmitProof(t, endpoint, reader, "postgres", bundleHash, blocked, release, &releaseOnce)
 }
 
 // Typed input routing derives this concrete path from the declared instance_id
 // business key; the retired create action used that key verbatim as its path.
 const servedTypedCreationInstancePath = "operating/ti-637499c0f9a5eda60519f6d3"
 
-func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, blocked <-chan servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once) {
+func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, reader receiverProofStateReader, backend, bundleHash string, blocked <-chan servedEventPublishPreHandlerProof, release chan struct{}, releaseOnce *sync.Once) {
 	t.Helper()
-	bootstrap := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name":      "opco.bootstrap_requested",
-		"bundle_hash":     bundleHash,
-		"payload":         map[string]any{"owner": "operator"},
-		"idempotency_key": "issue-1384-" + backend + "-bootstrap",
-	})
+	bootstrap := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "opco.bootstrap_requested", "bundle_hash": bundleHash, "payload": map[string]any{"owner": "operator"}, "idempotency_key": "issue-1384-" + backend + "-bootstrap"})
 	if !bootstrap.NewRunCreated || bootstrap.EventID == "" || bootstrap.RunID == "" {
 		t.Fatalf("bootstrap event.publish result = %#v, want new run and event id", bootstrap)
 	}
 	runID := bootstrap.RunID
-	parentEntityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
-
+	parentEntityID := requireServedEventPublishEntityState(t, reader, backend, runID, "", "waiting")
 	instanceID := "11111111-1111-4111-8111-111111111111"
-	spinupEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "opco.spinup_requested",
-		"run_id":          runID,
-		"source_event_id": bootstrap.EventID,
-		"payload": map[string]any{
-			"instance_id": instanceID,
-			"product_id":  "product-1",
-		},
-		"idempotency_key": "issue-1384-" + backend + "-spinup",
-	})
+	spinupEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{"event_name": "opco.spinup_requested", "run_id": runID, "source_event_id": bootstrap.EventID, "payload": map[string]any{"instance_id": instanceID, "product_id": "product-1"}, "idempotency_key": "issue-1384-" + backend + "-spinup"})
 	if spinupEnvelope.Error != nil {
 		t.Fatalf("spinup event.publish error = %#v", spinupEnvelope.Error)
 	}
@@ -3647,62 +3410,59 @@ func runServedDynamicAutoEmitProof(t *testing.T, endpoint string, db *sql.DB, ba
 		t.Fatalf("spinup event.publish result = %#v, want existing run with source lineage", spinup)
 	}
 	portfolioNode := identitytest.RootNode(t, "portfolio-node").Key()
-	requireServedEventPublishPreHandlerProof(t, db, backend, blocked, runID, spinup.EventID, portfolioNode)
+	requireServedEventPublishPreHandlerProof(t, reader, backend, blocked, runID, spinup.EventID, portfolioNode)
 	assertServedEventPublishDeliveriesContainStatus(t, spinup.Deliveries, "node", portfolioNode, "pending", "in_progress")
-	if got := servedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "node", portfolioNode, "in_progress"); got != 1 {
-		t.Fatalf("%s parent delivery in_progress count = %d, want 1\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	if got := servedEventPublishDeliveryStatusCount(t, reader, backend, spinup.EventID, "node", portfolioNode, "in_progress"); got != 1 {
+		t.Fatalf("%s parent delivery in_progress count = %d, want 1\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-	requireServedEventPublishCommittedReplayScope(t, db, backend, runID, spinup.EventID, "subscribed")
-	if got := servedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "", "workflow-runtime"); got != 0 {
-		t.Fatalf("%s parent workflow-runtime delivery count = %d, want 0\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	requireServedEventPublishCommittedReplayScope(t, reader, backend, runID, spinup.EventID, "subscribed")
+	if got := servedEventPublishDeliveryStatusCount(t, reader, backend, spinup.EventID, "", "workflow-runtime"); got != 0 {
+		t.Fatalf("%s parent workflow-runtime delivery count = %d, want 0\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-	// The original publication's asynchronous log is accepted work, not an
-	// effect of the rejected replay. Settle that exact fact before snapshotting.
 	waitServedEventPublishedLog(t, endpoint, runID, spinup.EventID)
-	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, backend, spinup.EventID, "issue-1384-"+backend+"-replay-pending-parent")
-
-	releaseOnce.Do(func() { close(release) })
-	waitServedEventPublishDeliveryStatusCount(t, db, backend, spinup.EventID, "node", identitytest.RootNode(t, "portfolio-node").Key(), "delivered", 1)
-	waitServedDeliveryOutcomeCount(t, db, backend, spinup.EventID, "node", portfolioNode, "delivered", 1)
+	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, reader, backend, spinup.EventID, "issue-1384-"+backend+"-replay-pending-parent")
+	releaseOnce.Do(func() {
+		close(release)
+	})
+	waitServedEventPublishDeliveryStatusCount(t, reader, backend, spinup.EventID, "node", identitytest.RootNode(t, "portfolio-node").Key(), "delivered", 1)
+	waitServedDeliveryOutcomeCount(t, reader, backend, spinup.EventID, "node", portfolioNode, "delivered", 1)
 	requireServedEventReadback(t, endpoint, spinup.EventID, runID, parentEntityID, "opco.spinup_requested", portfolioNode)
 	requireServedTraceReadback(t, endpoint, runID, spinup.EventID, "opco.spinup_requested", portfolioNode)
-
 	autoEventName := servedTypedCreationInstancePath + "/opco.product_initialization_requested"
-	autoEventID := waitServedEventPublishEventID(t, db, backend, runID, autoEventName)
-	autoEntityID := servedEventPublishEventEntityID(t, db, backend, autoEventID)
-	assertServedDynamicAutoEmitPayload(t, db, backend, autoEventID, map[string]any{"instance_id": instanceID, "product_id": "product-1"})
+	autoEventID := waitServedEventPublishEventID(t, reader, backend, runID, autoEventName)
+	autoEntityID := servedEventPublishEventEntityID(t, reader, backend, autoEventID)
+	assertServedDynamicAutoEmitPayload(t, reader, backend, autoEventID, map[string]any{"instance_id": instanceID, "product_id": "product-1"})
 	lifecycleNode := identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key()
 	requireServedEventReadback(t, endpoint, autoEventID, runID, autoEntityID, autoEventName, lifecycleNode)
 	requireServedTraceReadback(t, endpoint, runID, autoEventID, autoEventName, lifecycleNode)
-	waitServedDeliveryOutcomeCount(t, db, backend, autoEventID, "node", lifecycleNode, "delivered", 1)
-	requireServedEventPublishCommittedReplayScope(t, db, backend, runID, autoEventID, "subscribed")
-	if got := servedEventPublishDeliveryStatusCount(t, db, backend, autoEventID, "", "workflow-runtime"); got != 0 {
-		t.Fatalf("%s child workflow-runtime delivery count = %d, want 0\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	waitServedDeliveryOutcomeCount(t, reader, backend, autoEventID, "node", lifecycleNode, "delivered", 1)
+	requireServedEventPublishCommittedReplayScope(t, reader, backend, runID, autoEventID, "subscribed")
+	if got := servedEventPublishDeliveryStatusCount(t, reader, backend, autoEventID, "", "workflow-runtime"); got != 0 {
+		t.Fatalf("%s child workflow-runtime delivery count = %d, want 0\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-	if got := servedEventPublishReceiptCountBySubscribers(t, db, backend, autoEventID, "workflow-runtime", "__runtime_replay_scope__"); got != 0 {
-		t.Fatalf("%s child runtime/replay receipt count = %d, want 0\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	if got := servedEventPublishReceiptCountBySubscribers(t, reader, backend, autoEventID, "workflow-runtime", "__runtime_replay_scope__"); got != 0 {
+		t.Fatalf("%s child runtime/replay receipt count = %d, want 0\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-
 	componentEventName := servedTypedCreationInstancePath + "/component_scaffold.spawn_requested"
-	componentEventID := waitServedEventPublishEventID(t, db, backend, runID, componentEventName)
-	assertServedDynamicAutoEmitPayload(t, db, backend, componentEventID, map[string]any{"product_id": "product-1"})
-	componentEntityID := servedEventPublishEventEntityID(t, db, backend, componentEventID)
+	componentEventID := waitServedEventPublishEventID(t, reader, backend, runID, componentEventName)
+	assertServedDynamicAutoEmitPayload(t, reader, backend, componentEventID, map[string]any{"product_id": "product-1"})
+	componentEntityID := servedEventPublishEventEntityID(t, reader, backend, componentEventID)
 	componentNode := identitytest.FlowNode(t, "operating", "component-scaffold").Key()
 	requireServedEventReadback(t, endpoint, componentEventID, runID, componentEntityID, componentEventName, componentNode)
 	requireServedTraceReadback(t, endpoint, runID, componentEventID, componentEventName, componentNode)
-	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
+	requireServedRunStatusWithDebug(t, endpoint, reader, backend, runID, "completed")
 	requireServedRunDiagnoseOperationalState(t, endpoint, runID, "completed")
 	requireServedStatusCLIReadback(t, endpoint, runID, "  completed")
-	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, db, backend, autoEventID, "issue-1384-"+backend+"-replay-child-node-only")
-	requireServedParitySettlementPostconditions(t, endpoint, db, backend, runID, servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle))
+	requireServedReplayNoDeliveryHistoryNoMutation(t, endpoint, reader, backend, autoEventID, "issue-1384-"+backend+"-replay-child-node-only")
+	requireServedParitySettlementPostconditions(t, endpoint, reader, backend, runID, servedparity.MustScenario(servedparity.ScenarioEventPublishDynamicAutoEmitLifecycle))
 }
 
-func requireServedParitySettlementPostconditions(t *testing.T, endpoint string, db *sql.DB, backend, runID string, scenario servedparity.Scenario) {
+func requireServedParitySettlementPostconditions(t *testing.T, endpoint string, reader receiverProofStateReader, backend, runID string, scenario servedparity.Scenario) {
 	t.Helper()
-	requireServedParitySettlementPostconditionsWithDebug(t, endpoint, db, backend, runID, scenario, nil)
+	requireServedParitySettlementPostconditionsWithDebug(t, endpoint, reader, backend, runID, scenario, nil)
 }
 
-func requireServedParitySettlementPostconditionsWithDebug(t *testing.T, endpoint string, db *sql.DB, backend, runID string, scenario servedparity.Scenario, debug func() string) {
+func requireServedParitySettlementPostconditionsWithDebug(t *testing.T, endpoint string, reader receiverProofStateReader, backend, runID string, scenario servedparity.Scenario, debug func() string) {
 	t.Helper()
 	var last cliapp.DiagnosticRunDiagnosisResult
 	deadline := time.Now().Add(servedProofPollDeadline)
@@ -3728,7 +3488,7 @@ func requireServedParitySettlementPostconditionsWithDebug(t *testing.T, endpoint
 	if debug != nil {
 		extra = "\n" + debug()
 	} else {
-		extra = "\n" + servedEventPublishDebugSummary(t, db, backend, runID)
+		extra = "\n" + servedInspectionRunDebugSummary(reader, runID)
 	}
 	t.Fatalf("served parity scenario %s settlement did not quiesce for run %s: ready=%v active_deliveries=%d unsettled_pipeline_events=%d due_timers=%d active_session_leases=%d%s",
 		scenario.ID,
@@ -3742,20 +3502,15 @@ func requireServedParitySettlementPostconditionsWithDebug(t *testing.T, endpoint
 	)
 }
 
-func createServedControlWaitingRun(t *testing.T, rt servedControlProofRuntime, suffix string) (runID, eventID, entityID string) {
+func createServedControlWaitingRun(t *testing.T, selectedProofBackend string, selectedProofBundleHash string, selectedProofEndpoint string, selectedProofProbe *lifecycletest.Probe, selectedProofReceiverStateReader receiverProofStateReader, suffix string) (runID, eventID, entityID string) {
 	t.Helper()
-	result := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "item.received",
-		"bundle_hash":     rt.BundleHash,
-		"payload":         map[string]any{"item_id": suffix},
-		"idempotency_key": "issue-1864-" + rt.Backend + "-" + suffix,
-	})
+	result := requireServedEventPublishRPCResult(t, selectedProofEndpoint, map[string]any{"event_name": "item.received", "bundle_hash": selectedProofBundleHash, "payload": map[string]any{"item_id": suffix}, "idempotency_key": "issue-1864-" + selectedProofBackend + "-" + suffix})
 	if !result.NewRunCreated || result.RunID == "" || result.EventID == "" {
-		t.Fatalf("%s control seed event.publish result = %#v, want new run", rt.Backend, result)
+		t.Fatalf("%s control seed event.publish result = %#v, want new run", selectedProofBackend, result)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, result.RunID, result.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
-	entityID = requireServedEventPublishEntityState(t, rt.DB, rt.Backend, result.RunID, "", "waiting")
-	requireServedRunStatus(t, rt.Endpoint, result.RunID, "running")
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, selectedProofReceiverStateReader, selectedProofBackend, result.RunID, result.EventID, identitytest.RootNode(t, "item-handler").Key(), selectedProofProbe)
+	entityID = requireServedEventPublishEntityState(t, selectedProofReceiverStateReader, selectedProofBackend, result.RunID, "", "waiting")
+	requireServedRunStatus(t, selectedProofEndpoint, result.RunID, "running")
 	return result.RunID, result.EventID, entityID
 }
 
@@ -3791,13 +3546,12 @@ type servedAgentRestartProofResult struct {
 func runServedAgentRestartLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
 	t.Helper()
 	const agentID = "load-agent"
-	runID, initialEventID, _ := createServedControlWaitingRun(t, rt, "issue-1927-restart-delivery-"+uuid.NewString())
-	beforeRestart := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-before-restart")
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, beforeRestart.EventID, "agent", agentID, "delivered", 1)
+	runID, initialEventID, _ := createServedControlWaitingRun(t, rt.Backend, rt.BundleHash, rt.Endpoint, rt.Probe, rt.ReceiverStateReader, "issue-1927-restart-delivery-"+uuid.NewString())
+	beforeRestart := publishServedLiveAgentHoldEvent(t, rt.Backend, rt.Endpoint, rt.ReceiverStateReader, runID, initialEventID, "agent-before-restart")
+	waitServedEventPublishDeliveryStatusCountForRun(t, rt.ReceiverStateReader, rt.Backend, runID, beforeRestart.EventID, "agent", agentID, "delivered", 1)
 	beforeGeneration := servedAgentLifecycleGeneration(t, rt, runID, agentID)
 	key := "issue-1927-" + rt.Backend + "-restart-" + uuid.NewString()
 	params := map[string]any{"run_id": runID, "agent_id": agentID, "idempotency_key": key}
-
 	var first servedAgentRestartProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.restart", params, &first)
 	if !first.OK {
@@ -3808,8 +3562,7 @@ func runServedAgentRestartLifecycleProof(t *testing.T, rt servedControlProofRunt
 		t.Fatalf("%s restart generation = %d, want adjacent %d", rt.Backend, afterGeneration, beforeGeneration+1)
 	}
 	requireServedAgentRestartEvidence(t, rt, runID, agentID, afterGeneration, 1)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.restart", key, 1)
-
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "agent.restart", key, 1)
 	var replay servedAgentRestartProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.restart", params, &replay)
 	if replay != first {
@@ -3819,11 +3572,10 @@ func runServedAgentRestartLifecycleProof(t *testing.T, rt servedControlProofRunt
 		t.Fatalf("%s replay generation = %d, want unchanged %d", rt.Backend, got, afterGeneration)
 	}
 	requireServedAgentRestartEvidence(t, rt, runID, agentID, afterGeneration, 1)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.restart", key, 1)
-
-	postRestart := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-restart")
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, postRestart.EventID, "agent", agentID, "delivered", 1)
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentRestartLifecycle))
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "agent.restart", key, 1)
+	postRestart := publishServedLiveAgentHoldEvent(t, rt.Backend, rt.Endpoint, rt.ReceiverStateReader, runID, initialEventID, "agent-restart")
+	waitServedEventPublishDeliveryStatusCountForRun(t, rt.ReceiverStateReader, rt.Backend, runID, postRestart.EventID, "agent", agentID, "delivered", 1)
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentRestartLifecycle))
 }
 
 func servedAgentLifecycleGeneration(t *testing.T, rt servedControlProofRuntime, runID, agentID string) uint64 {
@@ -3864,75 +3616,57 @@ func requireServedAgentRestartEvidence(t *testing.T, rt servedControlProofRuntim
 	}
 }
 
-func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, rt servedControlProofRuntime) {
+func runServedLiveAgentEventReplayLifecycleProof(t *testing.T, selectedProofBackend string, selectedProofBundleHash string, selectedProofEndpoint string, selectedProofProbe *lifecycletest.Probe, selectedProofReceiverStateReader receiverProofStateReader) {
 	t.Helper()
-	runID, initialEventID, _ := createServedControlWaitingRun(t, rt, "issue-1910-event-replay-"+uuid.NewString())
-
-	eventReplayOriginal := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "event-replay")
-	eventReplayKey := "issue-1910-" + rt.Backend + "-" + runID + "-event-replay"
-	beforeHoldEvents := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed")
-	beforeAuditEvents := servedEventNameCount(t, rt.DB, rt.Backend, "event.replayed")
+	runID, initialEventID, _ := createServedControlWaitingRun(t, selectedProofBackend, selectedProofBundleHash, selectedProofEndpoint, selectedProofProbe, selectedProofReceiverStateReader, "issue-1910-event-replay-"+uuid.NewString())
+	eventReplayOriginal := publishServedLiveAgentHoldEvent(t, selectedProofBackend, selectedProofEndpoint, selectedProofReceiverStateReader, runID, initialEventID, "event-replay")
+	eventReplayKey := "issue-1910-" + selectedProofBackend + "-" + runID + "-event-replay"
+	beforeHoldEvents := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "item.processed")
+	beforeAuditEvents := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "event.replayed")
 	var eventReplay servedEventReplayProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.replay", map[string]any{
-		"event_id":        eventReplayOriginal.EventID,
-		"idempotency_key": eventReplayKey,
-	}, &eventReplay)
-	requireServedLiveAgentEventReplayResult(t, rt, eventReplayOriginal.EventID, eventReplay)
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, eventReplay.ReplayEventID, "agent", "load-agent", "delivered", 1)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "event.replay", eventReplayKey, 1)
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
-		t.Fatalf("%s item.processed events after event.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "event.replay", map[string]any{"event_id": eventReplayOriginal.EventID, "idempotency_key": eventReplayKey}, &eventReplay)
+	requireServedLiveAgentEventReplayResult(t, selectedProofBackend, eventReplayOriginal.EventID, eventReplay)
+	waitServedEventPublishDeliveryStatusCountForRun(t, selectedProofReceiverStateReader, selectedProofBackend, runID, eventReplay.ReplayEventID, "agent", "load-agent", "delivered", 1)
+	requireServedControlAPIIdempotencyRows(t, selectedProofReceiverStateReader, selectedProofBackend, "event.replay", eventReplayKey, 1)
+	if got := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "item.processed"); got != beforeHoldEvents+1 {
+		t.Fatalf("%s item.processed events after event.replay = %d, want %d", selectedProofBackend, got, beforeHoldEvents+1)
 	}
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "event.replayed"); got != beforeAuditEvents+1 {
-		t.Fatalf("%s event.replayed events after event.replay = %d, want %d", rt.Backend, got, beforeAuditEvents+1)
+	if got := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "event.replayed"); got != beforeAuditEvents+1 {
+		t.Fatalf("%s event.replayed events after event.replay = %d, want %d", selectedProofBackend, got, beforeAuditEvents+1)
 	}
 	var eventReplayAgain servedEventReplayProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "event.replay", map[string]any{
-		"event_id":        eventReplayOriginal.EventID,
-		"idempotency_key": eventReplayKey,
-	}, &eventReplayAgain)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "event.replay", map[string]any{"event_id": eventReplayOriginal.EventID, "idempotency_key": eventReplayKey}, &eventReplayAgain)
 	if eventReplayAgain.ReplayEventID != eventReplay.ReplayEventID || eventReplayAgain.AuditEventID != eventReplay.AuditEventID {
-		t.Fatalf("%s event.replay idempotent result = %#v, want replay=%s audit=%s", rt.Backend, eventReplayAgain, eventReplay.ReplayEventID, eventReplay.AuditEventID)
+		t.Fatalf("%s event.replay idempotent result = %#v, want replay=%s audit=%s", selectedProofBackend, eventReplayAgain, eventReplay.ReplayEventID, eventReplay.AuditEventID)
 	}
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
-		t.Fatalf("%s item.processed events after idempotent event.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
+	if got := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "item.processed"); got != beforeHoldEvents+1 {
+		t.Fatalf("%s item.processed events after idempotent event.replay = %d, want %d", selectedProofBackend, got, beforeHoldEvents+1)
 	}
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioEventReplayLiveAgentLifecycle))
-
-	agentReplayOriginal := publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-replay")
-	agentReplayKey := "issue-1910-" + rt.Backend + "-" + runID + "-agent-replay"
-	beforeHoldEvents = servedEventNameCount(t, rt.DB, rt.Backend, "item.processed")
-	beforeAuditEvents = servedEventNameCount(t, rt.DB, rt.Backend, "event.replayed")
+	requireServedParitySettlementPostconditions(t, selectedProofEndpoint, selectedProofReceiverStateReader, selectedProofBackend, runID, servedparity.MustScenario(servedparity.ScenarioEventReplayLiveAgentLifecycle))
+	agentReplayOriginal := publishServedLiveAgentHoldEvent(t, selectedProofBackend, selectedProofEndpoint, selectedProofReceiverStateReader, runID, initialEventID, "agent-replay")
+	agentReplayKey := "issue-1910-" + selectedProofBackend + "-" + runID + "-agent-replay"
+	beforeHoldEvents = servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "item.processed")
+	beforeAuditEvents = servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "event.replayed")
 	var agentReplay servedAgentReplayProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay", map[string]any{
-		"event_id":        agentReplayOriginal.EventID,
-		"run_id":          runID,
-		"agent_id":        "load-agent",
-		"idempotency_key": agentReplayKey,
-	}, &agentReplay)
-	requireServedLiveAgentAgentReplayResult(t, rt, agentReplayOriginal.EventID, agentReplay)
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, agentReplay.ReplayEventID, "agent", "load-agent", "delivered", 1)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.replay", agentReplayKey, 1)
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
-		t.Fatalf("%s item.processed events after agent.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "agent.replay", map[string]any{"event_id": agentReplayOriginal.EventID, "run_id": runID, "agent_id": "load-agent", "idempotency_key": agentReplayKey}, &agentReplay)
+	requireServedLiveAgentAgentReplayResult(t, selectedProofBackend, agentReplayOriginal.EventID, agentReplay)
+	waitServedEventPublishDeliveryStatusCountForRun(t, selectedProofReceiverStateReader, selectedProofBackend, runID, agentReplay.ReplayEventID, "agent", "load-agent", "delivered", 1)
+	requireServedControlAPIIdempotencyRows(t, selectedProofReceiverStateReader, selectedProofBackend, "agent.replay", agentReplayKey, 1)
+	if got := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "item.processed"); got != beforeHoldEvents+1 {
+		t.Fatalf("%s item.processed events after agent.replay = %d, want %d", selectedProofBackend, got, beforeHoldEvents+1)
 	}
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "event.replayed"); got != beforeAuditEvents+1 {
-		t.Fatalf("%s event.replayed events after agent.replay = %d, want %d", rt.Backend, got, beforeAuditEvents+1)
+	if got := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "event.replayed"); got != beforeAuditEvents+1 {
+		t.Fatalf("%s event.replayed events after agent.replay = %d, want %d", selectedProofBackend, got, beforeAuditEvents+1)
 	}
 	var agentReplayAgain servedAgentReplayProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.replay", map[string]any{
-		"event_id":        agentReplayOriginal.EventID,
-		"run_id":          runID,
-		"agent_id":        "load-agent",
-		"idempotency_key": agentReplayKey,
-	}, &agentReplayAgain)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "agent.replay", map[string]any{"event_id": agentReplayOriginal.EventID, "run_id": runID, "agent_id": "load-agent", "idempotency_key": agentReplayKey}, &agentReplayAgain)
 	if agentReplayAgain.ReplayEventID != agentReplay.ReplayEventID || agentReplayAgain.AuditEventID != agentReplay.AuditEventID {
-		t.Fatalf("%s agent.replay idempotent result = %#v, want replay=%s audit=%s", rt.Backend, agentReplayAgain, agentReplay.ReplayEventID, agentReplay.AuditEventID)
+		t.Fatalf("%s agent.replay idempotent result = %#v, want replay=%s audit=%s", selectedProofBackend, agentReplayAgain, agentReplay.ReplayEventID, agentReplay.AuditEventID)
 	}
-	if got := servedEventNameCount(t, rt.DB, rt.Backend, "item.processed"); got != beforeHoldEvents+1 {
-		t.Fatalf("%s item.processed events after idempotent agent.replay = %d, want %d", rt.Backend, got, beforeHoldEvents+1)
+	if got := servedEventNameCount(t, selectedProofReceiverStateReader, selectedProofBackend, "item.processed"); got != beforeHoldEvents+1 {
+		t.Fatalf("%s item.processed events after idempotent agent.replay = %d, want %d", selectedProofBackend, got, beforeHoldEvents+1)
 	}
-	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentReplayLiveAgentLifecycle))
+	requireServedParitySettlementPostconditions(t, selectedProofEndpoint, selectedProofReceiverStateReader, selectedProofBackend, runID, servedparity.MustScenario(servedparity.ScenarioAgentReplayLiveAgentLifecycle))
 }
 
 type servedAgentDirectiveProofResult struct {
@@ -3947,22 +3681,16 @@ type servedAgentDirectiveProofResult struct {
 
 func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControlProofRuntime, effects *atomic.Int32, faults *servedDirectivePersistenceFaults) {
 	t.Helper()
-	runID, initialEventID, _ := createServedControlWaitingRun(t, rt, "agent-directive-"+uuid.NewString())
-	publishServedLiveAgentHoldEvent(t, rt, runID, initialEventID, "agent-directive-readiness")
+	runID, initialEventID, _ := createServedControlWaitingRun(t, rt.Backend, rt.BundleHash, rt.Endpoint, rt.Probe, rt.ReceiverStateReader, "agent-directive-"+uuid.NewString())
+	publishServedLiveAgentHoldEvent(t, rt.Backend, rt.Endpoint, rt.ReceiverStateReader, runID, initialEventID, "agent-directive-readiness")
 	effects.Store(0)
 	key := "issue-1932-" + rt.Backend + "-directive"
-	params := map[string]any{
-		"run_id":          runID,
-		"agent_id":        "load-agent",
-		"directive":       "perform one durable directive step",
-		"idempotency_key": key,
-	}
+	params := map[string]any{"run_id": runID, "agent_id": "load-agent", "directive": "perform one durable directive step", "idempotency_key": key}
 	var first servedAgentDirectiveProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", params, &first)
 	requireServedAgentDirectiveResult(t, rt.Backend, first)
 	requireServedAgentDirectivePersistence(t, rt, first, key, 1)
 	requireServedAgentDirectiveEffectCount(t, rt.Backend, effects, 1)
-
 	var replay servedAgentDirectiveProofResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", params, &replay)
 	if replay != first {
@@ -3970,30 +3698,15 @@ func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControl
 	}
 	requireServedAgentDirectivePersistence(t, rt, first, key, 1)
 	requireServedAgentDirectiveEffectCount(t, rt.Backend, effects, 1)
-
-	conflict := requireServedJSONRPCError(t, rt.Endpoint, "agent.send_directive", map[string]any{
-		"run_id":          runID,
-		"agent_id":        "load-agent",
-		"directive":       "a conflicting directive body",
-		"idempotency_key": key,
-	})
+	conflict := requireServedJSONRPCError(t, rt.Endpoint, "agent.send_directive", map[string]any{"run_id": runID, "agent_id": "load-agent", "directive": "a conflicting directive body", "idempotency_key": key})
 	if conflict.Data["code"] != apiv1.IdempotencyConflictCode {
 		t.Fatalf("%s directive conflict = %#v, want %s", rt.Backend, conflict.Data, apiv1.IdempotencyConflictCode)
 	}
 	requireServedAgentDirectivePersistence(t, rt, first, key, 1)
 	requireServedAgentDirectiveEffectCount(t, rt.Backend, effects, 1)
-
 	var keylessA, keylessB servedAgentDirectiveProofResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", map[string]any{
-		"run_id":    runID,
-		"agent_id":  "load-agent",
-		"directive": "keyless operation A",
-	}, &keylessA)
-	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", map[string]any{
-		"run_id":    runID,
-		"agent_id":  "load-agent",
-		"directive": "keyless operation B",
-	}, &keylessB)
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", map[string]any{"run_id": runID, "agent_id": "load-agent", "directive": "keyless operation A"}, &keylessA)
+	requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", map[string]any{"run_id": runID, "agent_id": "load-agent", "directive": "keyless operation B"}, &keylessB)
 	requireServedAgentDirectiveResult(t, rt.Backend, keylessA)
 	requireServedAgentDirectiveResult(t, rt.Backend, keylessB)
 	if keylessA.OperationID == keylessB.OperationID || keylessA.DirectiveEventID == keylessB.DirectiveEventID {
@@ -4001,28 +3714,19 @@ func runServedAgentDirectiveOutcomeLifecycleProof(t *testing.T, rt servedControl
 	}
 	requireServedAgentDirectiveOperationCount(t, rt.DB, rt.Backend, 3)
 	requireServedAgentDirectiveEffectCount(t, rt.Backend, effects, 3)
-	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "agent.send_directive", key, 1)
+	requireServedControlAPIIdempotencyRows(t, rt.ReceiverStateReader, rt.Backend, "agent.send_directive", key, 1)
 	for _, runID := range []string{first.RunID, keylessA.RunID, keylessB.RunID} {
-		requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentDirectiveOutcomeLifecycle))
+		requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.ReceiverStateReader, rt.Backend, runID, servedparity.MustScenario(servedparity.ScenarioAgentDirectiveOutcomeLifecycle))
 	}
-
 	for _, failureCase := range []struct {
 		name      string
 		directive string
 		class     runtimefailures.Class
 		detail    string
-	}{
-		{name: "untyped", directive: "return untyped directive failure", class: runtimefailures.ClassInternalFailure, detail: runtimeagentcontrol.DirectiveBoardStepFailedDetail},
-		{name: "typed", directive: "return typed directive failure", class: runtimefailures.ClassAuthenticationNeeded, detail: "provider_unauthorized"},
-	} {
+	}{{name: "untyped", directive: "return untyped directive failure", class: runtimefailures.ClassInternalFailure, detail: runtimeagentcontrol.DirectiveBoardStepFailedDetail}, {name: "typed", directive: "return typed directive failure", class: runtimefailures.ClassAuthenticationNeeded, detail: "provider_unauthorized"}} {
 		t.Run(failureCase.name+"_failure", func(t *testing.T) {
 			failureKey := "issue-1869-" + rt.Backend + "-" + failureCase.name
-			failureParams := map[string]any{
-				"run_id":          runID,
-				"agent_id":        "load-agent",
-				"directive":       failureCase.directive,
-				"idempotency_key": failureKey,
-			}
+			failureParams := map[string]any{"run_id": runID, "agent_id": "load-agent", "directive": failureCase.directive, "idempotency_key": failureKey}
 			before := effects.Load()
 			firstFailure := requireServedJSONRPCError(t, rt.Endpoint, "agent.send_directive", failureParams)
 			failure := requireServedDirectiveFailureEnvelope(t, rt, firstFailure, failureKey, failureCase.class, failureCase.detail)
@@ -4079,7 +3783,7 @@ func runServedDirectiveResultPersistenceUncertaintyProof(t *testing.T, rt served
 				if op.State != runtimeagentcontrol.DirectiveOperationExecuted || len(op.Response) == 0 || op.Failure != nil {
 					t.Fatalf("%s acknowledgment-loss durable operation = %#v", rt.Backend, op)
 				}
-				requireServedDirectivePipelineReceiptCount(t, rt, op.DirectiveEventID, 0)
+				requireServedDirectivePipelineReceiptCount(t, rt.ReceiverStateReader, rt.Backend, op.DirectiveEventID, 0)
 				var result servedAgentDirectiveProofResult
 				requireServedJSONRPCResult(t, rt.Endpoint, "agent.send_directive", params, &result)
 				requireServedAgentDirectiveResult(t, rt.Backend, result)
@@ -4087,12 +3791,12 @@ func runServedDirectiveResultPersistenceUncertaintyProof(t *testing.T, rt served
 				if op.State != runtimeagentcontrol.DirectiveOperationSucceeded {
 					t.Fatalf("%s acknowledgment-loss convergence state = %s", rt.Backend, op.State)
 				}
-				requireServedDirectivePipelineReceiptCount(t, rt, op.DirectiveEventID, 1)
+				requireServedDirectivePipelineReceiptCount(t, rt.ReceiverStateReader, rt.Backend, op.DirectiveEventID, 1)
 			} else {
 				if op.State != runtimeagentcontrol.DirectiveOperationExecuting || len(op.Response) != 0 || op.Failure != nil {
 					t.Fatalf("%s rollback durable operation = %#v", rt.Backend, op)
 				}
-				requireServedDirectivePipelineReceiptCount(t, rt, op.DirectiveEventID, 0)
+				requireServedDirectivePipelineReceiptCount(t, rt.ReceiverStateReader, rt.Backend, op.DirectiveEventID, 0)
 				expireServedDirectiveLease(t, rt, op.OperationID)
 				replay := requireServedJSONRPCError(t, rt.Endpoint, "agent.send_directive", params)
 				replayedFailure := servedDirectiveErrorFailure(t, rt.Backend, replay, apiv1.AgentDirectiveOutcomeIndeterminateCode)
@@ -4103,7 +3807,7 @@ func runServedDirectiveResultPersistenceUncertaintyProof(t *testing.T, rt served
 				if op.State != runtimeagentcontrol.DirectiveOperationIndeterminate || op.Failure == nil || op.Failure.Detail.Code != runtimeagentcontrol.DirectiveExecutionLeaseExpiredDetail {
 					t.Fatalf("%s rollback convergence operation = %#v", rt.Backend, op)
 				}
-				requireServedDirectivePipelineReceiptCount(t, rt, op.DirectiveEventID, 1)
+				requireServedDirectivePipelineReceiptCount(t, rt.ReceiverStateReader, rt.Backend, op.DirectiveEventID, 1)
 			}
 			if got := effects.Load(); got != before+1 {
 				t.Fatalf("%s result persistence replay effects = %d, want %d", rt.Backend, got, before+1)
@@ -4131,26 +3835,24 @@ func requireServedDirectiveFailureEnvelope(t *testing.T, rt servedControlProofRu
 		t.Fatalf("%s API failure = %#v, want %s/%s", rt.Backend, apiFailure, class, detail)
 	}
 
-	var state string
-	var operationFailure, receiptFailure []byte
 	switch rt.Backend {
-	case "postgres":
-		if err := rt.DB.QueryRow(`SELECT state, failure FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = $1`, key).Scan(&state, &operationFailure); err != nil {
-			t.Fatalf("load Postgres directive failure: %v", err)
-		}
-		if err := rt.DB.QueryRow(`SELECT er.failure FROM event_receipts er JOIN agent_directive_operations op ON op.directive_event_id = er.event_id WHERE op.method = 'agent.send_directive' AND op.idempotency_key = $1 AND er.subscriber_type = 'platform' AND er.subscriber_id = 'pipeline'`, key).Scan(&receiptFailure); err != nil {
-			t.Fatalf("load Postgres directive receipt failure: %v", err)
-		}
-	case "sqlite":
-		if err := rt.DB.QueryRow(`SELECT state, failure FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = ?`, key).Scan(&state, &operationFailure); err != nil {
-			t.Fatalf("load SQLite directive failure: %v", err)
-		}
-		if err := rt.DB.QueryRow(`SELECT er.failure FROM event_receipts er JOIN agent_directive_operations op ON op.directive_event_id = er.event_id WHERE op.method = 'agent.send_directive' AND op.idempotency_key = ? AND er.subscriber_type = 'platform' AND er.subscriber_id = 'pipeline'`, key).Scan(&receiptFailure); err != nil {
-			t.Fatalf("load SQLite directive receipt failure: %v", err)
-		}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown directive proof backend %q", rt.Backend)
 	}
+	operation, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) (storetest.DirectiveFailureStorage, error) {
+		return storetest.ReadDirectiveFailureStorage(ctx, rt.ReceiverStateReader, key)
+	})
+	if err != nil {
+		t.Fatalf("load %s directive failure: %v", rt.Backend, err)
+	}
+	receiptFailure, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) ([]byte, error) {
+		return storetest.ReadDirectivePipelineFailureStorage(ctx, rt.ReceiverStateReader, key)
+	})
+	if err != nil {
+		t.Fatalf("load %s directive receipt failure: %v", rt.Backend, err)
+	}
+	state, operationFailure := operation.State, operation.Failure
 	if state != "failed" {
 		t.Fatalf("%s directive failure state = %s, want failed", rt.Backend, state)
 	}
@@ -4193,21 +3895,19 @@ func servedDirectiveErrorFailure(t *testing.T, backend string, rpcErr *servedJSO
 
 func loadServedDirectiveOperationByKey(t *testing.T, rt servedControlProofRuntime, key string) runtimeagentcontrol.DirectiveOperation {
 	t.Helper()
-	var op runtimeagentcontrol.DirectiveOperation
-	var state string
-	var response, failure sql.NullString
 	switch rt.Backend {
-	case "postgres":
-		if err := rt.DB.QueryRow(`SELECT operation_id::text, directive_event_id::text, state, response, failure FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = $1`, key).Scan(&op.OperationID, &op.DirectiveEventID, &state, &response, &failure); err != nil {
-			t.Fatalf("load Postgres directive operation: %v", err)
-		}
-	case "sqlite":
-		if err := rt.DB.QueryRow(`SELECT operation_id, directive_event_id, state, response, failure FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = ?`, key).Scan(&op.OperationID, &op.DirectiveEventID, &state, &response, &failure); err != nil {
-			t.Fatalf("load SQLite directive operation: %v", err)
-		}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown directive proof backend %q", rt.Backend)
 	}
+	stored, err := readServedSelectedRole(context.Background(), rt.ReceiverStateReader, func(ctx context.Context) (storetest.DirectiveReplayStorage, error) {
+		return storetest.ReadDirectiveReplayStorage(ctx, rt.ReceiverStateReader, key)
+	})
+	if err != nil {
+		t.Fatalf("load %s directive operation: %v", rt.Backend, err)
+	}
+	op := runtimeagentcontrol.DirectiveOperation{OperationID: stored.OperationID, DirectiveEventID: stored.EventID}
+	state, response, failure := stored.State, stored.Response, stored.Failure
 	op.State = runtimeagentcontrol.DirectiveOperationState(state)
 	if response.Valid {
 		op.Response = json.RawMessage(response.String)
@@ -4238,23 +3938,30 @@ func expireServedDirectiveLease(t *testing.T, rt servedControlProofRuntime, oper
 	}
 }
 
-func requireServedDirectivePipelineReceiptCount(t *testing.T, rt servedControlProofRuntime, eventID string, want int) {
+func requireServedDirectivePipelineReceiptCount(t *testing.T, reader servedEventCountReader, backend, eventID string, want int) {
 	t.Helper()
 	var count int
-	switch rt.Backend {
+	read := func() error {
+		return reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+			var err error
+			count, err = storetest.CountPipelineEventReceiptStorage(ctx, reader, eventID)
+			return err
+		})
+	}
+	switch backend {
 	case "postgres":
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).Scan(&count); err != nil {
+		if err := read(); err != nil {
 			t.Fatalf("count Postgres directive receipts: %v", err)
 		}
 	case "sqlite":
-		if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`, eventID).Scan(&count); err != nil {
+		if err := read(); err != nil {
 			t.Fatalf("count SQLite directive receipts: %v", err)
 		}
 	default:
-		t.Fatalf("unknown directive proof backend %q", rt.Backend)
+		t.Fatalf("unknown directive proof backend %q", backend)
 	}
 	if count != want {
-		t.Fatalf("%s directive receipt count = %d, want %d", rt.Backend, count, want)
+		t.Fatalf("%s directive receipt count = %d, want %d", backend, count, want)
 	}
 }
 
@@ -4297,43 +4004,41 @@ func requireServedAgentDirectiveResult(t *testing.T, backend string, result serv
 func requireServedAgentDirectivePersistence(t *testing.T, rt servedControlProofRuntime, result servedAgentDirectiveProofResult, key string, wantOperations int) {
 	t.Helper()
 	ctx := context.Background()
-	var operationID, eventID, runID, state, projectionResource, payloadOperationID string
-	var operationCount, receiptCount int
 	switch rt.Backend {
-	case "postgres":
-		if err := rt.DB.QueryRowContext(ctx, `SELECT operation_id::text, directive_event_id::text, resolved_run_id::text, state FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = $1`, key).Scan(&operationID, &eventID, &runID, &state); err != nil {
-			t.Fatalf("postgres load directive operation: %v", err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = $1`, key).Scan(&operationCount); err != nil {
-			t.Fatal(err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT payload->>'operation_id' FROM events WHERE event_id = $1::uuid`, result.DirectiveEventID).Scan(&payloadOperationID); err != nil {
-			t.Fatal(err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline' AND outcome = 'success'`, result.DirectiveEventID).Scan(&receiptCount); err != nil {
-			t.Fatal(err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT resource_id FROM api_idempotency WHERE method = 'agent.send_directive' AND idempotency_key = $1`, key).Scan(&projectionResource); err != nil {
-			t.Fatal(err)
-		}
-	case "sqlite":
-		if err := rt.DB.QueryRowContext(ctx, `SELECT operation_id, directive_event_id, resolved_run_id, state FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = ?`, key).Scan(&operationID, &eventID, &runID, &state); err != nil {
-			t.Fatalf("sqlite load directive operation: %v", err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM agent_directive_operations WHERE method = 'agent.send_directive' AND idempotency_key = ?`, key).Scan(&operationCount); err != nil {
-			t.Fatal(err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT json_extract(payload, '$.operation_id') FROM events WHERE event_id = ?`, result.DirectiveEventID).Scan(&payloadOperationID); err != nil {
-			t.Fatal(err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline' AND outcome = 'success'`, result.DirectiveEventID).Scan(&receiptCount); err != nil {
-			t.Fatal(err)
-		}
-		if err := rt.DB.QueryRowContext(ctx, `SELECT resource_id FROM api_idempotency WHERE method = 'agent.send_directive' AND idempotency_key = ?`, key).Scan(&projectionResource); err != nil {
-			t.Fatal(err)
-		}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown directive proof backend %q", rt.Backend)
+	}
+	identity, err := readServedSelectedRole(ctx, rt.ReceiverStateReader, func(ctx context.Context) (storetest.DirectiveIdentityStorage, error) {
+		return storetest.ReadDirectiveIdentityStorage(ctx, rt.ReceiverStateReader, key)
+	})
+	if err != nil {
+		t.Fatalf("%s load directive operation: %v", rt.Backend, err)
+	}
+	operationID, eventID, runID, state := identity.OperationID, identity.EventID, identity.RunID, identity.State
+	operationCount, err := readServedSelectedRole(ctx, rt.ReceiverStateReader, func(ctx context.Context) (int, error) {
+		return storetest.CountKeyedDirectiveOperationsStorage(ctx, rt.ReceiverStateReader, key)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payloadOperationID, err := readServedSelectedRole(ctx, rt.ReceiverStateReader, func(ctx context.Context) (string, error) {
+		return storetest.ReadDirectivePayloadOperationIDStorage(ctx, rt.ReceiverStateReader, result.DirectiveEventID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptCount, err := readServedSelectedRole(ctx, rt.ReceiverStateReader, func(ctx context.Context) (int, error) {
+		return storetest.CountSuccessfulDirectivePipelineReceiptsStorage(ctx, rt.ReceiverStateReader, result.DirectiveEventID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectionResource, err := readServedSelectedRole(ctx, rt.ReceiverStateReader, func(ctx context.Context) (string, error) {
+		return storetest.ReadDirectiveProjectionResourceStorage(ctx, rt.ReceiverStateReader, key)
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	if operationCount != wantOperations || operationID != result.OperationID || eventID != result.DirectiveEventID || runID != result.RunID || state != "succeeded" || projectionResource != result.OperationID || payloadOperationID != result.OperationID || receiptCount != 1 {
 		t.Fatalf("%s directive persistence count=%d operation=%s event=%s run=%s state=%s projection=%s payload_operation=%s receipts=%d result=%#v", rt.Backend, operationCount, operationID, eventID, runID, state, projectionResource, payloadOperationID, receiptCount, result)
@@ -4351,48 +4056,42 @@ func requireServedAgentDirectiveOperationCount(t *testing.T, db *sql.DB, backend
 	}
 }
 
-func publishServedLiveAgentHoldEvent(t *testing.T, rt servedControlProofRuntime, runID, sourceEventID, label string) servedEventPublishRPCResult {
+func publishServedLiveAgentHoldEvent(t *testing.T, selectedProofBackend string, selectedProofEndpoint string, selectedProofReceiverStateReader receiverProofStateReader, runID, sourceEventID, label string) servedEventPublishRPCResult {
 	t.Helper()
-	result := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-		"event_name":      "item.processed",
-		"run_id":          runID,
-		"source_event_id": sourceEventID,
-		"payload":         map[string]any{"item_id": "hold"},
-		"idempotency_key": "issue-1910-" + rt.Backend + "-" + runID + "-agent-hold-" + label,
-	})
+	result := requireServedEventPublishRPCResult(t, selectedProofEndpoint, map[string]any{"event_name": "item.processed", "run_id": runID, "source_event_id": sourceEventID, "payload": map[string]any{"item_id": "hold"}, "idempotency_key": "issue-1910-" + selectedProofBackend + "-" + runID + "-agent-hold-" + label})
 	if result.RunID != runID || result.OperatorReferenceEventID != sourceEventID || result.NewRunCreated || result.EventID == "" {
-		t.Fatalf("%s live-agent hold event.publish result = %#v, want existing run source=%s", rt.Backend, result, sourceEventID)
+		t.Fatalf("%s live-agent hold event.publish result = %#v, want existing run source=%s", selectedProofBackend, result, sourceEventID)
 	}
 	assertServedEventPublishDeliveriesContainStatus(t, result.Deliveries, "agent", "load-agent", "pending", "in_progress", "delivered")
-	requireServedEventPublishCommittedReplayScope(t, rt.DB, rt.Backend, runID, result.EventID, "subscribed")
-	waitServedEventPublishDeliveryStatusCountForRun(t, rt.DB, rt.Backend, runID, result.EventID, "agent", "load-agent", "delivered", 1)
-	waitServedDeliveryOutcomeCount(t, rt.DB, rt.Backend, result.EventID, "agent", "load-agent", "delivered", 1)
+	requireServedEventPublishCommittedReplayScope(t, selectedProofReceiverStateReader, selectedProofBackend, runID, result.EventID, "subscribed")
+	waitServedEventPublishDeliveryStatusCountForRun(t, selectedProofReceiverStateReader, selectedProofBackend, runID, result.EventID, "agent", "load-agent", "delivered", 1)
+	waitServedDeliveryOutcomeCount(t, selectedProofReceiverStateReader, selectedProofBackend, result.EventID, "agent", "load-agent", "delivered", 1)
 	return result
 }
 
-func requireServedLiveAgentEventReplayResult(t *testing.T, rt servedControlProofRuntime, originalEventID string, result servedEventReplayProofResult) {
+func requireServedLiveAgentEventReplayResult(t *testing.T, selectedProofBackend string, originalEventID string, result servedEventReplayProofResult) {
 	t.Helper()
 	if result.EventID != originalEventID || result.ReplayEventID == "" || result.AuditEventID == "" || result.ReplayEventID == originalEventID || result.AuditEventID == originalEventID || result.AuditEventID == result.ReplayEventID {
-		t.Fatalf("%s event.replay result IDs = %#v, want distinct original/replay/audit IDs", rt.Backend, result)
+		t.Fatalf("%s event.replay result IDs = %#v, want distinct original/replay/audit IDs", selectedProofBackend, result)
 	}
 	if len(result.SubscribersReplayed) != 1 || result.SubscribersReplayed[0] != "load-agent" {
-		t.Fatalf("%s event.replay subscribers = %#v, want [load-agent]", rt.Backend, result.SubscribersReplayed)
+		t.Fatalf("%s event.replay subscribers = %#v, want [load-agent]", selectedProofBackend, result.SubscribersReplayed)
 	}
 	if len(result.OriginalDeliveries) != 1 || len(result.NewDeliveries) != 1 {
-		t.Fatalf("%s event.replay deliveries = original %#v new %#v, want one original and one new", rt.Backend, result.OriginalDeliveries, result.NewDeliveries)
+		t.Fatalf("%s event.replay deliveries = original %#v new %#v, want one original and one new", selectedProofBackend, result.OriginalDeliveries, result.NewDeliveries)
 	}
-	requireServedLiveAgentReplayDeliveryPair(t, rt.Backend, result.OriginalDeliveries[0], result.NewDeliveries[0])
+	requireServedLiveAgentReplayDeliveryPair(t, selectedProofBackend, result.OriginalDeliveries[0], result.NewDeliveries[0])
 }
 
-func requireServedLiveAgentAgentReplayResult(t *testing.T, rt servedControlProofRuntime, originalEventID string, result servedAgentReplayProofResult) {
+func requireServedLiveAgentAgentReplayResult(t *testing.T, selectedProofBackend string, originalEventID string, result servedAgentReplayProofResult) {
 	t.Helper()
 	if result.EventID != originalEventID || result.AgentID != "load-agent" || result.ReplayEventID == "" || result.AuditEventID == "" || result.ReplayEventID == originalEventID || result.AuditEventID == originalEventID || result.AuditEventID == result.ReplayEventID {
-		t.Fatalf("%s agent.replay result IDs = %#v, want distinct original/replay/audit IDs for load-agent", rt.Backend, result)
+		t.Fatalf("%s agent.replay result IDs = %#v, want distinct original/replay/audit IDs for load-agent", selectedProofBackend, result)
 	}
 	if len(result.OriginalDeliveries) != 1 || len(result.NewDeliveries) != 1 {
-		t.Fatalf("%s agent.replay deliveries = original %#v new %#v, want one exact pair", rt.Backend, result.OriginalDeliveries, result.NewDeliveries)
+		t.Fatalf("%s agent.replay deliveries = original %#v new %#v, want one exact pair", selectedProofBackend, result.OriginalDeliveries, result.NewDeliveries)
 	}
-	requireServedLiveAgentReplayDeliveryPair(t, rt.Backend, result.OriginalDeliveries[0], result.NewDeliveries[0])
+	requireServedLiveAgentReplayDeliveryPair(t, selectedProofBackend, result.OriginalDeliveries[0], result.NewDeliveries[0])
 }
 
 func requireServedLiveAgentReplayDeliveryPair(t *testing.T, backend string, original, replayed servedReplayProofDelivery) {
@@ -4414,14 +4113,14 @@ func requireServedOKJSONRPC(t *testing.T, endpoint, method string, params map[st
 	}
 }
 
-func requireServedControlAPIIdempotencyRows(t *testing.T, db *sql.DB, backend, method, key string, want int) {
+func requireServedControlAPIIdempotencyRows(t *testing.T, reader receiverProofStateReader, backend, method, key string, want int) {
 	t.Helper()
-	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, method, key); got != want {
+	if got := servedEventPublishAPIIdempotencyCount(t, reader, backend, method, key); got != want {
 		t.Fatalf("%s api_idempotency rows for %s/%s = %d, want %d", backend, method, key, got, want)
 	}
 }
 
-func requireServedRunControlState(t *testing.T, db *sql.DB, backend, runID, wantControlStatus string, allowedRunStatuses ...string) {
+func requireServedRunControlState(t *testing.T, reader receiverProofStateReader, backend, runID, wantControlStatus string, allowedRunStatuses ...string) {
 	t.Helper()
 	allowed := map[string]bool{}
 	for _, status := range allowedRunStatuses {
@@ -4433,7 +4132,7 @@ func requireServedRunControlState(t *testing.T, db *sql.DB, backend, runID, want
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var lastRunStatus, lastControlStatus, lastReason, lastControlledBy string
 	for time.Now().Before(deadline) {
-		runStatus, controlStatus, reason, controlledBy := servedRunControlState(t, db, backend, runID)
+		runStatus, controlStatus, reason, controlledBy := servedRunControlState(t, reader, backend, runID)
 		lastRunStatus, lastControlStatus, lastReason, lastControlledBy = runStatus, controlStatus, reason, controlledBy
 		if controlStatus == wantControlStatus && allowed[runStatus] {
 			return
@@ -4444,39 +4143,29 @@ func requireServedRunControlState(t *testing.T, db *sql.DB, backend, runID, want
 		backend, runID, lastRunStatus, lastControlStatus, lastReason, lastControlledBy, wantControlStatus, allowedRunStatuses)
 }
 
-func servedRunControlState(t *testing.T, db *sql.DB, backend, runID string) (runStatus, controlStatus, reason, controlledBy string) {
+func servedRunControlState(t *testing.T, reader receiverProofStateReader, backend, runID string) (runStatus, controlStatus, reason, controlledBy string) {
 	t.Helper()
-	var query string
-	var args []any
 	switch backend {
-	case "postgres":
-		query = `
-			SELECT r.status, COALESCE(rc.control_status, ''), COALESCE(rc.reason, ''), COALESCE(rc.controlled_by, '')
-			FROM runs r
-			LEFT JOIN run_control_state rc ON rc.run_id = r.run_id
-			WHERE r.run_id = $1::uuid
-		`
-		args = []any{runID}
-	case "sqlite":
-		query = `
-			SELECT r.status, COALESCE(rc.control_status, ''), COALESCE(rc.reason, ''), COALESCE(rc.controlled_by, '')
-			FROM runs r
-			LEFT JOIN run_control_state rc ON rc.run_id = r.run_id
-			WHERE r.run_id = ?
-		`
-		args = []any{runID}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&runStatus, &controlStatus, &reason, &controlledBy); err != nil {
+	var out storetest.ServedRunControlStorage
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		out, err = storetest.ReadServedRunControlStorage(ctx, reader, runID)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s load run control state for %s: %v", backend, runID, err)
 	}
+	runStatus, controlStatus, reason, controlledBy = out.RunStatus, out.ControlStatus, out.Reason, out.ControlledBy
 	return strings.TrimSpace(runStatus), strings.TrimSpace(controlStatus), strings.TrimSpace(reason), strings.TrimSpace(controlledBy)
 }
 
 func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedControlProofRuntime) (string, string, string, string) {
 	t.Helper()
-	db := rt.DB
+
 	backend := rt.Backend
 	ctx := context.Background()
 	runID := uuid.NewString()
@@ -4507,8 +4196,8 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 		[]events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient("agent-pending"), AgentIdentity: agentidentitytest.RootRuntimeForRun(t, runID, "agent-pending", "serveapp-test")}},
 		runtimepipelineobligation.ScopeSubscribed,
 		storetest.AcknowledgedPipelineDisposition())
-	if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success"); got != 1 {
-		t.Fatalf("%s seeded pipeline receipt count for event=%s = %d, want 1\n%s", backend, eventID, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	if got := servedEventPublishReceiptOutcomeCount(t, rt.ReceiverStateReader, backend, eventID, "platform", "pipeline", "success"); got != 1 {
+		t.Fatalf("%s seeded pipeline receipt count for event=%s = %d, want 1\n%s", backend, eventID, got, servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 	}
 	entityID, cardID := seedServedRunControlDecisionCard(t, rt, runID, now)
 	return runID, eventID, entityID, cardID
@@ -4516,17 +4205,14 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 
 func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime, runID string, now time.Time) (string, string) {
 	t.Helper()
-	ctx := runtimecorrelation.WithRunID(servedControlProofAuthorActivityContext(t, rt), runID)
+	ctx := runtimecorrelation.WithRunID(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), runID)
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	bundleHash := strings.TrimSpace(rt.BundleHash)
 	if bundleHash == "" {
 		bundleHash = "bundle-v2:sha256:" + strings.Repeat("a", 64)
 	}
-	outcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{
-		"approve": {Verdict: "approve", AdvancesTo: "done"},
-		"reject":  {Verdict: "reject", AdvancesTo: "rework"},
-	}
+	outcomes := map[string]runtimecontracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "done"}, "reject": {Verdict: "reject", AdvancesTo: "rework"}}
 	routes, err := gateruntime.FreezeRoutes(outcomes, servedDecisionCardTransitionFixture(t, rt.Runtime.Pipeline.SemanticSource(), outcomes))
 	if err != nil {
 		t.Fatalf("freeze %s run.stop gate routes: %v", rt.Backend, err)
@@ -4601,19 +4287,11 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	if err != nil {
 		t.Fatalf("admit %s run.stop decision-card provenance: %v", rt.Backend, err)
 	}
-	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{
-		Route: runtimeflowidentity.RouteForInstancePath(runID), FlowID: ".", EntityID: entityID, Stage: activation.Stage,
-		StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID),
-	})
+	anchor, err := decisioncard.NewStageGateAnchor(decisioncard.StageGateAnchor{Route: runtimeflowidentity.RouteForInstancePath(runID), FlowID: ".", EntityID: entityID, Stage: activation.Stage, StageActivationID: activation.ActivationID, Source: eventtest.RootRoutingSource(entityID)})
 	if err != nil {
 		t.Fatalf("new %s run.stop decision-card anchor: %v", rt.Backend, err)
 	}
-	card, err := decisioncard.New(decisioncard.Card{
-		CardID: activation.CardID, RunID: runID, ExecutionMode: executionmode.Live, Anchor: anchor,
-		Snapshot: snapshot, BundleHash: bundleHash, WorkflowVersion: "1.0.0",
-		EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"},
-		Provenance:       provenance, CreatedAt: now,
-	})
+	card, err := decisioncard.New(decisioncard.Card{CardID: activation.CardID, RunID: runID, ExecutionMode: executionmode.Live, Anchor: anchor, Snapshot: snapshot, BundleHash: bundleHash, WorkflowVersion: "1.0.0", EffectiveCadence: decisioncard.Cadence{InputDraftTTL: "15m", ReminderInterval: "24h"}, Provenance: provenance, CreatedAt: now})
 	if err != nil {
 		t.Fatalf("new %s run.stop decision card: %v", rt.Backend, err)
 	}
@@ -4663,7 +4341,6 @@ func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedCon
 	if !found {
 		t.Fatalf("%s terminal mailbox.list = %#v, want superseded card %s", rt.Backend, listed, cardID)
 	}
-
 	var cards decisioncard.Store
 	workflow := rt.Runtime.Pipeline
 	switch rt.Backend {
@@ -4681,10 +4358,7 @@ func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedCon
 	default:
 		t.Fatalf("unknown terminal decision-card proof backend %q", rt.Backend)
 	}
-	instance, ok, err := workflow.Load(runtimecorrelation.WithRunID(context.Background(), runID), runtimeflowidentity.RunScopedFlowInstance{
-		RunID: runID,
-		Route: runtimeflowidentity.RouteForInstancePath(runID),
-	})
+	instance, ok, err := workflow.Load(runtimecorrelation.WithRunID(context.Background(), runID), runtimeflowidentity.RunScopedFlowInstance{RunID: runID, Route: runtimeflowidentity.RouteForInstancePath(runID)})
 	if err != nil || !ok {
 		t.Fatalf("load %s terminal gate instance: ok=%v err=%v", rt.Backend, ok, err)
 	}
@@ -4709,87 +4383,83 @@ func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedCon
 	if changeCount != 1 {
 		t.Fatalf("%s terminal superseded changes for %s = %d, want 1", rt.Backend, cardID, changeCount)
 	}
-	if got := servedEventNameCountForRun(t, rt.DB, rt.Backend, runID, "mailbox.card_superseded"); got != 0 {
+	if got := servedEventNameCountForRun(t, rt.ReceiverStateReader, rt.Backend, runID, "mailbox.card_superseded"); got != 0 {
 		t.Fatalf("%s terminal mailbox.card_superseded events for %s = %d, want 0", rt.Backend, runID, got)
 	}
 }
 
-func servedEventNameCountForRun(t *testing.T, db *sql.DB, backend, runID, eventName string) int {
+func servedEventNameCountForRun(t *testing.T, reader receiverProofStateReader, backend, runID, eventName string) int {
 	t.Helper()
-	query := `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = ?`
-	args := []any{runID, eventName}
-	if backend == "postgres" {
-		query = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = $2`
+	switch backend {
+	case "postgres", "sqlite":
+	default:
+		t.Fatalf("unknown proof backend %q", backend)
 	}
 	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.CountRunNamedEventStorage(ctx, reader, runID, eventName)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s count run %s event name %s: %v", backend, runID, eventName, err)
 	}
 	return count
 }
 
-func requireServedStoppedPendingDelivery(t *testing.T, db *sql.DB, backend, eventID, subscriberID string) {
+func requireServedStoppedPendingDelivery(t *testing.T, reader receiverProofStateReader, backend, eventID, subscriberID string) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var lastStatus, lastReason string
 	for time.Now().Before(deadline) {
-		status, reason := servedDeliveryStatusReason(t, db, backend, eventID, "agent", subscriberID)
+		status, reason := servedDeliveryStatusReason(t, reader, backend, eventID, "agent", subscriberID)
 		lastStatus, lastReason = status, reason
 		if status == "dead_letter" && reason == "run_stopped" {
-			waitServedDeliveryOutcomeCount(t, db, backend, eventID, "agent", subscriberID, "terminalized", 1)
-			waitServedEventPublishReceiptOutcomeCount(t, db, backend, eventID, "platform", "pipeline", "success", 1)
+			waitServedDeliveryOutcomeCount(t, reader, backend, eventID, "agent", subscriberID, "terminalized", 1)
+			waitServedEventPublishReceiptOutcomeCount(t, reader, backend, eventID, "platform", "pipeline", "success", 1)
 			return
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("%s stopped pending delivery %s/%s = %s/%s, want dead_letter/run_stopped\n%s", backend, eventID, subscriberID, lastStatus, lastReason, servedEventPublishDebugSummaryForEvent(t, db, backend, eventID))
+	t.Fatalf("%s stopped pending delivery %s/%s = %s/%s, want dead_letter/run_stopped\n%s", backend, eventID, subscriberID, lastStatus, lastReason, servedEventPublishDebugSummaryForEvent(t, reader, backend, eventID))
 }
 
-func servedDeliveryStatusReason(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID string) (status, reason string) {
+func servedDeliveryStatusReason(t *testing.T, reader receiverProofStateReader, backend, eventID, subscriberType, subscriberID string) (status, reason string) {
 	t.Helper()
-	var query string
-	var args []any
 	switch backend {
-	case "postgres":
-		query = `
-			SELECT status, COALESCE(reason_code, '')
-			FROM event_deliveries
-			WHERE event_id = $1::uuid AND subscriber_type = $2 AND subscriber_id = $3
-		`
-		args = []any{eventID, subscriberType, subscriberID}
-	case "sqlite":
-		query = `
-			SELECT status, COALESCE(reason_code, '')
-			FROM event_deliveries
-			WHERE event_id = ? AND subscriber_type = ? AND subscriber_id = ?
-		`
-		args = []any{eventID, subscriberType, subscriberID}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&status, &reason); err != nil {
+	var out storetest.ServedDeliveryStatusReasonStorage
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		out, err = storetest.ReadServedDeliveryStatusReasonStorage(ctx, reader, eventID, subscriberType, subscriberID)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s load delivery status/reason for %s: %v", backend, eventID, err)
 	}
+	status, reason = out.Status, out.Reason
 	return strings.TrimSpace(status), strings.TrimSpace(reason)
 }
 
-func requireNoServedDeliveryStatusDuring(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, status string, duration time.Duration) {
+func requireNoServedDeliveryStatusDuring(t *testing.T, reader receiverProofStateReader, backend, eventID, subscriberType, subscriberID, status string, duration time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(duration)
 	for time.Now().Before(deadline) {
-		if got := servedEventPublishDeliveryStatusCount(t, db, backend, eventID, subscriberType, subscriberID, status); got != 0 {
-			t.Fatalf("%s delivery count for event=%s subscriber=%s/%s status=%q = %d during blocked interval, want 0",
-				backend, eventID, subscriberType, subscriberID, status, got)
+		if got := servedEventPublishDeliveryStatusCount(t, reader, backend, eventID, subscriberType, subscriberID, status); got != 0 {
+			t.Fatalf("%s delivery count for event=%s subscriber=%s/%s status=%q = %d during blocked interval, want 0", backend, eventID, subscriberType, subscriberID, status, got)
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }
 
-func requireNoServedReceiptOutcomeDuring(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, outcome string, duration time.Duration) {
+func requireNoServedReceiptOutcomeDuring(t *testing.T, reader servedEventCountReader, backend, eventID, subscriberType, subscriberID, outcome string, duration time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(duration)
 	for time.Now().Before(deadline) {
-		if got := servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, subscriberType, subscriberID, outcome); got != 0 {
+		if got := servedEventPublishReceiptOutcomeCount(t, reader, backend, eventID, subscriberType, subscriberID, outcome); got != 0 {
 			t.Fatalf("%s receipt count for event=%s subscriber=%s/%s outcome=%q = %d during blocked interval, want 0",
 				backend, eventID, subscriberType, subscriberID, outcome, got)
 		}
@@ -4797,15 +4467,15 @@ func requireNoServedReceiptOutcomeDuring(t *testing.T, db *sql.DB, backend, even
 	}
 }
 
-func requireServedRuntimeIngressState(t *testing.T, db *sql.DB, backend, wantStatus, wantTransitionEventName string) {
+func requireServedRuntimeIngressState(t *testing.T, reader receiverProofStateReader, backend, wantStatus, wantTransitionEventName string) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var lastStatus, lastEventID, lastEventName string
 	for time.Now().Before(deadline) {
-		status, eventID := servedRuntimeIngressState(t, db, backend)
+		status, eventID := servedRuntimeIngressState(t, reader, backend)
 		lastStatus, lastEventID = status, eventID
 		if eventID != "" {
-			lastEventName = servedEventNameByID(t, db, backend, eventID)
+			lastEventName = servedEventNameByID(t, reader, backend, eventID)
 		}
 		if status == wantStatus && (wantTransitionEventName == "" || lastEventName == wantTransitionEventName) {
 			return
@@ -4816,50 +4486,51 @@ func requireServedRuntimeIngressState(t *testing.T, db *sql.DB, backend, wantSta
 		backend, lastStatus, lastEventID, lastEventName, wantStatus, wantTransitionEventName)
 }
 
-func servedRuntimeIngressState(t *testing.T, db *sql.DB, backend string) (status, transitionEventID string) {
+func servedRuntimeIngressState(t *testing.T, reader receiverProofStateReader, backend string) (status, transitionEventID string) {
 	t.Helper()
-	var query string
 	switch backend {
-	case "postgres":
-		query = `SELECT status, COALESCE(transition_event_id::text, '') FROM runtime_ingress_state WHERE id = 1`
-	case "sqlite":
-		query = `SELECT status, COALESCE(transition_event_id, '') FROM runtime_ingress_state WHERE id = 1`
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	if err := db.QueryRowContext(context.Background(), query).Scan(&status, &transitionEventID); err != nil {
+	var out storetest.ServedIngressStorage
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		out, err = storetest.ReadServedIngressStorage(ctx, reader)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s load runtime ingress state: %v", backend, err)
 	}
+	status, transitionEventID = out.Status, out.TransitionEventID
 	return strings.TrimSpace(status), strings.TrimSpace(transitionEventID)
 }
 
-func servedEventNameByID(t *testing.T, db *sql.DB, backend, eventID string) string {
+func servedEventNameByID(t *testing.T, reader receiverProofStateReader, backend, eventID string) string {
 	t.Helper()
-	var query string
-	var args []any
 	switch backend {
-	case "postgres":
-		query = `SELECT event_name FROM events WHERE event_id = $1::uuid`
-		args = []any{eventID}
-	case "sqlite":
-		query = `SELECT event_name FROM events WHERE event_id = ?`
-		args = []any{eventID}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
 	var name string
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&name); err != nil {
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		name, err = storetest.ReadEventNameStorage(ctx, reader, eventID)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s load event name for %s: %v", backend, eventID, err)
 	}
 	return strings.TrimSpace(name)
 }
 
-func requireServedEventNameCount(t *testing.T, db *sql.DB, backend, eventName string, want int) {
+func requireServedEventNameCount(t *testing.T, reader receiverProofStateReader, backend, eventName string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var got int
 	for time.Now().Before(deadline) {
-		got = servedEventNameCount(t, db, backend, eventName)
+		got = servedEventNameCount(t, reader, backend, eventName)
 		if got == want {
 			return
 		}
@@ -4868,22 +4539,20 @@ func requireServedEventNameCount(t *testing.T, db *sql.DB, backend, eventName st
 	t.Fatalf("%s events named %s = %d, want %d", backend, eventName, got, want)
 }
 
-func servedEventNameCount(t *testing.T, db *sql.DB, backend, eventName string) int {
+func servedEventNameCount(t *testing.T, reader receiverProofStateReader, backend, eventName string) int {
 	t.Helper()
-	var query string
-	var args []any
 	switch backend {
-	case "postgres":
-		query = `SELECT COUNT(*) FROM events WHERE event_name = $1`
-		args = []any{eventName}
-	case "sqlite":
-		query = `SELECT COUNT(*) FROM events WHERE event_name = ?`
-		args = []any{eventName}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
 	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.CountEventNameStorage(ctx, reader, eventName)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s count event name %s: %v", backend, eventName, err)
 	}
 	return count
@@ -4906,7 +4575,7 @@ func servedJoinProofOutboxSweeperConfig() runtimebus.OutboxSweeperConfig {
 	return cfg
 }
 
-func servedJoinTarget(t *testing.T, db *sql.DB, runID string) string {
+func servedJoinTarget(t *testing.T, db *sql.DB, reader receiverProofStateReader, runID string) string {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for time.Now().Before(deadline) {
@@ -4927,7 +4596,7 @@ func servedJoinTarget(t *testing.T, db *sql.DB, runID string) string {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("served join entity was not created for run %s\n%s", runID, servedEventPublishDebugSummary(t, db, "postgres", runID))
+	t.Fatalf("served join entity was not created for run %s\n%s", runID, servedInspectionRunDebugSummary(reader, runID))
 	return ""
 }
 
@@ -5046,7 +4715,7 @@ type servedEventPublishPreHandlerProof struct {
 }
 
 func servedEventPublishBlockingHandlerAuthorityHook(
-	db *sql.DB,
+	reader *receiverProofStateReader,
 	backend string,
 	wantNodeID string,
 	wantEventSuffix string,
@@ -5061,12 +4730,16 @@ func servedEventPublishBlockingHandlerAuthorityHook(
 			return nil
 		}
 		once.Do(func() {
+			var currentReader receiverProofStateReader
+			if reader != nil {
+				currentReader = *reader
+			}
 			runID := strings.TrimSpace(evt.RunID())
 			if runID == "" {
 				runID = runtimecorrelation.RunIDFromContext(ctx)
 			}
 			eventID := strings.TrimSpace(evt.ID())
-			count, err := servedEventPublishNodeDeliveryCountValue(ctx, db, backend, runID, eventID, wantNodeID)
+			count, err := servedEventPublishNodeDeliveryCountValue(ctx, currentReader, backend, runID, eventID, wantNodeID)
 			proof := servedEventPublishPreHandlerProof{
 				RunID:   runID,
 				EventID: eventID,
@@ -5094,21 +4767,21 @@ func servedEventPublishMatchesNodeEvent(nodeID string, evt events.Event, wantNod
 	return eventType == wantEventSuffix || strings.HasSuffix(eventType, "/"+wantEventSuffix)
 }
 
-func requireServedEventPublishPreHandlerProof(t *testing.T, db *sql.DB, backend string, proofs <-chan servedEventPublishPreHandlerProof, runID, eventID, nodeID string) {
+func requireServedEventPublishPreHandlerProof(t *testing.T, reader receiverProofStateReader, backend string, proofs <-chan servedEventPublishPreHandlerProof, runID, eventID, nodeID string) {
 	t.Helper()
 	select {
 	case proof := <-proofs:
 		if proof.Err != nil {
-			t.Fatalf("%s pre-handler node delivery authority query failed: %v\n%s", backend, proof.Err, servedEventPublishDebugSummary(t, db, backend, runID))
+			t.Fatalf("%s pre-handler node delivery authority query failed: %v\n%s", backend, proof.Err, servedInspectionRunDebugSummary(reader, runID))
 		}
 		if proof.RunID != runID || proof.EventID != eventID || proof.NodeID != nodeID {
-			t.Fatalf("%s pre-handler node delivery authority proof = %#v, want run=%s event=%s node=%s\n%s", backend, proof, runID, eventID, nodeID, servedEventPublishDebugSummary(t, db, backend, runID))
+			t.Fatalf("%s pre-handler node delivery authority proof = %#v, want run=%s event=%s node=%s\n%s", backend, proof, runID, eventID, nodeID, servedInspectionRunDebugSummary(reader, runID))
 		}
 		if proof.Count == 0 {
-			t.Fatalf("%s pre-handler root-input node deliveries = %d, want committed node/%s authority before handler execution\n%s", backend, proof.Count, nodeID, servedEventPublishDebugSummary(t, db, backend, runID))
+			t.Fatalf("%s pre-handler root-input node deliveries = %d, want committed node/%s authority before handler execution\n%s", backend, proof.Count, nodeID, servedInspectionRunDebugSummary(reader, runID))
 		}
 	case <-time.After(45 * time.Second):
-		t.Fatalf("%s pre-handler root-input node delivery authority hook did not run for run=%s event=%s node=%s\n%s", backend, runID, eventID, nodeID, servedEventPublishDebugSummary(t, db, backend, runID))
+		t.Fatalf("%s pre-handler root-input node delivery authority hook did not run for run=%s event=%s node=%s\n%s", backend, runID, eventID, nodeID, servedInspectionRunDebugSummary(reader, runID))
 	}
 }
 
@@ -5149,7 +4822,7 @@ func assertServedEventPublishDeliveriesContainStatus(t *testing.T, deliveries []
 	t.Fatalf("event.publish deliveries = %#v, want %s/%s status in %v", deliveries, subscriberType, subscriberID, statuses)
 }
 
-func waitForServedEventPublishNodeDeliveryLifecycleForNode(t *testing.T, db *sql.DB, backend, runID, eventID, nodeID string, probe *lifecycletest.Probe) {
+func waitForServedEventPublishNodeDeliveryLifecycleForNode(t *testing.T, reader receiverProofStateReader, backend, runID, eventID, nodeID string, probe *lifecycletest.Probe) {
 	t.Helper()
 	if probe == nil {
 		t.Fatalf("%s lifecycle probe is required for event %s", backend, eventID)
@@ -5169,14 +4842,14 @@ func waitForServedEventPublishNodeDeliveryLifecycleForNode(t *testing.T, db *sql
 		t.Fatal("node delivery consumed the complete lifecycle proof deadline")
 	}
 	probe.Expect(eventID).PostCommitDispatchStarted().PostCommitDispatchCompleted().Within(remaining)
-	if count := servedEventPublishNodeDeliveryCount(t, db, backend, runID, eventID, nodeID); count != 1 {
-		t.Fatalf("%s node/%s delivery count for event %s = %d, want 1\n%s", backend, nodeID, eventID, count, servedEventPublishDebugSummary(t, db, backend, runID))
+	if count := servedEventPublishNodeDeliveryCount(t, reader, backend, runID, eventID, nodeID); count != 1 {
+		t.Fatalf("%s node/%s delivery count for event %s = %d, want 1\n%s", backend, nodeID, eventID, count, servedInspectionRunDebugSummary(reader, runID))
 	}
 }
 
-func waitForServedEventPublishNodeDeliveryLifecycle(t *testing.T, db *sql.DB, backend, runID, eventID string, probe *lifecycletest.Probe) {
+func waitForServedEventPublishNodeDeliveryLifecycle(t *testing.T, reader receiverProofStateReader, backend, runID, eventID string, probe *lifecycletest.Probe) {
 	t.Helper()
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, eventID, identitytest.RootNode(t, "item-handler").Key(), probe)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, reader, backend, runID, eventID, identitytest.RootNode(t, "item-handler").Key(), probe)
 }
 
 const (
@@ -5194,13 +4867,9 @@ type servedEventPublishFollowUpProof struct {
 	FollowUpEventID string
 }
 
-func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) servedEventPublishFollowUpProof {
+func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, reader receiverProofStateReader, backend, bundleHash string, probe *lifecycletest.Probe) servedEventPublishFollowUpProof {
 	t.Helper()
-	initialStdout, initialStderr, code := runServedCLICommand(t, endpoint, []string{
-		"event", "publish", "item.received",
-		"--payload-json", `{"item_id":"item-1"}`,
-		"--idempotency-key", "issue-1255-" + backend + "-initial",
-	})
+	initialStdout, initialStderr, code := runServedCLICommand(t, endpoint, []string{"event", "publish", "item.received", "--payload-json", `{"item_id":"item-1"}`, "--idempotency-key", "issue-1255-" + backend + "-initial"})
 	if code != 0 {
 		t.Fatalf("initial event publish code=%d stderr=%s stdout=%s", code, initialStderr, initialStdout)
 	}
@@ -5210,23 +4879,17 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if initial["new_run_created"] != "true" || initial["deliveries"] == "0" || runID == "" || initialEventID == "" {
 		t.Fatalf("initial event publish fields = %#v, want new run with delivery", initial)
 	}
-	if got := servedEventPublishRowCount(t, db, backend, "runs", runID, ""); got != 1 {
+	if got := servedEventPublishScalarCount(t, reader, backend, "runs", runID, ""); got != 1 {
 		t.Fatalf("%s runs for initial run = %d, want 1", backend, got)
 	}
-	if got := servedEventPublishNodeDeliveryCount(t, db, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key()); got == 0 {
+	if got := servedEventPublishNodeDeliveryCount(t, reader, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key()); got == 0 {
 		t.Fatalf("%s initial root-input node deliveries = %d, want persisted node/item-handler authority", backend, got)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
-	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, reader, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
+	entityID := requireServedEventPublishEntityState(t, reader, backend, runID, "", "waiting")
 	requireServedEventReadback(t, endpoint, initialEventID, runID, entityID, "item.received", identitytest.RootNode(t, "item-handler").Key())
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
-
-	followUpStdout, followUpStderr, code := runServedCLICommand(t, endpoint, []string{
-		"event", "publish", "item.processed",
-		"--run-id", runID,
-		"--payload-json", `{"item_id":"review"}`,
-		"--idempotency-key", "issue-1255-" + backend + "-follow-up",
-	})
+	followUpStdout, followUpStderr, code := runServedCLICommand(t, endpoint, []string{"event", "publish", "item.processed", "--run-id", runID, "--payload-json", `{"item_id":"review"}`, "--idempotency-key", "issue-1255-" + backend + "-follow-up"})
 	if code != 0 {
 		t.Fatalf("follow-up event publish code=%d stderr=%s stdout=%s", code, followUpStderr, followUpStdout)
 	}
@@ -5235,29 +4898,23 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if followUp["run_id"] != runID || followUp["new_run_created"] != "false" || followUp["deliveries"] == "0" || followUpEventID == "" {
 		t.Fatalf("follow-up event publish fields = %#v, want selected existing run with delivery", followUp)
 	}
-	if got := servedEventPublishRowCount(t, db, backend, "runs", runID, ""); got != 1 {
+	if got := servedEventPublishScalarCount(t, reader, backend, "runs", runID, ""); got != 1 {
 		t.Fatalf("%s runs for selected run after follow-up = %d, want 1", backend, got)
 	}
-	if got := servedEventPublishScalarCount(t, db, backend, "application_events_by_run", runID, ""); got != 2 {
-		t.Fatalf("%s application events for selected run = %d, want 2\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	if got := servedEventPublishScalarCount(t, reader, backend, "application_events_by_run", runID, ""); got != 2 {
+		t.Fatalf("%s application events for selected run = %d, want 2\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, followUpEventID); got == 0 {
+	if got := servedEventPublishScalarCount(t, reader, backend, "event_deliveries", runID, followUpEventID); got == 0 {
 		t.Fatalf("%s follow-up deliveries = %d, want non-empty persisted evidence", backend, got)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUpEventID, identitytest.RootNode(t, "item-observer").Key(), probe)
-	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, reader, backend, runID, followUpEventID, identitytest.RootNode(t, "item-observer").Key(), probe)
+	requireServedEventPublishEntityState(t, reader, backend, runID, entityID, "done")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "done")
-	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
+	requireServedRunStatusWithDebug(t, endpoint, reader, backend, runID, "completed")
 	itemObserver := identitytest.RootNode(t, "item-observer").Key()
 	requireServedEventReadback(t, endpoint, followUpEventID, runID, entityID, "item.processed", itemObserver)
 	requireServedTraceReadback(t, endpoint, runID, followUpEventID, "item.processed", itemObserver)
-
-	traceStdout, traceStderr, traceCode := runServedCLICommand(t, endpoint, []string{
-		"run", "trace", runID,
-		"--event-name", "item.processed",
-		"--entity-id", entityID,
-		"--limit", "10",
-	})
+	traceStdout, traceStderr, traceCode := runServedCLICommand(t, endpoint, []string{"run", "trace", runID, "--event-name", "item.processed", "--entity-id", entityID, "--limit", "10"})
 	if traceCode != 0 {
 		t.Fatalf("trace readback code=%d stderr=%s stdout=%s", traceCode, traceStderr, traceStdout)
 	}
@@ -5285,14 +4942,8 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 			t.Fatalf("entity view readback missing %q:\n%s", want, entityViewStdout)
 		}
 	}
-
 	unhandledIdempotencyKey := "issue-1255-" + backend + "-unhandled"
-	errResp := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "item.processed",
-		"run_id":          runID,
-		"payload":         map[string]any{"item_id": "review"},
-		"idempotency_key": unhandledIdempotencyKey,
-	})
+	errResp := requireServedJSONRPCError(t, endpoint, "event.publish", map[string]any{"event_name": "item.processed", "run_id": runID, "payload": map[string]any{"item_id": "review"}, "idempotency_key": unhandledIdempotencyKey})
 	if errResp.Data["code"] != apiv1.RunAlreadyTerminalCode {
 		t.Fatalf("unhandled follow-up error data = %#v, want %s", errResp.Data, apiv1.RunAlreadyTerminalCode)
 	}
@@ -5300,26 +4951,18 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	if !ok || details["current_status"] != "completed" {
 		t.Fatalf("unhandled follow-up details = %#v", errResp.Data["details"])
 	}
-	if got := servedEventPublishEventCountByIdempotencyKey(t, db, backend, unhandledIdempotencyKey); got != 0 {
+	if got := servedEventPublishEventCountByIdempotencyKey(t, reader, backend, unhandledIdempotencyKey); got != 0 {
 		t.Fatalf("%s event rows for rejected follow-up idempotency key = %d, want 0", backend, got)
 	}
-	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", unhandledIdempotencyKey); got != 0 {
+	if got := servedEventPublishAPIIdempotencyCount(t, reader, backend, "event.publish", unhandledIdempotencyKey); got != 0 {
 		t.Fatalf("%s idempotency rows for rejected follow-up = %d, want 0", backend, got)
 	}
-	return servedEventPublishFollowUpProof{
-		RunID:           runID,
-		InitialEventID:  initialEventID,
-		FollowUpEventID: followUpEventID,
-	}
+	return servedEventPublishFollowUpProof{RunID: runID, InitialEventID: initialEventID, FollowUpEventID: followUpEventID}
 }
 
-func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
+func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sql.DB, reader receiverProofStateReader, backend, bundleHash string, probe *lifecycletest.Probe) {
 	t.Helper()
-	bootstrapStdout, bootstrapStderr, code := runServedCLICommand(t, endpoint, []string{
-		"event", "publish", "opco.bootstrap_requested",
-		"--payload-json", `{"owner":"operator"}`,
-		"--idempotency-key", "issue-1438-" + backend + "-bootstrap",
-	})
+	bootstrapStdout, bootstrapStderr, code := runServedCLICommand(t, endpoint, []string{"event", "publish", "opco.bootstrap_requested", "--payload-json", `{"owner":"operator"}`, "--idempotency-key", "issue-1438-" + backend + "-bootstrap"})
 	if code != 0 {
 		t.Fatalf("bootstrap target-route event publish code=%d stderr=%s stdout=%s", code, bootstrapStderr, bootstrapStdout)
 	}
@@ -5329,16 +4972,9 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	if bootstrap["new_run_created"] != "true" || bootstrap["deliveries"] == "0" || runID == "" || bootstrapEventID == "" {
 		t.Fatalf("bootstrap target-route event publish fields = %#v, want new run with delivery", bootstrap)
 	}
-	requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
-
+	requireServedEventPublishEntityState(t, reader, backend, runID, "", "waiting")
 	instanceID := "11111111-1111-4111-8111-111111111111"
-	spinupStdout, spinupStderr, code := runServedCLICommand(t, endpoint, []string{
-		"event", "publish", "opco.spinup_requested",
-		"--run-id", runID,
-		"--source-event-id", bootstrapEventID,
-		"--payload-json", fmt.Sprintf(`{"instance_id":%q,"product_id":"product-1"}`, instanceID),
-		"--idempotency-key", "issue-1438-" + backend + "-spinup",
-	})
+	spinupStdout, spinupStderr, code := runServedCLICommand(t, endpoint, []string{"event", "publish", "opco.spinup_requested", "--run-id", runID, "--source-event-id", bootstrapEventID, "--payload-json", fmt.Sprintf(`{"instance_id":%q,"product_id":"product-1"}`, instanceID), "--idempotency-key", "issue-1438-" + backend + "-spinup"})
 	if code != 0 {
 		t.Fatalf("spinup target-route event publish code=%d stderr=%s stdout=%s", code, spinupStderr, spinupStdout)
 	}
@@ -5347,79 +4983,45 @@ func runServedEventPublishTargetRouteProof(t *testing.T, endpoint string, db *sq
 	if spinup["run_id"] != runID || spinup["new_run_created"] != "false" || spinup["deliveries"] == "0" || spinupEventID == "" {
 		t.Fatalf("spinup target-route event publish fields = %#v, want selected existing run with delivery", spinup)
 	}
-	waitServedEventPublishDeliveryStatusCount(t, db, backend, spinupEventID, "node", identitytest.RootNode(t, "portfolio-node").Key(), "delivered", 1)
-
+	waitServedEventPublishDeliveryStatusCount(t, reader, backend, spinupEventID, "node", identitytest.RootNode(t, "portfolio-node").Key(), "delivered", 1)
 	autoEventName := servedTypedCreationInstancePath + "/opco.product_initialization_requested"
-	autoEventID := waitServedEventPublishEventID(t, db, backend, runID, autoEventName)
-	waitServedEventPublishDeliveryStatusCount(t, db, backend, autoEventID, "node", identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key(), "delivered", 1)
-	entityID := servedEventPublishEventEntityID(t, db, backend, autoEventID)
+	autoEventID := waitServedEventPublishEventID(t, reader, backend, runID, autoEventName)
+	waitServedEventPublishDeliveryStatusCount(t, reader, backend, autoEventID, "node", identitytest.FlowNode(t, "operating", "lifecycle-orchestrator").Key(), "delivered", 1)
+	entityID := servedEventPublishEventEntityID(t, reader, backend, autoEventID)
 	if entityID == "" {
-		t.Fatalf("%s child auto event %s has no entity_id\n%s", backend, autoEventID, servedEventPublishDebugSummary(t, db, backend, runID))
+		t.Fatalf("%s child auto event %s has no entity_id\n%s", backend, autoEventID, servedInspectionRunDebugSummary(reader, runID))
 	}
-	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "waiting")
+	requireServedEventPublishEntityState(t, reader, backend, runID, entityID, "waiting")
 	targetFlowInstance := requireServedEventPublishEntityFlowInstance(t, db, backend, runID, entityID)
 	if targetFlowInstance != servedTypedCreationInstancePath {
 		t.Fatalf("typed receiver path = %q, want %q", targetFlowInstance, servedTypedCreationInstancePath)
 	}
-
-	targetStdout, targetStderr, code := runServedCLICommand(t, endpoint, []string{
-		"event", "publish", "operating/opco.product_review_requested",
-		"--run-id", runID,
-		"--source-event-id", autoEventID,
-		"--target-flow-instance", targetFlowInstance,
-		"--target-entity-id", entityID,
-		"--payload-json", `{"note":"approved-target"}`,
-		"--idempotency-key", "issue-1438-" + backend + "-target",
-	})
+	targetStdout, targetStderr, code := runServedCLICommand(t, endpoint, []string{"event", "publish", "operating/opco.product_review_requested", "--run-id", runID, "--source-event-id", autoEventID, "--target-flow-instance", targetFlowInstance, "--target-entity-id", entityID, "--payload-json", `{"note":"approved-target"}`, "--idempotency-key", "issue-1438-" + backend + "-target"})
 	if code == 0 || !strings.Contains(targetStderr+targetStdout, apiv1.EventNotDeclaredCode) {
 		t.Fatalf("private target must be refused: code=%d stderr=%s stdout=%s", code, targetStderr, targetStdout)
 	}
-	// The selected receiver exists and has executed its creation event, but its
-	// address must never grant public write access to a private input.
-	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "waiting")
+	requireServedEventPublishEntityState(t, reader, backend, runID, entityID, "waiting")
 	requireServedEntityReadback(t, endpoint, runID, entityID, "waiting")
-	if got := servedEventPublishEventCountByIdempotencyKey(t, db, backend, "issue-1438-"+backend+"-target"); got != 0 {
+	if got := servedEventPublishEventCountByIdempotencyKey(t, reader, backend, "issue-1438-"+backend+"-target"); got != 0 {
 		t.Fatalf("%s rejected private target wrote %d events", backend, got)
 	}
-	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", "issue-1438-"+backend+"-target"); got != 0 {
+	if got := servedEventPublishAPIIdempotencyCount(t, reader, backend, "event.publish", "issue-1438-"+backend+"-target"); got != 0 {
 		t.Fatalf("%s rejected private target wrote %d receipts", backend, got)
 	}
 }
 
-func runServedEventPublishActiveLoadProof(
-	t *testing.T,
-	endpoint string,
-	db *sql.DB,
-	backend string,
-	bundleHash string,
-	probe *lifecycletest.Probe,
-	agentStarted <-chan struct{},
-	release chan struct{},
-	releaseOnce *sync.Once,
-) {
+func runServedEventPublishActiveLoadProof(t *testing.T, endpoint string, db *sql.DB, reader receiverProofStateReader, backend string, bundleHash string, probe *lifecycletest.Probe, agentStarted <-chan struct{}, release chan struct{}, releaseOnce *sync.Once) {
 	t.Helper()
-	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{
-		"event_name":      "item.received",
-		"bundle_hash":     bundleHash,
-		"payload":         map[string]any{"item_id": "item-1"},
-		"idempotency_key": "issue-1434-" + backend + "-initial",
-	})
+	initial := requireServedEventPublishRPCResult(t, endpoint, map[string]any{"event_name": "item.received", "bundle_hash": bundleHash, "payload": map[string]any{"item_id": "item-1"}, "idempotency_key": "issue-1434-" + backend + "-initial"})
 	runID := initial.RunID
 	initialEventID := initial.EventID
 	if !initial.NewRunCreated || runID == "" || initialEventID == "" {
 		t.Fatalf("%s initial event.publish result = %#v, want new run", backend, initial)
 	}
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
-	entityID := requireServedEventPublishEntityState(t, db, backend, runID, "", "waiting")
-
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, reader, backend, runID, initialEventID, identitytest.RootNode(t, "item-handler").Key(), probe)
+	entityID := requireServedEventPublishEntityState(t, reader, backend, runID, "", "waiting")
 	holdStart := time.Now()
-	holdEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "item.processed",
-		"run_id":          runID,
-		"source_event_id": initialEventID,
-		"payload":         map[string]any{"item_id": "hold"},
-		"idempotency_key": "issue-1434-" + backend + "-agent-hold",
-	})
+	holdEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{"event_name": "item.processed", "run_id": runID, "source_event_id": initialEventID, "payload": map[string]any{"item_id": "hold"}, "idempotency_key": "issue-1434-" + backend + "-agent-hold"})
 	holdElapsed := time.Since(holdStart)
 	if holdEnvelope.Error != nil {
 		t.Fatalf("%s agent-hold event.publish error = %#v", backend, holdEnvelope.Error)
@@ -5434,29 +5036,22 @@ func runServedEventPublishActiveLoadProof(
 	if hold.RunID != runID || hold.OperatorReferenceEventID != initialEventID || hold.NewRunCreated || hold.EventID == "" {
 		t.Fatalf("%s agent-hold event.publish result = %#v, want existing run with source lineage", backend, hold)
 	}
-	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, hold.EventID); got == 0 {
-		t.Fatalf("%s agent-hold deliveries = %d, want persisted delivery authority\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	if got := servedEventPublishScalarCount(t, reader, backend, "event_deliveries", runID, hold.EventID); got == 0 {
+		t.Fatalf("%s agent-hold deliveries = %d, want persisted delivery authority\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-	requireServedEventPublishCommittedReplayScope(t, db, backend, runID, hold.EventID, "subscribed")
+	requireServedEventPublishCommittedReplayScope(t, reader, backend, runID, hold.EventID, "subscribed")
 	assertServedEventPublishDeliveriesContainStatus(t, hold.Deliveries, "agent", "load-agent", "pending", "in_progress")
 	select {
 	case <-agentStarted:
 	case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
-		t.Fatalf("%s timed out waiting for active-load agent to start\n%s", backend, servedEventPublishDebugSummary(t, db, backend, runID))
+		t.Fatalf("%s timed out waiting for active-load agent to start\n%s", backend, servedInspectionRunDebugSummary(reader, runID))
 	}
-	if got := servedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
-		t.Fatalf("%s agent-hold delivery in_progress count = %d, want active agent load before follow-up\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	if got := servedEventPublishDeliveryStatusCount(t, reader, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
+		t.Fatalf("%s agent-hold delivery in_progress count = %d, want active agent load before follow-up\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-
 	unhandledKey := "issue-1434-" + backend + "-unhandled-active"
 	unhandledStart := time.Now()
-	unhandledEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "thing.unhandled",
-		"run_id":          runID,
-		"source_event_id": hold.EventID,
-		"payload":         map[string]any{"note": "unhandled under active load"},
-		"idempotency_key": unhandledKey,
-	})
+	unhandledEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{"event_name": "thing.unhandled", "run_id": runID, "source_event_id": hold.EventID, "payload": map[string]any{"note": "unhandled under active load"}, "idempotency_key": unhandledKey})
 	unhandledElapsed := time.Since(unhandledStart)
 	if unhandledEnvelope.Error == nil {
 		t.Fatalf("%s unhandled event.publish error = nil, result=%s", backend, string(unhandledEnvelope.Result))
@@ -5467,24 +5062,17 @@ func runServedEventPublishActiveLoadProof(
 	if unhandledEnvelope.Error.Data["code"] != apiv1.EventNotDeclaredCode {
 		t.Fatalf("%s unhandled event.publish error data = %#v, want %s", backend, unhandledEnvelope.Error.Data, apiv1.EventNotDeclaredCode)
 	}
-	if got := servedEventPublishEventCountByIdempotencyKey(t, db, backend, unhandledKey); got != 0 {
+	if got := servedEventPublishEventCountByIdempotencyKey(t, reader, backend, unhandledKey); got != 0 {
 		t.Fatalf("%s event rows for unhandled active-load idempotency key = %d, want 0", backend, got)
 	}
-	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", unhandledKey); got != 0 {
+	if got := servedEventPublishAPIIdempotencyCount(t, reader, backend, "event.publish", unhandledKey); got != 0 {
 		t.Fatalf("%s idempotency rows for unhandled active-load publish = %d, want 0", backend, got)
 	}
-	if got := servedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
-		t.Fatalf("%s agent-hold delivery in_progress after fail-closed publish = %d, want still active\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	if got := servedEventPublishDeliveryStatusCount(t, reader, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
+		t.Fatalf("%s agent-hold delivery in_progress after fail-closed publish = %d, want still active\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-
 	followStart := time.Now()
-	followEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{
-		"event_name":      "item.processed",
-		"run_id":          runID,
-		"source_event_id": hold.EventID,
-		"payload":         map[string]any{"item_id": "review"},
-		"idempotency_key": "issue-1434-" + backend + "-follow-up",
-	})
+	followEnvelope := requestServedJSONRPC(t, endpoint, "event.publish", map[string]any{"event_name": "item.processed", "run_id": runID, "source_event_id": hold.EventID, "payload": map[string]any{"item_id": "review"}, "idempotency_key": "issue-1434-" + backend + "-follow-up"})
 	followElapsed := time.Since(followStart)
 	if followEnvelope.Error != nil {
 		t.Fatalf("%s follow-up event.publish error = %#v", backend, followEnvelope.Error)
@@ -5499,23 +5087,24 @@ func runServedEventPublishActiveLoadProof(
 	if followUp.RunID != runID || followUp.OperatorReferenceEventID != hold.EventID || followUp.NewRunCreated || followUp.EventID == "" {
 		t.Fatalf("%s follow-up event.publish result = %#v, want existing run with hold event source lineage", backend, followUp)
 	}
-	if got := servedEventPublishScalarCount(t, db, backend, "event_deliveries", runID, followUp.EventID); got == 0 {
-		t.Fatalf("%s follow-up deliveries = %d, want persisted delivery authority\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	if got := servedEventPublishScalarCount(t, reader, backend, "event_deliveries", runID, followUp.EventID); got == 0 {
+		t.Fatalf("%s follow-up deliveries = %d, want persisted delivery authority\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
-	requireServedEventPublishCommittedReplayScope(t, db, backend, runID, followUp.EventID, "subscribed")
+	requireServedEventPublishCommittedReplayScope(t, reader, backend, runID, followUp.EventID, "subscribed")
 	itemObserver := identitytest.RootNode(t, "item-observer").Key()
 	assertServedEventPublishDeliveriesContainStatus(t, followUp.Deliveries, "node", itemObserver, "pending", "in_progress", "delivered")
-	if got := servedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
-		t.Fatalf("%s agent-hold delivery in_progress after follow-up ACK = %d, want ACK before unrelated agent delivery release\n%s", backend, got, servedEventPublishDebugSummary(t, db, backend, runID))
+	if got := servedEventPublishDeliveryStatusCount(t, reader, backend, hold.EventID, "agent", "load-agent", "in_progress"); got != 1 {
+		t.Fatalf("%s agent-hold delivery in_progress after follow-up ACK = %d, want ACK before unrelated agent delivery release\n%s", backend, got, servedInspectionRunDebugSummary(reader, runID))
 	}
 	requireServedEventPublishDeliveryTargetRoute(t, db, backend, followUp.EventID, "node", identitytest.RootNode(t, "item-observer").Key(), runID, entityID)
 	requireServedEventReadback(t, endpoint, followUp.EventID, runID, "", "item.processed", itemObserver)
-
-	releaseOnce.Do(func() { close(release) })
-	waitServedEventPublishDeliveryStatusCount(t, db, backend, hold.EventID, "agent", "load-agent", "delivered", 1)
-	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, db, backend, runID, followUp.EventID, identitytest.RootNode(t, "item-observer").Key(), probe)
-	requireServedEventPublishEntityState(t, db, backend, runID, entityID, "done")
-	requireServedRunStatusWithDebug(t, endpoint, db, backend, runID, "completed")
+	releaseOnce.Do(func() {
+		close(release)
+	})
+	waitServedEventPublishDeliveryStatusCount(t, reader, backend, hold.EventID, "agent", "load-agent", "delivered", 1)
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, reader, backend, runID, followUp.EventID, identitytest.RootNode(t, "item-observer").Key(), probe)
+	requireServedEventPublishEntityState(t, reader, backend, runID, entityID, "done")
+	requireServedRunStatusWithDebug(t, endpoint, reader, backend, runID, "completed")
 	requireServedTraceReadback(t, endpoint, runID, followUp.EventID, "item.processed", itemObserver)
 }
 
@@ -5659,7 +5248,7 @@ func requireServedRunStatus(t *testing.T, endpoint, runID, want string) {
 	t.Fatalf("run.get status for %s = %q, want %q", runID, last, want)
 }
 
-func requireServedRunStatusWithDebug(t *testing.T, endpoint string, db *sql.DB, backend, runID, want string) {
+func requireServedRunStatusWithDebug(t *testing.T, endpoint string, reader receiverProofStateReader, backend, runID, want string) {
 	t.Helper()
 	var last string
 	deadline := time.Now().Add(servedProofPollDeadline)
@@ -5677,7 +5266,7 @@ func requireServedRunStatusWithDebug(t *testing.T, endpoint string, db *sql.DB, 
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("run.get status for %s = %q, want %q\n%s", runID, last, want, servedEventPublishDebugSummary(t, db, backend, runID))
+	t.Fatalf("run.get status for %s = %q, want %q\n%s", runID, last, want, servedInspectionRunDebugSummary(reader, runID))
 }
 
 func requireServedRunDiagnoseOperationalState(t *testing.T, endpoint, runID, want string) {
@@ -5802,12 +5391,20 @@ func requireServedEntityReadback(t *testing.T, endpoint, runID, entityID, wantSt
 	}
 }
 
-func requireServedEventPublishEntityState(t *testing.T, db *sql.DB, backend, runID, entityID, wantState string) string {
+func requireServedEventPublishEntityState(t *testing.T, reader receiverProofStateReader, backend, runID, entityID, wantState string) string {
 	t.Helper()
 	var lastState, lastEntityID string
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		gotEntityID, state := servedEventPublishEntityState(t, db, backend, runID, entityID, wantState)
+		var evidence storetest.WriterStageEvidence
+		if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+			var err error
+			evidence, err = storetest.ReadWriterStage(ctx, reader, runID, entityID, wantState)
+			return err
+		}); err != nil {
+			t.Fatalf("%s entity_state query: %v", backend, err)
+		}
+		gotEntityID, state := evidence.EntityID, evidence.State
 		if state == wantState && gotEntityID != "" {
 			return gotEntityID
 		}
@@ -5815,7 +5412,7 @@ func requireServedEventPublishEntityState(t *testing.T, db *sql.DB, backend, run
 		lastState = state
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("%s entity_state for run %s entity %q = %q (entity %q), want %q\n%s", backend, runID, entityID, lastState, lastEntityID, wantState, servedEventPublishDebugSummary(t, db, backend, runID))
+	t.Fatalf("%s entity_state for run %s entity %q = %q (entity %q), want %q\n%s", backend, runID, entityID, lastState, lastEntityID, wantState, servedInspectionRunDebugSummary(reader, runID))
 	return ""
 }
 
@@ -5901,225 +5498,78 @@ func requireServedEventPublishRouteJSON(t *testing.T, backend, field, raw, flowI
 	}
 }
 
-func servedEventPublishDebugSummary(t *testing.T, db *sql.DB, backend, runID string) string {
+func servedEventPublishScalarCount(t *testing.T, reader receiverProofStateReader, backend, scope, runID, eventID string) int {
 	t.Helper()
-	sections := []string{
-		servedEventPublishDebugQuery(t, db, backend, "runs", runID),
-		servedEventPublishDebugQuery(t, db, backend, "entity_state", runID),
-		servedEventPublishDebugQuery(t, db, backend, "flow_instances", runID),
-		servedEventPublishDebugQuery(t, db, backend, "events", runID),
-		servedEventPublishDebugQuery(t, db, backend, "event_deliveries", runID),
-		servedEventPublishDebugQuery(t, db, backend, "settled_delivery_attempts", runID),
-		servedEventPublishDebugQuery(t, db, backend, "event_receipts", runID),
-		servedEventPublishDebugQuery(t, db, backend, "pipeline_obligations", runID),
-		servedEventPublishDebugQuery(t, db, backend, "dead_letters", runID),
-		servedEventPublishDebugQuery(t, db, backend, "delivery_agents", runID),
-		servedEventPublishDebugQuery(t, db, backend, "runtime_logs", runID),
-	}
-	return strings.Join(sections, "\n")
-}
-
-func servedEventPublishDebugQuery(t *testing.T, db *sql.DB, backend, scope, runID string) string {
-	t.Helper()
-	sqlText := ""
-	args := []any{runID}
 	switch backend {
-	case "postgres":
-		switch scope {
-		case "runs":
-			sqlText = `SELECT status, completion_revision, COALESCE(completion_due_at::text, ''), bundle_hash FROM runs WHERE run_id = $1::uuid`
-		case "entity_state":
-			sqlText = `SELECT entity_id::text, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = $1::uuid ORDER BY created_at, entity_id LIMIT 5`
-		case "flow_instances":
-			sqlText = `SELECT instance_path, flow_template, status FROM flow_instances WHERE run_id = $1::uuid ORDER BY instance_path LIMIT 5`
-		case "events":
-			sqlText = `SELECT event_id::text, event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 5`
-		case "event_deliveries":
-			sqlText = `SELECT delivery_id::text, event_id::text, subscriber_type, subscriber_id, status, claim_version, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 8`
-		case "settled_delivery_attempts":
-			sqlText = `SELECT o.delivery_id::text, o.claim_version, o.outcome, COALESCE(o.reason_code, '') FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.run_id = $1::uuid ORDER BY o.settled_at, o.delivery_id LIMIT 8`
-		case "event_receipts":
-			sqlText = `SELECT r.event_id::text, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects::text, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid ORDER BY r.processed_at, r.event_id LIMIT 8`
-		case "pipeline_obligations":
-			sqlText = `SELECT e.event_id::text, e.event_name, COALESCE(r.outcome, ''), COALESCE(o.status, '') FROM events e LEFT JOIN event_receipts r ON r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' LEFT JOIN decision_card_route_obligations o ON o.event_id = e.event_id WHERE e.run_id = $1::uuid ORDER BY e.created_at, e.event_id LIMIT 12`
-		case "dead_letters":
-			sqlText = `SELECT d.original_event, COALESCE(d.entity_id::text, ''), d.failure::text FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1::uuid ORDER BY d.created_at LIMIT 5`
-		case "delivery_agents":
-			sqlText = `SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source, d.agent_route_presence, d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path, COALESCE(a.status, ''), COALESCE(a.lifecycle_phase, '') FROM event_deliveries d LEFT JOIN agents a ON a.agent_id = d.subscriber_id AND a.agent_name_owner = d.agent_name_owner AND a.agent_name_source = d.agent_name_source AND a.agent_route_presence = d.agent_route_presence AND a.flow_scope_key = d.agent_flow_scope_key AND a.flow_instance_id = d.agent_flow_instance_id AND a.flow_instance = d.agent_flow_instance_path WHERE d.run_id = $1::uuid ORDER BY d.created_at LIMIT 8`
-		case "runtime_logs":
-			sqlText = `SELECT payload::text FROM events WHERE run_id = $1::uuid AND event_name = 'platform.runtime_log' ORDER BY created_at LIMIT 8`
-		}
-	case "sqlite":
-		switch scope {
-		case "runs":
-			sqlText = `SELECT status, completion_revision, COALESCE(completion_due_at, ''), bundle_hash FROM runs WHERE run_id = ?`
-		case "entity_state":
-			sqlText = `SELECT entity_id, COALESCE(flow_instance, ''), COALESCE(current_state, '') FROM entity_state WHERE run_id = ? ORDER BY created_at, entity_id LIMIT 5`
-		case "flow_instances":
-			sqlText = `SELECT instance_path, flow_template, status FROM flow_instances WHERE run_id = ? ORDER BY instance_path LIMIT 5`
-		case "events":
-			sqlText = `SELECT event_id, event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = ? ORDER BY created_at, event_id LIMIT 5`
-		case "event_deliveries":
-			sqlText = `SELECT delivery_id, event_id, subscriber_type, subscriber_id, status, claim_version, COALESCE(reason_code, '') FROM event_deliveries WHERE run_id = ? ORDER BY created_at, event_id LIMIT 8`
-		case "settled_delivery_attempts":
-			sqlText = `SELECT o.delivery_id, o.claim_version, o.outcome, COALESCE(o.reason_code, '') FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o JOIN event_deliveries d ON d.delivery_id = o.delivery_id WHERE d.run_id = ? ORDER BY o.settled_at, o.delivery_id LIMIT 8`
-		case "event_receipts":
-			sqlText = `SELECT r.event_id, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? ORDER BY r.processed_at, r.event_id LIMIT 8`
-		case "pipeline_obligations":
-			sqlText = `SELECT e.event_id, e.event_name, COALESCE(r.outcome, ''), COALESCE(o.status, '') FROM events e LEFT JOIN event_receipts r ON r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' LEFT JOIN decision_card_route_obligations o ON o.event_id = e.event_id WHERE e.run_id = ? ORDER BY e.created_at, e.event_id LIMIT 12`
-		case "dead_letters":
-			sqlText = `SELECT d.original_event, COALESCE(d.entity_id, ''), d.failure FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = ? ORDER BY d.created_at LIMIT 5`
-		case "delivery_agents":
-			sqlText = `SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source, d.agent_route_presence, d.agent_flow_scope_key, d.agent_flow_instance_id, d.agent_flow_instance_path, COALESCE(a.status, ''), COALESCE(a.lifecycle_phase, '') FROM event_deliveries d LEFT JOIN agents a ON a.agent_id = d.subscriber_id AND a.agent_name_owner = d.agent_name_owner AND a.agent_name_source = d.agent_name_source AND a.agent_route_presence = d.agent_route_presence AND a.flow_scope_key = d.agent_flow_scope_key AND a.flow_instance_id = d.agent_flow_instance_id AND a.flow_instance = d.agent_flow_instance_path WHERE d.run_id = ? ORDER BY d.created_at LIMIT 8`
-		case "runtime_logs":
-			sqlText = `SELECT payload FROM events WHERE run_id = ? AND event_name = 'platform.runtime_log' ORDER BY created_at LIMIT 8`
-		}
-	}
-	if sqlText == "" {
-		return scope + ": unsupported debug query"
-	}
-	rows, err := db.QueryContext(context.Background(), sqlText, args...)
-	if err != nil {
-		return fmt.Sprintf("%s: %v", scope, err)
-	}
-	defer rows.Close()
-	out := []string{}
-	columns, err := rows.Columns()
-	if err != nil {
-		return fmt.Sprintf("%s columns: %v", scope, err)
-	}
-	for rows.Next() {
-		values := make([]sql.NullString, len(columns))
-		scan := make([]any, len(values))
-		for i := range values {
-			scan[i] = &values[i]
-		}
-		if err := rows.Scan(scan...); err != nil {
-			return fmt.Sprintf("%s scan: %v", scope, err)
-		}
-		cols := make([]string, len(values))
-		for i, value := range values {
-			if value.Valid {
-				cols[i] = value.String
-			}
-		}
-		out = append(out, fmt.Sprintf("%v", cols))
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Sprintf("%s rows: %v", scope, err)
-	}
-	if len(out) == 0 {
-		return scope + ": []"
-	}
-	return scope + ": " + strings.Join(out, "; ")
-}
-
-func servedEventPublishRowCount(t *testing.T, db *sql.DB, backend, scope, runID, eventID string) int {
-	t.Helper()
-	return servedEventPublishScalarCount(t, db, backend, scope, runID, eventID)
-}
-
-func servedEventPublishScalarCount(t *testing.T, db *sql.DB, backend, scope, runID, eventID string) int {
-	t.Helper()
-	var sqlText string
-	var args []any
-	switch backend {
-	case "postgres":
-		switch scope {
-		case "runs":
-			sqlText = `SELECT COUNT(*) FROM runs WHERE run_id = $1::uuid`
-			args = []any{runID}
-		case "events_by_run":
-			sqlText = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`
-			args = []any{runID}
-		case "application_events_by_run":
-			sqlText = `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name NOT LIKE 'platform.%'`
-			args = []any{runID}
-		case "event_deliveries":
-			sqlText = `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid AND event_id = $2::uuid`
-			args = []any{runID, eventID}
-		default:
-			t.Fatalf("unknown postgres proof count scope %q", scope)
-		}
-	case "sqlite":
-		switch scope {
-		case "runs":
-			sqlText = `SELECT COUNT(*) FROM runs WHERE run_id = ?`
-			args = []any{runID}
-		case "events_by_run":
-			sqlText = `SELECT COUNT(*) FROM events WHERE run_id = ?`
-			args = []any{runID}
-		case "application_events_by_run":
-			sqlText = `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name NOT LIKE 'platform.%'`
-			args = []any{runID}
-		case "event_deliveries":
-			sqlText = `SELECT COUNT(*) FROM event_deliveries WHERE run_id = ? AND event_id = ?`
-			args = []any{runID, eventID}
-		default:
-			t.Fatalf("unknown sqlite proof count scope %q", scope)
-		}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
 	var count int
-	if err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&count); err != nil {
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		switch scope {
+		case "runs":
+			count, err = storetest.CountPhysicalRunIdentity(ctx, reader, runID)
+		case "application_events_by_run":
+			count, err = storetest.CountApplicationRunEvents(ctx, reader, runID)
+		case "event_deliveries":
+			count, err = storetest.CountExactRunEventDeliveries(ctx, reader, runID, eventID)
+		default:
+			return fmt.Errorf("unknown %s proof count scope %q", backend, scope)
+		}
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s count %s: %v", backend, scope, err)
 	}
 	return count
 }
 
-func servedEventPublishEventCountByIdempotencyKey(t *testing.T, db *sql.DB, backend, idempotencyKey string) int {
+func servedEventPublishEventCountByIdempotencyKey(t *testing.T, reader receiverProofStateReader, backend, idempotencyKey string) int {
 	t.Helper()
-	var (
-		query string
-		args  []any
-	)
 	switch backend {
-	case "postgres":
-		query = `SELECT COUNT(*) FROM events WHERE idempotency_key = $1`
-		args = []any{idempotencyKey}
-	case "sqlite":
-		query = `SELECT COUNT(*) FROM events WHERE idempotency_key = ?`
-		args = []any{idempotencyKey}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
 	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.ReadEventIdempotencyCardinality(ctx, reader, idempotencyKey)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s count events by idempotency key %q: %v", backend, idempotencyKey, err)
 	}
 	return count
 }
 
-func servedEventPublishAPIIdempotencyCount(t *testing.T, db *sql.DB, backend, method, idempotencyKey string) int {
+func servedEventPublishAPIIdempotencyCount(t *testing.T, reader receiverProofStateReader, backend, method, idempotencyKey string) int {
 	t.Helper()
-	var (
-		query string
-		args  []any
-	)
 	switch backend {
-	case "postgres":
-		query = `SELECT COUNT(*) FROM api_idempotency WHERE method = $1 AND idempotency_key = $2`
-		args = []any{method, idempotencyKey}
-	case "sqlite":
-		query = `SELECT COUNT(*) FROM api_idempotency WHERE method = ? AND idempotency_key = ?`
-		args = []any{method, idempotencyKey}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
 	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.ReadAPIIdempotencyCardinality(ctx, reader, method, idempotencyKey)
+		return err
+	})
+	if err != nil {
 		t.Fatalf("%s count api idempotency method=%q key=%q: %v", backend, method, idempotencyKey, err)
 	}
 	return count
 }
 
-func waitServedEventPublishDeliveryStatusCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, status string, want int) {
+func waitServedEventPublishDeliveryStatusCount(t *testing.T, reader receiverProofStateReader, backend, eventID, subscriberType, subscriberID, status string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var got int
 	for time.Now().Before(deadline) {
-		got = servedEventPublishDeliveryStatusCount(t, db, backend, eventID, subscriberType, subscriberID, status)
+		got = servedEventPublishDeliveryStatusCount(t, reader, backend, eventID, subscriberType, subscriberID, status)
 		if got == want {
 			return
 		}
@@ -6128,308 +5578,169 @@ func waitServedEventPublishDeliveryStatusCount(t *testing.T, db *sql.DB, backend
 	t.Fatalf("%s delivery count for event=%s subscriber=%s/%s status=%q = %d, want %d", backend, eventID, subscriberType, subscriberID, status, got, want)
 }
 
-func waitServedEventPublishDeliveryStatusCountForRun(t *testing.T, db *sql.DB, backend, runID, eventID, subscriberType, subscriberID, status string, want int) {
+func waitServedEventPublishDeliveryStatusCountForRun(t *testing.T, reader receiverProofStateReader, backend, runID, eventID, subscriberType, subscriberID, status string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var got int
 	for time.Now().Before(deadline) {
-		got = servedEventPublishDeliveryStatusCount(t, db, backend, eventID, subscriberType, subscriberID, status)
+		got = servedEventPublishDeliveryStatusCount(t, reader, backend, eventID, subscriberType, subscriberID, status)
 		if got == want {
 			return
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("%s delivery count for event=%s subscriber=%s/%s status=%q = %d, want %d\n%s",
-		backend, eventID, subscriberType, subscriberID, status, got, want, servedEventPublishDebugSummary(t, db, backend, runID))
+	t.Fatalf("%s delivery count for event=%s subscriber=%s/%s status=%q = %d, want %d\n%s", backend, eventID, subscriberType, subscriberID, status, got, want, servedInspectionRunDebugSummary(reader, runID))
 }
 
-func servedEventPublishDeliveryStatusCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID string, statuses ...string) int {
+func servedEventPublishDeliveryStatusCount(t *testing.T, reader receiverProofStateReader, backend, eventID, subscriberType, subscriberID string, statuses ...string) int {
 	t.Helper()
-	where := []string{}
-	args := []any{}
 	switch backend {
-	case "postgres":
-		where = append(where, fmt.Sprintf("event_id = $%d::uuid", len(args)+1))
-		args = append(args, eventID)
-		if strings.TrimSpace(subscriberType) != "" {
-			where = append(where, fmt.Sprintf("subscriber_type = $%d", len(args)+1))
-			args = append(args, subscriberType)
-		}
-		where = append(where, fmt.Sprintf("subscriber_id = $%d", len(args)+1))
-		args = append(args, subscriberID)
-		for _, status := range statuses {
-			if strings.TrimSpace(status) == "" {
-				continue
-			}
-			where = append(where, fmt.Sprintf("status = $%d", len(args)+1))
-			args = append(args, status)
-		}
-	case "sqlite":
-		where = append(where, "event_id = ?")
-		args = append(args, eventID)
-		if strings.TrimSpace(subscriberType) != "" {
-			where = append(where, "subscriber_type = ?")
-			args = append(args, subscriberType)
-		}
-		where = append(where, "subscriber_id = ?")
-		args = append(args, subscriberID)
-		for _, status := range statuses {
-			if strings.TrimSpace(status) == "" {
-				continue
-			}
-			where = append(where, "status = ?")
-			args = append(args, status)
-		}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	query := "SELECT COUNT(*) FROM event_deliveries WHERE " + strings.Join(where, " AND ")
 	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
-		t.Fatalf("%s delivery count query failed: %v\n%s", backend, err, query)
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.ReadServedDeliveryStatusCount(ctx, reader, eventID, subscriberType, subscriberID, statuses...)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("%s count deliveries for event=%s subscriber=%s/%s statuses=%#v: %v", backend, eventID, subscriberType, subscriberID, statuses, err)
 	}
 	return count
 }
 
-func requireServedEventPublishCommittedReplayScope(t *testing.T, db *sql.DB, backend, runID, eventID, wantScope string) {
+func requireServedEventPublishCommittedReplayScope(t *testing.T, reader receiverProofStateReader, backend, runID, eventID, wantScope string) {
 	t.Helper()
-	var (
-		query string
-		args  []any
-	)
-	switch backend {
-	case "postgres":
-		query = `
-			SELECT COUNT(*)
-			FROM committed_replay_scopes
-			WHERE run_id = $1::uuid
-			  AND event_id = $2::uuid
-			  AND scope = $3
-		`
-		args = []any{runID, eventID, strings.TrimSpace(wantScope)}
-	case "sqlite":
-		query = `
-			SELECT COUNT(*)
-			FROM committed_replay_scopes
-			WHERE run_id = ?
-			  AND event_id = ?
-			  AND scope = ?
-		`
-		args = []any{runID, eventID, strings.TrimSpace(wantScope)}
-	default:
+	if backend != "postgres" && backend != "sqlite" {
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
-		t.Fatalf("%s committed replay scope query failed: %v\n%s", backend, err, query)
+	count, err := readServedExactReplayScopeCount(context.Background(), reader, runID, eventID, strings.TrimSpace(wantScope))
+	if err != nil {
+		t.Fatalf("%s committed replay scope query failed: %v", backend, err)
 	}
 	if count != 1 {
-		t.Fatalf("%s committed replay scope rows for run=%s event=%s scope=%q = %d, want 1\n%s", backend, runID, eventID, wantScope, count, servedEventPublishDebugSummary(t, db, backend, runID))
+		t.Fatalf("%s committed replay scope rows for run=%s event=%s scope=%q = %d, want 1\n%s", backend, runID, eventID, wantScope, count, servedInspectionRunDebugSummary(reader, runID))
 	}
 }
 
-func waitServedEventPublishReceiptOutcomeCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, outcome string, want int) {
+func waitServedEventPublishReceiptOutcomeCount(t *testing.T, reader receiverProofStateReader, backend, eventID, subscriberType, subscriberID, outcome string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var got int
 	for time.Now().Before(deadline) {
-		got = servedEventPublishReceiptOutcomeCount(t, db, backend, eventID, subscriberType, subscriberID, outcome)
+		got = servedEventPublishReceiptOutcomeCount(t, reader, backend, eventID, subscriberType, subscriberID, outcome)
 		if got == want {
 			return
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("%s receipt count for event=%s subscriber=%s/%s outcome=%q = %d, want %d\n%s", backend, eventID, subscriberType, subscriberID, outcome, got, want, servedEventPublishDebugSummaryForEvent(t, db, backend, eventID))
+	t.Fatalf("%s receipt count for event=%s subscriber=%s/%s outcome=%q = %d, want %d\n%s", backend, eventID, subscriberType, subscriberID, outcome, got, want, servedEventPublishDebugSummaryForEvent(t, reader, backend, eventID))
 }
 
-func waitServedDeliveryOutcomeCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, outcome string, want int) {
+func waitServedDeliveryOutcomeCount(t *testing.T, reader receiverProofStateReader, backend, eventID, subscriberType, subscriberID, outcome string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var got int
 	for time.Now().Before(deadline) {
-		var query string
-		var args []any
-		switch backend {
-		case "postgres":
-			query = `
-				SELECT COUNT(*)
-				FROM event_deliveries d
-				JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
-				  ON o.delivery_id = d.delivery_id
-				 AND o.claim_version = d.claim_version
-				WHERE d.event_id = $1::uuid
-				  AND d.subscriber_type = $2
-				  AND d.subscriber_id = $3
-				  AND o.outcome = $4`
-			args = []any{eventID, subscriberType, subscriberID, outcome}
-		case "sqlite":
-			query = `
-				SELECT COUNT(*)
-				FROM event_deliveries d
-				JOIN (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') o
-				  ON o.delivery_id = d.delivery_id
-				 AND o.claim_version = d.claim_version
-				WHERE d.event_id = ?
-				  AND d.subscriber_type = ?
-				  AND d.subscriber_id = ?
-				  AND o.outcome = ?`
-			args = []any{eventID, subscriberType, subscriberID, outcome}
-		default:
+		if backend != "postgres" && backend != "sqlite" {
 			t.Fatalf("unknown proof backend %q", backend)
 		}
-		if err := db.QueryRowContext(context.Background(), query, args...).Scan(&got); err != nil {
-			t.Fatalf("%s delivery outcome count query failed: %v\n%s", backend, err, query)
+		var err error
+		got, err = readServedCurrentDeliveryOutcomeCount(context.Background(), reader, eventID, subscriberType, subscriberID, outcome)
+		if err != nil {
+			t.Fatalf("%s delivery outcome count query failed: %v", backend, err)
 		}
 		if got == want {
 			return
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("%s delivery outcome count for event=%s subscriber=%s/%s outcome=%q = %d, want %d\n%s", backend, eventID, subscriberType, subscriberID, outcome, got, want, servedEventPublishDebugSummaryForEvent(t, db, backend, eventID))
+	t.Fatalf("%s delivery outcome count for event=%s subscriber=%s/%s outcome=%q = %d, want %d\n%s", backend, eventID, subscriberType, subscriberID, outcome, got, want, servedEventPublishDebugSummaryForEvent(t, reader, backend, eventID))
 }
 
-func servedEventPublishDebugSummaryForEvent(t *testing.T, db *sql.DB, backend, eventID string) string {
+func servedEventPublishDebugSummaryForEvent(t *testing.T, reader receiverProofStateReader, backend, eventID string) string {
 	t.Helper()
-	var query string
-	var args []any
-	switch backend {
-	case "postgres":
-		query = `SELECT run_id::text FROM events WHERE event_id = $1::uuid`
-		args = []any{eventID}
-	case "sqlite":
-		query = `SELECT run_id FROM events WHERE event_id = ?`
-		args = []any{eventID}
-	default:
-		return fmt.Sprintf("unknown proof backend %q", backend)
-	}
 	var runID string
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&runID); err != nil {
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		runID, err = storetest.ReadServedEventRunIDStorage(ctx, reader, eventID)
+		return err
+	})
+	if err != nil {
 		return fmt.Sprintf("%s event %s run lookup failed: %v", backend, eventID, err)
 	}
-	return servedEventPublishDebugSummary(t, db, backend, runID)
+	return servedInspectionRunDebugSummary(reader, runID)
 }
 
-func servedEventPublishReceiptOutcomeCount(t *testing.T, db *sql.DB, backend, eventID, subscriberType, subscriberID, outcome string) int {
+func servedEventPublishReceiptOutcomeCount(t *testing.T, reader servedEventCountReader, backend, eventID, subscriberType, subscriberID, outcome string) int {
 	t.Helper()
-	var query string
-	var args []any
-	switch backend {
-	case "postgres":
-		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = $2 AND subscriber_id = $3 AND outcome = $4`
-		args = []any{eventID, subscriberType, subscriberID, outcome}
-	case "sqlite":
-		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = ? AND subscriber_id = ? AND outcome = ?`
-		args = []any{eventID, subscriberType, subscriberID, outcome}
-	default:
+	if backend != "postgres" && backend != "sqlite" {
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
-		t.Fatalf("%s receipt count query failed: %v\n%s", backend, err, query)
+	count, err := readServedSubscriberReceiptOutcomeCount(context.Background(), reader, eventID, subscriberType, subscriberID, outcome)
+	if err != nil {
+		t.Fatalf("%s receipt count query failed: %v", backend, err)
 	}
 	return count
 }
 
-func servedEventPublishReceiptCountBySubscribers(t *testing.T, db *sql.DB, backend, eventID string, subscriberIDs ...string) int {
+func servedEventPublishReceiptCountBySubscribers(t *testing.T, reader servedEventCountReader, backend, eventID string, subscriberIDs ...string) int {
 	t.Helper()
 	if len(subscriberIDs) == 0 {
 		t.Fatal("subscriberIDs is required")
 	}
-	var query string
-	args := []any{eventID}
-	switch backend {
-	case "postgres":
-		placeholders := make([]string, 0, len(subscriberIDs))
-		for _, subscriberID := range subscriberIDs {
-			placeholders = append(placeholders, fmt.Sprintf("$%d", len(args)+1))
-			args = append(args, subscriberID)
-		}
-		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_id IN (` + strings.Join(placeholders, ", ") + `)`
-	case "sqlite":
-		placeholders := make([]string, 0, len(subscriberIDs))
-		for _, subscriberID := range subscriberIDs {
-			placeholders = append(placeholders, "?")
-			args = append(args, subscriberID)
-		}
-		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_id IN (` + strings.Join(placeholders, ", ") + `)`
-	default:
+	if backend != "postgres" && backend != "sqlite" {
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
-		t.Fatalf("%s receipt subscriber count query failed: %v\n%s", backend, err, query)
+	count, err := readServedSubscriberReceiptCount(context.Background(), reader, eventID, subscriberIDs)
+	if err != nil {
+		t.Fatalf("%s receipt subscriber count query failed: %v", backend, err)
 	}
 	return count
 }
 
-func waitServedEventPublishEventID(t *testing.T, db *sql.DB, backend, runID, eventName string) string {
+func waitServedEventPublishEventID(t *testing.T, reader receiverProofStateReader, backend, runID, eventName string) string {
 	t.Helper()
-	var query string
-	var args []any
-	switch backend {
-	case "postgres":
-		query = `SELECT event_id::text FROM events WHERE run_id = $1::uuid AND event_name = $2`
-		args = []any{runID, eventName}
-	case "sqlite":
-		query = `SELECT event_id FROM events WHERE run_id = ? AND event_name = ?`
-		args = []any{runID, eventName}
-	default:
+	if backend != "postgres" && backend != "sqlite" {
 		t.Fatalf("unknown proof backend %q", backend)
 	}
 	deadline := time.Now().Add(servedProofPollDeadline)
 	for {
-		var eventID string
-		err := db.QueryRowContext(context.Background(), query, args...).Scan(&eventID)
+		eventID, err := readServedRunNamedPublicationIdentity(context.Background(), reader, runID, eventName)
 		if err == nil && strings.TrimSpace(eventID) != "" {
 			return strings.TrimSpace(eventID)
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			t.Fatalf("%s event id query failed: %v\n%s", backend, err, query)
+			t.Fatalf("%s event id query failed: %v", backend, err)
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("%s timed out waiting for event %q in run %s\n%s", backend, eventName, runID, servedEventPublishDebugSummary(t, db, backend, runID))
+			t.Fatalf("%s timed out waiting for event %q in run %s\n%s", backend, eventName, runID, servedInspectionRunDebugSummary(reader, runID))
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
 }
 
-func servedEventPublishEventEntityID(t *testing.T, db *sql.DB, backend, eventID string) string {
+func servedEventPublishEventEntityID(t *testing.T, reader servedEventCountReader, backend, eventID string) string {
 	t.Helper()
-	var query string
-	var args []any
-	switch backend {
-	case "postgres":
-		query = `SELECT COALESCE(entity_id::text, '') FROM events WHERE event_id = $1::uuid`
-		args = []any{eventID}
-	case "sqlite":
-		query = `SELECT COALESCE(entity_id, '') FROM events WHERE event_id = ?`
-		args = []any{eventID}
-	default:
+	if backend != "postgres" && backend != "sqlite" {
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	var entityID string
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&entityID); err != nil {
+	entityID, err := readServedPublicationEntityIdentity(context.Background(), reader, eventID)
+	if err != nil {
 		t.Fatalf("%s load event entity_id %s: %v", backend, eventID, err)
 	}
 	return strings.TrimSpace(entityID)
 }
 
-func assertServedDynamicAutoEmitPayload(t *testing.T, db *sql.DB, backend, eventID string, want map[string]any) {
+func assertServedDynamicAutoEmitPayload(t *testing.T, reader servedEventCountReader, backend, eventID string, want map[string]any) {
 	t.Helper()
-	var raw string
-	var query string
-	var args []any
-	switch backend {
-	case "postgres":
-		query = `SELECT payload::text FROM events WHERE event_id = $1::uuid`
-		args = []any{eventID}
-	case "sqlite":
-		query = `SELECT payload FROM events WHERE event_id = ?`
-		args = []any{eventID}
-	default:
+	if backend != "postgres" && backend != "sqlite" {
 		t.Fatalf("unknown proof backend %q", backend)
 	}
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&raw); err != nil {
+	raw, err := readServedPublicationPayloadText(context.Background(), reader, eventID)
+	if err != nil {
 		t.Fatalf("%s load event payload %s: %v", backend, eventID, err)
 	}
 	var payload map[string]any
@@ -6471,17 +5782,14 @@ func waitServedEventPublishedLog(t *testing.T, endpoint, runID, eventID string) 
 	t.Fatalf("original publication log did not settle for event %s", eventID)
 }
 
-func requireServedReplayNoDeliveryHistoryNoMutation(t *testing.T, endpoint string, db *sql.DB, backend, eventID, idempotencyKey string) {
+func requireServedReplayNoDeliveryHistoryNoMutation(t *testing.T, endpoint string, reader receiverProofStateReader, backend, eventID, idempotencyKey string) {
 	t.Helper()
-	beforeSourcedEvents := servedEventPublishSourcedEventCount(t, db, backend, eventID)
-	errResp := requireServedJSONRPCError(t, endpoint, "event.replay", map[string]any{
-		"event_id":        eventID,
-		"idempotency_key": idempotencyKey,
-	})
+	beforeSourcedEvents := servedEventPublishSourcedEventCount(t, reader, backend, eventID)
+	errResp := requireServedJSONRPCError(t, endpoint, "event.replay", map[string]any{"event_id": eventID, "idempotency_key": idempotencyKey})
 	if errResp.Data["code"] != apiv1.EventReplayNoDeliveryHistoryCode {
 		t.Fatalf("event.replay data = %#v, want %s", errResp.Data, apiv1.EventReplayNoDeliveryHistoryCode)
 	}
-	if got := servedEventPublishSourcedEventCount(t, db, backend, eventID); got != beforeSourcedEvents {
+	if got := servedEventPublishSourcedEventCount(t, reader, backend, eventID); got != beforeSourcedEvents {
 		var cause operatorread.OperatorEventFull
 		requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": eventID}, &cause)
 		var page operatorread.OperatorEventListResult
@@ -6493,119 +5801,44 @@ func requireServedReplayNoDeliveryHistoryNoMutation(t *testing.T, endpoint strin
 		}
 		t.Fatalf("%s events sourced from rejected node-only replay target = %d, want %d", backend, got, beforeSourcedEvents)
 	}
-	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.replay", idempotencyKey); got != 0 {
+	if got := servedEventPublishAPIIdempotencyCount(t, reader, backend, "event.replay", idempotencyKey); got != 0 {
 		t.Fatalf("%s api_idempotency rows for rejected node-only replay = %d, want 0", backend, got)
 	}
 }
 
-func servedEventPublishSourcedEventCount(t *testing.T, db *sql.DB, backend, sourceEventID string) int {
+func servedEventPublishSourcedEventCount(t *testing.T, reader receiverProofStateReader, backend, sourceEventID string) int {
 	t.Helper()
-	var query string
-	var args []any
 	switch backend {
-	case "postgres":
-		query = `SELECT COUNT(*) FROM events WHERE source_event_id = $1::uuid`
-		args = []any{sourceEventID}
-	case "sqlite":
-		query = `SELECT COUNT(*) FROM events WHERE source_event_id = ?`
-		args = []any{sourceEventID}
+	case "postgres", "sqlite":
 	default:
 		t.Fatalf("unknown proof backend %q", backend)
 	}
 	var count int
-	if err := db.QueryRowContext(context.Background(), query, args...).Scan(&count); err != nil {
-		t.Fatalf("%s sourced event count query failed: %v\n%s", backend, err, query)
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.CountSourceEventPublications(ctx, reader, sourceEventID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("%s sourced event count query failed: %v", backend, err)
 	}
 	return count
 }
 
-func servedEventPublishNodeDeliveryCount(t *testing.T, db *sql.DB, backend, runID, eventID, subscriberID string) int {
+func servedEventPublishNodeDeliveryCount(t *testing.T, reader servedEventCountReader, backend, runID, eventID, subscriberID string) int {
 	t.Helper()
-	count, err := servedEventPublishNodeDeliveryCountValue(context.Background(), db, backend, runID, eventID, subscriberID)
+	count, err := servedEventPublishNodeDeliveryCountValue(context.Background(), reader, backend, runID, eventID, subscriberID)
 	if err != nil {
 		t.Fatalf("%s count node delivery %s/%s: %v", backend, eventID, subscriberID, err)
 	}
 	return count
 }
 
-func servedEventPublishNodeDeliveryCountValue(ctx context.Context, db *sql.DB, backend, runID, eventID, subscriberID string) (int, error) {
-	var sqlText string
-	var args []any
-	switch backend {
-	case "postgres":
-		sqlText = `
-			SELECT COUNT(*)
-			FROM event_deliveries
-			WHERE run_id = $1::uuid
-			  AND event_id = $2::uuid
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = $3
-		`
-		args = []any{runID, eventID, subscriberID}
-	case "sqlite":
-		sqlText = `
-			SELECT COUNT(*)
-			FROM event_deliveries
-			WHERE run_id = ?
-			  AND event_id = ?
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = ?
-		`
-		args = []any{runID, eventID, subscriberID}
-	default:
+func servedEventPublishNodeDeliveryCountValue(ctx context.Context, reader servedEventCountReader, backend, runID, eventID, subscriberID string) (int, error) {
+	if backend != "postgres" && backend != "sqlite" {
 		return 0, fmt.Errorf("unknown proof backend %q", backend)
 	}
-	var count int
-	if err := db.QueryRowContext(ctx, sqlText, args...).Scan(&count); err != nil {
-		return 0, err
-	}
-	return count, nil
-}
-
-func servedEventPublishEntityState(t *testing.T, db *sql.DB, backend, runID, entityID, wantState string) (string, string) {
-	t.Helper()
-	var sqlText string
-	var args []any
-	switch backend {
-	case "postgres":
-		if strings.TrimSpace(entityID) != "" {
-			sqlText = `SELECT current_state FROM flow_instances WHERE run_id = $1::uuid AND entity_id = $2::uuid`
-			args = []any{runID, entityID}
-		} else {
-			sqlText = `SELECT entity_id::text, current_state FROM flow_instances WHERE run_id = $1::uuid AND current_state = $2 ORDER BY created_at, entity_id LIMIT 1`
-			args = []any{runID, wantState}
-		}
-	case "sqlite":
-		if strings.TrimSpace(entityID) != "" {
-			sqlText = `SELECT current_state FROM flow_instances WHERE run_id = ? AND entity_id = ?`
-			args = []any{runID, entityID}
-		} else {
-			sqlText = `SELECT entity_id, current_state FROM flow_instances WHERE run_id = ? AND current_state = ? ORDER BY created_at, entity_id LIMIT 1`
-			args = []any{runID, wantState}
-		}
-	default:
-		t.Fatalf("unknown proof backend %q", backend)
-	}
-	var gotEntityID, state string
-	if strings.TrimSpace(entityID) != "" {
-		gotEntityID = strings.TrimSpace(entityID)
-		err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&state)
-		if err == sql.ErrNoRows {
-			return gotEntityID, ""
-		}
-		if err != nil {
-			t.Fatalf("%s entity_state query: %v", backend, err)
-		}
-		return gotEntityID, state
-	}
-	err := db.QueryRowContext(context.Background(), sqlText, args...).Scan(&gotEntityID, &state)
-	if err == sql.ErrNoRows {
-		return "", ""
-	}
-	if err != nil {
-		t.Fatalf("%s entity_state query: %v", backend, err)
-	}
-	return gotEntityID, state
+	return readServedExactRunNodeDeliveryCount(ctx, reader, runID, eventID, subscriberID)
 }
 
 func TestRunServeRuntimePassesNoAmbientDataSourceToWorkspaceLifecycle(t *testing.T) {
@@ -7567,7 +6800,7 @@ func TestRunServeRuntimeRejectsPresentZeroBeforeContextPublication(t *testing.T)
 }
 
 func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBeforeCleanup(t *testing.T) {
-	_, db, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+	_, _, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
 	ctx := context.Background()
@@ -7594,7 +6827,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 	if code != serveExitDataIntegrity {
 		t.Fatalf("Run code = %d, want %d\noutput:\n%s", code, serveExitDataIntegrity, out.String())
 	}
-	assertServeRuntimeRunStillActive(t, ctx, storetest.NewPostgresStoreForTest(db), persistedMissingRunID)
+	assertServeRuntimeRunStillActive(t, ctx, pg, persistedMissingRunID)
 	if strings.Contains(out.String(), "ready") {
 		t.Fatalf("serve reached readiness despite persisted-missing startup recovery failure:\n%s", out.String())
 	}
@@ -7656,7 +6889,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, bundle *
 		Type: "default", Role: "operator", Model: "regular", LLMBackend: "anthropic",
 		Memory: runtimeagentmemory.Plan{Enabled: true},
 	}, mustServeTestPersistedSourceArtifactFact(bundleHash))
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, storetest.DatabaseForTest(sqliteStore), authoractivityfixture.DialectSQLite,
+	event := storetest.InsertNativeExistingRunRootEvent(t, ctx, sqliteStore,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a")}
@@ -7892,10 +7125,9 @@ func TestServeListenerServersPartitionAPIAndMCPRoutes(t *testing.T) {
 	}
 }
 
-func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, entityID, eventID, bundleHash, eventName, subscriberID string, at time.Time) {
+func seedRunForkSelectedExecutionSourceEvent(t *testing.T, selected runForkCLISelectedStore, runID, entityID, eventID, bundleHash, eventName, subscriberID string, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	selected := storetest.AdmitPostgresRuntimeStore(t, db)
 	storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Minute),
 		BundleHash: bundleHash,
@@ -7903,8 +7135,8 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 	if entityID != runID {
 		t.Fatal("selected root fixture must use the constructed run entity")
 	}
-	seedRunForkCLIConstruction(t, db, runID, bundleHash, at)
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
+	seedRunForkCLIConstruction(t, selected, runID, bundleHash, at)
+	event := storetest.InsertNativeExistingRunRootEvent(t, ctx, selected,
 		eventID, runID, events.EventType(eventName), eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(fmt.Sprintf(`{"entity_id":%q}`, entityID)),
 		events.EventEnvelope{EntityID: entityID, FlowInstance: runID, Scope: events.EventScopeEntity}, at)
@@ -7915,24 +7147,7 @@ func seedRunForkSelectedExecutionSourceEvent(t *testing.T, db *sql.DB, runID, en
 				FlowID: ".", FlowInstance: runID, EntityID: runID,
 			}),
 		}})
-	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
-}
-
-func captureRunForkCLIRevision(t *testing.T, db *sql.DB, runID string, families ...runforkrevision.Family) int64 {
-	t.Helper()
-	tx, err := db.BeginTx(context.Background(), nil)
-	if err != nil {
-		t.Fatalf("begin run-fork revision fixture: %v", err)
-	}
-	revision, err := runforkrevision.Capture(context.Background(), tx, runID, families...)
-	if err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("capture run-fork revision fixture: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit run-fork revision fixture: %v", err)
-	}
-	return revision
+	storetest.CaptureSelectedRunForkRevision(t, ctx, selected, runID, runforkrevision.AllFamilies()...)
 }
 
 func TestServeBootRegistryDetail_UsesRuntimeToolInventoryCount(t *testing.T) {
@@ -8801,7 +8016,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		Type: "default", Role: "operator", Model: "regular", LLMBackend: "anthropic",
 		Memory: runtimeagentmemory.Plan{Enabled: true},
 	}, mustServeTestPersistedSourceArtifactFact(bundleHash))
-	event := storetest.InsertExistingRunRootEventRecord(t, ctx, db, authoractivityfixture.DialectPostgres,
+	event := storetest.InsertNativeExistingRunRootEvent(t, ctx, runtimePG,
 		eventID, runID, "serve.abandon.test", eventtest.Producer(events.EventProducerExternal, "test"),
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a")}

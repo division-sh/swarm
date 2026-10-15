@@ -2,6 +2,7 @@ package conformance
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -50,66 +52,63 @@ func TestDeploymentSourceKeylessEqualRowsPreserveMultiplicityBothStores(t *testi
 			runID := startDeploymentResourceRun(t, f, server, "--data", selectedDeploymentEvent+"="+path)
 			waitNotifyAllChildrenRuntimeWithin(t, f.runtime, runID, 30*time.Second)
 
-			var pin string
-			if err := f.db.QueryRowContext(f.ctx, `SELECT version_id FROM resource_version_pins WHERE run_id=$1 AND flow_path='.' AND event_name='root.ready'`, runID).Scan(&pin); err != nil {
+			pin, err := storetest.ReadRootReadyResourcePinStorage(f.ctx, f.selected, runID)
+			if err != nil {
 				t.Fatal(err)
 			}
 			if pin != string(version.VersionID) {
 				t.Fatalf("keyless run pin=%s want=%s", pin, version.VersionID)
 			}
-			var storedKeyField string
-			var storedRowCount int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT COALESCE(business_key_field,''),row_count FROM resource_versions WHERE version_id=$1`, pin).Scan(&storedKeyField, &storedRowCount); err != nil {
-				t.Fatal(err)
-			}
-			if storedKeyField != "" || storedRowCount != 2 {
-				t.Fatalf("stored keyless version has key=%q row_count=%d", storedKeyField, storedRowCount)
-			}
-			var cursor, cardinality int
-			if err := f.db.QueryRowContext(f.ctx, `SELECT cursor,cardinality FROM fan_out_intents WHERE run_id=$1 AND origin_kind='deployment'`, runID).Scan(&cursor, &cardinality); err != nil {
-				t.Fatal(err)
-			}
-			if cursor != 2 || cardinality != 2 {
-				t.Fatalf("keyless feed cursor=%d cardinality=%d, want two", cursor, cardinality)
-			}
-			outcomes, err := f.db.QueryContext(f.ctx, `SELECT ordinal,CAST(event_id AS TEXT) FROM fan_out_outcomes WHERE run_id=$1 AND outcome_kind='committed' ORDER BY ordinal`, runID)
+			stored, err := storetest.ReadResourceVersionMetadataStorage(f.ctx, f.selected, pin)
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer outcomes.Close()
+			storedKeyField, storedRowCount := stored.BusinessKey, stored.RowCount
+			if storedKeyField != "" || storedRowCount != 2 {
+				t.Fatalf("stored keyless version has key=%q row_count=%d", storedKeyField, storedRowCount)
+			}
+			progress, err := storetest.ReadDeploymentIntentCardinalityStorage(f.ctx, f.selected, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			cursor, cardinality := progress.Cursor, progress.Cardinality
+			if cursor != 2 || cardinality != 2 {
+				t.Fatalf("keyless feed cursor=%d cardinality=%d, want two", cursor, cardinality)
+			}
+			outcomes, err := storetest.ReadDeploymentCommittedOrdinalsStorage(f.ctx, f.selected, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			eventIDs := make(map[string]struct{}, 2)
-			for ordinal := 0; outcomes.Next(); ordinal++ {
-				var gotOrdinal int
-				var eventID string
-				if err := outcomes.Scan(&gotOrdinal, &eventID); err != nil {
-					t.Fatal(err)
-				}
+			for ordinal, outcome := range outcomes {
+				gotOrdinal, eventID := outcome.Ordinal, outcome.ID
 				if gotOrdinal != ordinal || ordinal >= 2 || eventID == "" {
 					t.Fatalf("keyless outcome ordinal=%d event=%q at index=%d", gotOrdinal, eventID, ordinal)
 				}
 				eventIDs[eventID] = struct{}{}
-			}
-			if err := outcomes.Err(); err != nil {
-				t.Fatal(err)
 			}
 			if len(eventIDs) != 2 {
 				t.Fatalf("equal keyless rows collapsed event IDs: %+v", eventIDs)
 			}
 			var outcomeCount, eventCount, deliveryCount, settledCount, handoffCount, receiptCount int
 			for _, check := range []struct {
-				query string
-				into  *int
+				read func(context.Context, any, string) (int, error)
+				into *int
 			}{
-				{`SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`, &outcomeCount},
-				{`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='root.ready'`, &eventCount},
-				{`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`, &deliveryCount},
-				{`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND status='delivered'`, &settledCount},
-				{`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1 AND continuation_handoff_at IS NOT NULL`, &handoffCount},
-				{`SELECT COUNT(*) FROM event_receipts r JOIN events e ON e.event_id=r.event_id WHERE e.run_id=$1 AND r.subscriber_type='platform' AND r.subscriber_id='pipeline' AND r.outcome='success'`, &receiptCount},
+				{storetest.CountNestedRunFanOutOutcomes, &outcomeCount},
+				{func(ctx context.Context, owner any, run string) (int, error) {
+					return storetest.CountRunNamedEventStorage(ctx, owner, run, "root.ready")
+				}, &eventCount},
+				{storetest.CountRunDeliveryStorage, &deliveryCount},
+				{storetest.CountRunDeliveredRowsStorage, &settledCount},
+				{storetest.CountDeploymentStampedHandoffsStorage, &handoffCount},
+				{storetest.CountClosedReceiverPipelineSuccessStorage, &receiptCount},
 			} {
-				if err := f.db.QueryRowContext(f.ctx, check.query, runID).Scan(check.into); err != nil {
+				got, err := check.read(f.ctx, f.selected, runID)
+				if err != nil {
 					t.Fatal(err)
 				}
+				*check.into = got
 			}
 			if outcomeCount != 2 || eventCount != 2 || deliveryCount != 2 || settledCount != 2 || handoffCount != 2 || receiptCount != 2 {
 				t.Fatalf("keyless multiplicity/settlement: outcomes=%d events=%d deliveries=%d delivered=%d handoffs=%d receipts=%d", outcomeCount, eventCount, deliveryCount, settledCount, handoffCount, receiptCount)

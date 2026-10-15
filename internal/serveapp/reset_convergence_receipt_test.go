@@ -55,7 +55,7 @@ func proveServedResetFinalReceiptFailure(t *testing.T, proof servedControlProofR
 		"event_name": "item.received", "bundle_hash": proof.BundleHash,
 		"payload": map[string]any{"item_id": "after-uncertain-final-receipt"}, "idempotency_key": uuid.NewString(),
 	})
-	waitForServedEventPublishNodeDeliveryLifecycle(t, proof.DB, proof.Backend, later.RunID, later.EventID, proof.Probe)
+	waitForServedEventPublishNodeDeliveryLifecycle(t, proof.ReceiverStateReader, proof.Backend, later.RunID, later.EventID, proof.Probe)
 	for i := 0; i < 2; i++ {
 		retry := requestServedJSONRPC(t, proof.Endpoint, "runtime.nuke", params)
 		if retry.Error != nil {
@@ -73,8 +73,9 @@ func proveServedResetFinalReceiptFailure(t *testing.T, proof servedControlProofR
 		if grantErr != nil || current != successor || currentGrant.GrantID != grant.GrantID {
 			t.Fatalf("retry reconstructed live successor: %v", grantErr)
 		}
-		var count int
-		if err := proof.DB.QueryRow("SELECT COUNT(*) FROM runs WHERE run_id = $1", later.RunID).Scan(&count); err != nil || count != 1 {
+
+		count, err := readServedRunPhysicalIdentity(proof.ReceiverStateReader, later.RunID)
+		if err != nil || count != 1 {
 			t.Fatalf("retry changed later work: count=%d err=%v", count, err)
 		}
 	}

@@ -56,9 +56,10 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 		{
 			name: "postgres",
 			start: func(t *testing.T) (budgetRecoveryParityStore, *sql.DB, bool) {
-				_, db, cleanup := testutil.StartPostgres(t)
+				dsn, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db, true
+				native, _ := storetest.StartPostgresRuntimeStoreWithReopen(t, dsn)
+				return native, db, true
 			},
 		},
 	}

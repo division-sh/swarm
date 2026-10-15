@@ -7,6 +7,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -120,7 +121,9 @@ func CountPhysicalRunIdentityForTest(ctx context.Context, selected any, runID st
 	}
 	var count int
 	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE run_id=$1`, runID).Scan(&count)
+		var err error
+		count, err = runlifecycle.CountRunIdentityStorageTx(ctx, tx, runID)
+		return err
 	})
 	if err != nil {
 		return 0, err
@@ -186,6 +189,20 @@ func CountAPICommandReceiptsForTest(ctx context.Context, selected any) (int, err
 
 type APIPublicationCardinalityStorage struct{ Runs, Events, APICompletions int }
 
+func ReadEventPublicationStoredResponseForTest(ctx context.Context, selected any, key string) ([]byte, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out []byte
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `SELECT response FROM api_idempotency WHERE method='event.publish' AND idempotency_key=$1`, key).Scan(&out)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func ReadAPIFlowPublicationRefusalStorageForTest(ctx context.Context, selected any) (APIPublicationCardinalityStorage, error) {
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return APIPublicationCardinalityStorage{}, err
@@ -212,20 +229,6 @@ func ReadAPIRunStartRefusalStorageForTest(ctx context.Context, selected any, run
 		return APIPublicationCardinalityStorage{}, err
 	}
 	return out, nil
-}
-
-func CountEventNameStorageForTest(ctx context.Context, selected any, eventName string) (int, error) {
-	if err := validateChannelObservationOwner(selected); err != nil {
-		return 0, err
-	}
-	var count int
-	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE event_name=$1`, eventName).Scan(&count)
-	})
-	if err != nil {
-		return 0, err
-	}
-	return count, nil
 }
 
 func ReadAPIEventPublicationRefusalStorageForTest(ctx context.Context, selected any, eventName string) (APIEventPublicationRefusalStorage, error) {

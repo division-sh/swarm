@@ -2,7 +2,6 @@ package runtimepersistence_test
 
 import (
 	"context"
-	"database/sql"
 	"reflect"
 	"testing"
 	"time"
@@ -13,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -21,15 +19,10 @@ func TestFlowActivationSourceSetRebindBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var selected flowActivationAttemptTestStore
-			var db *sql.DB
-			sqlite := backend == "sqlite"
-			if sqlite {
-				store := storetest.StartSQLiteRuntimeStore(t)
-				selected, db = store, storetest.Database(store)
+			if backend == "sqlite" {
+				selected = storetest.StartSQLiteRuntimeStore(t)
 			} else {
-				_, database, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected, db = storetest.AdmitPostgresRuntimeStore(t, database), database
+				selected = storetest.StartPostgresRuntimeStore(t)
 			}
 			ctx := testAuthorActivityContext()
 			runID, path := uuid.NewString(), "account/restamp"
@@ -116,13 +109,13 @@ func TestFlowActivationSourceSetRebindBothStores(t *testing.T) {
 					if err != nil || after.Phase != phase || after.AttemptOrdinal != before.AttemptOrdinal || after.PlanHash != before.PlanHash || !after.CreationEventEmittedAt.Equal(before.CreationEventEmittedAt) {
 						t.Fatalf("re-stamp changed attachment progress: before=%+v after=%+v err=%v", before, after, err)
 					}
-					rawAfter := flowReadinessStampSnapshot(t, ctx, db, sqlite, runID, path)
+					rawAfter := flowReadinessStampSnapshot(t, ctx, selected, runID, path)
 					duplicate, err := owner.RebindFlowReadinessSourceSet(ctx, rebind)
 					if err != nil || !reflect.DeepEqual(result, duplicate) {
 						t.Fatalf("duplicate re-stamp: %+v %v", duplicate, err)
 					}
 					again, _, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, row.Plan.Identity.Route())
-					if err != nil || !reflect.DeepEqual(after, again) || !reflect.DeepEqual(rawAfter, flowReadinessStampSnapshot(t, ctx, db, sqlite, runID, path)) {
+					if err != nil || !reflect.DeepEqual(after, again) || !reflect.DeepEqual(rawAfter, flowReadinessStampSnapshot(t, ctx, selected, runID, path)) {
 						t.Fatalf("duplicate changed readiness bytes: %v", err)
 					}
 					if err := grant.Retire(ctx); err != nil {
@@ -159,15 +152,11 @@ func TestFlowActivationSourceSetRebindBothStores(t *testing.T) {
 	}
 }
 
-func flowReadinessStampSnapshot(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, runID, path string) []any {
+func flowReadinessStampSnapshot(t *testing.T, ctx context.Context, selected any, runID, path string) storetest.DescriptorReadinessStampStorage {
 	t.Helper()
-	query := `SELECT activation_attempt_grant_id::text, activation_request_id::text, updated_at, phase, plan::text FROM flow_instance_runtime_readiness WHERE run_id=$1::uuid AND instance_path=$2`
-	if sqlite {
-		query = `SELECT activation_attempt_grant_id, activation_request_id, updated_at, phase, plan FROM flow_instance_runtime_readiness WHERE run_id=? AND instance_path=?`
-	}
-	values := make([]any, 5)
-	if err := db.QueryRowContext(ctx, query, runID, path).Scan(&values[0], &values[1], &values[2], &values[3], &values[4]); err != nil {
+	value, err := storetest.ReadDescriptorReadinessStampStorage(ctx, selected, runID, path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return values
+	return value
 }

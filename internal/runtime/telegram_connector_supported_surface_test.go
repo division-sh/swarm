@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,7 +15,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -31,7 +31,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 const telegramConnectorSupportedSurfaceTimeout = 15 * time.Second
@@ -40,20 +40,17 @@ const telegramConnectorSupportedSurfaceTimeout = 15 * time.Second
 // The process-served standing-ingress tests own the supported E2E claim.
 func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *testing.T) {
 	t.Run("postgres", func(t *testing.T) {
-		_, db, cleanup := testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
 
 		const flowInstance = boundedProviderFlowID
 		runID, entityID := boundedInboundTestCoordinates()
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
+		pg := storetest.StartPostgresRuntimeStore(t)
 		target := seedPostgresInboundGatewayRuntime(t, ctx, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
 		ctx = boundedInboundTargetContext(t, ctx, target)
 
 		runTelegramConnectorSupportedSurfaceRoundTrip(t, telegramConnectorSupportedSurfaceBackend{
 			name:          "postgres",
 			ctx:           ctx,
-			db:            db,
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
@@ -64,7 +61,6 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 			runID:         runID,
 			entityID:      entityID,
 			flowInstance:  flowInstance,
-			sqlite:        false,
 		})
 	})
 
@@ -79,7 +75,6 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 		runTelegramConnectorSupportedSurfaceRoundTrip(t, telegramConnectorSupportedSurfaceBackend{
 			name:          "sqlite",
 			ctx:           ctx,
-			db:            storetest.Database(sqliteStore),
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
@@ -90,7 +85,6 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 			runID:         runID,
 			entityID:      entityID,
 			flowInstance:  flowInstance,
-			sqlite:        true,
 		})
 	})
 }
@@ -98,7 +92,6 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 type telegramConnectorSupportedSurfaceBackend struct {
 	name             string
 	ctx              context.Context
-	db               *sql.DB
 	eventStore       runtimebus.EventStore
 	deliveryStore    runtimedelivery.Store
 	inboundStore     runtimepkg.InboundPersistence
@@ -110,7 +103,6 @@ type telegramConnectorSupportedSurfaceBackend struct {
 	runID            string
 	entityID         string
 	flowInstance     string
-	sqlite           bool
 }
 
 type telegramConnectorSupportedSurfaceCall struct {
@@ -194,6 +186,18 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 	waitForInboundBusQuiescence(t, bus)
 
 	inboundEventID := loadTelegramConnectorSupportedSurfaceInboundEventID(t, backend, "123456789")
+	foreignRun, foreignEntity := uuid.NewString(), uuid.NewString()
+	for _, request := range [][4]string{
+		{foreignRun, backend.entityID, "inbound.telegram.text_message", "123456789"},
+		{backend.runID, foreignEntity, "inbound.telegram.text_message", "123456789"},
+		{backend.runID, backend.entityID, "fixture.wrong_name", "123456789"},
+		{backend.runID, backend.entityID, "inbound.telegram.text_message", "missing-provider"},
+	} {
+		id, err := storetest.ReadConnectorNormalizedProviderEventID(backend.ctx, backend.eventStore, request[0], request[1], request[2], request[3])
+		if !errors.Is(err, sql.ErrNoRows) || id != "" {
+			t.Fatalf("%s normalized inbound observer borrowed foreign evidence: %q/%v", backend.name, id, err)
+		}
+	}
 	if got := countTelegramConnectorSupportedSurfaceNodeDeliveries(t, backend, inboundEventID, telegramConnectorSupportedSurfaceNodeKey(t)); got != 1 {
 		t.Fatalf("%s node delivery rows for inbound event = %d, want 1", backend.name, got)
 	}
@@ -426,7 +430,7 @@ func startTelegramConnectorSupportedSurfaceCoordinator(
 		Credentials:         credentialStore,
 	})
 
-	startConfiguredChannelActivityNode(t, backend.ctx, pc, bus, backend.db)
+	assertConfiguredChannelClaimedDispatch(t, pc, bus, backend.eventStore)
 	return pc
 }
 
@@ -471,45 +475,7 @@ func loadTelegramConnectorSupportedSurfaceInboundEventID(t *testing.T, backend t
 
 func loadTelegramConnectorSupportedSurfaceInboundEventIDByRun(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, runID, providerEventID string) string {
 	t.Helper()
-	var eventID string
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT normalized.event_id
-			FROM events normalized
-			JOIN events evidence
-			  ON evidence.run_id = normalized.run_id
-			 AND evidence.event_name = 'platform.inbound_recorded'
-			WHERE normalized.run_id = ?
-			  AND normalized.entity_id = ?
-			  AND normalized.event_name = 'inbound.telegram.text_message'
-			  AND json_extract(evidence.payload, '$.provider_event_id') = ?
-			  AND EXISTS (
-				SELECT 1 FROM json_each(evidence.payload, '$.event_ids') ids
-				WHERE ids.value = normalized.event_id
-			  )
-			ORDER BY normalized.created_at DESC
-			LIMIT 1
-		`, runID, backend.entityID, providerEventID).Scan(&eventID)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT normalized.event_id::text
-			FROM events normalized
-			JOIN events evidence
-			  ON evidence.run_id = normalized.run_id
-			 AND evidence.event_name = 'platform.inbound_recorded'
-			WHERE normalized.run_id = $1::uuid
-			  AND normalized.entity_id = $2::uuid
-			  AND normalized.event_name = 'inbound.telegram.text_message'
-			  AND evidence.payload->>'provider_event_id' = $3
-			  AND EXISTS (
-				SELECT 1 FROM jsonb_array_elements_text(evidence.payload->'event_ids') ids(event_id)
-				WHERE ids.event_id = normalized.event_id::text
-			  )
-			ORDER BY normalized.created_at DESC
-			LIMIT 1
-		`, runID, backend.entityID, providerEventID).Scan(&eventID)
-	}
+	eventID, err := storetest.ReadConnectorNormalizedProviderEventID(backend.ctx, backend.eventStore, runID, backend.entityID, "inbound.telegram.text_message", providerEventID)
 	if err != nil {
 		t.Fatalf("%s load inbound event id for %s: %v; diagnostics: %s", backend.name, providerEventID, err, telegramConnectorSupportedSurfaceDiagnostics(t, backend))
 	}
@@ -518,25 +484,7 @@ func loadTelegramConnectorSupportedSurfaceInboundEventIDByRun(t *testing.T, back
 
 func countTelegramConnectorSupportedSurfaceNodeDeliveries(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, eventID, nodeID string) int {
 	t.Helper()
-	var count int
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM event_deliveries
-			WHERE event_id = ?
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = ?
-		`, eventID, nodeID).Scan(&count)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM event_deliveries
-			WHERE event_id = $1::uuid
-			  AND subscriber_type = 'node'
-			  AND subscriber_id = $2
-		`, eventID, nodeID).Scan(&count)
-	}
+	count, err := storetest.CountTemplateNodeDelivery(backend.ctx, backend.eventStore, eventID, nodeID)
 	if err != nil {
 		t.Fatalf("%s count node deliveries: %v", backend.name, err)
 	}
@@ -617,25 +565,7 @@ func countTelegramConnectorSupportedSurfaceFailureEventsForEvent(t *testing.T, b
 	t.Helper()
 	inboundEventID := loadTelegramConnectorSupportedSurfaceInboundEventIDByRun(t, backend, backend.runID, providerEventID)
 	failureEventType := boundedProviderFlowID + "/telegram_send_message.failed"
-	var count int
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE run_id = ?
-			  AND event_name = ?
-			  AND source_event_id = ?
-		`, backend.runID, failureEventType, inboundEventID).Scan(&count)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE run_id = $1::uuid
-			  AND event_name = $2
-			  AND source_event_id = $3::uuid
-		`, backend.runID, failureEventType, inboundEventID).Scan(&count)
-	}
+	count, err := storetest.CountConnectorNamedSourceEvent(backend.ctx, backend.eventStore, backend.runID, failureEventType, inboundEventID)
 	if err != nil {
 		t.Fatalf("%s count failure events for provider event %s: %v", backend.name, providerEventID, err)
 	}
@@ -678,23 +608,7 @@ func requireTelegramConnectorSupportedSurfaceEventEventually(t *testing.T, backe
 
 func telegramConnectorSupportedSurfaceEventExists(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, eventID, eventType string) bool {
 	t.Helper()
-	var count int
-	var err error
-	if backend.sqlite {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE event_id = ?
-			  AND event_name = ?
-		`, eventID, eventType).Scan(&count)
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT COUNT(*)
-			FROM events
-			WHERE event_id = $1::uuid
-			  AND event_name = $2
-		`, eventID, eventType).Scan(&count)
-	}
+	count, err := storetest.CountConnectorNamedEventIdentity(backend.ctx, backend.eventStore, eventID, eventType)
 	if err != nil {
 		t.Fatalf("%s require event %s/%s: %v", backend.name, eventID, eventType, err)
 	}
@@ -703,46 +617,14 @@ func telegramConnectorSupportedSurfaceEventExists(t *testing.T, backend telegram
 
 func loadTelegramConnectorSupportedSurfaceActivityRequestEvent(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, eventID string) events.Event {
 	t.Helper()
-	var raw []byte
-	var created time.Time
-	var err error
-	if backend.sqlite {
-		var payload string
-		var createdRaw string
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT payload, created_at
-			FROM events
-			WHERE event_id = ?
-			  AND event_name = 'platform.activity_requested'
-		`, eventID).Scan(&payload, &createdRaw)
-		raw = []byte(payload)
-		created, _ = time.Parse(time.RFC3339Nano, createdRaw)
-		if created.IsZero() {
-			created = time.Now().UTC()
-		}
-	} else {
-		err = backend.db.QueryRowContext(backend.ctx, `
-			SELECT payload, created_at
-			FROM events
-			WHERE event_id = $1::uuid
-			  AND event_name = 'platform.activity_requested'
-		`, eventID).Scan(&raw, &created)
+	event, found, err := storetest.ReadCanonicalEventRecord(backend.ctx, backend.eventStore, eventID)
+	if err != nil || !found {
+		t.Fatalf("%s load activity request event %s: found=%t error=%v", backend.name, eventID, found, err)
 	}
-	if err != nil {
-		t.Fatalf("%s load activity request event %s: %v", backend.name, eventID, err)
+	if event.Type() != events.EventType("platform.activity_requested") {
+		t.Fatalf("%s activity request event %s has type %q", backend.name, eventID, event.Type())
 	}
-	return eventtest.PersistedProjection(
-		eventID,
-		events.EventType("platform.activity_requested"),
-		"workflow-runtime",
-		"",
-		raw,
-		2,
-		backend.runID,
-		"",
-		events.EventEnvelope{EntityID: backend.entityID},
-		created,
-	)
+	return event
 }
 
 func assertTelegramConnectorSupportedSurfaceNoStoredSecret(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, secret string) {
@@ -758,95 +640,56 @@ func assertTelegramConnectorSupportedSurfaceNoStoredSecret(t *testing.T, backend
 
 func telegramConnectorSupportedSurfaceDiagnostics(t *testing.T, backend telegramConnectorSupportedSurfaceBackend) string {
 	t.Helper()
-	type row struct {
-		name   string
-		query  string
-		args   []any
-		sqlite string
-	}
-	rows := []row{
-		{
-			name:   "events",
-			query:  `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`,
-			sqlite: `SELECT COUNT(*) FROM events WHERE run_id = ?`,
-			args:   []any{backend.runID},
-		},
-		{
-			name:   "inbound_telegram_events",
-			query:  `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = 'inbound.telegram'`,
-			sqlite: `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = 'inbound.telegram'`,
-			args:   []any{backend.runID},
-		},
-		{
-			name:   "node_deliveries",
-			query:  `SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2`,
-			sqlite: `SELECT COUNT(*) FROM event_deliveries WHERE run_id = ? AND subscriber_type = 'node' AND subscriber_id = ?`,
-			args:   []any{backend.runID, telegramConnectorSupportedSurfaceNodeKey(t)},
-		},
-		{
-			name:   "activity_requests",
-			query:  `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = 'platform.activity_requested'`,
-			sqlite: `SELECT COUNT(*) FROM events WHERE run_id = ? AND event_name = 'platform.activity_requested'`,
-			args:   []any{backend.runID},
-		},
-		{
-			name:   "activity_attempts",
-			query:  `SELECT COUNT(*) FROM activity_attempts WHERE run_id = $1::uuid`,
-			sqlite: `SELECT COUNT(*) FROM activity_attempts WHERE run_id = ?`,
-			args:   []any{backend.runID},
-		},
-		{
-			name:   "dead_letters",
-			query:  `SELECT COUNT(*) FROM dead_letters WHERE entity_id = $1::uuid`,
-			sqlite: `SELECT COUNT(*) FROM dead_letters WHERE entity_id = ?`,
-			args:   []any{backend.entityID},
-		},
+	rows := []struct {
+		name string
+		read func() (int, error)
+	}{
+		{"events", func() (int, error) {
+			return storetest.CountPhysicalRunEvents(backend.ctx, backend.eventStore, backend.runID)
+		}},
+		{"inbound_telegram_events", func() (int, error) {
+			return storetest.CountRunNamedEventStorage(backend.ctx, backend.eventStore, backend.runID, "inbound.telegram")
+		}},
+		{"node_deliveries", func() (int, error) {
+			return storetest.CountConnectorRunNodeDeliveries(backend.ctx, backend.eventStore, backend.runID, telegramConnectorSupportedSurfaceNodeKey(t))
+		}},
+		{"activity_requests", func() (int, error) {
+			return storetest.CountRunNamedEventStorage(backend.ctx, backend.eventStore, backend.runID, "platform.activity_requested")
+		}},
+		{"activity_attempts", func() (int, error) {
+			return storetest.CountConnectorRunActivityAttempts(backend.ctx, backend.eventStore, backend.runID)
+		}},
+		{"dead_letters", func() (int, error) {
+			return storetest.CountConnectorEntityDeadLetters(backend.ctx, backend.eventStore, backend.entityID)
+		}},
 	}
 	parts := make([]string, 0, len(rows))
-	for _, r := range rows {
-		query := r.query
-		if backend.sqlite {
-			query = r.sqlite
-		}
-		var count int
-		if err := backend.db.QueryRowContext(backend.ctx, query, r.args...).Scan(&count); err != nil {
-			parts = append(parts, r.name+"=ERR("+err.Error()+")")
+	for _, row := range rows {
+		count, err := row.read()
+		if err != nil {
+			parts = append(parts, row.name+"=ERR("+err.Error()+")")
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%s=%d", r.name, count))
+		parts = append(parts, fmt.Sprintf("%s=%d", row.name, count))
 	}
-	parts = append(parts, "delivery_status="+telegramConnectorSupportedSurfaceScalarDiagnostic(t, backend,
-		`SELECT COALESCE(status, '') || ':' || COALESCE(reason_code, '') || ':' || COALESCE(failure->'detail'->>'code', '') FROM event_deliveries WHERE run_id = $1::uuid AND subscriber_type = 'node' AND subscriber_id = $2 ORDER BY created_at DESC LIMIT 1`,
-		`SELECT COALESCE(status, '') || ':' || COALESCE(reason_code, '') || ':' || COALESCE(json_extract(failure, '$.detail.code'), '') FROM event_deliveries WHERE run_id = ? AND subscriber_type = 'node' AND subscriber_id = ? ORDER BY created_at DESC LIMIT 1`,
-		backend.runID, telegramConnectorSupportedSurfaceNodeKey(t)))
-	parts = append(parts, "event_names="+telegramConnectorSupportedSurfaceScalarDiagnostic(t, backend,
-		`SELECT COALESCE(string_agg(event_id::text || ':' || event_name, ',' ORDER BY created_at), '') FROM events WHERE run_id = $1::uuid`,
-		`SELECT COALESCE(group_concat(event_id || ':' || event_name, ','), '') FROM (SELECT event_id, event_name FROM events WHERE run_id = ? ORDER BY created_at)`,
-		backend.runID))
-	parts = append(parts, "activity_receipt="+telegramConnectorSupportedSurfaceScalarDiagnostic(t, backend,
-		`SELECT COALESCE(r.outcome, '') || ':' || COALESCE(r.failure->>'class', '') || ':' || COALESCE(r.failure->'detail'->>'code', '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid AND e.event_name = 'platform.activity_requested' AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' ORDER BY r.processed_at DESC LIMIT 1`,
-		`SELECT COALESCE(r.outcome, '') || ':' || COALESCE(json_extract(r.failure, '$.class'), '') || ':' || COALESCE(json_extract(r.failure, '$.detail.code'), '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? AND e.event_name = 'platform.activity_requested' AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' ORDER BY r.processed_at DESC LIMIT 1`,
-		backend.runID))
-	parts = append(parts, "dead_letter="+telegramConnectorSupportedSurfaceScalarDiagnostic(t, backend,
-		`SELECT COALESCE(failure->>'class', '') || ':' || COALESCE(failure->'detail'->>'code', '') FROM dead_letters WHERE entity_id = $1::uuid ORDER BY created_at DESC LIMIT 1`,
-		`SELECT COALESCE(json_extract(failure, '$.class'), '') || ':' || COALESCE(json_extract(failure, '$.detail.code'), '') FROM dead_letters WHERE entity_id = ? ORDER BY created_at DESC LIMIT 1`,
-		backend.entityID))
+	value, err := storetest.ReadConnectorLatestNodeDeliveryDiagnostic(backend.ctx, backend.eventStore, backend.runID, telegramConnectorSupportedSurfaceNodeKey(t))
+	parts = append(parts, "delivery_status="+telegramConnectorSupportedSurfaceScalarDiagnostic(value, err))
+	value, err = storetest.ReadConnectorEventChronology(backend.ctx, backend.eventStore, backend.runID)
+	parts = append(parts, "event_names="+telegramConnectorSupportedSurfaceScalarDiagnostic(value, err))
+	value, err = storetest.ReadConnectorLatestActivityReceiptDiagnostic(backend.ctx, backend.eventStore, backend.runID)
+	parts = append(parts, "activity_receipt="+telegramConnectorSupportedSurfaceScalarDiagnostic(value, err))
+	value, err = storetest.ReadConnectorLatestEntityDeadLetterDiagnostic(backend.ctx, backend.eventStore, backend.entityID)
+	parts = append(parts, "dead_letter="+telegramConnectorSupportedSurfaceScalarDiagnostic(value, err))
 	_, found, err := backend.persistence.LoadWorkflowInstance(backend.ctx, runtimeflowidentity.RunScopedFlowInstance{RunID: backend.runID, Route: runtimeflowidentity.RouteForInstancePath(backend.flowInstance)})
 	parts = append(parts, fmt.Sprintf("workflow_load=found:%t,error:%v", found, err))
 	return strings.Join(parts, " ")
 }
 
-func telegramConnectorSupportedSurfaceScalarDiagnostic(t *testing.T, backend telegramConnectorSupportedSurfaceBackend, pgQuery, sqliteQuery string, args ...any) string {
-	t.Helper()
-	query := pgQuery
-	if backend.sqlite {
-		query = sqliteQuery
+func telegramConnectorSupportedSurfaceScalarDiagnostic(value string, err error) string {
+	if errors.Is(err, sql.ErrNoRows) {
+		return "<none>"
 	}
-	var value string
-	if err := backend.db.QueryRowContext(backend.ctx, query, args...).Scan(&value); err != nil {
-		if err == sql.ErrNoRows {
-			return "<none>"
-		}
+	if err != nil {
 		return "ERR(" + err.Error() + ")"
 	}
 	return value
