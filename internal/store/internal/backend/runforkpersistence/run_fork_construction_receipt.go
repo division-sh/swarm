@@ -37,6 +37,10 @@ func readRunForkReceiverBirthTx(ctx context.Context, tx *sql.Tx, forkRunID strin
 	if err != nil {
 		return runForkReceiverBirth{}, fmt.Errorf("read original fork receiver birth: %w", err)
 	}
+	return runForkReceiverBirthFromConstructed(owner, initial)
+}
+
+func runForkReceiverBirthFromConstructed(owner flowidentity.RunScopedFlowInstance, initial runfork.RunForkEntityState) (runForkReceiverBirth, error) {
 	recorded, err := pipeline.DecodeWorkflowInstanceRecordedHeader(owner.Route, initial.MaterializationMetadata.FlowConfig)
 	if err != nil {
 		return runForkReceiverBirth{}, fmt.Errorf("decode original fork receiver birth: %w", err)
