@@ -160,6 +160,31 @@ func TestServedDeliveryQuiescenceOwnerRecipesRemainSourcePinned(t *testing.T) {
 		if row.Successor != "" {
 			current = row.Successor
 		}
+		if row.File == "internal/serveapp/receiver_restart_test.go" && row.Function == "TestReceiverCompositionRestartBothStores" {
+			const original = "`SELECT count(*) FROM entity_state WHERE run_id=$1 AND current_state='done'`"
+			const paired = "`SELECT count(*) FROM entity_state es JOIN flow_instances fi\n" +
+				"ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id\n" +
+				"WHERE es.run_id=$1 AND fi.current_state='done'`"
+			if strings.Count(current, original) != 1 {
+				t.Fatal("missing exact historical restart construction-count read")
+			}
+			historical := current
+			current = strings.Replace(current, original, paired, 1)
+			guard := row
+			guard.Before, guard.After, guard.Successor = current, current, ""
+			if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+historical), guard); err == nil || changed {
+				t.Fatal("retired data-row stage count admitted as the current restart reader")
+			}
+			for _, cut := range []string{"fi.run_id=es.run_id", "fi.instance_path=es.flow_instance", "fi.entity_id=es.entity_id", "fi.current_state='done'", "entities != 2"} {
+				mutant := strings.Replace(current, cut, "foreignCut", 1)
+				if mutant == current {
+					t.Fatalf("missing exact restart construction binding: %s", cut)
+				}
+				if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+mutant), guard); err == nil || changed {
+					t.Fatalf("restart lost lifecycle owner, composite membership or exact count: %s", cut)
+				}
+			}
+		}
 		want, err := canonicalFunction(current)
 		got, actualErr := canonicalFunction(actual)
 		if err != nil || actualErr != nil || want != got {
