@@ -106,8 +106,6 @@ func (servedOpenAICompatibleNoopLLMRuntime) ProviderContract() runtimellm.Provid
 	return runtimellm.OpenAICompatibleProviderContract()
 }
 
-const serveRuntimeTestBundleHash = "bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
-
 func TestLoadServeRuntimeBundleRejectsMalformedPackBodiesBeforePublication(t *testing.T) {
 	base, err := packartifact.LoadEmbeddedPlatformPackInventory("0.7.0")
 	if err != nil {
