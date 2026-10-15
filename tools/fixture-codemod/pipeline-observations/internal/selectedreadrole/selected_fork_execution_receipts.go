@@ -82,6 +82,11 @@ func ValidateSelectedForkExecutionCurrent(root string, pins []EntityToolPin) err
 }
 
 func EarlierSelectedForkExecutionSource(root, file, function, current string) (string, error) {
+	var err error
+	current, err = EarlierDeliveryRecoverySource(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
 	if file != SelectedForkExecutionFile {
 		return current, nil
 	}
@@ -174,6 +179,11 @@ func appendSelectedForkExecutionTransition(rows []map[string]any, pin EntityTool
 }
 
 func EarlierSelectedForkExecutionHistory(root string, current []byte, recipes bool) ([]byte, error) {
+	var err error
+	current, err = BeforeDeliveryRecoveryHistory(root, current, recipes)
+	if err != nil {
+		return nil, err
+	}
 	prior, err := PriorSelectedForkExecutionHistory(root, recipes)
 	if err != nil {
 		return nil, err
@@ -192,6 +202,11 @@ func EarlierSelectedForkExecutionHistory(root string, current []byte, recipes bo
 // Older owners still validate their complete predecessor. Peel this stage only
 // when one of its exact new endpoints is actually present in the supplied ledger.
 func BeforeSelectedForkExecutionHistory(root string, current []byte, recipes bool) ([]byte, error) {
+	var err error
+	current, err = BeforeDeliveryRecoveryHistory(root, current, recipes)
+	if err != nil {
+		return nil, err
+	}
 	var rows []map[string]any
 	if err := json.Unmarshal(current, &rows); err != nil {
 		return nil, err

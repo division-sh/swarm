@@ -49,6 +49,14 @@ func captureRecentFamilyCommand(args []string) bool {
 		return false
 	}
 	switch args[1] {
+	case "-delivery-recovery-schema":
+		rewriteDeliveryRecoverySchema()
+	case "-delivery-recovery-capture":
+		captureDeliveryRecovery()
+	case "-delivery-recovery-history":
+		composeDeliveryRecoveryHistory()
+	case "-delivery-recovery-clock":
+		rewriteDeliveryRecoveryClock()
 	case "-selected-fork-execution-capture":
 		captureSelectedForkExecution()
 	case "-selected-fork-execution-history":

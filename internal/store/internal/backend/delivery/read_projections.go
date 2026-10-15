@@ -49,6 +49,80 @@ func ReadForkReceiverRuleSelectionStorageTx(ctx context.Context, tx *sql.Tx, del
 
 type PublicationRuleSelectionStorage struct{ Context, Disposition, Flow, Family, Path, Label string }
 
+type DeliveryRollbackStorage struct{ Outcomes, Diagnostics, Transitions int }
+
+func ReadDeliveryRollbackStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string) (DeliveryRollbackStorage, error) {
+	var out DeliveryRollbackStorage
+	err := tx.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id=$1 AND closure_kind='settled'),
+		(SELECT COUNT(*) FROM dead_letters WHERE delivery_id=$1),
+		(SELECT COUNT(*) FROM author_activity_occurrences WHERE source_identity=CAST($1 AS TEXT) AND transition IN ('dead_letter','terminalized'))`, deliveryID).Scan(&out.Outcomes, &out.Diagnostics, &out.Transitions)
+	return out, err
+}
+
+type ExactDeliveryDeadLetterStorage struct {
+	DeliveryID, EventType, Handler string
+	ClaimVersion                   int64
+	Payload, Failure               []byte
+	RetryCount, ChainDepth         int
+}
+
+func ReadExactDeliveryDeadLetterStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string, version int64) (ExactDeliveryDeadLetterStorage, error) {
+	var out ExactDeliveryDeadLetterStorage
+	err := tx.QueryRowContext(ctx, `SELECT CAST(delivery_id AS TEXT),claim_version,original_event,original_payload,failure,retry_count,chain_depth,handler_node FROM dead_letters WHERE delivery_id=$1 AND claim_version=$2`, deliveryID, version).Scan(&out.DeliveryID, &out.ClaimVersion, &out.EventType, &out.Payload, &out.Failure, &out.RetryCount, &out.ChainDepth, &out.Handler)
+	return out, err
+}
+
+func ReadDeliveryAttemptFailureStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string, version int64) ([]byte, error) {
+	var out []byte
+	err := tx.QueryRowContext(ctx, `SELECT failure FROM event_delivery_attempts WHERE delivery_id=$1 AND claim_version=$2`, deliveryID, version).Scan(&out)
+	return out, err
+}
+
+type DeliveryConformanceAttemptStorage struct {
+	Version          int64
+	Closure, Outcome string
+}
+
+func ReadDeliveryConformanceAttemptsStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string) (out []DeliveryConformanceAttemptStorage, err error) {
+	rows, err := tx.QueryContext(ctx, `SELECT claim_version,closure_kind,outcome FROM event_delivery_attempts WHERE delivery_id=$1 ORDER BY claim_version`, deliveryID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, rows.Close())
+		if err != nil {
+			out = nil
+		}
+	}()
+	for rows.Next() {
+		var row DeliveryConformanceAttemptStorage
+		if err := rows.Scan(&row.Version, &row.Closure, &row.Outcome); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func CountMatchingOpenDeliveryAttemptStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string, version int64) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_attempts a JOIN event_deliveries d ON d.delivery_id=a.delivery_id AND d.current_attempt_version=a.claim_version AND d.current_attempt_open=TRUE WHERE a.delivery_id=$1 AND a.claim_version=$2 AND a.open_marker=TRUE`, deliveryID, version).Scan(&count)
+	return count, err
+}
+
+func ReadDeliveryConformanceSelectionStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string) (PublicationRuleSelectionStorage, error) {
+	var out PublicationRuleSelectionStorage
+	err := tx.QueryRowContext(ctx, `SELECT selection_context,disposition,COALESCE(flow_path,''),COALESCE(declaration_family,''),COALESCE(semantic_path,''),display_label FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, deliveryID).Scan(&out.Context, &out.Disposition, &out.Flow, &out.Family, &out.Path, &out.Label)
+	return out, err
+}
+
+func CountDeliveryHandlerSelectionsStorageTx(ctx context.Context, tx *sql.Tx, deliveryID string) (int, error) {
+	var count int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id=$1`, deliveryID).Scan(&count)
+	return count, err
+}
+
 func ReadPublicationRuleSelectionStorageTx(ctx context.Context, tx *sql.Tx, runID, eventID, subscriberID string) (PublicationRuleSelectionStorage, error) {
 	var out PublicationRuleSelectionStorage
 	err := tx.QueryRowContext(ctx, `SELECT s.selection_context,s.disposition,s.flow_path,s.declaration_family,s.semantic_path,s.display_label FROM event_delivery_handler_rule_selections s JOIN event_deliveries d ON d.delivery_id=s.delivery_id WHERE d.run_id=$1 AND d.event_id=$2 AND d.subscriber_id=$3`, runID, eventID, subscriberID).Scan(&out.Context, &out.Disposition, &out.Flow, &out.Family, &out.Path, &out.Label)

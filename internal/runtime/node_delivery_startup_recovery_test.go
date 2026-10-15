@@ -2,7 +2,6 @@ package runtime_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -40,7 +39,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 type nodeDeliveryRecoveryStore interface {
@@ -161,14 +159,12 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 	persistedBundleHash := persistedSource.BundleHash()
 	for _, backend := range []struct {
 		name  string
-		setup func(*testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore)
+		setup func(*testing.T) (context.Context, startupRecoveryOrderStore)
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected := storetest.AdmitPostgresRuntimeStore(t, db)
+			setup: func(t *testing.T) (context.Context, startupRecoveryOrderStore) {
+				selected := storetest.StartPostgresRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
 				ensureStartupRecoverySourceArtifact(t, ctx, selected, authorActivityTestSourceArtifact)
@@ -176,12 +172,12 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
 					BundleHash: persistedBundleHash,
 				})
-				return ctx, db, db, selected
+				return ctx, selected
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore) {
+			setup: func(t *testing.T) (context.Context, startupRecoveryOrderStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
@@ -190,12 +186,12 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
 					BundleHash: persistedBundleHash,
 				})
-				return ctx, nil, storetest.Database(selected), selected
+				return ctx, selected
 			},
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			ctx, _, _, selected := backend.setup(t)
+			ctx, selected := backend.setup(t)
 			activationCleanupErr := errors.New("injected delivery authority postcommit cleanup failure")
 			activationProbe := &startupRecoveryActivationProbe{Store: selected, cleanupErr: activationCleanupErr}
 			bundle := loadEntitylessStartupRecoveryBundle(t)
@@ -386,19 +382,11 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 		for _, mode := range modes {
 			for _, test := range cases {
 				t.Run(backend+"/"+mode.name+"/"+test.name, func(t *testing.T) {
-					var (
-						db       *sql.DB
-						selected startupRecoveryOrderStore
-					)
+					var selected startupRecoveryOrderStore
 					if backend == "postgres" {
-						_, postgresDB, cleanup := testutil.StartPostgres(t)
-						t.Cleanup(cleanup)
-						db = postgresDB
-						selected = storetest.AdmitPostgresRuntimeStore(t, postgresDB)
+						selected = storetest.StartPostgresRuntimeStore(t)
 					} else {
-						sqliteStore := storetest.StartSQLiteRuntimeStore(t)
-						db = storetest.Database(sqliteStore)
-						selected = sqliteStore
+						selected = storetest.StartSQLiteRuntimeStore(t)
 					}
 
 					currentRunID := eventtest.UUID("recovery-disabled-current-" + backend + "-" + mode.name + "-" + test.name)
@@ -461,10 +449,11 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 								t.Fatalf("claim busy startup delivery: %v", claimErr)
 							}
 						case "reclaimable":
-							if _, claimErr := storetest.ClaimDelivery(eventCtx, selected, event, route); claimErr != nil {
+							claim, claimErr := storetest.ClaimDelivery(eventCtx, selected, event, route)
+							if claimErr != nil {
 								t.Fatalf("claim reclaimable startup delivery: %v", claimErr)
 							}
-							expireNodeDeliveryClaim(t, eventCtx, db, backend == "postgres", deliveryID)
+							expireNodeDeliveryClaim(t, eventCtx, selected, claim.Claim)
 						default:
 							t.Fatalf("unknown startup delivery state %q", test.state)
 						}
@@ -928,30 +917,28 @@ func TestDeliveryContinuationCoordinatorRecoversNodeDeliveriesThroughCanonicalSe
 func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *testing.T) {
 	for _, backend := range []struct {
 		name  string
-		setup func(*testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore)
+		setup func(*testing.T) (context.Context, nodeDeliveryRecoveryStore)
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected := storetest.AdmitPostgresRuntimeStore(t, db)
+			setup: func(t *testing.T) (context.Context, nodeDeliveryRecoveryStore) {
+				selected := storetest.StartPostgresRuntimeStore(t)
 				ctx := seedRuntimeTestRun(t, selected)
-				return ctx, db, selected
+				return ctx, selected
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
+			setup: func(t *testing.T) (context.Context, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
-				return ctx, storetest.Database(selected), selected
+				return ctx, selected
 			},
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			ctx, db, selected := backend.setup(t)
+			ctx, selected := backend.setup(t)
 			bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyArtifactActionResultDelivery(t, "template", false))
 			source := semanticview.Wrap(bundle)
 			var pc *runtimepipeline.PipelineCoordinator
@@ -994,7 +981,7 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 			poisonInstance.EntityID = poisonEntityID
 			poisonInstance.Fields = map[string]any{}
 			seedRuntimeTestPreparedInstance(t, ctx, selected, pc, poisonInstance)
-			installNodeRecoveryPoisonMutation(t, ctx, db, backend.name == "postgres", poisonEntityID)
+			installNodeRecoveryPoisonMutation(t, ctx, selected, poisonEntityID)
 			poison := eventtest.ExistingRunRootIngressWithRoutingSource(
 				eventtest.UUID("node-recovery-poison-event"),
 				"repo-scaffold/poison/repo_scaffold.repo_commit_succeeded",
@@ -1038,30 +1025,14 @@ func TestPipelineCoordinatorRecoveryContinuesAfterCommittedDeadLetterParity(t *t
 	}
 }
 
-func installNodeRecoveryPoisonMutation(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, entityID string) {
+func installNodeRecoveryPoisonMutation(t *testing.T, ctx context.Context, selected any, entityID string) {
 	t.Helper()
-	statement := fmt.Sprintf(`
-		CREATE TRIGGER fail_node_recovery_poison_update
-		BEFORE UPDATE ON entity_state
-		WHEN OLD.entity_id = '%s'
-		BEGIN
-			SELECT RAISE(ABORT, 'injected node recovery poison mutation');
-		END`, entityID)
-	if postgres {
-		statement = fmt.Sprintf(`
-			CREATE FUNCTION fail_node_recovery_poison_update_fn() RETURNS trigger AS $$
-			BEGIN
-				IF OLD.entity_id = '%s'::uuid THEN
-					RAISE EXCEPTION 'injected node recovery poison mutation';
-				END IF;
-				RETURN NEW;
-			END;
-			$$ LANGUAGE plpgsql;
-			CREATE TRIGGER fail_node_recovery_poison_update
-			BEFORE UPDATE ON entity_state
-			FOR EACH ROW EXECUTE FUNCTION fail_node_recovery_poison_update_fn()`, entityID)
-	}
-	if _, err := db.ExecContext(ctx, statement); err != nil {
+	t.Cleanup(func() {
+		if err := storetest.RemoveNodeRecoveryPoisonFault(context.WithoutCancel(ctx), selected); err != nil {
+			t.Errorf("remove node recovery poison mutation: %v", err)
+		}
+	})
+	if err := storetest.InstallNodeRecoveryPoisonFault(ctx, selected, entityID); err != nil {
 		t.Fatalf("install node recovery poison mutation: %v", err)
 	}
 }
@@ -1069,30 +1040,28 @@ func installNodeRecoveryPoisonMutation(t *testing.T, ctx context.Context, db *sq
 func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t *testing.T) {
 	for _, backend := range []struct {
 		name  string
-		setup func(*testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore)
+		setup func(*testing.T) (context.Context, nodeDeliveryRecoveryStore)
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected := storetest.AdmitPostgresRuntimeStore(t, db)
+			setup: func(t *testing.T) (context.Context, nodeDeliveryRecoveryStore) {
+				selected := storetest.StartPostgresRuntimeStore(t)
 				ctx := seedRuntimeTestRun(t, selected)
-				return ctx, db, selected
+				return ctx, selected
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (context.Context, *sql.DB, nodeDeliveryRecoveryStore) {
+			setup: func(t *testing.T) (context.Context, nodeDeliveryRecoveryStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID})
-				return ctx, storetest.Database(selected), selected
+				return ctx, selected
 			},
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			ctx, db, selected := backend.setup(t)
+			ctx, selected := backend.setup(t)
 			bundle := loadRuntimeBundleRoot(t, canonicalrouting.CopyArtifactActionResultDelivery(t, "template", false))
 			source := semanticview.Wrap(bundle)
 			var pc *runtimepipeline.PipelineCoordinator
@@ -1191,8 +1160,8 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 				t.Fatalf("claim node delivery before lease expiry: %v", err)
 			}
 			continuations := startNodeDeliveryContinuation(t, ctx, bus, deliveryOwner, selected, workOwner, eventID, route)
-			makeNodeDeliveryImmediatelyEligible(t, ctx, db, backend.name == "postgres", retrying.DeliveryID)
-			expireNodeDeliveryClaim(t, ctx, db, backend.name == "postgres", expiringClaim.Snapshot.DeliveryID)
+			makeNodeDeliveryImmediatelyEligible(t, ctx, selected, retrying.DeliveryID)
+			expireNodeDeliveryClaim(t, ctx, selected, expiringClaim.Claim)
 			continuations.Signal()
 			for recovered := 0; recovered < 2; recovered++ {
 				select {
@@ -1203,7 +1172,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			}
 			waitForRecoveredNodeDelivery(t, ctx, selected, eventID, route, 2)
 			waitForRecoveredNodeDelivery(t, ctx, selected, expiringEventID, route, 1)
-			assertExpiredNodeDeliveryAttemptHistory(t, ctx, db, backend.name == "postgres", expiringClaim.Snapshot.DeliveryID)
+			assertExpiredNodeDeliveryAttemptHistory(t, ctx, selected, expiringClaim.Snapshot.DeliveryID)
 			if got := deliveryOwner.renewals.Load(); got != 0 {
 				t.Fatalf("standalone recovery claim renewals = %d, want claim/settlement-owned renewal", got)
 			}
@@ -1211,85 +1180,40 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 	}
 }
 
-func expireNodeDeliveryClaim(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, deliveryID string) {
+func expireNodeDeliveryClaim(t *testing.T, ctx context.Context, selected any, claim runtimedelivery.Claim) {
 	t.Helper()
-	transaction, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin node claim expiry: %v", err)
-	}
-	defer func() { _ = transaction.Rollback() }()
-	startedAt := time.Now().Add(-2 * time.Hour).UTC()
-	expiresAt := time.Now().Add(-time.Hour).UTC()
-	deliveryQuery := `UPDATE event_deliveries SET created_at = $1, started_at = $1, updated_at = $2 WHERE delivery_id = $3::uuid AND status = 'in_progress'`
-	attemptQuery := `UPDATE event_delivery_attempts SET started_at = $1, lease_expires_at = $2 WHERE delivery_id = $3::uuid AND open_marker = TRUE`
-	if !postgres {
-		deliveryQuery = `UPDATE event_deliveries SET created_at = ?, started_at = ?, updated_at = ? WHERE delivery_id = ? AND status = 'in_progress'`
-		attemptQuery = `UPDATE event_delivery_attempts SET started_at = ?, lease_expires_at = ? WHERE delivery_id = ? AND open_marker = TRUE`
-	}
-	deliveryArgs := []any{startedAt, expiresAt, deliveryID}
-	if !postgres {
-		deliveryArgs = []any{startedAt, startedAt, expiresAt, deliveryID}
-	}
-	if result, execErr := transaction.ExecContext(ctx, deliveryQuery, deliveryArgs...); execErr != nil {
-		t.Fatalf("expire node delivery claim: %v", execErr)
-	} else if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
-		t.Fatalf("expire node delivery claim affected %d rows, err=%v", rows, rowsErr)
-	}
-	if result, execErr := transaction.ExecContext(ctx, attemptQuery, startedAt, expiresAt, deliveryID); execErr != nil {
-		t.Fatalf("expire node delivery attempt: %v", execErr)
-	} else if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
-		t.Fatalf("expire node delivery attempt affected %d rows, err=%v", rows, rowsErr)
-	}
-	if err := transaction.Commit(); err != nil {
+	if err := storetest.ExpireExactDeliveryClaimFault(ctx, selected, claim); err != nil {
 		t.Fatalf("commit node claim expiry: %v", err)
 	}
 }
 
-func assertExpiredNodeDeliveryAttemptHistory(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, deliveryID string) {
+func assertExpiredNodeDeliveryAttemptHistory(t *testing.T, ctx context.Context, selected any, deliveryID string) {
 	t.Helper()
-	query := `SELECT claim_version, outcome FROM event_delivery_attempts WHERE delivery_id = $1::uuid ORDER BY claim_version`
-	if !postgres {
-		query = `SELECT claim_version, outcome FROM event_delivery_attempts WHERE delivery_id = ? ORDER BY claim_version`
-	}
-	rows, err := db.QueryContext(ctx, query, deliveryID)
+	rows, err := storetest.ReadDeliveryConformanceAttemptsStorage(ctx, selected, deliveryID)
 	if err != nil {
 		t.Fatalf("load recovered node attempt history: %v", err)
 	}
-	defer rows.Close()
 	var attempts []struct {
 		version int64
 		outcome string
 	}
-	for rows.Next() {
+	for _, row := range rows {
 		var attempt struct {
 			version int64
 			outcome string
 		}
-		if err := rows.Scan(&attempt.version, &attempt.outcome); err != nil {
-			t.Fatalf("scan recovered node attempt: %v", err)
-		}
+		attempt.version, attempt.outcome = row.Version, row.Outcome
 		attempts = append(attempts, attempt)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read recovered node attempts: %v", err)
 	}
 	if len(attempts) != 2 || attempts[0].version != 1 || attempts[0].outcome != "lease_expired" || attempts[1].version != 2 || attempts[1].outcome != "delivered" {
 		t.Fatalf("recovered node attempts = %#v, want lease_expired then delivered", attempts)
 	}
 }
 
-func makeNodeDeliveryImmediatelyEligible(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, deliveryID string) {
+func makeNodeDeliveryImmediatelyEligible(t *testing.T, ctx context.Context, selected any, deliveryID string) {
 	t.Helper()
-	query := `UPDATE event_deliveries SET next_eligible_at = $1 WHERE delivery_id = $2::uuid AND status = 'failed'`
-	if !postgres {
-		query = `UPDATE event_deliveries SET next_eligible_at = ? WHERE delivery_id = ? AND status = 'failed'`
-	}
-	result, err := db.ExecContext(ctx, query, time.Now().Add(-time.Hour).UTC(), deliveryID)
-	if err != nil {
+	if err := storetest.MakeDeliveryRecoveryRetryEligible(ctx, selected, deliveryID); err != nil {
 		t.Fatalf("make node delivery immediately eligible: %v", err)
-	}
-	if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
-		t.Fatalf("make node delivery eligible affected %d rows, err=%v", rows, rowsErr)
 	}
 }
 

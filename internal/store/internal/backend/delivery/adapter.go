@@ -29,6 +29,92 @@ import (
 
 type Dialect string
 
+type DeliveryConstraintCase string
+
+type DeliveryConstraintInput struct {
+	Case                                                                        DeliveryConstraintCase
+	DeliveryID, OtherRunID, SessionID, RunID, AgentID, Token, RecordID, EventID string
+	Version                                                                     int64
+	At, ExpiresAt                                                               time.Time
+}
+
+func ValidateDeliveryConstraintInput(input DeliveryConstraintInput) error {
+	if _, ok := deliveryConstraintQueries[input.Case]; !ok {
+		return fmt.Errorf("unknown delivery constraint probe %q", input.Case)
+	}
+	ids := []string{input.DeliveryID}
+	switch input.Case {
+	case DeliveryConstraintEventRunMismatch:
+		ids = append(ids, input.OtherRunID)
+	case DeliveryConstraintMissingSession, DeliveryConstraintForeignSession:
+		ids = append(ids, input.SessionID, input.RunID)
+	case DeliveryConstraintSecondOpenAttempt:
+		ids = append(ids, input.Token)
+	case DeliveryConstraintOpenDeadLetter, DeliveryConstraintPartialSettlementReference:
+		ids = append(ids, input.RecordID, input.EventID)
+	case DeliveryConstraintExpiredDeadLetter:
+		ids = append(ids, input.RecordID)
+	}
+	for _, id := range ids {
+		parsed, err := uuid.Parse(id)
+		if err != nil || parsed.String() != id {
+			return fmt.Errorf("constraint probe requires canonical nonempty identities")
+		}
+	}
+	return validateDeliveryConstraintValues(input)
+}
+
+func validateDeliveryConstraintValues(input DeliveryConstraintInput) error {
+	switch input.Case {
+	case DeliveryConstraintMissingOpenAttempt, DeliveryConstraintMissingSettlementEvidence, DeliveryConstraintMissingOutcome, DeliveryConstraintMissingCompletionTime, DeliveryConstraintExpiredDuration, DeliveryConstraintSecondOpenAttempt:
+		if input.At.IsZero() {
+			return fmt.Errorf("constraint probe requires its exact clock")
+		}
+	}
+	switch input.Case {
+	case DeliveryConstraintMissingSession, DeliveryConstraintForeignSession:
+		if strings.TrimSpace(input.AgentID) == "" {
+			return fmt.Errorf("constraint probe requires its exact agent")
+		}
+	}
+	switch input.Case {
+	case DeliveryConstraintMissingSession, DeliveryConstraintForeignSession, DeliveryConstraintSecondOpenAttempt, DeliveryConstraintOpenDeadLetter, DeliveryConstraintContradictoryClosure:
+		if input.Version <= 0 {
+			return fmt.Errorf("constraint probe requires a positive exact version")
+		}
+	}
+	if input.Case == DeliveryConstraintSecondOpenAttempt && input.ExpiresAt.IsZero() {
+		return fmt.Errorf("constraint probe requires its exact expiry")
+	}
+	return nil
+}
+
+func ProbeDeliveryConstraintTx(ctx context.Context, tx *sql.Tx, postgres bool, input DeliveryConstraintInput) error {
+	if err := ValidateDeliveryConstraintInput(input); err != nil {
+		return err
+	}
+	queries := deliveryConstraintQueries[input.Case]
+	query := queries.sqlite
+	if postgres {
+		query = queries.postgres
+	}
+	args, err := deliveryConstraintArguments(postgres, input)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, query, args...)
+	return err
+}
+
+func IsDeliveryConstraintRejection(err error) bool {
+	var postgres interface{ SQLState() string }
+	if errors.As(err, &postgres) {
+		return strings.HasPrefix(postgres.SQLState(), "23")
+	}
+	var sqlite interface{ Code() int }
+	return errors.As(err, &sqlite) && sqlite.Code()&255 == 19
+}
+
 func MakeManagerRetryEligibleTx(ctx context.Context, tx *sql.Tx, event events.Event, route events.DeliveryRoute) error {
 	if tx == nil {
 		return fmt.Errorf("manager retry cut requires the original selected transaction")
@@ -44,6 +130,34 @@ func MakeManagerRetryEligibleTx(ctx context.Context, tx *sql.Tx, event events.Ev
 	count, err := result.RowsAffected()
 	if err != nil || count != 1 {
 		return fmt.Errorf("manager retry cut requires one exact failed delivery: count=%d,error=%v", count, err)
+	}
+	return nil
+}
+
+func MakeDeliveryRecoveryRetryEligibleTx(ctx context.Context, tx *sql.Tx, deliveryID string) error {
+	result, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET next_eligible_at=$1 WHERE delivery_id=$2 AND status='failed'`, time.Now().Add(-time.Hour).UTC(), deliveryID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows != 1 {
+		return fmt.Errorf("recovery retry cut requires one exact failed delivery: count=%d error=%v", rows, err)
+	}
+	return nil
+}
+
+func CorruptDeliveryConformanceRouteTx(ctx context.Context, tx *sql.Tx, postgres bool, deliveryID string) error {
+	query := `UPDATE event_deliveries SET delivery_target_route='{"flow_id":7}' WHERE delivery_id=$1`
+	if postgres {
+		query = `UPDATE event_deliveries SET delivery_target_route='{"flow_id":7}'::jsonb WHERE delivery_id=$1`
+	}
+	result, err := tx.ExecContext(ctx, query, deliveryID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows != 1 {
+		return fmt.Errorf("route corruption requires one exact delivery: count=%d error=%v", rows, err)
 	}
 	return nil
 }
@@ -3497,4 +3611,190 @@ func parseNullableTime(raw any) (time.Time, bool, error) {
 		}
 	}
 	return time.Time{}, false, fmt.Errorf("parse delivery timestamp %q", value)
+}
+
+// Exact finite constraint probes captured from the signed conformance predecessor.
+const (
+	DeliveryConstraintContradictoryClosure       DeliveryConstraintCase = "contradictory open settlement tag"
+	DeliveryConstraintMissingTypedFailure        DeliveryConstraintCase = "dead-letter without typed failure"
+	DeliveryConstraintEventRunMismatch           DeliveryConstraintCase = "event/run mismatch"
+	DeliveryConstraintExpiredDuration            DeliveryConstraintCase = "expired attempt cannot carry settlement duration"
+	DeliveryConstraintExpiredDeadLetter          DeliveryConstraintCase = "expired attempt cannot own a linked dead letter"
+	DeliveryConstraintMissingOpenAttempt         DeliveryConstraintCase = "in-progress without open attempt"
+	DeliveryConstraintMissingSession             DeliveryConstraintCase = "nonexistent exact agent session"
+	DeliveryConstraintOpenDeadLetter             DeliveryConstraintCase = "open attempt cannot own a linked dead letter"
+	DeliveryConstraintPartialSettlementReference DeliveryConstraintCase = "partial-null settlement reference cannot bypass the FK"
+	DeliveryConstraintForeignSession             DeliveryConstraintCase = "session owned by another delivery run and agent"
+	DeliveryConstraintMissingCompletionTime      DeliveryConstraintCase = "settled attempt without completion time"
+	DeliveryConstraintMissingOutcome             DeliveryConstraintCase = "settled attempt without outcome"
+	DeliveryConstraintMissingSettlementEvidence  DeliveryConstraintCase = "settled attempt without required evidence"
+	DeliveryConstraintSecondOpenAttempt          DeliveryConstraintCase = "unreferenced second open attempt"
+)
+
+var deliveryConstraintQueries = map[DeliveryConstraintCase]struct{ postgres, sqlite string }{
+	DeliveryConstraintContradictoryClosure:       {"UPDATE event_delivery_attempts SET closure_kind='settled' WHERE delivery_id=$1::uuid AND claim_version=$2", "UPDATE event_delivery_attempts SET closure_kind='settled' WHERE delivery_id=? AND claim_version=?"},
+	DeliveryConstraintMissingTypedFailure:        {"UPDATE event_deliveries SET status='dead_letter', next_eligible_at=NULL, reason_code='raw_terminal', settled_at=created_at, updated_at=created_at WHERE delivery_id=$1::uuid", "UPDATE event_deliveries SET status='dead_letter', next_eligible_at=NULL, reason_code='raw_terminal', settled_at=created_at, updated_at=created_at WHERE delivery_id=?"},
+	DeliveryConstraintEventRunMismatch:           {"UPDATE event_deliveries SET run_id = $1::uuid WHERE delivery_id = $2::uuid", "UPDATE event_deliveries SET run_id = ? WHERE delivery_id = ?"},
+	DeliveryConstraintExpiredDuration:            {"INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, duration_ms, completed_at) VALUES ($1::uuid, 99, gen_random_uuid(), $2, $2::timestamptz + INTERVAL '1 minute', FALSE, 'lease_expired', 'lease_expired', 0, $2)", "INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, duration_ms, completed_at) VALUES (?1, 99, lower(hex(randomblob(16))), ?2, datetime(?2, '+1 minute'), FALSE, 'lease_expired', 'lease_expired', 0, ?2)"},
+	DeliveryConstraintExpiredDeadLetter:          {"INSERT INTO dead_letters (dead_letter_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES ($1::uuid, $2::uuid, 1, 'settled', 'delivery.expired', '{}'::jsonb, '', '{\"class\":\"lifecycle_conflict\"}'::jsonb)", "INSERT INTO dead_letters (dead_letter_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES (?, ?, 1, 'settled', 'delivery.expired', '{}', '', '{\"class\":\"lifecycle_conflict\"}')"},
+	DeliveryConstraintMissingOpenAttempt:         {"UPDATE event_deliveries SET status='in_progress', next_eligible_at=NULL, claim_version=1, current_attempt_version=1, current_attempt_open=TRUE, started_at=$1, updated_at=$1 WHERE delivery_id=$2::uuid", "UPDATE event_deliveries SET status='in_progress', next_eligible_at=NULL, claim_version=1, current_attempt_version=1, current_attempt_open=TRUE, started_at=?, updated_at=? WHERE delivery_id=?"},
+	DeliveryConstraintMissingSession:             {"UPDATE event_delivery_attempts SET active_session_id=$1::uuid, session_run_id=$2::uuid, session_agent_id=$3 WHERE delivery_id=$4::uuid AND claim_version=$5", "UPDATE event_delivery_attempts SET active_session_id=?, session_run_id=?, session_agent_id=? WHERE delivery_id=? AND claim_version=?"},
+	DeliveryConstraintOpenDeadLetter:             {"INSERT INTO dead_letters (dead_letter_id, original_event_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'settled', 'delivery.schema', '{}'::jsonb, '', '{\"class\":\"lifecycle_conflict\"}'::jsonb)", "INSERT INTO dead_letters (dead_letter_id, original_event_id, delivery_id, claim_version, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES (?, ?, ?, ?, 'settled', 'delivery.schema', '{}', '', '{\"class\":\"lifecycle_conflict\"}')"},
+	DeliveryConstraintPartialSettlementReference: {"INSERT INTO dead_letters (dead_letter_id, original_event_id, delivery_id, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES ($1::uuid, $2::uuid, $3::uuid, 'settled', 'delivery.schema', '{}'::jsonb, '', '{\"class\":\"lifecycle_conflict\"}'::jsonb)", "INSERT INTO dead_letters (dead_letter_id, original_event_id, delivery_id, settlement_ref_kind, original_event, original_payload, flow_instance, failure) VALUES (?, ?, ?, 'settled', 'delivery.schema', '{}', '', '{\"class\":\"lifecycle_conflict\"}')"},
+	DeliveryConstraintForeignSession:             {"UPDATE event_delivery_attempts SET active_session_id=$1::uuid, session_delivery_id=$2::uuid, session_run_id=$3::uuid, session_subscriber_type='agent', session_agent_id=$4 WHERE delivery_id=$2::uuid AND claim_version=$5", "UPDATE event_delivery_attempts SET active_session_id=?1, session_delivery_id=?2, session_run_id=?3, session_subscriber_type='agent', session_agent_id=?4 WHERE delivery_id=?2 AND claim_version=?5"},
+	DeliveryConstraintMissingCompletionTime:      {"INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, duration_ms) VALUES ($1::uuid, 99, gen_random_uuid(), $2, $2::timestamptz + INTERVAL '1 minute', FALSE, 'settled', 'delivered', 0)", "INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, duration_ms) VALUES (?1, 99, lower(hex(randomblob(16))), ?2, datetime(?2, '+1 minute'), FALSE, 'settled', 'delivered', 0)"},
+	DeliveryConstraintMissingOutcome:             {"INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, duration_ms, completed_at) VALUES ($1::uuid, 99, gen_random_uuid(), $2, $2::timestamptz + INTERVAL '1 minute', FALSE, 'settled', 0, $2)", "INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, duration_ms, completed_at) VALUES (?1, 99, lower(hex(randomblob(16))), ?2, datetime(?2, '+1 minute'), FALSE, 'settled', 0, ?2)"},
+	DeliveryConstraintMissingSettlementEvidence:  {"INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, completed_at) VALUES ($1::uuid, 99, gen_random_uuid(), $2, $2::timestamptz + INTERVAL '1 minute', FALSE, 'settled', 'delivered', $2)", "INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, open_marker, closure_kind, outcome, completed_at) VALUES (?1, 99, lower(hex(randomblob(16))), ?2, datetime(?2, '+1 minute'), FALSE, 'settled', 'delivered', ?2)"},
+	DeliveryConstraintSecondOpenAttempt:          {"INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker, closure_kind) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $1::uuid, TRUE, 'open')", "INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker, closure_kind) VALUES (?1, ?2, ?3, ?4, ?5, ?1, TRUE, 'open')"},
+}
+
+func deliveryConstraintArguments(postgres bool, input DeliveryConstraintInput) ([]any, error) {
+	switch input.Case {
+	case DeliveryConstraintContradictoryClosure:
+		return []any{input.DeliveryID, input.Version}, nil
+	case DeliveryConstraintMissingTypedFailure:
+		return []any{input.DeliveryID}, nil
+	case DeliveryConstraintEventRunMismatch:
+		return []any{input.OtherRunID, input.DeliveryID}, nil
+	case DeliveryConstraintExpiredDuration:
+		return []any{input.DeliveryID, input.At}, nil
+	case DeliveryConstraintExpiredDeadLetter:
+		return []any{input.RecordID, input.DeliveryID}, nil
+	case DeliveryConstraintMissingOpenAttempt:
+		if !postgres {
+			return []any{input.At, input.At, input.DeliveryID}, nil
+		}
+		return []any{input.At, input.DeliveryID}, nil
+	case DeliveryConstraintMissingSession:
+		return []any{input.SessionID, input.RunID, input.AgentID, input.DeliveryID, input.Version}, nil
+	case DeliveryConstraintOpenDeadLetter:
+		return []any{input.RecordID, input.EventID, input.DeliveryID, input.Version}, nil
+	case DeliveryConstraintPartialSettlementReference:
+		return []any{input.RecordID, input.EventID, input.DeliveryID}, nil
+	case DeliveryConstraintForeignSession:
+		return []any{input.SessionID, input.DeliveryID, input.RunID, input.AgentID, input.Version}, nil
+	case DeliveryConstraintMissingCompletionTime:
+		return []any{input.DeliveryID, input.At}, nil
+	case DeliveryConstraintMissingOutcome:
+		return []any{input.DeliveryID, input.At}, nil
+	case DeliveryConstraintMissingSettlementEvidence:
+		return []any{input.DeliveryID, input.At}, nil
+	case DeliveryConstraintSecondOpenAttempt:
+		return []any{input.DeliveryID, input.Version, input.Token, input.At, input.ExpiresAt}, nil
+	}
+	return nil, fmt.Errorf("unknown delivery constraint probe %q", input.Case)
+}
+
+// This finite proof retains all observations and assertions in one original
+// native transaction; it exports no SQL or callback aperture.
+type DeliveryConformanceClockInput struct {
+	Event                  events.Event
+	Snapshot               Snapshot
+	ClaimRoute             events.DeliveryRoute
+	RetryClaim, LeaseClaim ClaimedObligation
+	Failure                *runtimefailures.Envelope
+}
+
+func (s *DeliveryPostgresOwner) ProveDeliveryConformanceClockForTest(ctx context.Context, input DeliveryConformanceClockInput) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	if err := input.Snapshot.Authority.Validate(); err != nil {
+		return err
+	}
+	for _, claim := range []Claim{input.RetryClaim.Claim, input.LeaseClaim.Claim} {
+		if err := claim.Validate(); err != nil {
+			return err
+		}
+		if claim.RunID() != input.Event.RunID() {
+			return fmt.Errorf("delivery clock proof cannot borrow a foreign run")
+		}
+	}
+	result := mutationprotocol.RunPostgres(ctx, s.backend, mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
+		return struct{}{}, s.deliveryConformanceClockAttempt(txctx, attempt, input)
+	})
+	return result.Err()
+}
+func (s *DeliveryPostgresOwner) deliveryConformanceClockAttempt(txctx context.Context, attempt *mutationprotocol.Attempt, input DeliveryConformanceClockInput) error {
+	adapter := s.receiverAdapter
+	longEvent, longClaimSnapshot, longClaimRoute := input.Event, input.Snapshot, input.ClaimRoute
+	longRetryClaim, longLeaseClaim := input.RetryClaim, input.LeaseClaim
+	var transactionStartedAt time.Time
+	if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := tx.QueryRowContext(txctx, `SELECT CURRENT_TIMESTAMP`).Scan(&transactionStartedAt); err != nil {
+			return fmt.Errorf("read PostgreSQL transaction timestamp: %w", err)
+		}
+		_, err := tx.ExecContext(txctx, `UPDATE event_delivery_attempts SET lease_expires_at=$1
+						 WHERE delivery_id=$2::uuid AND claim_version=$3 AND open_marker=TRUE`, transactionStartedAt.Add(500*time.Millisecond), longLeaseClaim.Claim.DeliveryID(), longLeaseClaim.Claim.Version())
+		if err != nil {
+			return fmt.Errorf("age long-transaction lease: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	time.Sleep(1100 * time.Millisecond)
+	longClaimResult, err := adapter.ClaimExactResult(txctx, attempt, longClaimSnapshot.Authority, longEvent, longClaimRoute, DefaultLeaseTTL)
+	if err != nil {
+		return fmt.Errorf("claim in long PostgreSQL transaction: %w", err)
+	}
+	longClaimed, acquired := longClaimResult.Acquired()
+	if !acquired {
+		return fmt.Errorf("long-transaction claim = %#v, want acquired", longClaimResult)
+	}
+	longRetry, err := adapter.SettleFailure(txctx, attempt, longRetryClaim.Claim, Settlement{Disposition: FailureRetry, Failure: input.Failure, RetryBase: 10 * time.Second, RuleSelection: NotApplicableHandlerRuleObservation()})
+	if err != nil {
+		return fmt.Errorf("settle retry in long PostgreSQL transaction: %w", err)
+	}
+	var leaseObservation ContinuationObservation
+	var longPage ContinuationPage
+	if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		leaseObservation, err = adapter.ObserveContinuation(txctx, tx, longClaimSnapshot.Authority, longLeaseClaim.Claim.DeliveryID())
+		if err != nil {
+			return fmt.Errorf("observe aged lease in long PostgreSQL transaction: %w", err)
+		}
+		longPage, err = adapter.ScanContinuations(txctx, tx, longClaimSnapshot.Authority, ContinuationCursor{}, 10)
+		if err != nil {
+			return fmt.Errorf("scan long PostgreSQL transaction continuations: %w", err)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return validateDeliveryConformanceClockProof(transactionStartedAt, longClaimed, longRetry, leaseObservation, longPage, longLeaseClaim)
+}
+func validateDeliveryConformanceClockProof(transactionStartedAt time.Time, longClaimed ClaimedObligation, longRetry Snapshot, leaseObservation ContinuationObservation, longPage ContinuationPage, longLeaseClaim ClaimedObligation) error {
+	if leaseObservation.Disposition != ClaimReclaimable {
+		return fmt.Errorf("aged lease observation = %s, want reclaimable after transaction-start time", leaseObservation.Disposition)
+	}
+	longDispositions := map[string]ClaimDisposition{}
+	longWakes := map[string]time.Duration{}
+	for _, item := range longPage.Items {
+		longDispositions[item.DeliveryID] = item.Disposition
+		if after, ok := item.Wake.After(); ok {
+			longWakes[item.DeliveryID] = after
+		}
+	}
+	if longDispositions[longClaimed.Snapshot.DeliveryID] != ClaimBusy || longWakes[longClaimed.Snapshot.DeliveryID] <= 0 {
+		return fmt.Errorf("fresh long-transaction claim scan = %s/%s, want busy with opaque wake", longDispositions[longClaimed.Snapshot.DeliveryID], longWakes[longClaimed.Snapshot.DeliveryID])
+	}
+	if longDispositions[longRetry.DeliveryID] != ClaimDeferred || longWakes[longRetry.DeliveryID] <= 0 {
+		return fmt.Errorf("long-transaction retry scan = %s/%s, want deferred with opaque wake", longDispositions[longRetry.DeliveryID], longWakes[longRetry.DeliveryID])
+	}
+	if longDispositions[longLeaseClaim.Claim.DeliveryID()] != ClaimReclaimable {
+		return fmt.Errorf("long-transaction expired lease scan = %s, want reclaimable", longDispositions[longLeaseClaim.Claim.DeliveryID()])
+	}
+	for label, observed := range map[string]time.Time{"claim": longClaimed.Snapshot.UpdatedAt, "retry": longRetry.UpdatedAt} {
+		if elapsed := observed.Sub(transactionStartedAt); elapsed < 900*time.Millisecond {
+			return fmt.Errorf("%s database clock advanced %s across long transaction; want clock_timestamp semantics", label, elapsed)
+		}
+		if observed.Nanosecond()%1000 != 0 || observed.Location() != time.UTC {
+			return fmt.Errorf("%s database clock = %s (%s), want UTC microseconds", label, observed, observed.Location())
+		}
+	}
+	if delay := longRetry.NextEligibleAt.Sub(longRetry.UpdatedAt); delay != 10*time.Second {
+		return fmt.Errorf("long-transaction retry delay = %s, want exact 10s from current database time", delay)
+	}
+	return nil
 }

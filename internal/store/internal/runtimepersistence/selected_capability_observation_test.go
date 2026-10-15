@@ -20,6 +20,30 @@ type selectedCapabilityReadCase struct {
 
 func selectedCapabilityReadCases() []selectedCapabilityReadCase {
 	return []selectedCapabilityReadCase{
+		{"delivery_rollback_cut", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadDeliveryRollbackStorageForTest(ctx, owner, id)
+		}, DeliveryRollbackStorage{}, false, false},
+		{"delivery_exact_dead_letter", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadExactDeliveryDeadLetterStorageForTest(ctx, owner, id, 1)
+		}, ExactDeliveryDeadLetterStorage{}, true, false},
+		{"delivery_attempt_failure", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadDeliveryAttemptFailureStorageForTest(ctx, owner, id, 1)
+		}, []byte(nil), true, false},
+		{"delivery_activity_failure", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadLatestDeliveryActivityFailureStorageForTest(ctx, owner, id)
+		}, []byte(nil), true, false},
+		{"delivery_attempt_history", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadDeliveryConformanceAttemptsStorageForTest(ctx, owner, id)
+		}, []DeliveryConformanceAttemptStorage(nil), false, false},
+		{"delivery_matching_open", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountMatchingOpenDeliveryAttemptStorageForTest(ctx, owner, id, 1)
+		}, 0, false, false},
+		{"delivery_exact_selection", func(ctx context.Context, owner any, id string) (any, error) {
+			return ReadDeliveryConformanceSelectionStorageForTest(ctx, owner, id)
+		}, PublicationRuleSelectionStorage{}, true, false},
+		{"delivery_selection_count", func(ctx context.Context, owner any, id string) (any, error) {
+			return CountDeliveryHandlerSelectionsStorageForTest(ctx, owner, id)
+		}, 0, false, false},
 		{"provider_operations", func(ctx context.Context, owner any, id string) (any, error) {
 			return CountSelectedProviderOperationsStorageForTest(ctx, owner, id, 1)
 		}, 0, false, true},
@@ -159,9 +183,9 @@ func TestSelectedCapabilityReadPortsKeepIndependentCutsAndStrictAbsenceBothStore
 					}
 				})
 			}
-			wantBegun, wantCommitted := int64(38), int64(28)
+			wantBegun, wantCommitted := int64(46), int64(32)
 			if backend == "sqlite" {
-				wantBegun, wantCommitted = 28, 19
+				wantBegun, wantCommitted = 36, 23
 			}
 			if counts := probe.Snapshot(); counts.Active != 0 || int64(counts.Total.Begun) != wantBegun || int64(counts.Total.ReadCommits) != wantCommitted || counts.Total.WriteCommits != 0 {
 				t.Fatalf("capability evidence joined separate cuts or wrote storage: %+v", counts)
