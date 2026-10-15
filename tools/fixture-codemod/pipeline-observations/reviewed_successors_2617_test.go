@@ -16,11 +16,6 @@ type reviewedSuccessorPin struct {
 	HasMechanicalReceipt                                    bool
 }
 
-type reviewedSuccessorEdit struct {
-	Start          int
-	Current, Prior []string
-}
-
 type reviewedSuccessor2617 struct {
 	Pin       reviewedSuccessorPin
 	Original  recipe
@@ -75,21 +70,6 @@ func matchesReviewedSuccessor2617(row recipe, source string, pin reviewedSuccess
 	return reflect.DeepEqual(history, pin.Original) &&
 		historicalCurrentSourcePinned(row.Successor, pin.Pin.CandidateSHA256) &&
 		historicalCurrentSourcePinned(source, pin.Pin.CandidateSHA256)
-}
-
-func reverseReviewedSuccessor2617(source string, edits []reviewedSuccessorEdit) (string, error) {
-	lines := strings.SplitAfter(source, "\n")
-	end := len(lines)
-	for index := len(edits) - 1; index >= 0; index-- {
-		edit := edits[index]
-		stop := edit.Start + len(edit.Current)
-		if edit.Start < 0 || stop > end || !reflect.DeepEqual(lines[edit.Start:stop], edit.Current) {
-			return "", fmt.Errorf("changed or overlapping finite composition edit %d", index)
-		}
-		lines = append(append(append([]string{}, lines[:edit.Start]...), edit.Prior...), lines[stop:]...)
-		end = edit.Start
-	}
-	return strings.Join(lines, ""), nil
 }
 
 func reviewedSharedCoordinatorBody2617(row recipe, packet reviewedSuccessorPacket2617) (string, error) {
