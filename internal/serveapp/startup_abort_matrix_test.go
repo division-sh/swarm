@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
-	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -71,10 +70,13 @@ func testServeStartupAbortFailure(t *testing.T, backend string, reset bool, phas
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stores := openStandingRuntimeContextStore(t, backend, "startup-abort")
-	cfg, err := config.Load(writeServeRuntimeTestConfig(t))
+	loadedConfig, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{
+		RepoRoot: repoRootForTest(), ExplicitPath: writeServeRuntimeTestConfig(t),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	cfg := loadedConfig.Config
 	stubServeRuntimeWorkspaceLifecycle(t)
 	process := worklifetime.NewProcess()
 	instance := uuid.NewString()
