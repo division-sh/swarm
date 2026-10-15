@@ -472,17 +472,18 @@ rows:
     corpus: {expression_alias_uses: 0}
 
   - id: handler.data_write
-    ruled: mechanical-ratified
+    ruled: sugar
     paths: "data_accumulation.writes[], data_accumulation.source_event"
-    owners: [projectNodeDataWriteValue, projectNodeDataAccumulationValue]
+    owners: [projectNodeDataWriteValue, projectNodeDataAccumulationValue, hydrateWorkflowDataWrite]
     information:
       fact: [source and target paths]
       choice: [operation, value, key, index]
     spelling:
-      canonical_candidate: scalar_for_direct_same_field_else_operation_mapping
-      retired_duplicates: ["scalar field versus {field: field}", "expression versus value:{cel:...}"]
+      canonical_candidate: scalar_write_is_sugar_for_same_path_source_target_mapping_both_retained
+      retired_duplicates: ["{field: x}", "expression versus value:{cel:...}"]
       distinct_overrides: [source_to_different_target, operation_mapping]
     corpus: {write_lists: 7, scalar_write_rows: 19, mapping_write_rows: 0}
+    sugar_lowering: "projectNodeDataWriteValue -> hydrateWorkflowDataWrite (internal/runtime/contracts/workflow_contract_yaml_rules.go:45) admits bare x and {source_field: x, target_field: x} as the same direct write, per #2287 USER ruling6197401134. Both stay; the internal Field slot remains until D's #2293 work. Different-path mappings, target_path, literals, computed values, operations and existing refusals are unchanged."
 
   - id: handler.collection_compute
     ruled: mechanical-ratified

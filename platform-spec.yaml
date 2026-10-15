@@ -4292,6 +4292,7 @@ handler_specification:
         direct:
           shape: 'field_name (bare string)'
           meaning: 'payload.field_name → entity.field_name. Direct name match.'
+          sugar: 'The bare `- x` write is sugar for `- {source_field: x, target_field: x}`; both forms remain supported.'
           example: '- geography'
         mapped:
           shape: '{source_field: payload_key, target_field: entity_key}'
