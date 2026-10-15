@@ -69,6 +69,50 @@ func TestOperatorRunForkLateWinnerUsesOriginalActorKey(t *testing.T) {
 	}
 }
 
+func TestOperatorRunForkOutcomeRetainsOriginalStartSelector(t *testing.T) {
+	for _, start := range []bool{false, true} {
+		for _, keyed := range []bool{false, true} {
+			name := "latest/keyless"
+			if start {
+				name = "start/keyless"
+			}
+			if keyed {
+				name += "/keyed"
+			}
+			t.Run(name, func(t *testing.T) {
+				operations := newRecordingRunForkOperations()
+				request := runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "start-outcome", TransportHash: "start-outcome-transport",
+					SourceRunID: runForkTestSourceRunID, AtStart: start, TargetBundleHash: runForkTestBundleHash,
+					AllowSourceFreeze: true, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}}
+				if keyed {
+					request.IdempotencyKey = "original-selector"
+				}
+				result := runForkActivatedTestResult()
+				if start {
+					result.ForkPointKind, result.ForkEventID = string(runfork.RunForkPointRunStart), ""
+				}
+				if err := operations.activate(request, result); err != nil {
+					t.Fatal(err)
+				}
+				before := operations.byID[request.OperationID]
+				if keyed {
+					request.OperationID = uuid.NewString()
+				}
+				if _, found, err := loadRunForkOutcomeForRequest(context.Background(), operations, request, nil); err != nil || !found {
+					t.Fatalf("original selector was refused: found=%t err=%v", found, err)
+				}
+				request.AtStart = !request.AtStart
+				if _, found, err := loadRunForkOutcomeForRequest(context.Background(), operations, request, nil); err == nil || found {
+					t.Fatalf("opposite original selector was projected: found=%t err=%v", found, err)
+				}
+				if after := operations.byID[before.Request.OperationID]; !reflect.DeepEqual(before, after) || len(operations.byID) != 1 {
+					t.Fatal("selector refusal mutated the original durable operation")
+				}
+			})
+		}
+	}
+}
+
 func TestOperatorRunForkActivatedPostCommitErrorReplaysWithoutReexecution(t *testing.T) {
 	cleanupErr := errors.New("selected fork postcommit cleanup failed")
 	selectedCalls := 0
