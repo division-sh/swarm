@@ -73,7 +73,7 @@ func (s *flowActorObservationStore) LoadDynamicFlowRuntimeReadiness(ctx context.
 
 func TestWorkspaceGatewayConstructedActorUsesCurrentNativeAttempt(t *testing.T) {
 	instances := &flowActorObservationStore{&flowActivationTestInstanceStore{}}
-	bus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
+	bus := &flowActivationTestBus{creationStore: instances.flowActivationTestInstanceStore}
 	am := newFlowActivationManager(t, bus, instances)
 	am.factory = (&projectionTestFactory{handled: make(chan int, 1)}).Build
 	bundle := testFlowBundle(t, "")
