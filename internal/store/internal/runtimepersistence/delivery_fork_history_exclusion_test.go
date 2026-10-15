@@ -11,7 +11,9 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/google/uuid"
 )
@@ -136,12 +138,23 @@ func proveRetainedDeliveryLifecycleAccounting(t *testing.T, fixture authorActivi
 		t.Fatal(err)
 	}
 	publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, !completion.sqlite, event.RunID())
+	backend := "postgres"
+	if completion.sqlite {
+		backend = "sqlite"
+	}
+	retained := retryDecisionFixture{t: t, ctx: ctx, store: fixture.store, event: event, route: route, backend: backend}
+	deliveryID := loadDeliverySnapshotFixture(t, ctx, store, event.ID(), route).DeliveryID
+	initialCut, initialFact := retained.cut(deliveryID)
+	if initialFact.SourceExecution != (runtimedelivery.SourceExecutionAtCut{}) || !runfork.RunForkPendingWorkReplayableForHistoricalReplay(initialFact) {
+		t.Fatalf("unstarted source lost its historical replay classification: %+v", initialFact)
+	}
+	previousCuts := map[string]runfork.RunForkPendingWork{initialCut: initialFact}
 	probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer restore()
-	phase := func(name string, want uint64, write func() error) {
+	phase := func(name string, want uint64, wantCut runtimedelivery.SourceExecutionAtCut, write func() error) {
 		t.Helper()
 		before := probe.Snapshot().Total.Revision
 		if err := write(); err != nil {
@@ -154,6 +167,35 @@ func proveRetainedDeliveryLifecycleAccounting(t *testing.T, fixture authorActivi
 		requireCompleteRunForkRevision(t, ctx, fixture, event.RunID())
 		t.Logf("retained lifecycle accounting: phase=%s finalizations=%d history_sql=%d", name, want,
 			after.ExecCalls+after.QueryCalls+after.QueryRowCalls-before.ExecCalls-before.QueryCalls-before.QueryRowCalls)
+		cutID, fact := retained.cut(deliveryID)
+		if fact.SourceExecution != wantCut || runfork.RunForkPendingWorkReplayableForHistoricalReplay(fact) {
+			t.Fatalf("%s changed historical source-execution/refusal predicates: fact=%+v want=%+v", name, fact, wantCut)
+		}
+		for cutID, previous := range previousCuts {
+			if got := retained.historyAt(cutID, deliveryID); !reflect.DeepEqual(got, previous) {
+				t.Fatalf("%s changed earlier cut %s: before=%+v after=%+v", name, cutID, previous, got)
+			}
+		}
+		previousCuts[cutID] = fact
+		for _, whole := range []bool{false, true} {
+			before, err := ReadSemanticEventFixtureEvidenceForTest(ctx, fixture.store, event.RunID(), event.ID())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := runDeliveryFixtureAttempt(ctx, store, func(_ context.Context, attempt *mutationprotocol.Attempt) error {
+				if whole {
+					return attempt.AddWholeFamily(event.RunID(), privaterunforkrevision.FamilyEventDeliveries)
+				}
+				return attempt.AddFact(event.RunID(), privaterunforkrevision.FamilyEventDeliveries, deliveryID)
+			}); err != nil {
+				t.Fatalf("%s projection whole=%t: %v", name, whole, err)
+			}
+			after, err := ReadSemanticEventFixtureEvidenceForTest(ctx, fixture.store, event.RunID(), event.ID())
+			if err != nil || !reflect.DeepEqual(after, before) {
+				t.Fatalf("%s exact/broad projection disagrees whole=%t: before=%+v after=%+v err=%v", name, whole, before, after, err)
+			}
+		}
+		requireCompleteRunForkRevision(t, ctx, fixture, event.RunID())
 	}
 	var current runtimedelivery.ClaimedObligation
 	claim := func() error {
@@ -186,31 +228,33 @@ func proveRetainedDeliveryLifecycleAccounting(t *testing.T, fixture authorActivi
 		}
 		return err
 	}
-	phase("initial_status", 1, claim)
-	phase("session_bind", 1, bind)
-	phase("unchanged_session_bind", 0, bind)
-	phase("lease_renewal", 0, func() error {
+	unbound := runtimedelivery.SourceExecutionAtCut{InProgress: true, Started: true}
+	bound := runtimedelivery.SourceExecutionAtCut{InProgress: true, Started: true, SessionBound: true}
+	phase("initial_status", 1, unbound, claim)
+	phase("session_bind", 1, bound, bind)
+	phase("unchanged_session_bind", 0, bound, bind)
+	phase("lease_renewal", 0, bound, func() error {
 		renewed, err := store.RenewClaim(ctx, current.Claim)
 		if err == nil && !renewed.Acknowledged {
 			t.Fatal("physical renewal was not acknowledged")
 		}
 		return err
 	})
-	phase("short_lease_renewal", 0, expire)
+	phase("short_lease_renewal", 0, bound, expire)
 	previous := current.Claim
-	phase("reclaim_session_clear", 1, claim)
+	phase("reclaim_session_clear", 1, unbound, claim)
 	if current.Snapshot.ActiveSessionID != "" || current.Claim.Version() != previous.Version()+1 {
 		t.Fatal("reclaim did not clear the previous session under a fresh claim")
 	}
-	phase("stale_session_bind", 0, func() error {
+	phase("stale_session_bind", 0, unbound, func() error {
 		if _, err := store.BindAgentSession(ctx, previous, completion.sessionID); !errors.Is(err, runtimedelivery.ErrConflict) {
 			t.Fatalf("stale session binding error=%v, want conflict", err)
 		}
 		return nil
 	})
-	phase("short_lease_renewal_without_session", 0, expire)
-	phase("unchanged_reclaim", 0, claim)
-	phase("retry_settlement", 1, func() error {
+	phase("short_lease_renewal_without_session", 0, unbound, expire)
+	phase("unchanged_reclaim", 0, unbound, claim)
+	phase("retry_settlement", 1, runtimedelivery.SourceExecutionAtCut{Started: true}, func() error {
 		failed, err := store.SettleFailure(ctx, current.Claim, runtimedelivery.Settlement{
 			Disposition: runtimedelivery.FailureRetry, Failure: testRetryableFailure(), RetryBase: time.Millisecond,
 			RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
@@ -223,5 +267,5 @@ func proveRetainedDeliveryLifecycleAccounting(t *testing.T, fixture authorActivi
 		}
 		return err
 	})
-	phase("retry_status", 1, claim)
+	phase("retry_status", 1, unbound, claim)
 }

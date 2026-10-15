@@ -60,6 +60,37 @@ func AgeManagerClaimStartedAtTx(ctx context.Context, tx *sql.Tx, claim Claim, st
 	return nil
 }
 
+func (a *Adapter) ProbeRetryDecisionConstraintTxForTest(ctx context.Context, tx *sql.Tx, claim Claim, probe RetryDecisionConstraintProbe) error {
+	if tx == nil {
+		return fmt.Errorf("retry constraint probe requires its native transaction")
+	}
+	if err := claim.Validate(); err != nil {
+		return err
+	}
+	query := `UPDATE event_delivery_attempts
+		SET closure_kind=$1, outcome=$2, completed_at=$3, retry_eligible_at=$4,
+			failure=NULL, reason_code=CASE WHEN $2='canceled' THEN 'terminate' ELSE NULL END
+		WHERE delivery_id=$5 AND claim_version=$6 AND claim_token=$7`
+	if a.dialect == DialectSQLite {
+		query = `UPDATE event_delivery_attempts
+			SET closure_kind=?1, outcome=?2, completed_at=?3, retry_eligible_at=?4,
+				failure=NULL, reason_code=CASE WHEN ?2='canceled' THEN 'terminate' ELSE NULL END
+			WHERE delivery_id=?5 AND claim_version=?6 AND claim_token=?7`
+	}
+	result, err := tx.ExecContext(ctx, query, probe.ClosureKind, probe.Outcome, probe.CompletedAt, probe.EligibleAt, claim.DeliveryID(), claim.Version(), claim.PersistenceToken())
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return fmt.Errorf("retry constraint probe lost its exact settled attempt")
+	}
+	return nil
+}
+
 const (
 	DialectPostgres Dialect = "postgres"
 	DialectSQLite   Dialect = "sqlite"
@@ -1606,7 +1637,7 @@ func (a *Adapter) settleExactClaim(ctx context.Context, tx *sql.Tx, attempt *mut
 				base = time.Second
 			}
 			delay := time.Duration(float64(base) * math.Pow(2, float64(retryCount-1)))
-			due := now.Add(delay)
+			due := committedRetryDue(now, delay)
 			nextEligible = &due
 		} else {
 			status = StatusDeadLetter
