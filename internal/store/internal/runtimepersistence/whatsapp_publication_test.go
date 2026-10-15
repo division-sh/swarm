@@ -25,6 +25,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 // This proves the selected-store publication component, not SDK authentication,
@@ -35,6 +36,7 @@ func TestWhatsAppInboundPublicationRollbackAndLostAcknowledgmentBothStores(t *te
 			f := openStandingDispositionParityFixture(t, backend)
 			store := f.selected.(inboundPublicationProofStore)
 			candidate := f.candidate("whatsapp-publication")
+			candidate.Source = sourceartifactfixture.Require(t, context.Background(), store)
 			candidate.FlowPath = "."
 			candidate.ServiceID = runtimeflowidentity.StandingServiceID(candidate.FlowPath)
 			ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), candidate.Source)
