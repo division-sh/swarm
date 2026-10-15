@@ -3,12 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
-	"os"
 	"reflect"
 	"strings"
 	"time"
 
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimesharding "github.com/division-sh/swarm/internal/runtime/core/sharding"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -238,43 +236,6 @@ type OpenAICompatibleConfig struct {
 
 type OpenAIResponsesConfig struct {
 	BaseURL string `yaml:"base_url"`
-}
-
-type LoadOptions struct {
-	BackendOverride string
-}
-
-func Load(path string) (*Config, error) {
-	return LoadWithOptions(path, LoadOptions{})
-}
-
-func LoadWithOptions(path string, opts LoadOptions) (*Config, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read config: %w", err)
-	}
-	var cfg Config
-	cfg.Runtime.RecoveryOnStartup = true
-	var source yaml.Node
-	if err := yaml.Unmarshal(b, &source); err != nil {
-		return nil, fmt.Errorf("parse config %s: %w", path, err)
-	}
-	if err := DecodeSource(yamlsource.ValueFromNode(&source), &cfg); err != nil {
-		if diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
-			located := *diagnostic
-			located.Location.File = path
-			return nil, &located
-		}
-		return nil, fmt.Errorf("parse config %s: %w", path, err)
-	}
-	backendOverride := strings.TrimSpace(opts.BackendOverride)
-	if err := cfg.validate(backendOverride); err != nil {
-		return nil, err
-	}
-	if backendOverride != "" {
-		cfg.LLM.Backend = backendOverride
-	}
-	return &cfg, nil
 }
 
 func (c *Config) LLMBackendProfile() (llmselection.Profile, error) {
