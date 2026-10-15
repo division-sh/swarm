@@ -15,6 +15,7 @@ import (
 )
 
 const source = "3e84acd02f4cc3c02e2b26be494e74be1a035f0c"
+const completion = "098a84acd3cff157fb6bcaefb1d55ee15994cdb7"
 const root = "tools/fixture-codemod/pipeline-observations/"
 
 type recipe struct {
@@ -71,6 +72,38 @@ func main() {
 			panic("missing/ambiguous reviewed endpoint: " + target[1])
 		}
 	}
+	// #642/6191161328 appends to, rather than replacing, the prior 39 receipts.
+	prior := encode(history, false)
+	if !bytes.Equal(prior, read(completion, root+"testdata/fixture_setup_successors_2617.json")) {
+		panic("reviewed completion predecessor changed")
+	}
+	for _, target := range [][2]string{
+		{"internal/runtime/pipeline/workflow_timer_replay_selected_store_external_test.go", "TestWorkflowTimerCauseReplayReopenAndIsolationBothStores"},
+		{"internal/runtime/runforkexecution/constructed_agent_input_execution_test.go", "proveSelectedConstructedAgentInput"},
+		{"internal/runtime/runforkexecution/execution_test.go", "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation"},
+	} {
+		matches := 0
+		for i := range rows {
+			row := &rows[i]
+			if row.File != target[0] || row.Function != target[1] {
+				continue
+			}
+			matches++
+			candidate := body(read(completion, row.File), row.Function)
+			current, err := os.ReadFile(row.File)
+			must(err)
+			if body(current, row.Function) != candidate || row.Successor == "" || row.Successor == candidate {
+				panic("unreviewed or unchanged completion successor: " + row.Function)
+			}
+			history = append(history, successor{Original: *row, Candidate: candidate, Edits: []edit{{
+				Current: strings.SplitAfter(candidate, "\n"), Prior: strings.SplitAfter(row.Successor, "\n"),
+			}}})
+			row.Successor = candidate
+		}
+		if matches != 1 {
+			panic("missing/ambiguous completion endpoint: " + target[1])
+		}
+	}
 	for _, target := range [][2]string{
 		{"internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go", "selectedContractExecutionOwnerForCatalogTestWithReplay"},
 		{"internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go", "selectedContractExecutionOwnerForCatalogHarnessWithReplay"},
@@ -81,6 +114,8 @@ func main() {
 	} {
 		fmt.Printf("pin %s %x\n", target[1], sha256.Sum256([]byte(canonical(body(read(source, target[0]), target[1])))))
 	}
+	const scanFile = "internal/runtime/runforkexecution/constructed_agent_input_execution_test.go"
+	fmt.Printf("pin selectedHistoricalScanProbe.CommitSelectedForkEvent %x\n", sha256.Sum256([]byte(canonical(body(read(completion, scanFile), "selectedHistoricalScanProbe.CommitSelectedForkEvent")))))
 	packet := encode(history, false)
 	fmt.Printf("append-only history=%d sha256=%x\n", len(history), sha256.Sum256(packet))
 	if len(os.Args) == 2 && os.Args[1] == "-write" {

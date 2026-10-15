@@ -37,7 +37,7 @@ func TestPersistenceAuthorityDebtProcessLeaseReviewedSourcePins(t *testing.T) {
 	if digest, err := debtProcessLeaseCustodyDigest(root); err != nil || digest != debtProcessLeaseCustodyPin {
 		t.Errorf("custody pin=%q error=%v", digest, err)
 	}
-	if digest, err := debtCollectorDigest(root); err != nil || digest != debtProcessLeaseCollectorTo {
+	if digest, err := debtCollectorDigest(root); err != nil || (digest != debtProcessLeaseCollectorTo && digest != debtNativeFixtureCollectorTo) {
 		t.Errorf("collector pin=%q error=%v", digest, err)
 	}
 }

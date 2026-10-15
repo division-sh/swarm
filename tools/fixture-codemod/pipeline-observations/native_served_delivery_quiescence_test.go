@@ -143,10 +143,11 @@ func TestServedDeliveryQuiescenceCallerInventoryConsumesOnlyDomainReadPorts(t *t
 	for _, count := range counts {
 		total += count
 	}
-	if len(counts) != 83 || total != 157 || counts["TestServedRunDeliveryQuiescenceReaderPreservesStableStatusCut"] != 1 ||
+	if len(counts) != 84 || total != 159 || counts["TestServedRunDeliveryQuiescenceReaderPreservesStableStatusCut"] != 1 ||
 		counts["proveServedRetainedJoinOutcomeHeld"] != 3 || counts["testServedJoinWriterCompletedHistoryRefusal"] != 5 ||
-		counts["TestIssue642OriginalStartFirstTurnExecutesBothStores"] != 2 {
-		t.Fatalf("delivery family inventory functions=%d,calls=%d,want82/155 plus two exact original-start source/child waits", len(counts), total)
+		counts["TestIssue642OriginalStartFirstTurnExecutesBothStores"] != 2 ||
+		counts["TestServedCompiledTransitionTemplateSiblingForkOnBothStores"] != 2 {
+		t.Fatalf("delivery family inventory functions=%d,calls=%d,want84/159 including exact original-start and sibling source/child waits", len(counts), total)
 	}
 }
 
