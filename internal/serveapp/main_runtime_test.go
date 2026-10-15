@@ -9190,10 +9190,9 @@ func writeServeRuntimeTestConfigWithWorkspaceFields(t *testing.T, workspaceField
 	configText := strings.Join([]string{
 		"runtime:",
 		"  recovery_on_startup: false",
-		"workspace:",
 	}, "\n") + "\n"
 	if len(workspaceFields) > 0 {
-		configText += strings.Join(workspaceFields, "\n") + "\n"
+		configText += "workspace:\n" + strings.Join(workspaceFields, "\n") + "\n"
 	}
 	configText += strings.Join([]string{
 		"llm:",
@@ -9398,9 +9397,11 @@ func writeStoreBackendRuntimeConfigWithWorkspaceFields(t *testing.T, backend str
 	lines := []string{
 		"runtime:",
 		"  recovery_on_startup: false",
-		"workspace:",
 	}
-	lines = append(lines, workspaceFields...)
+	if len(workspaceFields) > 0 {
+		lines = append(lines, "workspace:")
+		lines = append(lines, workspaceFields...)
+	}
 	if strings.TrimSpace(backend) != "" || strings.TrimSpace(sqlitePath) != "" {
 		lines = append(lines,
 			"store:",
