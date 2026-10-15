@@ -340,7 +340,10 @@ func (s *Service) Close(ctx context.Context) error {
 func (r *ServiceRegistry) removeServiceContainer(ctx context.Context, containerID string) error {
 	out, err := r.runDocker(ctx, "rm", "--force", containerID)
 	if err == nil {
-		return r.verifyContainerAbsent(ctx, containerID)
+		err = r.verifyContainerAbsent(ctx, containerID)
+	}
+	if err == nil {
+		return nil
 	}
 	removeErr := fmt.Errorf("remove Postgres service %s: %w output=%s", containerID, err, strings.TrimSpace(string(out)))
 	if !errors.Is(ctx.Err(), context.DeadlineExceeded) && !errors.Is(err, context.DeadlineExceeded) {
@@ -352,7 +355,7 @@ func (r *ServiceRegistry) removeServiceContainer(ctx context.Context, containerI
 	if checkErr := r.verifyContainerAbsent(checkCtx, containerID); checkErr != nil {
 		return errors.Join(removeErr, ctx.Err(), checkErr)
 	}
-	fmt.Fprintf(os.Stderr, "%v; container absence confirmed after removal timeout\n", removeErr)
+	fmt.Fprintf(os.Stderr, "%v; container absence confirmed after removal timeout\n", errors.Join(removeErr, ctx.Err()))
 	return nil
 }
 
