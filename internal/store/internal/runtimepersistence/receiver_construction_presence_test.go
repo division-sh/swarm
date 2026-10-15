@@ -275,7 +275,7 @@ func TestReceiverConstructionReceiptBindsCreatingPublicationBothStores(t *testin
 					} else if ready || err == nil {
 						t.Fatalf("corrupt/unrelated receipt admitted: ready=%t %v", ready, err)
 					}
-					if variant == "conflicting_historical" && err.Error() != "receiver native receipt contradicts fixed historical construction" {
+					if variant == "conflicting_historical" && err.Error() != "receiver has conflicting native and historical construction evidence" {
 						t.Fatalf("dual evidence reached the wrong refusal: %v", err)
 					}
 					if shape == "later_native_fork" && variant == "missing_receipt" && err.Error() != "native receiver construction lacks its original receipt" {

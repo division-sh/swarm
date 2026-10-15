@@ -15,6 +15,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
@@ -30,6 +31,7 @@ type runForkDeliveryEventReplayAdapter struct {
 	events         eventCommitOwner
 	deliveries     *storedelivery.Adapter
 	commitScope    func(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.CommittedScope, time.Time) error
+	loadSnapshot   runForkLifecycleSnapshotLoader
 }
 
 func (s *RunForkPostgresOwner) deliveryEventReplayAdapter() runForkDeliveryEventReplayAdapter {
@@ -37,13 +39,17 @@ func (s *RunForkPostgresOwner) deliveryEventReplayAdapter() runForkDeliveryEvent
 		postgres:       true,
 		requireCurrent: s.requireCurrentSchema, events: s.events, deliveries: postgresDeliveryAdapter,
 		commitScope: s.PipelinePostgresOwner.CommitScopeAtTx,
+		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runlifecycle.Snapshot, error) {
+			return s.LoadSnapshotTx(ctx, tx, runID, false)
+		},
 	}
 }
 
 func (s *RunForkSQLiteOwner) deliveryEventReplayAdapter() runForkDeliveryEventReplayAdapter {
 	return runForkDeliveryEventReplayAdapter{
 		requireCurrent: s.requireCurrentSchema, events: s.events, deliveries: sqliteDeliveryAdapter,
-		commitScope: s.PipelineSQLiteOwner.CommitScopeAtTx,
+		commitScope:  s.PipelineSQLiteOwner.CommitScopeAtTx,
+		loadSnapshot: s.LoadSnapshotTx,
 	}
 }
 
@@ -165,8 +171,34 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 			if expected.WorkflowName != target.FlowID {
 				return result, fmt.Errorf("reconstructed replay receiver contradicts fixed-revision template")
 			}
-			if err := pipelinepersistence.RequireSelectedHistoricalWorkflowHeader(ctx, tx, store.postgres, expected); err != nil {
+			header, err := pipelinepersistence.RequireSelectedHistoricalWorkflowHeader(ctx, tx, store.postgres, expected)
+			if err != nil {
 				return result, fmt.Errorf("reconstructed replay receiver contradicts fixed-revision ownership: %w", err)
+			}
+			if store.loadSnapshot == nil {
+				return result, fmt.Errorf("replay construction requires its immutable lifecycle owner")
+			}
+			child, err := store.loadSnapshot(ctx, tx, lineage.ForkRunID)
+			if err != nil {
+				return result, err
+			}
+			observed, found, err := readProjectedReceiverConstructionReceiptTx(ctx, tx, child, header)
+			if err != nil {
+				return result, err
+			}
+			if !found {
+				return result, fmt.Errorf("replay receiver lacks admitted historical construction")
+			}
+			plan, err := constructionPlanAtSnapshot(snapshot)
+			if err != nil {
+				return result, err
+			}
+			receipt, err := projectRunForkConstructionReceiptTx(ctx, tx, plan, lineage.ForkRunID, state, header.CreatedAt)
+			if err != nil {
+				return result, err
+			}
+			if err := pipelinepersistence.RequireSelectedHistoricalWorkflowReceipt(ctx, tx, receipt, observed); err != nil {
+				return result, err
 			}
 		}
 		obligation, err := runtimedelivery.NewObligation(forkEventID, lineage.ForkRunID, forkRoute, deliveryAuthority)

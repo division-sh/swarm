@@ -8,9 +8,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
@@ -172,12 +173,14 @@ func projectRunForkReplyOrigin(plan runfork.RunForkPlan, childRunID string, sour
 		return events.RouteIdentity{}, fmt.Errorf("fork reply origin lacks captured construction authority")
 	}
 	metadata := entity.MaterializationMetadata
-	receipt, err := pipeline.DecodeStoredFlowConstructionReceipt(metadata.InitialMaterialization,
-		plan.SourceRunID, entity.EntityID, metadata.FlowInstance, metadata.FlowTemplate)
+	route := flowidentity.StoredRoute(metadata.FlowTemplate, flowidentity.LogicalInstanceID(metadata.FlowInstance), metadata.FlowInstance)
+	identity, _, found, err := runforkadmission.FixedConstructionEvidenceForRoute(plan, route)
 	if err != nil {
 		return events.RouteIdentity{}, err
 	}
-	identity := receipt.Identity
+	if !found {
+		return events.RouteIdentity{}, fmt.Errorf("fork reply origin lacks captured construction identity")
+	}
 	if identity.ScopeKey != source.FlowID || identity.InstancePath != source.FlowInstance || identity.EntityID != source.EntityID {
 		return events.RouteIdentity{}, fmt.Errorf("fork reply origin contradicts exact captured construction identity")
 	}

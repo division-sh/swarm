@@ -138,6 +138,20 @@ type capturedConstructionHop struct {
 	SourceRevision     int64
 }
 
+// FixedConstructionOccurrenceID names only the recorded constructor output in
+// this captured run. Event membership separately decides whether it is owed.
+func FixedConstructionOccurrenceID(plan runfork.RunForkPlan, entity runfork.RunForkEntityState) (string, error) {
+	evidence, err := fixedConstructionEvidence(plan, entity)
+	if err != nil || evidence.Original.CreationEvent == nil {
+		return "", err
+	}
+	id := evidence.Original.CreationEvent.EventID
+	for _, hop := range evidence.Lineage {
+		id = runfork.ProjectReplayEventID(hop.RunID, id)
+	}
+	return id, nil
+}
+
 func (e capturedConstructionEvidence) creatingSelector(plan runfork.RunForkPlan) (events.Event, bool, error) {
 	id := e.Original.CreatingInput.EventID
 	if id == "" {

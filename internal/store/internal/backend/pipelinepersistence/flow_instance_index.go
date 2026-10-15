@@ -433,6 +433,9 @@ func (s *flowInstanceIndexSnapshot) observe(ctx context.Context, request pipelin
 	}
 	var observation pipeline.FlowInstanceObservation
 	if projected {
+		if companions.constructionPresent {
+			return pipeline.FlowInstanceObservation{}, corruptFlowConstructionEvidence(flowidentity.RunScopedFlowInstance{RunID: s.run.RunID, Route: route}, fmt.Errorf("instance has conflicting native and historical construction evidence"))
+		}
 		var desired *pipeline.DynamicFlowRuntimeReadiness
 		if readyFound {
 			desired = &readiness

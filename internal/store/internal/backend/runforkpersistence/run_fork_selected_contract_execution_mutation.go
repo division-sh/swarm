@@ -164,7 +164,7 @@ type selectedContractWorkflowState struct {
 	RemovedArrivalRefs []timeridentity.JoinRef
 }
 
-func selectedContractAdmittedWorkflowStates(plan runfork.RunForkPlan, forkRunID string, admission runforkreadiness.Admission) ([]selectedContractWorkflowState, error) {
+func selectedContractAdmittedWorkflowStates(ctx context.Context, tx *sql.Tx, plan runfork.RunForkPlan, forkRunID string, admission runforkreadiness.Admission) ([]selectedContractWorkflowState, error) {
 	if _, err := prepareRunForkArrivalJoinSchedules(plan, forkRunID); err != nil {
 		return nil, err
 	}
@@ -216,7 +216,7 @@ func selectedContractAdmittedWorkflowStates(plan runfork.RunForkPlan, forkRunID 
 		}
 		var creation *runtimepipeline.DynamicFlowRuntimeCreationEventPlan
 		if owed {
-			receipt, err := ProjectRunForkConstructionReceipt(plan, forkRunID, entity, entity.MaterializationMetadata.CreatedAt)
+			receipt, err := projectRunForkConstructionReceiptTx(ctx, tx, plan, forkRunID, entity, entity.MaterializationMetadata.CreatedAt)
 			if err != nil {
 				return nil, err
 			}

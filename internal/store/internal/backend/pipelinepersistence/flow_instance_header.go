@@ -116,83 +116,79 @@ func CommitSelectedHistoricalWorkflowHeader(ctx context.Context, tx *sql.Tx, pos
 	if _, err := commitWorkflowInstanceHeader(ctx, tx, postgres, record, true); err != nil {
 		return err
 	}
-	return insertFlowConstructionReceipt(ctx, tx, postgres, receipt.RunID, receipt.EntityID, receipt.FlowInstance, raw, receipt.OccurredAt)
+	return requireHistoricalNativeReceiptAbsent(ctx, tx, receipt.RunID, receipt.FlowInstance)
 }
 
 // Materialize-only reuse consumes the same paired reader and immutable record
 // as the historical writer. It cannot repair or accept changed snapshot facts.
-func RequireSelectedHistoricalWorkflowHeader(ctx context.Context, tx *sql.Tx, postgres bool, expected pipeline.WorkflowEngineStateRecord) error {
-	if err := requireWorkflowHeaderProjection(ctx, tx, postgres, expected, 1); err != nil {
-		return err
-	}
-	var raw []byte
-	if err := tx.QueryRowContext(ctx, `SELECT projection FROM workflow_instance_initial_materializations
-		WHERE run_id=$1 AND instance_path=$2 AND entity_id=$3`, expected.Identity.RunID, expected.Identity.Route.InstancePath, expected.EntityID).Scan(&raw); err != nil {
-		return fmt.Errorf("read historical construction receipt: %w", err)
-	}
-	receipt, err := pipeline.DecodeFlowConstructionReceipt(raw, expected.Identity, expected.EntityID)
+func RequireSelectedHistoricalWorkflowHeader(ctx context.Context, tx *sql.Tx, postgres bool, expected pipeline.WorkflowEngineStateRecord) (pipeline.WorkflowInstance, error) {
+	instance, err := requireWorkflowHeaderProjection(ctx, tx, postgres, expected, 1)
 	if err != nil {
-		return err
+		return pipeline.WorkflowInstance{}, err
 	}
-	if receipt.WorkflowName != expected.WorkflowName || !receipt.OccurredAt.Equal(expected.CreatedAt) || receipt.Persisted.Control.EntityType != expected.EntityType {
-		return fmt.Errorf("historical construction contradicts persisted header")
+	if err := requireHistoricalNativeReceiptAbsent(ctx, tx, expected.Identity.RunID, expected.Identity.Route.InstancePath); err != nil {
+		return pipeline.WorkflowInstance{}, err
 	}
-	return nil
+	return instance, nil
 }
 
 // Exact materialization reuse also compares immutable initialization. Header
 // equality alone cannot prove that later fields have not replaced the receipt.
-func RequireSelectedHistoricalWorkflowReceipt(ctx context.Context, tx *sql.Tx, expected pipeline.FlowConstructionReceipt) error {
-	if _, err := pipeline.EncodeFlowConstructionReceipt(expected); err != nil {
+func RequireSelectedHistoricalWorkflowReceipt(ctx context.Context, tx *sql.Tx, expected, observed pipeline.FlowConstructionReceipt) error {
+	if err := pipeline.ValidateProjectedFlowConstructionReceipt(observed, expected); err != nil {
 		return err
 	}
-	var persisted []byte
-	if err := tx.QueryRowContext(ctx, `SELECT projection FROM workflow_instance_initial_materializations
-		WHERE run_id=$1 AND instance_path=$2 AND entity_id=$3`, expected.RunID, expected.FlowInstance, expected.EntityID).Scan(&persisted); err != nil {
-		return fmt.Errorf("read immutable historical construction: %w", err)
-	}
-	receipt, err := pipeline.DecodeStoredFlowConstructionReceipt(persisted, expected.RunID, expected.EntityID, expected.FlowInstance, expected.WorkflowName)
-	if err != nil {
-		return err
-	}
-	return pipeline.ValidateProjectedFlowConstructionReceipt(receipt, expected)
+	return requireHistoricalNativeReceiptAbsent(ctx, tx, expected.RunID, expected.FlowInstance)
 }
 
-func requireWorkflowHeaderProjection(ctx context.Context, tx *sql.Tx, postgres bool, expected pipeline.WorkflowEngineStateRecord, revision int64) error {
+func requireHistoricalNativeReceiptAbsent(ctx context.Context, tx *sql.Tx, runID, path string) error {
+	var present bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workflow_instance_initial_materializations
+		WHERE run_id=$1 AND instance_path=$2)`, runID, path).Scan(&present); err != nil {
+		return fmt.Errorf("inspect historical construction receipt absence: %w", err)
+	}
+	if present {
+		return fmt.Errorf("receiver has conflicting native and historical construction evidence")
+	}
+	return nil
+}
+
+func requireWorkflowHeaderProjection(ctx context.Context, tx *sql.Tx, postgres bool, expected pipeline.WorkflowEngineStateRecord, revision int64) (pipeline.WorkflowInstance, error) {
 	if err := expected.Validate(); err != nil {
-		return err
+		return pipeline.WorkflowInstance{}, err
 	}
 	target, err := loadWorkflowTargetPersistence(ctx, tx, expected.Identity, identity.NormalizeEntityID(expected.EntityID), !postgres)
 	if err != nil {
-		return err
+		return pipeline.WorkflowInstance{}, err
 	}
-	if _, err := target.DecodeComplete(expected.Identity.Route, identity.NormalizeEntityID(expected.EntityID)); err != nil {
-		return err
+	instance, err := target.DecodeComplete(expected.Identity.Route, identity.NormalizeEntityID(expected.EntityID))
+	if err != nil {
+		return pipeline.WorkflowInstance{}, err
 	}
 	lifecycle, header := target.Lifecycle, target.Lifecycle.State
 	if expected.Transition.PreservesState() && (header.Revision != revision || header.CurrentState != expected.ExpectedState) {
-		return workflowEngineStateRevisionConflict(expected)
+		return pipeline.WorkflowInstance{}, workflowEngineStateRevisionConflict(expected)
 	}
 	if err := requireHistoricalWorkflowDescriptor(lifecycle, expected); err != nil {
-		return err
+		return pipeline.WorkflowInstance{}, err
 	}
 	if expected.EntityType != "" {
 		if !workflowCommitJSONEqual(target.State.Fields, expected.Fields) {
-			return fmt.Errorf("historical workflow fields disagree with fixed snapshot")
+			return pipeline.WorkflowInstance{}, fmt.Errorf("historical workflow fields disagree with fixed snapshot")
 		}
 	}
 	if header.EntityID != expected.EntityID || header.FlowInstance != expected.Identity.Route.InstancePath ||
 		header.EntityType != expected.EntityType || header.Slug != expected.Slug || header.Name != expected.Name ||
 		header.CurrentState != expected.CurrentState || header.Revision != revision {
-		return fmt.Errorf("historical workflow state %s disagrees with fixed snapshot", expected.Identity.Route.InstancePath)
+		return pipeline.WorkflowInstance{}, fmt.Errorf("historical workflow state %s disagrees with fixed snapshot", expected.Identity.Route.InstancePath)
 	}
 	if !header.EnteredStageAt.Equal(expected.EnteredStageAt) || !header.CreatedAt.Equal(expected.CreatedAt) || !header.UpdatedAt.Equal(expected.UpdatedAt) {
-		return fmt.Errorf("historical workflow clocks %s disagree with fixed snapshot", expected.Identity.Route.InstancePath)
+		return pipeline.WorkflowInstance{}, fmt.Errorf("historical workflow clocks %s disagree with fixed snapshot", expected.Identity.Route.InstancePath)
 	}
 	if !workflowCommitJSONEqual(header.Gates, expected.Gates) || !workflowCommitJSONEqual(header.Bookkeeping, expected.Bookkeeping) || !workflowCommitJSONEqual(header.Accumulator, expected.Accumulator) {
-		return fmt.Errorf("historical workflow projection %s disagrees with fixed snapshot", expected.Identity.Route.InstancePath)
+		return pipeline.WorkflowInstance{}, fmt.Errorf("historical workflow projection %s disagrees with fixed snapshot", expected.Identity.Route.InstancePath)
 	}
-	return nil
+	return instance, nil
 }
 
 func requireHistoricalWorkflowDescriptor(lifecycle pipeline.WorkflowLifecycleCompanionPersistenceRecord, expected pipeline.WorkflowEngineStateRecord) error {

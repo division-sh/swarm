@@ -175,12 +175,13 @@ func TestSelectedForkRecipientContextsPreserveCompiledConnectAuthority(t *testin
 		if plan.ReceiverEndpoint().Readback().ResolvedEvent != "sink/work.completed" {
 			continue
 		}
-		for _, subscriber := range table.Resolve("sink/work.completed") {
-			if !subscriber.Recipient.IsNode() {
+		for _, registration := range table.ConnectDeclarationDefinitions("sink") {
+			recipient, matched := registration.RecipientForPlan(plan)
+			if !matched || recipient.Kind() != pinrouting.ConnectRecipientNode {
 				continue
 			}
-			node, _ := subscriber.Recipient.Node()
-			route := pinrouting.ConnectDeliveryRoute{Recipient: subscriber.Recipient,
+			node := recipient.Handler().Node()
+			route := pinrouting.ConnectDeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node),
 				Handler: pinrouting.MustConnectReceiverHandler(node), Target: events.RouteIdentity{FlowID: "sink", FlowInstance: "sink"}}
 			route.ConnectClaim, err = pinrouting.ConnectExecutionClaim(plan, route)
 			if err != nil {
