@@ -46,7 +46,14 @@ func ResolveSessionActivitySite(source semanticview.Source, node identity.Execut
 		return contracts.ActivitySite{}, fmt.Errorf("session activity requires its exact declaration source")
 	}
 	for _, site := range contracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node)) {
-		if site.HandlerEventKey == handler && site.Spec.Tool == toolID && contracts.ActivityResultEventsForSite(site).ActivityID == activityID {
+		if site.HandlerEventKey != handler || site.Spec.Tool != toolID {
+			continue
+		}
+		events, err := contracts.ActivityResultEventsForSite(site)
+		if err != nil {
+			return contracts.ActivitySite{}, fmt.Errorf("session activity declaration identity: %w", err)
+		}
+		if events.ActivityID == activityID {
 			matches = append(matches, site)
 		}
 	}
@@ -180,10 +187,17 @@ func compileSessionActivityDeclaration(source semanticview.Source, site contract
 }
 
 func sessionActivitySiteDeclared(site contracts.ActivitySite, handlers map[string]contracts.SystemNodeEventHandler) bool {
+	wanted, err := contracts.ActivityResultEventsForSite(site)
+	if err != nil {
+		return false
+	}
 	for _, declared := range contracts.ActivitySitesForNode(site.Node, handlers) {
-		if declared.HandlerEventKey == site.HandlerEventKey && declared.Source == site.Source && declared.RuleIndex == site.RuleIndex &&
-			declared.RuleRef == site.RuleRef && declared.Spec.Tool == site.Spec.Tool &&
-			contracts.ActivityResultEventsForSite(declared).ActivityID == contracts.ActivityResultEventsForSite(site).ActivityID {
+		if declared.HandlerEventKey != site.HandlerEventKey || declared.Kind != site.Kind || declared.Source != site.Source ||
+			declared.RuleIndex != site.RuleIndex || declared.RuleRef != site.RuleRef || declared.Spec.Tool != site.Spec.Tool {
+			continue
+		}
+		events, err := contracts.ActivityResultEventsForSite(declared)
+		if err == nil && events.ActivityID == wanted.ActivityID {
 			return true
 		}
 	}
