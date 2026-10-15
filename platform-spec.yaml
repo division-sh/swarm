@@ -21293,7 +21293,13 @@ run_model:
       runtime.run_fork.selected_contract_route_recovery. The store owner persists selected route topology, dynamic
       topology proof or fail-closed state, recipient-plan evidence, selected binding identity, and evidence
       fingerprints under the fork run_id. Topology and recipient-planning fingerprints MUST be computed and verified
-      over canonical JSON semantics rather than raw JSONB storage bytes. Runtime recovery MUST read this owner after restart for selected-contract
+      over canonical JSON semantics rather than raw JSONB storage bytes. Route persistence and activation retain the
+      fixed-revision historical event certificate. Only the exact admitted immutable original-start first-turn intention
+      may supply a nonhistorical frontier entry: its event identity, name and start_first_turn classification must match
+      OriginalStartFirstTurn, with complete input coordinates still bound by preparation and readiness. This intention
+      is never inserted into the exclusive historical cut; an honestly eventless start remains legal. Other frontier
+      entries retain historical membership checks and cannot borrow original-start authority.
+      Runtime recovery MUST read this owner after restart for selected-contract
       fork route truth and revalidate the selected frontier/binding/topology fingerprint. Exact selected replay and
       activation require matching recovery even when the source has no concrete child. This owner MUST NOT read
       source/current route membership or source event_deliveries as executable fork route or recipient truth. Recipient

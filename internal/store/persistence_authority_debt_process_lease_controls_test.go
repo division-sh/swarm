@@ -16,6 +16,42 @@ import (
 // Excluded from the collector payload to avoid a self-referential fingerprint.
 const debtProcessLeaseCollectorTo = "1a353f6c8e5cfe2e2fce2163231e4ac4832df0776daa8dbea177c6edb274bd90"
 
+func TestPersistenceAuthorityDebtProcessLeaseCustodySuccessorPreservesOnlyPredecessorEvidence(t *testing.T) {
+	root, predecessor := persistenceAuthorityRepoRoot(t), t.TempDir()
+	const source = "98feeaa8de97bd15e3f93c7d110a3dda6af4a783"
+	const dir = "internal/store/internal/startupownership"
+	paths, err := debtGit(root, "ls-tree", "-r", "--name-only", source, "--", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range strings.Fields(string(paths)) {
+		if !strings.HasSuffix(path, ".go") {
+			continue
+		}
+		data, err := debtGit(root, "show", source+":"+path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		debtWriteModuleSource(t, predecessor, path, string(data))
+	}
+	// #642/6191476293: the old digest is evidence, never a second accepted pin.
+	const prior = "6065613a9040e4fc3f779d8e3f09afd0ea055421ea0965512e1de09a52e84ff3"
+	if digest, err := debtProcessLeaseCustodyDigest(predecessor); err != nil || digest != prior {
+		t.Fatalf("custody predecessor=%s error=%v", digest, err)
+	}
+	const typ = "github.com/division-sh/swarm/internal/store/internal/startupownership.StartupPostgresOwner"
+	findings := []authorityFinding{
+		{Kind: "raw-authority-export", File: dir + "/owner.go", Enclosing: "StartupPostgresOwner", Member: "exported-type", Resolved: typ, RawSQL: true},
+		{Kind: "raw-authority-export", File: dir + "/owner.go", Enclosing: "NewPostgres", Member: "result:#1", Resolved: "*" + typ, RawSQL: true},
+	}
+	debtClassifyProcessLeaseCustody(predecessor, findings)
+	for _, finding := range findings {
+		if finding.Disposition != "" {
+			t.Fatal("historical custody digest remains permissive:", finding)
+		}
+	}
+}
+
 func TestPersistenceAuthorityDebtProcessLeaseReviewedSourcePins(t *testing.T) {
 	root, base := persistenceAuthorityRepoRoot(t), t.TempDir()
 	debtRequireProcessLeasePredecessor(t, root)
@@ -37,7 +73,7 @@ func TestPersistenceAuthorityDebtProcessLeaseReviewedSourcePins(t *testing.T) {
 	if digest, err := debtProcessLeaseCustodyDigest(root); err != nil || digest != debtProcessLeaseCustodyPin {
 		t.Errorf("custody pin=%q error=%v", digest, err)
 	}
-	if digest, err := debtCollectorDigest(root); err != nil || digest != debtProcessLeaseCollectorTo {
+	if digest, err := debtCollectorDigest(root); err != nil || (digest != debtProcessLeaseCollectorTo && digest != debtNativeFixtureCollectorTo) {
 		t.Errorf("collector pin=%q error=%v", digest, err)
 	}
 }
