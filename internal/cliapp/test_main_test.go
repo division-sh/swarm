@@ -52,7 +52,6 @@ func TestMain(m *testing.M) {
 			fmt.Fprintf(os.Stderr, "disable private test-home Go telemetry: %v\n%s", err, output)
 			return 1
 		}
-		writeCLIAPITestExecutionPosture(testMainTB{})
 		return m.Run()
 	}()
 	os.Exit(code)
@@ -95,12 +94,4 @@ func removeCLIAPPTestHome(home string) error {
 		return nil
 	})
 	return errors.Join(err, os.RemoveAll(home))
-}
-
-type testMainTB struct{}
-
-func (testMainTB) Helper() {}
-
-func (testMainTB) Fatalf(format string, args ...any) {
-	panic(fmt.Sprintf(format, args...))
 }

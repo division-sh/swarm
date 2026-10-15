@@ -35,8 +35,8 @@ func TestCLIAPPTestMainPreservesCachesAndRemovesHome(t *testing.T) {
 		if !strings.HasPrefix(filepath.Base(home), "swarm-cliapp-test-home-") || os.Getenv("XDG_CONFIG_HOME") != home {
 			t.Fatalf("Swarm config is not isolated: HOME=%q XDG_CONFIG_HOME=%q", home, os.Getenv("XDG_CONFIG_HOME"))
 		}
-		if data, err := os.ReadFile(filepath.Join(home, "swarm", "swarm.yaml")); err != nil || string(data) != "{}\n" {
-			t.Fatalf("isolated Swarm config: %q, %v", data, err)
+		if _, err := os.Lstat(filepath.Join(home, "swarm", "swarm.yaml")); !os.IsNotExist(err) {
+			t.Fatalf("test isolation created a retired user-global config: %v", err)
 		}
 		module := filepath.Join(home, "go", "pkg", "mod", "example.com", "module@v1.0.0")
 		if err := os.MkdirAll(module, 0o755); err != nil {
