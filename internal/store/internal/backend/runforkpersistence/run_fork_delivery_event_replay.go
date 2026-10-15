@@ -531,7 +531,7 @@ func InsertRunForkReplayDelivery(ctx context.Context, attempt *mutationprotocol.
 }
 
 func deterministicRunForkReplayEventID(forkRunID, sourceEventID string) string {
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm/run-fork/delivery-event-replay/event/"+strings.TrimSpace(forkRunID)+"/"+strings.TrimSpace(sourceEventID))).String()
+	return runfork.ProjectReplayEventID(forkRunID, sourceEventID)
 }
 
 func DeterministicRunForkReplayEventID(forkRunID, sourceEventID string) string {

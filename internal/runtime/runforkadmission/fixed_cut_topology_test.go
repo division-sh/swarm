@@ -2,6 +2,7 @@ package runforkadmission_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -23,6 +24,204 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
+
+func TestT17HistoricalTopologyRetainsOriginalConstructionAndExactSelectors(t *testing.T) {
+	for _, hops := range []int{1, 2, 4} {
+		t.Run(fmt.Sprintf("hops_%d", hops), func(t *testing.T) {
+			source, plan, selectors := t17FixedCutTopologyFixture(t)
+			for i := 0; i < hops; i++ {
+				plan, selectors = t17ProjectHistoricalCut(t, source, plan, selectors)
+			}
+			for _, entity := range plan.Entities {
+				if len(entity.MaterializationMetadata.InitialMaterialization) != 0 || entity.MaterializationMetadata.HistoricalConstruction == nil {
+					t.Fatal("historical header was made native")
+				}
+			}
+			before, _ := json.Marshal(plan)
+			frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: source})
+			if err != nil {
+				t.Fatal(err)
+			}
+			routes, err := runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{Plan: plan, Source: source, FrontierAdmission: frontier})
+			if err != nil {
+				t.Fatal(err)
+			}
+			topology, err := runforkexecution.BuildSelectedContractRouteTopology(runforkexecution.SelectedContractRouteTopologyRequest{Admission: frontier, RouteAdmission: routes})
+			if err != nil || !topology.DynamicTopologySupported || len(topology.DynamicTopologyProofs) != 4 {
+				t.Fatalf("historical topology lost captured construction: %+v %v", topology, err)
+			}
+			if _, err := runforkexecution.BuildSelectedContractExecutionModel(runforkexecution.SelectedContractExecutionModelRequest{Admission: frontier, RouteAdmission: routes, RouteTopology: topology}); err != nil {
+				t.Fatal(err)
+			}
+			after, _ := json.Marshal(plan)
+			if string(before) != string(after) {
+				t.Fatal("historical topology rewrote its source evidence")
+			}
+		})
+	}
+}
+
+func TestT17HistoricalTopologyRefusesCrossedConstructionAndSelectorLineage(t *testing.T) {
+	for _, name := range []string{"missing_selector", "foreign_selector_source", "ancestor_event_as_child", "foreign_key", "foreign_parent", "missing_revision", "native_conflict"} {
+		t.Run(name, func(t *testing.T) {
+			source, original, selectors := t17FixedCutTopologyFixture(t)
+			ancestorEventID := selectors[0].ID()
+			plan, selectors := t17ProjectHistoricalCut(t, source, original, selectors)
+			meta := plan.Entities[2].MaterializationMetadata
+			switch name {
+			case "missing_selector":
+				selectors = selectors[1:]
+			case "foreign_selector_source", "ancestor_event_as_child":
+				selector := selectors[0]
+				sourceRun, id := original.SourceRunID, selector.ID()
+				if name == "foreign_selector_source" {
+					sourceRun = uuid.NewString()
+				} else {
+					id = ancestorEventID
+				}
+				lineage, err := events.NewSelectedForkLineage(plan.SourceRunID, sourceRun, ancestorEventID, "selection:test", "", selector.ExecutionMode())
+				if err != nil {
+					t.Fatal(err)
+				}
+				replacement, err := events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{Lineage: lineage, Facts: events.EventFacts{ID: id, Type: selector.Type(), Producer: events.ProducerClaim{Type: selector.Producer().Type(), ID: selector.Producer().ID()}, RoutingSource: selector.RoutingSource(), Payload: selector.Payload(), CreatedAt: selector.CreatedAt()}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				admission, _ := selector.PayloadAdmission()
+				selectors[0], err = events.ApplyPayloadAdmission(replacement, admission)
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "foreign_key":
+				meta.InstanceKey = "foreign-key"
+			case "foreign_parent":
+				meta.ParentInstance = "foreign-parent"
+			case "missing_revision":
+				meta.HistoricalConstruction.SourceRevision = 0
+			case "native_conflict":
+				meta.InitialMaterialization = original.Entities[2].MaterializationMetadata.InitialMaterialization
+			}
+			var ids []string
+			for _, event := range selectors {
+				ids = append(ids, event.ID())
+			}
+			plan = plan.WithHistoricalEvents(plan.ForkPoint.Revision, ids)
+			var err error
+			plan, err = plan.WithHistoricalRouteSelectors(plan.ForkPoint.Revision, selectors)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, _ := json.Marshal(plan)
+			frontier, err := runforkadmission.AdmitContractFrontier(runforkadmission.ContractFrontierRequest{Plan: plan, Source: source})
+			if err == nil {
+				var routes runfork.RunForkSelectedContractRouteAdmission
+				routes, err = runforkadmission.AdmitSelectedContractRouteHistory(runforkadmission.SelectedContractRouteHistoryRequest{Plan: plan, Source: source, FrontierAdmission: frontier})
+				if err == nil {
+					topology, err := runforkexecution.BuildSelectedContractRouteTopology(runforkexecution.SelectedContractRouteTopologyRequest{Admission: frontier, RouteAdmission: routes})
+					if err == nil && topology.DynamicTopologySupported {
+						t.Fatal("crossed historical evidence became complete topology authority")
+					}
+				}
+			}
+			after, _ := json.Marshal(plan)
+			if string(before) != string(after) {
+				t.Fatal("historical refusal mutated its captured evidence")
+			}
+		})
+	}
+}
+
+func t17ProjectHistoricalCut(t *testing.T, source semanticview.Source, plan runfork.RunForkPlan, selectors []events.Event) (runfork.RunForkPlan, []events.Event) {
+	t.Helper()
+	previous := plan
+	nextRun := uuid.NewString()
+	plan.SourceRunID, plan.Entities = nextRun, nil
+	for _, entity := range previous.Entities {
+		meta := entity.MaterializationMetadata
+		route := flowidentity.StoredRoute(meta.FlowTemplate, flowidentity.LogicalInstanceID(meta.FlowInstance), meta.FlowInstance)
+		fixed, _, found, err := runforkadmission.FixedConstructionEvidenceForRoute(previous, route)
+		if err != nil || !found {
+			t.Fatalf("source construction: %t %v", found, err)
+		}
+		projected, err := runfork.ProjectCapturedConstructionIdentity(previous.SourceRunID, nextRun, fixed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := pipeline.WorkflowInstanceHeaderPayloadForIdentity(projected, source.WorkflowVersion())
+		if err != nil {
+			t.Fatal(err)
+		}
+		config, err := json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		metadata := *meta
+		metadata.FlowConfig, metadata.FlowInstance, metadata.ParentInstance = config, projected.InstancePath, projected.ParentRoute.FlowInstance
+		metadata.InitialMaterialization = nil
+		metadata.HistoricalConstruction = &runfork.RunForkCapturedHistoricalConstruction{SourceRunID: previous.SourceRunID, SourceRevision: previous.ForkPoint.Revision, SourceEntity: entity}
+		projectedEntity := entity
+		projectedEntity.EntityID, projectedEntity.MaterializationMetadata = projected.EntityID, &metadata
+		// Mutable field values are not captured instance keys.
+		if meta.EntityType != "" {
+			projectedEntity.Fields = make(map[string]any, len(entity.Fields))
+			for field, value := range entity.Fields {
+				projectedEntity.Fields[field] = value
+			}
+			flow, _ := source.FlowSchemaByID(meta.FlowTemplate)
+			if !flow.Instance.Empty() {
+				projectedEntity.Fields[flow.Instance.Path()] = "current-value-not-construction-key"
+			}
+		}
+		plan.Entities = append(plan.Entities, projectedEntity)
+	}
+	var projectedSelectors []events.Event
+	var ids []string
+	eventIDs := make(map[string]string)
+	for _, selector := range selectors {
+		projected, err := runfork.ProjectSelectedContractSourceEvent(previous.SourceRunID, nextRun, runfork.RunForkSelectedContractSourceEvent{SourceEventID: selector.ID(), EventName: string(selector.Type()), RoutingSource: selector.RoutingSource(), ExecutionMode: selector.ExecutionMode(), Payload: selector.Payload()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		lineage, err := events.NewSelectedForkLineage(nextRun, previous.SourceRunID, selector.ID(), "selection:test", "", selector.ExecutionMode())
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := runfork.ProjectReplayEventID(nextRun, selector.ID())
+		event, err := events.NewSelectedForkReplayEvent(events.SelectedForkReplayEventInput{Lineage: lineage, Facts: events.EventFacts{ID: id, Type: events.EventType(projected.EventName), Producer: events.ProducerClaim{Type: selector.Producer().Type(), ID: selector.Producer().ID()}, RoutingSource: projected.RoutingSource, Payload: projected.Payload, CreatedAt: selector.CreatedAt()}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		admission, _ := selector.PayloadAdmission()
+		event, err = events.ApplyPayloadAdmission(event, admission)
+		if err != nil {
+			t.Fatal(err)
+		}
+		projectedSelectors = append(projectedSelectors, event)
+		ids, eventIDs[selector.ID()] = append(ids, id), id
+	}
+	plan.PendingWork = append([]runfork.RunForkPendingWork(nil), previous.PendingWork...)
+	for i := range plan.PendingWork {
+		item := &plan.PendingWork[i]
+		item.EventID = eventIDs[item.EventID]
+		for _, selector := range projectedSelectors {
+			if selector.ID() == item.EventID {
+				item.RoutingSource = selector.RoutingSource()
+			}
+		}
+		if item.FlowInstance == previous.SourceRunID {
+			item.FlowInstance = nextRun
+		}
+	}
+	last := projectedSelectors[len(projectedSelectors)-1]
+	plan.ForkPoint.Input, plan.ForkPoint.EventID, plan.ForkPoint.RoutingSource = last.ID(), last.ID(), last.RoutingSource()
+	plan = plan.WithHistoricalEvents(plan.ForkPoint.Revision, ids)
+	var err error
+	plan, err = plan.WithHistoricalRouteSelectors(plan.ForkPoint.Revision, projectedSelectors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan, projectedSelectors
+}
 
 func TestT17FixedCutTopologyUsesConstructorsAndSelectorsNotDynamicFrontier(t *testing.T) {
 	source, plan, _ := t17FixedCutTopologyFixture(t)
@@ -317,6 +516,14 @@ func t17AddConstructor(t *testing.T, plan *runfork.RunForkPlan, source semanticv
 	}
 	contract, _ := entityruntime.ResolveForFlow(source, instance.TemplateID)
 	scope, _ := source.FlowScopeByID(instance.TemplateID)
+	var key string
+	flow, _ := source.FlowSchemaByID(instance.TemplateID)
+	if !flow.Instance.Empty() {
+		key, err = pipeline.AdmitFlowInstanceKey(source, instance.TemplateID, fields[flow.Instance.Path()])
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	graph, found := semanticview.WorkflowStageTopology(source, instance.TemplateID)
 	if !found {
 		t.Fatal("constructor has no lifecycle")
@@ -329,12 +536,12 @@ func t17AddConstructor(t *testing.T, plan *runfork.RunForkPlan, source semanticv
 	activation := pipeline.FlowInstanceActivationPlan{Identity: instance, CreatingInput: input, OccurredAt: at,
 		Readiness: pipeline.DynamicFlowRuntimeReadinessPlan{Identity: instance, RunID: plan.SourceRunID, BundleHash: hash, WorkflowVersion: source.WorkflowVersion(), ExecutionMode: executionmode.Live},
 		Instance: pipeline.WorkflowInstance{InstanceID: instance.InstanceID, StorageRef: instance.InstancePath, EntityID: instance.EntityID, EntityType: contract.EntityType, Fields: fields,
-			InstanceKind: scope.Mode, Mode: scope.Mode, Status: "active", WorkflowName: instance.TemplateID, WorkflowVersion: source.WorkflowVersion(), CurrentState: initial.ID(), StageDefined: graph.StageCount() != 0, EnteredStageAt: at, CreatedAt: at,
+			InstanceKind: scope.Mode, Mode: scope.Mode, InstanceKey: key, Status: "active", WorkflowName: instance.TemplateID, WorkflowVersion: source.WorkflowVersion(), CurrentState: initial.ID(), StageDefined: graph.StageCount() != 0, EnteredStageAt: at, CreatedAt: at,
 			ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance, ParentEntityID: instance.ParentEntityID}}
 	record, err := activation.PersistenceRecord()
 	if err != nil {
 		t.Fatal(err)
 	}
 	plan.Entities = append(plan.Entities, runfork.RunForkEntityState{EntityID: instance.EntityID, CurrentState: initial.ID(), EnteredStateAt: &at, Fields: fields,
-		MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowTemplate: instance.TemplateID, FlowInstance: instance.InstancePath, Mode: scope.Mode, EntityType: contract.EntityType, FlowConfig: record.Config, InitialMaterialization: record.InitialMaterialization}})
+		MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance, FlowTemplate: instance.TemplateID, FlowInstance: instance.InstancePath, ParentInstance: instance.ParentRoute.FlowInstance, InstanceKey: key, Mode: scope.Mode, EntityType: contract.EntityType, FlowConfig: record.Config, InitialMaterialization: record.InitialMaterialization}})
 }

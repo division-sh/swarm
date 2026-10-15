@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -15,7 +16,7 @@ import (
 
 type fixedCutConstructor struct {
 	instance flowidentity.Instance
-	receipt  pipeline.FlowConstructionReceipt
+	evidence capturedConstructionEvidence
 }
 
 type fixedCutConstructionIndex struct {
@@ -24,20 +25,20 @@ type fixedCutConstructionIndex struct {
 }
 
 func indexFixedCutConstructions(source semanticview.Source, cut runfork.RunForkPlan) (fixedCutConstructionIndex, error) {
+	if err := validateFixedConstructionMetadata(cut.Entities); err != nil {
+		return fixedCutConstructionIndex{}, err
+	}
 	index := fixedCutConstructionIndex{byPath: make(map[string]fixedCutConstructor, len(cut.Entities)), byFlow: make(map[string][]fixedCutConstructor)}
 	for _, entity := range cut.Entities {
-		receipt, err := fixedConstructionReceipt(cut, entity)
+		evidence, err := fixedConstructionEvidence(cut, entity)
 		if err != nil {
 			return fixedCutConstructionIndex{}, err
 		}
-		instance, _, found, err := FixedConstructionForRoute(source, cut, receipt.Identity.Route())
-		if err != nil {
+		instance := evidence.Identity
+		if err := validateSelectedConstruction(source, cut.SourceRunID, instance, entity); err != nil {
 			return fixedCutConstructionIndex{}, err
 		}
-		if !found {
-			return fixedCutConstructionIndex{}, fmt.Errorf("fixed receiver lost captured constructor")
-		}
-		entry := fixedCutConstructor{instance: instance, receipt: receipt}
+		entry := fixedCutConstructor{instance: instance, evidence: evidence}
 		index.byPath[instance.InstancePath] = entry
 		index.byFlow[instance.TemplateID] = append(index.byFlow[instance.TemplateID], entry)
 	}
@@ -82,28 +83,41 @@ func fixedCutConnectTargets(source semanticview.Source, cut runfork.RunForkPlan,
 	if err != nil {
 		return nil, false, err
 	}
-	keys, err := contract.CanonicalKeyMaterial(map[string]any{receiver.InstanceKey().Field().Path(): resolved})
+	keys, err := pipeline.AdmitFlowInstanceKeyMaterial(source, contract.FlowID, resolved)
+	if err != nil {
+		return nil, false, err
+	}
+	hash, err := contracts.BundleHash(bundle)
+	if err != nil {
+		return nil, false, err
+	}
+	fact, err := correlation.NewSourceArtifactFact(hash)
+	if err != nil {
+		return nil, false, err
+	}
+	lookup, err := pipeline.NewDeclaredFlowInstanceLookup(source, fact, cut.SourceRunID, readback.Receiver.FlowID, parent, keys)
 	if err != nil {
 		return nil, false, err
 	}
 	parentRoute := flowidentity.ParentRoute{FlowID: parent.TemplateID, FlowInstance: parent.InstancePath, EntityID: parent.EntityID}
 	var matches []flowidentity.Instance
 	for _, constructor := range constructors.byFlow[readback.Receiver.FlowID] {
-		instance, receipt := constructor.instance, constructor.receipt
+		instance, evidence := constructor.instance, constructor.evidence
 		if instance.ParentRoute != parentRoute {
 			continue
 		}
-		fields := make(map[string]string, len(receipt.Persisted.Fields))
-		for field, value := range receipt.Persisted.Fields {
-			fields["entity."+field] = fmt.Sprint(value)
-		}
-		descriptor := pinrouting.Descriptor{FlowID: instance.TemplateID, EntityID: instance.EntityID, FlowInstance: instance.InstancePath, AddressFields: fields}
-		if pinrouting.ConnectInstanceKeyDescriptorMatches(keys, descriptor) {
-			if receipt.BundleHash != admission.Binding().BundleHash() {
+		if evidence.InstanceKey == lookup.InstanceKey() {
+			if evidence.Original.BundleHash != admission.Binding().BundleHash() {
 				return nil, false, fmt.Errorf("fixed constructor and selector have foreign source bundles")
 			}
-			if receiver.InstanceKey().Mode() == contracts.FlowInputResolutionModeCreate && receipt.CreatingInput.EventID != eventID {
-				return nil, false, fmt.Errorf("historical create selector does not own the captured constructor")
+			if receiver.InstanceKey().Mode() == contracts.FlowInputResolutionModeCreate {
+				creating, found, err := evidence.creatingSelector(cut)
+				if err != nil {
+					return nil, false, err
+				}
+				if !found || creating.ID() != eventID {
+					return nil, false, fmt.Errorf("historical create selector does not own the captured constructor")
+				}
 			}
 			matches = append(matches, instance)
 		}
@@ -190,15 +204,15 @@ func fixedCutConstructedRouteEvidence(source semanticview.Source, cut runfork.Ru
 		if !found {
 			return nil, fmt.Errorf("fixed topology lost captured constructor")
 		}
-		receipt := constructor.receipt
-		selector, found, err := cut.HistoricalRouteSelector(receipt.CreatingInput.EventID)
+		evidence := constructor.evidence
+		selector, found, err := evidence.creatingSelector(cut)
 		if err != nil {
 			return nil, err
 		}
-		if !found || receipt.CreatingInput.Input == "" {
+		if !found || evidence.Original.CreatingInput.Input == "" {
 			continue
 		}
-		if err := requireFixedCutConstructorSelector(graph, receipt, selector); err != nil {
+		if err := requireFixedCutConstructorSelector(graph, evidence, selector); err != nil {
 			return nil, err
 		}
 		event, found := eventsByID[selector.ID()]
@@ -214,7 +228,7 @@ func fixedCutConstructedRouteEvidence(source semanticview.Source, cut runfork.Ru
 		if len(recipients) == 0 {
 			continue
 		}
-		bound, err := cut.BindConstructedRouteEvidence(receipt.EntityID, selector.ID(), recipients, frontier)
+		bound, err := cut.BindConstructedRouteEvidence(evidence.Identity.EntityID, selector.ID(), recipients, frontier)
 		if err != nil {
 			return nil, err
 		}
@@ -223,7 +237,8 @@ func fixedCutConstructedRouteEvidence(source semanticview.Source, cut runfork.Ru
 	return out, nil
 }
 
-func requireFixedCutConstructorSelector(graph pinrouting.CompiledConnectGraph, receipt pipeline.FlowConstructionReceipt, selector events.Event) error {
+func requireFixedCutConstructorSelector(graph pinrouting.CompiledConnectGraph, evidence capturedConstructionEvidence, selector events.Event) error {
+	receipt := evidence.Original
 	admission, _ := selector.PayloadAdmission()
 	if receipt.BundleHash != admission.Binding().BundleHash() {
 		return fmt.Errorf("fixed constructor and selector have foreign source bundles")
@@ -234,7 +249,7 @@ func requireFixedCutConstructorSelector(graph pinrouting.CompiledConnectGraph, r
 	}
 	for _, receiver := range graph.MatchingSourceEvent(sourceEvent) {
 		endpoint := receiver.ReceiverEndpoint().Readback()
-		if endpoint.FlowID == receipt.Identity.TemplateID && endpoint.LocalEvent == receipt.CreatingInput.Input {
+		if endpoint.FlowID == evidence.Identity.TemplateID && endpoint.LocalEvent == receipt.CreatingInput.Input {
 			return nil
 		}
 	}

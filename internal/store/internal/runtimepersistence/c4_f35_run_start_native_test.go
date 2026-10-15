@@ -37,7 +37,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	"github.com/division-sh/swarm/internal/sourceartifact"
-	storerunfork "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -51,7 +50,12 @@ type c4StartPlanner interface {
 	PlanRunFork(context.Context, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
 }
 
-func c4ReopenCreationStore(t *testing.T, backend string, selected any, db *sql.DB, connector *stopCommitConnector) (selectedFanOutLifecycleOwner, *sql.DB) {
+type c4ForkCreationOwner interface {
+	MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+	RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+}
+
+func c4ReopenCreationStore(t *testing.T, backend string, selected any, db *sql.DB, connector *stopCommitConnector, instrumentation ...driver.Connector) (selectedFanOutLifecycleOwner, *sql.DB) {
 	t.Helper()
 	location := connector.dsn
 	if backend == "sqlite" {
@@ -67,8 +71,42 @@ func c4ReopenCreationStore(t *testing.T, backend string, selected any, db *sql.D
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, _ := openPipelineCrashStore(t, backend, location)
+	reopened, _ := openPipelineCrashStore(t, backend, location, instrumentation...)
 	return reopened.store.(selectedFanOutLifecycleOwner), reopened.db
+}
+
+func c4ReadExactForkWithoutMutation(t *testing.T, ctx context.Context, selected any, backend, child string, request runfork.RunForkMaterializeRequest, present bool, connector *stopCommitConnector) runfork.RunForkMaterialization {
+	t.Helper()
+	before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var commits, writeCommits int32
+	if connector != nil {
+		commits, writeCommits = connector.commits.Load(), connector.writeCommits.Load()
+	}
+	got, err := selected.(c4ForkCreationOwner).RequireMaterializedRunFork(ctx, child, request)
+	if present {
+		if err != nil || got.ForkRunID != child {
+			t.Fatalf("exact committed fork readback: got=%+v child=%s err=%v", got, child, err)
+		}
+	} else if !errors.Is(err, runlifecycle.ErrRunNotFound) || !reflect.DeepEqual(got, runfork.RunForkMaterialization{}) {
+		t.Fatalf("rolled-back exact child did not refuse without a result: got=%+v err=%v", got, err)
+	}
+	if connector != nil {
+		wantReadCommits := int32(0)
+		if present && backend == "sqlite" {
+			wantReadCommits = 1
+		}
+		if actual := connector.commits.Load() - commits; actual != wantReadCommits || connector.writeCommits.Load() != writeCommits {
+			t.Fatalf("exact fork read changed physical commit accounting: commits=%d want=%d write commits=%d want=%d", actual, wantReadCommits, connector.writeCommits.Load(), writeCommits)
+		}
+	}
+	after, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, selected)
+	if err != nil || !reflect.DeepEqual(before, after) {
+		t.Fatalf("exact fork read changed complete application storage: %v", err)
+	}
+	return got
 }
 
 func c4RequireAbsentCreation(t *testing.T, ctx context.Context, selected any, runID string) {
@@ -245,11 +283,13 @@ func TestC4F35ForkStartNativeCommitAccountingBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				sourceStart := c4RequireExclusiveStart(t, ctx, selected, sourceRun, sourceartifactfixture.BundleHash, input.ID())
-				forkRun := storerunfork.DeterministicRunForkMaterializationID(sourceRun, input.ID())
 				request := runfork.RunForkMaterializeRequest{SourceRunID: sourceRun, At: input.ID()}
-				owner := selected.(interface {
-					MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
-				})
+				plan, err := selected.(c4StartPlanner).PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: sourceRun, At: input.ID()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				witness := connector.armForkInsert(sourceRun, plan.ForkPoint, sourceartifactfixture.BundleHash)
+				owner := selected.(c4ForkCreationOwner)
 				fault := errors.New("C4 fork creation physical commit boundary")
 				var commits atomic.Int32
 				var intercept func(driver.Tx) error
@@ -272,28 +312,47 @@ func TestC4F35ForkStartNativeCommitAccountingBothStores(t *testing.T) {
 				if backend == "sqlite" {
 					wantCommits = 2
 				}
-				if !errors.Is(err, fault) || uncertain.ForkRunID != "" || commits.Load() != wantCommits {
+				if !errors.Is(err, fault) || !reflect.DeepEqual(uncertain, runfork.RunForkMaterialization{}) || commits.Load() != wantCommits {
 					t.Fatalf("fork creation fault did not hit its write commit: %+v commits=%d want=%d err=%v", uncertain, commits.Load(), wantCommits, err)
 				}
+				attempted, err := witness.attempted()
+				if err != nil {
+					t.Fatal(err)
+				}
+				forkRun := attempted.RunID
 				if !committed {
 					c4RequireAbsentCreation(t, ctx, selected, forkRun)
+					c4ReadExactForkWithoutMutation(t, ctx, selected, backend, forkRun, request, false, connector)
 				} else {
 					c4RequireExclusiveStart(t, ctx, selected, forkRun, sourceartifactfixture.BundleHash, "")
 					c4RequireRevisionCount(t, ctx, selected, forkRun, 1)
 				}
-				selected, _ = c4ReopenCreationStore(t, backend, selected, db, connector)
+				selected, _ = c4ReopenCreationStore(t, backend, selected, db, connector, p16CommitConnector{connector})
 				ctx = testAuthorActivityContext()
-				owner = selected.(interface {
-					MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
-				})
+				owner = selected.(c4ForkCreationOwner)
 				if !committed {
 					c4RequireAbsentCreation(t, ctx, selected, forkRun)
+					c4ReadExactForkWithoutMutation(t, ctx, selected, backend, forkRun, request, false, connector)
 				} else {
 					c4RequireExclusiveStart(t, ctx, selected, forkRun, sourceartifactfixture.BundleHash, "")
 					c4RequireRevisionCount(t, ctx, selected, forkRun, 1)
 				}
-				created, err := owner.MaterializeRunFork(ctx, request)
-				if err != nil || created.ForkRunID != forkRun || created.ForkRunStatus != runfork.RunForkMaterializedStatus ||
+				var created runfork.RunForkMaterialization
+				if committed {
+					created = c4ReadExactForkWithoutMutation(t, ctx, selected, backend, forkRun, request, true, connector)
+				} else {
+					// The witness stays pinned to the failed invocation, not a new call.
+					connector.mu.Lock()
+					connector.fork = nil
+					connector.mu.Unlock()
+					created, err = owner.MaterializeRunFork(ctx, request)
+					if err != nil || created.ForkRunID == "" || created.ForkRunID == forkRun {
+						t.Fatalf("fresh invocation reused rolled-back attempted child: attempted=%s created=%+v err=%v", forkRun, created, err)
+					}
+					c4RequireAbsentCreation(t, ctx, selected, forkRun)
+					forkRun = created.ForkRunID
+				}
+				if created.ForkRunID != forkRun || created.ForkRunStatus != runfork.RunForkMaterializedStatus ||
 					created.ForkPoint.Kind != runfork.RunForkPointEvent || created.ForkPoint.EventID != input.ID() || created.ForkPoint.Revision != 1 {
 					t.Fatalf("fork creation exact reconciliation: %+v err=%v", created, err)
 				}
@@ -303,9 +362,9 @@ func TestC4F35ForkStartNativeCommitAccountingBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				for pass := 0; pass < 2; pass++ {
-					replay, err := owner.MaterializeRunFork(ctx, request)
-					if err != nil || replay.ForkRunID != forkRun || replay.ForkPoint != created.ForkPoint {
-						t.Fatalf("fork creation permanent retry: %+v err=%v", replay, err)
+					replay := c4ReadExactForkWithoutMutation(t, ctx, selected, backend, forkRun, request, true, connector)
+					if !reflect.DeepEqual(replay, created) {
+						t.Fatalf("fork creation permanent exact read: got=%+v want=%+v", replay, created)
 					}
 					after := c4RequireExclusiveStart(t, ctx, selected, forkRun, sourceartifactfixture.BundleHash, "")
 					_, got, err := c4LoadStartProjection(t, ctx, selected, forkRun)
@@ -438,7 +497,7 @@ func TestC4F35CreationCrashRecordJSONRetainsCallerRequest(t *testing.T) {
 	command := bus.DeploymentRunCreationCommand{
 		RunCreation: durabledata.RunCreationCommand{RunID: runID, Actor: "operator", BundleHash: sourceartifactfixture.BundleHash, Data: durabledata.RunCreationDataEnvelope{Pins: []durabledata.ExplicitPin{{Declaration: declaration, VersionID: durabledata.VersionID("resource-version-v1:sha256:0000000000000000000000000000000000000000000000000000000000000000")}}}},
 		Idempotency: apiidempotency.Request{Method: "run.start", Actor: apiidempotency.BearerActor("operator"), Now: at, TTL: time.Hour},
-		Root:        bus.FlowInstanceActivationCommand{Plan: plan, RouteTopology: []bus.FlowInstanceRouteRecordSet{{Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: identity.Route()}}}},
+		Root:        bus.FlowInstanceActivationCommand{Plan: plan},
 	}
 	record := c4CreationCrashRecord{Origin: "deployment", RunID: runID, BundleHash: sourceartifactfixture.BundleHash, At: at, Deployment: &command}
 	raw, err := json.Marshal(record)
@@ -570,7 +629,7 @@ func TestC4F35CreationCommitSIGKILLReopenBothStores(t *testing.T) {
 					} else if !reflect.DeepEqual(projection, original) || !reflect.DeepEqual(before, originalPlan) {
 						t.Fatal("fresh reopen changed the committed original start or creating input")
 					}
-					c4ReplayCreationAfterCrash(t, ctx, fixture, record)
+					c4ReplayCreationAfterCrash(t, ctx, fixture, backend, record)
 					after := c4RequireExclusiveStart(t, ctx, fixture.store, record.RunID, record.BundleHash, firstTurn)
 					_, got, err := c4LoadStartProjection(t, ctx, fixture.store, record.RunID)
 					if err != nil || !reflect.DeepEqual(after, originalPlan) || !reflect.DeepEqual(got, original) {
@@ -642,6 +701,7 @@ func c4RunCreationCrashChild(t *testing.T) {
 		At: time.Now().UTC().Truncate(time.Microsecond)}
 	var create func()
 	var arm func()
+	var forkWitness *stopCommitForkWitness
 	arm = func() {
 		var commits int
 		var intercept func(driver.Tx) error
@@ -653,6 +713,16 @@ func c4RunCreationCrashChild(t *testing.T) {
 			}
 			if err := tx.Commit(); err != nil {
 				return err
+			}
+			if origin == "fork" {
+				observed, err := forkWitness.attempted()
+				if err != nil || observed.SourceRunID != record.SourceRunID || observed.BundleHash != record.BundleHash ||
+					observed.PointKind != record.ForkPoint.Kind || observed.Revision != record.ForkPoint.Revision || observed.EventID != record.ForkPoint.EventID {
+					t.Fatalf("committed fork lost its exact attempted child witness: %+v err=%v", observed, err)
+				}
+				// An attempted INSERT becomes crash-record evidence only after
+				// the physical native COMMIT above actually succeeds.
+				record.RunID = observed.RunID
 			}
 			pipe := os.NewFile(3, "c4-creation-commit-evidence")
 			if err := json.NewEncoder(pipe).Encode(record); err != nil {
@@ -692,17 +762,16 @@ func c4RunCreationCrashChild(t *testing.T) {
 		if _, err := commitAdmittedSemanticEventFixtureOutcomeWithDisposition(ctx, fixture.store, admitted, nil, pipelineobligation.ScopeDirect, &processed); err != nil {
 			t.Fatal(err)
 		}
-		record.RunID = storerunfork.DeterministicRunForkMaterializationID(record.SourceRunID, record.EventID)
+		record.RunID = ""
 		sourcePlan, err := fixture.store.(c4StartPlanner).PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: record.SourceRunID, At: record.EventID})
 		if err != nil {
 			t.Fatal(err)
 		}
 		record.ForkPoint = sourcePlan.ForkPoint
 		create = func() {
+			forkWitness = connector.armForkInsert(record.SourceRunID, record.ForkPoint, record.BundleHash)
 			arm()
-			if _, err := fixture.store.(interface {
-				MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
-			}).MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: record.SourceRunID, At: record.EventID}); err != nil {
+			if _, err := fixture.store.(c4ForkCreationOwner).MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: record.SourceRunID, At: record.EventID}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -726,7 +795,7 @@ func c4RunCreationCrashChild(t *testing.T) {
 	t.Fatal("creation process returned an ACK instead of reaching the SIGKILL boundary")
 }
 
-func c4ReplayCreationAfterCrash(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, record c4CreationCrashRecord) {
+func c4ReplayCreationAfterCrash(t *testing.T, ctx context.Context, fixture authorActivityReceiptFixture, backend string, record c4CreationCrashRecord) {
 	t.Helper()
 	var origin runlifecycle.RunOrigin
 	var err error
@@ -751,13 +820,12 @@ func c4ReplayCreationAfterCrash(t *testing.T, ctx context.Context, fixture autho
 		}
 		origin = runlifecycle.DeploymentRunOrigin()
 	case "fork":
-		replayed, replayErr := fixture.store.(interface {
-			MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
-		}).MaterializeRunFork(ctx, runfork.RunForkMaterializeRequest{SourceRunID: record.SourceRunID, At: record.EventID})
+		replayed := c4ReadExactForkWithoutMutation(t, ctx, fixture.store, backend, record.RunID,
+			runfork.RunForkMaterializeRequest{SourceRunID: record.SourceRunID, At: record.EventID}, true, nil)
 		point := record.ForkPoint
 		if point.Kind != runfork.RunForkPointEvent || point.EventID != record.EventID || point.Revision != 1 ||
-			replayErr != nil || replayed.ForkRunID != record.RunID || replayed.ForkPoint != point {
-			t.Fatalf("fresh owner replay changed committed fork child/cut: %+v err=%v", replayed, replayErr)
+			replayed.ForkRunID != record.RunID || replayed.ForkPoint != point {
+			t.Fatalf("fresh owner exact read changed committed fork child/cut: %+v", replayed)
 		}
 		origin, err = point.MaterializationRunOrigin(record.SourceRunID)
 		c4RequireExclusiveStart(t, ctx, fixture.store, record.SourceRunID, record.BundleHash, record.EventID)
@@ -982,9 +1050,7 @@ func TestC4F35EventForkStartNativeRetryBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			c4RequireExclusiveStart(t, ctx, fixture.store, runID, runLifecycleCandidateParityBundleHash, initial.ID())
-			selected := fixture.store.(interface {
-				MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
-			})
+			selected := fixture.store.(c4ForkCreationOwner)
 			request := runfork.RunForkMaterializeRequest{SourceRunID: runID, At: initial.ID()}
 			created, err := selected.MaterializeRunFork(ctx, request)
 			if err != nil || created.ForkRunID == "" || created.ForkPoint.Kind != runfork.RunForkPointEvent || created.ForkPoint.EventID != initial.ID() ||
@@ -999,9 +1065,9 @@ func TestC4F35EventForkStartNativeRetryBothStores(t *testing.T) {
 			before := c4RequireExclusiveStart(t, ctx, fixture.store, created.ForkRunID, runLifecycleCandidateParityBundleHash, "")
 			for i := 0; i < 2; i++ {
 				c4RequireRevisionCount(t, ctx, fixture.store, created.ForkRunID, 1)
-				replayed, err := selected.MaterializeRunFork(ctx, request)
-				if err != nil || replayed.ForkRunID != created.ForkRunID || replayed.ForkPoint != created.ForkPoint {
-					t.Fatalf("fork retry minted another creation: %+v err=%v", replayed, err)
+				replayed := c4ReadExactForkWithoutMutation(t, ctx, fixture.store, backend, created.ForkRunID, request, true, nil)
+				if !reflect.DeepEqual(replayed, created) {
+					t.Fatalf("exact fork read changed its original creation: got=%+v want=%+v", replayed, created)
 				}
 				after := c4RequireExclusiveStart(t, ctx, fixture.store, created.ForkRunID, runLifecycleCandidateParityBundleHash, "")
 				if !reflect.DeepEqual(after, before) {
@@ -1009,6 +1075,13 @@ func TestC4F35EventForkStartNativeRetryBothStores(t *testing.T) {
 				}
 			}
 			c4RequireRevisionCount(t, ctx, fixture.store, created.ForkRunID, 1)
+			second, err := selected.MaterializeRunFork(ctx, request)
+			if err != nil || second.ForkRunID == "" || second.ForkRunID == created.ForkRunID || second.ForkPoint != created.ForkPoint {
+				t.Fatalf("distinct fresh event-cut invocation reused a child or changed the cut: first=%+v second=%+v err=%v", created, second, err)
+			}
+			c4RequireExclusiveStart(t, ctx, fixture.store, second.ForkRunID, runLifecycleCandidateParityBundleHash, "")
+			c4RequireRevisionCount(t, ctx, fixture.store, second.ForkRunID, 1)
+			requireRunOriginHeader(t, ctx, fixture.store.(runOriginReadStore), second.ForkRunID, origin, 0)
 			sourceOrigin, err := runlifecycle.EventRunOrigin(initial.ID(), string(initial.Type()))
 			if err != nil {
 				t.Fatal(err)
@@ -1149,11 +1222,6 @@ func c4DeploymentStartCommand(t *testing.T, selected any, withTimer bool) (conte
 			Data: durabledata.RunCreationDataEnvelope{Pins: []durabledata.ExplicitPin{{Declaration: ref, VersionID: imported.Candidate.VersionID}}}},
 		Idempotency: apiidempotency.Request{Method: "run.start", Actor: apiidempotency.BearerActor("operator"), Now: at, TTL: time.Hour},
 		Root:        bus.FlowInstanceActivationCommand{Plan: plan},
-	}
-	for _, construction := range plan.ConstructionPlans() {
-		command.Root.RouteTopology = append(command.Root.RouteTopology, bus.FlowInstanceRouteRecordSet{
-			Identity: flowidentity.RunScopedFlowInstance{RunID: runID, Route: construction.Identity.Route()},
-		})
 	}
 	return ctx, command
 }

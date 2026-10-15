@@ -610,7 +610,7 @@ func contractFrontierRouteEvaluation(routeTable *runtimebus.RouteTable, selected
 
 func selectedContractConnectDefinitions(table *runtimebus.RouteTable, plan runtimepinrouting.ConnectRoutePlan, runID string, instances []runtimeflowidentity.Instance) ([]runtimepinrouting.ConnectRecipientRegistration, error) {
 	flowID := plan.ReceiverEndpoint().Readback().FlowID
-	if plan.ReceiverEndpoint().IsRoot() || !plan.RequiresRuntimeResolution() {
+	if plan.ReceiverEndpoint().IsRoot() {
 		// Non-executing selected-contract projection describes static roles.
 		// It neither observes construction nor authorizes their execution.
 		return table.ConnectDeclarationDefinitions(flowID), nil
@@ -625,6 +625,9 @@ func selectedContractConnectDefinitions(table *runtimebus.RouteTable, plan runti
 			return nil, err
 		}
 		definitions = append(definitions, bound...)
+	}
+	if len(definitions) == 0 && !plan.RequiresRuntimeResolution() {
+		return table.ConnectDeclarationDefinitions(flowID), nil
 	}
 	return definitions, nil
 }
