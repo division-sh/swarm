@@ -210,9 +210,20 @@ func runServeConstructionDiscriminator(t *testing.T, backend, mode string, insid
 	logConstructionDiagnostic(t, f, attempt, "before_release", first, originalWait, reuseWait, false, false)
 	release()
 	awaitConstructionDiagnosticSignal(t, f.ctx, cut.released)
-	if publishBeforeProbe {
-		publish()
-		awaitConstructionDiagnosticSignal(t, f.ctx, attempt.done)
+	publish()
+	if err := f.owner.WaitForQuiescence(f.ctx); err != nil {
+		t.Fatal("original construction did not publish before cleanup", constructionDiagnosticErrorClass(err))
+	}
+	select {
+	case <-attempt.done:
+	case <-f.ctx.Done():
+		t.Fatal("exact original attempt did not settle", constructionDiagnosticErrorClass(context.Cause(f.ctx)))
+	}
+	f.adapter.mu.Lock()
+	retained := f.adapter.connections[f.op.OperationID]
+	f.adapter.mu.Unlock()
+	if retained != attempt {
+		t.Fatal("cleanup replaced the original attempt")
 	}
 	connection := f.adapter.connection(f.op.OperationID)
 	closeRan, closeJoined := connection != nil, false
@@ -224,11 +235,9 @@ func runServeConstructionDiscriminator(t *testing.T, backend, mode string, insid
 		}
 	}
 	logConstructionDiagnostic(t, f, attempt, "fixture_probe", first, originalWait, reuseWait, closeRan, closeJoined)
-	if closeRan != publishBeforeProbe {
-		t.Fatal("controlled probe did not distinguish constructor publication")
+	if !closeRan || !closeJoined {
+		t.Fatal("controlled original connection did not join before cache reuse")
 	}
-	publish()
-	awaitConstructionDiagnosticSignal(t, f.ctx, attempt.done)
 	if err := f.owner.WaitForQuiescence(f.ctx); err != nil {
 		t.Fatal("original construction did not join", constructionDiagnosticErrorClass(err))
 	}
