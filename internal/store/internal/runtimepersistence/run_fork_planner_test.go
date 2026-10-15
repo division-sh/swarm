@@ -799,8 +799,8 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 	if pending.Status != "pending" {
 		t.Fatalf("started-after-fork status = %q, want pending", pending.Status)
 	}
-	if pending.StartedAt != nil || pending.DeliveredAt != nil {
-		t.Fatalf("started-after-fork timestamps = started %v delivered %v, want both nil at fork", pending.StartedAt, pending.DeliveredAt)
+	if pending.SourceExecution.Started || pending.SourceExecution.InProgress || pending.SourceExecution.SessionBound || pending.DeliveredAt != nil {
+		t.Fatalf("started-after-fork cut = %+v delivered %v, want unstarted and unsettled at fork", pending.SourceExecution, pending.DeliveredAt)
 	}
 }
 
