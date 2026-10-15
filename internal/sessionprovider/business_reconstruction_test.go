@@ -17,7 +17,7 @@ import (
 
 func reconstructPublication(command bus.PublicationCommand) bus.PublicationCommand {
 	return bus.PublicationCommand{
-		Commit: command.Commit, Activations: command.Activations, RouteTopology: command.RouteTopology,
+		Commit: command.Commit, Activations: command.Activations,
 		DynamicFlowCreation: command.DynamicFlowCreation, AuthorScope: command.AuthorScope,
 		HasAuthorScope: command.HasAuthorScope, AuthorDescriptor: command.AuthorDescriptor,
 		HasAuthorDescriptor: command.HasAuthorDescriptor,
