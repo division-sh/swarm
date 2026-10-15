@@ -231,7 +231,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			if err := requireForkResourceSourcePinAgreement(plan, pins); err != nil {
 				return err
 			}
-			if err := requireExactMaterializedRunForkFanOut(txctx, tx, port.postgres, forkRunID, plan, fanOutPlanRefs, req.OriginalLoopCarriage, identity.SourceArtifactFact.BundleHash(), port.durableData, pins); err != nil {
+			if err := requireExactMaterializedRunForkFanOut(txctx, tx, port.postgres, port.postgres, forkRunID, plan, fanOutPlanRefs, req.OriginalLoopCarriage, identity.SourceArtifactFact.BundleHash(), port.durableData, pins); err != nil {
 				return err
 			}
 			existing.DataPins = pins

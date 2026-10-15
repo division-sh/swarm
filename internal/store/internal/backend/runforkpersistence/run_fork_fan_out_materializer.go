@@ -83,7 +83,7 @@ func requireForkResourceSourcePinAgreement(plan runfork.RunForkPlan, pins []runt
 	return nil
 }
 
-func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, plan runfork.RunForkPlan, planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, original semanticview.OriginalLoopCarriage, targetBundleHash string, data *storedurabledata.Owner, pins []runtimedata.Pin) error {
+func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, postgres, lockPostgres bool, forkRunID string, plan runfork.RunForkPlan, planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, original semanticview.OriginalLoopCarriage, targetBundleHash string, data *storedurabledata.Owner, pins []runtimedata.Pin) error {
 	var intentCount int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1 AND origin_kind='handler'`, forkRunID).Scan(&intentCount); err != nil {
 		return fmt.Errorf("count materialized fork fan-out intents: %w", err)
@@ -100,7 +100,7 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, post
 		if err := sourceIntent.Request.ValidateSourceProjection(); err != nil {
 			return fmt.Errorf("fixed fork fan-out source/plan agreement: %w", err)
 		}
-		projectedCapsule, _, err := projectRunForkFanOutCapsule(ctx, tx, postgres, forkRunID, plan, obligation, original)
+		projectedCapsule, _, err := projectRunForkFanOutCapsule(ctx, tx, lockPostgres, forkRunID, plan, obligation, original)
 		if err != nil {
 			return err
 		}
