@@ -246,6 +246,7 @@ func TestServiceRegistryProvisionPreservesPrimaryAndCleanupFailure(t *testing.T)
 	registry, _ := testRegistryRecord(t, ServicePrepared)
 	primary, cleanup := errors.New("injected creator-publication failure"), errors.New("injected cleanup write failure")
 	docker := registry.docker.(*fakeDocker)
+	docker.outputs["image ls --quiet --no-trunc postgres:16"] = []byte("image")
 	docker.outputs["info --format {{.ID}}"] = []byte("daemon")
 	docker.outputs["image inspect --format {{.Id}} postgres:16"] = []byte("image")
 	registry.beforeRegistrySave = func(doc registryDocument) error {

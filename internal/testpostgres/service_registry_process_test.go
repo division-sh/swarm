@@ -791,6 +791,8 @@ def load():
     with open(path("inspect.json")) as f: return json.load(f)
 with open(path("commands.log"), "a") as f: f.write(" ".join(args) + "\n")
 if args[0] == "pull": sys.exit(0)
+if args == ["image", "ls", "--quiet", "--no-trunc", "postgres:16"]:
+    print("image-id"); sys.exit(0)
 if args[:3] == ["info", "--format", "{{.ID}}"]:
     print("daemon-id"); sys.exit(0)
 if args[:4] == ["image", "inspect", "--format", "{{.Id}}"]:
