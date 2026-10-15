@@ -118,6 +118,7 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			publish := func(name string) events.Event {
 				t.Helper()
 				event := eventtest.ExistingRunRootIngress(uuid.NewString(), events.EventType(name), "operator", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+				t.Logf("Q10-CAS-PHASE publish=%s event=%s started=%s", name, event.ID(), time.Now().UTC().Format(time.RFC3339Nano))
 				if err := bus.PublishAcknowledged(ctx, event); err != nil {
 					t.Fatal(err)
 				}
