@@ -22,6 +22,7 @@ import (
 
 func TestRewrite2566FiniteFixturePlanMatchesReviewedOutputs(t *testing.T) {
 	repo := canonicalrouting.RepoRoot(t)
+	root := finiteFixtureRootWithEmbeddedSpecSuccessor(t, repo)
 	body, err := os.ReadFile(filepath.Join(repo, "scripts/rewrite-stages-2566/finite-fixtures.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -58,7 +59,7 @@ func TestRewrite2566FiniteFixturePlanMatchesReviewedOutputs(t *testing.T) {
 				composed++
 				predecessor = finiteFixtureGitSource(t, repo, finiteFixtureFeedPredecessor, c.File)
 			}
-			if err := checkFiniteFixtureCurrentOutput(repo, c, historical, predecessor); err != nil {
+			if err := checkFiniteFixtureCurrentOutput(root, c, historical, predecessor); err != nil {
 				t.Fatal(err)
 			}
 		})
