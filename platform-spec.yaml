@@ -23141,13 +23141,14 @@ configuration_source_authority:
         paths:
           keys:
             swarm_dir: supported_path
-            platform_spec_path: existing_platform_spec_path_owner
+            platform_spec_path: retired_rejected
             prompts_dir: split_unsupported_retired
             monitor_dir: supported_path
             agent_config_map_file: retired_rejected
             verification_gates_file: retired_rejected
             tooling_lock_file: retired_rejected
           owner: contract/platform path owners, agent_intent_model, and #1600 helper-path drains
+          platform_spec_path_remediation: "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
     document_semantics:
       rule: >
         Expand supported aliases and merge keys only within the selected document through the existing YAML source
@@ -23160,8 +23161,9 @@ configuration_source_authority:
         cannot delegate env authority. Preserve secret-reference-only admission and exact supported delegation.
       path_bases: >
         Platform development pack paths resolve from the selected document's directory. This is not a universal
-        config-relative path rule: token paths, state paths and the live platform-spec path retain their owning
-        invocation-root/default rules. Discovery never changes the authored source root or target context.
+        config-relative path rule: token paths and state paths retain their owning invocation-root/default rules.
+        The embedded platform spec is not a configurable path. Discovery never changes the authored source root
+        or target context.
     old_shape_and_unknown_key_policy:
       unknown_keys: fail_closed_with_key_path_and_source
       rejection_diagnostics:
@@ -28435,10 +28437,6 @@ cli_specification:
             Accepted by the shared CLI config parser for
             cli_specification.foundations.local_target_resolution_authority; ignored by the API connection and auth
             resolver.
-          paths.platform_spec_path: >
-            Accepted by the shared CLI config parser for
-            cli_specification.foundations.source_platform_spec_path_resolution; ignored by the API connection
-            and auth resolver.
           serve.api_listen_addr: >
             Accepted by the shared CLI config parser for
             cli_specification.command_catalog.serve.listener_topology_v2_1.source_precedence; ignored by the API
@@ -28453,6 +28451,7 @@ cli_specification:
             by the API connection and auth resolver. This key is server-side `swarm serve` auth only and MUST NOT be
             consumed as client API auth.
         rejected_keys:
+          paths.platform_spec_path: "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
           api_token: Inline bearer tokens in config files are not promoted.
           output_format: Split to #848 output renderer implementation.
           no_color: >
@@ -28494,9 +28493,10 @@ cli_specification:
       scope: Platform spec path selection only; authored source root is owned by filesystem_source_model.local_root_selection.
       platform_spec_path:
         accepted_sources:
-          config_key: paths.platform_spec_path
           built_in_default: embedded platform-spec.yaml
-        rule: Explicit config resolves against invocation root; otherwise use embedded tracked bytes. No environment or CLI flag source.
+        rejected_config_key: paths.platform_spec_path
+        remediation: "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
+        rule: Use embedded tracked bytes by default. Existing explicit owner options resolve against invocation root. No environment or public swarm CLI flag source; do not add one as part of config retirement.
     error_channel_and_exit_code_contract:
       implemented_by: '#846'
       scope: >

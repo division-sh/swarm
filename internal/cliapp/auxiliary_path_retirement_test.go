@@ -11,7 +11,7 @@ import (
 )
 
 func TestRuntimeConfigRejectsRetiredAuxiliaryPaths(t *testing.T) {
-	for _, key := range []string{"agent_config_map_file", "verification_gates_file", "tooling_lock_file"} {
+	for _, key := range []string{"agent_config_map_file", "verification_gates_file", "tooling_lock_file", "platform_spec_path"} {
 		for _, selector := range []string{"deployment", "explicit", "locator"} {
 			for _, merged := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s/%s/merged=%t", key, selector, merged), func(t *testing.T) {
@@ -56,6 +56,12 @@ func TestRuntimeConfigRejectsRetiredAuxiliaryPaths(t *testing.T) {
 					}
 					if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "paths."+key) || !strings.Contains(err.Error(), "Valid fields:") {
 						t.Fatalf("missing located current-key teaching: %v", err)
+					}
+					if key == "platform_spec_path" {
+						const teaching = "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
+						if problem.Remediation != teaching || !strings.Contains(err.Error(), teaching) {
+							t.Fatalf("platform spec teaching differs from the user ruling: %#v / %v", problem, err)
+						}
 					}
 					if _, err := os.Stat(filepath.Join(root, ".swarm", "stores")); !os.IsNotExist(err) {
 						t.Fatalf("source refusal created store state: %v", err)

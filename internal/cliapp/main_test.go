@@ -1117,8 +1117,11 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 	if _, survives := spec.CLIConfigFile.SharedNonAPIKeys["paths.contracts_path"]; survives {
 		t.Fatalf("retired paths.contracts_path remains a shared config key: %#v", spec.CLIConfigFile.SharedNonAPIKeys)
 	}
-	if key := "paths.platform_spec_path"; !strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys[key], "source_platform_spec_path_resolution") {
-		t.Fatalf("cli config shared non-API key %q missing source path owner: %#v", key, spec.CLIConfigFile.SharedNonAPIKeys)
+	if _, survives := spec.CLIConfigFile.SharedNonAPIKeys["paths.platform_spec_path"]; survives {
+		t.Fatalf("retired platform spec key remains shared: %#v", spec.CLIConfigFile.SharedNonAPIKeys)
+	}
+	if got := spec.CLIConfigFile.RejectedKeys["paths.platform_spec_path"]; got != config.PlatformSpecPathConfigRemediation {
+		t.Fatalf("platform spec teaching = %q, want %q", got, config.PlatformSpecPathConfigRemediation)
 	}
 	for _, key := range []string{"serve.api_listen_addr", "serve.mcp_listen_addr"} {
 		if !strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys[key], "listener_topology_v2_1.source_precedence") {
