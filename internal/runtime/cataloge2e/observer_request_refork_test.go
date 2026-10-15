@@ -38,7 +38,8 @@ func executeObserverOnlyRequestRefork(t *testing.T, h *runtimeHarness, selected 
 	if err != nil {
 		t.Fatal(err)
 	}
-	staged := stageCatalogSelectedContractFork(t, ctx, selected, owner, loader, selection, options, sourceRun, cut)
+	operation := catalogStagedForkOperation(t, ctx, selected, selection, sourceRun, cut)
+	staged := stageCatalogSelectedContractFork(t, ctx, selected, owner, loader, selection, options, sourceRun, cut, operation)
 	rows, err := storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("observer-only child did not retain one context: rows=%+v error=%v", rows, err)
@@ -57,7 +58,7 @@ func executeObserverOnlyRequestRefork(t *testing.T, h *runtimeHarness, selected 
 		t.Fatalf("observer-only projection changed terminal meaning: source=%+v child=%+v error=%v", original, row, err)
 	}
 	executed, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, runforkexecution.SelectedContractExecutionRequest{
-		SourceRunID: sourceRun, At: cut, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+		SourceRunID: sourceRun, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 	})
 	if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
 		t.Fatalf("activate observer-only child: activation=%+v error=%v", executed.Activation, err)

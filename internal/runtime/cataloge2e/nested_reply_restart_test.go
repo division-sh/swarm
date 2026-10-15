@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -87,8 +88,30 @@ func restartNestedReplyChild(t *testing.T, h *runtimeHarness, staged runfork.Run
 	}
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootFromCatalogE2E(t),
 		PlatformSpecPath: platformSpecPathFromCatalogE2E(t), Store: selected}
-	retry := stageCatalogSelectedContractFork(t, h.ctx, selected, selectedContractExecutionOwnerForCatalogHarness(t, h), loader,
-		operation.ContractSelection, selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig()), operation.SourceRunID, operation.ForkEventID, operation)
+	prepared, err := selectedContractExecutionOwnerForCatalogHarness(t, h).Prepare(h.ctx, runforkexecution.SelectedContractExecutionRequest{
+		SourceRunID: operation.SourceRunID, At: operation.ForkEventID, ForkOperation: &operation, AllowSourceFreeze: operation.AllowSourceFreeze,
+		SourceLoader: loader, ContractSelection: operation.ContractSelection, AgentRuntime: selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := prepared.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	readback, err := prepared.MaterializationRequest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	readback.ForkOperation = nil
+	retry, err := selected.RequireMaterializedRunForkForSelectedContractExecution(correlation.WithSourceArtifactFact(h.ctx, readback.SourceArtifactFact), staged.ForkRunID, readback)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := prepared.Close(); err != nil {
+		t.Fatal(err)
+	}
 	retryRows, rowsErr := storetest.ReadReplyContextRecords(h.ctx, selected, staged.ForkRunID)
 	childAfter, childErr := storetest.ReadSelectedForkSourceDomain(h.ctx, selected, staged.ForkRunID)
 	stable, found, operationErr := ops.LoadForkOperation(h.ctx, operation.Actor, operation.IdempotencyKey, operation.TransportHash)

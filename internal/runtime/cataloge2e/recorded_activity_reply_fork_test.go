@@ -251,6 +251,8 @@ func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, n
 		operations = append(operations, runfork.ForkOperationRequest{OperationID: uuid.NewString(), Actor: "nested-reply-restart",
 			IdempotencyKey: uuid.NewString(), TransportHash: "nested-reply-restart", SourceRunID: catalogRuntimeRunID, ForkEventID: cut,
 			TargetBundleHash: selection.BundleHash, AllowSourceFreeze: true, ContractSelection: selection})
+	} else if followup != copiedReplyContextOnlyOpen {
+		operations = append(operations, catalogStagedForkOperation(t, h.ctx, selected, selection, catalogRuntimeRunID, cut))
 	}
 	staged := stageCatalogSelectedContractFork(t, h.ctx, selected, owner, loader, selection, options, catalogRuntimeRunID, cut, operations...)
 	t.Logf("fixed activity cut: point=%+v blockers=%+v", staged.ForkPoint, staged.ReplayResumeAdmission.UnsupportedBlockers)
@@ -296,7 +298,7 @@ func runCopiedActivityReplyReturn(t *testing.T, backend catalogRuntimeBackend, n
 		options = selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
 	} else {
 		executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
-			SourceRunID: catalogRuntimeRunID, At: cut, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+			SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operations[0], AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 		})
 		if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
 			t.Fatalf("activate real recorded-result child: %+v error=%v", executed, err)
@@ -495,7 +497,8 @@ func proveCopiedTwoLevelReplyRefork(t *testing.T, h *runtimeHarness, selected co
 	if pendingInputs > 1 || (!atResult && pendingInputs != 1) {
 		t.Fatalf("refork has an unexpected exact pending-input inventory: %+v", plan.PendingWork)
 	}
-	staged := stageCatalogSelectedContractFork(t, ctx, selected, owner, loader, selection, options, sourceRun, cut)
+	operation := catalogStagedForkOperation(t, ctx, selected, selection, sourceRun, cut)
+	staged := stageCatalogSelectedContractFork(t, ctx, selected, owner, loader, selection, options, sourceRun, cut, operation)
 	t.Logf("physical result refork: source=%s cut=%s child=%s pending_inputs=%d", sourceRun, cut, staged.ForkRunID, pendingInputs)
 	grandchildRows, err := storetest.ReadReplyContextRecords(ctx, selected, staged.ForkRunID)
 	if err != nil || len(grandchildRows) != 2 || staged.SourceRunID != sourceRun || staged.ForkRunID == sourceRun {
@@ -503,7 +506,7 @@ func proveCopiedTwoLevelReplyRefork(t *testing.T, h *runtimeHarness, selected co
 	}
 	inner := requireReforkedOpenReplyRows(t, beforeRows, grandchildRows, staged.ForkRunID)
 	executed, err := runforkexecution.ExecuteSelectedContractRunFork(ctx, runforkexecution.SelectedContractExecutionRequest{
-		SourceRunID: sourceRun, At: cut, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+		SourceRunID: sourceRun, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 	})
 	if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
 		t.Fatalf("activate exact grandchild activity continuation: %+v error=%v", executed, err)
