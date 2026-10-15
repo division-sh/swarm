@@ -87,6 +87,13 @@ func historicalReceiverCreatingEventTx(ctx context.Context, tx *sql.Tx, run runl
 		return "", err
 	}
 	if historical {
+		if _, present, err := ReadStoredFlowConstructionReceiptTx(ctx, tx, run.RunID, header); err != nil {
+			return "", err
+		} else if present {
+			if err := requireProjectedReceiverReceiptTx(ctx, tx, run, header, history); err != nil {
+				return "", err
+			}
+		}
 		return "", nil
 	}
 	return receiverCreatingEventTx(ctx, tx, run.RunID, route)

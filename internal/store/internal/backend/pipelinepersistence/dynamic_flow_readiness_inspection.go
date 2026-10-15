@@ -183,8 +183,10 @@ func (inspection dynamicFlowReadinessInspection) construction(ctx context.Contex
 	}
 	identity, key := history.Identity, history.InstanceKey
 	if recorded {
-		if projected && (receipt.Identity != history.Identity || receipt.InstanceKey != history.InstanceKey) {
-			return corrupt(fmt.Errorf("present native receipt crosses fixed historical construction"))
+		if projected {
+			if err := requireProjectedReceiverReceiptTx(ctx, tx, run, header, inspection.historical); err != nil {
+				return corrupt(err)
+			}
 		}
 		if err := receipt.ValidateStoredMode(header.Mode); err != nil {
 			return corrupt(err)

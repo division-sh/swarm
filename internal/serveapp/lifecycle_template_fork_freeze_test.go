@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/operatorread"
@@ -123,7 +124,10 @@ func requireTemplateForkFreezeDelta(t *testing.T, before, after templateForkSour
 			// is not an additional semantic gate change. Other raw columns stay exact.
 			expected.Lifecycle.State.Accumulator = actual.Lifecycle.State.Accumulator
 			expected.Lifecycle.State.Revision++
-			expected.Lifecycle.State.UpdatedAt = *source.EndedAt
+			if !templateForkFrozenHeaderEqual(expected, actual, *source.EndedAt) {
+				t.Fatalf("source freeze changed unrelated header/field/configuration facts: entity=%s expected=%+v actual=%+v", entityID, expected, actual)
+			}
+			continue
 		}
 		if !reflect.DeepEqual(expected, actual) {
 			t.Fatalf("source freeze changed unrelated header/field/configuration facts: entity=%s expected=%+v actual=%+v", entityID, expected, actual)
@@ -144,4 +148,42 @@ func requireTemplateForkFreezeDelta(t *testing.T, before, after templateForkSour
 		t.Fatalf("source supersession lost a pending card: %v", seen)
 	}
 	return frozen
+}
+
+func templateForkFrozenHeaderEqual(expected, actual pipeline.WorkflowTargetPersistenceRecord, freeze time.Time) bool {
+	if !actual.Lifecycle.State.UpdatedAt.Equal(freeze) {
+		return false
+	}
+	// Only these two changed header clocks cross the UTC-normalized run reader
+	// and the backend-scanned header reader. All other values remain exact.
+	expected.Lifecycle.State.UpdatedAt = actual.Lifecycle.State.UpdatedAt
+	return reflect.DeepEqual(expected, actual)
+}
+
+func TestTemplateForkFreezeHeaderComparisonKeepsExactEvidence(t *testing.T) {
+	freeze := time.Date(2026, 10, 15, 12, 0, 0, 123, time.UTC)
+	expected := pipeline.WorkflowTargetPersistenceRecord{}
+	expected.Lifecycle.State.Revision = 2
+	expected.Lifecycle.State.UpdatedAt = freeze
+	actual := expected
+	actual.Lifecycle.State.UpdatedAt = freeze.In(time.FixedZone("scanned-zero-offset", 0))
+	if reflect.DeepEqual(expected, actual) || !templateForkFrozenHeaderEqual(expected, actual, freeze) {
+		t.Fatal("equal instants with distinct locations must retain exact header correspondence")
+	}
+	for _, variant := range []string{"instant", "revision", "configuration"} {
+		t.Run(variant, func(t *testing.T) {
+			changed := actual
+			switch variant {
+			case "instant":
+				changed.Lifecycle.State.UpdatedAt = freeze.Add(time.Nanosecond)
+			case "revision":
+				changed.Lifecycle.State.Revision++
+			case "configuration":
+				changed.Lifecycle.Config = []byte(`{"changed":true}`)
+			}
+			if templateForkFrozenHeaderEqual(expected, changed, freeze) {
+				t.Fatal("equal-instant comparison hid changed " + variant)
+			}
+		})
+	}
 }

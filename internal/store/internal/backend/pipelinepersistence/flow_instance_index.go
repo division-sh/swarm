@@ -31,6 +31,7 @@ type HistoricalFlowInstanceReader interface {
 	ReadHistoricalFlowInstanceConstructionBatchTx(context.Context, *sql.Tx, semanticview.Source, runlifecycle.Snapshot, []pipeline.WorkflowInstance) ([]HistoricalFlowInstanceConstructionResult, error)
 	ReadHistoricalFlowInstanceConstructionEvidenceTx(context.Context, *sql.Tx, runlifecycle.Snapshot, pipeline.WorkflowInstance) (pipeline.HistoricalFlowInstanceConstruction, bool, error)
 	ReadHistoricalFlowInstanceConstructionEvidenceBatchTx(context.Context, *sql.Tx, runlifecycle.Snapshot, []pipeline.WorkflowInstance) ([]HistoricalFlowInstanceConstructionResult, error)
+	ReadProjectedReceiverConstructionReceiptTx(context.Context, *sql.Tx, runlifecycle.Snapshot, pipeline.WorkflowInstance) (pipeline.FlowConstructionReceipt, bool, error)
 }
 
 func (s *PipelinePostgresOwner) BindHistoricalFlowInstanceReader(owner HistoricalFlowInstanceReader) error {
@@ -463,7 +464,9 @@ func (s *flowInstanceIndexSnapshot) observeConstruction(ctx context.Context, req
 	var observation pipeline.FlowInstanceObservation
 	if history.Found {
 		if companions.constructionPresent {
-			return pipeline.FlowInstanceObservation{}, corruptFlowConstructionEvidence(flowidentity.RunScopedFlowInstance{RunID: s.run.RunID, Route: route}, fmt.Errorf("instance has conflicting native and historical construction evidence"))
+			if err := requireProjectedReceiverReceiptTx(ctx, s.tx, s.run, header, s.historical); err != nil {
+				return pipeline.FlowInstanceObservation{}, err
+			}
 		}
 		var desired *pipeline.DynamicFlowRuntimeReadiness
 		if readyFound {

@@ -400,13 +400,14 @@ func readProjectedReceiverConstructionReceiptTx(ctx context.Context, tx *sql.Tx,
 	if err != nil {
 		return pipeline.FlowConstructionReceipt{}, false, err
 	}
-	var present bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workflow_instance_initial_materializations
-		WHERE run_id=$1 AND instance_path=$2)`, run.RunID, header.StorageRef).Scan(&present); err != nil {
-		return pipeline.FlowConstructionReceipt{}, false, fmt.Errorf("inspect projected construction receipt: %w", err)
+	physical, present, err := pipelinepersistence.ReadStoredFlowConstructionReceiptTx(ctx, tx, run.RunID, header)
+	if err != nil {
+		return pipeline.FlowConstructionReceipt{}, false, err
 	}
 	if present {
-		return pipeline.FlowConstructionReceipt{}, false, fmt.Errorf("receiver has conflicting native and historical construction evidence")
+		if err := pipeline.ValidateProjectedFlowConstructionReceipt(physical, expected); err != nil {
+			return pipeline.FlowConstructionReceipt{}, false, &pipeline.FlowInstanceConstructionCorruption{RunID: run.RunID, FlowID: header.WorkflowName, InstancePath: header.StorageRef, Cause: err}
+		}
 	}
 	return expected, true, nil
 }

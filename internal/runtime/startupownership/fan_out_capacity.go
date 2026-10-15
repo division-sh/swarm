@@ -152,38 +152,41 @@ func RegisterFanOutServing(ctx context.Context, grant GenerationGrant, occurrenc
 	}
 	budget.registrations[evidence.GrantID] = r
 	p.mu.Unlock()
-	go func() {
-		defer close(r.done)
-		defer standing.Done()
-		select {
-		case <-g.Done():
-		case <-p.Done():
-		case <-registrationCtx.Done():
-		}
-		cancel()
-		p.mu.Lock()
-		r.turnsClosing = true
-		// An acknowledged closing registration remains in the complete census
-		// until its grant retires. It retains no standing lease after this join.
-		if budget.registrations[evidence.GrantID] == r && (r.executor == nil || p.requireLive() != nil || grantRetired(g)) {
-			delete(budget.registrations, evidence.GrantID)
-		}
-		idleService := p.retireIdleFanOutServiceLocked()
-		p.mu.Unlock()
-		r.Wake()
-		// Cancellation precedes the locked removal, so no BeginTurn can Add
-		// after this point. Join only this registration's admitted finite work.
-		r.turns.Wait()
-		if idleService != nil {
-			<-idleService.done
-			p.mu.Lock()
-			if budget.service == idleService {
-				budget.service = nil
-			}
-			p.mu.Unlock()
-		}
-	}()
+	go r.joinRetirement(standing, budget, evidence.GrantID)
 	return r, nil
+}
+
+func (r *FanOutServingRegistration) joinRetirement(standing *worklifetime.Lease, budget *fanOutCapacityState, grantID string) {
+	g, p := r.grant, r.grant.owner
+	defer close(r.done)
+	defer standing.Done()
+	select {
+	case <-g.Done():
+	case <-p.Done():
+	case <-r.ctx.Done():
+	}
+	r.cancel()
+	p.mu.Lock()
+	r.turnsClosing = true
+	// An acknowledged closing registration remains in the complete census
+	// until its grant retires. It retains no standing lease after this join.
+	if budget.registrations[grantID] == r && (r.executor == nil || p.requireLive() != nil || grantRetired(g)) {
+		delete(budget.registrations, grantID)
+	}
+	idleService := p.retireIdleFanOutServiceLocked()
+	p.mu.Unlock()
+	r.Wake()
+	// Cancellation precedes the locked removal, so no BeginTurn can Add
+	// after this point. Join only this registration's admitted finite work.
+	r.turns.Wait()
+	if idleService != nil {
+		<-idleService.done
+		p.mu.Lock()
+		if budget.service == idleService {
+			budget.service = nil
+		}
+		p.mu.Unlock()
+	}
 }
 
 // The process owns the shared observer, but its last registered occurrence
