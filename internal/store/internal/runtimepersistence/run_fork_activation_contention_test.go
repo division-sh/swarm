@@ -137,15 +137,8 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 					if outcome == "cancel_loser" {
 						cancelLoser()
 						barrier.resume()
-						got := awaitForkContentionResult(t, ctx, loser)
-						requireForkContentionCancellation(t, got.err)
-						select {
-						case <-loserFinished:
-						case <-ctx.Done():
-							t.Fatal("cancelled contender did not join: ", ctx.Err())
-						}
 						if gate != nil {
-							gate.cancelled = true
+							gate.cancelRequested = true
 						}
 					}
 					if outcome == "cancel_winner" {
@@ -166,6 +159,20 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 						}
 					}
 					barrier.awaitGate(t, ctx, observer, gate)
+					if outcome == "cancel_loser" {
+						// Admitted PostgreSQL SQL drains despite logical cancellation.
+						// Settle the winner, then let this cancelled exception drain and
+						// join before inspecting the complete zero-effect snapshot.
+						barrier.openGate(t, gate)
+						barrier.resume()
+						got := awaitForkContentionResult(t, ctx, loser)
+						requireForkContentionCancellation(t, got.err)
+						select {
+						case <-loserFinished:
+						case <-ctx.Done():
+							t.Fatal("cancelled contender did not join: ", ctx.Err())
+						}
+					}
 					winnerOnly := snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres")
 					if outcome != "commit" && !reflect.DeepEqual(before, winnerOnly) {
 						for _, diagnostic := range forkContentionFailureDiagnostics(before, winnerOnly, won, loser) {
@@ -173,18 +180,18 @@ func exerciseForkActivationFrontierContention(t *testing.T, selected bool) {
 						}
 						t.Fatal("rolled-back/cancelled winner changed complete source/child/application tables")
 					}
-					barrier.assertContenderFenced(t, ctx, observer, gate)
-					if outcome != "cancel_loser" && len(loser) != 0 {
-						t.Fatal("contender returned before the isolated snapshot gate opened")
-					}
-					barrier.openGate(t, gate)
-					barrier.resume()
 					if outcome == "cancel_loser" {
 						if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, observer, backend.name == "postgres")) {
 							t.Fatal("cancelled loser and rolled-back winner left durable effects")
 						}
 						return
 					}
+					barrier.assertContenderFenced(t, ctx, observer, gate)
+					if len(loser) != 0 {
+						t.Fatal("contender returned before the isolated snapshot gate opened")
+					}
+					barrier.openGate(t, gate)
+					barrier.resume()
 					lost := awaitForkContentionResult(t, ctx, loser)
 					if outcome == "commit" {
 						if selected && first == "writer" {
@@ -788,11 +795,11 @@ func (b *forkContentionBarrier) awaitWinner(t *testing.T, ctx context.Context, d
 }
 
 type forkContentionGate struct {
-	tx        *sql.Tx
-	pid       int
-	acquired  chan error
-	contender forkContentionWait
-	cancelled bool
+	tx              *sql.Tx
+	pid             int
+	acquired        chan error
+	contender       forkContentionWait
+	cancelRequested bool
 }
 
 func (b *forkContentionBarrier) queueGate(t *testing.T, ctx context.Context, db *sql.DB, winnerPID int) *forkContentionGate {
@@ -875,12 +882,14 @@ func (b *forkContentionBarrier) awaitGate(t *testing.T, ctx context.Context, db 
 	case <-ctx.Done():
 		t.Fatal("observer frontier gate: ", ctx.Err())
 	}
-	b.assertContenderFenced(t, ctx, db, gate)
+	if !gate.cancelRequested {
+		b.assertContenderFenced(t, ctx, db, gate)
+	}
 }
 
 func (b *forkContentionBarrier) assertContenderFenced(t *testing.T, ctx context.Context, db *sql.DB, gate *forkContentionGate) {
 	t.Helper()
-	if gate == nil || gate.cancelled {
+	if gate == nil {
 		return
 	}
 	if gate.contender.pid == 0 {
