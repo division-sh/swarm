@@ -14,6 +14,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -450,50 +451,13 @@ func loadExactRunForkMaterialization(
 	identity runForkBundleInsertIdentity,
 	selection *runfork.RunForkContractSelection,
 ) (runfork.RunForkMaterialization, bool, error) {
-	query := `
-		SELECT CAST(run_id AS TEXT)
-		FROM runs
-		WHERE run_id = $1
-	`
-	args := []any{forkRunID}
-	if plan.ForkPoint.Kind == runfork.RunForkPointEvent {
-		query += ` OR (forked_from_run_id = $2 AND forked_from_point_kind = 'event'
-			AND forked_from_revision = $3 AND forked_from_event_id = $4)`
-		args = append(args, plan.SourceRunID, plan.ForkPoint.Revision, plan.ForkPoint.EventID)
-	}
-	query += ` ORDER BY started_at ASC LIMIT 2`
-	rows, err := tx.QueryContext(ctx, query, args...)
-	if err != nil {
-		return runfork.RunForkMaterialization{}, false, fmt.Errorf("check existing fork materialization: %w", err)
-	}
-	var matches []string
-	for rows.Next() {
-		var existing string
-		if err := rows.Scan(&existing); err != nil {
-			_ = rows.Close()
-			return runfork.RunForkMaterialization{}, false, fmt.Errorf("scan existing fork materialization: %w", err)
-		}
-		matches = append(matches, existing)
-	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return runfork.RunForkMaterialization{}, false, fmt.Errorf("read existing fork materialization: %w", err)
-	}
-	_ = rows.Close()
-	if len(matches) == 0 {
-		return runfork.RunForkMaterialization{}, false, nil
-	}
-	if len(matches) != 1 || matches[0] != forkRunID {
-		return runfork.RunForkMaterialization{}, false, fmt.Errorf(
-			"fork materialization identity conflict for source run %s at %s revision %d: matches=%v",
-			plan.SourceRunID, plan.ForkPoint.Kind, plan.ForkPoint.Revision, matches,
-		)
-	}
-
 	if loadSnapshot == nil {
 		return runfork.RunForkMaterialization{}, false, fmt.Errorf("fork lifecycle snapshot loader is required")
 	}
 	snapshot, err := loadSnapshot(ctx, tx, forkRunID)
+	if runtimefailures.OnlyBranches(err, func(branch error) bool { return branch == storerunlifecycle.ErrRunNotFound }) {
+		return runfork.RunForkMaterialization{}, false, nil
+	}
 	if err != nil {
 		return runfork.RunForkMaterialization{}, false, fmt.Errorf("load existing fork lifecycle: %w", err)
 	}

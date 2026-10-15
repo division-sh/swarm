@@ -79,8 +79,9 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 }
 
 func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExecutionRequest, reserved *selectedContractOperation) (out SelectedContractExecutionResult, finalErr error) {
+	callerContext := ctx
 	if req.Recovery == nil && req.ForkOperation != nil {
-		result, found, err := req.Owner.replaySelectedForkOperation(ctx, req)
+		result, found, err := req.Owner.replaySelectedForkOperation(ctx, req, nil)
 		if found || err != nil {
 			return result, err
 		}
@@ -89,7 +90,12 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, err
 	}
-	defer func() { finalErr = errors.Join(finalErr, req.Owner.completePreparation(prepared)) }()
+	disposed := false
+	defer func() {
+		if !disposed {
+			finalErr = errors.Join(finalErr, req.Owner.completePreparation(prepared))
+		}
+	}()
 	ports, operation, loadedSource := req.Owner.ports, prepared.operation, prepared.loadedSource
 	forkOperation := prepared.forkOperation
 	plan, frontier, routeAdmission := prepared.plan, prepared.frontier, prepared.routeAdmission
@@ -111,6 +117,17 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		materialization, acknowledged, materializationDiagnostic = req.Owner.materializePrepared(ctx, prepared)
 	}
 	if !acknowledged {
+		if req.Recovery == nil && forkOperation != nil {
+			if replay := isolatedSelectedForkOperationReplay(materializationDiagnostic); replay != nil {
+				disposed = true
+				if cleanupErr := req.Owner.disposePreparation(prepared); cleanupErr != nil {
+					return SelectedContractExecutionResult{}, errors.Join(materializationDiagnostic, cleanupErr)
+				}
+				request := req
+				request.ForkOperation = forkOperation
+				return req.Owner.continueElectedSelectedForkOperation(callerContext, request, replay)
+			}
+		}
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner}, materializationDiagnostic
 	}
 	defer func() {
@@ -124,7 +141,7 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{
 			Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization,
 			AgentRuntimeMaterialization: &agentRuntime.Proof,
-		}, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, req.ForkOperation, err)
+		}, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, forkOperation, err)
 	}
 	if _, err := RequireSelectedContractAgentDeliveryMaterialization(ctx, SelectedContractAgentDeliveryMaterializationRequest{
 		RunID:             materialization.ForkRunID,
@@ -134,7 +151,7 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		return SelectedContractExecutionResult{
 			Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization,
 			AgentRuntimeMaterialization: &agentRuntime.Proof,
-		}, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, req.ForkOperation, err)
+		}, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, forkOperation, err)
 	}
 	admission, err := BuildSelectedContractExecutionAdmission(ctx, SelectedContractExecutionAdmissionRequest{
 		ForkRunID:             materialization.ForkRunID,
@@ -149,7 +166,7 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		DeferredWorkAdmission: deferredWorkAdmission,
 	})
 	if err != nil {
-		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, req.ForkOperation, err)
+		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, prepared.cleanupExecutionFailure(ctx, ports.fork, materialization.ForkRunID, forkOperation, err)
 	}
 	container, err := buildSelectedContractForkLocalRuntimeContainer(ctx, publishSelectedContractForkEventsRequest{
 		OriginalLoopCarriage:  prepared.originalLoopCarriage,

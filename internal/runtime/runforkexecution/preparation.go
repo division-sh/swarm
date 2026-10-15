@@ -338,6 +338,7 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 	prepared.agentRuntime, prepared.readiness = agentRuntime, readiness
 	prepared.deferredWorkAdmission = deferredWorkAdmission
 	prepared.dataPinOverrides = append([]durabledata.ExplicitPin(nil), req.DataPinOverrides...)
+	prepared.forkOperation = forkOperation
 	if req.Recovery != nil {
 		prepared.recoveryFromExecutionID = req.Recovery.ExecutionID
 		prepared.recoveryChildRunID = req.Recovery.RunID

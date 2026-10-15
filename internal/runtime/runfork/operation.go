@@ -103,6 +103,18 @@ func (r ForkOperationRequest) BindResolvedPoint(point RunForkPoint) (ForkOperati
 
 type ForkOperationStatus string
 
+// ForkOperationReplayRequiredError reports a clean materialization abort after
+// the native owner observed the original durable operation. It grants no
+// execution or recovery authority.
+type ForkOperationReplayRequiredError struct {
+	OperationID string
+	ForkRunID   string
+}
+
+func (e *ForkOperationReplayRequiredError) Error() string {
+	return "run.fork invocation requires its original durable operation"
+}
+
 type ForkOperationKeyConflictError struct {
 	OriginalRequestHash    string
 	ConflictingRequestHash string
