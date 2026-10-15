@@ -4685,7 +4685,9 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
-	seedSelectedExecutionDiagnosticPlatformDeadLetter(t, db, sourceRunID, afterEventID, at.Add(time.Second))
+	// Source advancement requires a business event, not excluded diagnostics.
+	seedSelectedExecutionPostForkSourceEvent(t, db, sourceRunID, afterEventID, sourceRunID, at.Add(time.Second))
+	seedSourceOutcomeThatMustNotSuppressFork(t, db, afterEventID, sourceRunID, at.Add(time.Second))
 	if _, _, err := storetest.TerminalizeRun(ctx, pg, storerunlifecycle.TerminalRequest{
 		RunID:   sourceRunID,
 		State:   storerunlifecycle.StateCancelled,
