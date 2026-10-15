@@ -41,7 +41,10 @@ func loadRunForkPointSnapshot(ctx context.Context, tx *sql.Tx, runID string, poi
 		}
 	}
 	snapshot.sort()
-	return snapshot, nil
+	// Resolve construction provenance without expanding the original start's
+	// fact membership to later rows in this run.
+	resolver := capturedConstructionResolver{tx: tx, snapshots: make(map[constructionCut]*runForkRevisionSnapshot), active: make(map[string]bool)}
+	return resolver.resolve(ctx, snapshot)
 }
 
 // Restrict the database read before ranking or decoding; the creating ingress

@@ -19,6 +19,7 @@ import (
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
@@ -519,14 +520,22 @@ func loadExactRunForkMaterialization(
 			if err != nil {
 				return runfork.RunForkMaterialization{}, false, err
 			}
-			if err := pipelinepersistence.RequireSelectedHistoricalWorkflowHeader(ctx, tx, postgres, header); err != nil {
-				return runfork.RunForkMaterialization{}, false, err
-			}
-			receipt, err := ProjectRunForkConstructionReceipt(plan, forkRunID, entity, header.CreatedAt)
+			observedHeader, err := pipelinepersistence.RequireSelectedHistoricalWorkflowHeader(ctx, tx, postgres, header)
 			if err != nil {
 				return runfork.RunForkMaterialization{}, false, err
 			}
-			if err := pipelinepersistence.RequireSelectedHistoricalWorkflowReceipt(ctx, tx, receipt); err != nil {
+			receipt, err := projectRunForkConstructionReceiptTx(ctx, tx, plan, forkRunID, entity, header.CreatedAt)
+			if err != nil {
+				return runfork.RunForkMaterialization{}, false, err
+			}
+			observed, found, err := readProjectedReceiverConstructionReceiptTx(ctx, tx, snapshot, observedHeader)
+			if err != nil {
+				return runfork.RunForkMaterialization{}, false, err
+			}
+			if !found {
+				return runfork.RunForkMaterialization{}, false, fmt.Errorf("exact materialization lacks admitted historical construction")
+			}
+			if err := pipelinepersistence.RequireSelectedHistoricalWorkflowReceipt(ctx, tx, receipt, observed); err != nil {
 				return runfork.RunForkMaterialization{}, false, err
 			}
 		}
@@ -694,7 +703,7 @@ func materializeRunForkEntityState(ctx context.Context, decisions runForkDecisio
 		if header.Identity.RunID != forkRunID || header.Identity.Route.InstancePath != meta.FlowInstance || header.EntityID != entityID || header.EntityType != meta.EntityType {
 			return fmt.Errorf("historical header projection crossed entity ownership")
 		}
-		receipt, err := ProjectRunForkConstructionReceipt(plan, forkRunID, entity, header.CreatedAt)
+		receipt, err := projectRunForkConstructionReceiptTx(ctx, tx, plan, forkRunID, entity, header.CreatedAt)
 		if err != nil {
 			return err
 		}
@@ -788,19 +797,22 @@ func projectRunForkHistoricalFields(sourceRunID, forkRunID, entityID, targetBund
 
 func projectRunForkHistoricalHeader(sourceRunID, forkRunID, entityID, path, targetBundleHash string, entity runfork.RunForkEntityState) (runtimepipeline.WorkflowEngineStateRecord, error) {
 	metadata := entity.MaterializationMetadata
-	receipt, err := runtimepipeline.DecodeStoredFlowConstructionReceipt(metadata.InitialMaterialization,
-		sourceRunID, entity.EntityID, metadata.FlowInstance, metadata.FlowTemplate)
+	route := runtimeflowidentity.StoredRoute(metadata.FlowTemplate, runtimeflowidentity.LogicalInstanceID(metadata.FlowInstance), metadata.FlowInstance)
+	constructed, _, found, err := runforkadmission.FixedConstructionEvidenceForRoute(runfork.RunForkPlan{SourceRunID: sourceRunID, Entities: []runfork.RunForkEntityState{entity}}, route)
 	if err != nil {
 		return runtimepipeline.WorkflowEngineStateRecord{}, err
 	}
-	recorded, err := runtimepipeline.DecodeWorkflowInstanceRecordedHeader(receipt.Identity.Route(), metadata.FlowConfig)
+	if !found {
+		return runtimepipeline.WorkflowEngineStateRecord{}, fmt.Errorf("historical header lacks its captured construction identity")
+	}
+	recorded, err := runtimepipeline.DecodeWorkflowInstanceRecordedHeader(constructed.Route(), metadata.FlowConfig)
 	if err != nil {
 		return runtimepipeline.WorkflowEngineStateRecord{}, err
 	}
-	if recorded.ParentRoute() != receipt.Identity.ParentRoute {
+	if recorded.ParentRoute() != constructed.ParentRoute {
 		return runtimepipeline.WorkflowEngineStateRecord{}, fmt.Errorf("historical header contradicts captured construction ancestry")
 	}
-	identity, err := runfork.ProjectConstructionIdentity(sourceRunID, forkRunID, receipt.Identity)
+	identity, err := runfork.ProjectConstructionIdentity(sourceRunID, forkRunID, constructed)
 	if err != nil {
 		return runtimepipeline.WorkflowEngineStateRecord{}, err
 	}

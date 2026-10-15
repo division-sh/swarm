@@ -49,7 +49,8 @@ func commitWorkflowEngineState(
 				return fmt.Errorf("lock workflow engine state route: %w", err)
 			}
 			if record.Transition.PreservesState() {
-				return requireWorkflowHeaderProjection(ctx, tx, true, record, record.ExpectedRevision)
+				_, err := requireWorkflowHeaderProjection(ctx, tx, true, record, record.ExpectedRevision)
+				return err
 			}
 			written, err = commitPostgresWorkflowEngineState(ctx, tx, record, decision)
 		} else {
@@ -57,7 +58,8 @@ func commitWorkflowEngineState(
 				return err
 			}
 			if record.Transition.PreservesState() {
-				return requireWorkflowHeaderProjection(ctx, tx, false, record, record.ExpectedRevision)
+				_, err := requireWorkflowHeaderProjection(ctx, tx, false, record, record.ExpectedRevision)
+				return err
 			}
 			written, err = commitSQLiteWorkflowEngineState(ctx, tx, record, decision)
 		}

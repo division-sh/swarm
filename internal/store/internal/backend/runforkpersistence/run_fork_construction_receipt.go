@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"reflect"
 	"slices"
 	"time"
 
@@ -12,6 +13,9 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
+	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	lifecycleowner "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/google/uuid"
 )
 
@@ -35,16 +39,15 @@ func runForkConstructionOccurrenceOwed(plan runfork.RunForkPlan, entity runfork.
 	if meta == nil {
 		return false, fmt.Errorf("construction occurrence requires fixed-cut owner metadata")
 	}
-	receipt, err := pipeline.DecodeStoredFlowConstructionReceipt(meta.InitialMaterialization,
-		plan.SourceRunID, entity.EntityID, meta.FlowInstance, meta.FlowTemplate)
-	if err != nil || receipt.CreationEvent == nil {
+	occurrenceID, err := runforkadmission.FixedConstructionOccurrenceID(plan, entity)
+	if err != nil || occurrenceID == "" {
 		return false, err
 	}
 	ids, admitted := plan.HistoricalEventIDs(plan.ForkPoint.Revision)
 	if !admitted {
 		return false, fmt.Errorf("construction occurrence requires admitted fixed-cut event membership")
 	}
-	return !slices.Contains(ids, receipt.CreationEvent.EventID), nil
+	return !slices.Contains(ids, occurrenceID), nil
 }
 
 // ProjectRunForkConstructionReceipt projects immutable initialization from the
@@ -60,6 +63,87 @@ func ProjectRunForkConstructionReceipt(plan runfork.RunForkPlan, forkRunID strin
 		plan.SourceRunID, entity.EntityID, meta.FlowInstance, meta.FlowTemplate)
 	if err != nil {
 		return pipeline.FlowConstructionReceipt{}, err
+	}
+	return projectRunForkConstructionReceipt(plan, forkRunID, entity, born, source)
+}
+
+func projectRunForkConstructionReceiptTx(ctx context.Context, tx *sql.Tx, plan runfork.RunForkPlan, forkRunID string, entity runfork.RunForkEntityState, born time.Time) (pipeline.FlowConstructionReceipt, error) {
+	active := make(map[string]bool)
+	var project func(runfork.RunForkPlan, string, runfork.RunForkEntityState, time.Time) (pipeline.FlowConstructionReceipt, error)
+	project = func(cut runfork.RunForkPlan, child string, state runfork.RunForkEntityState, birth time.Time) (pipeline.FlowConstructionReceipt, error) {
+		if err := ctx.Err(); err != nil {
+			return pipeline.FlowConstructionReceipt{}, err
+		}
+		if active[cut.SourceRunID] {
+			return pipeline.FlowConstructionReceipt{}, fmt.Errorf("historical construction projection has cyclic lineage")
+		}
+		active[cut.SourceRunID] = true
+		defer delete(active, cut.SourceRunID)
+		meta := state.MaterializationMetadata
+		if meta == nil {
+			return pipeline.FlowConstructionReceipt{}, fmt.Errorf("historical projection requires captured construction")
+		}
+		route := flowidentity.StoredRoute(meta.FlowTemplate, flowidentity.LogicalInstanceID(meta.FlowInstance), meta.FlowInstance)
+		if _, _, found, err := runforkadmission.FixedConstructionEvidenceForRoute(runfork.RunForkPlan{SourceRunID: cut.SourceRunID, Entities: []runfork.RunForkEntityState{state}}, route); err != nil || !found {
+			return pipeline.FlowConstructionReceipt{}, fmt.Errorf("historical projection lacks admitted construction: found=%t: %w", found, err)
+		}
+		history := meta.HistoricalConstruction
+		if history == nil {
+			return ProjectRunForkConstructionReceipt(cut, child, state, birth)
+		}
+		origin, err := lifecycleowner.ReadImmutableRunOriginTx(ctx, tx, cut.SourceRunID)
+		if err != nil {
+			return pipeline.FlowConstructionReceipt{}, err
+		}
+		if origin.Kind() != runlifecycle.OriginForkMaterialization || origin.SourceRunID() != history.SourceRunID || origin.ForkRevision() != history.SourceRevision {
+			return pipeline.FlowConstructionReceipt{}, fmt.Errorf("historical construction projection contradicts immutable source origin")
+		}
+		snapshot, err := loadRunForkRevisionSnapshot(ctx, tx, history.SourceRunID, history.SourceRevision)
+		if err != nil {
+			return pipeline.FlowConstructionReceipt{}, err
+		}
+		parent, err := constructionPlanAtSnapshot(snapshot)
+		if err != nil {
+			return pipeline.FlowConstructionReceipt{}, err
+		}
+		var original *runfork.RunForkEntityState
+		for i := range parent.Entities {
+			if parent.Entities[i].EntityID == history.SourceEntity.EntityID {
+				original = &parent.Entities[i]
+			}
+		}
+		if original == nil || !reflect.DeepEqual(*original, history.SourceEntity) {
+			return pipeline.FlowConstructionReceipt{}, fmt.Errorf("historical construction projection has crossed fixed-cut evidence")
+		}
+		source, err := project(parent, cut.SourceRunID, *original, meta.CreatedAt)
+		if err != nil {
+			return pipeline.FlowConstructionReceipt{}, err
+		}
+		return projectRunForkConstructionReceipt(cut, child, state, birth, source)
+	}
+	return project(plan, forkRunID, entity, born)
+}
+
+func constructionPlanAtSnapshot(snapshot *runForkRevisionSnapshot) (runfork.RunForkPlan, error) {
+	entities, err := loadRunForkEntityStates(snapshot)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
+	entities, _, err = attachRunForkMaterializedEntitySnapshotMetadata(snapshot, entities)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
+	plan := runfork.RunForkPlan{SourceRunID: snapshot.RunID, ForkPoint: runfork.RunForkPoint{Revision: snapshot.Revision}, Entities: entities}
+	for _, reply := range snapshot.ReplyContexts {
+		plan.ReplyContexts = append(plan.ReplyContexts, reply.Record)
+	}
+	return plan, nil
+}
+
+func projectRunForkConstructionReceipt(plan runfork.RunForkPlan, forkRunID string, entity runfork.RunForkEntityState, born time.Time, source pipeline.FlowConstructionReceipt) (pipeline.FlowConstructionReceipt, error) {
+	meta := entity.MaterializationMetadata
+	if meta == nil || born.IsZero() || source.RunID != plan.SourceRunID {
+		return pipeline.FlowConstructionReceipt{}, fmt.Errorf("historical projection requires its original source and birth")
 	}
 	identity, err := runfork.ProjectConstructionIdentity(plan.SourceRunID, forkRunID, source.Identity)
 	if err != nil {

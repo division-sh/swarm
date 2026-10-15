@@ -39,7 +39,7 @@ func TestSelectedForkWorkflowOwnerAssociations(t *testing.T) {
 					plan, planning, _, modes, _ := workflowOwnershipProjection(t, source, flow)
 					switch change {
 					case "mixed_static_associations":
-						modes["event-b"] = executionmode.Mock
+						modes[eventtest.UUID("event-b")] = executionmode.Mock
 					case "reordered_associations":
 						planning.RecipientPlanEvents[0], planning.RecipientPlanEvents[1] = planning.RecipientPlanEvents[1], planning.RecipientPlanEvents[0]
 					case "duplicate_entity", "contradictory_entity":
@@ -53,12 +53,12 @@ func TestSelectedForkWorkflowOwnerAssociations(t *testing.T) {
 					case "wrong_entity_type":
 						plan.Entities[0].MaterializationMetadata.EntityType = "foreign"
 					case "missing_event_mode":
-						delete(modes, "event-b")
+						delete(modes, eventtest.UUID("event-b"))
 					}
 					posture := executionposture.Live
 					if change == "mock_process" {
 						posture = executionposture.MockOnly
-						modes["event-a"], modes["event-b"] = executionmode.Mock, executionmode.Mock
+						modes[eventtest.UUID("event-a")], modes[eventtest.UUID("event-b")] = executionmode.Mock, executionmode.Mock
 					} else if change == "missing_process_posture" {
 						posture = ""
 					}
@@ -97,18 +97,18 @@ func TestSelectedForkTemplateGenerationAssociations(t *testing.T) {
 			plan, planning, _, modes, _ := workflowOwnershipProjection(t, source, "consumer")
 			switch change {
 			case "mock":
-				modes["event-a"], modes["event-b"] = executionmode.Mock, executionmode.Mock
+				modes[eventtest.UUID("event-a")], modes[eventtest.UUID("event-b")] = executionmode.Mock, executionmode.Mock
 			case "conflicting_generation":
-				modes["event-b"] = executionmode.Mock
+				modes[eventtest.UUID("event-b")] = executionmode.Mock
 			case "missing_generation":
-				delete(modes, "event-b")
+				delete(modes, eventtest.UUID("event-b"))
 			}
 			got, err := runforkreadiness.Project(plan, source, planning, modes, manager.AgentManagerOptions{ExecutionPosture: executionposture.Live})
 			wantOK := change == "live" || change == "mock"
 			if (err == nil) != wantOK {
 				t.Fatalf("canonical template generation: %v, want acceptance %t", err, wantOK)
 			}
-			if wantOK && (len(got.States) != 1 || got.States[0].ExecutionMode != modes["event-a"]) {
+			if wantOK && (len(got.States) != 1 || got.States[0].ExecutionMode != modes[eventtest.UUID("event-a")]) {
 				t.Fatalf("generation mode lost: %+v", got.States)
 			}
 		})
@@ -501,7 +501,7 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 		other.MaterializationMetadata = &metadata
 		plan.Entities = append(plan.Entities, other)
 	}
-	plan = plan.WithHistoricalEvents(7, []string{"event-a", "event-b"})
+	plan = plan.WithHistoricalEvents(7, []string{eventtest.UUID("event-a"), eventtest.UUID("event-b")})
 	eventName := "outer.requested"
 	producer := eventtest.RootRoutingSource(runID)
 	switch flow {
@@ -523,7 +523,7 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 		origin := workflowOwnershipKeylessInstance(t, source, runID, "branch/producer")
 		producer = eventtest.StaticFlowRoutingSource(origin.TemplateID, origin.InstancePath, origin.EntityID)
 	}
-	for _, eventID := range []string{"event-a", "event-b"} {
+	for _, eventID := range []string{eventtest.UUID("event-a"), eventtest.UUID("event-b")} {
 		target, err := events.NewExistingEntityTarget(events.RouteIdentity{FlowID: flow, FlowInstance: path, EntityID: entityID})
 		if err != nil {
 			t.Fatal(err)
@@ -539,13 +539,13 @@ func workflowOwnershipProjection(t *testing.T, source semanticview.Source, flow 
 	for _, event := range frontier.FrontierEvents {
 		planning.RecipientPlanEvents = append(planning.RecipientPlanEvents, runfork.RunForkSelectedContractRecipientPlanEvent{SourceEventID: event.SourceEventID, EventName: event.EventName, Recipients: event.DerivedRecipients})
 	}
-	state := runfork.RunForkSelectedContractWorkflowState{SourceEventID: "event-a", EntityID: entityID, EntityType: entityType, FlowID: flow, WorkflowVersion: source.WorkflowVersion(), Mode: mode,
-		SourceEvents: []runfork.RunForkSelectedContractWorkflowStateSourceEvent{{SourceEventID: "event-a", ExecutionMode: executionmode.Live}, {SourceEventID: "event-b", ExecutionMode: executionmode.Live}},
+	state := runfork.RunForkSelectedContractWorkflowState{SourceEventID: eventtest.UUID("event-a"), EntityID: entityID, EntityType: entityType, FlowID: flow, WorkflowVersion: source.WorkflowVersion(), Mode: mode,
+		SourceEvents: []runfork.RunForkSelectedContractWorkflowStateSourceEvent{{SourceEventID: eventtest.UUID("event-a"), ExecutionMode: executionmode.Live}, {SourceEventID: eventtest.UUID("event-b"), ExecutionMode: executionmode.Live}},
 		AddressKind:  runfork.RunForkSelectedContractWorkflowStateExact, Route: flowidentity.StoredRoute(flowidentity.ScopeKey(source, flow), flowidentity.LogicalInstanceID(path), path)}
 	if flow == "." {
 		state.AddressKind, state.Route = runfork.RunForkSelectedContractWorkflowStateRunScope, flowidentity.Route{}
 	}
-	return plan, planning, state, map[string]executionmode.Mode{"event-a": executionmode.Live, "event-b": executionmode.Live}, forkID
+	return plan, planning, state, map[string]executionmode.Mode{eventtest.UUID("event-a"): executionmode.Live, eventtest.UUID("event-b"): executionmode.Live}, forkID
 }
 
 func workflowOwnershipKeylessInstance(t *testing.T, source semanticview.Source, runID, flowID string) flowidentity.Instance {

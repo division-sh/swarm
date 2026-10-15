@@ -46,6 +46,11 @@ type ordinaryForkPredecessorFixture struct {
 func newOrdinaryForkPredecessorFixture(t *testing.T, backend string) ordinaryForkPredecessorFixture {
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithAgents(t, backend, false)
+	return newOrdinaryForkPredecessorFixtureForReceiver(t, backend, f)
+}
+
+func newOrdinaryForkPredecessorFixtureForReceiver(t *testing.T, backend string, f receiverConfigActivationFixture) ordinaryForkPredecessorFixture {
+	t.Helper()
 	f.constructKeylessRoot(t)
 	plan := constructHistoricalSourceFixture(t, f.ctx, f.store, f.request("original", "ti-original", "source"))
 	runID := correlation.RunIDFromContext(f.ctx)

@@ -52,7 +52,8 @@ func forkConstructionPlanFixture(t *testing.T, outgoing bool) runfork.RunForkPla
 			MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 				Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 				FlowTemplate: identity.TemplateID, FlowInstance: path, FlowConfig: record.Config, EntityType: "record", Mode: "static",
-				CreatedAt: at, UpdatedAt: at, EnteredStateAt: at, InitialMaterialization: raw,
+				ParentInstance: identity.ParentRoute.FlowInstance,
+				CreatedAt:      at, UpdatedAt: at, EnteredStateAt: at, InitialMaterialization: raw,
 			},
 		}},
 	}).WithHistoricalEvents(1, nil)
@@ -121,6 +122,51 @@ func TestForkConstructionOccurrenceSeparatesOwedFromPublished(t *testing.T) {
 	plan = forkConstructionPlanFixture(t, false)
 	if owed, err := runForkConstructionOccurrenceOwed(plan, plan.Entities[0]); err != nil || owed {
 		t.Fatal("explicit no-output receipt invented publication work")
+	}
+}
+
+func TestForkConstructionOccurrenceUsesRecordedHistoricalLineage(t *testing.T) {
+	plan := forkConstructionPlanFixture(t, true)
+	entity := plan.Entities[0]
+	childRun, born := uuid.NewString(), time.Unix(200, 0).UTC()
+	receipt, err := ProjectRunForkConstructionReceipt(plan, childRun, entity, born)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := *entity.MaterializationMetadata
+	recorded, err := pipeline.DecodeWorkflowInstanceRecordedHeader(receipt.Identity.Route(), metadata.FlowConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata.FlowConfig, err = recorded.Project(receipt.Identity.Route(), receipt.Identity.ParentRoute, recorded.WorkflowVersion())
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata.ParentInstance = receipt.Identity.ParentRoute.FlowInstance
+	metadata.InitialMaterialization = nil
+	metadata.HistoricalConstruction = &runfork.RunForkCapturedHistoricalConstruction{SourceRunID: plan.SourceRunID, SourceRevision: 1, SourceEntity: entity}
+	projected := entity
+	projected.MaterializationMetadata = &metadata
+	history := (runfork.RunForkPlan{SourceRunID: childRun, ForkPoint: plan.ForkPoint, Entities: []runfork.RunForkEntityState{projected}}).WithHistoricalEvents(1, []string{receipt.CreationEvent.EventID})
+	before, err := json.Marshal(history)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owed, err := runForkConstructionOccurrenceOwed(history, projected); err != nil || owed {
+		t.Fatalf("recorded historical output became new construction work: owed=%t err=%v", owed, err)
+	}
+	missing := history.WithHistoricalEvents(1, nil)
+	if owed, err := runForkConstructionOccurrenceOwed(missing, projected); err != nil || !owed {
+		t.Fatalf("recorded but unpublished output lost its exact obligation: owed=%t err=%v", owed, err)
+	}
+	metadata.HistoricalConstruction.SourceRevision = 0
+	if _, err := runForkConstructionOccurrenceOwed(history, projected); err == nil {
+		t.Fatal("missing captured cut became occurrence authority")
+	}
+	metadata.HistoricalConstruction.SourceRevision = 1
+	after, err := json.Marshal(history)
+	if err != nil || !bytes.Equal(before, after) || len(metadata.InitialMaterialization) != 0 {
+		t.Fatal("historical occurrence inspection changed captured evidence")
 	}
 }
 

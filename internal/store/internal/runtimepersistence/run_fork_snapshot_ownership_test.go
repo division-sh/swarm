@@ -291,7 +291,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			for _, phase := range []string{"initial", "exact_replay"} {
 				t.Run(phase, func(t *testing.T) {
-					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type"} {
+					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type", "native_receipt_missing", "native_receipt_version", "native_birth", "native_contract"} {
 						t.Run(invalid, func(t *testing.T) {
 							f := newSnapshotOwnershipFixture(t, backend, false, false)
 							plan := f.plan(t)
@@ -347,6 +347,25 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 							if invalid == "duplicate_type" {
 								fact["entity_type"] = "foreign_type"
 							}
+							switch invalid {
+							case "native_receipt_missing":
+								fact["initial_materialization"] = nil
+							case "native_receipt_version":
+								fact["initial_projection_version"] = 0
+							case "native_birth":
+								fact["created_at"] = f.state.CreatedAt.Add(time.Second)
+							case "native_contract":
+								receipt, err := runtimepipeline.DecodeStoredFlowConstructionReceipt(f.initialMaterialization, f.runID, f.entityID, f.state.Identity.Route.InstancePath, f.state.WorkflowName)
+								if err != nil {
+									t.Fatal(err)
+								}
+								receipt.Persisted.Control.EntityType = "foreign_type"
+								altered, err := runtimepipeline.EncodeFlowConstructionReceipt(receipt)
+								if err != nil {
+									t.Fatal(err)
+								}
+								fact["initial_materialization"] = json.RawMessage(altered)
+							}
 							encoded, err := json.Marshal(fact)
 							if err != nil {
 								t.Fatal(err)
@@ -381,6 +400,17 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 							}
 							before := snapshotOwnershipCounts(t, f, f.runID)
 							got, planErr := f.store.PlanRunFork(f.ctx, runfork.RunForkPlanRequest{SourceRunID: f.runID, At: f.eventID})
+							if strings.HasPrefix(invalid, "native_") {
+								want := "native captured constructor contradicts fixed header birth or field contract"
+								if invalid == "native_receipt_missing" {
+									want = "captured construction lacks its native receipt or proven historical origin"
+								} else if invalid == "native_receipt_version" {
+									want = "native captured header requires its immutable constructor receipt version"
+								}
+								if planErr == nil || planErr.Error() != want {
+									t.Fatalf("native corruption reached the wrong owner: got=%v want=%q", planErr, want)
+								}
+							}
 							if planErr == nil && !runForkTestHasPlanBlocker(got, runfork.RunForkBlockerEntitySnapshotMetadataUnproven) {
 								t.Fatalf("invalid historical metadata admitted: %#v", got)
 							}

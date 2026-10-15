@@ -89,10 +89,11 @@ func runForkReplyPlanFixture(t *testing.T, state replycontext.State, root, field
 	record = record.Normalized()
 	plan := (runfork.RunForkPlan{
 		SourceRunID: sourceRun, ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, EventID: request, Revision: 1},
-		Entities: []runfork.RunForkEntityState{{EntityID: owner.EntityID, CurrentState: "later", Bookkeeping: bookkeeping, Fields: initial.Fields,
+		Entities: []runfork.RunForkEntityState{{EntityID: owner.EntityID, CurrentState: "later", EnteredStateAt: &born, Bookkeeping: bookkeeping, Fields: initial.Fields,
 			MaterializationMetadata: &runfork.RunForkMaterializedEntitySnapshotMetadata{
 				Owner: runfork.RunForkMaterializedEntitySnapshotMetadataOwner, Source: runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 				FlowInstance: owner.InstancePath, FlowTemplate: owner.TemplateID, EntityType: initial.EntityType, FlowConfig: constructed.Config,
+				Mode: initial.Mode, ParentInstance: owner.ParentRoute.FlowInstance,
 				InitialMaterialization: constructed.InitialMaterialization, CreatedAt: born, UpdatedAt: born,
 			}}},
 		ReplyContexts: []replycontext.Record{record},
@@ -108,16 +109,13 @@ func runForkReplyCapturedChildPlan(t *testing.T, source runfork.RunForkPlan, chi
 	}
 	entities := make([]runfork.RunForkEntityState, 0, len(source.Entities))
 	for _, entity := range source.Entities {
+		captured := entity
 		constructor, err := ProjectRunForkConstructionReceipt(source, childRun, entity, time.Unix(200, 0).UTC())
 		if err != nil {
 			t.Fatal(err)
 		}
 		if constructor.CreationEvent != nil {
 			t.Fatal("context-only model fixture cannot carry a construction event")
-		}
-		raw, err := pipeline.EncodeFlowConstructionReceipt(constructor)
-		if err != nil {
-			t.Fatal(err)
 		}
 		metadata := *entity.MaterializationMetadata
 		projection, err := runfork.ProjectEntityOwnership(source.SourceRunID, childRun, entity.EntityID, metadata.FlowInstance)
@@ -130,7 +128,18 @@ func runForkReplyCapturedChildPlan(t *testing.T, source runfork.RunForkPlan, chi
 		}
 		entity.EntityID, entity.Bookkeeping, entity.Accumulator = projection.Fork.EntityID, bookkeeping, accumulator
 		metadata.FlowInstance, metadata.FlowTemplate = constructor.Identity.InstancePath, constructor.Identity.TemplateID
-		metadata.InitialMaterialization = raw
+		sourceRoute := flowidentity.StoredRoute(captured.MaterializationMetadata.FlowTemplate, flowidentity.LogicalInstanceID(captured.MaterializationMetadata.FlowInstance), captured.MaterializationMetadata.FlowInstance)
+		recorded, err := pipeline.DecodeWorkflowInstanceRecordedHeader(sourceRoute, metadata.FlowConfig)
+		if err != nil {
+			t.Fatal(err)
+		}
+		metadata.FlowConfig, err = recorded.Project(constructor.Identity.Route(), constructor.Identity.ParentRoute, recorded.WorkflowVersion())
+		if err != nil {
+			t.Fatal(err)
+		}
+		metadata.ParentInstance = constructor.Identity.ParentRoute.FlowInstance
+		metadata.InitialMaterialization = nil
+		metadata.HistoricalConstruction = &runfork.RunForkCapturedHistoricalConstruction{SourceRunID: source.SourceRunID, SourceRevision: source.ForkPoint.Revision, SourceEntity: captured}
 		entity.MaterializationMetadata = &metadata
 		entities = append(entities, entity)
 	}

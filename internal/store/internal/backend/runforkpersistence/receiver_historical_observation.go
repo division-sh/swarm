@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/google/uuid"
 )
 
@@ -90,6 +89,13 @@ func loadHistoricalFlowInstanceConstructionCutTx(ctx context.Context, tx *sql.Tx
 	metadata, found, err := findProjectedFlowInstanceMetadata(snapshot, run.RunID, instance.StorageRef)
 	if err != nil || !found {
 		return historicalFlowInstanceConstructionCut{}, false, err
+	}
+	born, err := readRunForkReceiverBirthTx(ctx, tx, run.RunID, instance)
+	if err != nil {
+		return historicalFlowInstanceConstructionCut{}, false, err
+	}
+	if !born.Equal(instance.CreatedAt) {
+		return historicalFlowInstanceConstructionCut{}, false, &pipeline.FlowInstanceConstructionCorruption{RunID: run.RunID, FlowID: instance.WorkflowName, InstancePath: instance.StorageRef, Cause: fmt.Errorf("historical header contradicts its original materialization birth")}
 	}
 	state, err := loadRunForkConstructedEntityState(snapshot, metadata.EntityID)
 	if err != nil {
@@ -218,7 +224,7 @@ func readProjectedReceiverConstructionReceiptTx(ctx context.Context, tx *sql.Tx,
 	if err != nil {
 		return pipeline.FlowConstructionReceipt{}, false, err
 	}
-	expected, err := ProjectRunForkConstructionReceipt(plan, run.RunID, *selected, born)
+	expected, err := projectRunForkConstructionReceiptTx(ctx, tx, plan, run.RunID, *selected, born)
 	if err != nil {
 		return pipeline.FlowConstructionReceipt{}, false, err
 	}
@@ -228,9 +234,7 @@ func readProjectedReceiverConstructionReceiptTx(ctx context.Context, tx *sql.Tx,
 		return pipeline.FlowConstructionReceipt{}, false, fmt.Errorf("inspect projected construction receipt: %w", err)
 	}
 	if present {
-		if err := pipelinepersistence.RequireSelectedHistoricalWorkflowReceipt(ctx, tx, expected); err != nil {
-			return pipeline.FlowConstructionReceipt{}, false, fmt.Errorf("receiver has contradictory historical and native construction evidence: %w", err)
-		}
+		return pipeline.FlowConstructionReceipt{}, false, fmt.Errorf("receiver has conflicting native and historical construction evidence")
 	}
 	return expected, true, nil
 }

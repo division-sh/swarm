@@ -98,8 +98,8 @@ func receiverConstructionEvidenceTx(ctx context.Context, tx *sql.Tx, flow flowid
 	if err != nil {
 		return false, err
 	}
-	if projected && recorded && (fixed.Identity != original.Identity || fixed.InstanceKey != original.InstanceKey) {
-		return false, fmt.Errorf("receiver native receipt contradicts fixed historical construction")
+	if projected && recorded {
+		return false, fmt.Errorf("receiver has conflicting native and historical construction evidence")
 	}
 	if recorded {
 		if err := original.ValidateStoredMode(header.Mode); err != nil {

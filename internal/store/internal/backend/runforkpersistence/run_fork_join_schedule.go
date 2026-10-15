@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 )
 
 // These are retained semantic rows, not fresh execution authority. The generic
@@ -138,12 +139,14 @@ func requireRunForkJoinSourceOwner(runID string, entity runfork.RunForkEntitySta
 		metadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance {
 		return fmt.Errorf("fixed-revision arrival arm lacks its exact materialized source owner")
 	}
-	receipt, err := pipeline.DecodeStoredFlowConstructionReceipt(metadata.InitialMaterialization,
-		runID, entity.EntityID, metadata.FlowInstance, metadata.FlowTemplate)
+	route := flowidentity.StoredRoute(metadata.FlowTemplate, flowidentity.LogicalInstanceID(metadata.FlowInstance), metadata.FlowInstance)
+	owner, _, found, err := runforkadmission.FixedConstructionEvidenceForRoute(runfork.RunForkPlan{SourceRunID: runID, Entities: []runfork.RunForkEntityState{entity}}, route)
 	if err != nil {
 		return err
 	}
-	owner := receipt.Identity
+	if !found {
+		return fmt.Errorf("fixed-revision arrival arm lacks its captured construction identity")
+	}
 	if err := entry.RequireOwner(runID, owner.ScopeKey, owner.InstanceID, owner.InstancePath, owner.EntityID, join.Stage()); err != nil {
 		return err
 	}

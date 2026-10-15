@@ -227,7 +227,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return err
 		}
-		workflowStates, err := selectedContractAdmittedWorkflowStates(plan, forkRunID, req.Readiness)
+		workflowStates, err := selectedContractAdmittedWorkflowStates(txctx, tx, plan, forkRunID, req.Readiness)
 		if err != nil {
 			return err
 		}

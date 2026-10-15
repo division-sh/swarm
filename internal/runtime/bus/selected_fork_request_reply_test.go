@@ -57,7 +57,7 @@ func TestIssue642RequestContinuationBindsBeforeCompiledClaim(t *testing.T) {
 	if err != nil || fresh.Equal(expected) {
 		t.Fatal("fresh context retained the same compiled claim")
 	}
-	materialized := pinrouting.MaterializeConnectRoutePlan(plan, pinrouting.ConnectRoutePlanMaterializationInput{})
+	materialized := pinrouting.MaterializeConnectRoutePlan(plan)
 	sourceRoute := events.DeliveryRoute{Recipient: compiled[0].Recipient,
 		Target:  events.MustExistingEntityTarget(events.RouteIdentity{FlowID: materialized.Target.FlowID, FlowInstance: materialized.Target.FlowInstance, EntityID: uuid.NewString()}),
 		Context: resolved[0].Context, ConnectClaim: resolved[0].ConnectClaim}

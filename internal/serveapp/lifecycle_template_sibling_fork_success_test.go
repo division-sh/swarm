@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -396,8 +395,8 @@ func logLifecycleTemplateForkTopology(t *testing.T, family storeselected.RunFork
 		t.Logf("T17_TOPOLOGY_READBACK call=BuildSelectedContractRouteTopology error=%v", err)
 		return
 	}
-	t.Logf("T17_TOPOLOGY_READBACK point=%+v route_history=%+v static=%t dynamic=%t instances=%v proofs=%+v plan_unsupported_cases=%+v route_unsupported_cases=%+v topology_unsupported_cases=%+v",
-		point, plan.RouteHistory, topology.StaticTopologySupported, topology.DynamicTopologySupported, topology.DynamicFlowInstances,
+	t.Logf("T17_TOPOLOGY_READBACK point=%+v static=%t dynamic=%t instances=%v proofs=%+v plan_unsupported_cases=%+v route_unsupported_cases=%+v topology_unsupported_cases=%+v",
+		point, topology.StaticTopologySupported, topology.DynamicTopologySupported, topology.DynamicFlowInstances,
 		topology.DynamicTopologyProofs, plan.UnsupportedBlockers, routes.UnsupportedBlockers, topology.UnsupportedBlockers)
 	t.Logf("T17_TOPOLOGY_FRONTIER events=%+v", frontier.FrontierEvents)
 	t.Logf("T17_TOPOLOGY_PENDING count=%d work=%+v inputs=%+v", plan.PendingWorkCount, plan.PendingWork, plan.HistoricalInputCoordinates())
@@ -413,15 +412,6 @@ func logLifecycleTemplateForkTopology(t *testing.T, family storeselected.RunFork
 	}
 	for _, instance := range instances {
 		t.Logf("T17_SOURCE_CONSTRUCTOR instance=%+v", instance)
-		identity, err := flowidentity.NewRunScopedFlowInstance(plan.SourceRunID, instance.Route())
-		if err != nil {
-			t.Logf("T17_TOPOLOGY_READBACK call=NewRunScopedFlowInstance error=%v", err)
-			return
-		}
-		if err := table.AddFlowInstanceRoute(bus.FlowInstanceRouteMaterializationRequest{Identity: identity, Instance: instance}); err != nil {
-			t.Logf("T17_TOPOLOGY_READBACK call=RouteTable.AddFlowInstanceRoute error=%v", err)
-			return
-		}
 	}
 	for _, entity := range plan.Entities {
 		t.Logf("T17_SOURCE_CONSTRUCTOR_ENTITY entity=%s fields=%+v materialization=%+v", entity.EntityID, entity.Fields, entity.MaterializationMetadata)
@@ -447,11 +437,23 @@ func logLifecycleTemplateForkTopology(t *testing.T, family storeselected.RunFork
 			if !receiver.RequiresRuntimeResolution() {
 				continue
 			}
+			var definitions []pinrouting.ConnectRecipientRegistration
+			for _, instance := range instances {
+				if instance.TemplateID != receiver.ReceiverEndpoint().Readback().FlowID {
+					continue
+				}
+				bound, err := table.ConnectReceiverDefinitions(plan.SourceRunID, instance)
+				if err != nil {
+					t.Logf("T17_TOPOLOGY_READBACK call=RouteTable.ConnectReceiverDefinitions error=%v", err)
+					return
+				}
+				definitions = append(definitions, bound...)
+			}
 			// Fail-closed runtime resolution has no admitted target. Observe
 			// that evaluator state, not a guessed child from the census.
-			evaluation := table.EvaluateConnectPlan(plan.SourceRunID, receiver, nil)
+			evaluation := graph.EvaluateMaterializedRecipients(receiver, nil, definitions)
 			ledger, err := evaluation.Ledger()
-			t.Logf("T17_RECEIVER_CALL call=RouteTable.EvaluateConnectPlan event=%s receiver=%+v input_targets=nil matched=%t requires_runtime_resolution=%t recipients=%d error=%v",
+			t.Logf("T17_RECEIVER_CALL call=CompiledConnectGraph.EvaluateMaterializedRecipients event=%s receiver=%+v input_targets=nil matched=%t requires_runtime_resolution=%t recipients=%d error=%v",
 				event.SourceEventID, receiver.Readback(), evaluation.Matched(), evaluation.RequiresRuntimeResolution(), len(evaluation.Recipients()), err)
 			for _, outcome := range ledger.Plans() {
 				t.Logf("T17_RECEIVER_CASE plan=%s resolution=%s targets=%+v candidates=%+v", outcome.PlanIdentity(), outcome.Resolution().Code(), outcome.Targets(), outcome.Candidates())

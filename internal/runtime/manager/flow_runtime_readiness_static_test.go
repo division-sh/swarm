@@ -216,6 +216,8 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 		}
 	}
 	requireStaticReadinessCalls(t, calls, "VerifyDynamicFlowRuntimeActivationAttempt", map[string]int{
+		// The gateway proves the same exact current attachment before publication.
+		"activation_gateway.go":            1,
 		"committed_agent_attachment.go":    1,
 		"dynamic_flow_activation_owner.go": 2,
 		"flow_readiness_startup.go":        1,

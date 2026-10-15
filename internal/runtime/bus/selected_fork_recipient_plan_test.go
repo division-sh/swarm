@@ -85,8 +85,8 @@ func TestSelectedForkRecipientPlanConsumesCompiledHandlerEventProjection(t *test
 		t.Fatal("fixture lacks its actual compiled connection")
 	}
 	plan := graph.Plans()[0]
-	registrations := table.connectRecipientAdmissionsForRun(busInternalTestRunID)
-	materialized := pinrouting.MaterializeConnectRoutePlan(plan, pinrouting.ConnectRoutePlanMaterializationInput{})
+	registrations := table.ConnectDeclarationDefinitions(plan.ReceiverEndpoint().Readback().FlowID)
+	materialized := pinrouting.MaterializeConnectRoutePlan(plan)
 	evaluation := graph.EvaluateMaterializedRecipients(plan, []events.RouteIdentity{materialized.Target}, registrations)
 	if _, err := evaluation.Ledger(); err != nil || len(evaluation.Recipients()) == 0 {
 		t.Fatalf("canonical graph control has no receiver: %+v err=%v", evaluation.Recipients(), err)

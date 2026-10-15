@@ -38,6 +38,7 @@ func requireSelectedControlInstanceReaders(t *testing.T, owner SelectedContractE
 				p.pipelineObligations, p.manager, p.managerRoles, p.effects, p.completion,
 				p.completionHeartbeat, p.liveSessions, p.managedCapabilities, p.budget, p.logs,
 				p.decisionCards, p.proposedEffects, p.humanTasks, p.decisionCardDraftExpiry, p.humanTaskExpiry,
+				p.candidates, p.genericSchedules,
 			)
 			want := "selected-contract execution requires event " + role
 			if err == nil || err.Error() != want {
