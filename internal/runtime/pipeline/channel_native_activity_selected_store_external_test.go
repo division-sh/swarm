@@ -9,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	contracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	sessionexecution "github.com/division-sh/swarm/internal/sessionprovider/execution"
 	"github.com/google/uuid"
 )
@@ -19,9 +18,7 @@ func TestNativeActivityWithoutOriginalActivationJournalsRefusalBothStores(t *tes
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected, closeStore, reopen := openActivityReplayStore(t, backend)
-			ctx := testAuthorActivityContext(t, context.Background())
 			runID := uuid.NewString()
-			requireActivityReplayRun(t, ctx, selected, runID)
 			tool := contracts.MustToolSchemaEntry(
 				contracts.WithToolHandler(contracts.ToolHandlerInProcess),
 				contracts.WithToolCategory("provider_connector"),
@@ -29,7 +26,8 @@ func TestNativeActivityWithoutOriginalActivationJournalsRefusalBothStores(t *tes
 				contracts.WithToolEffect(contracts.ActivityEffectClassNonIdempotentWrite),
 				contracts.WithToolSchemas(contracts.MustToolInputSchema(contracts.ToolSchemaObject), contracts.MustToolInputSchema(contracts.ToolSchemaObject)),
 			)
-			source := semanticview.Wrap(&contracts.WorkflowContractBundle{Tools: map[string]contracts.ToolSchemaEntry{"provider_write": tool}})
+			source := activityJournalProofSource(t, map[string]contracts.ToolSchemaEntry{"provider_write": tool})
+			ctx := requireActivityReplayRun(t, selected, source, runID)
 			var selectedSDK atomic.Int32
 			options := pipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source},
 				NativeChannelExecution: func(context.Context, channelonboarding.CompiledActivation) (sessionexecution.Channel, error) {
@@ -39,7 +37,7 @@ func TestNativeActivityWithoutOriginalActivationJournalsRefusalBothStores(t *tes
 			bus := newActivityJournalProofBus(t, selected, source)
 			pc := newGateRecoveryCoordinator(bus, selected, options)
 			intent := pipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString())
-			seedSelectedActivitySource(t, ctx, selected, intent)
+			intent = seedSelectedActivitySource(t, ctx, selected, pc, intent)
 			if err := pipeline.ExecuteActivityIntentForTest(ctx, pc, nil, intent); err != nil {
 				t.Fatal(err)
 			}
