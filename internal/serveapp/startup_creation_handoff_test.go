@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
-	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -97,10 +96,13 @@ func TestComposedStartupCreationPublicationHandoffOnBothStores(t *testing.T) {
 				ctx, cancel := context.WithCancel(context.Background())
 				defer cancel()
 				stores := openStandingRuntimeContextStore(t, backend, "startup-creation-handoff")
-				cfg, err := config.Load(writeServeRuntimeTestConfig(t))
+				loadedConfig, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{
+					RepoRoot: repoRootForTest(), ExplicitPath: writeServeRuntimeTestConfig(t),
+				})
 				if err != nil {
 					t.Fatal(err)
 				}
+				cfg := loadedConfig.Config
 				cfg.Runtime.RecoveryOnStartup = true
 				stubServeRuntimeWorkspaceLifecycle(t)
 				process := worklifetime.NewProcess()
