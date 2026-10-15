@@ -1120,8 +1120,9 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 	if _, survives := spec.CLIConfigFile.SharedNonAPIKeys["paths.platform_spec_path"]; survives {
 		t.Fatalf("retired platform spec key remains shared: %#v", spec.CLIConfigFile.SharedNonAPIKeys)
 	}
-	if got := spec.CLIConfigFile.RejectedKeys["paths.platform_spec_path"]; got != config.PlatformSpecPathConfigRemediation {
-		t.Fatalf("platform spec teaching = %q, want %q", got, config.PlatformSpecPathConfigRemediation)
+	const teaching = "`paths.platform_spec_path` at <file>:<line>:<col> is not a config key; the platform spec is embedded in `swarm`."
+	if got := spec.CLIConfigFile.RejectedKeys["paths.platform_spec_path"]; got != teaching {
+		t.Fatalf("platform spec teaching = %q, want %q", got, teaching)
 	}
 	for _, key := range []string{"serve.api_listen_addr", "serve.mcp_listen_addr"} {
 		if !strings.Contains(spec.CLIConfigFile.SharedNonAPIKeys[key], "listener_topology_v2_1.source_precedence") {

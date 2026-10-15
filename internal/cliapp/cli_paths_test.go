@@ -110,7 +110,7 @@ func TestResolveCLISourcePlatformSpecPathsRejectsConfigOverrideBeforeExplicitOpt
 	_, err := ResolveCLISourcePlatformSpecPaths(t.TempDir(), CLISourcePlatformSpecPathOptions{
 		ConfigPath: path, PlatformSpecPath: "explicit.yaml",
 	})
-	if err == nil || !strings.Contains(err.Error(), `unknown config key "paths.platform_spec_path"`) || !strings.Contains(err.Error(), path) {
+	if err == nil || !strings.Contains(err.Error(), "`paths.platform_spec_path` at "+path+":2:3 is not a config key; the platform spec is embedded in `swarm`.") {
 		t.Fatalf("explicit selection bypassed invalid config admission: %v", err)
 	}
 }

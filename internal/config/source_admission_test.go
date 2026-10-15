@@ -94,7 +94,12 @@ func TestConfigSourceRejectsExcludedDeclaredFieldsBeforeProjection(t *testing.T)
 						if !ok || !strings.Contains(diagnostic.Problem, key) || slices.Contains(diagnostic.ValidOptions, key) || !slices.Contains(diagnostic.ValidOptions, row.supported) || diagnostic.Location.File != file || diagnostic.Location.Line == 0 || diagnostic.Location.Column == 0 {
 							t.Fatalf("excluded field admitted or misdiagnosed: error=%v diagnostic=%#v", err, diagnostic)
 						}
-						if !strings.Contains(err.Error(), "Valid fields:") || strings.Contains(err.Error(), "RETIRED") {
+						if row.path == "paths.platform_spec_path" {
+							want := fmt.Sprintf("`paths.platform_spec_path` at <config>:%d:%d is not a config key; the platform spec is embedded in `swarm`.", diagnostic.Location.Line, diagnostic.Location.Column)
+							if err.Error() != want || diagnostic.Remediation != "" {
+								t.Fatalf("embedded-spec refusal differs from ruling6197217312: %v", err)
+							}
+						} else if !strings.Contains(err.Error(), "Valid fields:") || strings.Contains(err.Error(), "RETIRED") {
 							t.Fatalf("not current-vocabulary rejection: %v", err)
 						}
 					}
@@ -115,7 +120,6 @@ func TestConfigSourceRejectsExcludedDeclaredFieldsBeforeProjection(t *testing.T)
 }
 
 func TestConfigPlatformSpecOverrideRefusalTeachesEmbeddedDefault(t *testing.T) {
-	const teaching = "the platform spec is embedded in the binary; to run against a different spec, pass it with the command's explicit flag"
 	for _, source := range []string{
 		"paths:\n  platform_spec_path: elsewhere.yaml\n",
 		"paths:\n  platform_spec_path: null\n",
@@ -127,8 +131,12 @@ func TestConfigPlatformSpecOverrideRefusalTeachesEmbeddedDefault(t *testing.T) {
 			got := before
 			err := decodeConfigSourceTest(source, &got)
 			diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err)
-			if !ok || diagnostic.Remediation != teaching || diagnostic.Location.Line != 2 || diagnostic.Location.Column == 0 || slices.Contains(diagnostic.ValidOptions, "platform_spec_path") {
+			if !ok || diagnostic.Remediation != "" || diagnostic.Location.Line != 2 || diagnostic.Location.Column == 0 || slices.Contains(diagnostic.ValidOptions, "platform_spec_path") {
 				t.Fatalf("missing exact typed retirement teaching/location: error=%v diagnostic=%#v", err, diagnostic)
+			}
+			want := fmt.Sprintf("`paths.platform_spec_path` at <config>:2:%d is not a config key; the platform spec is embedded in `swarm`.", diagnostic.Location.Column)
+			if err.Error() != want {
+				t.Fatalf("refusal = %q, want %q", err.Error(), want)
 			}
 			if !reflect.DeepEqual(got, before) {
 				t.Fatal("refused config mutated the projection target")
