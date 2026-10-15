@@ -222,3 +222,30 @@ func TestSelectedDeploymentForkRequiresDurableInvocationBeforeMutationBothStores
 		})
 	}
 }
+
+func TestSelectedForkLatestPreparationRetainsCapturedSelectorBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			ctx, seeded := forkWorkflowOwnershipRequest(t, fixture, backend.name == "postgres")
+			request := prepareSelectedStoreMaterializationForTest(t, ctx, fixture.store, seeded.SourceRunID, "", seeded.ContractSelection)
+			point := request.Preparation.ForkPoint
+			if point.EventID != request.At || point.Input == request.At {
+				t.Fatalf("fixture did not distinguish captured latest from concrete event: point=%+v at=%q", point, request.At)
+			}
+			owner := fixture.store.(forkWorkflowOwnershipStore)
+			child, err := owner.MaterializeRunForkForSelectedContractExecution(ctx, request)
+			if err != nil || child.ForkRunID == "" || child.ForkPoint != point {
+				t.Fatalf("materialization changed the already captured latest selector: child=%+v point=%+v err=%v", child, point, err)
+			}
+			before := historicalContextDatabaseRows(t, fixture.db, backend.name == "postgres")
+			hostile := request
+			hostile.At = uuid.NewString()
+			if got, err := owner.MaterializeRunForkForSelectedContractExecution(ctx, hostile); err == nil || got.ForkRunID != "" ||
+				!strings.Contains(err.Error(), "selector differs from its captured fork point") {
+				t.Fatalf("foreign request selector bypassed captured point: child=%+v err=%v", got, err)
+			}
+			historicalContextRequireUnchanged(t, before, historicalContextDatabaseRows(t, fixture.db, backend.name == "postgres"))
+		})
+	}
+}
