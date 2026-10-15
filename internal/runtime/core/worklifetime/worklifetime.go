@@ -37,6 +37,7 @@ type gate struct {
 	transientDrained  chan struct{}
 	ctx               context.Context
 	cancel            context.CancelCauseFunc
+	m25Traces         []*m25LeaseTrace
 }
 
 func newGate(parent context.Context) *gate {
@@ -61,6 +62,7 @@ type Lease struct {
 	transient        bool
 	publicCompletion bool
 	settled          bool
+	m25Trace         *m25LeaseTrace
 }
 
 type acceptedLeaseContextKey struct{}
@@ -152,10 +154,12 @@ func (g *gate) beginOwned(parent context.Context, transient bool, ancestor *Leas
 		}
 		g.activeTransient++
 	}
+	trace := newM25LeaseTrace(transient, publicCompletion)
+	g.m25Traces = append(g.m25Traces, trace)
 	g.mu.Unlock()
 
 	ctx, cancel := context.WithCancelCause(parent)
-	lease := &Lease{gate: g, ctx: ctx, cancel: cancel, transient: transient, publicCompletion: publicCompletion}
+	lease := &Lease{gate: g, ctx: ctx, cancel: cancel, transient: transient, publicCompletion: publicCompletion, m25Trace: trace}
 	lease.ctx = context.WithValue(ctx, acceptedLeaseContextKey{}, lease)
 	lease.stop = context.AfterFunc(g.ctx, func() {
 		cancel(ErrRetired)
@@ -196,6 +200,9 @@ func (l *Lease) Done() error {
 		settleErr = errors.New("work lease has no occurrence owner")
 	} else {
 		g.mu.Lock()
+		if l.m25Trace != nil {
+			l.m25Trace.finish()
+		}
 		if g.active == 0 {
 			settleErr = errors.New("work occurrence accounting underflow")
 		} else {
@@ -304,6 +311,7 @@ func (g *gate) waitClass(ctx context.Context, transientOnly bool) error {
 	if g == nil {
 		return nil
 	}
+	defer g.reportM25LeaseTraces(transientOnly)
 	if ctx == nil {
 		ctx = context.Background()
 	}
