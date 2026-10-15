@@ -21,17 +21,23 @@ import (
 
 func TestSelectedOperationReplayRetainsPinsAfterResourceHeadAdvanceBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) { proveSelectedPinnedOperationReplay(t, backend, 1) })
+		t.Run(backend, func(t *testing.T) { proveSelectedPinnedOperationReplay(t, backend, 1, true) })
+	}
+}
+
+func TestSelectedOperationFreshPinFeedsSettleBeforeExactReplayBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) { proveSelectedPinnedOperationReplay(t, backend, 1, false) })
 	}
 }
 
 func TestSelectedOperationEmptyPinnedFeedActivatesAndReplaysBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		t.Run(backend, func(t *testing.T) { proveSelectedPinnedOperationReplay(t, backend, 0) })
+		t.Run(backend, func(t *testing.T) { proveSelectedPinnedOperationReplay(t, backend, 0, true) })
 	}
 }
 
-func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int) {
+func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int, recover bool) {
 	t.Helper()
 	ctx, request := ownerlessSelectedOperationFixtureFromSource(t, backend, canonicalrouting.CopySelectedOperationPinnedResource(t), "fixture.seed.requested")
 	loader := request.SourceLoader.(SourceArtifactSelectedContractSourceLoader)
@@ -64,9 +70,12 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int) 
 	}
 	pins := []durabledata.ExplicitPin{{Declaration: ref, VersionID: original.Candidate.VersionID}}
 	request.ForkOperation.DataPinOverrides, request.DataPinOverrides = pins, slices.Clone(pins)
-	materialized := abandonSelectedOperationPreparation(t, ctx, request)
-	if len(materialized.DataPins) != 1 || materialized.DataPins[0].VersionID != original.Candidate.VersionID || materialized.DataPins[0].Declaration != ref {
-		t.Fatalf("pin proof did not materialize its exact nonempty selection: %+v", materialized.DataPins)
+	var materialized runfork.RunForkMaterialization
+	if recover {
+		materialized = abandonSelectedOperationPreparation(t, ctx, request)
+		if len(materialized.DataPins) != 1 || materialized.DataPins[0].VersionID != original.Candidate.VersionID || materialized.DataPins[0].Declaration != ref {
+			t.Fatalf("pin proof did not materialize its exact nonempty selection: %+v", materialized.DataPins)
+		}
 	}
 	if rows > 0 {
 		command.SourceInvocationID, command.ExpectedHead, command.Input = uuid.NewString(), durabledata.VersionHead(original.Candidate.VersionID), bytes.Repeat([]byte("{\"account_id\":\"new-head\"}\n"), rows+1)
@@ -75,10 +84,18 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int) 
 			t.Fatalf("resource head did not genuinely advance: %+v err=%v", advanced, err)
 		}
 	}
-	duplicate := *request.ForkOperation
-	duplicate.OperationID = uuid.NewString()
-	request.ForkOperation = &duplicate
+	if recover {
+		duplicate := *request.ForkOperation
+		duplicate.OperationID = uuid.NewString()
+		request.ForkOperation = &duplicate
+	}
 	result, err := ExecuteSelectedContractRunFork(ctx, request)
+	if !recover {
+		materialized = result.Materialization
+		if len(materialized.DataPins) != 1 || materialized.DataPins[0].VersionID != original.Candidate.VersionID || materialized.DataPins[0].Declaration != ref {
+			t.Fatalf("fresh execution did not retain its exact explicit pin: %+v err=%v", materialized.DataPins, err)
+		}
+	}
 	if err != nil || !result.Activation.Activated || result.Materialization.ForkRunID != materialized.ForkRunID ||
 		!slices.Equal(result.Materialization.DataPins, materialized.DataPins) {
 		t.Fatalf("recovered operation adopted the new resource head: %+v err=%v", result, err)
@@ -149,6 +166,20 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int) 
 			t.Fatalf("actual pinned row did not settle through its exact receiver: deliveries=%+v err=%v", deliveries, err)
 		}
 	}
+	request.Owner.ports.contexts.mu.Lock()
+	var runtime *selectedContractAgentRuntime
+	for _, entry := range request.Owner.ports.contexts.entries {
+		if entry.binding.ForkRunID == materialized.ForkRunID && entry.retained != nil {
+			runtime = entry.retained.retainedRuntime
+		}
+	}
+	request.Owner.ports.contexts.mu.Unlock()
+	if runtime == nil {
+		t.Fatal("exact root receiver retired before replay without terminal business work")
+	}
+	if err := runtime.WaitForQuiescence(ctx, runtime.bus); err != nil {
+		t.Fatalf("join actual receiver/publication work before the replay baseline: %v", err)
+	}
 	before, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, loader.Store)
 	if err != nil {
 		t.Fatal(err)
@@ -164,6 +195,11 @@ func proveSelectedPinnedOperationReplay(t *testing.T, backend string, rows int) 
 	}
 	after, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, loader.Store)
 	if err != nil || !reflect.DeepEqual(before, after) {
+		for table, previous := range before {
+			if !reflect.DeepEqual(previous, after[table]) {
+				t.Logf("replay table delta %s: before=%+v after=%+v", table, previous, after[table])
+			}
+		}
 		t.Fatalf("activated pin replay mutated durable state: %v", err)
 	}
 	if err := request.Owner.RetireSelectedContexts(ctx); err != nil {
