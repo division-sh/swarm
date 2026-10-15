@@ -64,9 +64,9 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 			}
 			switch store := selected.(type) {
 			case *PostgresStore:
-				result.Construction, err = store.pipelinePostgresOwner.CommitConversationForkConstructionForTest(ctx, attempt, fixture.Construction.Parent, fixture.Construction.Child)
+				result.Construction, err = store.pipelinePostgresOwner.CommitFixedForkConstructionForTest(ctx, attempt, fixture.Construction.Parent, fixture.Construction.Child, input)
 			case *SQLiteRuntimeStore:
-				result.Construction, err = store.pipelineSQLiteOwner.CommitConversationForkConstructionForTest(ctx, attempt, fixture.Construction.Parent, fixture.Construction.Child)
+				result.Construction, err = store.pipelineSQLiteOwner.CommitFixedForkConstructionForTest(ctx, attempt, fixture.Construction.Parent, fixture.Construction.Child, input)
 			}
 			if err != nil {
 				return err
