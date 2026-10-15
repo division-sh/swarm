@@ -8,13 +8,15 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, cut := range []string{"launched", "settled"} {
 			t.Run(string(backend)+"/"+cut, func(t *testing.T) {
-				h, db, hash := startChannelAnchorJourney(t, backend, "ack-crash-token", false)
+				h, _, hash := startChannelAnchorJourney(t, backend, "ack-crash-token", false)
+				reader := channelProcessStorageObservation(t, h)
 				waitSelectedChannelDeliverySendsSettled(t, channelSettlementStorageObservation(t, h))
 				h.stop(t)
 				t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
@@ -67,7 +69,7 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 				} else {
 					waitChannelAnchorDecision(t, channelAnchorStorageObservation(t, h), card)
 				}
-				operation := waitChannelAcknowledgmentAttempt(t, db, cut)
+				operation := waitChannelAcknowledgmentAttempt(t, reader, cut)
 				before := len(h.provider.Acknowledgments())
 				if err := intentReader.Close(); err != nil {
 					t.Fatal(err)
@@ -88,7 +90,7 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 				if cut == "launched" {
 					want = "outcome_uncertain"
 				}
-				if after := waitChannelAcknowledgmentAttempt(t, db, want); after != operation {
+				if after := waitChannelAcknowledgmentAttempt(t, reader, want); after != operation {
 					t.Fatal("restart replaced original acknowledgment operation")
 				}
 				waitChannelAnchorDecision(t, channelAnchorStorageObservation(t, h), card)
@@ -118,18 +120,16 @@ func TestChannelActionAcknowledgmentAbruptProcessDeathPublicJourney(t *testing.T
 	}
 }
 
-func waitChannelAcknowledgmentAttempt(t *testing.T, db *sql.DB, want string) string {
+func waitChannelAcknowledgmentAttempt(t *testing.T, reader storetest.ChannelProcessObservation, want string) string {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		var operation, state string
-		err := db.QueryRow(`SELECT CAST(o.operation_id AS TEXT),a.state FROM runtime_external_effect_operations o
-			JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id WHERE o.authority_kind='channel_action_ack'`).Scan(&operation, &state)
-		if err == nil && state == want {
-			return operation
+		observed, err := reader.ReadChannelAcknowledgmentAttemptStorage(context.Background())
+		if err == nil && observed.State == want {
+			return observed.OperationID
 		}
 		if err != nil && err != sql.ErrNoRows || time.Now().After(deadline) {
-			t.Fatalf("ACK attempt state=%s want=%s err=%v", state, want, err)
+			t.Fatalf("ACK attempt state=%s want=%s err=%v", observed.State, want, err)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

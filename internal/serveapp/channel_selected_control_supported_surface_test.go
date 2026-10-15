@@ -6,12 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/google/uuid"
 )
 
 // This is a downstream admission proof, not a public selected-fork creation
@@ -22,8 +20,10 @@ func TestChannelSelectedForkInputBoundaryMatrix(t *testing.T) {
 		for _, mode := range []string{"plain", "quoted", "chosen", "skip"} {
 			for _, partial := range []bool{true, false} {
 				t.Run(fmt.Sprintf("%s/%s/partial=%t", backend, mode, partial), func(t *testing.T) {
+					var selected any
+					captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected = p.deps.EventStore })
 					root := canonicalrouting.CopyChannelLearnedObjectOptionalInputJourney(t, partial)
-					h, db, p, _, hash := startObjectChannelJourney(t, backend, root, telegramPhraseBotLLMRuntime{}, "")
+					h, _, p, _, hash := startObjectChannelJourney(t, backend, root, telegramPhraseBotLLMRuntime{}, "")
 					card, receipt, reject := beginObjectInputCard(t, h, p, hash, 0)
 					firstCard := card
 					postObjectInputAction(t, p, "selected-input-begin", receipt, reject)
@@ -42,23 +42,7 @@ func TestChannelSelectedForkInputBoundaryMatrix(t *testing.T) {
 						waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "selected-retained-answer"), "chooser")
 						_, chooser = waitObjectRequestedResponse(t, channelSettlementStorageObservation(t, h), "selected-retained-answer")
 						token = firstObjectDraftChoice(t, p, chooser)
-						var raw []byte
-						var renderHash string
-						var position int
-						if err := db.QueryRow(`SELECT r.render_input,r.render_hash,a.action_position
-							FROM channel_delivery_actions a JOIN channel_delivery_renders r ON r.render_id=a.render_id
-							WHERE a.action_token=$1`, token).Scan(&raw, &renderHash, &position); err != nil {
-							t.Fatal(err)
-						}
-						raw, err := canonicaljson.Canonicalize(raw)
-						if err != nil {
-							t.Fatal(err)
-						}
-						frozen, err := channeldelivery.Decode(raw, renderHash)
-						if err != nil {
-							t.Fatal(err)
-						}
-						card = frozen.DraftChoices[position-1].CardID
+						card = objectChannelChoiceCard(t, channelProcessStorageObservation(t, h), token)
 						if other == card {
 							other = firstCard
 						}
@@ -76,22 +60,18 @@ func TestChannelSelectedForkInputBoundaryMatrix(t *testing.T) {
 					}(); err != nil {
 						t.Fatal(err)
 					}
-					conn, err := db.Conn(context.Background())
+					fault, err := storetest.CaptureChannelInputBindingFaultForTest(context.Background(), selected, runID)
 					if err != nil {
 						t.Fatal(err)
 					}
-					if backend == servedparity.BackendDefaultSQLite {
-						if _, err := conn.ExecContext(context.Background(), `PRAGMA busy_timeout=5000`); err != nil {
-							t.Fatal(err)
+					t.Cleanup(func() {
+						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer cancel()
+						if err := fault.RestoreForTest(ctx); err != nil {
+							t.Error(err)
 						}
-					}
-					_, err = conn.ExecContext(context.Background(), `INSERT INTO run_fork_selected_contract_bindings
-						(binding_id,fork_run_id,source_run_id,fork_point_kind,fork_revision,mode,created_at)
-						VALUES ($1,$2,$2,'deployment_revision',1,'selected_contracts',$3)`, uuid.NewString(), runID, time.Now().UTC())
-					if closeErr := conn.Close(); closeErr != nil {
-						t.Fatal(closeErr)
-					}
-					if err != nil {
+					})
+					if err := fault.InstallForTest(context.Background()); err != nil {
 						t.Fatal(err)
 					}
 					if mode == "skip" {

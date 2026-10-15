@@ -18,14 +18,15 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		for _, cut := range []string{"launched", "settled"} {
 			t.Run(string(backend)+"/"+cut, func(t *testing.T) {
-				h, db, hash := startChannelAnchorJourney(t, backend, "delivery-crash-token", false)
+				h, _, hash := startChannelAnchorJourney(t, backend, "delivery-crash-token", false)
+				reader := channelProcessStorageObservation(t, h)
 				waitSelectedChannelDeliverySendsSettled(t, channelSettlementStorageObservation(t, h))
 				h.stop(t)
 				t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
 				first := startChannelOnboardingCrashServeProcess(t, h.opts, h.telegram.URL)
 				h.endpoint = first.endpoint(t)
-				var standingRun string
-				if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&standingRun); err != nil {
+				standingRun, err := reader.ReadChannelCurrentStandingRunStorage(context.Background())
+				if err != nil {
 					t.Fatal(err)
 				}
 				standingCard := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), standingRun, decisioncard.AnchorKindStageGate, "telegram-ingress")
@@ -47,18 +48,12 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 							t.Error("creating publication did not acknowledge the review run")
 							return false
 						}
-						var runID, raw string
-						err := db.QueryRow(`SELECT CAST(card.run_id AS TEXT),CAST(card.anchor AS TEXT)
-							FROM channel_delivery_actions action
-							JOIN channel_delivery_renders render ON render.render_id=action.render_id
-							JOIN channel_delivery_plans plan ON plan.delivery_id=render.delivery_id
-							JOIN decision_cards card ON card.card_id=plan.source_id
-							WHERE action.action_token=$1`, token).Scan(&runID, &raw)
+						observed, err := reader.ReadChannelProcessActionCardStorage(context.Background(), token)
 						if err != nil {
 							t.Errorf("resolve actual provider control: %v", err)
 							return false
 						}
-						anchor, err := decisioncard.DecodeAnchor(string(decisioncard.AnchorKindStageGate), []byte(raw))
+						anchor, err := decisioncard.DecodeAnchor(string(decisioncard.AnchorKindStageGate), []byte(observed.Anchor))
 						if err != nil {
 							t.Errorf("decode actual provider control anchor: %v", err)
 							return false
@@ -68,7 +63,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 							t.Errorf("resolve actual provider control scope: %v", err)
 							return false
 						}
-						return runID == seedRunID && scope.FlowInstance == "reviews"
+						return observed.RunID == seedRunID && scope.FlowInstance == "reviews"
 					})
 					t.Cleanup(release)
 				}
@@ -93,7 +88,7 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 				if cut == "launched" {
 					state = "launched"
 				}
-				operation, render := waitChannelDeliveryProcessAttempt(t, db, backend, card, state)
+				operation, render := waitChannelDeliveryProcessAttempt(t, reader, card, state)
 				var input, renderHash string
 				if err := func() error {
 					observed, err := channelSettlementStorageObservation(t, h).ReadChannelRenderStorage(context.Background(), render)
@@ -128,17 +123,12 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 				if cut == "launched" {
 					want = "outcome_uncertain"
 				}
-				waitChannelDeliveryProcessAttempt(t, db, backend, card, want)
-				var actualOperation, afterInput, afterHash, planState, receiptState, current string
-				if err := db.QueryRow(`SELECT CAST(r.effect_operation_id AS TEXT),p.state,r.state,COALESCE(CAST(p.current_receipt_operation_id AS TEXT),'')
-					FROM channel_delivery_plans p JOIN channel_delivery_receipts r ON r.delivery_id=p.delivery_id AND r.effect_operation_id=$2
-					WHERE p.source_id=$1`, card, operation).Scan(&actualOperation, &planState, &receiptState, &current); err != nil {
-					var retainedState, retainedCurrent string
-					var receipts int
-					readErr := db.QueryRow(`SELECT p.state,COALESCE(CAST(p.current_receipt_operation_id AS TEXT),''),
-						(SELECT COUNT(*) FROM channel_delivery_receipts WHERE effect_operation_id=$2)
-						FROM channel_delivery_plans p WHERE p.source_id=$1`, card, operation).Scan(&retainedState, &retainedCurrent, &receipts)
-					t.Fatalf("exact recovered receipt missing: cut=%s operation=%s want_attempt=%s plan=%s current=%s receipts=%d read=%v join=%v\n%s", cut, operation, want, retainedState, retainedCurrent, receipts, readErr, err, second.output.String())
+				waitChannelDeliveryProcessAttempt(t, reader, card, want)
+				var afterInput, afterHash string
+				recovered, err := reader.ReadChannelProcessRecoveredReceiptStorage(context.Background(), card, operation)
+				if err != nil {
+					retained, readErr := reader.ReadChannelProcessRetainedReceiptStorage(context.Background(), card, operation)
+					t.Fatalf("exact recovered receipt missing: cut=%s operation=%s want_attempt=%s plan=%s current=%s receipts=%d read=%v join=%v\n%s", cut, operation, want, retained.PlanState, retained.CurrentOperationID, retained.Receipts, readErr, err, second.output.String())
 				}
 				if err := func() error {
 					observed, err := channelSettlementStorageObservation(t, h).ReadChannelRenderStorage(context.Background(), render)
@@ -154,8 +144,8 @@ func TestChannelDeliveryAbruptProcessDeathPublicJourney(t *testing.T) {
 					wantReceipt = "uncertain"
 					wantCurrent = ""
 				}
-				if actualOperation != operation || current != wantCurrent || planState != wantReceipt || receiptState != wantReceipt || afterInput != input || afterHash != renderHash {
-					t.Fatalf("restart changed exact frozen delivery/receipt: op=%s want=%s plan=%s receipt=%s", actualOperation, operation, planState, receiptState)
+				if recovered.OperationID != operation || recovered.CurrentOperationID != wantCurrent || recovered.PlanState != wantReceipt || recovered.ReceiptState != wantReceipt || afterInput != input || afterHash != renderHash {
+					t.Fatalf("restart changed exact frozen delivery/receipt: op=%s want=%s plan=%s receipt=%s", recovered.OperationID, operation, recovered.PlanState, recovered.ReceiptState)
 				}
 				if count := channelDeliveryCountForToken(h.provider, token); count != before {
 					t.Fatalf("startup replayed a %s delivery: before=%d after=%d", cut, before, count)
@@ -199,28 +189,19 @@ func channelDeliveryCountForToken(provider *channelOnboardingTelegramProvider, t
 	}
 }
 
-func waitChannelDeliveryProcessAttempt(t *testing.T, db *sql.DB, backend servedparity.Backend, card, state string) (string, string) {
+func waitChannelDeliveryProcessAttempt(t *testing.T, reader storetest.ChannelProcessObservation, card, state string) (string, string) {
 	t.Helper()
-	evidence := "json_extract(o.authority_evidence,'$.delivery_id')=p.delivery_id"
-	if backend == servedparity.BackendExplicitPostgres {
-		evidence = "o.authority_evidence->>'delivery_id'=CAST(p.delivery_id AS TEXT)"
-	}
-	query := `SELECT CAST(o.operation_id AS TEXT),p.current_render_id,a.state
-		FROM channel_delivery_plans p JOIN runtime_external_effect_operations o ON ` + evidence + `
-		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
-		WHERE p.source_id=$1 AND o.authority_kind='channel_delivery'`
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		var operation, render, actual string
-		err := db.QueryRow(query, card).Scan(&operation, &render, &actual)
+		observed, err := reader.ReadChannelDeliveryProcessAttemptStorage(context.Background(), card)
 		if err != nil && err != sql.ErrNoRows {
 			t.Fatal(err)
 		}
-		if err == nil && actual == state {
-			return operation, render
+		if err == nil && observed.State == state {
+			return observed.OperationID, observed.RenderID
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("delivery card=%s attempt=%s, want=%s: %v", card, actual, state, err)
+			t.Fatalf("delivery card=%s attempt=%s, want=%s: %v", card, observed.State, state, err)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

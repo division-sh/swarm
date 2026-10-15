@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *testing.T) {
@@ -20,7 +21,9 @@ func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *test
 			previousLog := log.Writer()
 			log.SetOutput(io.MultiWriter(previousLog, workerLog))
 			defer log.SetOutput(previousLog)
-			h, db, bundleHash := startChannelAnchorJourney(t, backend, "scan-token", false)
+			var selected any
+			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) { selected = p.deps.EventStore })
+			h, _, bundleHash := startChannelAnchorJourney(t, backend, "scan-token", false)
 			var cards [2]string
 			var messages [2]int
 			for index := range cards {
@@ -30,25 +33,18 @@ func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *test
 			}
 			injectionCtx, cancelInjection := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancelInjection()
-			conn, err := db.Conn(injectionCtx)
+			fault, err := storetest.CaptureChannelCurrentRenderFaultForTest(injectionCtx, selected, cards[0])
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer conn.Close()
-			if backend == servedparity.BackendDefaultSQLite {
-				if _, err := conn.ExecContext(injectionCtx, `PRAGMA busy_timeout=5000`); err != nil {
-					t.Fatal(err)
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := fault.RestoreForTest(ctx); err != nil {
+					t.Errorf("restore original current render before joined serve teardown: %v", err)
 				}
-			}
-			result, err := conn.ExecContext(injectionCtx, `UPDATE channel_delivery_renders SET render_input='{}'
-				WHERE render_id IN (SELECT current_render_id FROM channel_delivery_plans WHERE source_id=$1)`, cards[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			if rows, err := result.RowsAffected(); err != nil || rows != 1 {
-				t.Fatalf("fault did not address one actual frozen render: rows=%d err=%v", rows, err)
-			}
-			if err := conn.Close(); err != nil {
+			})
+			if err := fault.InstallForTest(injectionCtx); err != nil {
 				t.Fatal(err)
 			}
 			var deferred map[string]any
@@ -67,10 +63,9 @@ func TestChannelDeliveryCompiledRenderFailureDoesNotStarveReceiptUpdates(t *test
 				}
 				time.Sleep(20 * time.Millisecond)
 			}
-			var state, status string
-			if err := db.QueryRow(`SELECT p.state,c.status FROM channel_delivery_plans p
-				JOIN decision_cards c ON c.card_id=p.source_id WHERE p.source_id=$1`, cards[0]).Scan(&state, &status); err != nil || state != "sent" || status != "pending" {
-				t.Fatalf("corrupt render gained new authority: state=%s status=%s err=%v", state, status, err)
+			observed, err := channelProcessStorageObservation(t, h).ReadChannelPlanCardStateStorage(context.Background(), cards[0])
+			if err != nil || observed.State != "sent" || observed.Status != "pending" {
+				t.Fatalf("corrupt render gained new authority: state=%s status=%s err=%v", observed.State, observed.Status, err)
 			}
 		})
 	}

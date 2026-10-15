@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/http"
 	"os"
@@ -83,15 +82,7 @@ func TestChannelNativeEntryDispositionsPublicJourney(t *testing.T) {
 						t.Fatalf("operator entry leaked business events: %v", names)
 					}
 				}
-				driver := "sqlite"
-				if backend == servedparity.BackendExplicitPostgres {
-					driver = "postgres"
-				}
-				db, err := sql.Open(driver, h.storeDSN)
-				if err != nil {
-					t.Fatal(err)
-				}
-				defer db.Close()
+				reader := channelProcessStorageObservation(t, h)
 				// Every occurrence is admitted by verified ingress. SQL below is observation only.
 				for index := int64(0); index < 201; index++ {
 					send(825100+index, 8593, fmt.Sprintf("/unknown_%03d", index))
@@ -106,9 +97,8 @@ func TestChannelNativeEntryDispositionsPublicJourney(t *testing.T) {
 				waitNativeIntentCount(t, channelSettlementStorageObservation(t, h), "entry_rejected", rejectedCount)
 				send(825100, 8593, "/unknown_000", http.StatusOK)
 				waitNativeIntentCount(t, channelSettlementStorageObservation(t, h), "entry_rejected", rejectedCount)
-				var forbiddenPlans int
-				if err := db.QueryRow(`SELECT COUNT(*) FROM channel_delivery_plans p JOIN operator_channel_text_intents i
-					ON p.source_id=i.publication_id WHERE i.disposition='entry_rejected'`).Scan(&forbiddenPlans); err != nil || forbiddenPlans != 0 {
+				forbiddenPlans, err := reader.CountChannelRejectedIntentPlansStorage(context.Background())
+				if err != nil || forbiddenPlans != 0 {
 					t.Fatalf("rejection granted response authority: plans=%d err=%v", forbiddenPlans, err)
 				}
 				scope := map[string]any{"type": "chat", "chat_id": fmt.Sprint(chat)}

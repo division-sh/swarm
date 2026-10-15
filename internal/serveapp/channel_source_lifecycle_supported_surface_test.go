@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/channelnative"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -32,6 +33,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					deliveryReader = p.deps.DeliveryStore.SummarizeRun
 				})
 				h, db, hash := startChannelAnchorJourney(t, backend, "source-lifecycle-token", false)
+				storage := channelProcessStorageObservation(t, h)
 				intentIdentity := captureChannelIntentIdentity(t, h)
 				var standingRun string
 				if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&standingRun); err != nil {
@@ -47,7 +49,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					t.Fatal("source-lifecycle card lacks frozen control")
 				}
 				waitSelectedChannelDeliverySendsSettled(t, channelSettlementStorageObservation(t, h))
-				frozen := readChannelSourceHistory(t, db, card)
+				frozen := readChannelSourceHistory(t, storage, card)
 				var originalSource []byte
 				if err := func() error {
 					var err error
@@ -132,11 +134,11 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 							t.Fatalf("reset history proof has no settled %s: count=%d err=%v", table, count, err)
 						}
 					}
-					beforeNative := readChannelNativeHistory(t, db)
-					beforeHistory := readChannelPreservedHistory(t, db)
+					beforeNative := readChannelNativeHistory(t, storage)
+					beforeHistory := readChannelPreservedHistory(t, storage)
 					writes := len(h.provider.CommandWrites())
 					dry := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", map[string]any{"dry_run": true, "include_source_artifacts": clear, "idempotency_key": uuid.NewString()})
-					if dry.Error != nil || readChannelNativeHistory(t, db) != beforeNative || readChannelPreservedHistory(t, db) != beforeHistory {
+					if dry.Error != nil || readChannelNativeHistory(t, storage) != beforeNative || readChannelPreservedHistory(t, storage) != beforeHistory {
 						t.Fatalf("dry-run changed native identity or populated history: %+v", dry.Error)
 					}
 					params := map[string]any{"include_source_artifacts": clear, "idempotency_key": uuid.NewString()}
@@ -199,17 +201,17 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 							time.Sleep(20 * time.Millisecond)
 						}
 					}
-					afterNative := readChannelNativeHistory(t, db)
+					afterNative := readChannelNativeHistory(t, storage)
 					wantNative := beforeNative
 					wantNative[3], wantNative[7] = "retired", "retired"
 					if afterNative != wantNative {
 						t.Fatalf("reset altered native identity: before=%v after=%v", beforeNative, afterNative)
 					}
-					requireChannelPreservedHistory(t, db, beforeHistory, successorPlan)
+					requireChannelPreservedHistory(t, storage, beforeHistory, successorPlan)
 					if got := len(h.provider.CommandWrites()); got != writes {
 						t.Fatalf("reset wrote native settings: count %d -> %d", writes, got)
 					}
-					if replay := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", params); replay.Error != nil || readChannelNativeHistory(t, db) != afterNative {
+					if replay := requestServedJSONRPC(t, h.rpcEndpoint(), "runtime.nuke", params); replay.Error != nil || readChannelNativeHistory(t, storage) != afterNative {
 						t.Fatalf("reset replay changed native history: %+v", replay.Error)
 					}
 					postChannelSourceControl(t, callback, signing, card, token, messageID)
@@ -243,7 +245,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 					}
 					h.stop(t)
 					h.start(t)
-					if readChannelNativeHistory(t, db) != afterNative || len(h.provider.CommandWrites()) != writes {
+					if readChannelNativeHistory(t, storage) != afterNative || len(h.provider.CommandWrites()) != writes {
 						t.Fatal("restart revived retired native consumers or replayed installation")
 					}
 					if !clear {
@@ -400,7 +402,7 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 						t.Fatal("child refusal or normal-run control mutated the frozen parent card")
 					}
 				}
-				if after := readChannelSourceHistory(t, db, card); after != frozen {
+				if after := readChannelSourceHistory(t, storage, card); after != frozen {
 					t.Fatal("source lifecycle changed historical receipt/render evidence")
 				}
 			})
@@ -408,9 +410,9 @@ func TestChannelSourceLifecyclePublicJourney(t *testing.T) {
 	}
 }
 
-func requireChannelPreservedHistory(t *testing.T, db *sql.DB, beforeHistory, successorPlan string) {
+func requireChannelPreservedHistory(t *testing.T, reader storetest.ChannelProcessObservation, beforeHistory, successorPlan string) {
 	t.Helper()
-	afterHistory := readChannelPreservedHistory(t, db)
+	afterHistory := readChannelPreservedHistory(t, reader)
 	afterHistory, err := channelHistoryWithoutSuccessorPlan(afterHistory, successorPlan)
 	if err != nil {
 		t.Fatal(err)
@@ -514,13 +516,10 @@ func TestChannelSourceLifecycleHistoryPreservation(t *testing.T) {
 	}
 }
 
-func readChannelNativeHistory(t *testing.T, db *sql.DB) [8]string {
+func readChannelNativeHistory(t *testing.T, reader storetest.ChannelProcessObservation) [8]string {
 	t.Helper()
-	var row [8]string
-	if err := db.QueryRow(`SELECT s.setting_id,CAST(s.generation AS TEXT),s.install_operation_id,s.state,
-		COALESCE(s.readback_hash,''),CAST(s.desired_commands AS TEXT),c.activation_id,c.state
-		FROM channel_native_settings s JOIN channel_native_setting_consumers c ON c.setting_id=s.setting_id
-		ORDER BY c.updated_at LIMIT 1`).Scan(&row[0], &row[1], &row[2], &row[3], &row[4], &row[5], &row[6], &row[7]); err != nil {
+	row, err := reader.ReadChannelNativeHistoryStorage(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
 	return row
@@ -528,52 +527,30 @@ func readChannelNativeHistory(t *testing.T, db *sql.DB) [8]string {
 
 // Mutable retirement and qualification metadata are deliberately not compared
 // as immutable evidence. Each historical identity and frozen artifact is.
-func readChannelPreservedHistory(t *testing.T, db *sql.DB) string {
+func readChannelPreservedHistory(t *testing.T, reader storetest.ChannelProcessObservation) string {
 	t.Helper()
-	queries := []string{
-		`SELECT * FROM operator_principals ORDER BY principal_id`,
-		`SELECT * FROM operator_channel_operations ORDER BY operation_id`,
-		`SELECT * FROM operator_channel_bindings ORDER BY interface_key`,
-		`SELECT principal_id,interface_key,binding_revision,delivery_epoch,external_account_reference,conversation_reference,conversation_scope,state,first_operation_id FROM channel_delivery_defaults`,
-		`SELECT setting_id,provider,resource_slot_id,conversation_reference,scope_kind,member_reference,language_code,pack_id,pack_version,pack_manifest_hash,entry_contract_hash,entry_command,desired_commands,principal_id,generation,install_operation_id,readback_hash,created_at FROM channel_native_settings ORDER BY setting_id`,
-		`SELECT setting_id,activation_id,activation_revision,interface_key,binding_revision,context_publication_generation FROM channel_native_setting_consumers ORDER BY activation_id`,
-		`SELECT CAST(delivery_id AS TEXT),source_kind,CAST(source_id AS TEXT),request_activation_id,summary_count,principal_id,interface_key,binding_revision,delivery_epoch,external_account_reference,conversation_reference,conversation_scope,action_capacity,text_capacity,label_capacity,resend_generation,resend_of_delivery_id,resend_action_publication_id,created_at FROM channel_delivery_plans ORDER BY delivery_id`,
-		`SELECT * FROM channel_delivery_renders ORDER BY render_id`,
-		`SELECT * FROM channel_delivery_receipts ORDER BY effect_operation_id`,
-		`SELECT * FROM channel_delivery_actions ORDER BY action_token`,
-		`SELECT * FROM operator_channel_claim_receipts ORDER BY publication_id`,
-		`SELECT * FROM operator_channel_action_intents ORDER BY publication_id`,
-		`SELECT * FROM operator_channel_text_intents ORDER BY publication_id`,
-		`SELECT * FROM runtime_external_effect_operations WHERE effect_kind IN ('channel_delivery','channel_native_setting','channel_action_ack') ORDER BY operation_id`,
-		`SELECT a.* FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE o.effect_kind IN ('channel_delivery','channel_native_setting','channel_action_ack') ORDER BY a.attempt_id`,
+	queries := []func(context.Context) ([][]any, error){
+		reader.ReadChannelPreservedPrincipalsStorage,
+		reader.ReadChannelPreservedOperationsStorage,
+		reader.ReadChannelPreservedBindingsStorage,
+		reader.ReadChannelPreservedDefaultsStorage,
+		reader.ReadChannelPreservedSettingsStorage,
+		reader.ReadChannelPreservedConsumersStorage,
+		reader.ReadChannelPreservedPlansStorage,
+		reader.ReadChannelPreservedRendersStorage,
+		reader.ReadChannelPreservedReceiptsStorage,
+		reader.ReadChannelPreservedActionsStorage,
+		reader.ReadChannelPreservedClaimReceiptsStorage,
+		reader.ReadChannelPreservedActionIntentsStorage,
+		reader.ReadChannelPreservedTextIntentsStorage,
+		reader.ReadChannelPreservedEffectOperationsStorage,
+		reader.ReadChannelPreservedEffectAttemptsStorage,
 	}
 	var snapshots [][][]any
-	for _, query := range queries {
-		rows, err := db.Query(query)
+	for index, query := range queries {
+		snapshot, err := query(context.Background())
 		if err != nil {
-			t.Fatalf("history query %s: %v", query, err)
-		}
-		columns, err := rows.Columns()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var snapshot [][]any
-		for rows.Next() {
-			values := make([]any, len(columns))
-			dest := make([]any, len(columns))
-			for i := range values {
-				dest[i] = &values[i]
-			}
-			if err := rows.Scan(dest...); err != nil {
-				t.Fatal(err)
-			}
-			snapshot = append(snapshot, values)
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatal(err)
-		}
-		if err := rows.Close(); err != nil {
-			t.Fatal(err)
+			t.Fatalf("history query %d: %v", index, err)
 		}
 		snapshots = append(snapshots, snapshot)
 	}
@@ -584,15 +561,12 @@ func readChannelPreservedHistory(t *testing.T, db *sql.DB) string {
 	return string(body)
 }
 
-func readChannelSourceHistory(t *testing.T, db *sql.DB, card string) string {
-	var render, receipt string
-	if err := db.QueryRow(`SELECT CAST(r.render_input AS TEXT),CAST(c.provider_reference AS TEXT)
-		FROM channel_delivery_plans p JOIN channel_delivery_receipts c ON c.delivery_id=p.delivery_id
-		JOIN channel_delivery_renders r ON r.render_id=c.render_id
-		WHERE p.source_id=$1 AND c.state='sent' ORDER BY c.settled_at LIMIT 1`, card).Scan(&render, &receipt); err != nil {
+func readChannelSourceHistory(t *testing.T, reader storetest.ChannelProcessObservation, card string) string {
+	observed, err := reader.ReadChannelSourceHistoryStorage(context.Background(), card)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return render + "\n" + receipt
+	return observed.Render + "\n" + observed.Receipt
 }
 
 func postChannelSourceControl(t *testing.T, callback, signing, card, token string, messageID int) int {

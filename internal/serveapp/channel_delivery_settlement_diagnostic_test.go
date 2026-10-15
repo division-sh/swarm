@@ -203,17 +203,17 @@ func readChannelDeliveryDiagnosticRows(ctx context.Context, db *sql.DB, query st
 func TestChannelDeliverySettlementDiagnosticBothStores(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		t.Run(string(backend), func(t *testing.T) {
-			h, db, _ := startChannelAnchorJourney(t, backend, "settlement-diagnostic-token", false)
-			var runID string
-			if err := db.QueryRow(`SELECT current_run_id FROM standing_services WHERE current_run_id IS NOT NULL`).Scan(&runID); err != nil {
+			h, _, _ := startChannelAnchorJourney(t, backend, "settlement-diagnostic-token", false)
+			reader := channelProcessStorageObservation(t, h)
+			runID, err := reader.ReadChannelCurrentStandingRunStorage(context.Background())
+			if err != nil {
 				t.Fatal(err)
 			}
 			card := waitChannelAnchorCard(t, channelAnchorStorageObservation(t, h), runID, "stage_gate", "telegram-ingress")
 			waitChannelAnchorReceipt(t, channelAnchorStorageObservation(t, h), card)
 			waitSelectedChannelDeliverySendsSettled(t, channelSettlementStorageObservation(t, h))
-			var deliveryID string
-			if err := db.QueryRow(`SELECT CAST(delivery_id AS TEXT) FROM channel_delivery_plans
-				WHERE current_receipt_operation_id IS NOT NULL ORDER BY created_at LIMIT 1`).Scan(&deliveryID); err != nil {
+			deliveryID, err := reader.ReadChannelFirstReceiptedDeliveryStorage(context.Background())
+			if err != nil {
 				t.Fatal(err)
 			}
 			evidence, err := readSelectedChannelDeliverySettlementDiagnostic(context.Background(), channelSettlementStorageObservation(t, h), deliveryID)

@@ -46,17 +46,7 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 				t.Cleanup(func() {
 					h.stop(t)
 				})
-				driver := "sqlite"
-				if backend == servedparity.BackendExplicitPostgres {
-					driver = "postgres"
-				}
-				db, err := sql.Open(driver, h.storeDSN)
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() {
-					_ = db.Close()
-				})
+				reader := channelProcessStorageObservation(t, h)
 				var begun channelonboarding.Result
 				requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.onboarding_start", map[string]any{"provider": "mock", "verb": "connect", "provider_credential": "object-provider-secret", "save_proof": true, "client_language": "fr"}, &begun)
 				if begun.IdentityOperation == nil {
@@ -184,7 +174,7 @@ func TestChannelLearnedObjectPublicJourney(t *testing.T) {
 					}
 				}
 				proveObjectChannelRecovery(t, h, provider, scope, command, identity.SourceArtifacts[0].BundleHash, postAction)
-				proveObjectChannelRebindRetirement(t, h, db, provider, scope, command, begun.Operation.OperationID)
+				proveObjectChannelRebindRetirement(t, h, reader, provider, scope, command, begun.Operation.OperationID)
 				provider.mu.Lock()
 				defer provider.mu.Unlock()
 				for _, input := range provider.calls["/v2/edit"] {
@@ -265,7 +255,7 @@ func proveObjectChannelRecovery(t *testing.T, h *channelOnboardingE2EHarness, p 
 	}
 }
 
-func proveObjectChannelRebindRetirement(t *testing.T, h *channelOnboardingE2EHarness, db *sql.DB, p *objectChannelProvider, scope, oldCommand, oldOperation string) {
+func proveObjectChannelRebindRetirement(t *testing.T, h *channelOnboardingE2EHarness, reader storetest.ChannelProcessObservation, p *objectChannelProvider, scope, oldCommand, oldOperation string) {
 	t.Helper()
 	var begun channelonboarding.Result
 	requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.onboarding_start", map[string]any{
@@ -332,15 +322,15 @@ func proveObjectChannelRebindRetirement(t *testing.T, h *channelOnboardingE2EHar
 		}
 	}
 	p.mu.Unlock()
-	var retained string
-	if err := db.QueryRow(`SELECT conversation_reference FROM connected_channel_activations WHERE operation_id=$1`, oldOperation).Scan(&retained); err != nil || retained != `{"room":"queue-a"}` {
+	retained, err := reader.ReadChannelActivationConversationStorage(context.Background(), oldOperation)
+	if err != nil || retained != `{"room":"queue-a"}` {
 		t.Fatalf("rebind changed retained predecessor source: %s %v", retained, err)
 	}
 	requireServedJSONRPCResult(t, h.rpcEndpoint(), "channel.unbind", map[string]any{
 		"interface": ready.Operation.Interface.Selector, "expected_revision": ready.Binding.Revision, "idempotency_key": "object-unbind",
 	}, &result)
-	var current int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM connected_channel_activations WHERE status='current'`).Scan(&current); err != nil || current != 0 {
+	current, err := reader.CountChannelCurrentActivationsStorage(context.Background())
+	if err != nil || current != 0 {
 		t.Fatalf("unbind retained execution authority: %d %v", current, err)
 	}
 	closeObjectIntentObservation(t, p)

@@ -36,6 +36,7 @@ type declaration struct {
 
 func main() {
 	generate := flag.Bool("ports", false, "generate the finite approved selected-observation ports")
+	processPorts := flag.Bool("process-ports", false, "generate only the approved borrowed process observation role")
 	rewrite := flag.Bool("rewrite", false, "validate the whole signed caller transformation")
 	write := flag.Bool("write", false, "write the whole checked caller candidate")
 	history := flag.Bool("history", false, "compose the finite signed source/history stage")
@@ -45,6 +46,10 @@ func main() {
 	}
 	if *generate {
 		generatePorts()
+		return
+	}
+	if *processPorts {
+		generateProcessPorts()
 		return
 	}
 	root, err := os.Getwd()

@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"net/http"
 	"sync"
@@ -14,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestChannelInputAuthorityRestartPublicJourney(t *testing.T) {
@@ -28,7 +28,8 @@ func TestChannelInputAuthorityRestartPublicJourney(t *testing.T) {
 
 func proveChannelInputAuthorityRestart(t *testing.T, backend servedparity.Backend, change string) {
 	t.Helper()
-	h, db, p, command, hash := startObjectChannelInputJourney(t, backend, false)
+	h, _, p, command, hash := startObjectChannelInputJourney(t, backend, false)
+	reader := channelProcessStorageObservation(t, h)
 	closeObjectIntentObservation(t, p)
 	h.stop(t)
 	t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
@@ -50,8 +51,8 @@ func proveChannelInputAuthorityRestart(t *testing.T, backend servedparity.Backen
 	}
 	_, chooser := waitObjectRequestedResponse(t, channelSettlementStorageObservation(t, h), "authority-answer")
 	token := firstObjectDraftChoice(t, p, chooser)
-	var operationID string
-	if err := db.QueryRow(`SELECT operation_id FROM connected_channel_activations WHERE status='current'`).Scan(&operationID); err != nil {
+	operationID, err := reader.ReadChannelCurrentActivationOperationStorage(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
 	old := getChannelOnboardingRPC(t, h, operationID)
@@ -168,7 +169,8 @@ func TestChannelInputAbruptProcessDeathPublicJourney(t *testing.T) {
 func proveChannelInputCommitDeath(t *testing.T, backend servedparity.Backend, mode string, partial bool) {
 	t.Helper()
 	root := canonicalrouting.CopyChannelLearnedObjectOptionalInputJourney(t, partial)
-	h, db, p, _, hash := startObjectChannelJourney(t, backend, root, telegramPhraseBotLLMRuntime{}, "")
+	h, _, p, _, hash := startObjectChannelJourney(t, backend, root, telegramPhraseBotLLMRuntime{}, "")
+	reader := channelProcessStorageObservation(t, h)
 	closeObjectIntentObservation(t, p)
 	h.stop(t)
 	t.Setenv("TEST_CHANNEL_ONBOARDING_RETAIN_RUNS", "1")
@@ -188,7 +190,7 @@ func proveChannelInputCommitDeath(t *testing.T, backend servedparity.Backend, mo
 		waitObjectChannelDisposition(t, p.intentReader, objectIntentQuery(p.intentIdentity, channeldelivery.IntentText, "crash-answer"), "chooser")
 		_, actionReceipt = waitObjectRequestedResponse(t, channelSettlementStorageObservation(t, h), "crash-answer")
 		action = firstObjectDraftChoice(t, p, actionReceipt)
-		selected := objectChannelChoiceCard(t, db, action)
+		selected := objectChannelChoiceCard(t, channelProcessStorageObservation(t, h), action)
 		if selected == otherCard {
 			card, otherCard = otherCard, card
 			receipt = waitObjectCardReceipt(t, channelSettlementStorageObservation(t, h), card)
@@ -213,7 +215,7 @@ func proveChannelInputCommitDeath(t *testing.T, backend servedparity.Backend, mo
 		t.Fatal("committed input never reached the real provider edit-response barrier")
 	}
 	waitChannelInputCommitDispositions(t, p, mode, partial)
-	assertChannelInputCommit(t, db, card, mode, partial)
+	assertChannelInputCommit(t, reader, card, mode, partial)
 	committed := selectedChannelDraftState(t, channelSettlementStorageObservation(t, h), card)
 	beforeACK, beforeEdit := objectChannelCallCounts(p)
 	closeObjectIntentObservation(t, p)
@@ -228,7 +230,7 @@ func proveChannelInputCommitDeath(t *testing.T, backend servedparity.Backend, mo
 	h.endpoint = second.endpoint(t)
 	p.intentReader = openChannelAnchorObservation(t, h)
 	waitChannelInputCommitDispositions(t, p, mode, partial)
-	assertChannelInputCommit(t, db, card, mode, partial)
+	assertChannelInputCommit(t, reader, card, mode, partial)
 	if after := selectedChannelDraftState(t, channelSettlementStorageObservation(t, h), card); after != committed {
 		t.Fatalf("restart reinterpreted committed input: %v / %v", committed, after)
 	}
@@ -238,7 +240,7 @@ func proveChannelInputCommitDeath(t *testing.T, backend servedparity.Backend, mo
 		postObjectChannelFact(t, p, "crash-input-action", map[string]any{"token": action, "cursor": "crash-input-action", "message": map[string]any{"id": actionReceipt}})
 	}
 	waitChannelInputCommitDispositions(t, p, mode, partial)
-	assertChannelInputCommit(t, db, card, mode, partial)
+	assertChannelInputCommit(t, reader, card, mode, partial)
 	if mode == "chosen" {
 		if after := selectedChannelDraftState(t, channelSettlementStorageObservation(t, h), otherCard); after != unrelated {
 			t.Fatal("chosen input consumed the unrelated draft")
@@ -275,24 +277,20 @@ func waitChannelInputCommitDispositions(t *testing.T, p *objectChannelProvider, 
 	}
 }
 
-func assertChannelInputCommit(t *testing.T, db *sql.DB, card, mode string, partial bool) {
+func assertChannelInputCommit(t *testing.T, reader storetest.ChannelProcessObservation, card, mode string, partial bool) {
 	t.Helper()
-	var index, decisions int
-	var draftStatus, cardStatus, draftFields, cardFields string
-	if err := db.QueryRow(`SELECT d.next_field_index,d.status,c.status,CAST(d.input_fields AS TEXT),CAST(c.fields AS TEXT),
-		(SELECT COUNT(*) FROM events e WHERE e.run_id=c.run_id AND e.event_name='mailbox.card_decided')
-		FROM decision_card_input_drafts d JOIN decision_cards c ON c.card_id=d.card_id WHERE c.card_id=$1`, card).
-		Scan(&index, &draftStatus, &cardStatus, &draftFields, &cardFields, &decisions); err != nil {
+	observed, err := reader.ReadChannelInputCommitStorage(context.Background(), card)
+	if err != nil {
 		t.Fatal(err)
 	}
 	wantDraft, wantCard, wantIndex, wantDecisions := "consumed", "decided", 0, 1
-	fields := cardFields
+	fields := observed.CardFields
 	if partial {
 		wantDraft, wantCard, wantIndex, wantDecisions = "active", "pending", 1, 0
-		fields = draftFields
+		fields = observed.DraftFields
 	}
-	if index != wantIndex || draftStatus != wantDraft || cardStatus != wantCard || decisions != wantDecisions {
-		t.Fatalf("non-atomic input commit: index=%d draft=%s card=%s events=%d", index, draftStatus, cardStatus, decisions)
+	if observed.Index != wantIndex || observed.DraftStatus != wantDraft || observed.CardStatus != wantCard || observed.Decisions != wantDecisions {
+		t.Fatalf("non-atomic input commit: index=%d draft=%s card=%s events=%d", observed.Index, observed.DraftStatus, observed.CardStatus, observed.Decisions)
 	}
 	value, err := canonicaljson.Decode([]byte(fields))
 	if err != nil {
@@ -308,25 +306,21 @@ func assertChannelInputCommit(t *testing.T, db *sql.DB, card, mode string, parti
 	}
 }
 
-func objectChannelChoiceCard(t *testing.T, db *sql.DB, token string) string {
+func objectChannelChoiceCard(t *testing.T, reader storetest.ChannelProcessObservation, token string) string {
 	t.Helper()
-	var raw []byte
-	var hash string
-	var position int
-	if err := db.QueryRow(`SELECT r.render_input,r.render_hash,a.action_position
-		FROM channel_delivery_actions a JOIN channel_delivery_renders r ON r.render_id=a.render_id
-		WHERE a.action_token=$1`, token).Scan(&raw, &hash, &position); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := canonicaljson.Canonicalize(raw)
+	observed, err := reader.ReadChannelActionChoiceStorage(context.Background(), token)
 	if err != nil {
 		t.Fatal(err)
 	}
-	frozen, err := channeldelivery.Decode(raw, hash)
-	if err != nil || position < 1 || position > len(frozen.DraftChoices) {
+	raw, err := canonicaljson.Canonicalize(observed.Input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frozen, err := channeldelivery.Decode(raw, observed.Hash)
+	if err != nil || observed.Position < 1 || observed.Position > len(frozen.DraftChoices) {
 		t.Fatalf("chosen input has no exact frozen target: %v", err)
 	}
-	return frozen.DraftChoices[position-1].CardID
+	return frozen.DraftChoices[observed.Position-1].CardID
 }
 
 func (p *objectChannelProvider) pauseInputEditResponse(t *testing.T, reference string) (<-chan struct{}, func()) {
