@@ -12002,6 +12002,12 @@ tool_model:
         owner closes and completely joins that occurrence before constructing its successor on the same reservation.
         Current unexpired QR and paired/connected reuse are unchanged; an observation error is a refusal, not permission
         to reconnect. Neither expiry nor replacement creates account, identity or executable authority.
+        Before the first SDK batch, the onboarding result owner may project its exact owned awaiting_qr snapshot
+        with no code or expiry, unpaired and unconnected, as the existing non-executable preparing progress only
+        while the selected declaration is valid, the operation is activating_provider and no account, identity,
+        binding or READY authority is present. The private snapshot is unchanged; awaiting_qr progress still
+        requires current code and a future expiry. Malformed, terminal, foreign, canceled or retired evidence
+        is never converted into preparation, and this projection performs no retry, polling or revision write.
         Overflow, unsupported passkey or non-multidevice modes, failure, cancellation and retirement clear QR material.
         Readback requires the exact authenticated onboarding principal, operation, durable source and live context,
         stable connection and connection occurrence; successor admission never adopts predecessor QR material.
