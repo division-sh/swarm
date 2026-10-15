@@ -624,6 +624,10 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					}
 					assertForkRows := func() {
 						assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1)
+						lifecycle, err := storetest.ReadRuntimeLogRunSnapshot(f.ctx, f.selected, result.ForkRunID)
+						if err != nil || lifecycle.RunID != result.ForkRunID || lifecycle.State != "completed" || lifecycle.EndedAt == nil || lifecycle.Failure != nil {
+							t.Fatalf("selected fixture did not complete successfully: %+v error=%v", lifecycle, err)
+						}
 					}
 					assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 0)
 					beforeRefusals, err := storetest.ReadSelectedForkSourceDomain(f.ctx, f.selected, result.ForkRunID)
@@ -745,18 +749,22 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					f.runtime.fanOutServing.Wake()
 					assertForkRows()
 					recoveredOwner, recovery := deploymentForkOwner(t, f)
-					var controlOnly bool
+					matched := 0
 					for _, entry := range recovery {
 						if entry.RunID == result.ForkRunID {
-							controlOnly = entry.Disposition == runfork.SelectedForkRecoveryControlOnly
+							matched++
+							if entry.Disposition != runfork.SelectedForkRecoveryTerminal || entry.ExecutionID != closeResult.ExecutionID || entry.Continuation != nil || len(entry.PendingCancellations) != 0 ||
+								entry.Operation == nil || entry.Operation.Status != runfork.ForkOperationActivated || entry.Operation.ForkRunID != result.ForkRunID || entry.Operation.Result == nil {
+								t.Fatalf("completed child lost its exact terminal recovery and activated result: %+v", entry)
+							}
 						}
 					}
-					if !controlOnly {
-						t.Fatalf("completed selected fork did not recover control-only: %+v", recovery)
+					if matched != 1 {
+						t.Fatalf("completed selected fork requires exactly one terminal recovery result, got %d: %+v", matched, recovery)
 					}
 					if _, err := recoveredOwner.PublishSelectedFixtureCloseForTest(f.ctx, result.ForkRunID,
 						runforkexecution.SelectedFixtureCloseInputForTest{AccountID: "changed"}); err == nil {
-						t.Fatal("completed control-only child acquired another close input")
+						t.Fatal("completed terminal-preserved child acquired another close input")
 					}
 					restartedServer := deploymentForkServer(t, f, recoveredOwner)
 					restartedReplay, rpcErr := deploymentForkRPC(t, f.ctx, restartedServer, params)
@@ -772,6 +780,9 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					}
 					if generationsAfter != generationsBefore {
 						t.Fatalf("restart resurrected selected executor: before=%d after=%d", generationsBefore, generationsAfter)
+					}
+					if closes, err := storetest.CountRunEventNameStorage(f.ctx, f.selected, result.ForkRunID, "fixture.close.requested"); err != nil || closes != 1 {
+						t.Fatalf("recovery or refused extra close changed publication count=%d, want one: %v", closes, err)
 					}
 					assertSelectedDeploymentRows(t, f, server, sourceRunID, route, string(original.VersionID), originalRows)
 					assertSelectedDeploymentRows(t, f, server, changedSourceID, route, string(changed.VersionID), changedRows)
