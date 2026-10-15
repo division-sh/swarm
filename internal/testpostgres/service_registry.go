@@ -1022,6 +1022,10 @@ func (r *ServiceRegistry) runDocker(ctx context.Context, args ...string) ([]byte
 }
 
 func (r *ServiceRegistry) managedContainers(ctx context.Context) (map[string][]dockerInspect, error) {
+	owner, err := r.managedNamespaceOwner()
+	if err != nil {
+		return nil, err
+	}
 	nameOut, err := r.runDocker(ctx, "ps", "--all", "--format", "{{.ID}} {{.Names}}")
 	if err != nil {
 		return nil, fmt.Errorf("enumerate canonical Postgres service names: %w output=%s", err, strings.TrimSpace(string(nameOut)))
@@ -1059,26 +1063,39 @@ func (r *ServiceRegistry) managedContainers(ctx context.Context) (map[string][]d
 			continue
 		}
 		seenFullIDs[got.ID] = true
-		labels := got.Config.Labels
-		if strings.TrimPrefix(got.Name, "/") == "" || !strings.HasPrefix(strings.TrimPrefix(got.Name, "/"), "swarm-test-postgres-v1-") {
-			return nil, fmt.Errorf("managed Postgres service %s has non-canonical name %q; left untouched", got.ID, got.Name)
+		if err := validateManagedContainerIdentity(got); err != nil {
+			return nil, err
 		}
-		if labels["com.division.swarm.test-postgres.managed"] != "1" || labels["com.division.swarm.test-postgres.contract"] != "v1" {
-			return nil, fmt.Errorf("canonical Postgres service %s has missing or invalid management labels; left untouched", got.ID)
+		local, err := r.belongsToManagedNamespace(owner, got)
+		if err != nil {
+			return nil, err
 		}
-		for _, key := range []string{"owner-id", "daemon-id", "runner-id", "lease-id", "spec-sha256"} {
-			if labels["com.division.swarm.test-postgres."+key] == "" {
-				return nil, fmt.Errorf("managed Postgres service %s has no %s label; left untouched", got.ID, key)
-			}
+		if !local {
+			continue
 		}
-		runnerID := labels["com.division.swarm.test-postgres.runner-id"]
-		if strings.TrimPrefix(got.Name, "/") != "swarm-test-postgres-v1-"+runnerID {
-			return nil, fmt.Errorf("managed Postgres service %s name does not match its runner label; left untouched", got.ID)
-		}
-		leaseID := labels["com.division.swarm.test-postgres.lease-id"]
+		leaseID := got.Config.Labels["com.division.swarm.test-postgres.lease-id"]
 		result[leaseID] = append(result[leaseID], got)
 	}
 	return result, nil
+}
+
+func validateManagedContainerIdentity(got dockerInspect) error {
+	if strings.TrimPrefix(got.Name, "/") == "" || !strings.HasPrefix(strings.TrimPrefix(got.Name, "/"), "swarm-test-postgres-v1-") {
+		return fmt.Errorf("managed Postgres service %s has non-canonical name %q; left untouched", got.ID, got.Name)
+	}
+	labels := got.Config.Labels
+	if labels["com.division.swarm.test-postgres.managed"] != "1" || labels["com.division.swarm.test-postgres.contract"] != "v1" {
+		return fmt.Errorf("canonical Postgres service %s has missing or invalid management labels; left untouched", got.ID)
+	}
+	for _, key := range []string{"owner-id", "daemon-id", "runner-id", "lease-id", "spec-sha256"} {
+		if labels["com.division.swarm.test-postgres."+key] == "" {
+			return fmt.Errorf("managed Postgres service %s has no %s label; left untouched", got.ID, key)
+		}
+	}
+	if strings.TrimPrefix(got.Name, "/") != "swarm-test-postgres-v1-"+labels["com.division.swarm.test-postgres.runner-id"] {
+		return fmt.Errorf("managed Postgres service %s name does not match its runner label; left untouched", got.ID)
+	}
+	return nil
 }
 
 func validateServiceRecord(key string, record ServiceRecord) error {

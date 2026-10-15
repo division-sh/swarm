@@ -128,6 +128,14 @@ command, uses tmpfs plus `fsync=off`, `synchronous_commit=off`, and
 `full_page_writes=off`, and tears the service down on every observable exit.
 Durable labeled state reconciles a service left by abrupt runner death.
 
+Each state root has a durable `owner-id`; service discovery remains daemon-wide
+by canonical name and management label, then partitions candidates by that owner
+before grouping lease IDs. Valid neighboring registries can share the daemon
+without sharing rows or authority. A neighbor's container is never adopted or
+removed. Missing or malformed ownership, conflicting local CID/name evidence,
+and same-owner containers without a registry row still refuse reconciliation.
+An absent owner ID is initialized only when no service rows or authority remain.
+
 The runner reuses a locally available `postgres:16` image and pulls it only when
 a successful local image listing confirms it is missing. Docker listing or
 inspection failures refuse provisioning; they do not trigger a network fallback.
