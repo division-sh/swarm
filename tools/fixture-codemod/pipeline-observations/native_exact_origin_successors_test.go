@@ -202,19 +202,35 @@ func TestExactOriginPublicationSuccessorsPreserveReviewedCuts(t *testing.T) {
 					t.Fatal("ambiguous or missing finite publication edit")
 				}
 				restored = strings.Replace(restored, change.after, change.before, 1)
+				mutationSource := actual
+				if target.name == "runLifecycleRootForkPolicy" && index > 0 {
+					// The setup overlaps the older snapshot edit. Remove it only
+					// while deriving that edit's unchanged negative controls.
+					mutationSource = strings.Replace(actual, rootForkPostCutBusinessSetup, "", 1)
+				}
 				mutants := map[string]string{
-					"missing":        strings.Replace(actual, change.after, change.before, 1),
-					"duplicate":      strings.Replace(actual, change.after, change.after+change.after, 1),
-					"wrong_identity": strings.Replace(actual, change.after, strings.ReplaceAll(change.after, ".EventID", ".RunID"), 1),
+					"missing":        strings.Replace(mutationSource, change.after, change.before, 1),
+					"duplicate":      strings.Replace(mutationSource, change.after, change.after+change.after, 1),
+					"wrong_identity": strings.Replace(mutationSource, change.after, strings.ReplaceAll(change.after, ".EventID", ".RunID"), 1),
 				}
 				if strings.Contains(change.after, "origins...") {
-					mutants["wrong_origin_set"] = strings.Replace(actual, change.after, strings.ReplaceAll(change.after, "origins...", "[]string{\"foreign\"}..."), 1)
+					mutants["wrong_origin_set"] = strings.Replace(mutationSource, change.after, strings.ReplaceAll(change.after, "origins...", "[]string{\"foreign\"}..."), 1)
 				}
 				for name, mutant := range mutants {
+					label := fmt.Sprintf("edit_%d/%s", index, name)
+					if target.name == "runLifecycleRootForkPolicy" {
+						if index == 0 {
+							label = "source_history/" + name
+						} else {
+							const snapshot = "\t\t\tbefore := lifecycleStoredSnapshot(t, rt, seed.RunID)\n"
+							mutant = strings.Replace(mutant, snapshot, rootForkPostCutBusinessSetup+snapshot, 1)
+							label = fmt.Sprintf("edit_%d/%s", index-1, name)
+						}
+					}
 					if mutant == actual {
 						continue
 					}
-					t.Run(fmt.Sprintf("edit_%d/%s", index, name), func(t *testing.T) {
+					t.Run(label, func(t *testing.T) {
 						guard := *selected
 						guard.Before, guard.After, guard.Successor = actual, actual, ""
 						if _, changed, err := rewriteFunction(guard.File, []byte("package probe\n"+mutant), guard); err == nil || changed {
