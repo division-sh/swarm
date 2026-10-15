@@ -57,6 +57,9 @@ func recipientBoundaryAllowances() map[string]recipientBoundaryAllowance {
 		"runtime/runforkreadiness::selectedContractAgentWorkflowState/evidence_field:Path":                               {1, "exact fixed-construction workflow-state owner"},
 		"runtime/runforkreadiness::selectedContractAgentWorkflowState/evidence_field:AgentPlan":                          {1, "full plan correspondence, not a reduced recipient key"},
 		"runtime/runforkexecution::selectedContractDynamicTopologyEvidence/evidence_field:Path":                          {2, "nonmutating dynamic topology corroboration"},
+		"runtime/runfork::RunForkPlan.BindConstructedRouteEvidence/evidence_field:Path":                                  {1, "reject a canonical recipient outside the captured constructor instance; full canonical recipients remain bound"},
+		"runtime/runfork::ConstructedRouteEvidence.ProofFor/evidence_field:Path":                                         {1, "select the admitted instance subset, then compare complete canonical recipient keys and frontier/selection binding"},
+		"runtime/runforkadmission::fixedCutConstructedRouteEvidence/evidence_field:Path":                                 {1, "select exact captured constructor recipients after fixed-cut selector corroboration and delegate to BindConstructedRouteEvidence"},
 	}
 }
 
