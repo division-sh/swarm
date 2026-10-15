@@ -53,7 +53,7 @@ func (o SelectedContractExecutionOwner) PublishSelectedFixtureCloseForTest(calle
 	if err := validateSelectedContractExecutionBinding(child, binding); err != nil {
 		return result, err
 	}
-	use, err := o.acquireSelectedFixtureCloseForTest(caller, binding)
+	use, err := o.acquireFixtureCloseOccurrence(caller, binding)
 	if err != nil {
 		return result, err
 	}
@@ -120,7 +120,7 @@ type selectedFixtureCloseUseForTest struct {
 	result SelectedFixtureCloseResultForTest
 }
 
-func (o SelectedContractExecutionOwner) acquireSelectedFixtureCloseForTest(caller context.Context, binding runfork.RunForkSelectedContractBinding) (selectedFixtureCloseUseForTest, error) {
+func (o SelectedContractExecutionOwner) acquireFixtureCloseOccurrence(caller context.Context, binding runfork.RunForkSelectedContractBinding) (selectedFixtureCloseUseForTest, error) {
 	contexts := o.ports.contexts
 	if contexts == nil {
 		return selectedFixtureCloseUseForTest{}, errors.New("fixture close lacks its selected owner")

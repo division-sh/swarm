@@ -453,24 +453,6 @@ func assertSelectedDeploymentRowsWithClosedExecutions(t *testing.T, f *deploymen
 
 func assertSelectedDeploymentRowSet(t *testing.T, f *deploymentResourceFixture, server *httptest.Server, runID, route string, compiledVersion string, rows [][]byte, wantClosed int) {
 	t.Helper()
-	assertSelectedDeploymentRowSettlement(t, f, server, runID, route, compiledVersion, rows)
-	var parentRunID sql.NullString
-	if err := f.db.QueryRowContext(f.ctx, `SELECT CAST(forked_from_run_id AS TEXT) FROM runs WHERE run_id=$1`, runID).Scan(&parentRunID); err != nil {
-		t.Fatal(err)
-	}
-	if parentRunID.Valid {
-		var closed int
-		if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 AND state='closed'`, runID).Scan(&closed); err != nil {
-			t.Fatal(err)
-		}
-		if closed != wantClosed {
-			t.Fatalf("%s selected child has %d closed executions after settled public result, want %d", route, closed, wantClosed)
-		}
-	}
-}
-
-func assertSelectedDeploymentRowSettlement(t *testing.T, f *deploymentResourceFixture, server *httptest.Server, runID, route string, compiledVersion string, rows [][]byte) {
-	t.Helper()
 	defer func() {
 		if t.Failed() {
 			logDeploymentResourceFailure(t, f.db, runID)
@@ -516,6 +498,19 @@ func assertSelectedDeploymentRowSettlement(t *testing.T, f *deploymentResourceFi
 	}
 	if events != len(rows) || delivered != len(rows) || committed != 1 || pipelineReceipts != len(rows) || stampedHandoffs != len(rows) {
 		t.Fatalf("%s selected route did not settle: events=%d delivered=%d committed=%d pipeline_receipts=%d stamped_handoffs=%d", route, events, delivered, committed, pipelineReceipts, stampedHandoffs)
+	}
+	var parentRunID sql.NullString
+	if err := f.db.QueryRowContext(f.ctx, `SELECT CAST(forked_from_run_id AS TEXT) FROM runs WHERE run_id=$1`, runID).Scan(&parentRunID); err != nil {
+		t.Fatal(err)
+	}
+	if parentRunID.Valid {
+		var closed int
+		if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1 AND state='closed'`, runID).Scan(&closed); err != nil {
+			t.Fatal(err)
+		}
+		if closed != wantClosed {
+			t.Fatalf("%s selected child has %d closed executions after settled public result, want %d", route, closed, wantClosed)
+		}
 	}
 	want := make(map[string]map[string]any, len(rows))
 	for _, row := range rows {
@@ -630,7 +625,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 					assertForkRows := func() {
 						assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 1)
 					}
-					assertSelectedDeploymentRowSettlement(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows)
+					assertSelectedDeploymentRowSet(t, f, server, result.ForkRunID, route, string(changed.VersionID), forkRows, 0)
 					beforeRefusals, err := storetest.ReadSelectedForkSourceDomain(f.ctx, f.selected, result.ForkRunID)
 					if err != nil {
 						t.Fatal(err)
@@ -668,8 +663,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 						t.Fatalf("fixture close lost retained execution evidence: %+v", closeResult)
 					}
 					assertForkRows()
-					var closes int
-					if err := f.db.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='fixture.close.requested'`, result.ForkRunID).Scan(&closes); err != nil || closes != 1 {
+					if closes, err := storetest.CountRunEventNameStorage(f.ctx, f.selected, result.ForkRunID, "fixture.close.requested"); err != nil || closes != 1 {
 						t.Fatalf("selected fixture close publication count=%d, want one: %v", closes, err)
 					}
 					operationBefore := selectedDeploymentForkOperationSnapshot(t, f, result.ForkRunID)

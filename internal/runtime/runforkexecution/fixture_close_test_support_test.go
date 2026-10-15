@@ -87,7 +87,7 @@ func TestSelectedFixtureCloseRequiresCurrentRetainedOccurrence(t *testing.T) {
 			before := process.ActiveCount()
 			switch phase {
 			case "current_join":
-				use, err := owner.acquireSelectedFixtureCloseForTest(caller, binding)
+				use, err := owner.acquireFixtureCloseOccurrence(caller, binding)
 				if err != nil {
 					t.Fatal(err)
 				}
