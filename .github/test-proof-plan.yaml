@@ -850,7 +850,7 @@ units:
       - github.com/division-sh/swarm/internal/serveapp
     # 36644617733 exhausted the unchanged 600s budget after passing whole
     # delivery families. Keep complete journeys together in distinct units.
-    run: '^Test(Canonical.*|Channel(Connect.*|Draft.*|Duplicate.*|Effect.*|Listener.*|OneBot.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*|Receiver.*)$'
+    run: '^Test(Canonical.*|Channel(Connect.*|Draft.*|Duplicate.*|Effect.*|Listener.*|OneBot.*|Onboarding(Admitted.*|Early.*|E2E.*|Crash.*|PendingResetRestartToReadyE2E))|Claude.*|CLI_.*|Composed.*|Configure.*|Connected.*|Create.*|Receiver.*)$'
     required_children:
       TestReceiverCompositionRestartBothStores: [sqlite, postgres]
     count_mode: count-1
@@ -868,7 +868,9 @@ units:
   serveapp-channel-neutral:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^TestChannel(TextReply.*|OptionalCapabilities.*|CollidingCaption.*|PageOracle.*)$'
+    run: '^Test(Channel(TextReply.*|OptionalCapabilities.*|CollidingCaption.*|PageOracle.*)|Prov.*)$'
+    required_children:
+      TestProviderSelectedRootStandingBootBothStores: [default_sqlite, explicit_postgres]
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full
@@ -1048,7 +1050,7 @@ units:
   serveapp-other-late:
     packages:
       - github.com/division-sh/swarm/internal/serveapp
-    run: '^(Test([J-LN-Q].*|ChannelOnboardingPendingResetRestartToReadyE2E|Issue2394(Held.*|Served(F.*|S.*)|Stop.*|Selected.*)|Issue2564(DecisionCard.*|Served(H3.*|M33.*))|Issue2566ReporterFiniteFixtureCanCloseBothStores|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$'
+    run: '^(Test([J-LNOQ].*|P($|[^r].*|r($|[^o].*|o($|[^v].*)))|Issue2394(Held.*|Served(F.*|S.*)|Stop.*|Selected.*)|Issue2564(DecisionCard.*|Served(H3.*|M33.*))|Issue2566ReporterFiniteFixtureCanCloseBothStores|Inbound.*|Initialize.*|Internal.*|M($|[^a].*)|Ma[^i].*|ServedPublicationDirect.*)|Example.*|Fuzz.*)$'
     required_children:
       TestPublicCompletionPreAckRetirementBothStores: [default_sqlite/event.publish, default_sqlite/run.start, explicit_postgres/event.publish, explicit_postgres/run.start]
       TestPublicCompletionNativePreAckRetirementBothStores: [default_sqlite/event.publish, default_sqlite/run.start, explicit_postgres/event.publish, explicit_postgres/run.start]
@@ -1067,7 +1069,6 @@ units:
       TestPublicPublicationCreatingTurnRestartBothStores: [sqlite, postgres]
       TestPublicPublicationInvalidAcknowledgedResultBothStores: [default_sqlite/completion, default_sqlite/publication, explicit_postgres/completion, explicit_postgres/publication]
       TestPublicFeedOnlyInvalidAcknowledgedResultBothStores: [default_sqlite, explicit_postgres]
-      TestProviderSelectedRootStandingBootBothStores: [default_sqlite, explicit_postgres]
       TestIssue2566ReporterFiniteFixtureCanCloseBothStores: [sqlite, postgres]
       TestManagedEmitPublicationExactScopeBothStores: [default_sqlite/root, default_sqlite/imported, default_sqlite/nested, default_sqlite/template, explicit_postgres/root, explicit_postgres/imported, explicit_postgres/nested, explicit_postgres/template]
     count_mode: count-1

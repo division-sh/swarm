@@ -309,10 +309,17 @@ func validateServedPreservationOwnership(plan RunPlan) error {
 	if late.Skip != "" || unitRequires(late, ServedPreservationTest) {
 		return fmt.Errorf("late unit lost disjoint preservation selection")
 	}
-	for _, root := range []string{"TestMockForkChatPublicMCPTransportBothStores", "TestManagedEmitPublicationExactScopeBothStores", "TestChannelOnboardingPendingResetRestartToReadyE2E"} {
+	for _, root := range []string{"TestMockForkChatPublicMCPTransportBothStores", "TestManagedEmitPublicationExactScopeBothStores"} {
 		if !unitRequires(late, root) {
 			return fmt.Errorf("late unit lost complete sibling root %s", root)
 		}
+	}
+	channel, err := plan.Unit("serveapp-channel")
+	if err != nil {
+		return err
+	}
+	if !unitRequires(channel, "TestChannelOnboardingPendingResetRestartToReadyE2E") {
+		return fmt.Errorf("channel unit lost complete onboarding reset root")
 	}
 	return nil
 }
