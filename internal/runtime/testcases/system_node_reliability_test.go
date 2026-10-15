@@ -3,6 +3,7 @@ package testcases
 import (
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -25,7 +26,11 @@ func TestGenericBundle_SystemNodeReliabilityPatterns(t *testing.T) {
 	}
 
 	handler := mustHandler(t, bundle, "processing-node", "item.review_requested")
-	if len(handler.Rules) != 2 || handler.Rules[1].Condition != "else" {
+	if len(handler.Rules) != 2 ||
+		handler.Rules[0].Condition != "payload.score >= 80.0" || handler.Rules[0].PolicyRow.Kind != contracts.PolicySheetRowKindWhen ||
+		handler.Rules[0].AdvancesTo != "approved" || handler.Rules[0].Emit.EventType() != "processing/item.completed" ||
+		handler.Rules[1].Condition != "" || handler.Rules[1].PolicyRow.Kind != contracts.PolicySheetRowKindDefault ||
+		handler.Rules[1].AdvancesTo != "rejected" || handler.Rules[1].Emit.EventType() != "processing/item.rejected" {
 		t.Fatalf("expected approve/reject rules with fallback, got %+v", handler.Rules)
 	}
 }
