@@ -17,19 +17,9 @@ func debtChannelProcessSourcePrevious(root, file, function, current string) (str
 	if !strings.HasPrefix(file, "internal/serveapp/channel_") {
 		return current, nil
 	}
-	raw, err := os.ReadFile(filepath.Join(root, debtChannelProcessManifest))
-	if err != nil || debtBaselineChecksum(raw) != "1e94cca2eaa12fedf807b37ed910371a79d0ba5df00df9f79afb4db5de879334" {
-		return "", fmt.Errorf("channel process signed source composition changed: %v", err)
-	}
-	const digest = "1e94cca2eaa12fedf807b37ed910371a79d0ba5df00df9f79afb4db5de879334"
-	var rows []debtRunIdentitySourceBody
-	if cached, ok := debtSelectedReadRolePinCache.Load(digest); ok {
-		rows = cached.([]debtRunIdentitySourceBody)
-	} else {
-		if err := json.Unmarshal(raw, &rows); err != nil || len(rows) != 45 {
-			return "", fmt.Errorf("channel process complete source inventory changed: %v", err)
-		}
-		debtSelectedReadRolePinCache.Store(digest, rows)
+	rows, err := debtChannelProcessSourcePins(root)
+	if err != nil {
+		return "", err
 	}
 	declarations, err := debtServedSetupDeclarations(filepath.Join(root, file))
 	if err != nil {
@@ -45,6 +35,50 @@ func debtChannelProcessSourcePrevious(root, file, function, current string) (str
 		return row.Before, nil
 	}
 	return current, nil
+}
+
+func debtChannelProcessSourcePins(root string) ([]debtRunIdentitySourceBody, error) {
+	raw, err := os.ReadFile(filepath.Join(root, debtChannelProcessManifest))
+	if err != nil || debtBaselineChecksum(raw) != "1e94cca2eaa12fedf807b37ed910371a79d0ba5df00df9f79afb4db5de879334" {
+		return nil, fmt.Errorf("channel process signed source composition changed: %v", err)
+	}
+	const digest = "1e94cca2eaa12fedf807b37ed910371a79d0ba5df00df9f79afb4db5de879334"
+	var rows []debtRunIdentitySourceBody
+	if cached, ok := debtSelectedReadRolePinCache.Load(digest); ok {
+		rows = cached.([]debtRunIdentitySourceBody)
+	} else {
+		if err := json.Unmarshal(raw, &rows); err != nil || len(rows) != 45 {
+			return nil, fmt.Errorf("channel process complete source inventory changed: %v", err)
+		}
+		debtSelectedReadRolePinCache.Store(digest, rows)
+	}
+	return rows, nil
+}
+
+func debtChannelProcessCopySources(t *testing.T, root, copy string) {
+	t.Helper()
+	rows, err := debtChannelProcessSourcePins(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]bool{debtChannelProcessManifest: true}
+	for _, row := range rows {
+		if !strings.HasPrefix(row.File, "internal/serveapp/channel_") {
+			continue
+		}
+		declarations, err := debtServedSetupDeclarations(filepath.Join(root, row.File))
+		if err != nil || declarations[row.Function] != row.After {
+			t.Fatalf("channel process evidence requires its actual current declaration %s: %v", row.Function, err)
+		}
+		files[row.File] = true
+	}
+	for file := range files {
+		raw, err := os.ReadFile(filepath.Join(root, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		debtWriteModuleSource(t, copy, file, string(raw))
+	}
 }
 
 func TestPersistenceAuthorityDebtChannelProcessSourceInverseIsExactAndAccountingNeutral(t *testing.T) {

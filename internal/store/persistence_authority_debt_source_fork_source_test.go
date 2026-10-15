@@ -11,6 +11,8 @@ import (
 
 var debtSourceForkPin = debtRunIdentitySourcePin{"internal/serveapp/main_runtime_test.go", "TestRunServeRuntimeJoinForkReplayRejectsTimerBearingSourceBeforeMutation", "89f5dd1b3bc9e48b823be7a697ec25354ea0265bdc1007cbcfd4d04b81386c4b", "3eccce2f3034abc34dc6af25adae10cc146ae7f19f20c6905493c75534423e11"}
 
+const debtSourceForkDeploymentAddition = "func CountSelectedSourceRuntimeExecutionsStorageForTest(ctx context.Context, selected any, sourceRunID string) (int, error) {\n\treturn readDeploymentStorageForTest(ctx, selected, sourceRunID, runforkpersistence.CountSelectedSourceRuntimeExecutionsStorageTx)\n}\n\n"
+
 func debtSourceForkSourcePrevious(root, file, function, current string) (string, error) {
 	if file != debtSourceForkPin.File || function != debtSourceForkPin.Function || debtBaselineChecksum([]byte(current)) != debtSourceForkPin.CurrentSHA256 {
 		return current, nil
@@ -62,11 +64,10 @@ func debtSourceForkDeploymentNativePrevious(path string, raw []byte) ([]byte, er
 	if debtBaselineChecksum(raw) != "807878f2988e11be92912786f11f8447d77a5b511de6e91f1708f68859152e12" {
 		return nil, fmt.Errorf("source fork exact deployment observation endpoint changed")
 	}
-	const addition = "func CountSelectedSourceRuntimeExecutionsStorageForTest(ctx context.Context, selected any, sourceRunID string) (int, error) {\n\treturn readDeploymentStorageForTest(ctx, selected, sourceRunID, runforkpersistence.CountSelectedSourceRuntimeExecutionsStorageTx)\n}\n\n"
-	if strings.Count(string(raw), addition) != 1 {
+	if strings.Count(string(raw), debtSourceForkDeploymentAddition) != 1 {
 		return nil, fmt.Errorf("source fork exact additive declaration missing or duplicated")
 	}
-	previous := []byte(strings.Replace(string(raw), addition, "", 1))
+	previous := []byte(strings.Replace(string(raw), debtSourceForkDeploymentAddition, "", 1))
 	if debtBaselineChecksum(previous) != "eb91b19e8ecc5c1736088bd905b1be072bd461e39a6e3234d5e0cb54641e5263" {
 		return nil, fmt.Errorf("source fork retained deployment observation source changed")
 	}
@@ -92,9 +93,10 @@ func TestPersistenceAuthorityDebtSourceForkDeploymentInversePinsBothCompleteFile
 			t.Fatal("changed added/retained bridge source was accepted:", cut)
 		}
 	}
-	for _, stale := range [][]byte{previous, append(append([]byte{}, raw...), '\n')} {
+	duplicate := []byte(strings.Replace(string(raw), debtSourceForkDeploymentAddition, debtSourceForkDeploymentAddition+debtSourceForkDeploymentAddition, 1))
+	for _, stale := range [][]byte{previous, append(append([]byte{}, raw...), '\n'), duplicate} {
 		if _, err := debtSourceForkDeploymentNativePrevious(path, stale); err == nil {
-			t.Fatal("stale/noncanonical complete file was accepted")
+			t.Fatal("missing/duplicate/stale/noncanonical complete file was accepted")
 		}
 	}
 	if untouched, err := debtSourceForkDeploymentNativePrevious("foreign.go", raw); err != nil || string(untouched) != string(raw) {

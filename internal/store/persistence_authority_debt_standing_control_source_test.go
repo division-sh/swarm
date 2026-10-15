@@ -23,12 +23,13 @@ const debtStandingControlPredecessor = "366ef25c98c0ec629354038246e7a30b214d7971
 
 var debtStandingControlCache sync.Map
 
-// Ruling6186092411: exactly four source inverses, never census/debt credit.
-var debtStandingControlKeys = [4][2]string{
+// Rulings6186092411/6186734979: five exact inverses, never census/debt credit.
+var debtStandingControlKeys = [5][2]string{
 	{"internal/serveapp/main_runtime_test.go", "requireServedStoppedPendingDelivery"},
 	{"internal/serveapp/main_runtime_test.go", "runServedRunControlLifecycleProof"},
 	{"internal/serveapp/main_runtime_test.go", "runServedRuntimeIngressControlLifecycleProof"},
 	{"internal/serveapp/standing_ingress_supported_surface_test.go", "runServedStandingServiceLifecycleBackendProof"},
+	{"internal/serveapp/standing_ingress_dormancy_supported_surface_test.go", "TestDormantIngressProvisionRestartSignedInputBothStores"},
 }
 
 func debtStandingControlSourcePrevious(root, file, function, current string) (string, error) {
@@ -195,7 +196,7 @@ func debtStandingControlCopySources(t *testing.T, root, copy string) {
 	debtWriteModuleSource(t, copy, ".git", "gitdir: "+strings.TrimSpace(string(gitdir))+"\n")
 }
 
-func TestPersistenceAuthorityDebtStandingControlFourInversesAndHostileEvidence(t *testing.T) {
+func TestPersistenceAuthorityDebtStandingControlFiveInversesAndHostileEvidence(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	pins, err := debtStandingControlLiveSources(root)
 	if err != nil {
@@ -249,7 +250,7 @@ func proveDebtStandingControlInverse(t *testing.T, root string, pins []debtRunId
 		}
 		before, err := debtStandingControlSourcePrevious(root, pin.File, pin.Function, pin.After)
 		if err != nil || before != pin.Before {
-			t.Fatalf("exact four-key inverse: %s %v", pin.Function, err)
+			t.Fatalf("exact five-key inverse: %s %v", pin.Function, err)
 		}
 		for _, wrong := range []string{pin.Before, pin.After + "\n", ""} {
 			if _, err := debtStandingControlSourcePrevious(root, pin.File, pin.Function, wrong); err == nil {

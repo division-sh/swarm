@@ -1,6 +1,7 @@
 # Durable-resource selected authority and exact receipts
 
-Track: FULL. Binding scope6184924023; F1/F2 disposition6184914472.
+Track: FULL. Binding scope6184924023; F1/F2 disposition6184914472;
+consolidated source/text integration disposition6186734979.
 Signed predecessor50c5c207de5b6986237d3f40a41c9adcfd03aca1. This is a local
 batch checkpoint, not a push, PR, tier qualification or parent closure.
 
@@ -68,18 +69,46 @@ or new accounting exception is part of this batch.
 
 ## Accounting And Qualifications
 
-The indicative163/144 is not pre-awarded. Final census/real-ratchet accounting and
-signed checkpoint identity are recorded after the frozen candidate completes.
-Starting physical4646/2788; held163/135; adjusted4809/2923. The metadata-only
-777e1d59ff companion's3/2 is composed separately in the final delta. Channel F2
+Final measured delta is159 findings/142 raw operations, zero additions, not the
+indicative163/144. Downward ratchet PASS98.945s; normal read-only ratchet
+PASS87.318s. Physical4646/2788 ->4487/2646; unchanged held163/135 yields
+qualification-adjusted4650/2781 (was4809/2923). The metadata-only777e1d59ff
+companion contributes exactly3/2 within159/142, not additional credit. The
+connected durable-resource family contributes156/140. Cumulative accepted-stack
+plus this submitted batch is1983/1641, subject to independent acceptance of this
+batch. Channel F2
 remains held6/5: PostgreSQL chosen, both-store skips and SQLite chosen-false are
 not proved by this unrelated durable-resource batch. Other channel/mock/numeric-
 fork holds remain independent and unchanged; the physical channel36/26 tail is
 already counted in the baseline, not a second hold.
 
-Source-only integration under6186092411 authenticates the unchanged29-row
+The four-count difference from the projection remains explicit debt: two
+StartPostgres setup calls (returned pools discarded, location passed to native
+factories), the existing SQLite native pair and the PostgreSQL native reopen
+construction. No classification exception or deletion credit is used for these.
+The batch retires the caller raw carriers, SQL/retry/fault helpers and same-pool
+reconstruction; it does not claim the broader construction census is zero.
+The census also retains all67 conservatively unresolved excluded occurrences.
+
+| Actual removal file | Findings | Raw operations |
+| --- | ---: | ---: |
+| store/durable_data_selected_store_test.go |95|85|
+| apiv1/operator_data_run_lifecycle_test.go |42|38|
+| apiv1/operator_data_show_selected_test.go |7|6|
+| apiv1/operator_data_test.go |4|3|
+| apiv1/operator_data_show_corruption_test.go |1|1|
+| apiv1/operator_deployment_run_start_test.go |7|7|
+| serveapp/channel_onboarding_supported_surface_test.go (777e1d59ff) |3|2|
+
+The finite-run and reviewer2566 files are required shared-fixture consumers,
+not separately invented count credit. Their seven named roots remain in the
+20-root API race receipt. Sidecar collector identity remainsb5bdd1d92df22693c570dab217a46c8a184f37085f496653d59b732c12399a4d;
+only the lowered baseline checksum changes. Existing retirement models and
+historical bytes/multiplicities are unchanged.
+
+Source-only integration under6186092411/6186734979 authenticates the unchanged29-row
 standing-ingress manifest, all actual siblings and signed366ef25c98 predecessor
-before peeling exactly four named live entries. The bounded table and warm-cache
+before peeling exactly five named live entries. The bounded table and warm-cache
 hostile controls pass; no signatures, collector bytes, multiplicities or debt
 ceilings change. The prior source-fork whole-file pin also intersects the already
 accepted four-line deployment observation addition from3fed7372e1: a finite
@@ -87,14 +116,16 @@ inverse verifies complete807878f2 bytes, removes only that exact declaration and
 verifies completeeb91b19e predecessor bytes. Retained source and all added code
 mutations must refuse. These inverses earn zero removal credit.
 
-At the internal integration savepoint, the real ratchet remains RED and no
-batch removal is claimed. Its remaining concrete source dependency is the
-standing-ingress dormancy root named in6186521864 (the exhaustive48-body/29-row
-intersection adds exactly this fifth key beyond the approved four). That exact
-composition and the four ordinary-text field dispositions in6186376328 await
-reviewer-b; neither is silently included here. The native carrier/fault/history
-migration is otherwise execution-proven as listed above. Source dependency
-checks for run identity, rollback, request key and served debug PASS9.070s;
+Internal signed savepoint31eb5f15f3 withheld all credit while those exact
+dispositions were pending. Ruling6186734979 authorizes the fifth dormancy key,
+the additive whole-file inverse and exactly four ordinary-text tuples together.
+The48-body retirement/29-sibling/five-key/cache/fingerprint packet now passes
+6.281s in final-live-copy-source. The ordinary-text inventory and complete-record,
+field/function/digest/product hostility pass9.527s in authorized-final-reference-
+guards. All corpus bytes and prior historical tuple dispositions remain; the
+ordinary-text multiplicities are19 recipes,12 transitions and2 channel-process
+preimages. None of that changes raw debt, the collector or budget policy.
+Source dependency checks for run identity, rollback, request key and served debug PASS9.070s;
 standing/channel/setup warm-cache preservation PASS25.116s. The29-key older
 observation hostility and all served-debug hostility individually PASS34.22s
 and124.61s, respectively, in an aggregate command that subsequently exhausted
@@ -109,6 +140,9 @@ manifest memoization verifies the immutable raw digest before every lookup;
 source caches remain byte-keyed and changed manifest/current-source controls are
 retained. Complete setup-source authentication is shared once within each older
 observation validation, not repeated independently for every intermediate key.
+The complete48-body copy control also now carries the authenticated current
+channel-family source files instead of substituting pre-migration bodies. Its
+initial RED was a fixture-image gap, corrected without accepting stale source.
 
 Plain vet still reports the same five untouched unkeyed literals in
 scenario_setup_observation_test.go and standing_diagnostic_error_test.go; it is
@@ -131,9 +165,12 @@ spent their bound repeatedly decoding/parsing unchanged nested evidence; a later
 command exposed the formatted-body no-op, then the four-line native whole-file
 intersection. No timeout was raised. Final exact-source controls, not those
 diagnostics, determine checkpoint qualification. The retired-product inventory
-also exposes four pre-batch ordinary text-accumulator snapshot fields, requested
-for exact field/function/digest classification in6186376328; no historical corpus
-bytes are edited to avoid that guard.
+also exposed four pre-batch ordinary text-accumulator snapshot fields, exactly
+classified under6186734979 as above; no historical corpus bytes were edited to
+avoid that guard. The first authorized source packet is aggregate RED70.901s
+solely on the copied channel image; it separately proves retained collector
+lineage57.98s and the source-fork history/inverse10.70s. The corrected48-body
+packet is green6.281s; no red aggregate is relabeled a package pass.
 
 No push/rebase/PR or local tier is authorized here. Preflight is unavailable on
 the retained pre-preflight base and is not claimed; after the authorized A+D
@@ -149,3 +186,14 @@ no new issue/framework or untracked architectural tail. The two strict completio
 guards, integrated landing proof and separate historical runtime holds remain
 open. The next batch should target the largest source-disjoint approved carrier
 family after this batch's accounting is accepted.
+
+## Time Split
+
+Approximately05:12-07:32Z (2h20m):05:12-06:12 owner/caller editing and native
+setup (~60m, with focused tests overlapping);06:12-06:26 plus07:26-07:32 proof,
+quality and final accounting (~20m);06:26-07:26 source/history integration,
+opaque-boundary repair and bounded reviewer dispositions (~60m). These are
+wall-clock phase bins, not a claim of exclusive edit-time telemetry or summed
+subprocess CPU. Native unchanged receipts were carried rather than rerun.
+Submitted throughput is about68 findings/hour; independent acceptance is pending.
+All work and the final baseline remain local; no push, PR or tier run occurred.

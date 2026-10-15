@@ -63,11 +63,12 @@ func TestRetiredBuilderSemanticReferencesStayExplicit(t *testing.T) {
 	expectedUnrelatedTextCounts := map[string]int{
 		// Exact historical and current factory/producer-label snapshots, pinned by
 		// the finite codemod guards; these do not restore the retired product.
-		"tools/fixture-codemod/pipeline-observations/recipes.json":                                18,
+		"tools/fixture-codemod/pipeline-observations/recipes.json":                                19,
 		"tools/fixture-codemod/pipeline-observations/family144-transitions.json":                  4,
 		"tools/fixture-codemod/pipeline-observations/family145-transitions.json":                  12,
 		"tools/fixture-codemod/pipeline-observations/family145-channel-anchor-preimages.json":     2,
 		"tools/fixture-codemod/pipeline-observations/family145-channel-settlement-preimages.json": 2,
+		"tools/fixture-codemod/pipeline-observations/family145-channel-process-preimages.json":    2,
 		"internal/runtime/bootverify/workflow_transition_relation_test.go":                        1,
 		"internal/runtime/semanticview/lifecycle_emitter_ownership_guard_test.go":                 1,
 		"internal/store/internal/runtimepersistence/dynamic_flow_creation_revision_test.go":       1,
@@ -407,7 +408,7 @@ func isExplicitUnrelatedBuilderText(relative, line string) bool {
 
 func isExactFamily145ReferenceSnapshot(path, line string) bool {
 	corpus := strings.TrimPrefix(path, "tools/fixture-codemod/pipeline-observations/")
-	if corpus != "recipes.json" && corpus != "family145-transitions.json" && corpus != "family145-channel-anchor-preimages.json" && corpus != "family145-channel-settlement-preimages.json" {
+	if corpus != "recipes.json" && corpus != "family145-transitions.json" && corpus != "family145-channel-anchor-preimages.json" && corpus != "family145-channel-settlement-preimages.json" && corpus != "family145-channel-process-preimages.json" {
 		return false
 	}
 	var field map[string]string
@@ -452,9 +453,10 @@ func TestChannelAnchorReferenceSnapshotsCannotAdmitChangedSourceOrProductReferen
 }
 
 var channelSettlementReferenceCounts = map[string]int{
-	"tools/fixture-codemod/pipeline-observations/recipes.json":                                18,
+	"tools/fixture-codemod/pipeline-observations/recipes.json":                                19,
 	"tools/fixture-codemod/pipeline-observations/family145-transitions.json":                  12,
 	"tools/fixture-codemod/pipeline-observations/family145-channel-settlement-preimages.json": 2,
+	"tools/fixture-codemod/pipeline-observations/family145-channel-process-preimages.json":    2,
 }
 
 func requireChannelSettlementReferenceCorpora(t *testing.T, root string) {
@@ -532,7 +534,7 @@ func requireChannelSettlementDuplicateRecordRefusal(t *testing.T, corpus string,
 		t.Fatal(err)
 	}
 	for _, row := range rows {
-		if row["Function"] != "proveObjectChannelPages" {
+		if row["Function"] != "proveObjectChannelPages" && row["Function"] != "runChannelDeliveryInboundDispositionE2E" {
 			continue
 		}
 		out, err := json.MarshalIndent(append(rows, row), "", "  ")
@@ -542,6 +544,74 @@ func requireChannelSettlementDuplicateRecordRefusal(t *testing.T, corpus string,
 		return
 	}
 	t.Fatal("approved complete record missing")
+}
+
+func TestChannelProcessReferenceSnapshotsRetainExactFieldsAndRejectDuplicateRecords(t *testing.T) {
+	for _, tuple := range [][2]string{
+		{"recipes.json", "Successor"},
+		{"family145-transitions.json", "After"},
+		{"family145-channel-process-preimages.json", "Before"},
+		{"family145-channel-process-preimages.json", "After"},
+	} {
+		t.Run(tuple[0]+"/"+tuple[1], func(t *testing.T) {
+			requireChannelProcessReferenceTuple(t, tuple[0], tuple[1])
+		})
+	}
+}
+
+func requireChannelProcessReferenceTuple(t *testing.T, corpus, field string) {
+	t.Helper()
+	path := "tools/fixture-codemod/pipeline-observations/" + corpus
+	raw, err := os.ReadFile(filepath.Join(repoRootForTest(), path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var records []map[string]any
+	if err := json.Unmarshal(raw, &records); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range records {
+		if record["Function"] != "runChannelDeliveryInboundDispositionE2E" {
+			continue
+		}
+		source, ok := record[field].(string)
+		if !ok {
+			t.Fatal("approved complete source field disappeared")
+		}
+		requireChannelProcessReferenceFieldHostility(t, path, field, source)
+		duplicate, err := json.MarshalIndent(append(records, record), "", "  ")
+		if err != nil || exactChannelSettlementReferenceMultiplicity(path, duplicate) {
+			t.Fatal("extra identical complete record escaped occurrence accounting:", err)
+		}
+		return
+	}
+	t.Fatal("approved source record disappeared")
+}
+
+func requireChannelProcessReferenceFieldHostility(t *testing.T, path, field, source string) {
+	t.Helper()
+	encoded, err := json.Marshal(map[string]string{field: source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := string(encoded[1 : len(encoded)-1])
+	if !isExactFamily145ReferenceSnapshot(path, line) {
+		t.Fatal("exact approved field/function/digest tuple was refused")
+	}
+	for _, mutant := range []string{
+		strings.Replace(line, `"`+field+`":`, `"Foreign":`, 1),
+		strings.Replace(line, "func runChannelDeliveryInboundDispositionE2E(", "func foreignChannelSource(", 1),
+		strings.Replace(line, "strings.Builder", "retiredBuilderEscape()", 1),
+		strings.Replace(line, `\n`, `\n retiredBuilderEscape()\n`, 1),
+		strings.Replace(line, "var extra", "var extraForeign", 1),
+	} {
+		if mutant == line || isExplicitUnrelatedBuilderText(path, mutant) {
+			t.Fatal("mutated field/function/digest/product reference escaped exact accounting")
+		}
+	}
+	if isExactFamily145ReferenceSnapshot("foreign.json", line) {
+		t.Fatal("unrelated corpus inherited the exact field disposition")
+	}
 }
 
 // Exact approved source/field evidence: buildErr and strings.Builder, not the
@@ -560,6 +630,11 @@ var family145ReferenceSnapshots = []struct{ corpus, function, field, digest stri
 	{"family145-transitions.json", "runChannelDeliveryInboundDispositionE2E", "After", "d88540e3887eb4d53eb7586716efe669a82442a9417021f259504262133094d5"},
 	{"family145-channel-anchor-preimages.json", "runChannelDeliveryInboundDispositionE2E", "Before", "5e5ec62277208488ec537166449eb550422b26dd63b16a8bff66f3e01781f382"},
 	{"family145-channel-anchor-preimages.json", "runChannelDeliveryInboundDispositionE2E", "After", "d88540e3887eb4d53eb7586716efe669a82442a9417021f259504262133094d5"},
+	// Ruling6186734979: four exact current ordinary-text fields; retain old tuples.
+	{"recipes.json", "runChannelDeliveryInboundDispositionE2E", "Successor", "4d6bdb92db7904620e641191b6a6a26f1887c534f81cd6bba3e521ea024b0c4a"},
+	{"family145-transitions.json", "runChannelDeliveryInboundDispositionE2E", "After", "4d6bdb92db7904620e641191b6a6a26f1887c534f81cd6bba3e521ea024b0c4a"},
+	{"family145-channel-process-preimages.json", "runChannelDeliveryInboundDispositionE2E", "Before", "d88540e3887eb4d53eb7586716efe669a82442a9417021f259504262133094d5"},
+	{"family145-channel-process-preimages.json", "runChannelDeliveryInboundDispositionE2E", "After", "4d6bdb92db7904620e641191b6a6a26f1887c534f81cd6bba3e521ea024b0c4a"},
 	{"recipes.json", "runtimeTestEventDiagnostics", "Before", "222818632cfa7253d1988a057dd751dfb29245ac1ff53049a2473976bef16455"},
 	{"recipes.json", "runtimeTestEventDiagnostics", "After", "ef3a68977a3aec247d33de356d4fed2cc02fc072ac6533cd7996bd163dae1814"},
 	{"family145-transitions.json", "runtimeTestEventDiagnostics", "Before", "222818632cfa7253d1988a057dd751dfb29245ac1ff53049a2473976bef16455"},

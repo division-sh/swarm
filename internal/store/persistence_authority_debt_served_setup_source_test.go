@@ -191,6 +191,7 @@ func debtServedSetupCopySourceEvidence(t *testing.T, root, copy string) {
 	debtChannelSettlementCopySources(t, root, copy)
 	debtSelectedReadRoleCopySources(t, root, copy)
 	debtStandingControlCopySources(t, root, copy)
+	debtChannelProcessCopySources(t, root, copy)
 }
 
 func TestPersistenceAuthorityDebtServedSetupSourceInverseRejectsStaleAndForeignCuts(t *testing.T) {
