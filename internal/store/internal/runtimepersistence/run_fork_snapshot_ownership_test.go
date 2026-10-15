@@ -183,7 +183,7 @@ func TestRunForkSnapshotOwnershipMetadataBothStores(t *testing.T) {
 					}
 					assertSnapshotOwnershipEntity(t, f, materialized.ForkRunID, entity, 1)
 					before := snapshotOwnershipCounts(t, f, materialized.ForkRunID)
-					replayed, err := f.store.MaterializeRunFork(f.ctx, req)
+					replayed, err := f.store.RequireMaterializedRunFork(f.ctx, materialized.ForkRunID, req)
 					if err != nil || replayed.ForkRunID != materialized.ForkRunID {
 						t.Fatalf("exact replay = %#v, %v", replayed, err)
 					}
