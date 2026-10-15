@@ -81,9 +81,165 @@ func nativeAPIPhysicalCardinalityWorkload(t *testing.T, source string) string {
 	source = strings.Replace(source, "\n\tdb := storetest.Database(sqliteStore)", "", 1)
 	return nativeAPIEventConsumerWorkload(t, source)
 }
+
+func q10APIPhysicalCardinalityCurrentRecipe(t *testing.T, row recipe) recipe {
+	t.Helper()
+	if row.File == "internal/apiv1/operator_test_setup_test.go" && row.Function == "TestOperatorTestSetupRejectsContractInvalidEntities" {
+		row.Successor = q10APISetupRefusalCurrentSource(t, row)
+		return row
+	}
+	if row.Function != "TestOperatorTestSetupHandlersPersistEntitiesAndReplayIdempotency" || row.File != "internal/apiv1/operator_test_setup_test.go" {
+		return q10PrivateTargetCurrentRecipe(t, row)
+	}
+	if row.Successor != "" || row.Family != "native-api-physical-cardinality-consumer" {
+		t.Fatal("setup import historical identity changed")
+	}
+	current := row.After
+	for _, edit := range []publicationSuccessorEdit{
+		{"runID, entityID, \"waiting\", \"seeded\", true,", "runID, entityID, \"seeded\","},
+		{"runID, entityID, \"ready\", \"changed\", false,", "runID, entityID, \"changed\","},
+		{"assertTestSetupPersistence(t, db, bundleHash, runID, entityID, \"waiting\", \"seeded\", true)", "assertTestSetupPersistence(t, pg, bundleHash, runID, entityID, \"seeded\")"},
+		{"if entityResult[\"alias\"] != \"subject\" || entityResult[\"entity_id\"] != entityID || entityResult[\"flow_instance\"] != \"operating\" || entityResult[\"entity_type\"] != \"product\" || entityResult[\"current_state\"] != \"waiting\" {", "if state, present := entityResult[\"current_state\"]; !present || state != nil || entityResult[\"alias\"] != \"subject\" || entityResult[\"entity_id\"] != entityID || entityResult[\"flow_instance\"] != \"operating\" || entityResult[\"entity_type\"] != \"product\" {"},
+	} {
+		want := 1
+		if strings.Contains(edit.before, "\"waiting\", \"seeded\"") {
+			want = 3
+			if strings.HasPrefix(edit.before, "assertTestSetupPersistence") {
+				want = 4
+			}
+		}
+		if strings.Count(current, edit.before) != want {
+			t.Fatalf("setup import historical cut changed: %q", edit.before)
+		}
+		current = strings.ReplaceAll(current, edit.before, edit.after)
+	}
+	guard := recipe{File: row.File, Function: row.Function, Before: current, After: current}
+	for _, edit := range []publicationSuccessorEdit{
+		{"!present || ", ""}, {"state != nil", "state == nil"},
+		{"assertTestSetupPersistence(t, pg,", "assertTestSetupPersistence(t, foreignStore,"},
+		{"pg, bundleHash, runID, entityID", "pg, bundleHash, foreignRun, entityID"},
+		{"pg, bundleHash, runID, entityID", "pg, bundleHash, runID, foreignEntity"},
+		{"count != 1", "count < 1"}, {"data[\"code\"] != IdempotencyConflictCode", "false"},
+	} {
+		mutant := strings.Replace(current, edit.before, edit.after, 1)
+		if mutant == current {
+			t.Fatalf("missing setup import hostile cut: %q", edit.before)
+		}
+		if _, changed, err := rewriteFunction(row.File, []byte("package proof\n"+mutant), guard); err == nil || changed {
+			t.Fatalf("setup import lost presence, owner, identity or replay assertion: %q", edit.before)
+		}
+	}
+	if _, changed, err := rewriteFunction(row.File, []byte("package proof\n"+row.After), guard); err == nil || changed {
+		t.Fatal("old lifecycle-bearing import accepted as current")
+	}
+	row.Successor = current
+	return row
+}
+
+func q10APISetupRefusalCurrentSource(t *testing.T, row recipe) string {
+	t.Helper()
+	if row.Successor != "" || row.Family != "native-api-physical-cardinality-consumer" {
+		t.Fatal("setup refusal historical identity changed")
+	}
+	current := row.After
+	for _, edit := range []publicationSuccessorEdit{
+		{"\t\tname      string\n\t\tedit      func(map[string]any)\n\t\twantField string", "\t\tname string\n\t\tconstructedRoot bool\n\t\tedit func(map[string]any)\n\t\twantField string\n\t\twantReason string"},
+		{"name: \"undeclared current state\",", "name: \"undeclared current state\",\nconstructedRoot: true,"},
+		{"wantField: \"entities[0].current_state\",", "wantField: \"entities[0].current_state\",\nwantReason: \"must be a declared state for the selected flow\","},
+		{"name: \"undeclared gate\",", "name: \"undeclared gate\",\nconstructedRoot: true,"},
+		{"wantField: \"entities[0].gates.missing_gate\",", "wantField: \"entities[0].gates.missing_gate\",\nwantReason: \"is not declared for the selected flow\","},
+		{"name: \"non boolean gate\",", "name: \"non boolean gate\",\nconstructedRoot: true,"},
+		{"wantField: \"entities[0].gates.review_ready\",", "wantField: \"entities[0].gates.review_ready\",\nwantReason: \"must be boolean\","},
+		{"\n\t}\n\n\tfor _, tc := range cases {", q10APISetupImportRefusalCases + "\n\t}\n\n\tfor _, tc := range cases {"},
+		{"\t\t\tentity := validTestSetupEntity(uuid.NewString(), \"waiting\", \"seeded\", true)", `			runID := uuid.NewString()
+			entity := validTestSetupEntity(uuid.NewString(), "seeded")
+			if tc.constructedRoot {
+				entity["entity_id"], entity["flow_instance"], entity["entity_type"] = runID, "", "item"
+				entity["current_state"], entity["fields"] = "new", map[string]any{}
+			}
+			baseline, err := testSetupEntityRequestFromParam(entity, 0, runID)
+			if err != nil {
+				t.Fatalf("invalid baseline input: %v", err)
+			}
+			if err := validateTestSetupEntityAgainstBundle(bundle, baseline, 0); err != nil {
+				t.Fatalf("invalid baseline contract: %v", err)
+			}`},
+		{"testSetupBodyWithEntity(bundle.SourceArtifact.BundleHash(), uuid.NewString(),", "testSetupBodyWithEntity(bundle.SourceArtifact.BundleHash(), runID,"},
+		{"\t\t\tif count := countAPIIdempotencyRows(t, pg); count != 0 {", `			if tc.wantReason != "" && details["reason"] != tc.wantReason {
+				t.Fatalf("test.setup_entities invalid reason = %#v, want %q; details=%#v", details["reason"], tc.wantReason, details)
+			}
+			if count := countAPIIdempotencyRows(t, pg); count != 0 {`},
+	} {
+		if strings.Count(current, edit.before) != 1 {
+			t.Fatalf("setup refusal historical cut changed: %q", edit.before)
+		}
+		current = strings.Replace(current, edit.before, edit.after, 1)
+	}
+	guard := recipe{File: row.File, Function: row.Function, Before: current, After: current}
+	for _, edit := range []publicationSuccessorEdit{
+		{"validateTestSetupEntityAgainstBundle(bundle, baseline, 0)", "validateTestSetupEntityAgainstBundle(bundle, baseline, 1)"},
+		{"entity[\"entity_id\"], entity[\"flow_instance\"], entity[\"entity_type\"] = runID", "entity[\"entity_id\"], entity[\"flow_instance\"], entity[\"entity_type\"] = foreignRun"},
+		{"details[\"reason\"] != tc.wantReason", "false"},
+		{"details[\"field\"] != tc.wantField", "false"},
+		{"count != 0", "count < 0"},
+		{"entity[\"current_state\"] = nil", "entity[\"current_state\"] = \"\""},
+		{"entity[\"gates\"] = nil", "entity[\"gates\"] = map[string]any{}"},
+	} {
+		mutant := strings.Replace(current, edit.before, edit.after, 1)
+		if mutant == current {
+			t.Fatalf("missing setup refusal control: %q", edit.before)
+		}
+		if _, changed, err := rewriteFunction(row.File, []byte("package proof\n"+mutant), guard); err == nil || changed {
+			t.Fatalf("setup refusal accepted wrong construction, missing validation or effects: %q", edit.before)
+		}
+	}
+	if _, changed, err := rewriteFunction(row.File, []byte("package proof\n"+row.After), guard); err == nil || changed {
+		t.Fatal("old lifecycle-bearing refusal setup accepted as current")
+	}
+	return current
+}
+
+const q10APISetupImportRefusalCases = `
+		{
+			name: "import declared current state",
+			edit: func(entity map[string]any) { entity["current_state"] = "waiting" },
+			wantField: "entities[0].current_state",
+			wantReason: "data-only imports cannot carry lifecycle inputs",
+		},
+		{
+			name: "import null current state",
+			edit: func(entity map[string]any) { entity["current_state"] = nil },
+			wantField: "entities[0].current_state",
+			wantReason: "data-only imports cannot carry lifecycle inputs",
+		},
+		{
+			name: "import empty current state",
+			edit: func(entity map[string]any) { entity["current_state"] = "" },
+			wantField: "entities[0].current_state",
+			wantReason: "data-only imports cannot carry lifecycle inputs",
+		},
+		{
+			name: "import declared gate",
+			edit: func(entity map[string]any) { entity["gates"] = map[string]any{"review_ready": true} },
+			wantField: "entities[0].gates",
+			wantReason: "data-only imports cannot carry lifecycle inputs",
+		},
+		{
+			name: "import null gates",
+			edit: func(entity map[string]any) { entity["gates"] = nil },
+			wantField: "entities[0].gates",
+			wantReason: "data-only imports cannot carry lifecycle inputs",
+		},
+		{
+			name: "import empty gates",
+			edit: func(entity map[string]any) { entity["gates"] = map[string]any{} },
+			wantField: "entities[0].gates",
+			wantReason: "data-only imports cannot carry lifecycle inputs",
+		},`
+
 func TestNativeAPIPhysicalCardinalityRetainsWorkloadsAssertionsAndExactReadBindings(t *testing.T) {
 	for _, row := range nativeAPIPhysicalCardinalityRecipes(t) {
-		row = historicalMechanicalRecipe(t, row)
+		row = historicalMechanicalRecipe(t, q10APIPhysicalCardinalityCurrentRecipe(t, row))
 		switch row.Function {
 		case "countAPIIdempotencyRows", "countAllRunRows", "countAllEventRows":
 			configuration := map[string][2]string{
