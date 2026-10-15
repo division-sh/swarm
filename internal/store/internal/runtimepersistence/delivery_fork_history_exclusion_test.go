@@ -212,11 +212,14 @@ func proveRetainedDeliveryLifecycleAccounting(t *testing.T, fixture authorActivi
 	phase("unchanged_reclaim", 0, claim)
 	phase("retry_settlement", 1, func() error {
 		failed, err := store.SettleFailure(ctx, current.Claim, runtimedelivery.Settlement{
-			Disposition: runtimedelivery.FailureRetry, Failure: testRetryableFailure(), RetryBase: time.Nanosecond,
+			Disposition: runtimedelivery.FailureRetry, Failure: testRetryableFailure(), RetryBase: time.Millisecond,
 			RuleSelection: runtimedelivery.NotApplicableHandlerRuleObservation(),
 		})
 		if err == nil && failed.Status != runtimedelivery.StatusFailed {
 			t.Fatal("retry did not retain its failed lifecycle state")
+		}
+		if err == nil {
+			waitRetryDecisionCoordinate(t, ctx, failed.NextEligibleAt)
 		}
 		return err
 	})

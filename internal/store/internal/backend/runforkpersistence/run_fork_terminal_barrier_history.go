@@ -78,7 +78,7 @@ func admitRunForkTerminalBarrierHistory(snapshot *runForkRevisionSnapshot, oblig
 			return err
 		}
 		var routes []events.DeliveryRoute
-		var exact *deliverylifecycle.Snapshot
+		var exact *deliverylifecycle.HistoricalFact
 		ref, _ := barrier.Registration.Handle.JoinRef()
 		for i := range snapshot.Deliveries {
 			delivery := &snapshot.Deliveries[i].Snapshot
@@ -111,8 +111,8 @@ func admitRunForkTerminalBarrierHistory(snapshot *runForkRevisionSnapshot, oblig
 			continue // No recipient is granted an exception by a terminal no-route occurrence.
 		}
 		if exact == nil || exact.RunID != snapshot.RunID || exact.Status != deliverylifecycle.StatusDeadLetter ||
-			exact.ClaimVersion <= 0 || exact.Failure == nil || exact.SettledAt.IsZero() ||
-			!exact.NextEligibleAt.IsZero() || !exact.ClaimExpiresAt.IsZero() || exact.ActiveSessionID != "" {
+			exact.SettledClaimVersion <= 0 || exact.Failure == nil || exact.SettledAt.IsZero() ||
+			exact.RetryDecision != nil || exact.SourceExecution.InProgress || exact.SourceExecution.SessionBound {
 			return fmt.Errorf("terminal barrier has no exact settled failed recipient")
 		}
 		var deadLetter *runForkRevisionDeadLetter
@@ -127,7 +127,7 @@ func admitRunForkTerminalBarrierHistory(snapshot *runForkRevisionSnapshot, oblig
 			deadLetter = candidate
 		}
 		if deadLetter == nil || deadLetter.DeadLetterID == "" || deadLetter.OriginalEventID != occurrence.EventID ||
-			deadLetter.ClaimVersion != exact.ClaimVersion || deadLetter.Outcome != "dead_letter" ||
+			deadLetter.ClaimVersion != exact.SettledClaimVersion || deadLetter.Outcome != "dead_letter" ||
 			deadLetter.OutcomeReasonCode != exact.ReasonCode || deadLetter.HandlerNode != exact.SubscriberID ||
 			deadLetter.OutcomeSettledAt == nil || !deadLetter.OutcomeSettledAt.Equal(exact.SettledAt) ||
 			!deadLetter.CreatedAt.Equal(exact.SettledAt) {

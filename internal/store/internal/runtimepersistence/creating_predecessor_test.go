@@ -67,7 +67,7 @@ func TestCreatingPredecessorAdmissionBothStores(t *testing.T) {
 					if scenario == "retry" {
 						disposition = deliverylifecycle.FailureRetry
 					}
-					if _, err := store.SettleFailure(ctx, first.Claim, deliverylifecycle.Settlement{Disposition: disposition, ReasonCode: failure.Detail.Code, Failure: &failure, RetryBase: time.Hour, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation()}); err != nil {
+					if _, err := store.SettleFailure(ctx, first.Claim, deliverylifecycle.Settlement{Disposition: disposition, ReasonCode: failure.Detail.Code, Failure: &failure, RetryBase: time.Millisecond, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation()}); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -166,7 +166,7 @@ func TestCreatingPredecessorAdmissionBothStores(t *testing.T) {
 						}
 					}
 					if scenario == "retry" {
-						if err := MakeManagerRetryEligibleForTest(ctx, f.store, creator, route); err != nil {
+						if err := WaitManagerRetryDecisionForTest(ctx, f.store, creator, route); err != nil {
 							t.Fatal(err)
 						}
 						original := first.Claim

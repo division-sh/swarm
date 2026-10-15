@@ -29,25 +29,6 @@ import (
 
 type Dialect string
 
-func MakeManagerRetryEligibleTx(ctx context.Context, tx *sql.Tx, event events.Event, route events.DeliveryRoute) error {
-	if tx == nil {
-		return fmt.Errorf("manager retry cut requires the original selected transaction")
-	}
-	id, err := DeliveryID(event.ID(), route)
-	if err != nil {
-		return err
-	}
-	result, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET next_eligible_at=$1 WHERE delivery_id=$2 AND event_id=$3 AND run_id=$4 AND status='failed'`, time.Now().UTC().Add(-time.Minute), id, event.ID(), event.RunID())
-	if err != nil {
-		return err
-	}
-	count, err := result.RowsAffected()
-	if err != nil || count != 1 {
-		return fmt.Errorf("manager retry cut requires one exact failed delivery: count=%d,error=%v", count, err)
-	}
-	return nil
-}
-
 // This cut changes age, not lease authority or expiry. Settlement still has to
 // renew the exact original token before recording its outcome.
 func AgeManagerClaimStartedAtTx(ctx context.Context, tx *sql.Tx, claim Claim, startedAt time.Time) error {
@@ -1173,10 +1154,11 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutation
 	return ClaimedObligation{Snapshot: claimed.Snapshot, Claim: claim}, nil
 }
 
-// These lifecycle coordinates are still part of the historical contract. A new
-// worker token or lease alone must not declare another historical fact.
+// Preserve only the refusal predicates; worker tokens, leases and session IDs
+// are not historical business facts.
 func declareRetainedDeliveryLifecycle(attempt *mutationprotocol.Attempt, before, after Snapshot) error {
-	if before.Status == after.Status && before.ActiveSessionID == after.ActiveSessionID {
+	if before.Status == after.Status && before.StartedAt.IsZero() == after.StartedAt.IsZero() &&
+		(strings.TrimSpace(before.ActiveSessionID) == "") == (strings.TrimSpace(after.ActiveSessionID) == "") {
 		return nil
 	}
 	return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)
@@ -1612,7 +1594,7 @@ func (a *Adapter) settleExactClaim(ctx context.Context, tx *sql.Tx, attempt *mut
 	reason := strings.TrimSpace(settlement.ReasonCode)
 	effectiveFailure := settlement.Failure
 	retryCount := record.RetryCount
-	var nextEligible any
+	var nextEligible *time.Time
 	if settlement.Disposition == FailureRetry {
 		if record.RetryCount < record.MaxRetries {
 			status = StatusFailed
@@ -1624,7 +1606,8 @@ func (a *Adapter) settleExactClaim(ctx context.Context, tx *sql.Tx, attempt *mut
 				base = time.Second
 			}
 			delay := time.Duration(float64(base) * math.Pow(2, float64(retryCount-1)))
-			nextEligible = now.Add(delay)
+			due := now.Add(delay)
+			nextEligible = &due
 		} else {
 			status = StatusDeadLetter
 			transition = "dead_letter"
@@ -1682,7 +1665,7 @@ func (a *Adapter) settleExactClaim(ctx context.Context, tx *sql.Tx, attempt *mut
 	if err := attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID); err != nil {
 		return Snapshot{}, err
 	}
-	if err := a.completeAttempt(ctx, tx, attempt, claim, outcome, reason, effectiveFailure, settlement.SideEffects, settlement.Duration, now); err != nil {
+	if err := a.completeAttempt(ctx, tx, attempt, claim, outcome, reason, effectiveFailure, settlement.SideEffects, settlement.Duration, now, nextEligible); err != nil {
 		return Snapshot{}, err
 	}
 	updated, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
@@ -1871,14 +1854,14 @@ func (a *Adapter) Outcomes(ctx context.Context, q queryer, deliveryID string) ([
 	}
 	query := `
 		SELECT delivery_id::text, claim_version, outcome, COALESCE(reason_code, ''),
-			failure, side_effects, duration_ms, completed_at
+			failure, side_effects, duration_ms, completed_at, retry_eligible_at
 		FROM event_delivery_attempts
 		WHERE delivery_id = $1::uuid AND closure_kind = 'settled'
 		ORDER BY claim_version`
 	if a.dialect == DialectSQLite {
 		query = `
 			SELECT delivery_id, claim_version, outcome, COALESCE(reason_code, ''),
-				failure, side_effects, duration_ms, completed_at
+				failure, side_effects, duration_ms, completed_at, retry_eligible_at
 			FROM event_delivery_attempts
 			WHERE delivery_id = ? AND closure_kind = 'settled'
 			ORDER BY claim_version`
@@ -1890,42 +1873,9 @@ func (a *Adapter) Outcomes(ctx context.Context, q queryer, deliveryID string) ([
 	defer rows.Close()
 	out := []Outcome{}
 	for rows.Next() {
-		var (
-			item           Outcome
-			failureRaw     []byte
-			sideEffectsRaw []byte
-			durationMS     int64
-			settledRaw     any
-		)
-		if err := rows.Scan(&item.DeliveryID, &item.ClaimVersion, &item.Outcome, &item.ReasonCode, &failureRaw, &sideEffectsRaw, &durationMS, &settledRaw); err != nil {
-			return nil, fmt.Errorf("scan delivery outcome: %w", err)
-		}
-		if item.ClaimVersion <= 0 {
-			return nil, fmt.Errorf("%w: delivery outcome claim version is invalid", ErrConflict)
-		}
-		switch item.Outcome {
-		case "delivered", "retry_scheduled", "dead_letter", "terminalized", "canceled":
-		default:
-			return nil, fmt.Errorf("%w: delivery outcome %q is invalid", ErrConflict, item.Outcome)
-		}
-		if item.Failure, err = decodeFailure(failureRaw); err != nil {
+		item, err := scanDeliveryOutcome(rows)
+		if err != nil {
 			return nil, err
-		}
-		if item.Outcome == "canceled" {
-			if _, err := ParseCancellationReason(item.ReasonCode); err != nil || item.Failure != nil {
-				return nil, fmt.Errorf("%w: canceled outcome lacks exact authored reason or contains failure", ErrConflict)
-			}
-		}
-		if err := json.Unmarshal(sideEffectsRaw, &item.SideEffects); err != nil {
-			return nil, fmt.Errorf("decode delivery outcome side effects: %w", err)
-		}
-		item.Duration = time.Duration(durationMS) * time.Millisecond
-		var present bool
-		if item.SettledAt, present, err = parseNullableTime(settledRaw); err != nil {
-			return nil, err
-		}
-		if !present {
-			return nil, fmt.Errorf("%w: delivery outcome settled time is missing", ErrConflict)
 		}
 		out = append(out, item)
 	}
@@ -1933,6 +1883,67 @@ func (a *Adapter) Outcomes(ctx context.Context, q queryer, deliveryID string) ([
 		return nil, fmt.Errorf("list delivery outcomes: %w", err)
 	}
 	return out, nil
+}
+
+func scanDeliveryOutcome(rows *sql.Rows) (Outcome, error) {
+	var item Outcome
+	var failureRaw, sideEffectsRaw []byte
+	var durationMS int64
+	var settledRaw, retryRaw any
+	if err := rows.Scan(&item.DeliveryID, &item.ClaimVersion, &item.Outcome, &item.ReasonCode, &failureRaw, &sideEffectsRaw, &durationMS, &settledRaw, &retryRaw); err != nil {
+		return Outcome{}, fmt.Errorf("scan delivery outcome: %w", err)
+	}
+	if item.ClaimVersion <= 0 {
+		return Outcome{}, fmt.Errorf("%w: delivery outcome claim version is invalid", ErrConflict)
+	}
+	switch item.Outcome {
+	case "delivered", "retry_scheduled", "dead_letter", "terminalized", "canceled":
+	default:
+		return Outcome{}, fmt.Errorf("%w: delivery outcome %q is invalid", ErrConflict, item.Outcome)
+	}
+	var err error
+	if item.Failure, err = decodeFailure(failureRaw); err != nil {
+		return Outcome{}, err
+	}
+	if item.Outcome == "canceled" {
+		if _, err := ParseCancellationReason(item.ReasonCode); err != nil || item.Failure != nil {
+			return Outcome{}, fmt.Errorf("%w: canceled outcome lacks exact authored reason or contains failure", ErrConflict)
+		}
+	}
+	if err := json.Unmarshal(sideEffectsRaw, &item.SideEffects); err != nil {
+		return Outcome{}, fmt.Errorf("decode delivery outcome side effects: %w", err)
+	}
+	item.Duration = time.Duration(durationMS) * time.Millisecond
+	var present bool
+	if item.SettledAt, present, err = parseNullableTime(settledRaw); err != nil {
+		return Outcome{}, err
+	}
+	if !present {
+		return Outcome{}, fmt.Errorf("%w: delivery outcome settled time is missing", ErrConflict)
+	}
+	item.RetryEligibleAt, err = decodeOutcomeRetryDue(item, retryRaw)
+	return item, err
+}
+
+func decodeOutcomeRetryDue(item Outcome, raw any) (*time.Time, error) {
+	due, present, err := parseNullableTime(raw)
+	if err != nil {
+		return nil, err
+	}
+	if !present && raw != nil {
+		return nil, fmt.Errorf("%w: outcome retry due is an empty timestamp", ErrConflict)
+	}
+	if item.Outcome != "retry_scheduled" {
+		if present {
+			return nil, fmt.Errorf("%w: non-retry outcome contains a retry due", ErrConflict)
+		}
+		return nil, nil
+	}
+	decision := CommittedRetryDecision{ClaimVersion: item.ClaimVersion, SettledAt: item.SettledAt, EligibleAt: due}
+	if err := decision.Validate(); err != nil {
+		return nil, err
+	}
+	return &due, nil
 }
 
 func (a *Adapter) ProveHandoff(ctx context.Context, q queryer, eventID string, route events.DeliveryRoute) (DurableHandoffProof, error) {
@@ -2977,7 +2988,7 @@ func (a *Adapter) expireAttempt(ctx context.Context, tx *sql.Tx, record delivery
 	return nil
 }
 
-func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, outcome, reason string, failure *runtimefailures.Envelope, sideEffects []string, duration time.Duration, now time.Time) error {
+func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, outcome, reason string, failure *runtimefailures.Envelope, sideEffects []string, duration time.Duration, now time.Time, retryEligibleAt *time.Time) error {
 	failureRaw, err := encodeFailure(failure)
 	if err != nil {
 		return err
@@ -2990,17 +3001,18 @@ func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, attempt *muta
 	query := `
 		UPDATE event_delivery_attempts
 		SET outcome = $1, reason_code = NULLIF($2, ''), failure = NULLIF($3, '')::jsonb,
-			side_effects = $4::jsonb, duration_ms = $5, completed_at = $6,
+			side_effects = $4::jsonb, duration_ms = $5, completed_at = $6, retry_eligible_at = $10,
 			current_delivery_id = NULL, open_marker = FALSE, closure_kind = 'settled'
 		WHERE delivery_id = $7::uuid AND claim_version = $8 AND claim_token = $9::uuid AND open_marker = TRUE`
-	args := []any{outcome, reason, failureRaw, string(sideEffectsRaw), durationMS, now, claim.DeliveryID(), claim.Version(), claim.PersistenceToken()}
+	args := []any{outcome, reason, failureRaw, string(sideEffectsRaw), durationMS, now, claim.DeliveryID(), claim.Version(), claim.PersistenceToken(), retryEligibleAt}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_delivery_attempts
 			SET outcome = ?, reason_code = NULLIF(?, ''), failure = NULLIF(?, ''),
-				side_effects = ?, duration_ms = ?, completed_at = ?,
+				side_effects = ?, duration_ms = ?, completed_at = ?, retry_eligible_at = ?,
 				current_delivery_id = NULL, open_marker = FALSE, closure_kind = 'settled'
 			WHERE delivery_id = ? AND claim_version = ? AND claim_token = ? AND open_marker = TRUE`
+		args = []any{outcome, reason, failureRaw, string(sideEffectsRaw), durationMS, now, retryEligibleAt, claim.DeliveryID(), claim.Version(), claim.PersistenceToken()}
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {

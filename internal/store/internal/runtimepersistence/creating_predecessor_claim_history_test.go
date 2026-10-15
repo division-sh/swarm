@@ -90,12 +90,16 @@ func proveCreatingPredecessorClaimHistory(t *testing.T, backend, state string) {
 		if !ok {
 			t.Fatal("missing typed retry failure")
 		}
-		if _, err := store.SettleFailure(f.ctx, first.Claim, deliverylifecycle.Settlement{Disposition: deliverylifecycle.FailureRetry, Failure: &failure, RetryBase: time.Hour, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation()}); err != nil {
+		retryBase := time.Hour
+		if state == "eligible_retry" {
+			retryBase = time.Millisecond
+		}
+		if _, err := store.SettleFailure(f.ctx, first.Claim, deliverylifecycle.Settlement{Disposition: deliverylifecycle.FailureRetry, Failure: &failure, RetryBase: retryBase, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation()}); err != nil {
 			t.Fatal(err)
 		}
 		want = deliverylifecycle.ClaimDeferred
 		if state == "eligible_retry" {
-			if err := MakeManagerRetryEligibleForTest(f.ctx, f.store, follower, route); err != nil {
+			if err := WaitManagerRetryDecisionForTest(f.ctx, f.store, follower, route); err != nil {
 				t.Fatal(err)
 			}
 			want, wake = deliverylifecycle.ClaimAcquired, false

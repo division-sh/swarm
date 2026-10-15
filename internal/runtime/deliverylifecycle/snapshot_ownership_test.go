@@ -74,10 +74,8 @@ func TestDecodeHistoricalSnapshotPreservesOwningRunWithoutCapability(t *testing.
 					if decoded.RunID != fact["run_id"] || decoded.DeliveryID != fact["delivery_id"] || decoded.EventID != fact["event_id"] {
 						t.Fatal("historical decoding changed owning coordinates")
 					}
-					if decoded.Authority.Validate() == nil {
-						t.Fatal("historical ownership must not grant execution authority")
-					}
-					if decoded.ClaimVersion != 0 || !decoded.ClaimExpiresAt.IsZero() {
+					assertHistoricalHasNoLiveFields(t, decoded)
+					if decoded.SettledClaimVersion != 0 {
 						t.Fatal("historical ownership must not carry a live generation or lease expiry")
 					}
 				})

@@ -105,3 +105,40 @@ func TestHistoricalDeliveryProjectionExcludesPhysicalHandoff(t *testing.T) {
 		t.Error("historical delivery fact contains an operational handoff stamp")
 	}
 }
+
+func TestHistoricalDeliveryProjectionSeparatesRefusalAndRetryEvidence(t *testing.T) {
+	spec, ok := canonicalProjectionSpec(FamilyEventDeliveries)
+	if !ok {
+		t.Fatal("missing delivery projection")
+	}
+	values := map[string]any{"status": "in_progress", "in_progress": true, "started": true, "session_bound": false,
+		"retry_outcome": "retry_scheduled", "retry_claim_version": int64(2), "retry_settled_at": "settled", "retry_eligible_at": "due"}
+	projected := spec.build(values)
+	for _, field := range []string{"next_eligible_at", "active_session_id", "started_at", "in_progress", "started", "session_bound", "retry_outcome", "retry_claim_version", "retry_settled_at", "retry_eligible_at"} {
+		if _, present := projected[field]; present {
+			t.Fatalf("historical delivery retains physical/intermediate field %s", field)
+		}
+	}
+	if got := projected["source_execution_at_cut"]; !reflect.DeepEqual(got, map[string]any{"in_progress": true, "started": true, "session_bound": false}) {
+		t.Fatalf("captured refusal predicates changed: %#v", got)
+	}
+	if got := projected["retry_decision"]; !reflect.DeepEqual(got, map[string]any{"claim_version": int64(2), "settled_at": "settled", "eligible_at": "due"}) {
+		t.Fatalf("committed retry coordinates changed: %#v", got)
+	}
+	if !strings.Contains(spec.source, "SELECT MAX(a.claim_version)") || !strings.Contains(spec.source, "a.closure_kind = 'settled'") || strings.Contains(spec.source, "a.outcome") {
+		t.Fatal("latest settled selector must compare all outcomes, not only retry rows")
+	}
+	for _, column := range spec.columns {
+		if column.name == "in_progress" || column.name == "started" || column.name == "session_bound" {
+			if column.kind != valueBool {
+				t.Fatalf("cut predicate %s is not a typed boolean", column.name)
+			}
+		}
+	}
+	for _, status := range []string{"pending", "delivered", "dead_letter", "canceled"} {
+		values := map[string]any{"status": status, "retry_outcome": "retry_scheduled", "retry_claim_version": int64(2), "retry_settled_at": "settled", "retry_eligible_at": "due"}
+		if got := spec.build(values)["retry_decision"]; got != nil {
+			t.Fatalf("%s resurrected an older retry decision: %#v", status, got)
+		}
+	}
+}
