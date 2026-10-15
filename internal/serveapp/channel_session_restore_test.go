@@ -49,11 +49,12 @@ func TestServeSessionResumePublicationRebindBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newServeBootstrapTestFixture(t, backend)
-			serveBootstrapWireFixture(t, "paired", f.owner)
+			authenticated := serveBootstrapWireFixture(t, "paired", f.owner)
 			seedServePairedDevice(t, f)
 			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, true); err != nil {
 				t.Fatal(err)
 			}
+			awaitServePairedAuthenticationFixture(t, f.ctx, authenticated)
 			paired, ok, err := f.adapter.CheckpointSessionPairing(f.ctx, f.op)
 			if err != nil || !ok {
 				t.Fatal(paired, ok, err)
@@ -102,7 +103,7 @@ func TestServeSessionExplicitResumeRetainsPairedIdentityBothStores(t *testing.T)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newServeBootstrapTestFixture(t, backend)
-			serveBootstrapWireFixture(t, "paired", f.owner)
+			authenticated := serveBootstrapWireFixture(t, "paired", f.owner)
 			accountRef := seedServePairedDevice(t, f)
 			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, false); err == nil {
 				t.Fatal("ordinary cache reuse silently reconnected a closed owner")
@@ -110,6 +111,7 @@ func TestServeSessionExplicitResumeRetainsPairedIdentityBothStores(t *testing.T)
 			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, true); err != nil {
 				t.Fatal("explicit original-reservation retry failed", err)
 			}
+			awaitServePairedAuthenticationFixture(t, f.ctx, authenticated)
 			paired, ok, err := f.adapter.CheckpointSessionPairing(f.ctx, f.op)
 			if err != nil || !ok || paired.SessionAccount.AccountRef != accountRef {
 				t.Fatal("original private SDK account did not checkpoint", paired, ok, err)
@@ -266,11 +268,12 @@ func TestServeSessionResumePreservesObservationErrorWithoutReconnectBothStores(t
 			f := newServeBootstrapTestFixture(t, backend)
 			fault := &serveSessionReadFaultStore{Store: f.adapter.store, cause: errors.New("selected resume observation failed")}
 			f.adapter.store = fault
-			serveBootstrapWireFixture(t, "paired", f.owner)
+			authenticated := serveBootstrapWireFixture(t, "paired", f.owner)
 			seedServePairedDevice(t, f)
 			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, true); err != nil {
 				t.Fatal(err)
 			}
+			awaitServePairedAuthenticationFixture(t, f.ctx, authenticated)
 			paired, ok, err := f.adapter.CheckpointSessionPairing(f.ctx, f.op)
 			if err != nil || !ok {
 				t.Fatal(paired, ok, err)
@@ -383,11 +386,12 @@ func TestServeSessionConcurrentResumeConstructsOneSuccessorBothStores(t *testing
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newServeBootstrapTestFixture(t, backend)
-			serveBootstrapWireFixture(t, "paired", f.owner)
+			authenticated := serveBootstrapWireFixture(t, "paired", f.owner)
 			seedServePairedDevice(t, f)
 			if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, true); err != nil {
 				t.Fatal(err)
 			}
+			awaitServePairedAuthenticationFixture(t, f.ctx, authenticated)
 			paired, ok, err := f.adapter.CheckpointSessionPairing(f.ctx, f.op)
 			if err != nil || !ok {
 				t.Fatal(paired, ok, err)
