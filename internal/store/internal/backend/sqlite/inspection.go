@@ -29,6 +29,18 @@ func (b *Backend) InspectSnapshot(ctx context.Context, inspect func(context.Cont
 	})
 }
 
+func (b *Backend) InspectAgentRecovery(ctx context.Context, inspect func(context.Context) error) error {
+	if !b.Valid() || ctx == nil || inspect == nil {
+		return errors.New("agent recovery inspection requires its selected backend and reader")
+	}
+	if tx, err := b.inspectionTransaction(ctx); err != nil {
+		return err
+	} else if tx != nil {
+		return errors.New("agent recovery cannot adopt a caller's inspection snapshot")
+	}
+	return b.InspectSnapshot(ctx, inspect)
+}
+
 func (b *Backend) inspectionTransaction(ctx context.Context) (*sql.Tx, error) {
 	if ctx == nil {
 		return nil, nil

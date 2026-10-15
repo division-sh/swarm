@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 )
 
 // Only acquisition installs this exact native capability. No copied stamp,
@@ -12,6 +13,8 @@ import (
 type processOperations struct {
 	mu      sync.Mutex
 	current runtimeownership.ProcessCapability
+
+	recoveryReader startuprecovery.AgentRecoveryReader
 }
 
 func (p *processOperations) bindProcess(capability runtimeownership.ProcessCapability) {

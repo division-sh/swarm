@@ -34,6 +34,7 @@ func (b *Backend) InstallTransactionProbeForTest(options transactiontest.Options
 func (b *Backend) NewSessionAuthority(conn *sql.Conn) (*SessionAuthority, error) {
 	session, err := NewSessionAuthority(conn)
 	if err == nil {
+		session.backend = b
 		session.testTransactions = &b.testTransactions
 	}
 	return session, err

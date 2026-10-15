@@ -38,6 +38,7 @@ const (
 )
 
 type SessionAuthority struct {
+	backend                 *Backend
 	testTransactions        *transactiontest.Slot
 	operationMu             sync.Mutex
 	fenceMu                 sync.Mutex
@@ -713,6 +714,7 @@ func AcquireAdvisoryLockLeaseWith(
 	}
 	authority := newSessionAuthority(conn)
 	if backend, ok := db.(*Backend); ok {
+		authority.backend = backend
 		authority.testTransactions = &backend.testTransactions
 	}
 	return AcquireAdvisoryLockLeaseOnSession(ctx, authority, lockKey, acquire, authority.release)

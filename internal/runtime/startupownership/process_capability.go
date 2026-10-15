@@ -161,7 +161,9 @@ type processCapability struct {
 	monitorCadence  time.Duration
 	monitorDeadline time.Duration
 
-	agentRecoverySeed *agentRecoverySeed
+	agentRecoverySeed          *agentRecoverySeed
+	agentRecoverySeedProbe     atomic.Pointer[AgentRecoverySeedFaultProbeForTest]
+	agentRecoverySeedFaultUsed atomic.Bool
 }
 
 type generationGrant struct {
