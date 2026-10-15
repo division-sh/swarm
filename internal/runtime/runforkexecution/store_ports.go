@@ -115,6 +115,7 @@ type selectedContractExecutionPorts struct {
 	humanTaskExpiry         runtimepipeline.HumanTaskExpiry
 	candidates              runlifecycle.CandidateOwner
 	genericSchedules        genericschedule.Store
+	testFanOutExecutor      func(startupownership.FanOutExecutor) startupownership.FanOutExecutor
 }
 
 func NewSelectedContractExecutionOwner(
