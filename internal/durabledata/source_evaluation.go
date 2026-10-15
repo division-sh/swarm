@@ -17,7 +17,7 @@ type SourceEvaluationBase struct {
 	Manifest        *Manifest  `json:"manifest,omitempty"`
 	BusinessKey     string     `json:"business_key,omitempty"`
 	CanonicalSchema []byte     `json:"canonical_schema,omitempty"`
-	CanonicalJSONL  []byte     `json:"canonical_jsonl,omitempty"`
+	CanonicalJSONL  []byte     `json:"canonical_jsonl,omitzero"`
 }
 
 type SourceEvaluationContext struct {
