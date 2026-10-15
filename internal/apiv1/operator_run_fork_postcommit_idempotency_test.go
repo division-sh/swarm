@@ -9,7 +9,65 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/google/uuid"
 )
+
+func TestOperatorRunForkLateWinnerUsesOriginalActorKey(t *testing.T) {
+	for _, disposition := range []string{"joined_outcome", "independent_execution_failure", "foreign_source"} {
+		t.Run(disposition, func(t *testing.T) {
+			operations := newRecordingRunForkOperations()
+			availability := &recordingRunForkAvailability{rows: map[string]runbundle.Availability{
+				runForkTestSourceRunID: runForkAvailable(runForkTestSourceRunID, runForkTestBundleHash),
+			}}
+			failure := errors.New("independent losing preparation failure")
+			var winnerID, loserID string
+			executor := &recordingRunForkExecutor{execute: func(_ context.Context, request RunForkExecutionRequest) (RunForkExecutionResult, error) {
+				winner := *request.ForkOperation
+				loserID, winnerID = winner.OperationID, uuid.NewString()
+				winner.OperationID = winnerID
+				result := runForkActivatedTestResult()
+				if disposition == "foreign_source" {
+					winner.SourceRunID = uuid.NewString()
+					result.SourceRunID = winner.SourceRunID
+				}
+				if err := operations.activate(winner, result); err != nil {
+					t.Fatal(err)
+				}
+				if disposition == "independent_execution_failure" {
+					return RunForkExecutionResult{}, failure
+				}
+				return result, nil
+			}}
+			opts := RunForkHandlerOptions{Availability: availability, Operations: operations, Executor: executor}
+			request := runForkOperationTestRequest("late-winner", "original-late-winner-transport")
+			value, err := invokeRunForkOperation(opts, request)
+			if disposition != "joined_outcome" {
+				if err == nil || value != nil {
+					t.Fatalf("unrelated failure or foreign source became a winner response: value=%+v err=%v", value, err)
+				}
+				if disposition == "independent_execution_failure" && !errors.Is(err, failure) {
+					t.Fatalf("winner projection hid the independent failure: %v", err)
+				}
+			} else {
+				result, ok := value.(RunForkExecutionResult)
+				if err != nil || !ok || !result.activationAcknowledged || result.ForkRunID != runForkTestForkRunID {
+					t.Fatalf("joined winner result depended on losing operation ID: value=%+v err=%v", value, err)
+				}
+				availability.err = runbundle.ErrRunNotFound
+				replayed, err := invokeRunForkOperation(opts, request)
+				if err != nil || !reflect.DeepEqual(value, replayed) || executor.calls != 1 || availability.calls != 1 {
+					t.Fatalf("winner replay re-executed or re-resolved source: value=%+v replay=%+v err=%v", value, replayed, err)
+				}
+			}
+			if winnerID == "" || winnerID == loserID || len(operations.byID) != 1 || len(operations.byKey) != 1 {
+				t.Fatalf("late election did not retain one distinct durable winner: winner=%s loser=%s records=%+v", winnerID, loserID, operations.byID)
+			}
+			if _, found := operations.byID[loserID]; found {
+				t.Fatal("losing generated operation acquired durable identity")
+			}
+		})
+	}
+}
 
 func TestOperatorRunForkActivatedPostCommitErrorReplaysWithoutReexecution(t *testing.T) {
 	cleanupErr := errors.New("selected fork postcommit cleanup failed")
