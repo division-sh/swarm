@@ -23,11 +23,11 @@ import (
 )
 
 func TestVerifyDeploymentDiscoveryAndPortableOverride(t *testing.T) {
-	for _, layer := range []string{"explicit", "project", "no_deployment"} {
+	for _, selection := range []string{"explicit", "project", "user_global", "deployment", "locator", "no_deployment"} {
 		for _, portable := range []bool{false, true} {
-			name := layer + "/default"
+			name := selection + "/default"
 			if portable {
-				name = layer + "/portable"
+				name = selection + "/portable"
 			}
 			t.Run(name, func(t *testing.T) {
 				isolateCLIAPIConfigEnv(t)
@@ -36,11 +36,24 @@ func TestVerifyDeploymentDiscoveryAndPortableOverride(t *testing.T) {
 				t.Setenv("SWARM_CREDENTIALS_FILE", credentialDir)
 				t.Setenv("SWARM_MANAGED_CREDENTIALS_FILE", credentialDir)
 				args := []string{"verify", root, "--json"}
-				switch layer {
+				configPath := ""
+				configBody := withTestProviderTriggerPlatformInventory(t, "llm: {backend: anthropic}\nserve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\n")
+				switch selection {
 				case "explicit":
 					args = append(args, "--config", writeTestVerifyRuntimeConfig(t))
 				case "project":
-					writeRuntimeConfigText(t, filepath.Join(root, "swarm.yaml"), withTestProviderTriggerPlatformInventory(t, "llm: {backend: anthropic}\nserve: {api_listen_addr: '127.0.0.1:0', mcp_listen_addr: '127.0.0.1:0'}\n"))
+					writeRuntimeConfigText(t, filepath.Join(root, "swarm.yaml"), configBody)
+				case "user_global":
+					writeRuntimeConfigText(t, ignoredUserGlobalConfigPath(t), "runtime: null\n")
+				case "deployment":
+					configPath = filepath.Join(root, ".swarm", "swarm.yaml")
+					if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					writeRuntimeConfigText(t, configPath, configBody)
+				case "locator":
+					configPath = writeTestVerifyRuntimeConfig(t)
+					t.Setenv("SWARM_CONFIG", configPath)
 				}
 				if portable {
 					args = append(args, "--portable")
@@ -54,7 +67,8 @@ func TestVerifyDeploymentDiscoveryAndPortableOverride(t *testing.T) {
 				if result.LiveReadiness != "not_evaluated" || result.AdmissionComplete {
 					t.Fatalf("fabricated readiness or unobserved completeness: %#v", result)
 				}
-				if layer == "no_deployment" || portable {
+				configured := selection == "explicit" || selection == "deployment" || selection == "locator"
+				if !configured || portable {
 					if code != 0 || !result.OK || result.ValidationScope != "structural" {
 						t.Fatalf("portable admission failed: exit=%d result=%#v", code, result)
 					}
@@ -63,7 +77,15 @@ func TestVerifyDeploymentDiscoveryAndPortableOverride(t *testing.T) {
 						t.Fatalf("unchecked deployment became success: exit=%d result=%#v", code, result)
 					}
 				}
-				if _, err := os.Stat(filepath.Join(root, ".swarm")); !os.IsNotExist(err) {
+				if selection == "deployment" {
+					entries, err := os.ReadDir(filepath.Dir(configPath))
+					if err != nil || len(entries) != 1 || entries[0].Name() != "swarm.yaml" {
+						t.Fatalf("verification added deployment-directory state: %v %v", entries, err)
+					}
+					if raw, err := os.ReadFile(configPath); err != nil || string(raw) != configBody {
+						t.Fatalf("verification changed selected config: %q %v", raw, err)
+					}
+				} else if _, err := os.Stat(filepath.Join(root, ".swarm")); !os.IsNotExist(err) {
 					t.Fatalf("verification created runtime state: %v", err)
 				}
 				if entries, err := os.ReadDir(credentialDir); err != nil || len(entries) != 0 {
