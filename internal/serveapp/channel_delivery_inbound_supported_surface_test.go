@@ -423,7 +423,7 @@ func runChannelDeliveryInboundDispositionE2E(t *testing.T, backend, scenario str
 	}
 	enableChannelOnboardingRecoveryOnStartup(t, configPath)
 	opts := cliapp.ServeOptions{
-		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath, ConfigPath: configPath,
+		SourceRoot: sourceRoot, ConfigPath: configPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		PublicWebhookBaseURL: "https://hooks.channel-onboarding.test", PublicWebhookListen: publicListen,
 		PublicWebhookListener: publicListener, SelfCheck: true, AbandonActiveRuns: true,

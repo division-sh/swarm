@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -41,8 +40,7 @@ func TestFanOutReadAPILiveSelectedStores(t *testing.T) {
 			}
 			calls := 0
 			handler, err := apiv1.NewHandler(apiv1.Options{
-				PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRootForRuntimeWriterGuard(t)),
-				AuthTokens:       []string{"fan-out-read-token"},
+				AuthTokens: []string{"fan-out-read-token"},
 				Handlers: apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{
 					Runs: selected.(apiv1.RunReadStore),
 					FanOutRuntime: func(ctx context.Context, page fanoutobligation.ListPage) (fanoutobligation.ListPage, error) {

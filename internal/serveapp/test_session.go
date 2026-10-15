@@ -33,7 +33,7 @@ func loadRuntimeCompositionBundles(ctx context.Context, req runtimeCompositionRe
 	if err != nil {
 		return nil, err
 	}
-	loaded, err := materializeRuntimeBundle(module, req.AdmittedBundle, req.ResolvedPaths.SourceRoot, req.ResolvedPaths.PlatformSpecPath)
+	loaded, err := materializeRuntimeBundle(module, req.AdmittedBundle, req.ResolvedPaths.SourceRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,7 @@ func RunTestSession(ctx context.Context, in cliapp.TestSessionRequest, execute f
 	}
 	token := hex.EncodeToString(tokenBytes)
 	opts := cliapp.DefaultServeOptions()
-	opts.SourceRoot, opts.PlatformSpecPath = in.SourceRoot, in.PlatformSpecPath
+	opts.SourceRoot = in.SourceRoot
 	opts.APIListenAddr, opts.MCPListenAddr = "127.0.0.1:0", "127.0.0.1:0"
 	opts.Output, opts.ErrorOutput = io.Discard, io.Discard
 	opts.NoColor = true
@@ -102,7 +102,7 @@ func RunTestSession(ctx context.Context, in cliapp.TestSessionRequest, execute f
 		Repo:                privateRoot, Options: opts,
 		Config:           cliapp.RuntimeConfigLoadResult{Config: cfg, Source: "private-test-session"},
 		AdmittedBundle:   in.Bundle,
-		ResolvedPaths:    cliapp.CLISourcePlatformSpecPaths{SourceRoot: in.SourceRoot, PlatformSpecPath: in.PlatformSpecPath},
+		ResolvedPaths:    cliapp.CLISourcePaths{SourceRoot: in.SourceRoot},
 		SwarmDir:         cliapp.CLISwarmDirResolution{Path: privateRoot, Source: "private-test-session"},
 		StoreSelection:   storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(privateRoot, "state.db")},
 		PlatformPackBase: in.PlatformPackBase, PlatformPackBases: bases,

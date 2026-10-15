@@ -213,9 +213,13 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("load runtime config: %w", err))
 	}
-	sourceRoot, platformSpec, err := resolveScenarioTestSources(RepoRoot, opts.contracts, configResult.cli)
+	sourceRoot, err := resolveScenarioTestSources(RepoRoot, opts.contracts, configResult.cli)
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, err)
+	}
+	platformSpec, err := EmbeddedPlatformSpecPath()
+	if err != nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("resolve embedded platform spec: %w", err))
 	}
 	deriveFlow := strings.Trim(strings.TrimSpace(opts.derive), "/")
 	if deriveFlow == "" && (strings.TrimSpace(opts.input) != "" || opts.allInputs) {
@@ -309,8 +313,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("private test session runner is unavailable"))
 	}
 	err = opts.apiOptions.runTest(ctx, TestSessionRequest{
-		Bundle: bundle, SourceRoot: sourceRoot, PlatformSpecPath: platformSpec,
-		PlatformPackBase: platformPackBase, LiveBackend: profile.ID, ModelAliases: configResult.Config.LLM.Models,
+		Bundle: bundle, SourceRoot: sourceRoot, PlatformPackBase: platformPackBase, LiveBackend: profile.ID, ModelAliases: configResult.Config.LLM.Models,
 		WorkspaceBackend: workspaceBackend,
 	}, func(sessionCtx context.Context, endpoint TestSessionEndpoint) error {
 		rpcEndpoint, err := cliAPIRPCEndpointFromServer(endpoint.APIServer, "private test session")
@@ -389,21 +392,17 @@ func scenarioTestSourceArtifactFact(ctx context.Context, client *cliAPIClient, b
 	return matched, nil
 }
 
-func resolveScenarioTestSources(RepoRoot, sourceArgument string, _ cliCommandConfig) (string, string, error) {
+func resolveScenarioTestSources(RepoRoot, sourceArgument string, _ cliCommandConfig) (string, error) {
 	var err error
 	RepoRoot, err = requireInvocationRootPath(RepoRoot)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	sourceRoot, err := ResolveSourceRoot(RepoRoot, sourceArgument)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
-	platformSpec, err := EmbeddedPlatformSpecPath()
-	if err != nil {
-		return "", "", fmt.Errorf("resolve embedded platform spec: %w", err)
-	}
-	return sourceRoot, ResolvePath(RepoRoot, platformSpec), nil
+	return sourceRoot, nil
 }
 
 func discoverScenarioTestFiles(bundle *runtimecontracts.WorkflowContractBundle, args []string) ([]scenarioTestFile, error) {

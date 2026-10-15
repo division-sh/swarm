@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"io"
 	"net"
 	"net/http"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -115,8 +116,6 @@ type serveRuntimeBundle struct {
 	source             semanticview.Source
 	sourceProjection   *sourceartifact.RuntimeProjection
 	sourceRoot         string
-	platformSpecPath   string
-	runningSpecPath    string
 	bootIdentity       runtimecontracts.BundleIdentity
 	sourceArtifactFact runtimecorrelation.SourceArtifactFact
 	dbLoaded           bool
@@ -262,21 +261,17 @@ func serveRuntimeStateStoreSummary(contexts []serveRuntimeBundleContext) string 
 	return strings.Join(parts, "; ")
 }
 
-func serveConfigLoadDetail(configDetail string, resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions) string {
+func serveConfigLoadDetail(configDetail string, resolvedPaths cliapp.CLISourcePaths, opts cliapp.ServeOptions) string {
 	parts := []string{"config=" + strings.TrimSpace(configDetail)}
 	parts = append(parts, "source="+filepath.Clean(resolvedPaths.SourceRoot))
 	return strings.Join(parts, " ")
-}
-
-func servePreCatalogPlatformSpecPath(resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions) (string, error) {
-	return resolvedPaths.PlatformSpecPath, nil
 }
 
 type sourceArtifactReader interface {
 	GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
 }
 
-func loadServeRuntimeBundles(ctx context.Context, repo string, artifacts sourceArtifactReader, resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) ([]serveRuntimeBundle, error) {
+func loadServeRuntimeBundles(ctx context.Context, repo string, artifacts sourceArtifactReader, resolvedPaths cliapp.CLISourcePaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) ([]serveRuntimeBundle, error) {
 	loaded, err := loadServeRuntimeBundle(ctx, repo, artifacts, resolvedPaths, opts, packBases)
 	if err != nil {
 		return nil, err
@@ -284,7 +279,7 @@ func loadServeRuntimeBundles(ctx context.Context, repo string, artifacts sourceA
 	return []serveRuntimeBundle{loaded}, nil
 }
 
-func loadServeRuntimeBundle(ctx context.Context, repo string, artifacts sourceArtifactReader, resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
+func loadServeRuntimeBundle(ctx context.Context, repo string, artifacts sourceArtifactReader, resolvedPaths cliapp.CLISourcePaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
 	sourceRoot, err := cliapp.NormalizeSourceRoot(resolvedPaths.SourceRoot)
 	if err != nil {
 		return serveRuntimeBundle{}, err
@@ -293,14 +288,14 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, artifacts sourceAr
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	module, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, resolvedPaths.PlatformSpecPath, packBase)
+	module, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, packBase)
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	return materializeRuntimeBundle(module, bundle, sourceRoot, resolvedPaths.PlatformSpecPath)
+	return materializeRuntimeBundle(module, bundle, sourceRoot)
 }
 
-func materializeRuntimeBundle(module runtimepipeline.WorkflowModule, bundle *runtimecontracts.WorkflowContractBundle, sourceRoot, platformSpecPath string) (serveRuntimeBundle, error) {
+func materializeRuntimeBundle(module runtimepipeline.WorkflowModule, bundle *runtimecontracts.WorkflowContractBundle, sourceRoot string) (serveRuntimeBundle, error) {
 	bootIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
 	if err != nil {
 		return serveRuntimeBundle{}, fmt.Errorf("compute boot bundle identity: %w", err)
@@ -315,14 +310,12 @@ func materializeRuntimeBundle(module runtimepipeline.WorkflowModule, bundle *run
 		source:           semanticview.Wrap(bundle),
 		sourceProjection: sourceProjection,
 		sourceRoot:       sourceRoot,
-		platformSpecPath: platformSpecPath,
-		runningSpecPath:  platformSpecPath,
 		bootIdentity:     bootIdentity,
 		cleanup:          sourceProjection.Release,
 	}, nil
 }
 
-func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactReader, repoRoot, runningSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner, bundleHash string) (semanticview.Source, error) {
+func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactReader, repoRoot string, packBases *packartifact.PlatformPackBaseGenerationOwner, bundleHash string) (semanticview.Source, error) {
 	if reader == nil {
 		return nil, fmt.Errorf("budget recovery source artifact reader is required")
 	}
@@ -337,7 +330,11 @@ func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactRea
 	if err != nil {
 		return nil, err
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repoRoot, artifact, runningSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+	specPath, err := cliapp.EmbeddedPlatformSpecPath()
+	if err != nil {
+		return nil, err
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repoRoot, artifact, specPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBases: packBases, AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {
@@ -346,7 +343,7 @@ func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactRea
 	return semanticview.Wrap(bundle), nil
 }
 
-func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifacts sourceArtifactReader, bundleHash, runningPlatformSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner, materialize func(*sourceartifact.AdmittedSourceArtifact, semanticview.Source) (*sourceartifact.RuntimeProjection, error)) (serveRuntimeBundle, error) {
+func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifacts sourceArtifactReader, bundleHash string, packBases *packartifact.PlatformPackBaseGenerationOwner, materialize func(*sourceartifact.AdmittedSourceArtifact, semanticview.Source) (*sourceartifact.RuntimeProjection, error)) (serveRuntimeBundle, error) {
 	if artifacts == nil {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: exact source reconstruction requires selected source artifact store")
 	}
@@ -364,7 +361,11 @@ func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifa
 	if err != nil {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_DATA_INTEGRITY_ERROR: decode source artifact %s: %w", bundleHash, err)
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, strings.TrimSpace(runningPlatformSpecPath), runtimecontracts.WorkflowContractLoadOptions{
+	specPath, err := cliapp.EmbeddedPlatformSpecPath()
+	if err != nil {
+		return serveRuntimeBundle{}, err
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, specPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBases:  packBases,
 		AdmitPackInventory: packadmission.AdmitInventory,
 	})
@@ -394,8 +395,6 @@ func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifa
 		source:             source,
 		sourceProjection:   sourceProjection,
 		sourceRoot:         ".",
-		platformSpecPath:   strings.TrimSpace(runningPlatformSpecPath),
-		runningSpecPath:    strings.TrimSpace(runningPlatformSpecPath),
 		bootIdentity:       bootIdentity,
 		sourceArtifactFact: fact,
 		dbLoaded:           true,
@@ -521,7 +520,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	runtimeDeps.Config = req.Config
 	if req.Stores.sourceReader != nil {
 		runtimeDeps.BudgetStageSourceLoader = func(ctx context.Context, bundleHash string) (semanticview.Source, error) {
-			return loadBudgetRecoveryStageSource(ctx, req.Stores.sourceReader, req.RepoRoot, req.Loaded.runningSpecPath, req.PlatformPackBases, bundleHash)
+			return loadBudgetRecoveryStageSource(ctx, req.Stores.sourceReader, req.RepoRoot, req.PlatformPackBases, bundleHash)
 		}
 	}
 	locatedScenarios, err := scenarioderivation.LoadDeclarations(loaded.bundle.SourceArtifact)
@@ -760,10 +759,9 @@ func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.
 	if apiAuth.UsesDefaultLoopbackToken() {
 		presenter.recordDefaultAPITokenWarning()
 	}
-	resolvedPaths, err := cliapp.ResolveCLISourcePlatformSpecPaths(repo, cliapp.CLISourcePlatformSpecPathOptions{
-		SourceRoot:       opts.SourceRoot,
-		PlatformSpecPath: opts.PlatformSpecPath,
-		ConfigPath:       opts.ConfigPath,
+	resolvedPaths, err := cliapp.ResolveCLISourcePaths(repo, cliapp.CLISourcePathOptions{
+		SourceRoot: opts.SourceRoot,
+		ConfigPath: opts.ConfigPath,
 	})
 	if err != nil {
 		presenter.fail(2, "config_load", err)
@@ -899,7 +897,7 @@ type runtimeCompositionRequest struct {
 	Repo                 string
 	Options              cliapp.ServeOptions
 	Config               cliapp.RuntimeConfigLoadResult
-	ResolvedPaths        cliapp.CLISourcePlatformSpecPaths
+	ResolvedPaths        cliapp.CLISourcePaths
 	LocalState           cliapp.LocalRuntimeStateResolution
 	SwarmDir             cliapp.CLISwarmDirResolution
 	StoreSelection       storebackend.Selection
@@ -1016,12 +1014,12 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 			}
 		}
 	}()
-	preCatalogPlatformSpecPath, err := servePreCatalogPlatformSpecPath(resolvedPaths, opts)
+	_, err = cliapp.EmbeddedPlatformSpecPath()
 	if err != nil {
 		presenter.fail(4, "bundle_load", err)
 		return 1
 	}
-	if _, err := initializeServePlatformStateStores(ctx, runtimePersistence.schema, preCatalogPlatformSpecPath); err != nil {
+	if _, err := initializeServePlatformStateStores(ctx, runtimePersistence.schema); err != nil {
 		presenter.fail(4, "bundle_load", err)
 		return 1
 	}
@@ -1164,12 +1162,11 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		presenter.fail(4, "bundle_load", errors.New("no bundle contexts loaded"))
 		return 1
 	}
-	loadedBundle := serveRuntimeBundle{platformSpecPath: preCatalogPlatformSpecPath, runningSpecPath: preCatalogPlatformSpecPath}
+	loadedBundle := serveRuntimeBundle{}
 	if len(loadedBundles) > 0 {
 		loadedBundle = loadedBundles[0]
 	}
 	source := loadedBundle.source
-	resolvedPlatformSpecPath := loadedBundle.platformSpecPath
 	var listenerWorkspaceBackend cliapp.WorkspaceBackendSelection
 	if len(loadedBundles) == 0 {
 		presenter.boot(4, "bundle_load", "ok", "reset retained an empty source set; execution remains unloaded")
@@ -1429,23 +1426,21 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		return 1
 	}
 	apiCapabilityRequest := selectedAPICapabilityRequest{
-		RepoRoot:                repo,
-		PlatformSpecPath:        resolvedPlatformSpecPath,
-		RunningPlatformSpecPath: strings.TrimSpace(loadedBundle.runningSpecPath),
-		LoadedBundle:            loadedBundle,
-		Source:                  source,
-		Config:                  cfg,
-		Workspaces:              workspaces,
-		Credentials:             credentialStore,
-		ManagedCredentials:      managedCredentialStore,
-		ProviderCredentials:     providerCredentialStore,
-		ExecutionPosture:        posture,
-		ProcessCapability:       processCapability,
-		PlatformPackBases:       platformPackBases,
-		RuntimeContextManager:   runtimeContextManager,
-		RuntimeSupervisor:       supervisor,
-		NoticePresentation:      noticePresentation,
-		SelectedFork:            supervisor.selected,
+		RepoRoot:              repo,
+		LoadedBundle:          loadedBundle,
+		Source:                source,
+		Config:                cfg,
+		Workspaces:            workspaces,
+		Credentials:           credentialStore,
+		ManagedCredentials:    managedCredentialStore,
+		ProviderCredentials:   providerCredentialStore,
+		ExecutionPosture:      posture,
+		ProcessCapability:     processCapability,
+		PlatformPackBases:     platformPackBases,
+		RuntimeContextManager: runtimeContextManager,
+		RuntimeSupervisor:     supervisor,
+		NoticePresentation:    noticePresentation,
+		SelectedFork:          supervisor.selected,
 	}
 	apiStoreCaps, err := buildSelectedAPICapabilities(stores, apiCapabilityRequest)
 	if err != nil {
@@ -1563,7 +1558,6 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		apiv1.ChannelOnboardingHandlers(apiv1.ChannelOnboardingHandlerOptions{Onboarding: channelOnboarding, Channels: operatorChannels}),
 	)
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
-		PlatformSpecPath:    resolvedPlatformSpecPath,
 		AuthTokens:          apiAuth.Tokens,
 		ProcessWorkOwner:    processWorkOwner,
 		OperatorPrincipalID: operatorPrincipal.ID,
@@ -2425,7 +2419,6 @@ func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtim
 			SourceArtifactFact:         contextDef.sourceArtifactFact,
 			BundleIdentity:             contextDef.bootIdentity,
 			Source:                     contextDef.loaded.source,
-			PlatformSpecPath:           contextDef.loaded.platformSpecPath,
 			Runtime:                    contextDef.runtime,
 			WorkOwner:                  contextDef.runtime.WorkOccurrence(),
 			StandingTargets:            targets,
@@ -2651,7 +2644,6 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 				SourceArtifactFact:         contextDef.sourceArtifactFact,
 				BundleIdentity:             contextDef.bootIdentity,
 				Source:                     contextDef.loaded.source,
-				PlatformSpecPath:           contextDef.loaded.platformSpecPath,
 				Runtime:                    contextDef.runtime,
 				WorkOwner:                  contextDef.runtime.WorkOccurrence(),
 				StandingTargets:            contextTargets,
@@ -2829,8 +2821,8 @@ func initializeStateStores(ctx context.Context, schema store.SchemaBootstrapper,
 	return cliapp.SummarizeServeSchemaPlans(plans.All()), nil
 }
 
-func initializeServePlatformStateStores(ctx context.Context, schema store.SchemaBootstrapper, platformSpecPath string) (string, error) {
-	spec, err := loadServePlatformSpecDocument(platformSpecPath)
+func initializeServePlatformStateStores(ctx context.Context, schema store.SchemaBootstrapper) (string, error) {
+	spec, err := loadServePlatformSpecDocument()
 	if err != nil {
 		return "", err
 	}
@@ -2868,10 +2860,10 @@ func ensureServeSchemaTables(ctx context.Context, schema store.SchemaBootstrappe
 	return schema.BootstrapSchema(ctx, request)
 }
 
-func loadServePlatformSpecDocument(platformSpecPath string) (runtimecontracts.PlatformSpecDocument, error) {
-	platformSpecPath = strings.TrimSpace(platformSpecPath)
-	if platformSpecPath == "" {
-		return runtimecontracts.PlatformSpecDocument{}, fmt.Errorf("platform spec path is required")
+func loadServePlatformSpecDocument() (runtimecontracts.PlatformSpecDocument, error) {
+	platformSpecPath, err := cliapp.EmbeddedPlatformSpecPath()
+	if err != nil {
+		return runtimecontracts.PlatformSpecDocument{}, err
 	}
 	source, err := yamlsource.LoadFile(platformSpecPath)
 	if err != nil {

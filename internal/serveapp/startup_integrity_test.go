@@ -45,7 +45,7 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 					t.Cleanup(func() { _ = selected.Close() })
 					db, artifacts = storetest.DatabaseForTest(selected), selected
 				}
-				spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
+				spec, err := loadServePlatformSpecDocument()
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -110,7 +110,7 @@ func TestRunServeSourceArtifactIntegrityRejectsBeforeReadinessBothStores(t *test
 				published := false
 				code := runFrom(ctx, repoRootForTest(), cliapp.ServeOptions{
 					ConfigPath: configPath, SourceRoot: filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-					PlatformSpecPath: defaultPlatformSpecPath, StoreMode: backend, StoreModeSet: true,
+					StoreMode: backend, StoreModeSet: true,
 					APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true,
 					Output: &out, TestLLMRuntime: servedNoopLLMRuntime{},
 					TestRuntimeContextsReadyHook: func(*runtime.RuntimeContextManager) { published = true },

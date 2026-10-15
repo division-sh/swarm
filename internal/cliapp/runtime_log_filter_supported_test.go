@@ -87,7 +87,7 @@ func TestRuntimeLogFilterSupportedConsumersBothStores(t *testing.T) {
 			insert(runB, "wanted", "excluded-foreign", base.Add(3*time.Second))
 			work := worklifetime.NewProcess()
 			handler, err := apiv1.NewHandler(apiv1.Options{
-				PlatformSpecPath: ResolvePath(RepoRoot(), defaultPlatformSpecPath), AuthTokens: []string{"test-token"}, ProcessWorkOwner: work,
+				AuthTokens: []string{"test-token"}, ProcessWorkOwner: work,
 				Handlers:      apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: selected}),
 				Subscriptions: apiv1.OperatorSubscriptions(apiv1.SubscriptionOptions{Observability: selected}, apiv1.SubscriptionRuntimeOptions{PollInterval: 10 * time.Millisecond}),
 			})

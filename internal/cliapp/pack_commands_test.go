@@ -111,7 +111,7 @@ func TestCLIWorkflowModuleConsumersUseConfiguredDevelopmentBase(t *testing.T) {
 
 	sourceRoot := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
 
-	_, bundle, paths, err := loadConfiguredCLIWorkflowModule(RepoRoot(), CLISourcePlatformSpecPathOptions{
+	_, bundle, paths, err := loadConfiguredCLIWorkflowModule(RepoRoot(), CLISourcePathOptions{
 		SourceRoot: sourceRoot, ConfigPath: configPath,
 	})
 	if err != nil {
@@ -348,7 +348,7 @@ func TestMalformedPackBodiesFailBeforeEveryCLIPublishingSurface(t *testing.T) {
 
 			assertRejected("packs list", "packs", "list", project, "--json")
 			assertRejected("packs show", "packs", "show", tc.id, project, "--json")
-			if _, _, err := NewSwarmWorkflowModule(RepoRoot(), project, runtimecontracts.DefaultPlatformSpecFile(RepoRoot())); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+			if _, _, err := NewSwarmWorkflowModule(RepoRoot(), project); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("bundle hash admission error = %v, want %q", err, tc.wantErr)
 			}
 			assertRejected("verify", "verify", project, "--config", configPath, "--json")
@@ -421,7 +421,7 @@ func TestPresentZeroOptionalFileFailsBeforeEveryCLIPublishingSurface(t *testing.
 		}
 	}
 
-	if _, _, err := NewSwarmWorkflowModule(RepoRoot(), project, runtimecontracts.DefaultPlatformSpecFile(RepoRoot())); err == nil || !strings.Contains(err.Error(), want) {
+	if _, _, err := NewSwarmWorkflowModule(RepoRoot(), project); err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("module/hash admission error = %v, want %q", err, want)
 	}
 	assertRejected("verify", "verify", project, "--config", configPath, "--json")
@@ -438,7 +438,7 @@ func runPacksCommand(t testing.TB, repo string, args ...string) (int, string, st
 
 func loadPackCommandBundleHash(t testing.TB, project, specPath string) string {
 	t.Helper()
-	_, bundle, err := NewSwarmWorkflowModule(RepoRoot(), project, specPath)
+	_, bundle, err := NewSwarmWorkflowModule(RepoRoot(), project)
 	if err != nil {
 		t.Fatalf("load project bundle: %v", err)
 	}

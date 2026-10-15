@@ -63,8 +63,7 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	var resetSelectedStore func()
 	diagnosticDSN := ""
 	opts := cliapp.ServeOptions{
-		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SourceRoot: sourceRoot, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		PublicWebhookBaseURL: "https://hooks.channel-onboarding.test", PublicWebhookListen: publicListen,
 		PublicWebhookListener: publicListener,
 		SelfCheck:             true, AbandonActiveRuns: true, Verbose: true,
@@ -455,7 +454,6 @@ func startChannelOnboardingCrashServeProcessAtBoundary(t *testing.T, opts cliapp
 		channelOnboardingCrashServeHelperEnv + "=1",
 		"TEST_CHANNEL_ONBOARDING_CONFIG=" + opts.ConfigPath,
 		"TEST_CHANNEL_ONBOARDING_CONTRACTS=" + opts.SourceRoot,
-		"TEST_CHANNEL_ONBOARDING_PLATFORM_SPEC=" + opts.PlatformSpecPath,
 		"TEST_CHANNEL_ONBOARDING_STORE=" + opts.StoreMode,
 		"TEST_CHANNEL_ONBOARDING_PUBLIC_ORIGIN=" + opts.PublicWebhookBaseURL,
 		"TEST_CHANNEL_ONBOARDING_PUBLIC_LISTEN=" + opts.PublicWebhookListen,
@@ -585,7 +583,6 @@ func TestChannelOnboardingCrashServeProcessHelper(t *testing.T) {
 	opts := cliapp.DefaultServeOptions()
 	opts.ConfigPath = os.Getenv("TEST_CHANNEL_ONBOARDING_CONFIG")
 	opts.SourceRoot = os.Getenv("TEST_CHANNEL_ONBOARDING_CONTRACTS")
-	opts.PlatformSpecPath = os.Getenv("TEST_CHANNEL_ONBOARDING_PLATFORM_SPEC")
 	opts.StoreMode = os.Getenv("TEST_CHANNEL_ONBOARDING_STORE")
 	opts.StoreModeSet = true
 	opts.APIListenAddr = "127.0.0.1:0"

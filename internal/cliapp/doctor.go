@@ -172,7 +172,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	}
 	localState, err := ResolveLocalRuntimeState(LocalRuntimeStateOptions{
 		RepoRoot:                repo,
-		ResolvedPaths:           CLISourcePlatformSpecPaths{PlatformSpecPath: platformSpecPath},
+		ResolvedPaths:           CLISourcePaths{},
 		SwarmDir:                swarmDir,
 		Config:                  cfgResult.Config,
 		DataSource:              opts.dataSource,

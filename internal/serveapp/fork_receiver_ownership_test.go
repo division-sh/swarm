@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -667,7 +666,7 @@ func runForkReceiverOwnershipJourney(t *testing.T, backend servedparity.Backend,
 		for attempt := 0; attempt < 2; attempt++ {
 			result, err := family.Execute(servedControlProofAuthorActivityContext(t, rt), runforkexecution.SelectedContractExecutionRequest{
 				SourceRunID: seed.RunID, At: frontier, AllowSourceFreeze: true, ExpectedBundleHash: selectedHash,
-				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: selected.SourceArtifactStore()},
+				SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repoRootForTest(), Store: selected.SourceArtifactStore()},
 				ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: selectedHash},
 				AgentRuntime:      rt.ForkRuntime,
 			})

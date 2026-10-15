@@ -29,8 +29,7 @@ func TestServedResetPendingStartupUsesAdmittedSourcesBothStores(t *testing.T) {
 					hash := servedEventPublishFixtureBundleHash(t, source)
 					cfg := writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "reset.db"))
 					opts := cliapp.ServeOptions{
-						ConfigPath: cfg, SourceRoot: source, PlatformSpecPath: defaultPlatformSpecPath,
-						APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
+						ConfigPath: cfg, SourceRoot: source, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, Verbose: true,
 						WorkspaceBackend: "host", WorkspaceBackendSet: true,
 					}
 					if backend == servedparity.BackendExplicitPostgres {

@@ -10,7 +10,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
@@ -49,7 +48,7 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 					t.Fatalf("import %s: %t %v", id, changed, err)
 				}
 			}
-			fixture := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo)}
+			fixture := admittedFixtureSelectedContractSourceLoader{RepoRoot: repo, SourceRoot: root}
 			loaded, err := fixture.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 			if err != nil {
 				t.Fatal(err)
@@ -67,7 +66,7 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 			if err := os.RemoveAll(root); err != nil {
 				t.Fatal(err)
 			}
-			loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)}
+			loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.(SourceArtifactSelectedContractSourceStore)}
 			selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: loaded.SourceArtifactFact.BundleHash()}
 			for i := 0; i < 2; i++ {
 				retained, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: sourceRun, BundleHash: selection.BundleHash, Selection: selection})

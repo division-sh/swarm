@@ -60,7 +60,7 @@ func testDynamicTopologyStartupPreflightTwoContexts(t *testing.T, backend string
 			if backend == "sqlite" {
 				selected = openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "dynamic-topology.db"), cfg)
 				db = selectedStoreDatabaseForTest(t, selected)
-				if _, err := initializeServePlatformStateStores(context.Background(), selected.Schema(), filepath.Join(repoRootForTest(), defaultPlatformSpecPath)); err != nil {
+				if _, err := initializeServePlatformStateStores(context.Background(), selected.Schema()); err != nil {
 					t.Fatalf("admit SQLite selected store: %v", err)
 				}
 			} else {
@@ -272,7 +272,7 @@ func loadServeDynamicTopologySource(t *testing.T, selected *selectedStoreOwner, 
 		writeWorkflowValidationFixtureFile(t, filepath.Join(root, path), contents)
 	}
 	loaded, err := loadServeRuntimeBundle(context.Background(), repoRootForTest(), selected.SourceArtifactStore(),
-		cliapp.CLISourcePlatformSpecPaths{SourceRoot: root, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath)},
+		cliapp.CLISourcePaths{SourceRoot: root},
 		cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 	if err != nil {
 		t.Fatalf("compile exact startup source %s: %v", label, err)

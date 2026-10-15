@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -36,7 +35,6 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	configPath := fs.String("config", "", "Path to swarm.yaml config")
 	backend := fs.String("backend", "", "LLM backend profile for local runtime startup")
 	bundleHash := fs.String("bundle-hash", "", "Exact persisted source artifact hash for fork planning or selected-source execution")
-	platformSpecPath := fs.String("platform-spec", defaultPlatformSpecPath, "Path to platform spec yaml")
 	storeMode := fs.String("store", storebackend.ActiveDefaultBackend().String(), cliapp.RuntimeStoreBackendHelp)
 	runID := fs.String("run", "", "Source run ID to plan from")
 	at := fs.String("at", "", "Fork point event UUID")
@@ -126,13 +124,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 		}
 	}()
-	resolvedPlatformSpecPath := cliapp.ResolvePath(repo, *platformSpecPath)
-	if strings.TrimSpace(*platformSpecPath) == defaultPlatformSpecPath {
-		if _, statErr := os.Stat(resolvedPlatformSpecPath); statErr != nil {
-			resolvedPlatformSpecPath = cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath)
-		}
-	}
-	platformSpec, err := loadServePlatformSpecDocument(resolvedPlatformSpecPath)
+	platformSpec, err := loadServePlatformSpecDocument()
 	if err != nil {
 		if out != nil {
 			fmt.Fprintf(out, "fork failed: load platform spec: %v\n", err)
@@ -168,7 +160,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		return 1
 	}
 	sourceLoader := runtimerunforkexecution.SourceArtifactSelectedContractSourceLoader{
-		RepoRoot: repo, PlatformSpecPath: resolvedPlatformSpecPath, Store: stores.SourceArtifactStore(),
+		RepoRoot: repo, Store: stores.SourceArtifactStore(),
 	}
 	var capability startupownership.ProcessCapability
 	if !*dryRun && !*materializeOnly {
@@ -354,7 +346,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 		localState, err := cliapp.ResolveLocalRuntimeState(cliapp.LocalRuntimeStateOptions{
 			RepoRoot:                repo,
-			ResolvedPaths:           cliapp.CLISourcePlatformSpecPaths{SourceRoot: sourceProjection.PrivateRoot()},
+			ResolvedPaths:           cliapp.CLISourcePaths{SourceRoot: sourceProjection.PrivateRoot()},
 			SwarmDir:                swarmDir,
 			Config:                  cfg,
 			CreateDefaultDataSource: true,

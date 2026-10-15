@@ -98,8 +98,7 @@ func startWorkspaceGatewayProofRuntime(t *testing.T, backend servedparity.Backen
 		t.Cleanup(func() { cliapp.ConfiguredWorkspaceLifecycleForServe = previousWorkspace })
 	}
 	opts := cliapp.ServeOptions{
-		SourceRoot: sourceRoot, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
-		WorkspaceBackend: targetBackend, WorkspaceBackendSet: targetBackend != "",
+		SourceRoot: sourceRoot, WorkspaceBackend: targetBackend, WorkspaceBackendSet: targetBackend != "",
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: mcpListen, SelfCheck: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}

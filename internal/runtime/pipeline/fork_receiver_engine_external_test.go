@@ -155,7 +155,7 @@ func TestSelectedForkReceiverSupportedDeliveryBothStores(t *testing.T) {
 					defer close(done)
 					_, err := family.Execute(forkCtx, runforkexecution.SelectedContractExecutionRequest{
 						SourceRunID: runID, At: frontier, ExpectedBundleHash: rt.Options.SourceArtifactFact.BundleHash(), AllowSourceFreeze: true,
-						SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: filepath.Join(repo, "platform-spec.yaml"), Store: selected.SourceArtifactStore()},
+						SourceLoader:      runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, Store: selected.SourceArtifactStore()},
 						ContractSelection: runforkadmission.SelectedContractSelection(semanticview.Wrap(bundle)),
 						AgentRuntime:      runforkexecution.SelectedContractAgentRuntimeOptions{ProcessCapability: capability, ExecutionPosture: rt.ExecutionPosture, AgentManagerOptions: runtimemanager.AgentManagerOptions{TestLifecycleProbe: probe}},
 					})
@@ -377,7 +377,7 @@ func startForkEngineRuntime(t *testing.T, backend, root string) (*swarmruntime.R
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = selected.CloseUnactivated() })
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(repo, root, filepath.Join(repo, "platform-spec.yaml"))
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(repo, root)
 	if err != nil {
 		t.Fatal(err)
 	}

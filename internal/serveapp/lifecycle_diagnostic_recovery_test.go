@@ -225,7 +225,6 @@ func TestLifecycleDiagnosticServeProcessHelper(t *testing.T) {
 	}
 	opts := cliapp.DefaultServeOptions()
 	opts.ConfigPath, opts.SourceRoot = os.Getenv("SWARM_TEST_DIAGNOSTIC_CONFIG"), os.Getenv("SWARM_TEST_DIAGNOSTIC_SOURCE")
-	opts.PlatformSpecPath = defaultPlatformSpecPath
 	opts.StoreMode = os.Getenv("SWARM_TEST_DIAGNOSTIC_STORE")
 	opts.StoreModeSet = opts.StoreMode != ""
 	opts.WorkspaceBackend, opts.WorkspaceBackendSet = "host", true

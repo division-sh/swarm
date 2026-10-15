@@ -110,8 +110,7 @@ func runMockAgentSupportedSurface(t *testing.T, backend string) time.Duration {
 	var location string
 	var prepareRestart func()
 	opts := cliapp.ServeOptions{
-		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SourceRoot: sourceRoot, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}

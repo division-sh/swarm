@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"io"
 	"net"
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packartifact"
@@ -89,7 +90,7 @@ type localPreflightRequest struct {
 	SourceFree             bool
 	RepoRoot               string
 	Config                 *config.Config
-	ResolvedPaths          CLISourcePlatformSpecPaths
+	ResolvedPaths          CLISourcePaths
 	DataSource             string
 	MountSources           WorkspaceMountSources
 	WorkspaceBackend       WorkspaceBackendSelection
@@ -608,12 +609,12 @@ func workspacePrerequisiteDiagnostic(err error, fallbackRemediation string) (str
 	return message, remediation
 }
 
-func loadLocalPreflightSource(repo string, paths CLISourcePlatformSpecPaths, base *packartifact.PlatformPackInventory) (semanticview.Source, string, error) {
+func loadLocalPreflightSource(repo string, paths CLISourcePaths, base *packartifact.PlatformPackInventory) (semanticview.Source, string, error) {
 	sourceRoot, err := NormalizeSourceRoot(paths.SourceRoot)
 	if err != nil {
 		return nil, "", err
 	}
-	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, paths.PlatformSpecPath, base)
+	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, sourceRoot, base)
 	if err != nil {
 		return nil, "", fmt.Errorf("load Swarm contracts: %w", err)
 	}
@@ -719,7 +720,7 @@ func serveLocalPreflightMode(opts ServeOptions) string {
 	return "serve"
 }
 
-func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts ServeOptions, cfg *config.Config, resolvedPaths CLISourcePlatformSpecPaths, workspaceBackend WorkspaceBackendSelection, mountSources WorkspaceMountSources, platformPackBase *packartifact.PlatformPackInventory, providerTriggerPacks []providertriggers.LoadedPack, providerTriggerCatalog *providertriggers.CatalogSnapshot, providerCredentials runtimecredentials.Store, channelPacks ChannelPackLoad, source semanticview.Source, apiListener net.Listener) LocalPreflightReport {
+func RunServeLocalClaudeCLIPreflight(ctx context.Context, repo string, opts ServeOptions, cfg *config.Config, resolvedPaths CLISourcePaths, workspaceBackend WorkspaceBackendSelection, mountSources WorkspaceMountSources, platformPackBase *packartifact.PlatformPackInventory, providerTriggerPacks []providertriggers.LoadedPack, providerTriggerCatalog *providertriggers.CatalogSnapshot, providerCredentials runtimecredentials.Store, channelPacks ChannelPackLoad, source semanticview.Source, apiListener net.Listener) LocalPreflightReport {
 	mode := serveLocalPreflightMode(opts)
 	if source == nil {
 		report := LocalPreflightReport{Mode: mode, Owner: localPreflightOwner}

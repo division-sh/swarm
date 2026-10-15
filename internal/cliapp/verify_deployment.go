@@ -129,7 +129,7 @@ func verifyDeploymentObservation(ctx context.Context, result *runtime.WorkflowCo
 	return false
 }
 
-func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePlatformSpecPaths, cfg RuntimeConfigLoadResult, swarmDir cliSwarmDirOptions, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, result *runtime.WorkflowContractValidationResult) {
+func inspectVerifyDeployment(ctx context.Context, repo string, paths CLISourcePaths, cfg RuntimeConfigLoadResult, swarmDir cliSwarmDirOptions, source semanticview.Source, opts runtime.WorkflowContractValidationOptions, packBases packartifact.PlatformPackBaseResolver, result *runtime.WorkflowContractValidationResult) {
 	backend, workspaces, workspaceOK := inspectVerifySourceAdmission(ctx, cfg, source, opts, result)
 	inspectVerifyListeners(ctx, repo, cfg, result)
 	inspectVerifyWorkspaceDependencies(ctx, cfg, backend, workspaceOK, result)

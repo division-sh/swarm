@@ -99,7 +99,7 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 	}
 	cfg := configResult.Config
 	cfg.Workspace.HostRoot = filepath.Join(retainedRoot, ".swarm", "lifecycle-workspaces")
-	paths, err := cliapp.ResolveCLISourcePlatformSpecPaths(root, cliapp.CLISourcePlatformSpecPathOptions{SourceRoot: opts.SourceRoot, ConfigPath: opts.ConfigPath, PlatformSpecPath: opts.PlatformSpecPath})
+	paths, err := cliapp.ResolveCLISourcePaths(root, cliapp.CLISourcePathOptions{SourceRoot: opts.SourceRoot, ConfigPath: opts.ConfigPath})
 	if err != nil {
 		return 1, err
 	}
@@ -119,7 +119,7 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 	if err != nil {
 		return 1, err
 	}
-	opts.SourceRoot, opts.PlatformSpecPath = paths.SourceRoot, paths.PlatformSpecPath
+	opts.SourceRoot = paths.SourceRoot
 	if opts.ShutdownGrace == 0 {
 		opts.ShutdownGrace = 2 * time.Second
 	}
@@ -145,9 +145,9 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 		if err != nil {
 			return 1, err
 		}
-		specPath, err := servePreCatalogPlatformSpecPath(paths, opts)
+		specPath, err := cliapp.EmbeddedPlatformSpecPath()
 		if err == nil {
-			_, err = initializeServePlatformStateStores(ctx, reader.Schema(), specPath)
+			_, err = initializeServePlatformStateStores(ctx, reader.Schema())
 		}
 		if err != nil {
 			return 1, errors.Join(err, reader.CloseUnactivated())
@@ -163,7 +163,7 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 		if err != nil {
 			return 1, err
 		}
-		admitted, err = runtimecontracts.LoadWorkflowContractBundleFromArtifact(root, artifact, paths.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+		admitted, err = runtimecontracts.LoadWorkflowContractBundleFromArtifact(root, artifact, specPath, runtimecontracts.WorkflowContractLoadOptions{
 			PlatformPackBases: bases, AdmitPackInventory: packadmission.AdmitInventory,
 		})
 		if err != nil {

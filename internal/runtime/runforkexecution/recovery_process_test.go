@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -275,7 +274,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 	ctx := runForkTestContext(t)
 	capability := selectedContractTestProcessCapability(t, ctx, capabilityStore)
 	root := runForkExecutionRepoRoot(t)
-	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: filepath.Join(root, "tests/tier1-primitives/test-emits-multiple"), PlatformSpecPath: contracts.DefaultPlatformSpecFile(root)}
+	loader := admittedFixtureSelectedContractSourceLoader{RepoRoot: root, SourceRoot: filepath.Join(root, "tests/tier1-primitives/test-emits-multiple")}
 	cut := os.Getenv("SWARM_SELECTED_CRASH_CUT")
 	options := SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}
 	if cut == "native_before_activation" {

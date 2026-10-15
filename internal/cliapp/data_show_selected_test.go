@@ -92,7 +92,7 @@ func TestDataShowCLIReadFamilyAcrossSelectedStores(t *testing.T) {
 			for method, handler := range apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{Ready: func() bool { return true }, Database: selected, Publication: source2376Publication{bundle: runtimecontracts.BundleIdentity{BundleHash: artifact.BundleHash(), WorkflowName: ".", WorkflowVersion: artifact.BundleHash(), SourceLabel: artifact.HumanLabel()}}}) {
 				handlers[method] = handler
 			}
-			handler, err := apiv1.NewHandler(apiv1.Options{PlatformSpecPath: ResolvePath(RepoRoot(), defaultPlatformSpecPath), AuthTokens: []string{"test-token"}, ProcessWorkOwner: work, Handlers: handlers})
+			handler, err := apiv1.NewHandler(apiv1.Options{AuthTokens: []string{"test-token"}, ProcessWorkOwner: work, Handlers: handlers})
 			if err != nil {
 				t.Fatal(err)
 			}

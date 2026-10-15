@@ -106,8 +106,7 @@ expect:
 				configPath := ""
 				repo := repoRootForTest()
 				opts := cliapp.ServeOptions{
-					SourceRoot: sourceRoot, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
-					APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", Dev: dev,
+					SourceRoot: sourceRoot, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", Dev: dev,
 					SelfCheck: true, Verbose: true,
 					TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 				}
@@ -179,8 +178,7 @@ expect:
 	managerReady := make(chan *runtimepkg.RuntimeContextManager, 1)
 	process := startServeRuntimeTestProcessAtRepo(t, sourceRoot, cliapp.ServeOptions{
 		ConfigPath: configPath, SourceRoot: sourceRoot,
-		PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
-		APIListenAddr:    "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		Dev: true, NoFeed: true, SelfCheck: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		TestRuntimeContextsReadyHook: func(manager *runtimepkg.RuntimeContextManager) {
@@ -327,8 +325,7 @@ channels:
 	}
 	process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath: configPath, SourceRoot: sourceRoot,
-		PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
-		APIListenAddr:    "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true,
 	})
 	process.waitForReadyLine()
@@ -468,8 +465,7 @@ func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend)
 	bundleHash := servedEventPublishFixtureBundleHash(t, sourceRoot)
 	var db *sql.DB
 	opts := cliapp.ServeOptions{
-		SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SourceRoot: sourceRoot, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
@@ -601,7 +597,6 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 	t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 	opts := cliapp.ServeOptions{
 		SourceRoot:              sourceRoot,
-		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
@@ -727,10 +722,8 @@ expect: {events: [fulfillment.requested], no_dead_letters: true}
 	var db *sql.DB
 	var configPath string
 	var postgresDSN string
-	platformSpecPath := filepath.Join(repoRootForTest(), defaultPlatformSpecPath)
 	opts := cliapp.ServeOptions{
-		SourceRoot: sourceRoot, PlatformSpecPath: platformSpecPath,
-		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SourceRoot: sourceRoot, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
@@ -1162,7 +1155,6 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 	var runtimeContexts *runtimepkg.RuntimeContextManager
 	opts := cliapp.ServeOptions{
 		SourceRoot:              sourceRoot,
-		PlatformSpecPath:        defaultPlatformSpecPath,
 		APIListenAddr:           "127.0.0.1:0",
 		MCPListenAddr:           "127.0.0.1:0",
 		SelfCheck:               true,
@@ -1487,7 +1479,6 @@ func TestInternalLifecycleScenariosPreserveCanonicalRoutingPathsSQLite(t *testin
 			options := cliapp.ServeOptions{
 				ConfigPath:              configPath,
 				SourceRoot:              sourceRoot,
-				PlatformSpecPath:        defaultPlatformSpecPath,
 				APIListenAddr:           "127.0.0.1:0",
 				MCPListenAddr:           "127.0.0.1:0",
 				SelfCheck:               true,

@@ -3,7 +3,6 @@ package serveapp
 import (
 	"context"
 	"database/sql"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -29,7 +28,7 @@ func openSelectedPostgresOwner(t testing.TB, dsn string, db *sql.DB, cfg *config
 	if err != nil {
 		t.Fatalf("open PostgreSQL selected store: %v", err)
 	}
-	if _, err := initializeServePlatformStateStores(context.Background(), owner.Schema(), filepath.Join(repoRootForTest(), defaultPlatformSpecPath)); err != nil {
+	if _, err := initializeServePlatformStateStores(context.Background(), owner.Schema()); err != nil {
 		_ = owner.CloseUnactivated()
 		t.Fatalf("admit PostgreSQL selected store: %v", err)
 	}

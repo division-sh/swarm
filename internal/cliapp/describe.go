@@ -15,12 +15,11 @@ import (
 )
 
 type describeCommandOptions struct {
-	sourceRoot       string
-	platformSpecPath string
-	configPath       string
-	graph            bool
-	output           cliOutputOptions
-	logging          cliLoggingOptions
+	sourceRoot string
+	configPath string
+	graph      bool
+	output     cliOutputOptions
+	logging    cliLoggingOptions
 }
 
 type describeCommandOutput struct {
@@ -30,11 +29,10 @@ type describeCommandOutput struct {
 }
 
 type describeRoutesCommandOptions struct {
-	sourceRoot       string
-	platformSpecPath string
-	configPath       string
-	output           cliOutputOptions
-	logging          cliLoggingOptions
+	sourceRoot string
+	configPath string
+	output     cliOutputOptions
+	logging    cliLoggingOptions
 }
 
 func defaultDescribeCommandOptions() describeCommandOptions {
@@ -115,8 +113,8 @@ func runDescribeRoutesCommandWithOutput(ctx context.Context, repo string, opts d
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation
 	}
-	_, bundle, _, err := loadCLIWorkflowModuleWithRuntimeConfig(repo, CLISourcePlatformSpecPathOptions{
-		SourceRoot: opts.sourceRoot, PlatformSpecPath: opts.platformSpecPath, ConfigPath: opts.configPath,
+	_, bundle, _, err := loadCLIWorkflowModuleWithRuntimeConfig(repo, CLISourcePathOptions{
+		SourceRoot: opts.sourceRoot, ConfigPath: opts.configPath,
 	}, configResult)
 	if err != nil {
 		writeCLIAPIError(errOut, err)
@@ -186,10 +184,9 @@ func runDescribeCommandWithOutput(ctx context.Context, repo string, opts describ
 		writeCLIAPIError(errOut, err)
 		return CLIExitValidation
 	}
-	_, bundle, _, err := loadCLIWorkflowModuleWithRuntimeConfig(repo, CLISourcePlatformSpecPathOptions{
-		SourceRoot:       opts.sourceRoot,
-		PlatformSpecPath: opts.platformSpecPath,
-		ConfigPath:       opts.configPath,
+	_, bundle, _, err := loadCLIWorkflowModuleWithRuntimeConfig(repo, CLISourcePathOptions{
+		SourceRoot: opts.sourceRoot,
+		ConfigPath: opts.configPath,
 	}, configResult)
 	if err != nil {
 		writeCLIAPIError(errOut, err)

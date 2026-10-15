@@ -148,8 +148,7 @@ func startSemanticNumericRuntime(t *testing.T, backend servedparity.Backend, roo
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
 	var db *sql.DB
-	opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath,
-		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true,
+	opts := cliapp.ServeOptions{SourceRoot: root, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 	dialect := "sqlite"
 	if backend == servedparity.BackendExplicitPostgres {

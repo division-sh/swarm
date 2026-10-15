@@ -27,6 +27,8 @@ type admissionPredicateSurface struct {
 }
 
 var admissionPredicateSurfaces = []admissionPredicateSurface{
+	// #1801 removes spec-path forwarding, not these admission obligations;
+	// owner/caller and execution accounting is in testdata/issue_1801_embedded_spec_accounting.md.
 	{"internal/cliapp/verify_runtime.go", "A01,A28,A29,A30", "P01,P02,P23,P24,P27,P29"},
 	{"internal/cliapp/verify_deployment.go", "A02,A11,A12,A13,A15,A18,A26,A27,A28", "P02,P09,P10,P11,P13,P15,P16,P22,P24,P26"},
 	{"internal/cliapp/verify_deployment_workspace.go", "A15,A16,A17", "P13,P14,P15"},

@@ -148,8 +148,7 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 					}
 					configPath := writeInboundAdmissionRuntimeConfig(t, backend, filepath.Join(t.TempDir(), "failure.sqlite"))
 					process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
-						ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-						StoreMode: backend, StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+						ConfigPath: configPath, SourceRoot: sourceRoot, StoreMode: backend, StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 						SelfCheck: true, Dev: true, LocalRun: true, Verbose: true,
 					})
 					code, exited := process.waitForExit(15 * time.Second)
@@ -222,8 +221,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 	}
 
 	opts := cliapp.ServeOptions{
-		ConfigPath: configPath, SourceRoot: sourceRoot, PlatformSpecPath: defaultPlatformSpecPath,
-		StoreMode: backend, StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		ConfigPath: configPath, SourceRoot: sourceRoot, StoreMode: backend, StoreModeSet: true, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
@@ -360,7 +358,7 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := initializeServePlatformStateStores(context.Background(), sqliteStore, filepath.Join(repoRootForTest(), opts.PlatformSpecPath)); err != nil {
+		if _, err := initializeServePlatformStateStores(context.Background(), sqliteStore); err != nil {
 			t.Fatal(err)
 		}
 		artifacts = sqliteStore

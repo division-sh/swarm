@@ -84,7 +84,7 @@ func (transport *supportedTelegramRegistrationTransport) applies() int {
 
 func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *testing.T) {
 	sourceRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
@@ -307,7 +307,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 
 func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T) {
 	sourceRoot := filepath.Join(writeStandingTelegramServeFixture(t, "http://127.0.0.1:1"), "telegram-ingress")
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestDeclaredActivationRejectsUnusableCredentialValues(t *testing.T) {
 func TestDeclaredRegistrationWithoutEnabledTargetStaysDiscoverable(t *testing.T) {
 	ctx := context.Background()
 	sourceRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), sourceRoot)
 	if err != nil {
 		t.Fatal(err)
 	}

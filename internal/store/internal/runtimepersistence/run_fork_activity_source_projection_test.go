@@ -737,7 +737,7 @@ func originalCarriageForRun(t testing.TB, selected any, runID string) semanticvi
 	}
 	repo := canonicalrouting.RepoRoot(t)
 	loaded, err := (runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo,
-		PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo), Store: store}).LoadRunForkSelectedContractSourceForRequest(context.Background(), runforkexecution.SelectedContractSourceLoadRequest{
+		Store: store}).LoadRunForkSelectedContractSourceForRequest(context.Background(), runforkexecution.SelectedContractSourceLoadRequest{
 		SourceRunID: runID, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 	})
 	if err != nil {
