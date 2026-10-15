@@ -20,34 +20,21 @@ type serveSessionObserver interface {
 func pairedServeSessionObserver(t *testing.T, backend string) (*serveBootstrapTestFixture, channelonboarding.Operation, serveSessionObserver) {
 	t.Helper()
 	f := newServeBootstrapTestFixture(t, backend)
-	serveBootstrapWireFixture(t, "paired", f.owner)
+	authenticated := serveBootstrapWireFixture(t, "paired", f.owner)
 	seedServePairedDevice(t, f)
 	if err := awaitServeSessionBootstrapFixture(f.ctx, f.adapter, f.op, f.candidate, true); err != nil {
 		t.Fatal(err)
 	}
 	wait, stop := context.WithTimeout(f.ctx, 5*time.Second)
 	defer stop()
-	tick := time.NewTicker(5 * time.Millisecond)
-	defer tick.Stop()
-	var op channelonboarding.Operation
-	for {
-		current, paired, err := f.adapter.CheckpointSessionPairing(wait, f.op)
-		if err != nil {
-			t.Fatal("actual SDK pairing did not checkpoint", err)
-		}
-		if paired {
-			op = current
-			break
-		}
-		select {
-		case <-tick.C:
-		case <-wait.Done():
-			t.Fatal("SDK login did not complete within the existing fixture bound", context.Cause(wait))
-		}
+	awaitServePairedAuthenticationFixture(t, wait, authenticated)
+	op, paired, err := f.adapter.CheckpointSessionPairing(wait, f.op)
+	if err != nil || !paired {
+		t.Fatal("actual SDK pairing did not checkpoint after its login milestone", err)
 	}
 	coordinate := op.Coordinate
 	coordinate.TargetGeneration = 1
-	op, err := f.adapter.store.AdvanceChannelOnboarding(f.ctx, channelonboarding.AdvanceRequest{
+	op, err = f.adapter.store.AdvanceChannelOnboarding(f.ctx, channelonboarding.AdvanceRequest{
 		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: op.Phase, RebindCoordinate: &coordinate, Now: time.Now().UTC()})
 	if err != nil {
 		t.Fatal(err)
