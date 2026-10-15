@@ -18,7 +18,7 @@ func TestRuntimeOptionsDoNotSelectPlatformSpec(t *testing.T) {
 	} {
 		typ := reflect.TypeOf(options)
 		t.Run(typ.Name(), func(t *testing.T) {
-			for _, field := range []string{"PlatformSpecPath", "platformSpecPath"} {
+			for _, field := range []string{"PlatformSpecPath", "platformSpecPath", "RunningPlatformSpecPath", "runningSpecPath"} {
 				if _, exists := typ.FieldByName(field); exists {
 					t.Fatalf("%s.%s still selects the platform spec; runtime commands must use embedded bytes", typ.Name(), field)
 				}

@@ -67,6 +67,9 @@ func sameReviewedRecipeKey(left, right recipe) bool {
 }
 
 func matchesReviewedSuccessor2617(row recipe, source string, pin reviewedSuccessor2617) bool {
+	if original, prior, err := embeddedSpecPriorEndpoint1801(row, source); err == nil {
+		row, source = original, prior
+	}
 	if original, err := fixtureSetupCurrentEndpoint2617(row, source); err == nil {
 		row, source = original, original.Successor
 	}

@@ -15,6 +15,7 @@ This is removal of the internal selector, not a new admission predicate.
 | Serve `Run` / `buildRuntimeComposition`, loading/materialization and runtime-context publication | Source-root and config selection, platform schema bootstrap, startup ownership, source availability and publication checks retain their order and refusal branches. The forwarding-only `servePreCatalogPlatformSpecPath` disappears; embedded materialization remains at that existing pre-catalog phase. Per-bundle spec-path fields and an unused runtime-context path field disappear. `TestLoadServeRuntimeBundleRejectsMalformedPackBodiesBeforePublication`, `TestPrivateTestAdmissionPrecedesResourceAcquisition`, `TestPrivateTestStartupFailureUnwindsAcquiredResources`, `TestServeBootLegacySchemaRendersTeachingError`. |
 | Serve retained artifact/budget/reset recovery and `SourceArtifactSelectedContractSourceLoader` | Exact artifact/hash, selected base generation, compatibility, source-run/target checks and recovery/fork guards are unchanged. Each terminal loader unconditionally uses embedded materialization. `TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores`, `TestPackPlatformRetainedSourceExecutesSelectedForkBothStores`, and the existing selected-loader missing/corrupt/unavailable/crossed-target negatives. |
 | Public API handler construction | Default registry comes from embedded materialization, not an option or caller cwd. Existing admitted registry/parser fixture seams remain below command construction. `TestHandlerUsesEmbeddedRegistryWithoutPathSelection` and the public API package's existing registry controls. |
+| Doctor `runDoctorCommand`, `appendDoctorInstalledReadback`, `buildDoctorSchemaInventory`, `appendDoctorPackInventoryReadback` | No intermediate helper accepts a spec path. Config and genuine embedded-schema failure reporting retain their existing branches. Preexisting report blockers remain distinct from the current readback's capability/admission failures. `TestDoctorInstalledReadbackScopesAdmissionBlockers`, `TestDoctorSchemaInventoryOwnsTypedHumanAndJSONReadback`, `TestDoctorIsSourceFreeAcrossHostileInvocationTrees`; explicit missing/malformed/incomplete draft documents are tested only at `loadChannelPlatformSpecDocument` by `TestChannelPlatformSpecExplicitLoaderRefusesInvalidSources`. |
 
 The A/P rows already assigned to these whole-file surfaces remain assigned;
 none is removed, declared proved by a hash, or narrowed to a check registry.
@@ -62,6 +63,21 @@ existing A/P classification. `TestVerifyBootStartupPredicateCensus` and all thre
 - Generator `swarm-openrpc-gen --platform-spec` remains explicit and unchanged.
   No platform-spec, OpenRPC schema, generation algorithm, deadline or debt baseline
   is changed by this deletion.
+- Reviewer-g 6201157565 retires the unreachable arbitrary-path-to-doctor-report
+  composition. Its replacement supplies an invalid pack inventory through the
+  existing admitted-input argument in both schema modes, requiring false, the
+  precise provider-pack blocker and `HasBlockers`. No injectable schema path or
+  test-only product branch replaces the removed selector.
+- The 28 frozen recipe endpoints have a finite successor packet under the same
+  ruling. Original `Before`/`After`, all 12 prior `Successor` chains, recipe order
+  and every unrelated record are retained exactly. The AST deletion/rename proof
+  and exact reversal reject altered assertions, execution/store/scenario/cleanup,
+  missing/unlisted records, changed history and hostile source/Successor pairs.
+  Existing historical comparators consume only this verified prior endpoint;
+  the complete overlay typecheck uses the real current sources. These tests are
+  `TestEmbeddedSpecSuccessorsPreserveFiniteHistoryAndAllOtherWork`,
+  `TestEmbeddedSpecSuccessorPacketRejectsChangedHistoryAndSemanticEdits` and
+  `TestReviewedSnapshotCandidateOverlayTypeChecks`.
 - The compiled release test relocates the binary and adds hostile spec files at
   its original directory, its new directory and the project. Pack inventory stays
   exactly equal; compiled portable verify and describe still succeed. The serve
