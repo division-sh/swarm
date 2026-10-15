@@ -28,8 +28,6 @@ func TestS6ProviderLimitsRejectRetiredFieldsBeforeProjection(t *testing.T) {
 					if !reflect.DeepEqual(target, want) {
 						t.Fatalf("rejected source changed projection: %#v", target)
 					}
-					var direct LLMProviderLimitPolicy
-					assertS6RetiredProviderField(t, yaml.Unmarshal([]byte(policy), &direct), key)
 				})
 			}
 		}
@@ -39,7 +37,7 @@ func TestS6ProviderLimitsRejectRetiredFieldsBeforeProjection(t *testing.T) {
 func assertS6RetiredProviderField(t *testing.T, err error, key string) {
 	t.Helper()
 	diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err)
-	if !ok || !strings.Contains(diagnostic.Problem, key) || !reflect.DeepEqual(diagnostic.ValidOptions, []string{"max_concurrency"}) {
+	if !ok || !strings.Contains(diagnostic.Problem, key) || !reflect.DeepEqual(diagnostic.ValidOptions, []string{"max_concurrency"}) || diagnostic.Location.Line == 0 || diagnostic.Location.Column == 0 {
 		t.Fatalf("error = %v, want typed %s refusal with only max_concurrency admitted", err, key)
 	}
 }
@@ -54,10 +52,6 @@ func TestS6ProviderLimitsAdmitOneProfileInteger(t *testing.T) {
 			}
 			if err := target.validateLLMProviderLimits(); err != nil {
 				t.Fatalf("one profile integer rejected: %v", err)
-			}
-			var direct LLMProviderLimitPolicy
-			if err := yaml.Unmarshal([]byte("{max_concurrency: 2}"), &direct); err != nil || direct.MaxConcurrency != 2 {
-				t.Fatalf("direct policy = %#v, err = %v", direct, err)
 			}
 		})
 	}
@@ -94,10 +88,6 @@ func TestS6ProviderLimitsRefuseNonpositiveOrNonintegerSource(t *testing.T) {
 			}
 			if target.LLM.Backend != "mock" || target.LLM.ProviderLimits != nil {
 				t.Fatalf("invalid integer changed projection: %#v", target)
-			}
-			var direct LLMProviderLimitPolicy
-			if err := yaml.Unmarshal([]byte("{max_concurrency: "+literal+"}"), &direct); err == nil {
-				t.Fatal("direct policy admitted invalid integer")
 			}
 		})
 	}

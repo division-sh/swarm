@@ -20,9 +20,19 @@ func TestS6UnifiedProviderLimitsRejectRetiredFields(t *testing.T) {
 					path := filepath.Join(t.TempDir(), "swarm.yaml")
 					writeRuntimeConfigText(t, path, "llm: {provider_limits: {anthropic: "+policy+"}}\n")
 					for _, override := range []string{"", "mock"} {
-						_, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{ExplicitPath: path, BackendOverride: override})
+						result, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{ExplicitPath: path, BackendOverride: override})
 						if err == nil || !strings.Contains(err.Error(), key) {
 							t.Fatalf("retired field %s admitted with override %q: %v", key, override, err)
+						}
+						located := false
+						for _, diagnostic := range result.Diagnostics {
+							if diagnostic.blocker() && strings.Contains(diagnostic.Message, key) && diagnostic.Path == path && diagnostic.Line > 0 && diagnostic.Column > 0 {
+								located = true
+								break
+							}
+						}
+						if !located {
+							t.Fatalf("retired field lost its selected-source location: %+v", result.Diagnostics)
 						}
 					}
 				})
