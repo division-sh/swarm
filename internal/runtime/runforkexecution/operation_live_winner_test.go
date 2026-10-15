@@ -303,6 +303,11 @@ func abandonSelectedOperationPreparation(t *testing.T, ctx context.Context, requ
 
 func ownerlessSelectedOperationFixture(t *testing.T, backend string) (context.Context, SelectedContractExecutionRequest) {
 	t.Helper()
+	return ownerlessSelectedOperationFixtureFromSource(t, backend, "tests/tier1-primitives/test-emits-multiple", "item.received")
+}
+
+func ownerlessSelectedOperationFixtureFromSource(t *testing.T, backend, sourceRoot, eventName string) (context.Context, SelectedContractExecutionRequest) {
+	t.Helper()
 	var selected startupownership.Store
 	var owner SelectedContractExecutionOwner
 	if backend == "sqlite" {
@@ -317,8 +322,11 @@ func ownerlessSelectedOperationFixture(t *testing.T, backend string) (context.Co
 	capability := selectedContractTestProcessCapability(t, ctx, selected)
 	repo := runForkExecutionRepoRoot(t)
 	loader := admittedFixtureSelectedContractSourceLoader{
-		RepoRoot: repo, SourceRoot: filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple"),
+		RepoRoot: repo, SourceRoot: sourceRoot,
 		PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo),
+	}
+	if !filepath.IsAbs(loader.SourceRoot) {
+		loader.SourceRoot = filepath.Join(repo, loader.SourceRoot)
 	}
 	loaded, err := loader.LoadRunForkSelectedContractSource(ctx, runfork.RunForkContractSelection{Mode: "selected_contracts"})
 	if err != nil {
@@ -330,7 +338,7 @@ func ownerlessSelectedOperationFixture(t *testing.T, backend string) (context.Co
 		RunID: sourceID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),
 		Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),
 	})
-	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0,
+	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, events.EventType(eventName), "source-runtime", "", []byte(`{}`), 0,
 		sourceID, events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event,
 		[]events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
