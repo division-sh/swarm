@@ -52,6 +52,10 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 			!record.CreatedAt.Equal(fixture.Turn1At.Add(-30*time.Second).UTC().Truncate(time.Microsecond)) || fixture.Construction.Child.Readiness.BundleHash != bundleHash {
 			return result, fmt.Errorf("conversation construction does not match fixed historical source/identity/time")
 		}
+		input := fixture.Construction.CreatingEvent
+		if input.ID() == "" || input.ID() != fixture.Construction.Child.CreatingInput.EventID || input.RunID() != fixture.RunID || !input.CreatedAt().Equal(fixture.Construction.Child.OccurredAt) {
+			return result, fmt.Errorf("conversation construction requires its original prepared creating event")
+		}
 	} else if fixture.Construction.Child.Identity.InstancePath != "" || fixture.Construction.Parent != nil {
 		return result, fmt.Errorf("data-only conversation fixture cannot carry construction")
 	}
@@ -64,7 +68,7 @@ func SeedConversationForkSourceForTest(ctx context.Context, selected any, fixtur
 			return fmt.Errorf("fork fixture source does not match admitted run")
 		}
 		if fixture.kind != conversationForkDataOnlyChat {
-			input := conversationForkConstructionEvent(fixture)
+			input := fixture.Construction.CreatingEvent
 			producer, err := events.NewProducerIdentity(events.EventProducerExternal, "conversation-construction-fixture")
 			if err != nil {
 				return err
