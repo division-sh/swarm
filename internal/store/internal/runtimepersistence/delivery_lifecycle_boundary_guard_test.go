@@ -101,6 +101,11 @@ func TestRetiredGenericDeliveryReadersHaveNoProductionConsumers(t *testing.T) {
 func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 	repoRoot := eventBoundaryRepositoryRoot(t)
 	found := map[string]int{}
+	reviewedFound := map[string]int{}
+	readOwner, err := parser.ParseFile(token.NewFileSet(), filepath.Join(repoRoot, "internal/store/internal/runtimepersistence/test_selected_storage_observation.go"), nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, rootName := range []string{"internal", "cmd"} {
 		root := filepath.Join(repoRoot, rootName)
 		if err := checkoutsource.WalkDir(repoRoot, root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -120,6 +125,7 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 			if err != nil {
 				return err
 			}
+			reviewed := reviewedDeliveryObservationLiterals(relative, file, readOwner)
 			ast.Inspect(file, func(node ast.Node) bool {
 				literal, ok := node.(*ast.BasicLit)
 				if !ok || literal.Kind != token.STRING {
@@ -130,6 +136,10 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 					return true
 				}
 				found[relative]++
+				if identity, allowed := reviewed[literal.Pos()]; allowed {
+					reviewedFound[identity]++
+					return true
+				}
 				if _, readOnly := selectedForkDeliveryReadCounts[relative]; readOnly && !selectedForkDeliveryReadSQL(raw) {
 					t.Errorf("%s:%d read-only selected evidence owner contains delivery mutation SQL", relative, fset.Position(literal.Pos()).Line)
 				}
@@ -163,6 +173,15 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 	for path, want := range selectedForkDeliveryReadCounts {
 		if got := found[path]; got != want {
 			t.Errorf("closed selected evidence reader %s has %d delivery queries, want %d", path, got, want)
+		}
+	}
+	for _, site := range reviewedDeliveryObservations {
+		identity := site.path + "/" + site.declaration
+		if got := reviewedFound[identity]; got != len(site.literals) {
+			t.Errorf("reviewed delivery observation %s has %d exact SELECTs, want %d", identity, got, len(site.literals))
+		}
+		if _, allowed := executableDeliverySQLOwners[site.path]; allowed {
+			t.Errorf("reviewed delivery observation %s gained whole-file authority", site.path)
 		}
 	}
 }
