@@ -78,6 +78,7 @@ type pairingQR struct {
 	paired    bool
 	connected bool
 	failure   error
+	terminal  pairingQRSnapshot
 }
 
 func newPairingQR(ctx context.Context, scope pairingQRScope) (*pairingQR, error) {
@@ -115,7 +116,10 @@ func (q *pairingQR) run() {
 		}
 		select {
 		case <-q.ctx.Done():
-			q.stop()
+			q.mu.Lock()
+			q.clearLocked()
+			q.status = pairingStopped
+			q.mu.Unlock()
 			return
 		case <-q.wake:
 		case <-elapsed:
@@ -263,7 +267,7 @@ func (q *pairingQR) read(scope pairingQRScope) (pairingQRSnapshot, error) {
 		return pairingQRSnapshot{}, errPairingScope
 	}
 	if q.ctx.Err() != nil || q.status == pairingStopped {
-		return pairingQRSnapshot{}, errors.Join(errPairingStopped, q.failure)
+		return q.terminal, errors.Join(errPairingStopped, q.failure)
 	}
 	q.advanceLocked(time.Now())
 	result := pairingQRSnapshot{Status: q.status, Paired: q.paired, Connected: q.connected}
@@ -274,7 +278,23 @@ func (q *pairingQR) read(scope pairingQRScope) (pairingQRSnapshot, error) {
 }
 
 func (q *pairingQR) stop() {
+	q.stopAfterDisconnect(false)
+}
+
+// Only an observed SDK disconnect may retain a terminal readback. Generic
+// retirement cancels disclosure instead; neither path retains QR material.
+func (q *pairingQR) stopAfterDisconnect(observed bool) {
 	q.mu.Lock()
+	q.terminal = pairingQRSnapshot{}
+	if observed && q.ctx.Err() == nil && q.status != pairingStopped && q.failure == nil {
+		q.advanceLocked(time.Now())
+		status := pairingFailed
+		if q.status == pairingExpired {
+			status = pairingExpired
+		}
+		q.terminal = pairingQRSnapshot{Status: status, Paired: q.paired}
+		q.failure = errPairingFailed
+	}
 	q.clearLocked()
 	q.status = pairingStopped
 	q.mu.Unlock()
