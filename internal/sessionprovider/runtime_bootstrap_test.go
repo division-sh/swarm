@@ -241,6 +241,71 @@ func (*runtimeBootstrapFixture) ProjectConnectedChannelReadiness(context.Context
 	return channelonboarding.ConnectedChannelReadiness{}, false, nil
 }
 
+func TestWhatsAppPairingDuplicateDisconnectReadbackBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, expired := range []bool{false, true} {
+			status := "failed"
+			if expired {
+				status = "qr_expired"
+			}
+			t.Run(backend+"/"+status, func(t *testing.T) {
+				f := newRuntimeBootstrapFixture(t, backend)
+				initial, err := f.service.Start(f.ctx, channelonboarding.StartInput{
+					Selection: channelonboarding.CandidateSelection{Provider: "whatsapp"}, Verb: channelonboarding.VerbConnect})
+				if err != nil {
+					t.Fatal(err)
+				}
+				occurrence := f.connection.state.currentOccurrence()
+				if err := occurrence.pairing.handle(&events.QR{Codes: []string{"private fixture code"}}); err != nil {
+					t.Fatal(err)
+				}
+				if expired {
+					if err := occurrence.pairing.handle(&events.QR{}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				// Cut at the same lifetime owner invoked by SDK Disconnected.
+				// Real SDK/public transport is covered separately by the served control.
+				for event := 1; event <= 2; event++ {
+					occurrence.fenceAfterDisconnect(true)
+					view, err := f.connection.PairingReadback(f.ctx, f.principal)
+					if err != nil || view != (channelonboarding.PairingReadback{Status: status}) {
+						t.Errorf("disconnect event %d lost exact zero-code terminal readback", event)
+					}
+					current, err := f.service.Get(f.ctx, initial.Operation.OperationID)
+					if err != nil || current.Pairing == nil || *current.Pairing != (channelonboarding.PairingReadback{Status: status}) ||
+						current.Operation.Coordinate != initial.Operation.Coordinate || current.Operation.OperationID != initial.Operation.OperationID {
+						t.Errorf("disconnect event %d changed the authenticated operation result or scope", event)
+					}
+					rows, err := f.service.ReadbackConnectedChannels(f.ctx)
+					if err != nil || len(rows) != 1 || rows[0].Identity.Status != "unbound" || rows[0].Activation != nil ||
+						rows[0].Readiness != nil && rows[0].Readiness.Ready {
+						t.Errorf("disconnect event %d lost observation or granted standing authority", event)
+					}
+					if f.connection.CheckBootstrap(f.ctx) == nil {
+						t.Fatal("duplicate disconnect granted bootstrap health")
+					}
+					if _, err := f.connection.ChannelExecution(f.ctx); err == nil {
+						t.Fatal("duplicate disconnect granted channel execution")
+					}
+				}
+				occurrence.fence()
+				occurrence.fenceAfterDisconnect(true)
+				if view, err := f.connection.PairingReadback(f.ctx, f.principal); err == nil || view != (channelonboarding.PairingReadback{}) {
+					t.Fatal("later disconnect resurrected a generically retired observation")
+				}
+				if _, err := f.owner.RetireAndWait(f.ctx); err != nil {
+					t.Fatal(err)
+				}
+				occurrence.fenceAfterDisconnect(true)
+				if view, err := f.connection.PairingReadback(f.ctx, f.principal); err == nil || view != (channelonboarding.PairingReadback{}) {
+					t.Fatal("later disconnect resurrected a retired runtime")
+				}
+			})
+		}
+	}
+}
+
 func TestWhatsAppPublicBootstrapReservesBeforeQRBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
