@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -53,7 +54,21 @@ func requireForkReceiverExecution(t *testing.T, rt servedControlProofRuntime, ru
 		row := readForkReceiverRows(t, rt, runID)[path]
 		var entity operatorread.OperatorEntityFull
 		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entityID}, &entity)
-		if entity.Entity.RunID != runID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != path || entity.Entity.EntityType != "receipt" || entity.Entity.CurrentState == nil || *entity.Entity.CurrentState != row.State || !reflect.DeepEqual(entity.Fields, row.Fields) {
+		graph, found := semanticview.WorkflowStageTopology(rt.Runtime.Options.WorkflowModule.SemanticSource(), path)
+		if !found {
+			t.Fatalf("authored receiver %s has no compiled topology", path)
+		}
+		initial, err := graph.InitialStoredStage()
+		if err != nil || row.State != initial.ID() {
+			t.Fatalf("receiver internal stage differs from authored entry: row=%+v entry=%v err=%v", row, initial, err)
+		}
+		staged := graph.StageCount() != 0
+		if entity.Entity.StageDefined == nil || *entity.Entity.StageDefined != staged ||
+			(staged && (entity.Entity.CurrentState == nil || *entity.Entity.CurrentState != initial.ID() || entity.Entity.EnteredStateAt == nil)) ||
+			(!staged && (entity.Entity.CurrentState != nil || entity.Entity.EnteredStateAt != nil)) {
+			t.Fatalf("public receiver stage posture differs from authored source: %+v", entity.Entity)
+		}
+		if entity.Entity.RunID != runID || entity.Entity.EntityID != entityID || entity.Entity.FlowInstance != path || entity.Entity.EntityType != "receipt" || !reflect.DeepEqual(entity.Fields, row.Fields) {
 			t.Fatalf("public receiver state: %+v rows=%+v", entity, row)
 		}
 	}

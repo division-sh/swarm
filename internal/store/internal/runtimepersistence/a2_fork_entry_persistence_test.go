@@ -310,6 +310,10 @@ func assertA2ForkConstructionMetadata(t *testing.T, entity runfork.RunForkEntity
 		StageDefined: state.StageDefined, Mode: state.Mode, Status: state.Status,
 		CreatedAt: state.CreatedAt, UpdatedAt: state.UpdatedAt, TerminatedAt: state.TerminatedAt, EnteredStateAt: state.EnteredStageAt,
 	}
+	if state.EntityType != "" {
+		created, updated := record.CreatedAt, state.UpdatedAt
+		want.DataCreatedAt, want.DataUpdatedAt = &created, &updated
+	}
 	if entity.MaterializationMetadata == nil {
 		t.Fatal("fixed entity lost source-bound construction metadata")
 	}

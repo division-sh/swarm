@@ -2,6 +2,9 @@ package runtimepersistence
 
 import (
 	"context"
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/google/uuid"
 	"testing"
 	"time"
 
@@ -55,6 +58,10 @@ func prepareNativeConversationForkConstruction(t *testing.T, ctx context.Context
 		BaseContext: ctx, SemanticSource: semanticview.Wrap(bundle), SourceArtifactFact: mustStoreTestSourceArtifactFact(bundle.SourceArtifact.BundleHash()),
 		WorkflowInstances: workflows, ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
+	fixture.Construction.CreatingEvent = eventtest.ExistingRunRootIngress(
+		uuid.NewSHA1(uuid.MustParse(fixture.EntityID), []byte("conversation-fork-construction")).String(),
+		"flow/conversation.created", "conversation-construction-fixture", "", []byte(`{"name":"Before"}`), 0,
+		fixture.RunID, events.EventEnvelope{}, fixture.Turn1At.Add(-30*time.Second))
 	plan, err := PrepareConversationForkConstructionForTest(ctx, selected, semanticview.Wrap(bundle), planner, fixture)
 	if err != nil {
 		t.Fatal(err)

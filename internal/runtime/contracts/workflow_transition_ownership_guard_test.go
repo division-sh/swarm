@@ -426,7 +426,7 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/runtime/pipeline.PipelineCoordinator.publishDirect::call internal/runtime/correlation.InboundEventFromContext":                      1,
 		"internal/runtime/pipeline.PipelineCoordinator.claimAndServeFanOutTurn::call internal/runtime/correlation.WithInboundEvent":                   1,
 		"internal/runtime/pipeline.pipelineActivityDispatcher.logActivityRuntime::call internal/runtime/correlation.InboundEventFromContext":          1,
-		"internal/store/internal/backend/mutationlog.Insert::call internal/runtime/correlation.InboundEventFromContext":                               1,
+		"internal/store/internal/backend/mutationlog.insertPostgresAt::call internal/runtime/correlation.InboundEventFromContext":                     1,
 		"internal/store/internal/backend/mutationlog.insertSQLiteAt::call internal/runtime/correlation.InboundEventFromContext":                       1,
 		"internal/store/storetest.PersistManagedAgentTurnFixture::call internal/runtime/correlation.WithInboundEvent":                                 1,
 

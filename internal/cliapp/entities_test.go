@@ -128,6 +128,7 @@ func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 	} {
 		command, err := flowactivationfixture.Command(ctx, pipeline.WorkflowInstance{
 			InstanceID: seed.key, StorageRef: "scoring/" + seed.key, EntityID: seed.id,
+			Mode: "template", InstanceKey: seed.key,
 			WorkflowName: "scoring", WorkflowVersion: "1", EntityType: "vertical",
 			CurrentState: seed.stage, StageDefined: true, CreatedAt: now, EnteredStageAt: now,
 			Fields: map[string]any{"vertical_name": seed.name},
