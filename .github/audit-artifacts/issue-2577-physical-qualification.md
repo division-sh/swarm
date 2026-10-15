@@ -23,6 +23,11 @@ rehearsal, not physical P01 or interoperability. No account or phone has paired.
 Fresh final-head preflight and normal hosted qualification remain required;
 the first repair-head preflight correctly caught the changed startup consumer
 fingerprint, which is refreshed with explicit owner/caller/proof accounting.
+Reviewer-g then found a duplicate-disconnect lifetime gap at `854bef93bd`
+([6199462678](https://github.com/division-sh/swarm/issues/2577#issuecomment-6199462678)).
+The successor must pass its both-store first/second-event and irreversible
+retirement controls, fresh affected proofs/preflight and a new exact-head QR
+rehearsal. Earlier passing single-disconnect receipts do not approve it.
 The deterministic notice-producer/source-switch packet is also awaiting the
 bounded runbook review requested in
 [#2577/6198521524](https://github.com/division-sh/swarm/issues/2577#issuecomment-6198521524).
