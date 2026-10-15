@@ -229,6 +229,7 @@ func TestWhatsAppPairingTerminalReadbackIsObservedAndScoped(t *testing.T) {
 			}
 			q.stopAfterDisconnect(true)
 			<-q.done
+			q.stopAfterDisconnect(true)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			coordinate := scope.Coordinate
