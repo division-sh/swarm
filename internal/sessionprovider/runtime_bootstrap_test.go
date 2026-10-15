@@ -264,10 +264,10 @@ func TestWhatsAppPairingDuplicateDisconnectReadbackBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
-				// Cut at the same lifetime owner invoked by SDK Disconnected.
-				// Real SDK/public transport is covered separately by the served control.
+				// Order the two cuts at the private read owner before socket cleanup
+				// can dispatch additional SDK events. Exercise the lifetime owner next.
 				for event := 1; event <= 2; event++ {
-					occurrence.fenceAfterDisconnect(true)
+					occurrence.pairing.stopAfterDisconnect(true)
 					view, err := f.connection.PairingReadback(f.ctx, f.principal)
 					if err != nil || view != (channelonboarding.PairingReadback{Status: status}) {
 						t.Errorf("disconnect event %d lost exact zero-code terminal readback", event)
@@ -282,12 +282,16 @@ func TestWhatsAppPairingDuplicateDisconnectReadbackBothStores(t *testing.T) {
 						rows[0].Readiness != nil && rows[0].Readiness.Ready {
 						t.Errorf("disconnect event %d lost observation or granted standing authority", event)
 					}
-					if f.connection.CheckBootstrap(f.ctx) == nil {
-						t.Fatal("duplicate disconnect granted bootstrap health")
-					}
 					if _, err := f.connection.ChannelExecution(f.ctx); err == nil {
 						t.Fatal("duplicate disconnect granted channel execution")
 					}
+				}
+				occurrence.fenceAfterDisconnect(true)
+				if view, err := f.connection.PairingReadback(f.ctx, f.principal); err != nil || view != (channelonboarding.PairingReadback{Status: status}) {
+					t.Error("SDK lifetime fence erased the same terminal observation")
+				}
+				if f.connection.CheckBootstrap(f.ctx) == nil {
+					t.Fatal("duplicate disconnect granted bootstrap health")
 				}
 				occurrence.fence()
 				occurrence.fenceAfterDisconnect(true)
