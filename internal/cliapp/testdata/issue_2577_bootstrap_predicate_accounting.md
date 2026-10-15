@@ -536,3 +536,19 @@ stderr SHA256 744a5f38901a875b3df29a94310db42fa70f970917729d44202c30f24a6f1efb.
 These are focused iteration receipts, not final-head qualification or a quiet
 physical rehearsal. Final-head race/guards/preflight and rehearsal receipts
 are named in the subsequent signed issue checkpoint without rewriting history.
+
+### Original Construction Cleanup Join
+
+The G3 nil/one-selection RED at `3282706dc3` is retained. The separate
+16-cell discriminator (#2577/6203651594) showed that pre-publication probing
+can skip Close when cancellation was not cached; joining the original Close
+refuses reuse. This is fixture-order evidence, not a proven product cache bug.
+
+Reviewer-g #2577/6203748537 approves joining the existing counted constructor
+before the connection probe, plus the exact original attempt's done before the
+ordinary final cache-use assertion. The fixture verifies attempt identity,
+keeps Close and post-close quiescence, and rejects Pending as well as nil at
+that final assertion. The 50ms pending-reuse negative, prompt cancellation and
+one-selection assertions remain. No production predicate or deadline changes.
+Disposable old-order RED/corrected-cut GREEN and final-head execution receipts
+are linked in the subsequent issue checkpoint; the earlier G3 RED is not waived.
