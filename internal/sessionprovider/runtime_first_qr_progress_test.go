@@ -57,9 +57,9 @@ func TestWhatsAppHeldFirstQRPublicCLIProgressBothStores(t *testing.T) {
 			for _, method := range []string{"channel.onboarding_get", "channel.onboarding_retry"} {
 				raw, result := requestHeldQRPublicResult(t, server, token, method, params)
 				code, calls := validateHeldQRResponseViaCLI(t, raw, result.Operation.OperationID, token)
-				if code != 0 {
+				if code != 0 || calls != 2 {
 					logHeldQRProgressFailure(t, method, started.Operation, result, code, calls)
-					t.Errorf("%s rejected genuine owned pre-first-batch progress with CLI exit %d", method, code)
+					t.Errorf("%s consumption: CLI exit=%d calls=%d, want 0/2", method, code, calls)
 				}
 				if result.Operation.OperationID != started.Operation.OperationID || result.Operation.Revision != started.Operation.Revision ||
 					result.Pairing == nil || result.Pairing.Status != channelonboarding.PairingStatusPreparing ||
@@ -85,9 +85,9 @@ func TestWhatsAppHeldFirstQRPublicCLIProgressBothStores(t *testing.T) {
 			}
 			raw, current := requestHeldQRPublicResult(t, server, token, "channel.onboarding_get", params)
 			code, calls := validateHeldQRResponseViaCLI(t, raw, current.Operation.OperationID, token)
-			if code != 0 {
+			if code != 0 || calls != 2 {
 				logHeldQRProgressFailure(t, "released_get", started.Operation, current, code, calls)
-				t.Error("ordinary released current-QR progress was refused")
+				t.Errorf("released current-QR consumption: CLI exit=%d calls=%d, want 0/2", code, calls)
 			}
 			if current.Operation.OperationID != started.Operation.OperationID || current.Operation.Revision != started.Operation.Revision ||
 				current.Pairing == nil || current.Pairing.Status != "awaiting_qr" || current.Pairing.Code == "" ||
@@ -137,16 +137,21 @@ func validateHeldQRResponseViaCLI(t *testing.T, raw json.RawMessage, operationID
 	t.Helper()
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call := calls.Add(1)
+		want := "channel.onboarding_get"
+		if call == 2 {
+			want = "channel.onboarding_retry"
+		}
 		var request struct {
 			ID     json.RawMessage `json:"id"`
 			Method string          `json:"method"`
 		}
 		if json.NewDecoder(r.Body).Decode(&request) != nil || r.Header.Get("Authorization") != "Bearer "+token ||
-			(request.Method != "channel.onboarding_get" && request.Method != "channel.onboarding_retry") {
+			call > 2 || request.Method != want {
+			t.Error("captured progress did not use exactly get then one explicit retry")
 			http.Error(w, "invalid controlled CLI request", http.StatusBadRequest)
 			return
 		}
-		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": raw})
 	}))
