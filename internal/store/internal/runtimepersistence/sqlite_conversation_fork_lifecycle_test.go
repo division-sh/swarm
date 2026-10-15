@@ -259,6 +259,7 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base time.Time) conversationForkSourceFixture {
 	t.Helper()
 	source := conversationForkSourceFixture{
+		selected:   s,
 		runID:      uuid.NewString(),
 		bundleHash: authorActivityTestBundleHash,
 		agentID:    "agent-fork-source",

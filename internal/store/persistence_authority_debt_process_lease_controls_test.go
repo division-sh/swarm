@@ -170,7 +170,7 @@ func TestPersistenceAuthorityDebtProcessLeaseCollectorTransitionIsBounded(t *tes
 		trusted := authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: debtProcessLeaseCollectorTo, Sites: debtControlSet(inherited)}
 		head := trusted
 		head.Collector = debtProcessLeaseFreshnessCollectorTo
-		for _, mutation := range []string{"exact", "landed-successor", "reverse", "wrong-base", "wrong-trusted", "wrong-destination", "wrong-head", "rebootstrap", "addition", "increase", "deletion"} {
+		for _, mutation := range []string{"exact", "landed-successor", "reverse", "wrong-base", "wrong-trusted", "unmatched-base", "wrong-destination", "wrong-head", "unmatched-current", "rebootstrap", "addition", "increase", "deletion"} {
 			t.Run(mutation, func(t *testing.T) {
 				base, candidate := trusted, head
 				base.Sites, candidate.Sites = maps.Clone(trusted.Sites), maps.Clone(head.Sites)
@@ -181,13 +181,17 @@ func TestPersistenceAuthorityDebtProcessLeaseCollectorTransitionIsBounded(t *tes
 				case "reverse":
 					base, candidate, predecessor, current = candidate, base, current, predecessor
 				case "wrong-base":
-					predecessor = strings.Repeat("a", 64)
+					predecessor, base.Collector = strings.Repeat("a", 64), strings.Repeat("a", 64)
 				case "wrong-trusted":
 					base.Collector = strings.Repeat("a", 64)
+				case "unmatched-base":
+					predecessor = strings.Repeat("a", 64)
 				case "wrong-destination":
-					current = strings.Repeat("b", 64)
+					current, candidate.Collector = strings.Repeat("b", 64), strings.Repeat("b", 64)
 				case "wrong-head":
 					candidate.Collector = strings.Repeat("b", 64)
+				case "unmatched-current":
+					current = strings.Repeat("b", 64)
 				case "rebootstrap":
 					candidate.BootstrapSource = strings.Repeat("c", 40)
 				case "addition":
