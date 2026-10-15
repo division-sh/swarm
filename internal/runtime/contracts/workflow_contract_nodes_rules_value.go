@@ -57,17 +57,21 @@ func projectNodeRuleRowsValue(value yamlsource.Value, context handlerRuleDecodeC
 	return rows, nil
 }
 
-func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecodeContext) (HandlerRuleEntry, error) {
-	allowed := ruleFieldOptions
-	if context != handlerRuleDecodeContextOnComplete {
-		allowed = make(map[string]struct{}, len(ruleFieldOptions)-1)
-		for key := range ruleFieldOptions {
-			if key != "condition" {
-				allowed[key] = struct{}{}
-			}
+func nodeRuleFieldOptions(context handlerRuleDecodeContext) map[string]struct{} {
+	if context == handlerRuleDecodeContextOnComplete {
+		return ruleFieldOptions
+	}
+	allowed := make(map[string]struct{}, len(ruleFieldOptions)-1)
+	for key := range ruleFieldOptions {
+		if key != "condition" {
+			allowed[key] = struct{}{}
 		}
 	}
-	fields, err := nodeValueFields(value, "rule", allowed)
+	return allowed
+}
+
+func projectNodeRuleEntryValue(value yamlsource.Value, context handlerRuleDecodeContext) (HandlerRuleEntry, error) {
+	fields, err := nodeValueFields(value, "rule", nodeRuleFieldOptions(context))
 	if err != nil {
 		return HandlerRuleEntry{}, err
 	}
