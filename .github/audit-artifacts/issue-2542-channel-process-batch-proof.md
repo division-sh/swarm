@@ -15,16 +15,17 @@ These are physical removals, not an unconditional claim that all250 are qualifie
 Existing mock78/62 and numeric-fork9/8 holds remain outside accepted credit.
 
 Qualification is not inferred from a physical deletion. Proposed independently
-green credit is184/139; the source-lifecycle/history dependency57/50 and selected
-binding caller9/7 remain uncredited,66/57 total. The source subgroup comprises
+green credit is180/136; the source-lifecycle/history dependency57/50, selected
+binding caller9/7 and learned-object caller4/3 remain uncredited,70/60 total.
+The source subgroup comprises
 TestChannelSourceLifecyclePublicJourney41/39, readChannelNativeHistory3/2,
 readChannelSourceHistory3/2, readChannelPreservedHistory8/6 and
 requireChannelPreservedHistory2/1. The exact selected root is
 TestChannelSelectedForkInputBoundaryMatrix9/7. Subject to reviewer acceptance,
-the adjusted residual is4799/2915, not the physical4646/2788; cumulative accepted
-would be1834/1507. The original learned-object shared-cell failure and interrupted
-PostgreSQL cells have a single matched predecessor/candidate discriminator below;
-its disposition must be recorded before claiming that root's4/3 as qualified.
+the adjusted residual is4803/2918, not the physical4646/2788; cumulative accepted
+would be1830/1504. TestChannelLearnedObjectPublicJourney is the exact4/3 held
+caller. The binding-reader helper's both-store direct-cell receipts remain
+separate from the uncompleted complete caller matrix.
 
 The receipt uses the SAME retained366ef25c98c0ec629354038246e7a30b214d7971
 integration base as the accepted agent-snapshot checkpoint, with a local push
@@ -185,6 +186,17 @@ PostgreSQL direct. The interrupted PostgreSQL direct cell passes separately
 30.874s. Per the orchestrator, one single-root sequential matched pair against
 7333184bec uses identical race/GOMAXPROCS2 flags and a6m command cap. This is a
 bounded diagnosis, not a retry loop or any change to the test's RPC deadlines.
+Results: predecessor216.738s RED, SQLite direct startup-readiness failure and
+SQLite shared channel.onboarding_start5s failure; both PostgreSQL cells pass.
+Candidate passes SQLite direct150.010s, SQLite shared146.580s and PostgreSQL
+direct37.440s, then hits the6m aggregate cap during PostgreSQL shared. It has
+no assertion failure before that cap, but is not a complete green root receipt.
+No additional retry or runtime repair follows this bounded pair. Its exact4/3
+retirement remains qualification-held rather than classified inherited or fixed.
+Observed load averages were7.61/8.06/11.18 before the predecessor,
+19.42/13.47/12.67 at the pair boundary, and17.78/19.96/16.37 after the candidate.
+These were matched flags on a busy host, not a quiet or matched-load timing
+experiment; they establish neither pressure cause nor non-amplification.
 
 ## Finite History And Quality
 
@@ -219,6 +231,11 @@ functions remain below the pinned cognitive limit. A scan of every touched file
 still lists inherited large test functions; the actual signed-snapshot complexity
 comparison, not that raw list, is the qualification authority. Its exact-head
 receipt accompanies the checkpoint.
+The actual signed-snapshot comparison at1dad7c5c70 against7333184bec passes:
+cognitive hot counts557/196 and cyclomatic259/59 are unchanged, maxima302/186
+unchanged, equal reviewed policy and no hotspot-count increase. Subsequent
+checkpoint documentation does not change Go sources or this measured code tree.
+The final metadata/factory/history-query controls also pass3.601s.
 
 An older global-event-name guard fails identically at the accepted predecessor
 and candidate on the untouched TestDormantIngressProvisionRestartSignedInputBothStores.
@@ -243,3 +260,14 @@ No new issue/watchlist node is needed: residual migration, explicit runtime hold
 and integration/source-cost feedback stay under2542/2151 and existing2353 where
 applicable. The approved existing-owner direction remains appropriate; no new
 restoration, scheduling, persistence or history framework is proposed.
+
+Timing record, non-additive because edits and focused runs overlap: owner repair
+and caller propagation with native controls01:33-02:37Z; combined source/history
+integration and affected guards02:37-03:20Z; remaining focused caller/quality
+receipts03:20-03:42Z; requested single-root predecessor/candidate diagnosis
+03:42-03:52Z. No instrumented edit-only/CPU-time split or cause attribution is
+invented from these wall-clock windows. The signed read-only ratchet and final
+documentation receipts follow; no additional migration scope was added.
+
+Cross-lane reservation:6183880813 confirms that this batch does not edit
+delivery/adapter.go (ActiveSnapshots) or ReadResetInventory. E may proceed.
