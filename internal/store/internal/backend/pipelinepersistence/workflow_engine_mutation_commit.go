@@ -381,26 +381,28 @@ func insertWorkflowEngineStateDiff(ctx context.Context, attempt *mutationprotoco
 			if !ok {
 				return fmt.Errorf("workflow engine PostgreSQL mutation requires PostgreSQL selected store")
 			}
-			owner := activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+			return insertWorkflowEngineStateDiffWithSource(ctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 				return selected.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
-			})
-			if occurrence != nil {
-				return privatemutationlog.InsertConstructionEntityStateDiff(ctx, attempt, owner, record, before, after, writer, occurrence, true)
-			}
-			return privatemutationlog.InsertEntityStateDiff(ctx, attempt, owner, record.EntityID, before, after, writer)
+			}), record, before, after, writer, occurrence, true)
 		}
 		selected, ok := store.(*PipelineSQLiteOwner)
 		if !ok {
 			return fmt.Errorf("workflow engine SQLite mutation requires SQLite selected store")
 		}
-		owner := activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
+		return insertWorkflowEngineStateDiffWithSource(ctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 			return selected.RunLifecycleSQLiteOwner.RequireActiveSourceTx(ctx, tx, runID)
-		})
-		if occurrence != nil {
-			return privatemutationlog.InsertConstructionEntityStateDiff(ctx, attempt, owner, record, before, after, writer, occurrence, false)
-		}
-		return privatemutationlog.InsertSQLiteEntityStateDiff(ctx, attempt, owner, record.EntityID, before, after, writer, record.UpdatedAt)
+		}), record, before, after, writer, occurrence, false)
 	})
+}
+
+func insertWorkflowEngineStateDiffWithSource(ctx context.Context, attempt *mutationprotocol.Attempt, owner privatemutationlog.ActiveRunSourceOwner, record runtimepipeline.WorkflowEngineStateRecord, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer, occurrence *privatemutationlog.ConstructionOccurrence, postgres bool) error {
+	if occurrence != nil {
+		return privatemutationlog.InsertConstructionEntityStateDiff(ctx, attempt, owner, record, before, after, writer, occurrence, postgres)
+	}
+	if postgres {
+		return privatemutationlog.InsertEntityStateDiff(ctx, attempt, owner, record.EntityID, before, after, writer)
+	}
+	return privatemutationlog.InsertSQLiteEntityStateDiff(ctx, attempt, owner, record.EntityID, before, after, writer, record.UpdatedAt)
 }
 
 func commitWorkflowEngineInitialValues(
