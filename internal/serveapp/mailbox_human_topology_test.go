@@ -102,8 +102,13 @@ func TestHumanTaskRealRequesterTopologyBothStores(t *testing.T) {
 							if remaining := time.Until(deadline); remaining > 0 {
 								time.Sleep(remaining)
 							}
+							restartDeadline := time.Now().Add(serveRuntimeReadyTimeout)
 							rt, owner = restart()
-							recovered, err := owner.GetDecisionCard(servedControlProofAuthorActivityContext(t, rt), id)
+							expiryCtx, cancelExpiry := context.WithDeadline(servedControlProofAuthorActivityContext(t, rt), restartDeadline)
+							defer cancelExpiry()
+							recovered, err := waitHumanTaskExpiryCommit(expiryCtx, card, func(ctx context.Context) (decisioncard.Card, error) {
+								return owner.GetDecisionCard(ctx, id)
+							})
 							if err != nil || recovered.Status != decisioncard.StatusExpired || !reflect.DeepEqual(recovered.Anchor, card.Anchor) {
 								t.Fatalf("expiry restart lost canonical card: %+v, %v", recovered, err)
 							}
