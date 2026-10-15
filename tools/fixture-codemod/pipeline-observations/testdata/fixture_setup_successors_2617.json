@@ -4788,5 +4788,77 @@
         ]
       }
     ]
+  },
+  {
+    "Original": {
+      "Family": "native-run-setup-family144",
+      "File": "internal/runtime/runforkexecution/runtime_outcome_test.go",
+      "Function": "seedSelectedRuntimeOutcomeSource",
+      "Before": "func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected SelectedContractForkLifecycle, loaded LoadedSelectedContractSource, runID, eventID string, route events.DeliveryRoute, at time.Time) {\n\tt.Helper()\n\tfixture := runlifecyclefixture.Fixture{RunID: runID, Origin: runlifecyclefixture.ScenarioSetupOrigin(), Source: loaded.SourceArtifactFact, Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute)}\n\tif backend == \"sqlite\" {\n\t\tif _, err := selected.(*store.SQLiteRuntimeStore).EnsureSourceArtifact(ctx, fixture.Artifact); err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n\t\trunlifecyclefixture.RequireSQLite(t, ctx, db, fixture)\n\t} else {\n\t\tif _, err := selected.(*store.PostgresStore).EnsureSourceArtifact(ctx, fixture.Artifact); err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n\t\trunlifecyclefixture.RequirePostgres(t, ctx, db, fixture)\n\t}\n\tpayload, err := json.Marshal(map[string]any{\"entity_id\": runID})\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tenvelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: runID, EntityID: runID})\n\tevent := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, \"item.received\", \"source-runtime\", \"\", payload, 0, runID, envelope, events.NoRoutingSource(), at, executionmode.Mock)\n\tstoretest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)\n\tcommitSelectedOperationRootFixture(t, ctx, selected, loaded, event)\n\tif backend == \"postgres\" {\n\t\tseedSourceOutcomeThatMustNotSuppressFork(t, db, eventID, runID, at)\n\t\tcaptureSelectedExecutionSourceRevision(t, db, runID)\n\t\treturn\n\t}\n\ttx, err := db.BeginTx(ctx, nil)\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tdefer tx.Rollback()\n\tif _, err := runforkrevision.CaptureSQLite(ctx, tx, runID, runforkrevision.AllFamilies()...); err != nil {\n\t\tt.Fatal(err)\n\t}\n\tif err := tx.Commit(); err != nil {\n\t\tt.Fatal(err)\n\t}\n}",
+      "After": "func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected SelectedContractForkLifecycle, loaded LoadedSelectedContractSource, runID, eventID string, route events.DeliveryRoute, at time.Time) {\n\tt.Helper()\n\tstoretest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute)})\n\tpayload, err := json.Marshal(map[string]any{\"entity_id\": runID})\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tenvelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: runID, EntityID: runID})\n\tevent := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, \"item.received\", \"source-runtime\", \"\", payload, 0, runID, envelope, events.NoRoutingSource(), at, executionmode.Mock)\n\tstoretest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)\n\tcommitSelectedOperationRootFixture(t, ctx, selected, loaded, event)\n\tif backend == \"postgres\" {\n\t\tseedSourceOutcomeThatMustNotSuppressFork(t, db, eventID, runID, at)\n\t\tcaptureSelectedExecutionSourceRevision(t, db, runID)\n\t\treturn\n\t}\n\ttx, err := db.BeginTx(ctx, nil)\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tdefer tx.Rollback()\n\tif _, err := runforkrevision.CaptureSQLite(ctx, tx, runID, runforkrevision.AllFamilies()...); err != nil {\n\t\tt.Fatal(err)\n\t}\n\tif err := tx.Commit(); err != nil {\n\t\tt.Fatal(err)\n\t}\n}"
+    },
+    "Candidate": "func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend string, selected SelectedContractForkLifecycle, loaded LoadedSelectedContractSource, runID, eventID string, route events.DeliveryRoute, at time.Time) {\n\tt.Helper()\n\tstoretest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{\n\t\tRunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),\n\t\tArtifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),\n\t})\n\tpayload, err := json.Marshal(map[string]any{\"entity_id\": runID})\n\tif err != nil {\n\t\tt.Fatal(err)\n\t}\n\tenvelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: runID, EntityID: runID})\n\tevent := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, \"item.received\", \"source-runtime\", \"\", payload, 0, runID,\n\t\tenvelope, events.NoRoutingSource(), at, executionmode.Mock)\n\tstoretest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)\n\tcommitSelectedOperationRootFixture(t, ctx, selected, loaded, event)\n\tif backend == \"postgres\" {\n\t\tfailure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassConnectorFailure, \"source_dead_letter\", \"run-fork-test\", \"seed\", nil), \"run-fork-test\", \"seed\")\n\t\tif err := storetest.SeedSelectedSourceOutcome(ctx, selected, storetest.SelectedSourceOutcomeFixture{\n\t\t\tRunID: runID, EventID: eventID, EntityID: runID, CreatedAt: at, Failure: failure,\n\t\t}); err != nil {\n\t\t\tt.Fatal(err)\n\t\t}\n\t}\n\tstoretest.CaptureRunForkSnapshot(t, ctx, selected, runID)\n}",
+    "Edits": [
+      {
+        "Start": 0,
+        "Current": [
+          "func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend string, selected SelectedContractForkLifecycle, loaded LoadedSelectedContractSource, runID, eventID string, route events.DeliveryRoute, at time.Time) {\n",
+          "\tt.Helper()\n",
+          "\tstoretest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{\n",
+          "\t\tRunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),\n",
+          "\t\tArtifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute),\n",
+          "\t})\n",
+          "\tpayload, err := json.Marshal(map[string]any{\"entity_id\": runID})\n",
+          "\tif err != nil {\n",
+          "\t\tt.Fatal(err)\n",
+          "\t}\n",
+          "\tenvelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: runID, EntityID: runID})\n",
+          "\tevent := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, \"item.received\", \"source-runtime\", \"\", payload, 0, runID,\n",
+          "\t\tenvelope, events.NoRoutingSource(), at, executionmode.Mock)\n",
+          "\tstoretest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)\n",
+          "\tcommitSelectedOperationRootFixture(t, ctx, selected, loaded, event)\n",
+          "\tif backend == \"postgres\" {\n",
+          "\t\tfailure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassConnectorFailure, \"source_dead_letter\", \"run-fork-test\", \"seed\", nil), \"run-fork-test\", \"seed\")\n",
+          "\t\tif err := storetest.SeedSelectedSourceOutcome(ctx, selected, storetest.SelectedSourceOutcomeFixture{\n",
+          "\t\t\tRunID: runID, EventID: eventID, EntityID: runID, CreatedAt: at, Failure: failure,\n",
+          "\t\t}); err != nil {\n",
+          "\t\t\tt.Fatal(err)\n",
+          "\t\t}\n",
+          "\t}\n",
+          "\tstoretest.CaptureRunForkSnapshot(t, ctx, selected, runID)\n",
+          "}"
+        ],
+        "Prior": [
+          "func seedSelectedRuntimeOutcomeSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected SelectedContractForkLifecycle, loaded LoadedSelectedContractSource, runID, eventID string, route events.DeliveryRoute, at time.Time) {\n",
+          "\tt.Helper()\n",
+          "\tstoretest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute)})\n",
+          "\tpayload, err := json.Marshal(map[string]any{\"entity_id\": runID})\n",
+          "\tif err != nil {\n",
+          "\t\tt.Fatal(err)\n",
+          "\t}\n",
+          "\tenvelope := events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{FlowID: semanticview.RootExecutionFlowID(loaded.Source), FlowInstance: runID, EntityID: runID})\n",
+          "\tevent := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, \"item.received\", \"source-runtime\", \"\", payload, 0, runID, envelope, events.NoRoutingSource(), at, executionmode.Mock)\n",
+          "\tstoretest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)\n",
+          "\tcommitSelectedOperationRootFixture(t, ctx, selected, loaded, event)\n",
+          "\tif backend == \"postgres\" {\n",
+          "\t\tseedSourceOutcomeThatMustNotSuppressFork(t, db, eventID, runID, at)\n",
+          "\t\tcaptureSelectedExecutionSourceRevision(t, db, runID)\n",
+          "\t\treturn\n",
+          "\t}\n",
+          "\ttx, err := db.BeginTx(ctx, nil)\n",
+          "\tif err != nil {\n",
+          "\t\tt.Fatal(err)\n",
+          "\t}\n",
+          "\tdefer tx.Rollback()\n",
+          "\tif _, err := runforkrevision.CaptureSQLite(ctx, tx, runID, runforkrevision.AllFamilies()...); err != nil {\n",
+          "\t\tt.Fatal(err)\n",
+          "\t}\n",
+          "\tif err := tx.Commit(); err != nil {\n",
+          "\t\tt.Fatal(err)\n",
+          "\t}\n",
+          "}"
+        ]
+      }
+    ]
   }
 ]

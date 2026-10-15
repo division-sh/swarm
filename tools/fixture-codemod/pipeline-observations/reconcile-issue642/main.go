@@ -72,7 +72,7 @@ func main() {
 			panic("missing/ambiguous reviewed endpoint: " + target[1])
 		}
 	}
-	// #642/6191161328 appends to, rather than replacing, the prior 39 receipts.
+	// #642/6191161328 and 6191625495 append to the prior 39 receipts.
 	prior := encode(history, false)
 	if !bytes.Equal(prior, read(completion, root+"testdata/fixture_setup_successors_2617.json")) {
 		panic("reviewed completion predecessor changed")
@@ -81,6 +81,7 @@ func main() {
 		{"internal/runtime/pipeline/workflow_timer_replay_selected_store_external_test.go", "TestWorkflowTimerCauseReplayReopenAndIsolationBothStores"},
 		{"internal/runtime/runforkexecution/constructed_agent_input_execution_test.go", "proveSelectedConstructedAgentInput"},
 		{"internal/runtime/runforkexecution/execution_test.go", "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation"},
+		{"internal/runtime/runforkexecution/runtime_outcome_test.go", "seedSelectedRuntimeOutcomeSource"},
 	} {
 		matches := 0
 		for i := range rows {
@@ -92,11 +93,15 @@ func main() {
 			candidate := body(read(completion, row.File), row.Function)
 			current, err := os.ReadFile(row.File)
 			must(err)
-			if body(current, row.Function) != candidate || row.Successor == "" || row.Successor == candidate {
+			previous := row.Successor
+			if previous == "" {
+				previous = row.After
+			}
+			if body(current, row.Function) != candidate || previous == candidate {
 				panic("unreviewed or unchanged completion successor: " + row.Function)
 			}
 			history = append(history, successor{Original: *row, Candidate: candidate, Edits: []edit{{
-				Current: strings.SplitAfter(candidate, "\n"), Prior: strings.SplitAfter(row.Successor, "\n"),
+				Current: strings.SplitAfter(candidate, "\n"), Prior: strings.SplitAfter(previous, "\n"),
 			}}})
 			row.Successor = candidate
 		}

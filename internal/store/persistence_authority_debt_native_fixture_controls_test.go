@@ -16,7 +16,7 @@ import (
 )
 
 // Excluded from the collector payload to avoid a self-referential fingerprint.
-const debtNativeFixtureCollectorTo = "d546d5679de4130416d4f44de86440c5527a5946e16505187430083dad6640b1"
+const debtNativeFixtureCollectorTo = "0bd1ab5a0b812a4ec0868c453f4a7ac572726261f9f1b738e72d49badc6c08af"
 
 func TestPersistenceAuthorityDebtNativeFixtureExactClassificationDelta(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)

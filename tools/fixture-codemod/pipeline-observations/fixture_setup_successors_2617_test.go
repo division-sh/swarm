@@ -29,6 +29,7 @@ import (
 // reviewer-a6190268703 appends the two exact #642 owner/caller successors.
 // reviewer-a6190555639 appends the exact delegated catalog harness.
 // reviewer-a6191161328 appends three exact #642 lineage/execution successors.
+// reviewer-a6191625495 appends the exact native source-outcome seed successor.
 //
 //go:embed testdata/fixture_setup_successors_2617.json
 var fixtureSetupSuccessorBytes2617 []byte
@@ -56,18 +57,19 @@ func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) 
 		"native-served-delivery-quiescence-caller/internal/serveapp/fork_retained_join_test.go/testServedJoinWriterCompletedHistoryRefusal",
 		"native-handler-source-coordinator/internal/runtime/pipeline/workflow_timer_replay_selected_store_external_test.go/TestWorkflowTimerCauseReplayReopenAndIsolationBothStores",
 		"native-run-setup-family144/internal/runtime/runforkexecution/constructed_agent_input_execution_test.go/proveSelectedConstructedAgentInput",
-		"native-run-setup-family144/internal/runtime/runforkexecution/execution_test.go/TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation":
+		"native-run-setup-family144/internal/runtime/runforkexecution/execution_test.go/TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation",
+		"native-run-setup-family144/internal/runtime/runforkexecution/runtime_outcome_test.go/seedSelectedRuntimeOutcomeSource":
 	default:
 		return recipe{}, fmt.Errorf("unlisted fixture comparator endpoint")
 	}
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "7558f1939d627ff145c5641f322bc51b51f32b6562805b452fe608638639d6d0" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "dc9462f1af05ec13e8fc9c03570c48082fe74b126bb6d0da8597dd4b2689ba62" {
 		return recipe{}, fmt.Errorf("fixture comparator evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
 	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil {
 		return recipe{}, err
 	}
-	if len(pins) != 42 {
+	if len(pins) != 43 {
 		return recipe{}, fmt.Errorf("fixture comparator receipt count changed")
 	}
 	var original recipe
@@ -128,7 +130,8 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			row.Function != "testServedJoinWriterCompletedHistoryRefusal" &&
 			row.Function != "TestWorkflowTimerCauseReplayReopenAndIsolationBothStores" &&
 			row.Function != "proveSelectedConstructedAgentInput" &&
-			row.Function != "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation" {
+			row.Function != "TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation" &&
+			row.Function != "seedSelectedRuntimeOutcomeSource" {
 			continue
 		}
 		matched++
@@ -174,13 +177,13 @@ func TestFixtureSetupCurrentComparators2617RejectUnlistedAndCrossedPairs(t *test
 			}
 		})
 	}
-	if matched != 14 {
-		t.Fatalf("fixture comparator endpoints=%d, want14", matched)
+	if matched != 15 {
+		t.Fatalf("fixture comparator endpoints=%d, want15", matched)
 	}
 }
 
 func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "7558f1939d627ff145c5641f322bc51b51f32b6562805b452fe608638639d6d0" {
+	if fmt.Sprintf("%x", sha256.Sum256(fixtureSetupSuccessorBytes2617)) != "dc9462f1af05ec13e8fc9c03570c48082fe74b126bb6d0da8597dd4b2689ba62" {
 		t.Fatal("append-only fixture setup evidence changed")
 	}
 	var pins []fixtureSetupSuccessor2617
@@ -191,7 +194,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 	if err := json.Unmarshal(recipeBytes, &rows); err != nil {
 		t.Fatal(err)
 	}
-	if len(pins) != 42 {
+	if len(pins) != 43 {
 		t.Fatal("fixture successor row count changed")
 	}
 	for index, pin := range pins {
@@ -260,7 +263,7 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 
 func TestIssue642FixtureSuccessorsPreservePriorPacketAndDelegatedOwner(t *testing.T) {
 	var pins []fixtureSetupSuccessor2617
-	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 42 {
+	if err := json.Unmarshal(fixtureSetupSuccessorBytes2617, &pins); err != nil || len(pins) != 43 {
 		t.Fatalf("exact #642 successor inventory changed: %v", err)
 	}
 	var prior bytes.Buffer
@@ -278,6 +281,10 @@ func TestIssue642FixtureSuccessorsPreservePriorPacketAndDelegatedOwner(t *testin
 	if err := encoder.Encode(rawPins[:39]); err != nil || fmt.Sprintf("%x", sha256.Sum256(prior.Bytes())) != "997a93df95f26aafdc82edb30cddc68378451e362cb7cc549aa45d6b8eb341d4" {
 		t.Fatal("an earlier #642 successor was rewritten")
 	}
+	prior.Reset()
+	if err := encoder.Encode(rawPins[:42]); err != nil || fmt.Sprintf("%x", sha256.Sum256(prior.Bytes())) != "7558f1939d627ff145c5641f322bc51b51f32b6562805b452fe608638639d6d0" {
+		t.Fatal("an authorized #642 completion successor was rewritten")
+	}
 	if pins[36].Original.File != "internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go" || pins[36].Original.Function != "selectedContractExecutionOwnerForCatalogTest" ||
 		pins[37].Original.File != "internal/serveapp/fork_retained_join_test.go" || pins[37].Original.Function != "testServedJoinWriterCompletedHistoryRefusal" ||
 		pins[38].Original.File != pins[36].Original.File || pins[38].Original.Function != "selectedContractExecutionOwnerForCatalogHarness" {
@@ -290,6 +297,31 @@ func TestIssue642FixtureSuccessorsPreservePriorPacketAndDelegatedOwner(t *testin
 	} {
 		if pins[39+i].Original.File != key[0] || pins[39+i].Original.Function != key[1] {
 			t.Fatal("unreviewed #642 completion successor key")
+		}
+	}
+	seed := pins[42]
+	if seed.Original.Family != "native-run-setup-family144" || seed.Original.File != "internal/runtime/runforkexecution/runtime_outcome_test.go" ||
+		seed.Original.Function != "seedSelectedRuntimeOutcomeSource" || seed.Original.Successor != "" {
+		t.Fatal("source-outcome seed successor has the wrong key or invented prior endpoint")
+	}
+	var recipes []recipe
+	if err := json.Unmarshal(recipeBytes, &recipes); err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range recipes {
+		if !sameReviewedRecipeKey(row, seed.Original) {
+			continue
+		}
+		for _, cut := range []string{"backend == \"postgres\"", "runtimefailures.ClassConnectorFailure", "RunID: runID, EventID: eventID, EntityID: runID, CreatedAt: at, Failure: failure", "commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)", "storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)", "if err := storetest.SeedSelectedSourceOutcome", "t.Fatal(err)"} {
+			mutant := strings.Replace(seed.Candidate, cut, "unreviewedOutcome", 1)
+			changed := row
+			changed.Successor = mutant
+			if mutant == seed.Candidate {
+				t.Fatalf("missing source-outcome guard cut: %s", cut)
+			}
+			if _, err := fixtureSetupCurrentEndpoint2617(changed, mutant); err == nil {
+				t.Fatalf("self-authorizing source-outcome pair accepted: %s", cut)
+			}
 		}
 	}
 	scan := selectedCausalObservationBody(t, pins[40].Original.File, "CommitSelectedForkEvent")

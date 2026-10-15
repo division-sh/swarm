@@ -879,7 +879,7 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	}
 	if base == debtProcessLeaseCollectorTo && trusted.Collector == base &&
 		current == debtNativeFixtureCollectorTo && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
-		return nil // #642/6190983544: twelve exact classifications, no baseline edit.
+		return nil // #642/6190983544 + 6191476293: exact fixture/custody policy, no baseline edit.
 	}
 	if base == debtForkProofCollectorFrom && current == debtForkProofCollectorTo &&
 		trusted.Collector == base && head.Collector == current &&
