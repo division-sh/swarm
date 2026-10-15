@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -760,6 +761,13 @@ func proveCompletionProviderHeadSettlement(t *testing.T, fixture completionSettl
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "provider-head:success")
 	handle := beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "success")
 	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "provider-head-current", "provider-head-next")
+	process, err := agentfixture.ProcessCapability(t, ctx, fixture.store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := startupownership.SeedAgentRecovery(ctx, process); err != nil {
+		t.Fatal(err)
+	}
 	settled, err := handle.SettleCompletion(ctx, settlement)
 	if err != nil {
 		t.Fatalf("settle completion with provider head: %v", err)
@@ -767,6 +775,7 @@ func proveCompletionProviderHeadSettlement(t *testing.T, fixture completionSettl
 	if !settled.Committed || settled.Disposition != runtimeeffects.CompletionSettlementCurrent || settled.Drained() {
 		t.Fatalf("current settlement result=%+v", settled)
 	}
+	assertAgentRecoveryReseedsAfterNativeMutation(t, ctx, fixture.store, process)
 	requireProviderHead(t, fixture.db, fixture.sqlite, fixture.sessionID, "provider-head-next")
 	requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateSettled)
 	requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateSettled, 1, 0)

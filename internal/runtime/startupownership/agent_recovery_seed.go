@@ -50,6 +50,10 @@ func SeedAgentRecovery(ctx context.Context, capability ProcessCapability) error 
 	if !ok {
 		return errors.New("retained process session has no agent recovery seed reader")
 	}
+	epoch, err := p.agentRecoveryWrites.seedEpoch(p)
+	if err != nil {
+		return err
+	}
 	probe := p.agentRecoverySeedProbe.Load()
 	read, err := reader.ReadAgentRecoverySeed(context.WithValue(ctx, agentRecoverySeedProbeContextKey{}, probe))
 	if err != nil {
@@ -73,15 +77,7 @@ func SeedAgentRecovery(ctx context.Context, capability ProcessCapability) error 
 		}
 		return errors.Join(err, ctx.Err(), p.requireLive())
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	// terminalize records its result under this same mutex before closing Done.
-	// Checking Done alone would allow publication in that intervening interval.
-	if p.terminal.Cause != "" || ctx.Err() != nil {
-		return errors.Join(errors.New("agent recovery seed lost its live process before publication"), ctx.Err())
-	}
-	p.agentRecoverySeed = seed
-	return nil
+	return p.agentRecoveryWrites.publishSeed(ctx, p, epoch, seed)
 }
 
 func (p *processCapability) prepareAgentRecoverySeed(read AgentRecoverySeedRead) (*agentRecoverySeed, error) {

@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 	"github.com/lib/pq"
 )
@@ -16,15 +17,25 @@ import (
 // persistence adapters may retain it; public selected-store facades expose
 // closed semantic operations instead.
 type Backend struct {
-	db                 *sql.DB
-	inspectionConfig   *pq.Config
-	inspectionDialer   *observationDialer
-	inspectionIOActive atomic.Bool
-	testTransactions   transactiontest.Slot
+	db                  *sql.DB
+	inspectionConfig    *pq.Config
+	inspectionDialer    *observationDialer
+	inspectionIOActive  atomic.Bool
+	testTransactions    transactiontest.Slot
+	agentRecoveryWrites runtimestartupownership.AgentRecoveryWriteObserver
 
 	capacityMu           sync.Mutex
 	baseOpenConnections  int
 	capacityReservations int
+}
+
+// AgentRecoveryWriteObserver is the original backend's passive cache observer.
+// It exists before acquisition, so binding cannot omit an already-active write.
+func (b *Backend) AgentRecoveryWriteObserver() *runtimestartupownership.AgentRecoveryWriteObserver {
+	if b == nil {
+		return nil
+	}
+	return &b.agentRecoveryWrites
 }
 
 func (b *Backend) InstallTransactionProbeForTest(options transactiontest.Options) (*transactiontest.Collector, func(), error) {
