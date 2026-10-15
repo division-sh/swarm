@@ -5,9 +5,6 @@ import (
 	"github.com/division-sh/swarm/internal/sessioncapture"
 )
 
-func decodeCapture(raw, digest []byte) (capturedEvent, error) {
-	return sessioncapture.DecodeCapture(raw, digest)
-}
 func withCaptureProvenance(event capturedEvent, request runtimeinbound.Request) (runtimeinbound.Request, error) {
 	return sessioncapture.WithCaptureProvenance(event, request)
 }
