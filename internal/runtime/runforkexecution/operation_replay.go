@@ -96,14 +96,8 @@ func (o SelectedContractExecutionOwner) observeSelectedForkOperation(ctx context
 	if !found {
 		return record, false, false, nil
 	}
-	if err := record.Validate(); err != nil {
+	if err := validateObservedSelectedForkOperation(record, request); err != nil {
 		return runfork.ForkOperationRecord{}, false, false, err
-	}
-	if record.Request.Actor != request.Actor || record.Request.IdempotencyKey != request.IdempotencyKey ||
-		record.Request.TransportHash != request.TransportHash || record.Request.SourceRunID != request.SourceRunID ||
-		record.Request.ForkEventID != request.ForkEventID || record.Request.AtStart != request.AtStart ||
-		(request.IdempotencyKey == "" && record.Request.OperationID != request.OperationID) {
-		return runfork.ForkOperationRecord{}, false, false, errors.New("selected operation observation differs from original request coordinates")
 	}
 	if record.Status != runfork.ForkOperationMaterialized {
 		return record, true, false, nil
@@ -141,6 +135,29 @@ func (o SelectedContractExecutionOwner) observeSelectedForkOperation(ctx context
 	}
 	entry.binding, entry.recoveryReserved = binding, true
 	return record, true, false, nil
+}
+
+func validateObservedSelectedForkOperation(record runfork.ForkOperationRecord, request runfork.ForkOperationRequest) error {
+	if err := record.Validate(); err != nil {
+		return err
+	}
+	if record.Request.Actor != request.Actor || record.Request.IdempotencyKey != request.IdempotencyKey ||
+		record.Request.TransportHash != request.TransportHash || record.Request.SourceRunID != request.SourceRunID ||
+		record.Request.ForkEventID != request.ForkEventID || record.Request.AtStart != request.AtStart ||
+		(request.IdempotencyKey == "" && record.Request.OperationID != request.OperationID) {
+		return errors.New("selected operation observation differs from original request coordinates")
+	}
+	if request.OperationID == record.Request.OperationID {
+		_, hash, err := request.Canonical()
+		if err != nil {
+			return err
+		}
+		if hash != record.SemanticHash || request.ResolvedPoint != nil &&
+			(!request.ResolvedPoint.SameIdentity(*record.Request.ResolvedPoint) || request.ResolvedPoint.Input != record.Request.ResolvedPoint.Input) {
+			return errors.New("selected operation observation differs from original invocation semantics")
+		}
+	}
+	return nil
 }
 
 func selectedForkRecordedOutcome(record runfork.ForkOperationRecord) SelectedContractExecutionResult {
