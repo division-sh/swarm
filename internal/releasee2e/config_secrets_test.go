@@ -57,7 +57,11 @@ func TestSingleDeploymentConfigReleaseSecretsReadback(t *testing.T) {
 				missing := run("check", "", "--json")
 				assertDeploymentSecretReadback(t, missing, "check", profile.key, profile.backend, false)
 				set := run("set", fileValue+"\n", profile.key, "--stdin")
-				if set.err != nil || !strings.Contains(set.output, "key="+profile.key) || !strings.Contains(set.output, "source=file") {
+				wantWriteMetadata := "source=file writable=yes shadowed=no present=yes"
+				if profile.backend != "claude_cli" {
+					wantWriteMetadata = "source=env writable=no shadowed=yes present=yes"
+				}
+				if set.err != nil || !strings.Contains(set.output, "key="+profile.key+" "+wantWriteMetadata) {
 					t.Fatalf("compiled stdin credential write: %v\n%s", set.err, set.output)
 				}
 				present := run("list", "", "--present", "--json")
