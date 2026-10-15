@@ -302,10 +302,11 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			for _, phase := range []string{"initial", "exact_replay"} {
 				t.Run(phase, func(t *testing.T) {
-					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type", "empty_import_missing_birth", "empty_import_missing_creation_clock", "empty_import_missing_update_clock", "empty_import_zero_creation_clock", "empty_import_zero_update_clock", "empty_import_reversed_clocks"} {
+					for _, invalid := range []string{"missing", "blank_flow", "blank_type", "duplicate_identical", "duplicate_flow", "duplicate_type", "empty_import_missing_birth", "empty_import_forged_kind", "empty_import_duplicate_birth", "empty_import_missing_creation_clock", "empty_import_missing_update_clock", "empty_import_omitted_creation_clock", "empty_import_omitted_update_clock", "empty_import_zero_creation_clock", "empty_import_zero_update_clock", "empty_import_reversed_clocks"} {
 						t.Run(invalid, func(t *testing.T) {
 							f := newSnapshotOwnershipFixture(t, backend, false, false)
 							emptyImport := strings.HasPrefix(invalid, "empty_import_")
+							duplicateImport := invalid == "empty_import_duplicate_birth"
 							metadataEntityID, wantEntities := f.entityID, 2
 							importedAt := f.state.CreatedAt.Add(time.Second)
 							if emptyImport {
@@ -391,10 +392,16 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								fact["entity_type"] = "foreign_type"
 							}
 							switch invalid {
+							case "empty_import_forged_kind":
+								fact["construction_kind"] = "constructed"
 							case "empty_import_missing_creation_clock":
 								fact["data_created_at"] = nil
 							case "empty_import_missing_update_clock":
 								fact["data_updated_at"] = nil
+							case "empty_import_omitted_creation_clock":
+								delete(fact, "data_created_at")
+							case "empty_import_omitted_update_clock":
+								delete(fact, "data_updated_at")
 							case "empty_import_zero_creation_clock":
 								fact["data_created_at"] = time.Time{}
 							case "empty_import_zero_update_clock":
@@ -407,7 +414,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								t.Fatal(err)
 							}
 							// Corrupt only historical evidence beneath a later valid live projection.
-							if strings.HasPrefix(invalid, "duplicate") {
+							if strings.HasPrefix(invalid, "duplicate") || duplicateImport {
 								key := uuid.NewString()
 								_, err = f.db.ExecContext(f.ctx, `INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) VALUES ($1,$2,'entity_metadata',$3,$4,TRUE)`, f.runID, revision, key, string(encoded))
 								if err == nil {
@@ -431,7 +438,7 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								err = runforkrevision.ValidateCompleteSQLite(f.ctx, tx, f.runID)
 							}
 							_ = tx.Rollback()
-							if emptyImport {
+							if emptyImport && !duplicateImport {
 								want := fmt.Sprintf("run %s has unsupported unrevisioned entity_metadata facts; recreate the store and retry", f.runID)
 								if err == nil || err.Error() != want {
 									t.Fatalf("forged import birth escaped native revision validation: %v", err)
@@ -446,7 +453,12 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 							}
 							if emptyImport {
 								report, err := inspector.InspectRunMutationDrift(f.ctx, f.runID)
-								if invalid == "empty_import_missing_birth" {
+								if duplicateImport {
+									want := mutationlog.DriftReport{RunID: f.runID, EntitiesChecked: wantEntities, Rows: []mutationlog.DriftRow{}}
+									if err != nil || !reflect.DeepEqual(report, want) {
+										t.Fatalf("historical-only duplicate changed the clean latest import: got=%+v want=%+v err=%v", report, want, err)
+									}
+								} else if invalid == "empty_import_missing_birth" || invalid == "empty_import_forged_kind" {
 									want := mutationlog.DriftReport{RunID: f.runID, EntitiesChecked: wantEntities, Rows: []mutationlog.DriftRow{{
 										Kind: "entity_presence", EntityID: metadataEntityID, FoldedPresent: false, StoredPresent: true, FoldedType: "entity", StoredType: "entity",
 									}}}
@@ -465,11 +477,20 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								t.Fatalf("invalid historical metadata admitted: %#v", got)
 							}
 							wantImportRefusal := fmt.Sprintf("run %s has unsupported unrevisioned entity_metadata facts; recreate the store and retry", f.runID)
-							if emptyImport && (planErr == nil || planErr.Error() != wantImportRefusal) {
+							if emptyImport && !duplicateImport && (planErr == nil || planErr.Error() != wantImportRefusal) {
 								t.Fatalf("empty import planning refused for the wrong reason: %v", planErr)
 							}
-							if _, err := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID}); err == nil || (emptyImport && err.Error() != wantImportRefusal) {
-								t.Fatalf("invalid historical metadata materialized or refused for the wrong reason: %v", err)
+							_, materializeErr := f.store.MaterializeRunFork(f.ctx, runfork.RunForkMaterializeRequest{SourceRunID: f.runID, At: f.eventID})
+							if materializeErr == nil || (emptyImport && !duplicateImport && materializeErr.Error() != wantImportRefusal) {
+								t.Fatalf("invalid historical metadata materialized or refused for the wrong reason: %v", materializeErr)
+							}
+							if duplicateImport {
+								for _, refusal := range []error{planErr, materializeErr} {
+									blocker, fact, ok := runForkReplayResumeBlockerFromError(refusal)
+									if !ok || blocker.Code != runfork.RunForkBlockerEntitySnapshotMetadataUnproven || fact != runfork.RunForkReplayResumeFactEntityStateSnapshot || !strings.Contains(refusal.Error(), fmt.Sprintf("duplicate snapshot metadata entity owner %q", metadataEntityID)) {
+										t.Fatalf("duplicate empty-import birth lost exact fixed-cut ownership refusal: %v", refusal)
+									}
+								}
 							}
 							if after, err := ReadSelectedForkApplicationStorageSnapshotForTest(f.ctx, f.store); err != nil || !reflect.DeepEqual(physicalBefore, after) {
 								t.Fatalf("invalid historical admission changed source, fork or ledger evidence: %v", err)
