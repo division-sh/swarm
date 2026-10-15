@@ -188,6 +188,12 @@ func debtStandingControlCopySources(t *testing.T, root, copy string) {
 		}
 		debtWriteModuleSource(t, copy, path, string(raw))
 	}
+	const composition = "tools/fixture-codemod/pipeline-observations/internal/selectedreadrole/testdata/catch_up_2542.json"
+	if raw, err := os.ReadFile(filepath.Join(root, composition)); err == nil {
+		debtWriteModuleSource(t, copy, composition, string(raw))
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
 	gitdir, err := debtGit(root, "rev-parse", "--absolute-git-dir")
 	if err != nil {
 		t.Fatal(err)
@@ -205,7 +211,12 @@ func TestPersistenceAuthorityDebtStandingControlFiveInversesAndHostileEvidence(t
 	for _, key := range debtStandingControlKeys {
 		proveDebtStandingControlInverse(t, root, pins, key)
 	}
-	for _, cut := range []string{"missing manifest", "changed manifest", "duplicate key", "changed sibling", "missing sibling", "missing history"} {
+	copy := t.TempDir()
+	debtStandingControlCopySources(t, root, copy)
+	if _, err := debtStandingControlLiveSources(copy); err != nil {
+		t.Fatal("unmodified standing-control evidence was rejected:", err)
+	}
+	for _, cut := range []string{"missing manifest", "changed manifest", "duplicate key", "changed sibling", "missing sibling", "missing history", "missing composition", "changed composition"} {
 		t.Run(cut, func(t *testing.T) {
 			copy := t.TempDir()
 			debtStandingControlCopySources(t, root, copy)
@@ -291,6 +302,17 @@ func mutateDebtStandingControlEvidence(t *testing.T, root string, pins []debtRun
 		}
 	case "missing history":
 		if err := os.Remove(filepath.Join(root, ".git")); err != nil {
+			t.Fatal(err)
+		}
+	case "missing composition", "changed composition":
+		const composition = "tools/fixture-codemod/pipeline-observations/internal/selectedreadrole/testdata/catch_up_2542.json"
+		raw, err := os.ReadFile(filepath.Join(root, composition))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cut == "changed composition" {
+			debtWriteModuleSource(t, root, composition, string(raw)+"\n")
+		} else if err := os.Remove(filepath.Join(root, composition)); err != nil {
 			t.Fatal(err)
 		}
 	}
