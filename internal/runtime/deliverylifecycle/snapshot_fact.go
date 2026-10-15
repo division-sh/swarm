@@ -15,7 +15,8 @@ import (
 
 // DecodeHistoricalSnapshot validates the canonical persisted delivery fact
 // captured by run-fork revisioning, including persisted connect-route evidence.
-// It excludes live worker claim tokens; historical readback is never a capability.
+// It excludes live worker claim generations/tokens, lease expiry and physical update/handoff stamps;
+// historical readback is never a capability or proof of current ownership.
 func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 	var fact struct {
 		DeliveryID                string                           `json:"delivery_id"`
@@ -35,16 +36,13 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		RetryCount                int                              `json:"retry_count"`
 		MaxRetries                int                              `json:"max_retries"`
 		NextEligibleAt            *time.Time                       `json:"next_eligible_at"`
-		ClaimVersion              int64                            `json:"claim_version"`
-		ClaimExpiresAt            *time.Time                       `json:"claim_expires_at"`
+		SettledClaimVersion       *int64                           `json:"settled_claim_version"`
 		ActiveSessionID           string                           `json:"active_session_id"`
 		ReasonCode                string                           `json:"reason_code"`
 		Failure                   *runtimefailures.Envelope        `json:"failure"`
 		StartedAt                 *time.Time                       `json:"started_at"`
-		ContinuationHandoffAt     *time.Time                       `json:"continuation_handoff_at"`
 		SettledAt                 *time.Time                       `json:"settled_at"`
 		CreatedAt                 time.Time                        `json:"created_at"`
-		UpdatedAt                 time.Time                        `json:"updated_at"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
@@ -109,25 +107,25 @@ func DecodeHistoricalSnapshot(raw []byte) (Snapshot, error) {
 		DeliveryID: fact.DeliveryID, EventID: fact.EventID, RunID: fact.RunID,
 		RouteIdentity: identity, Route: route, SubscriberClass: class, SubscriberID: route.Recipient.ID(),
 		Status: status, RetryCount: fact.RetryCount, MaxRetries: fact.MaxRetries,
-		FinalSelection: fact.FinalSelection,
-		ClaimVersion:   fact.ClaimVersion, ActiveSessionID: strings.TrimSpace(fact.ActiveSessionID),
-		ReasonCode: strings.TrimSpace(fact.ReasonCode), Failure: runtimefailures.CloneEnvelope(fact.Failure),
-		CreatedAt: fact.CreatedAt.UTC(), UpdatedAt: fact.UpdatedAt.UTC(),
+		FinalSelection:  fact.FinalSelection,
+		ActiveSessionID: strings.TrimSpace(fact.ActiveSessionID),
+		ReasonCode:      strings.TrimSpace(fact.ReasonCode), Failure: runtimefailures.CloneEnvelope(fact.Failure),
+		CreatedAt: fact.CreatedAt.UTC(),
 	}
 	if fact.NextEligibleAt != nil {
 		snapshot.NextEligibleAt = fact.NextEligibleAt.UTC()
 	}
-	if fact.ClaimExpiresAt != nil {
-		snapshot.ClaimExpiresAt = fact.ClaimExpiresAt.UTC()
-	}
 	if fact.StartedAt != nil {
 		snapshot.StartedAt = fact.StartedAt.UTC()
 	}
-	if fact.ContinuationHandoffAt != nil {
-		snapshot.ContinuationHandoffAt = fact.ContinuationHandoffAt.UTC()
-	}
 	if fact.SettledAt != nil {
 		snapshot.SettledAt = fact.SettledAt.UTC()
+	}
+	if (fact.SettledClaimVersion != nil) != !snapshot.SettledAt.IsZero() {
+		return Snapshot{}, fmt.Errorf("%w: historical claim generation requires exact settlement evidence", ErrConflict)
+	}
+	if fact.SettledClaimVersion != nil {
+		snapshot.ClaimVersion = *fact.SettledClaimVersion
 	}
 	if err := validateHistoricalSnapshot(snapshot); err != nil {
 		return Snapshot{}, err
@@ -144,7 +142,7 @@ func validateHistoricalSnapshot(snapshot Snapshot) error {
 	}
 	if snapshot.SubscriberID == "" || snapshot.MaxRetries != snapshot.SubscriberClass.MaxRetries() ||
 		snapshot.RetryCount < 0 || snapshot.RetryCount > snapshot.MaxRetries ||
-		snapshot.CreatedAt.IsZero() || snapshot.UpdatedAt.IsZero() || snapshot.ClaimVersion < 0 {
+		snapshot.CreatedAt.IsZero() || snapshot.ClaimVersion < 0 {
 		return fmt.Errorf("%w: historical delivery snapshot violates structural policy", ErrConflict)
 	}
 	return validateHistoricalLifecycleShape(snapshot)
@@ -153,19 +151,19 @@ func validateHistoricalSnapshot(snapshot Snapshot) error {
 func validateHistoricalLifecycleShape(snapshot Snapshot) error {
 	switch snapshot.Status {
 	case StatusPending:
-		if snapshot.RetryCount != 0 || snapshot.NextEligibleAt.IsZero() || !snapshot.SettledAt.IsZero() || !snapshot.ClaimExpiresAt.IsZero() {
+		if snapshot.RetryCount != 0 || snapshot.NextEligibleAt.IsZero() || !snapshot.SettledAt.IsZero() {
 			return fmt.Errorf("%w: historical pending delivery has conflicting lifecycle facts", ErrConflict)
 		}
 	case StatusInProgress:
-		if snapshot.ClaimVersion == 0 || snapshot.ClaimExpiresAt.IsZero() || snapshot.StartedAt.IsZero() || !snapshot.NextEligibleAt.IsZero() || !snapshot.SettledAt.IsZero() {
+		if snapshot.StartedAt.IsZero() || !snapshot.NextEligibleAt.IsZero() || !snapshot.SettledAt.IsZero() {
 			return fmt.Errorf("%w: historical in-progress delivery has conflicting lifecycle facts", ErrConflict)
 		}
 	case StatusFailed:
-		if snapshot.RetryCount == 0 || snapshot.NextEligibleAt.IsZero() || !snapshot.ClaimExpiresAt.IsZero() || !snapshot.SettledAt.IsZero() {
+		if snapshot.RetryCount == 0 || snapshot.NextEligibleAt.IsZero() || !snapshot.SettledAt.IsZero() {
 			return fmt.Errorf("%w: historical failed delivery has conflicting lifecycle facts", ErrConflict)
 		}
 	case StatusDelivered, StatusDeadLetter, StatusCanceled:
-		if snapshot.SettledAt.IsZero() || !snapshot.NextEligibleAt.IsZero() || !snapshot.ClaimExpiresAt.IsZero() {
+		if snapshot.SettledAt.IsZero() || !snapshot.NextEligibleAt.IsZero() {
 			return fmt.Errorf("%w: historical terminal delivery has conflicting lifecycle facts", ErrConflict)
 		}
 	default:

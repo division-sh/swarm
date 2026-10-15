@@ -13,6 +13,20 @@ import (
 
 type publicationSuccessorEdit struct{ before, after string }
 
+// Q2's diagnostic exclusion is settled in review 6183283144. This setup
+// amendment reverses before the older publication edits, preserving their pins.
+const rootForkPostCutBusinessSetup = `			if gate {
+				// Branch isolation needs later business history, not runtime logs.
+				var selected interface {
+					PipelineObligations() pipelineobligation.Store
+				} = rt.Postgres
+				if rt.SQLite != nil {
+					selected = rt.SQLite
+				}
+				advanceLifecycleForkSourceHistory(t, servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash), selected, seed.RunID)
+			}
+`
+
 var exactOriginSuccessors = []struct {
 	name, predecessor string
 	priorSuccessor    bool
@@ -94,6 +108,7 @@ var exactOriginSuccessors = []struct {
 		{"\t\t\t\tif _, err := rt.DB.Exec(`UPDATE run_fork_fact_revisions SET fact=$1 WHERE run_id=$2 AND family='events' AND fact_key=$3 AND revision=$4`, string(changed), seed.RunID, point.EventID, revision); err != nil {\n\t\t\t\t\tt.Fatal(err)\n\t\t\t\t}\n\t\t\t\tbefore := snapshotForkReceiverApplication(t, rt)\n\t\t\t\tdirect, ok := family.Availability().(forkHistoricalSelectedStore)\n\t\t\t\tif !ok {\n", "\t\t\t\tif _, err := rt.DB.Exec(`UPDATE run_fork_fact_revisions SET fact=$1 WHERE run_id=$2 AND family='events' AND fact_key=$3 AND revision=$4`, string(changed), seed.RunID, point.EventID, revision); err != nil {\n\t\t\t\t\tt.Fatal(err)\n\t\t\t\t}\n\t\t\t\tif err := waitExactOriginPublications(t.Context(), publication, seed.EventID, point.EventID); err != nil {\n\t\t\t\t\tt.Fatal(err)\n\t\t\t\t}\n\t\t\t\tbefore := snapshotForkReceiverApplication(t, rt)\n\t\t\t\tdirect, ok := family.Availability().(forkHistoricalSelectedStore)\n\t\t\t\tif !ok {\n"},
 	}},
 	{"runLifecycleRootForkPolicy", "78cc599416adac0be060849d04d71b6dc9c88b70ce48560a489d130a57ae5d67", true, []publicationSuccessorEdit{
+		{"\t\t\tbefore := lifecycleStoredSnapshot(t, rt, seed.RunID)\n", rootForkPostCutBusinessSetup + "\t\t\tbefore := lifecycleStoredSnapshot(t, rt, seed.RunID)\n"},
 		{"\tfor _, backend := range servedparity.RequiredBackends {\n\t\tt.Run(string(backend), func(t *testing.T) {\n\t\t\troot := canonicalrouting.CopyLifecycleForkSource(t, gate)\n\t\t\trt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)\n\t\t\tseed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{\"event_name\": \"work.requested\", \"bundle_hash\": rt.BundleHash, \"payload\": map[string]any{\"seed\": true}, \"idempotency_key\": \"fork-seed\"})\n\t\t\tstage := \"waiting\"\n\t\t\tif gate {\n\t\t\t\tstage = \"review\"\n", "\tfor _, backend := range servedparity.RequiredBackends {\n\t\tt.Run(string(backend), func(t *testing.T) {\n\t\t\troot := canonicalrouting.CopyLifecycleForkSource(t, gate)\n\t\t\tpublication := newExactOriginPublicationProbe(t)\n\t\t\trt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)\n\t\t\tseed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{\"event_name\": \"work.requested\", \"bundle_hash\": rt.BundleHash, \"payload\": map[string]any{\"seed\": true}, \"idempotency_key\": \"fork-seed\"})\n\t\t\torigins := []string{seed.EventID}\n\t\t\tstage := \"waiting\"\n\t\t\tif gate {\n\t\t\t\tstage = \"review\"\n"},
 		{"\t\t\tif gate {\n\t\t\t\tparentCard = lifecycleGateDecisionParams(t, rt, seed.RunID, \"approve\")\n\t\t\t} else {\n\t\t\t\trequireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{\"event_name\": \"loop.start\", \"run_id\": seed.RunID, \"source_event_id\": seed.EventID, \"payload\": map[string]any{\"seed\": true}, \"idempotency_key\": \"fork-loop-start\"})\n\t\t\t\tstage = \"drafting\"\n\t\t\t\trequireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, stage)\n\t\t\t}\n", "\t\t\tif gate {\n\t\t\t\tparentCard = lifecycleGateDecisionParams(t, rt, seed.RunID, \"approve\")\n\t\t\t} else {\n\t\t\t\tloopStart := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{\"event_name\": \"loop.start\", \"run_id\": seed.RunID, \"source_event_id\": seed.EventID, \"payload\": map[string]any{\"seed\": true}, \"idempotency_key\": \"fork-loop-start\"})\n\t\t\t\torigins = append(origins, loopStart.EventID)\n\t\t\t\tstage = \"drafting\"\n\t\t\t\trequireServedEventPublishEntityState(t, rt.DB, rt.Backend, seed.RunID, entityID, stage)\n\t\t\t}\n"},
 		{"\t\t\t}\n\t\t\tfrontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{\"event_name\": frontierEvent, \"run_id\": seed.RunID, \"source_event_id\": seed.EventID, \"payload\": frontierPayload, \"idempotency_key\": \"fork-frontier\"})\n\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, frontier.EventID)\n\t\t\tbefore := lifecycleStoredSnapshot(t, rt, seed.RunID)\n\t\t\tparams := map[string]any{\"source_run_id\": seed.RunID, \"fork_event_id\": frontier.EventID, \"allow_source_freeze\": true, \"idempotency_key\": \"lifecycle-fork\"}\n\t\t\tvar fork, duplicate apiv1.RunForkExecutionResult\n", "\t\t\t}\n\t\t\tfrontier := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{\"event_name\": frontierEvent, \"run_id\": seed.RunID, \"source_event_id\": seed.EventID, \"payload\": frontierPayload, \"idempotency_key\": \"fork-frontier\"})\n\t\t\twaitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, frontier.EventID)\n\t\t\torigins = append(origins, frontier.EventID)\n\t\t\tif err := waitExactOriginPublications(t.Context(), publication, origins...); err != nil {\n\t\t\t\tt.Fatal(err)\n\t\t\t}\n\t\t\tbefore := lifecycleStoredSnapshot(t, rt, seed.RunID)\n\t\t\tparams := map[string]any{\"source_run_id\": seed.RunID, \"fork_event_id\": frontier.EventID, \"allow_source_freeze\": true, \"idempotency_key\": \"lifecycle-fork\"}\n\t\t\tvar fork, duplicate apiv1.RunForkExecutionResult\n"},
@@ -133,7 +148,7 @@ func TestExactOriginPublicationSuccessorsPreserveReviewedCuts(t *testing.T) {
 			}
 			actual := selectedCausalObservationBody(t, selected.File, selected.Function)
 			currentRow := *selected
-			prior, actual := requireCatchUp2542MasterPair(t, currentRow, actual)
+			prior, actual := requireCatchUp2672MasterPair(t, currentRow, actual)
 			selected = &prior
 			got, err := canonicalFunction(actual)
 			want, wantErr := canonicalFunction(selected.Successor)
@@ -190,19 +205,35 @@ func TestExactOriginPublicationSuccessorsPreserveReviewedCuts(t *testing.T) {
 					t.Fatal("ambiguous or missing finite publication edit")
 				}
 				restored = strings.Replace(restored, change.after, change.before, 1)
+				mutationSource := actual
+				if target.name == "runLifecycleRootForkPolicy" && index > 0 {
+					// The setup overlaps the older snapshot edit. Remove it only
+					// while deriving that edit's unchanged negative controls.
+					mutationSource = strings.Replace(actual, rootForkPostCutBusinessSetup, "", 1)
+				}
 				mutants := map[string]string{
-					"missing":        strings.Replace(actual, change.after, change.before, 1),
-					"duplicate":      strings.Replace(actual, change.after, change.after+change.after, 1),
-					"wrong_identity": strings.Replace(actual, change.after, strings.ReplaceAll(change.after, ".EventID", ".RunID"), 1),
+					"missing":        strings.Replace(mutationSource, change.after, change.before, 1),
+					"duplicate":      strings.Replace(mutationSource, change.after, change.after+change.after, 1),
+					"wrong_identity": strings.Replace(mutationSource, change.after, strings.ReplaceAll(change.after, ".EventID", ".RunID"), 1),
 				}
 				if strings.Contains(change.after, "origins...") {
-					mutants["wrong_origin_set"] = strings.Replace(actual, change.after, strings.ReplaceAll(change.after, "origins...", "[]string{\"foreign\"}..."), 1)
+					mutants["wrong_origin_set"] = strings.Replace(mutationSource, change.after, strings.ReplaceAll(change.after, "origins...", "[]string{\"foreign\"}..."), 1)
 				}
 				for name, mutant := range mutants {
+					label := fmt.Sprintf("edit_%d/%s", index, name)
+					if target.name == "runLifecycleRootForkPolicy" {
+						if index == 0 {
+							label = "source_history/" + name
+						} else {
+							const snapshot = "\t\t\tbefore := lifecycleStoredSnapshot(t, rt, seed.RunID)\n"
+							mutant = strings.Replace(mutant, snapshot, rootForkPostCutBusinessSetup+snapshot, 1)
+							label = fmt.Sprintf("edit_%d/%s", index-1, name)
+						}
+					}
 					if mutant == actual {
 						continue
 					}
-					t.Run(fmt.Sprintf("edit_%d/%s", index, name), func(t *testing.T) {
+					t.Run(label, func(t *testing.T) {
 						guard := *selected
 						guard.Before, guard.After, guard.Successor = actual, actual, ""
 						if _, changed, err := rewriteFunction(guard.File, []byte("package probe\n"+mutant), guard); err == nil || changed {
@@ -316,7 +347,7 @@ func exactOriginOrderingMutants(t *testing.T, source string) map[string]string {
 func reviewedMilestoneRow(t *testing.T, row recipe) recipe {
 	t.Helper()
 	actual := selectedCausalObservationBody(t, row.File, row.Function)
-	row, _, err := catchUp2542PriorMasterPair(row, actual)
+	row, _, err := catchUp2672MasterPair(row, actual)
 	if err != nil {
 		t.Fatal(err)
 	}

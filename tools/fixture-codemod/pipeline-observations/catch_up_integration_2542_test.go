@@ -133,7 +133,7 @@ func TestCatchUp2542RecipeCompositionPreservesBothSignedInventories(t *testing.T
 		t.Fatal(err)
 	}
 	if packet.Base != "26701e7b187579220dffe72e01debd2e89cd2675" || packet.Master != "19dc188f6d57985a3360a619ea57b890b3c148dd" || packet.Lane != "dec6f1a009400d230b0bb92c83c0997ae35b2938" ||
-		packet.Authorization != "https://github.com/division-sh/swarm/issues/2542#issuecomment-6194296317" || len(packet.Rows) != 405 || len(packet.Files) != 229 {
+		packet.Authorization != "https://github.com/division-sh/swarm/issues/2542#issuecomment-6194296317" || len(packet.Rows) != 407 || len(packet.Files) != 229 {
 		t.Fatal("finite integration boundary changed")
 	}
 	var current []recipe
@@ -201,7 +201,8 @@ func assertCatchUp2542RowMap(t *testing.T, packet selectedreadrole.CatchUp2542Pa
 	}
 	if !reflect.DeepEqual(counts, map[string]int{
 		"double-changed": 3, "double-changed/composed-source": 94, "master-retired-lane-successor": 4,
-		"lane-only": 112, "master-only": 110, "lane-added/composed-source": 78, "lane-added/exact-retired-helper": 4,
+		"lane-only": 110, "lane-only/composed-source": 2, "master-only": 110,
+		"lane-added/composed-source": 79, "lane-added/exact-retired-helper": 4, "identical/composed-source": 1,
 	}) {
 		t.Fatalf("finite intersection/retirement classes changed: %v", counts)
 	}

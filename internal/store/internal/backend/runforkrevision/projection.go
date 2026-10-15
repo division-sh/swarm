@@ -385,8 +385,8 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 				d.subscriber_type, d.subscriber_id, d.agent_name_owner, d.agent_name_source, d.agent_route_presence,
 				d.agent_flow_scope_key, CAST(d.agent_flow_instance_id AS TEXT), d.agent_flow_instance_path,
 				d.delivery_target_route, d.delivery_context, d.delivery_payload_projection, d.connect_execution_claim, d.receiver_materialization_plan, d.status,
-				d.retry_count, d.max_retries, d.next_eligible_at, d.claim_version, current_attempt.lease_expires_at,
-				d.reason_code, d.failure, CAST(current_attempt.active_session_id AS TEXT), d.started_at, d.continuation_handoff_at, d.settled_at, d.created_at, d.updated_at,
+				d.retry_count, d.max_retries, d.next_eligible_at, CASE WHEN d.settled_at IS NOT NULL THEN d.claim_version END,
+				d.reason_code, d.failure, CAST(current_attempt.active_session_id AS TEXT), d.started_at, d.settled_at, d.created_at,
 				CAST(s.delivery_id AS TEXT), s.selection_context, s.disposition, s.flow_path, s.declaration_family, s.semantic_path, s.display_label`,
 			source: `event_deliveries d
 			LEFT JOIN event_delivery_attempts current_attempt ON current_attempt.delivery_id = d.delivery_id AND current_attempt.claim_version = d.current_attempt_version AND current_attempt.open_marker = TRUE
@@ -394,9 +394,12 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 			columns: typedColumns(map[string]valueKind{
 				"delivery_target_ownership": valueJSON, "delivery_context": valueJSON,
 				"delivery_payload_projection": valueJSON, "connect_execution_claim": valueJSON, "receiver_materialization_plan": valueJSON, "failure": valueJSON,
-				"next_eligible_at": valueTime, "claim_expires_at": valueTime, "started_at": valueTime, "continuation_handoff_at": valueTime, "settled_at": valueTime, "created_at": valueTime, "updated_at": valueTime,
-			}, "delivery_id", "event_id", "run_id", "route_identity", "subscriber_type", "subscriber_id", "agent_name_owner", "agent_name_source", "agent_route_presence", "agent_flow_scope_key", "agent_flow_instance_id", "agent_flow_instance_path", "delivery_target_ownership", "delivery_context", "delivery_payload_projection", "connect_execution_claim", "receiver_materialization_plan", "status", "retry_count", "max_retries", "next_eligible_at", "claim_version", "claim_expires_at", "reason_code", "failure", "active_session_id", "started_at", "continuation_handoff_at", "settled_at", "created_at", "updated_at", "selection_delivery_id", "selection_context", "selection_disposition", "selection_flow_path", "selection_declaration_family", "selection_semantic_path", "selection_display_label"),
+				"next_eligible_at": valueTime, "started_at": valueTime, "settled_at": valueTime, "created_at": valueTime,
+			}, "delivery_id", "event_id", "run_id", "route_identity", "subscriber_type", "subscriber_id", "agent_name_owner", "agent_name_source", "agent_route_presence", "agent_flow_scope_key", "agent_flow_instance_id", "agent_flow_instance_path", "delivery_target_ownership", "delivery_context", "delivery_payload_projection", "connect_execution_claim", "receiver_materialization_plan", "status", "retry_count", "max_retries", "next_eligible_at", "settled_claim_version", "reason_code", "failure", "active_session_id", "started_at", "settled_at", "created_at", "selection_delivery_id", "selection_context", "selection_disposition", "selection_flow_path", "selection_declaration_family", "selection_semantic_path", "selection_display_label"),
 			build: func(values map[string]any) map[string]any {
+				if values["settled_claim_version"] == nil {
+					delete(values, "settled_claim_version")
+				}
 				selection := map[string]any{"kind": "absent"}
 				if values["selection_delivery_id"] != nil {
 					fact := map[string]any{}
@@ -428,7 +431,7 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 	case FamilyCommittedReplayScopes:
 		spec = projectionSpec{
 			query:  `SELECT CAST(s.event_id AS TEXT), CAST(s.run_id AS TEXT), s.scope, s.created_at, s.updated_at`,
-			source: "committed_replay_scopes s", runAlias: "s",
+			source: "committed_replay_scopes s JOIN events e ON e.event_id = s.event_id", runAlias: "s",
 			columns: typedColumns(map[string]valueKind{"created_at": valueTime, "updated_at": valueTime}, "event_id", "run_id", "scope", "created_at", "updated_at"),
 		}
 	case FamilyEventReceipts:
@@ -552,6 +555,9 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 		}
 		if spec.source != "" {
 			spec.query += " FROM " + spec.source + " WHERE " + spec.runAlias + ".run_id = $1"
+		}
+		if family == FamilyEvents || family == FamilyCommittedReplayScopes || family == FamilyEventReceipts {
+			spec.query += " AND e.event_name <> '" + excludedEventName + "'"
 		}
 		spec.parts = []projectionPart{{query: spec.query, alias: alias}}
 	}

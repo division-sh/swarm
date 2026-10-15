@@ -51,10 +51,8 @@ func requireReceiverInitializationHeldOrigin(t *testing.T, reader receiverProofS
 	after := requireReceiverApplicationSnapshot(t, reader)
 	requireReceiverOriginDiagnosticRunCounter(t, before, after, seed.RunID)
 	for table, rows := range before {
-		// The native diagnostic append also records its R1 revision evidence
-		// in the same transaction; these are origin writes, not later actors.
 		switch table {
-		case "runs", "events", "run_fork_revision_heads", "run_fork_revisions", "run_fork_fact_revisions":
+		case "runs", "events":
 			t.Logf("origin diagnostic native table %s rows %d -> %d", table, len(rows), len(after[table]))
 			continue
 		}
@@ -65,14 +63,6 @@ func requireReceiverInitializationHeldOrigin(t *testing.T, reader receiverProofS
 	if len(after["events"]) != len(before["events"])+1 {
 		t.Fatalf("origin diagnostic appended %d rows, want exactly one", len(after["events"])-len(before["events"]))
 	}
-	for _, table := range []string{"run_fork_revisions", "run_fork_fact_revisions"} {
-		if len(after[table]) != len(before[table])+1 {
-			t.Fatalf("origin diagnostic %s appended %d rows, want one", table, len(after[table])-len(before[table]))
-		}
-	}
-	if len(after["run_fork_revision_heads"]) != len(before["run_fork_revision_heads"]) {
-		t.Fatal("origin diagnostic changed the revision-head owner census")
-	}
 	retained := make(map[string]bool, len(after["events"]))
 	for _, row := range after["events"] {
 		retained[row] = true
@@ -82,7 +72,7 @@ func requireReceiverInitializationHeldOrigin(t *testing.T, reader receiverProofS
 			t.Fatal("origin diagnostic changed a preexisting event")
 		}
 	}
-	t.Logf("HELD ORIGIN: earlier delivery/configuration gates passed, exact seed %s log/completion remained absent, release appended exactly one diagnostic with its native revision evidence; every unrelated application table unchanged", seed.EventID)
+	t.Logf("HELD ORIGIN: earlier delivery/configuration gates passed, exact seed %s log/completion remained absent, release appended exactly one physical diagnostic and event-counter delta; all fork history and unrelated application tables unchanged", seed.EventID)
 }
 
 func requireReceiverOriginDiagnosticRunCounter(t *testing.T, before, after map[string][]string, runID string) {

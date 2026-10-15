@@ -225,10 +225,7 @@ func TestNativeReceiverForkMilestoneSuccessorPreservesReviewedCuts(t *testing.T)
 	}
 	currentRow := *selected
 	actual := selectedCausalObservationBody(t, selected.File, selected.Function)
-	prior, actual, err := catchUp2542PriorMasterPair(*selected, actual)
-	if err != nil {
-		t.Fatal(err)
-	}
+	prior, actual := requireCatchUp2672MasterPair(t, *selected, actual)
 	selected = &prior
 	if err := validateReceiverForkMilestoneSuccessor(*selected, actual); err != nil {
 		t.Fatal(err)
@@ -274,6 +271,10 @@ func TestNativeReceiverForkMilestoneSuccessorPreservesReviewedCuts(t *testing.T)
 }
 
 func validateReceiverForkMilestoneSuccessor(row recipe, actual string) error {
+	row, actual, err := receiverForkBusinessPredecessor(row, actual)
+	if err != nil {
+		return err
+	}
 	if fmt.Sprintf("%x", sha256.Sum256([]byte(row.After))) != "fecc19b2cd332c799fb77740e3e4e9c0c857810022536660b0f188d1b87791e6" {
 		return fmt.Errorf("receiver predecessor changed")
 	}

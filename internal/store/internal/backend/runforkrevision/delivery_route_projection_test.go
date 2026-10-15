@@ -58,4 +58,50 @@ func TestHistoricalDeliveryProjectionCoversEveryRouteField(t *testing.T) {
 	if strings.Contains(spec.query, "claim_token") {
 		t.Error("historical projection must not copy a live worker claim token")
 	}
+	if strings.Contains(spec.query, "d.updated_at") {
+		t.Error("historical projection must not read the physical delivery update clock")
+	}
+	if _, exists := projected["updated_at"]; exists {
+		t.Error("historical delivery fact contains the physical update clock")
+	}
+	if _, exists := projected["claim_version"]; exists {
+		t.Error("historical delivery fact contains an unconditional live claim generation")
+	}
+	if !strings.Contains(spec.query, "CASE WHEN d.settled_at IS NOT NULL THEN d.claim_version END") {
+		t.Error("historical projection must read claim generation only as exact settlement evidence")
+	}
+}
+
+func TestHistoricalDeliveryProjectionExcludesLeaseExpiry(t *testing.T) {
+	spec, ok := canonicalProjectionSpec(FamilyEventDeliveries)
+	if !ok {
+		t.Fatal("missing delivery projection")
+	}
+	if strings.Contains(spec.query, "lease_expires_at") {
+		t.Error("historical delivery projection reads the live lease expiry")
+	}
+	values := make(map[string]any, len(spec.columns))
+	for _, column := range spec.columns {
+		values[column.name] = nil
+	}
+	if _, exists := spec.build(values)["claim_expires_at"]; exists {
+		t.Error("historical delivery fact contains operational lease expiry")
+	}
+}
+
+func TestHistoricalDeliveryProjectionExcludesPhysicalHandoff(t *testing.T) {
+	spec, ok := canonicalProjectionSpec(FamilyEventDeliveries)
+	if !ok {
+		t.Fatal("missing delivery projection")
+	}
+	if strings.Contains(spec.query, "continuation_handoff_at") {
+		t.Error("historical delivery projection reads the physical handoff stamp")
+	}
+	values := make(map[string]any, len(spec.columns))
+	for _, column := range spec.columns {
+		values[column.name] = nil
+	}
+	if _, exists := spec.build(values)["continuation_handoff_at"]; exists {
+		t.Error("historical delivery fact contains an operational handoff stamp")
+	}
 }

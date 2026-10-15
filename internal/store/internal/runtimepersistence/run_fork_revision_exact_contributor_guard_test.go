@@ -44,7 +44,7 @@ func revisionProjectionContributorCensus() map[string][]string {
 		"FamilyEntityMutations":         {"entity_mutations"},
 		"FamilyEntityMetadata":          {"entity_state", "flow_instances", "workflow_instance_initial_materializations"},
 		"FamilyEventDeliveries":         {"event_deliveries", "event_delivery_attempts", "event_delivery_handler_rule_selections"},
-		"FamilyCommittedReplayScopes":   {"committed_replay_scopes"},
+		"FamilyCommittedReplayScopes":   {"committed_replay_scopes", "events"},
 		"FamilyEventReceipts":           {"event_receipts", "events"},
 		"FamilyDeadLetters":             {"dead_letters", "event_delivery_attempts", "events"},
 		"FamilyTimers":                  {"timers"},
@@ -137,6 +137,13 @@ func TestRunForkRevisionExactWriterContributions(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := validateRetiredEntityDiffWriters(string(retiredBody)); err != nil {
+		t.Fatal(err)
+	}
+	deliveryBody, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend/delivery/adapter.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateDeliveryOperationalCaptureRetirement(string(deliveryBody)); err != nil {
 		t.Fatal(err)
 	}
 	seen := map[string]bool{}
@@ -317,22 +324,22 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 		{"pipelinepersistence/owner_operations.go", "declareEventRevisionFact", []string{"attempt.AddFact(runID.String, family, key)"}},
 		{"delivery/adapter.go", "Adapter.insertExactObligation", []string{"a.persistExactObligation(ctx, tx, obligation)", "attempt.AddFact(obligation.RunID(), privaterunforkrevision.FamilyEventDeliveries, obligation.DeliveryID())"}},
 		{"delivery/adapter.go", "Adapter.persistExactObligation", []string{"a.loadByEventAndRoute(ctx, tx, obligation.EventID(), obligation.RouteIdentity(), true)", "events.SameDeliveryRouteIdentity(record.Route, obligation.Route())", "record.Authority.Equal(obligation.Authority())"}},
-		{"delivery/adapter.go", "Adapter.claimLocked", []string{"attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)"}},
+		{"delivery/adapter.go", "Adapter.claimLocked", []string{"a.insertAttempt(ctx, tx, record.DeliveryID, version, token, now, expiresAt)", "a.expireAttempt(ctx, tx, record, now)", "a.recordTransition(ctx, attempt, claimed, \"in_progress\", nil, now)", "declareRetainedDeliveryLifecycle(attempt, record.Snapshot, claimed.Snapshot)"}},
 		{"delivery/adapter.go", "Adapter.BindAgentSession", []string{"a.bindAgentSessionTx(ctx, tx, attempt, claim, sessionID)"}},
-		{"delivery/adapter.go", "Adapter.bindAgentSessionTx", []string{"attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)"}},
-		{"delivery/adapter.go", "Adapter.RenewClaim", []string{"a.renewClaimTx(ctx, tx, attempt, claim, leaseTTL)"}},
-		{"delivery/adapter.go", "Adapter.renewClaimTx", []string{"a.renewClaimWrite(ctx, tx, attempt, claim, now, leaseTTL)"}},
-		{"delivery/adapter.go", "Adapter.renewAcquiredClaim", []string{"a.renewClaimWrite(ctx, tx, attempt, claim, now, leaseTTL)"}},
-		{"delivery/adapter.go", "Adapter.renewClaimWrite", []string{"attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())"}},
-		{"delivery/adapter.go", "Adapter.prepareProviderOriginRecovery", []string{"attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())"}},
+		{"delivery/adapter.go", "declareRetainedDeliveryLifecycle", []string{"attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)"}},
+		{"delivery/adapter.go", "Adapter.bindAgentSessionTx", []string{"a.requireCurrentClaim(ctx, tx, claim)", "record.Route.AgentIdentity.StorageFields()", "declareRetainedDeliveryLifecycle(attempt, record.Snapshot, updated.Snapshot)"}},
+		{"delivery/adapter.go", "Adapter.RenewClaim", []string{"a.renewClaimTx(ctx, tx, claim, leaseTTL)"}},
+		{"delivery/adapter.go", "Adapter.renewClaimTx", []string{"a.requireCurrentClaim(ctx, tx, claim)", "a.renewClaimWrite(ctx, tx, claim, now, leaseTTL)"}},
+		{"delivery/adapter.go", "Adapter.renewAcquiredClaim", []string{"claim.Validate()", "snapshot.ClaimExpiresAt.After(now)", "a.renewClaimWrite(ctx, tx, claim, now, leaseTTL)"}},
+		{"delivery/adapter.go", "Adapter.renewClaimWrite", []string{"claim.DeliveryID()", "claim.Version()", "claim.PersistenceToken()"}},
+		{"delivery/adapter.go", "Adapter.prepareProviderOriginRecovery", []string{"a.providerOriginRecoveryDisposition(ctx, tx, claim)", "claim.DeliveryID()", "claim.Version()", "claim.PersistenceToken()"}},
 		{"delivery/adapter.go", "Adapter.settle", []string{"a.requireCurrentClaim(ctx, tx, claim)", "a.settleExactClaim(ctx, tx, attempt, claim, settlement, cancellation, record, now)"}},
 		{"delivery/adapter.go", "Adapter.settleExactClaim", []string{"attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)"}},
-		{"delivery/adapter.go", "Adapter.CommitPipelineHandoff", []string{"a.commitPipelineHandoffTx(ctx, tx, attempt, eventID)"}},
-		{"delivery/adapter.go", "Adapter.commitPipelineHandoffTx", []string{"a.persistPipelineHandoffTx(ctx, tx, eventID)", "attempt.AddFact(fact.runID, privaterunforkrevision.FamilyEventDeliveries, fact.deliveryID)"}},
+		{"delivery/adapter.go", "Adapter.CommitPipelineHandoff", []string{"a.persistPipelineHandoffTx(ctx, tx, eventID)"}},
 		{"delivery/adapter.go", "Adapter.terminalizeDeliveries", []string{"attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, id)"}},
 		{"delivery/adapter.go", "Adapter.persistHandlerRuleSelection", []string{"attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)"}},
-		{"delivery/adapter.go", "Adapter.insertAttempt", []string{"attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)"}},
-		{"delivery/adapter.go", "Adapter.expireAttempt", []string{"attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)"}},
+		{"delivery/adapter.go", "Adapter.insertAttempt", []string{"tx.ExecContext(ctx, query, args...)"}},
+		{"delivery/adapter.go", "Adapter.expireAttempt", []string{"tx.ExecContext(ctx, query, args...)"}},
 		{"delivery/adapter.go", "Adapter.completeAttempt", []string{"attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())", "declareOutcomeDeadLetterEffects(ctx, tx, attempt, claim.DeliveryID(), claim.Version())"}},
 		{"delivery/adapter.go", "Adapter.closeAttemptForTerminalization", []string{"attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())"}},
 		{"delivery/adapter.go", "Adapter.insertTerminalizedAttempt", []string{"attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)", "declareOutcomeDeadLetterEffects(ctx, tx, attempt, deliveryID, version)"}},
@@ -588,6 +595,60 @@ func validateRevisionEnumeratedContribution(source, symbol, rangeOver, required 
 	return nil
 }
 
+func validateDeliveryOperationalCaptureRetirement(source string) error {
+	functions, err := revisionGuardFunctions(source)
+	if err != nil {
+		return err
+	}
+	if functions["Adapter.commitPipelineHandoffTx"] != nil {
+		return fmt.Errorf("retired handoff capture wrapper was restored")
+	}
+	for _, symbol := range []string{"Adapter.claimLocked", "Adapter.bindAgentSessionTx", "Adapter.renewClaimTx", "Adapter.renewAcquiredClaim", "Adapter.renewClaimWrite", "Adapter.prepareProviderOriginRecovery", "Adapter.insertAttempt", "Adapter.expireAttempt", "Adapter.CommitPipelineHandoff", "Adapter.persistPipelineHandoffTx"} {
+		fn := functions[symbol]
+		if fn == nil {
+			return fmt.Errorf("missing physical delivery owner %s", symbol)
+		}
+		var captures bool
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch selector.Sel.Name {
+			case "AddFact", "AddFacts", "AddWholeFamily":
+				captures = true
+			case "Add":
+				if revisionGuardNode(selector.X) == "effects" {
+					captures = true
+				}
+			}
+			return true
+		})
+		if captures {
+			return fmt.Errorf("physical delivery owner %s captures operational fork history", symbol)
+		}
+	}
+	return validateRetainedDeliveryLifecycleCapture(functions["declareRetainedDeliveryLifecycle"])
+}
+
+func validateRetainedDeliveryLifecycleCapture(fn *ast.FuncDecl) error {
+	if fn == nil || fn.Body == nil || len(fn.Body.List) != 2 {
+		return fmt.Errorf("retained delivery lifecycle capture must have one exact unchanged-state guard")
+	}
+	guard, ok := fn.Body.List[0].(*ast.IfStmt)
+	if !ok || guard.Init != nil || guard.Else != nil || len(guard.Body.List) != 1 ||
+		revisionGuardNode(guard.Cond) != "before.Status == after.Status && before.ActiveSessionID == after.ActiveSessionID" ||
+		revisionGuardNode(guard.Body.List[0]) != "return nil" ||
+		revisionGuardNode(fn.Body.List[1]) != "return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)" {
+		return fmt.Errorf("retained delivery lifecycle capture changed its exact semantic-state boundary")
+	}
+	return nil
+}
+
 func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 	contract := revisionExactWriterContract{symbol: "write", calls: []string{"effects.AddFact(runID, revision.FamilyEntityMutations, mutationID)"}}
 	valid := `package p; func write() error { return effects.AddFact(runID, revision.FamilyEntityMutations, mutationID) }`
@@ -612,6 +673,41 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 			}
 		})
 	}
+	t.Run("operational_capture_retirement", func(t *testing.T) {
+		source := "package p\n"
+		for _, symbol := range []string{"claimLocked", "bindAgentSessionTx", "renewClaimTx", "renewAcquiredClaim", "renewClaimWrite", "prepareProviderOriginRecovery", "insertAttempt", "expireAttempt", "CommitPipelineHandoff", "persistPipelineHandoffTx"} {
+			source += "func (a *Adapter) " + symbol + "() {}\n"
+		}
+		capture := `func declareRetainedDeliveryLifecycle() error {
+    if before.Status == after.Status && before.ActiveSessionID == after.ActiveSessionID { return nil }
+    return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)
+}`
+		source += capture
+		if err := validateDeliveryOperationalCaptureRetirement(source); err != nil {
+			t.Fatal(err)
+		}
+		for _, call := range []string{"attempt.AddFact(runID, revision.FamilyEventDeliveries, deliveryID)", "effects.AddFacts(runID, ref)", "attempt.AddWholeFamily(runID, revision.FamilyEventDeliveries)", "effects.Add(runID, revision.FamilyEventDeliveries)"} {
+			changed := strings.Replace(source, "renewClaimWrite() {}", "renewClaimWrite() { "+call+" }", 1)
+			if err := validateDeliveryOperationalCaptureRetirement(changed); err == nil {
+				t.Fatalf("restored operational capture passed: %s", call)
+			}
+		}
+		if err := validateDeliveryOperationalCaptureRetirement(source + "func (a *Adapter) commitPipelineHandoffTx() {}\n"); err == nil {
+			t.Fatal("retired competing handoff wrapper passed")
+		}
+		for _, changed := range []string{
+			strings.Replace(capture, "before.Status == after.Status && ", "", 1),
+			strings.Replace(capture, " && before.ActiveSessionID == after.ActiveSessionID", "", 1),
+			strings.Replace(capture, "return nil", "return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)", 1),
+			strings.Replace(capture, "after.RunID,", "before.RunID,", 1),
+			strings.Replace(capture, "after.DeliveryID)", "before.DeliveryID)", 1),
+			"",
+		} {
+			if err := validateDeliveryOperationalCaptureRetirement(strings.Replace(source, capture, changed, 1)); err == nil {
+				t.Fatalf("changed retained lifecycle boundary passed: %s", changed)
+			}
+		}
+	})
 	t.Run("typed_refs", func(t *testing.T) {
 		contract := revisionExactWriterContract{symbol: "write", calls: []string{"revision.NewFactRef(revision.FamilyEvents, eventID)", "effects.AddFacts(runID, ref)"}}
 		source := `package p; func write() error { ref, err := revision.NewFactRef(revision.FamilyEvents, eventID); if err != nil { return err }; return effects.AddFacts(runID, ref) }`

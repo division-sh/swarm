@@ -20,7 +20,7 @@ import (
 const debtCatchUpBase = "26701e7b187579220dffe72e01debd2e89cd2675"
 const debtCatchUpMaster = "19dc188f6d57985a3360a619ea57b890b3c148dd"
 const debtCatchUpLane = "dec6f1a009400d230b0bb92c83c0997ae35b2938"
-const debtCatchUpHistoryPacketSHA = "bc17ae7749fd5a4c3f4661d9c3d7b3e8a46f518f279559362bbc9498f0c7a01e"
+const debtCatchUpHistoryPacketSHA = "ddadfba0b9aff02fa963daebb07d95f9bda9b71ea84d2ea3c45cec466275aa5e"
 const debtCatchUpCollectorTo = "06cd3bb8d6a0bceeb68f62266dd77a2816cd92f36305d79e14347f074c25b010"
 const debtCatchUpForkSuccessorSHA = "bc2a02af3b9d426d97611481f691db79094983a350d5c40ed79741d96dd7d0c4"
 const debtCatchUpForkSourceSHA = "c817aff36c29a349de2e64fbe2e8312cc93316ddc2fcf37f31a3838efd081992"

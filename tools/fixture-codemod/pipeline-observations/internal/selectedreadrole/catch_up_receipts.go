@@ -51,7 +51,7 @@ func CatchUp2542Receipts() (CatchUp2542Packet, error) {
 
 func readCatchUp2542Packet() (CatchUp2542Packet, error) {
 	catchUp2542Once.Do(func() {
-		if fmt.Sprintf("%x", sha256.Sum256(catchUp2542Bytes)) != "bc17ae7749fd5a4c3f4661d9c3d7b3e8a46f518f279559362bbc9498f0c7a01e" {
+		if fmt.Sprintf("%x", sha256.Sum256(catchUp2542Bytes)) != "ddadfba0b9aff02fa963daebb07d95f9bda9b71ea84d2ea3c45cec466275aa5e" {
 			catchUp2542Error = fmt.Errorf("finite catch-up composition packet changed")
 			return
 		}

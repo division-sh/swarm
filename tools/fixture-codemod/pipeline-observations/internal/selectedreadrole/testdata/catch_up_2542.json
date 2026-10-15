@@ -3,7 +3,7 @@
   "Master": "19dc188f6d57985a3360a619ea57b890b3c148dd",
   "Lane": "dec6f1a009400d230b0bb92c83c0997ae35b2938",
   "Authorization": "https://github.com/division-sh/swarm/issues/2542#issuecomment-6194296317",
-  "ComposedSHA256": "9dcee8c3a9f116d6be258874ba19b677ad9b3271bdc2771cc1ad835eca81bd73",
+  "ComposedSHA256": "eb7368804ebdf7e06c2cf9aa95f84cb05e62f4d569e32ed4bcac1dba7fe1d43e",
   "Rows": [
     {
       "Key": "progress\tinternal/runtime/pipeline/a2_map_fan_out_execution_external_test.go\tassertProgress\t42aa72e892296322e3b9fc06bca3e63bcafc1c5fcf1a7222682cefb441a264c2",
@@ -273,7 +273,7 @@
       "MasterSHA256": "0297f93b4468342edf6c0cb8e95e5b8899981dab6e316a639b530af6e96ff22e",
       "LaneSHA256": "259fdb8de7f21418d8f1af288746068d442b6eec3f81c11a58ed78cd3351eec6",
       "ComposedSHA256": "259fdb8de7f21418d8f1af288746068d442b6eec3f81c11a58ed78cd3351eec6",
-      "SourceSHA256": "85f0cff72e31b5d0c1fd2a4515f2ffdb4d4dd932d97c6ca7870dbc2e066d96b8"
+      "SourceSHA256": "788278d04025e1b8c0c3bfa75c20687462c8d40b0c26fb2b980ac3b92ec431e7"
     },
     {
       "Key": "native-api-event-count-consumer\tinternal/apiv1/operator_event_publish_test.go\tTestOperatorEventPublishRootEventNameWinsOverFlowLeafAliases\td456d985bc732b642902eaaff4e419c06ed2c7f5decd0f754143f7d94d9bc6db",
@@ -282,7 +282,7 @@
       "MasterSHA256": "f29481fe58ebb1290f9b66a5e4eead46c146bbe478b04d883922a3a83b376dcf",
       "LaneSHA256": "36c161d2a5a29c6958271762bb4635aaff9b4a5b43196d1578238c012ddeac0b",
       "ComposedSHA256": "36c161d2a5a29c6958271762bb4635aaff9b4a5b43196d1578238c012ddeac0b",
-      "SourceSHA256": "85f0cff72e31b5d0c1fd2a4515f2ffdb4d4dd932d97c6ca7870dbc2e066d96b8"
+      "SourceSHA256": "788278d04025e1b8c0c3bfa75c20687462c8d40b0c26fb2b980ac3b92ec431e7"
     },
     {
       "Key": "native-api-event-count-consumer\tinternal/apiv1/operator_event_publish_test.go\tTestOperatorEventPublishPostgresUsesPublisherScopeWithPlainRequestContext\t8c8ce28e36c26b97da10f597466ba452e5a9a5b42c46126c8d7e036219950062",
@@ -291,7 +291,7 @@
       "MasterSHA256": "27f8261beb11f1432fca8e23adef1304e4e1f25ef6b5f0dc10ebaa5153823149",
       "LaneSHA256": "7e7a0c0e0de33073276ca31f40b010e1e59b2652f767aaee5117110ba9da4d29",
       "ComposedSHA256": "7e7a0c0e0de33073276ca31f40b010e1e59b2652f767aaee5117110ba9da4d29",
-      "SourceSHA256": "85f0cff72e31b5d0c1fd2a4515f2ffdb4d4dd932d97c6ca7870dbc2e066d96b8"
+      "SourceSHA256": "788278d04025e1b8c0c3bfa75c20687462c8d40b0c26fb2b980ac3b92ec431e7"
     },
     {
       "Key": "native-api-event-count-consumer\tinternal/apiv1/operator_event_publish_test.go\tTestOperatorEventPublishReturnsStoredCompletionWithoutPostCommitReadback\tc4822d677ea5cefc7c0ff043ae76d60a9d4f143632a64846ad44f744326e9805",
@@ -300,7 +300,7 @@
       "MasterSHA256": "344901d842db97f893bf1262e7bd8b3fd1692205367d1afebb5e7fb4ccb25fa9",
       "LaneSHA256": "bd32cd1d2f6c7957185ac2b812692008114e53d3b157bfc4f6202b3c99103510",
       "ComposedSHA256": "bd32cd1d2f6c7957185ac2b812692008114e53d3b157bfc4f6202b3c99103510",
-      "SourceSHA256": "85f0cff72e31b5d0c1fd2a4515f2ffdb4d4dd932d97c6ca7870dbc2e066d96b8"
+      "SourceSHA256": "788278d04025e1b8c0c3bfa75c20687462c8d40b0c26fb2b980ac3b92ec431e7"
     },
     {
       "Key": "native-api-event-count-consumer\tinternal/apiv1/operator_event_publish_test.go\tTestOperatorEventPublishPreCommitFailureFailsClosedWithDeclaredError\t66cd8e0bb8b3e0ab4c8141ab4ed9353d9d53d1e0b15967a0ca7b794bd1dd7c3a",
@@ -309,7 +309,7 @@
       "MasterSHA256": "84bdb3bc478b416479ffe89e42ada0a360c09755f7a1bbe5176d8d98a708d82f",
       "LaneSHA256": "5ccfdc40fb068020a3caf4acf86bb58c405aa074d094a404e370a1d2203a1065",
       "ComposedSHA256": "5ccfdc40fb068020a3caf4acf86bb58c405aa074d094a404e370a1d2203a1065",
-      "SourceSHA256": "85f0cff72e31b5d0c1fd2a4515f2ffdb4d4dd932d97c6ca7870dbc2e066d96b8"
+      "SourceSHA256": "788278d04025e1b8c0c3bfa75c20687462c8d40b0c26fb2b980ac3b92ec431e7"
     },
     {
       "Key": "native-api-event-count-consumer\tinternal/apiv1/operator_event_publish_test.go\tTestOperatorEventPublishOperatorReferenceValidatesSameRunProvenance\tf6d919bc3eccae3ae53aa026fafd85e1dc929f07c580126668de1b494a948a4f",
@@ -318,7 +318,7 @@
       "MasterSHA256": "eef83340a2c7366150508777634ebfda23c4cc45f4f4112aa6f56cd7568affc4",
       "LaneSHA256": "fc8dc3463f15b6bb00a29835a0950fd716ed9a737583e210747f0c94790a6244",
       "ComposedSHA256": "fc8dc3463f15b6bb00a29835a0950fd716ed9a737583e210747f0c94790a6244",
-      "SourceSHA256": "85f0cff72e31b5d0c1fd2a4515f2ffdb4d4dd932d97c6ca7870dbc2e066d96b8"
+      "SourceSHA256": "788278d04025e1b8c0c3bfa75c20687462c8d40b0c26fb2b980ac3b92ec431e7"
     },
     {
       "Key": "native-api-event-count-consumer\tinternal/apiv1/operator_runtime_context_test.go\tTestOperatorRuntimeContextManagerRoutesCreateNewWorkToSelectedBundle\tdb4288306c6c0fd20ca862bca8119b4aed8c4a2d33bc981bd672e156809442a6",
@@ -372,7 +372,7 @@
       "MasterSHA256": "1a2899349be4403b559d4579c95f381f97e533071a6d2397a80ce6c8131e32aa",
       "LaneSHA256": "908f086747164f1053885bae2e9e086be5f79ea07478709f18220e46473e686e",
       "ComposedSHA256": "908f086747164f1053885bae2e9e086be5f79ea07478709f18220e46473e686e",
-      "SourceSHA256": "85f0cff72e31b5d0c1fd2a4515f2ffdb4d4dd932d97c6ca7870dbc2e066d96b8"
+      "SourceSHA256": "788278d04025e1b8c0c3bfa75c20687462c8d40b0c26fb2b980ac3b92ec431e7"
     },
     {
       "Key": "native-api-physical-cardinality-consumer\tinternal/apiv1/operator_event_publish_test.go\tTestOperatorEventPublishExplicitRunFollowUpRequiresRecipientBeforePersistence\tc2a5aeb5cec5eea57c78c58d83c7af3ee5bd46334519679ad151ced516a3e8ba",
@@ -381,7 +381,7 @@
       "MasterSHA256": "93452200be6472ee1a708732002b4692cacdbc6fa001b2673b638c59f1eaa0af",
       "LaneSHA256": "23a88af4a0a7bac42c9525ea3f4e681152ec0622ceb704aff80c9b38b30a34ee",
       "ComposedSHA256": "23a88af4a0a7bac42c9525ea3f4e681152ec0622ceb704aff80c9b38b30a34ee",
-      "SourceSHA256": "85f0cff72e31b5d0c1fd2a4515f2ffdb4d4dd932d97c6ca7870dbc2e066d96b8"
+      "SourceSHA256": "788278d04025e1b8c0c3bfa75c20687462c8d40b0c26fb2b980ac3b92ec431e7"
     },
     {
       "Key": "native-api-physical-cardinality-consumer\tinternal/apiv1/operator_event_publish_test.go\tTestOperatorEventPublishPrivateTargetCannotAuthorizePublication\t030ad6c6c86b2cc8de4d25dbe2625292737b44c333d70eb904b52432b085a463",
@@ -390,7 +390,7 @@
       "MasterSHA256": "6ae3c4e745dd1deb7d88088224d97919332b61f8a73c79ce8ed800d55b473fcb",
       "LaneSHA256": "cd375622301ebc712da5a508a0b5be859bcb9403a7523c41afd123140d94650f",
       "ComposedSHA256": "1ab20359e9c3273c59d824561c52e52df8239c58c924161f73aba6e0f1423357",
-      "SourceSHA256": "85f0cff72e31b5d0c1fd2a4515f2ffdb4d4dd932d97c6ca7870dbc2e066d96b8"
+      "SourceSHA256": "788278d04025e1b8c0c3bfa75c20687462c8d40b0c26fb2b980ac3b92ec431e7"
     },
     {
       "Key": "native-api-physical-cardinality-consumer\tinternal/apiv1/operator_event_publish_test.go\tTestOperatorEventPublishExistingRunTargetRouteRejectsInvalidTargetBeforePersistence\t76ba33aad7504fbde81115a979a121a4885fa5b9f757fa5fbffc88fbd1c6bf5e",
@@ -399,7 +399,7 @@
       "MasterSHA256": "0fd146483fd04597873cd99a0896c5beeef2bca4e81ddc969685c89f7f912b10",
       "LaneSHA256": "67f319d7eabe21d7a479be2bc929adc10b70c367d80b77f67d3898e523022fd1",
       "ComposedSHA256": "d4764fd668179b51c9fdc17bc18830083e165187982cf01ed398d741b69aa397",
-      "SourceSHA256": "85f0cff72e31b5d0c1fd2a4515f2ffdb4d4dd932d97c6ca7870dbc2e066d96b8"
+      "SourceSHA256": "788278d04025e1b8c0c3bfa75c20687462c8d40b0c26fb2b980ac3b92ec431e7"
     },
     {
       "Key": "native-api-sqlite-shared-counter-consumer\tinternal/apiv1/operator_event_publish_test.go\tTestOperatorEventPublishSQLiteIdempotentFirstEventPublishesWithoutLock\t0e2d30f9f15b45039f45065fe13f0802b251a078341e4308342d57ba63c6361a",
@@ -408,7 +408,7 @@
       "MasterSHA256": "8e4016243e59005c193c095d00368661b08e4a38a409b10f4c7bd2602f8aa56d",
       "LaneSHA256": "565a4d0f46cda99e8c5ced44d207468c8bc70e289e0a24c6f143c14ef73827ab",
       "ComposedSHA256": "565a4d0f46cda99e8c5ced44d207468c8bc70e289e0a24c6f143c14ef73827ab",
-      "SourceSHA256": "85f0cff72e31b5d0c1fd2a4515f2ffdb4d4dd932d97c6ca7870dbc2e066d96b8"
+      "SourceSHA256": "788278d04025e1b8c0c3bfa75c20687462c8d40b0c26fb2b980ac3b92ec431e7"
     },
     {
       "Key": "native-api-exact-run-count-consumer\tinternal/apiv1/operator_runtime_context_test.go\tTestOperatorRuntimeContextManagerRoutesExistingRunByStoredBundle\t4e0514d164c85c778eb6b67ab5d5ba7245056e0bd0889ae522dd472d3f3f6fe8",
@@ -465,13 +465,22 @@
       "SourceSHA256": "333df5960ba82104207d1a373f478453c6f43708a69c3e72800af1670c0974e2"
     },
     {
+      "Key": "native-tier12-source-lifecycle\tinternal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go\tTestTier12RuntimeFork_SelectedContractForkExecutionFixture\tbfd311b293ab1d7b93852766feb5a4bd6910418b5ca0ab7b6c15ffdc88448c67",
+      "Disposition": "identical/composed-source",
+      "BaseSHA256": "b409e911d121545e69cf9f628e113158c6bf62ed559032c7edd77c6720097685",
+      "MasterSHA256": "b409e911d121545e69cf9f628e113158c6bf62ed559032c7edd77c6720097685",
+      "LaneSHA256": "b409e911d121545e69cf9f628e113158c6bf62ed559032c7edd77c6720097685",
+      "ComposedSHA256": "94df0927e740333eec35c5e88db43a7c3bd23f4af5e0f75f5c4330b15a9e129c",
+      "SourceSHA256": "646ee404098e8a8628d377f49c4ef84660eccd76bd1a974d9645c30616298e07"
+    },
+    {
       "Key": "native-selected-construction-raw-argument-retirement\tinternal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go\tselectedContractExecutionOwnerForCatalogTest\tf7a0691e87baa599e7ae05620dc6178f0e57b93616ca48294c7d2439575fd947",
       "Disposition": "master-only",
       "BaseSHA256": "096fd9437917e1098130a16dd86217a34a778ce6670e46a959ad62605a34ec08",
       "MasterSHA256": "57aa083e5d032034ed304274fd4b8bba86643fd1a8ba6b87561d8ae8847612ee",
       "LaneSHA256": "096fd9437917e1098130a16dd86217a34a778ce6670e46a959ad62605a34ec08",
       "ComposedSHA256": "57aa083e5d032034ed304274fd4b8bba86643fd1a8ba6b87561d8ae8847612ee",
-      "SourceSHA256": "bfb633d4170bda6a97a7e49a22fc3010cb2511b3ba3a0d37b80fb60974be7de7"
+      "SourceSHA256": "646ee404098e8a8628d377f49c4ef84660eccd76bd1a974d9645c30616298e07"
     },
     {
       "Key": "native-selected-construction-raw-argument-retirement\tinternal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go\tselectedContractExecutionOwnerForCatalogHarness\t719befd325c44fd086052c991b29e37c9f85cde088dd92571d1835e93a83374a",
@@ -480,7 +489,7 @@
       "MasterSHA256": "120ec3021b7b856a706e94b3bb9e3cb2903bf467fc6c2f6f496e28e815c2b439",
       "LaneSHA256": "b91f8ae7ffcbbefdec03d94d1d88344be85079ab2c30964be34df2b631930d7f",
       "ComposedSHA256": "120ec3021b7b856a706e94b3bb9e3cb2903bf467fc6c2f6f496e28e815c2b439",
-      "SourceSHA256": "bfb633d4170bda6a97a7e49a22fc3010cb2511b3ba3a0d37b80fb60974be7de7"
+      "SourceSHA256": "646ee404098e8a8628d377f49c4ef84660eccd76bd1a974d9645c30616298e07"
     },
     {
       "Key": "native-bus-committed-pipeline-scope\tinternal/runtime/bus/eventbus_publish_test.go\tTestEventBusPublishAcknowledgedReturnsBeforePostCommitDispatchCompletes\t13fc60fe429b82f9e012a4b951da12478f59693ba6f03fc9e57af6ec6c2ba35e",
@@ -1577,8 +1586,8 @@
       "BaseSHA256": "afd860fcbb9e6986c62e5292e9f87d4de2acf49bab3461ae67ebf4d1ea3baa44",
       "MasterSHA256": "f144f71cf9103aef430a1527cc8bda40e2b76b5734b25e0cfaee27992b49b82a",
       "LaneSHA256": "3ef7ef8b91904866fef40ef2e4316e0f1212868d46c8e70728b3943cba4afc3f",
-      "ComposedSHA256": "1e4a86561445a933ca250e38c443e0f9ccf1c1de5f905298b940320f835e9b19",
-      "SourceSHA256": "bd1e44134ded7b98c04dd0100f33743284ec0178cdfa3646358a7e1683d501b2"
+      "ComposedSHA256": "373cd92306b7b57f601ea0a56ff28ea62b55e088f013896e0400343dd3f0c2c5",
+      "SourceSHA256": "8901870ed5d085011984ae6dcf1050f6dd72571a78af1488197427e249d55581"
     },
     {
       "Key": "native-served-delivery-quiescence-caller\tinternal/serveapp/lifecycle_transition_gate_process_test.go\tTestServedCompiledGateOutcomeRestartOnBothStores\t7a99b1bb55bd61658ddd646fc1844c5074d5f40c2daa0ba56a466056f1366d70",
@@ -1762,12 +1771,12 @@
     },
     {
       "Key": "native-served-delivery-quiescence-caller\tinternal/serveapp/mailbox_human_topology_test.go\tTestHumanTaskRealRequesterTopologyBothStores\t33917f16661b87e196c39a90be34f1d2bbbc82762132af0ec98eeb8abe59bb24",
-      "Disposition": "lane-only",
+      "Disposition": "lane-only/composed-source",
       "BaseSHA256": "198900019546b379849cc5d69ac9e0269c037b93cd9bfb0e6b9eb6ecce53fe1d",
       "MasterSHA256": "198900019546b379849cc5d69ac9e0269c037b93cd9bfb0e6b9eb6ecce53fe1d",
       "LaneSHA256": "d183317dfea44765c9ff74b503195730e14ce892f98f0ade09b6d0a8f5f8363d",
-      "ComposedSHA256": "d183317dfea44765c9ff74b503195730e14ce892f98f0ade09b6d0a8f5f8363d",
-      "SourceSHA256": "ea3c7b8198835e76bb617d0855a089458e68d28ceeb1ee260fd0d22c73363daa"
+      "ComposedSHA256": "cdbe6d83a130e0a09bf55d5472a61d11b14d7da0ba541a762a00caf1197b61f3",
+      "SourceSHA256": "01bbd13a4be55460dcaa5cae2d15f066f5a33e6029484a23ea5d03116cce089d"
     },
     {
       "Key": "native-served-delivery-quiescence-caller\tinternal/serveapp/mailbox_principal_transport_test.go\tTestMailboxPrincipalConcurrentTransportBothStores\t4c097dea0ce912d6f251e2ad6161e40fcf7eda643076ea9c0c0b9c1ac1d1e581",
@@ -1910,8 +1919,8 @@
       "BaseSHA256": "5587a5a174366a5e21bce93de6dec1104de90182641ad5e0cfc39036eb24b4f9",
       "MasterSHA256": "fb343aca422071ca18c74036ba2645baa45330a1ba68b832192ca2c24b6f2b98",
       "LaneSHA256": "d051da6adb65ca442d60ecd4a1916ca8c0fbb398139f5649fc206e70ff0661c5",
-      "ComposedSHA256": "04aa723e6c7b2acbd653648d5bf3ea5d6bf177889eec3b09f4eb3e7a43d280c5",
-      "SourceSHA256": "a82aacbb8564d5685f7061789d121a856c146b5a66d939fb95ae942642bb7111"
+      "ComposedSHA256": "037ede54c6cf46c25994877b3117565dd61afa064c0c86ddc5cc5b22dfe7f0b5",
+      "SourceSHA256": "2408a00ba7079d24b1c65ae752db1407e12e9e15ea5d45fcd346f2d350c4f82d"
     },
     {
       "Key": "native-served-delivery-quiescence-caller\tinternal/serveapp/receiver_local_onward_test.go\tTestReceiverCompositionEntitylessLocalOnwardBothStores\ta930d97ccc9e447d2275c3cae5438370332213f678fe5be181cbe7616fff83e9",
@@ -2023,12 +2032,12 @@
     },
     {
       "Key": "native-served-delivery-quiescence-caller\tinternal/serveapp/source_admission_fork_proof_test.go\tTest2376ForkSourceAndPinsFollowSourceRunBothStores\tee11b9a761d33831fcd41b8ff10213b556f2516a109a5b97bb3bb9082d1a05c7",
-      "Disposition": "lane-only",
+      "Disposition": "lane-only/composed-source",
       "BaseSHA256": "062b41f91fc3a835038977f6981dbc08a8c8eae171cbfb5f5ab9c603975e191c",
       "MasterSHA256": "062b41f91fc3a835038977f6981dbc08a8c8eae171cbfb5f5ab9c603975e191c",
       "LaneSHA256": "1302da984ad18643c1ae231a0b4247bb7a15156ae9222c512ec4ce3f0d6b84d0",
-      "ComposedSHA256": "1302da984ad18643c1ae231a0b4247bb7a15156ae9222c512ec4ce3f0d6b84d0",
-      "SourceSHA256": "daa9b50067bb7a969e099235781111b54bb6c8be65191312207edaf096b81826"
+      "ComposedSHA256": "236eabe8ce93204008516404664bd31fee51418360a53b0fa7a10db4fb233ea4",
+      "SourceSHA256": "fce5e880ab716a9227bcfefeaa07ca9c898c56a297acc11c12aacee75de5049f"
     },
     {
       "Key": "native-served-delivery-quiescence-caller\tinternal/serveapp/transition_receiver_probe_test.go\tproveReceiverMaterializationBothStores\tb0df3e7f40c9437c08d93eae54431d4e9f0cbd659a52e34f24974b832fa98ea1",
@@ -2424,7 +2433,7 @@
       "MasterSHA256": "cdd4fad51d8f8cde7c733964b246b117e8a7276ef874ea20d12f8ea11fbf6c29",
       "LaneSHA256": "a082413e22cc0591ce686ede732b0ddb2f3d331d8da6ab5fa2224fc696832ab7",
       "ComposedSHA256": "47368beb4650f29b09cbfe8760981d5e8abe19e6b2d83fccfa1c1c3a82bb51dd",
-      "SourceSHA256": "ca3953a17479d3db8c1b586f1d977f4a5c5f9d3f3420d8c52dee0587618a65c4"
+      "SourceSHA256": "8ded476d1f5afc201d4b2f32ff855cf1de3572d97c678db9d2a28d27efc1383a"
     },
     {
       "Key": "native-run-setup-family144\tinternal/runtime/runforkexecution/execution_test.go\tTestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAuthority\t0095c88157da39be35aba627ff3991757f724e15a0d0c95b3843670d92b05c1f",
@@ -2433,7 +2442,7 @@
       "MasterSHA256": "c0778ee87f19369b2e3bfc969abc2caf98c521257821db733fff57c6fff9c6a6",
       "LaneSHA256": "d4c7f24a262bf9b52944656daffce3f5c80e4a48a539c406a5c096062abd9a39",
       "ComposedSHA256": "8fdfd53ce0190a35abcf5bea71a5755756ea106c90d4d397eb034d9654abe321",
-      "SourceSHA256": "ca3953a17479d3db8c1b586f1d977f4a5c5f9d3f3420d8c52dee0587618a65c4"
+      "SourceSHA256": "8ded476d1f5afc201d4b2f32ff855cf1de3572d97c678db9d2a28d27efc1383a"
     },
     {
       "Key": "native-run-setup-family144\tinternal/runtime/runforkexecution/execution_test.go\tbuildSelectedForkProofContainer\tc97b0ee1e92fc8af2f79c9ed24b0ccc43e02ca741412c69e12e00ea12ffe59f8",
@@ -2442,7 +2451,7 @@
       "MasterSHA256": "1f79ed253573e19ef869190e4161bf12086b51fee019ec7390fbcdf76dbedd1a",
       "LaneSHA256": "acf9b8b94bc29471819bf2f16aa3dbc405c3aee6714c6ca116dad728e9ceab0a",
       "ComposedSHA256": "acf9b8b94bc29471819bf2f16aa3dbc405c3aee6714c6ca116dad728e9ceab0a",
-      "SourceSHA256": "ca3953a17479d3db8c1b586f1d977f4a5c5f9d3f3420d8c52dee0587618a65c4"
+      "SourceSHA256": "8ded476d1f5afc201d4b2f32ff855cf1de3572d97c678db9d2a28d27efc1383a"
     },
     {
       "Key": "native-run-setup-family144\tinternal/runtime/runforkexecution/execution_test.go\tseedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource\t4defa9dead1c56f4d2b3368c31151a8d8ccceab246a34936b826ff96d3f62873",
@@ -2451,7 +2460,7 @@
       "MasterSHA256": "0e81c50fda6ff74683c7f193eff1565d4c73c441762adfc946b319e260817391",
       "LaneSHA256": "658fe4ba210f6239e640d67382e7ad54abfc857da9491744d0b90531aa381010",
       "ComposedSHA256": "658fe4ba210f6239e640d67382e7ad54abfc857da9491744d0b90531aa381010",
-      "SourceSHA256": "ca3953a17479d3db8c1b586f1d977f4a5c5f9d3f3420d8c52dee0587618a65c4"
+      "SourceSHA256": "8ded476d1f5afc201d4b2f32ff855cf1de3572d97c678db9d2a28d27efc1383a"
     },
     {
       "Key": "native-run-setup-family144\tinternal/runtime/runforkexecution/execution_test.go\tseedSelectedExecutionStateOnlySourceRun\td82c7a08cdbb6db48f1463a5cb1537e2bdf758b2772bbe11dfe3ffa4e2807f92",
@@ -2460,7 +2469,7 @@
       "MasterSHA256": "222c841597e3a807199e2e875e22116bcb5ed81e73ffa50b1d32c0ecdc3e6afb",
       "LaneSHA256": "82f3af070135977a53a4c5112a837ca0875c6cdf5eb3b85980f05f3f54bad1a1",
       "ComposedSHA256": "82f3af070135977a53a4c5112a837ca0875c6cdf5eb3b85980f05f3f54bad1a1",
-      "SourceSHA256": "ca3953a17479d3db8c1b586f1d977f4a5c5f9d3f3420d8c52dee0587618a65c4"
+      "SourceSHA256": "8ded476d1f5afc201d4b2f32ff855cf1de3572d97c678db9d2a28d27efc1383a"
     },
     {
       "Key": "native-run-setup-family144\tinternal/runtime/runforkexecution/operation_lifetime_parity_test.go\tseedSelectedOperationSource\t43e5f75d7474e8f9f19f7512d58ab31db885255ea3ba32cc663762be3cce31ff",
@@ -2919,7 +2928,7 @@
       "MasterSHA256": "df5e53439e1e397c86266db3d01f6b04dba3f563648d8ab05296634f8fb40b78",
       "LaneSHA256": "36cf9af8a3648997b3767e7e9466ae093c4f5871b06fdc455b149197f4950b42",
       "ComposedSHA256": "5b6e13dbe9225582822961fd8233420bb81a1085eb48e96ac702811a03205e42",
-      "SourceSHA256": "85f0cff72e31b5d0c1fd2a4515f2ffdb4d4dd932d97c6ca7870dbc2e066d96b8"
+      "SourceSHA256": "788278d04025e1b8c0c3bfa75c20687462c8d40b0c26fb2b980ac3b92ec431e7"
     },
     {
       "Key": "native-postgres-admission-family145\tinternal/runtime/conformance/reply_resolution_conformance_test.go\tTestReplyResolutionConformance_TypedHumanTaskPreservesReplyAuthorityAcrossRestart\t0976bbb7d3a37c51e4da4c6b66a822aace1b7865e7cb12287bf9a736d4d2df44",
@@ -3243,7 +3252,16 @@
       "MasterSHA256": "df5e53439e1e397c86266db3d01f6b04dba3f563648d8ab05296634f8fb40b78",
       "LaneSHA256": "5e22d513c891968a8ff8e22827c1dcd113d744c21463f7fe41273b150159e998",
       "ComposedSHA256": "868e563f44b920c4d56ed1768990f6fa1c47510bca34d9858765f9281e888602",
-      "SourceSHA256": "ca3953a17479d3db8c1b586f1d977f4a5c5f9d3f3420d8c52dee0587618a65c4"
+      "SourceSHA256": "8ded476d1f5afc201d4b2f32ff855cf1de3572d97c678db9d2a28d27efc1383a"
+    },
+    {
+      "Key": "native-postgres-admission-family145\tinternal/runtime/runforkexecution/execution_test.go\tTestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedAfterForkPoint\td30cd8efbce88fa0ae878594d451708f8e789b8174e37b3db75de9f9196ab818",
+      "Disposition": "lane-added/composed-source",
+      "BaseSHA256": "df5e53439e1e397c86266db3d01f6b04dba3f563648d8ab05296634f8fb40b78",
+      "MasterSHA256": "df5e53439e1e397c86266db3d01f6b04dba3f563648d8ab05296634f8fb40b78",
+      "LaneSHA256": "b5d037623ad8c92f399f890d22d598a9fa0e1d13e51c52efe29eb92e4f379623",
+      "ComposedSHA256": "39c01b75d393f38398435fb7fa462a13eb335f2961f4c8b46aed9e8d5c71ec6e",
+      "SourceSHA256": "8ded476d1f5afc201d4b2f32ff855cf1de3572d97c678db9d2a28d27efc1383a"
     },
     {
       "Key": "native-postgres-admission-family145\tinternal/runtime/runforkexecution/execution_test.go\tTestExecuteSelectedContractRunForkConstructsAgentRecipientWithoutHandlerMaterializer\t45da35dc732a987c9188243c16b53f8db6a982b418cbdfe43042abbf122a8d11",
@@ -3252,7 +3270,7 @@
       "MasterSHA256": "df5e53439e1e397c86266db3d01f6b04dba3f563648d8ab05296634f8fb40b78",
       "LaneSHA256": "8f8fe67ce4860363f0ce03e7beee3d740eb2ef541bfff45551c968c0eb5f5251",
       "ComposedSHA256": "cee019d900077d77a5902ea243761182bbf596d1aacc23deb4b1899622bbc884",
-      "SourceSHA256": "ca3953a17479d3db8c1b586f1d977f4a5c5f9d3f3420d8c52dee0587618a65c4"
+      "SourceSHA256": "8ded476d1f5afc201d4b2f32ff855cf1de3572d97c678db9d2a28d27efc1383a"
     },
     {
       "Key": "native-postgres-admission-family145\tinternal/runtime/runforkexecution/execution_test.go\tTestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRuntime\tf765ed78f34aeff40dcb49d002f85e0bd1206cc6ef10d62a1da87fa0bf70e64d",
@@ -3261,7 +3279,7 @@
       "MasterSHA256": "df5e53439e1e397c86266db3d01f6b04dba3f563648d8ab05296634f8fb40b78",
       "LaneSHA256": "5ce9bd239923dcd6ec585bfc3c06a9ed4c3d9dab654fe77198b5153763fa62a1",
       "ComposedSHA256": "44be1f6938ca013795bf452cd93854e255a10a5c20971d041761c2bec4992051",
-      "SourceSHA256": "ca3953a17479d3db8c1b586f1d977f4a5c5f9d3f3420d8c52dee0587618a65c4"
+      "SourceSHA256": "8ded476d1f5afc201d4b2f32ff855cf1de3572d97c678db9d2a28d27efc1383a"
     },
     {
       "Key": "native-postgres-admission-family145\tinternal/runtime/runforkexecution/execution_test.go\tTestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage\t68ba2f44ec1e3b3d4e554b338aed8df001955b80e67b8c4ec2b0f60e4646ac2b",
@@ -3270,7 +3288,7 @@
       "MasterSHA256": "df5e53439e1e397c86266db3d01f6b04dba3f563648d8ab05296634f8fb40b78",
       "LaneSHA256": "4238f1d473ca039d1de63acdb473c8cf23001afbd529b81080f3cde4d48ef28e",
       "ComposedSHA256": "1c17426cf2f5ac83a67d9cd592e119fc774bcbcf36604076ce91222c987da418",
-      "SourceSHA256": "ca3953a17479d3db8c1b586f1d977f4a5c5f9d3f3420d8c52dee0587618a65c4"
+      "SourceSHA256": "8ded476d1f5afc201d4b2f32ff855cf1de3572d97c678db9d2a28d27efc1383a"
     },
     {
       "Key": "native-postgres-admission-family145\tinternal/runtime/runforkexecution/execution_test.go\tproveSelectedForkClaudeOAuth\t52d6c46ac011c7c81ca4f549802a4541792117e9c2cfd63b2338c6377fe03481",
@@ -3279,7 +3297,7 @@
       "MasterSHA256": "df5e53439e1e397c86266db3d01f6b04dba3f563648d8ab05296634f8fb40b78",
       "LaneSHA256": "10f748acf31baebc7c3e35c5372f88c1ec34e58df900230836d66e5dd24787a8",
       "ComposedSHA256": "06946eb96c70439463e05bbedd71331008325471948fecfb46c46b404982fa68",
-      "SourceSHA256": "ca3953a17479d3db8c1b586f1d977f4a5c5f9d3f3420d8c52dee0587618a65c4"
+      "SourceSHA256": "8ded476d1f5afc201d4b2f32ff855cf1de3572d97c678db9d2a28d27efc1383a"
     },
     {
       "Key": "native-postgres-admission-family145\tinternal/serveapp/main_runtime_test.go\trunServedRunControlLifecycleProof\tfb4d4eac861469474873e82f21dcf7e440d36d4805746745672c497abadb1b4a",
@@ -3486,7 +3504,7 @@
       "MasterSHA256": "df5e53439e1e397c86266db3d01f6b04dba3f563648d8ab05296634f8fb40b78",
       "LaneSHA256": "358575f652a7b50cd7b86d05b7509bff271266b618b755736e644942e6c86990",
       "ComposedSHA256": "1af66bdffe1553cc67f81c8f0b17e920aae1e68f0b9de119df800ee607a281a6",
-      "SourceSHA256": "daa9b50067bb7a969e099235781111b54bb6c8be65191312207edaf096b81826"
+      "SourceSHA256": "fce5e880ab716a9227bcfefeaa07ca9c898c56a297acc11c12aacee75de5049f"
     },
     {
       "Key": "served-observation-family145\tinternal/serveapp/lifecycle_transition_template_test.go\tprepareLifecycleTemplateSiblings\t79ba613097ae4233a645d87eeff8b2fb3a944a26b27e9cdb432c9c38e241eea8",
@@ -3594,7 +3612,7 @@
       "MasterSHA256": "df5e53439e1e397c86266db3d01f6b04dba3f563648d8ab05296634f8fb40b78",
       "LaneSHA256": "3831abb42480e6421a14638a3b2e0dbcf1aee62ca93a526018575adb709650f8",
       "ComposedSHA256": "26b4c4f8309742ea3da63a0564f47bdf28b9c8c68a4be84c0b8b2d8786cc19b7",
-      "SourceSHA256": "daa9b50067bb7a969e099235781111b54bb6c8be65191312207edaf096b81826"
+      "SourceSHA256": "fce5e880ab716a9227bcfefeaa07ca9c898c56a297acc11c12aacee75de5049f"
     },
     {
       "Key": "native-channel-process-carrier-family145\tinternal/testutil/postgres.go\tstartPostgresDatabase\t8cd75baeddca4344c2f9020974dd14aba9ffa5dc4795cdde498f827bb7aaa9ce",
@@ -3768,7 +3786,7 @@
     },
     {
       "File": "internal/apiv1/operator_event_publish_test.go",
-      "ComposedSHA256": "85f0cff72e31b5d0c1fd2a4515f2ffdb4d4dd932d97c6ca7870dbc2e066d96b8",
+      "ComposedSHA256": "788278d04025e1b8c0c3bfa75c20687462c8d40b0c26fb2b980ac3b92ec431e7",
       "MasterSHA256": "62e08e13b69968f2df9428af36d4a782460f0cfbe1d1db0b51dab3d865919145",
       "LaneSHA256": "031541fad150bfc7f46d5b2d9892519bf3972fb6c9bab2557d41ca336ea1700c"
     },
@@ -3816,7 +3834,7 @@
     },
     {
       "File": "internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go",
-      "ComposedSHA256": "bfb633d4170bda6a97a7e49a22fc3010cb2511b3ba3a0d37b80fb60974be7de7",
+      "ComposedSHA256": "646ee404098e8a8628d377f49c4ef84660eccd76bd1a974d9645c30616298e07",
       "MasterSHA256": "bfb633d4170bda6a97a7e49a22fc3010cb2511b3ba3a0d37b80fb60974be7de7",
       "LaneSHA256": "c95e73f7ba8cd2e67fcfd4abc3112f13bcad9ee990fd621ff2fbc90e17bb2ea4"
     },
@@ -4266,7 +4284,7 @@
     },
     {
       "File": "internal/serveapp/lifecycle_transition_fork_test.go",
-      "ComposedSHA256": "bd1e44134ded7b98c04dd0100f33743284ec0178cdfa3646358a7e1683d501b2",
+      "ComposedSHA256": "8901870ed5d085011984ae6dcf1050f6dd72571a78af1488197427e249d55581",
       "MasterSHA256": "50a35bb24b6776aa85b90500f64b0921ce787f4626f1f51dc926e510af57c586",
       "LaneSHA256": "ced284b06611b6c2d8390d74a1a787b77db05c7f451efdfd2ad33658d157468a"
     },
@@ -4368,7 +4386,7 @@
     },
     {
       "File": "internal/serveapp/mailbox_human_topology_test.go",
-      "ComposedSHA256": "ea3c7b8198835e76bb617d0855a089458e68d28ceeb1ee260fd0d22c73363daa",
+      "ComposedSHA256": "01bbd13a4be55460dcaa5cae2d15f066f5a33e6029484a23ea5d03116cce089d",
       "MasterSHA256": "70715f8228ad89fbe14afd60cd519decf6f359e7208f11012d749e3d39f2ae3a",
       "LaneSHA256": "ea3c7b8198835e76bb617d0855a089458e68d28ceeb1ee260fd0d22c73363daa"
     },
@@ -4440,7 +4458,7 @@
     },
     {
       "File": "internal/serveapp/receiver_fork_test.go",
-      "ComposedSHA256": "a82aacbb8564d5685f7061789d121a856c146b5a66d939fb95ae942642bb7111",
+      "ComposedSHA256": "2408a00ba7079d24b1c65ae752db1407e12e9e15ea5d45fcd346f2d350c4f82d",
       "MasterSHA256": "9d70ba5f12022a065e387e328f200ffbc533aff23ce580fcf8b1ca2a9f94dd5c",
       "LaneSHA256": "78af8abd3be2e3a9772b31051c9b5462b8e64e00e4bca6d7697d33a02de3f1cc"
     },
@@ -4512,7 +4530,7 @@
     },
     {
       "File": "internal/serveapp/source_admission_fork_proof_test.go",
-      "ComposedSHA256": "daa9b50067bb7a969e099235781111b54bb6c8be65191312207edaf096b81826",
+      "ComposedSHA256": "fce5e880ab716a9227bcfefeaa07ca9c898c56a297acc11c12aacee75de5049f",
       "MasterSHA256": "208c9dc41728b706977b9530d20d9924b3e7ed20480d9e0d02249c7c2719bca7",
       "LaneSHA256": "886b077d2fc9f1a43b4df86032e2f3cf8c6b7e90711c9b5331a10cf15b145e42"
     },
@@ -4656,7 +4674,7 @@
     },
     {
       "File": "internal/runtime/runforkexecution/execution_test.go",
-      "ComposedSHA256": "ca3953a17479d3db8c1b586f1d977f4a5c5f9d3f3420d8c52dee0587618a65c4",
+      "ComposedSHA256": "8ded476d1f5afc201d4b2f32ff855cf1de3572d97c678db9d2a28d27efc1383a",
       "MasterSHA256": "9bb0295815f22ce4a04f977f3ba56b728e85aaf9437712c98060f4296fbd7f7d",
       "LaneSHA256": "06878a8437079f90ab44112708c2d60ba2a7aab98ab43d56de3a3e3af2457f1d"
     },

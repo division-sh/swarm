@@ -87,7 +87,7 @@ func TestDeliveryAuthorityActivationSerializesWithFreezeBothStores(t *testing.T)
 				// Both operations reach this real write only after owning the
 				// existing native ordering fence. The contender must actually
 				// wait on that fence (PG) or roll back BUSY (SQLite), not just start.
-				point := "writer"
+				point := "delivery_authority"
 				if first == "freeze" {
 					point = "source_freeze"
 				}
@@ -148,7 +148,7 @@ func TestDeliveryAuthorityActivationSerializesWithFreezeBothStores(t *testing.T)
 					t.Fatal("freeze lost the legitimately earlier authority activation")
 				}
 				before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
-				if got := invoke(ctx, fixture.store, "authority"); got.err != nil {
+				if got := invoke(ctx, firstStore, "authority"); got.err != nil {
 					t.Fatal(got.err)
 				}
 				if !reflect.DeepEqual(before, snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")) {

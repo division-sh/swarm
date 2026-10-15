@@ -367,7 +367,7 @@ func assertRunForkRevisionContributionPaths(t *testing.T, root string) {
 		},
 		{
 			Path: "internal/store/internal/backend/runforkpersistence/run_fork_source_freeze.go", Writer: "applyRunForkSourceFreeze",
-			WriterTokens: []string{"attempt *mutationprotocol.Attempt", "ForkSourceTx(ctx, attempt"},
+			WriterTokens: []string{"attempt *mutationprotocol.Attempt", "runtimeauthoractivity.BundleScopeForTarget(ctx, lineage.SourceBundleHash)", "runtimeauthoractivity.WithScope(ctx, sourceScope)", "ForkSourceTx(sourceCtx, attempt"},
 			ProofPath:    "internal/store/internal/runtimepersistence/run_fork_source_freeze_test.go", Proof: "TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome",
 			ProofTokens: []string{"commitRunForkSourceFreezeForTest", "ValidateCompletePostgres"},
 		},

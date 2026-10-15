@@ -2958,24 +2958,6 @@ func containsStoredRoute(routes []events.RouteIdentity, want events.RouteIdentit
 	return false
 }
 
-func assertStoredEventUntargeted(t *testing.T, targetRouteRaw, targetSetRaw string) {
-	t.Helper()
-	var target events.RouteIdentity
-	if err := json.Unmarshal([]byte(targetRouteRaw), &target); err != nil {
-		t.Fatalf("decode event target_route: %v", err)
-	}
-	if !target.Empty() {
-		t.Fatalf("event target_route = %#v, want untargeted root publication", target)
-	}
-	var targetSet []events.RouteIdentity
-	if err := json.Unmarshal([]byte(targetSetRaw), &targetSet); err != nil {
-		t.Fatalf("decode event target_set: %v", err)
-	}
-	if len(targetSet) != 0 {
-		t.Fatalf("event target_set = %#v, want untargeted root publication", targetSet)
-	}
-}
-
 func assertOperatorEventReference(t *testing.T, selected any, eventID, wantReferenceEventID string) {
 	t.Helper()
 	row, err := storetest.ReadOperatorReferenceStorage(context.Background(), selected, eventID)

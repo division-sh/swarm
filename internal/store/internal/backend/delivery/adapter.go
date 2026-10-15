@@ -756,7 +756,7 @@ func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *m
 	}
 	var renewal ClaimCommit
 	if renew {
-		updated, err := a.renewAcquiredClaim(ctx, tx, attempt, claimed, leaseTTL)
+		updated, err := a.renewAcquiredClaim(ctx, tx, claimed, leaseTTL)
 		if err != nil {
 			return ClaimResult{}, err
 		}
@@ -1110,67 +1110,40 @@ func (a *Adapter) PipelineHandoffIncomplete(ctx context.Context, q queryer, even
 // processing to executable delivery continuation ownership.
 func (a *Adapter) CommitPipelineHandoff(ctx context.Context, attempt *mutationprotocol.Attempt, eventID string) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		return a.commitPipelineHandoffTx(ctx, tx, attempt, eventID)
+		return a.persistPipelineHandoffTx(ctx, tx, eventID)
 	})
-}
-
-func (a *Adapter) commitPipelineHandoffTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, eventID string) error {
-	facts, err := a.persistPipelineHandoffTx(ctx, tx, eventID)
-	if err != nil {
-		return err
-	}
-	for _, fact := range facts {
-		if err := attempt.AddFact(fact.runID, privaterunforkrevision.FamilyEventDeliveries, fact.deliveryID); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // CommitUnrevisionedFixturePipelineHandoffTx transfers the same durable
 // continuations without moving the fixture's retained fork-history frontier.
 func (a *Adapter) CommitUnrevisionedFixturePipelineHandoffTx(ctx context.Context, tx *sql.Tx, eventID string) error {
-	_, err := a.persistPipelineHandoffTx(ctx, tx, eventID)
-	return err
+	return a.persistPipelineHandoffTx(ctx, tx, eventID)
 }
 
-type pipelineHandoffFact struct{ runID, deliveryID string }
-
-func (a *Adapter) persistPipelineHandoffTx(ctx context.Context, tx *sql.Tx, eventID string) ([]pipelineHandoffFact, error) {
+func (a *Adapter) persistPipelineHandoffTx(ctx context.Context, tx *sql.Tx, eventID string) error {
 	if tx == nil {
-		return nil, errors.New("delivery continuation handoff transaction is required")
+		return errors.New("delivery continuation handoff transaction is required")
 	}
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" {
-		return nil, errors.New("delivery continuation handoff event identity is required")
+		return errors.New("delivery continuation handoff event identity is required")
 	}
 	query := `
 		UPDATE event_deliveries
 		SET continuation_handoff_at = COALESCE(continuation_handoff_at, CURRENT_TIMESTAMP)
-		WHERE event_id = $1::uuid
-		RETURNING CAST(run_id AS TEXT), CAST(delivery_id AS TEXT)`
+		WHERE event_id = $1::uuid`
 	args := []any{eventID}
 	if a.dialect == DialectSQLite {
 		query = `
 			UPDATE event_deliveries
 			SET continuation_handoff_at = COALESCE(continuation_handoff_at, CURRENT_TIMESTAMP)
-			WHERE event_id = ?
-			RETURNING run_id, delivery_id`
+			WHERE event_id = ?`
 	}
-	rows, err := tx.QueryContext(ctx, query, args...)
+	_, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("transfer delivery continuations after pipeline acknowledgement: %w", err)
+		return fmt.Errorf("transfer delivery continuations after pipeline acknowledgement: %w", err)
 	}
-	defer rows.Close()
-	var facts []pipelineHandoffFact
-	for rows.Next() {
-		var runID, deliveryID string
-		if err := rows.Scan(&runID, &deliveryID); err != nil {
-			return nil, err
-		}
-		facts = append(facts, pipelineHandoffFact{runID: runID, deliveryID: deliveryID})
-	}
-	return facts, rows.Err()
+	return nil
 }
 
 func executionAuthorityCursorID(authority ExecutionAuthority) string {
@@ -1263,7 +1236,7 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutation
 	token := uuid.NewString()
 	version := record.ClaimVersion + 1
 	expiresAt := now.Add(leaseTTL)
-	if err := a.insertAttempt(ctx, tx, attempt, record.RunID, record.DeliveryID, version, token, now, expiresAt); err != nil {
+	if err := a.insertAttempt(ctx, tx, record.DeliveryID, version, token, now, expiresAt); err != nil {
 		return ClaimedObligation{}, err
 	}
 	query := `
@@ -1293,7 +1266,7 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutation
 		return ClaimedObligation{}, fmt.Errorf("%w: delivery claim lost compare-and-set", ErrConflict)
 	}
 	if record.Status == StatusInProgress {
-		if err := a.expireAttempt(ctx, tx, attempt, record, now); err != nil {
+		if err := a.expireAttempt(ctx, tx, record, now); err != nil {
 			return ClaimedObligation{}, err
 		}
 	}
@@ -1308,10 +1281,19 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutation
 	if err := a.recordTransition(ctx, attempt, claimed, "in_progress", nil, now); err != nil {
 		return ClaimedObligation{}, err
 	}
-	if err := attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID); err != nil {
+	if err := declareRetainedDeliveryLifecycle(attempt, record.Snapshot, claimed.Snapshot); err != nil {
 		return ClaimedObligation{}, err
 	}
 	return ClaimedObligation{Snapshot: claimed.Snapshot, Claim: claim}, nil
+}
+
+// These lifecycle coordinates are still part of the historical contract. A new
+// worker token or lease alone must not declare another historical fact.
+func declareRetainedDeliveryLifecycle(attempt *mutationprotocol.Attempt, before, after Snapshot) error {
+	if before.Status == after.Status && before.ActiveSessionID == after.ActiveSessionID {
+		return nil
+	}
+	return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)
 }
 
 func (a *Adapter) BindAgentSession(ctx context.Context, attempt *mutationprotocol.Attempt, claim Claim, sessionID string) (Snapshot, error) {
@@ -1387,20 +1369,20 @@ func (a *Adapter) bindAgentSessionTx(ctx context.Context, tx *sql.Tx, attempt *m
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return Snapshot{}, fmt.Errorf("%w: delivery session binding lost claim", ErrConflict)
 	}
-	if err := attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID); err != nil {
-		return Snapshot{}, err
-	}
 	updated, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
+	if err == nil {
+		err = declareRetainedDeliveryLifecycle(attempt, record.Snapshot, updated.Snapshot)
+	}
 	return updated.Snapshot, err
 }
 
 func (a *Adapter) RenewClaim(ctx context.Context, attempt *mutationprotocol.Attempt, claim Claim, leaseTTL time.Duration) (Snapshot, error) {
 	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (Snapshot, error) {
-		return a.renewClaimTx(ctx, tx, attempt, claim, leaseTTL)
+		return a.renewClaimTx(ctx, tx, claim, leaseTTL)
 	})
 }
 
-func (a *Adapter) renewClaimTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, leaseTTL time.Duration) (Snapshot, error) {
+func (a *Adapter) renewClaimTx(ctx context.Context, tx *sql.Tx, claim Claim, leaseTTL time.Duration) (Snapshot, error) {
 	if tx == nil || claim.Validate() != nil {
 		return Snapshot{}, fmt.Errorf("delivery claim renewal requires a current claim")
 	}
@@ -1408,7 +1390,7 @@ func (a *Adapter) renewClaimTx(ctx context.Context, tx *sql.Tx, attempt *mutatio
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if _, err := a.renewClaimWrite(ctx, tx, attempt, claim, now, leaseTTL); err != nil {
+	if _, err := a.renewClaimWrite(ctx, tx, claim, now, leaseTTL); err != nil {
 		return Snapshot{}, err
 	}
 	updated, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
@@ -1417,7 +1399,7 @@ func (a *Adapter) renewClaimTx(ctx context.Context, tx *sql.Tx, attempt *mutatio
 
 // The acquired row and its authority were just checked under this transaction's
 // locks. Only the exact conditional lease update remains necessary here.
-func (a *Adapter) renewAcquiredClaim(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claimed ClaimedObligation, leaseTTL time.Duration) (Snapshot, error) {
+func (a *Adapter) renewAcquiredClaim(ctx context.Context, tx *sql.Tx, claimed ClaimedObligation, leaseTTL time.Duration) (Snapshot, error) {
 	claim := claimed.Claim
 	snapshot := claimed.Snapshot
 	if claim.Validate() != nil || snapshot.Status != StatusInProgress || snapshot.DeliveryID != claim.DeliveryID() ||
@@ -1433,7 +1415,7 @@ func (a *Adapter) renewAcquiredClaim(ctx context.Context, tx *sql.Tx, attempt *m
 	if !snapshot.ClaimExpiresAt.After(now) {
 		return Snapshot{}, fmt.Errorf("%w: newly acquired delivery claim expired before renewal", ErrConflict)
 	}
-	expiresAt, err := a.renewClaimWrite(ctx, tx, attempt, claim, now, leaseTTL)
+	expiresAt, err := a.renewClaimWrite(ctx, tx, claim, now, leaseTTL)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -1443,7 +1425,7 @@ func (a *Adapter) renewAcquiredClaim(ctx context.Context, tx *sql.Tx, attempt *m
 	return snapshot, nil
 }
 
-func (a *Adapter) renewClaimWrite(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, now time.Time, leaseTTL time.Duration) (time.Time, error) {
+func (a *Adapter) renewClaimWrite(ctx context.Context, tx *sql.Tx, claim Claim, now time.Time, leaseTTL time.Duration) (time.Time, error) {
 	if leaseTTL <= 0 {
 		leaseTTL = DefaultLeaseTTL
 	}
@@ -1503,9 +1485,6 @@ func (a *Adapter) renewClaimWrite(ctx context.Context, tx *sql.Tx, attempt *muta
 		if rows, _ := deliveryResult.RowsAffected(); rows != 1 {
 			return time.Time{}, fmt.Errorf("%w: delivery claim renewal lost lifecycle owner", ErrConflict)
 		}
-	}
-	if err := attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID()); err != nil {
-		return time.Time{}, err
 	}
 	return expiresAt, nil
 }
@@ -1627,7 +1606,7 @@ func (a *Adapter) readProviderOriginRecoveryDisposition(ctx context.Context, tx 
 	return providerOriginRecoveryAlreadyTerminal, nil
 }
 
-func (a *Adapter) prepareProviderOriginRecovery(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim) (bool, error) {
+func (a *Adapter) prepareProviderOriginRecovery(ctx context.Context, tx *sql.Tx, claim Claim) (bool, error) {
 	disposition, err := a.providerOriginRecoveryDisposition(ctx, tx, claim)
 	if err != nil {
 		return false, err
@@ -1686,7 +1665,7 @@ func (a *Adapter) prepareProviderOriginRecovery(ctx context.Context, tx *sql.Tx,
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return false, fmt.Errorf("%w: provider origin recovery lost delivery lifecycle owner", ErrConflict)
 	}
-	return false, attempt.AddFact(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries, claim.DeliveryID())
+	return false, nil
 }
 
 func (a *Adapter) SettleFailure(ctx context.Context, attempt *mutationprotocol.Attempt, claim Claim, settlement Settlement) (Snapshot, error) {
@@ -3081,7 +3060,7 @@ func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cla
 	return record, now, nil
 }
 
-func (a *Adapter) insertAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, runID, deliveryID string, version int64, token string, startedAt, expiresAt time.Time) error {
+func (a *Adapter) insertAttempt(ctx context.Context, tx *sql.Tx, deliveryID string, version int64, token string, startedAt, expiresAt time.Time) error {
 	query := `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker, closure_kind) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $1::uuid, TRUE, 'open')`
 	args := []any{deliveryID, version, token, startedAt, expiresAt}
 	if a.dialect == DialectSQLite {
@@ -3090,10 +3069,10 @@ func (a *Adapter) insertAttempt(ctx context.Context, tx *sql.Tx, attempt *mutati
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("record delivery claim attempt: %w", err)
 	}
-	return attempt.AddFact(runID, privaterunforkrevision.FamilyEventDeliveries, deliveryID)
+	return nil
 }
 
-func (a *Adapter) expireAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, record deliveryRecord, now time.Time) error {
+func (a *Adapter) expireAttempt(ctx context.Context, tx *sql.Tx, record deliveryRecord, now time.Time) error {
 	if record.claimToken == "" || record.ClaimVersion <= 0 {
 		return fmt.Errorf("%w: expired in-progress delivery has no current claim", ErrConflict)
 	}
@@ -3109,7 +3088,7 @@ func (a *Adapter) expireAttempt(ctx context.Context, tx *sql.Tx, attempt *mutati
 	if rows, _ := result.RowsAffected(); rows != 1 {
 		return fmt.Errorf("%w: expired delivery attempt is missing", ErrConflict)
 	}
-	return attempt.AddFact(record.RunID, privaterunforkrevision.FamilyEventDeliveries, record.DeliveryID)
+	return nil
 }
 
 func (a *Adapter) completeAttempt(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, outcome, reason string, failure *runtimefailures.Envelope, sideEffects []string, duration time.Duration, now time.Time) error {

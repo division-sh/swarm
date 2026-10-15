@@ -4179,7 +4179,18 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	seedSelectedConstructedRootHistory(t, ctx, pg, loaded, sourceRunID, sourceEventID, "item.received", at, executionmode.Live,
 		[]events.DeliveryRoute{selectedConstructedRootNodeRoute(loaded.Source, sourceRunID, "test-node")})
 	captureSelectedExecutionSourceRevision(t, pg, sourceRunID)
-	seedSelectedExecutionDiagnosticPlatformDeadLetter(t, ctx, pg, sourceRunID, afterEventID, at.Add(time.Second))
+	// Source advancement requires a business event, not excluded diagnostics.
+	storetest.InsertRevisionedExistingRunRootEventRecord(t, ctx, pg, afterEventID, sourceRunID, "source.after",
+		eventtest.Producer(events.EventProducerExternal, "source-runtime"), []byte(`{}`),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, sourceRunID), sourceRunID), at.Add(time.Second))
+	pipeline := pg.PipelineObligations()
+	work, err := pipeline.ClaimEvent(ctx, sourceEventID, runtimepipelineobligation.PurposeRecovery)
+	if err != nil {
+		t.Fatalf("claim existing source pipeline outcome: %v", err)
+	}
+	if _, err := pipeline.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("source_outcome_must_not_suppress_fork")); err != nil {
+		t.Fatalf("settle existing source pipeline outcome: %v", err)
+	}
 	if _, _, err := storetest.TerminalizeRun(ctx, pg, storerunlifecycle.TerminalRequest{
 		RunID:   sourceRunID,
 		State:   storerunlifecycle.StateCancelled,

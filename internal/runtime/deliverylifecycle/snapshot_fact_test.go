@@ -40,8 +40,17 @@ func TestDecodeHistoricalSnapshotCompleteRouteRoundTrip(t *testing.T) {
 					if decoded.Authority.Validate() == nil {
 						t.Fatal("historical evidence unexpectedly grants live execution authority")
 					}
-					if status == deliverylifecycle.StatusInProgress && (decoded.ClaimVersion != 2 || decoded.ClaimExpiresAt.IsZero()) {
-						t.Fatal("historical lease evidence was lost while excluding its token")
+					if status == deliverylifecycle.StatusInProgress && decoded.ClaimVersion != 0 {
+						t.Fatal("historical evidence retained a live attempt generation")
+					}
+					if (status == deliverylifecycle.StatusDelivered || status == deliverylifecycle.StatusDeadLetter) && decoded.ClaimVersion != 2 {
+						t.Fatal("historical evidence lost the exact settlement generation")
+					}
+					if !decoded.ClaimExpiresAt.IsZero() {
+						t.Fatal("historical evidence retained live lease expiry")
+					}
+					if !decoded.UpdatedAt.IsZero() || decoded.CreatedAt.IsZero() {
+						t.Fatal("historical evidence must retain admission time, not the physical update clock")
 					}
 				})
 			}
@@ -49,17 +58,16 @@ func TestDecodeHistoricalSnapshotCompleteRouteRoundTrip(t *testing.T) {
 	}
 }
 
-func TestDecodeHistoricalSnapshotRetainsContinuationHandoff(t *testing.T) {
+func TestDecodeHistoricalSnapshotRejectsPhysicalContinuationHandoff(t *testing.T) {
 	fact := historicalRouteFact(t, historicalRouteFixtures(t)[0].route, deliverylifecycle.StatusPending)
 	handoff := time.Now().UTC().Truncate(time.Microsecond)
 	fact["continuation_handoff_at"] = handoff.Format(time.RFC3339Nano)
-	decoded, err := deliverylifecycle.DecodeHistoricalSnapshot(historicalJSON(t, fact))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !decoded.ContinuationHandoffAt.Equal(handoff) {
-		t.Fatalf("historical handoff = %s, want %s", decoded.ContinuationHandoffAt, handoff)
-	}
+	assertHistoricalRejects(t, fact)
+	t.Run("physical_update_clock", func(t *testing.T) {
+		fact := historicalRouteFact(t, historicalRouteFixtures(t)[0].route, deliverylifecycle.StatusPending)
+		fact["updated_at"] = handoff.Format(time.RFC3339Nano)
+		assertHistoricalRejects(t, fact)
+	})
 }
 
 func TestDecodeHistoricalSnapshotNonConnectPreservesEmptyClaim(t *testing.T) {
@@ -340,10 +348,32 @@ func TestDecodeHistoricalSnapshotRejectsUnknownFieldsAndLiveTokens(t *testing.T)
 			if bytes.Contains(historicalJSON(t, decoded), []byte("claim_token")) || decoded.Authority.Validate() == nil {
 				t.Fatal("historical snapshot exposed a live capability")
 			}
-			for _, field := range []string{"unexpected", "claim_token", "lease_token", "execution_authority"} {
+			for _, field := range []string{"unexpected", "claim_token", "lease_token", "execution_authority", "claim_expires_at", "continuation_handoff_at", "updated_at", "claim_version"} {
 				t.Run(field, func(t *testing.T) {
 					fact := historicalRouteFact(t, fixture.route, deliverylifecycle.StatusInProgress)
 					fact[field] = "f03e9ff9-7a7f-45dc-89d3-a15ed401388a"
+					if field == "claim_version" {
+						fact[field] = 3
+					}
+					assertHistoricalRejects(t, fact)
+				})
+			}
+			for _, status := range []deliverylifecycle.Status{deliverylifecycle.StatusPending, deliverylifecycle.StatusInProgress, deliverylifecycle.StatusFailed} {
+				t.Run("unsettled_generation_"+string(status), func(t *testing.T) {
+					fact := historicalRouteFact(t, fixture.route, status)
+					fact["settled_claim_version"] = 3
+					assertHistoricalRejects(t, fact)
+				})
+			}
+			for _, status := range []deliverylifecycle.Status{deliverylifecycle.StatusDelivered, deliverylifecycle.StatusDeadLetter, deliverylifecycle.StatusCanceled} {
+				t.Run("missing_settlement_generation_"+string(status), func(t *testing.T) {
+					fact := historicalRouteFact(t, fixture.route, status)
+					delete(fact, "settled_claim_version")
+					assertHistoricalRejects(t, fact)
+				})
+				t.Run("negative_settlement_generation_"+string(status), func(t *testing.T) {
+					fact := historicalRouteFact(t, fixture.route, status)
+					fact["settled_claim_version"] = -1
 					assertHistoricalRejects(t, fact)
 				})
 			}
@@ -448,12 +478,12 @@ func historicalRouteFact(t testing.TB, route events.DeliveryRoute, status delive
 	now := time.Date(2026, 9, 8, 1, 0, 0, 0, time.UTC)
 	fact["delivery_id"], fact["event_id"], fact["run_id"] = id, eventID, "d34a7a1b-f738-42b2-8758-9e4ad5417ad0"
 	fact["route_identity"], fact["status"], fact["max_retries"] = events.EncodeDeliveryRouteIdentity(identity), status, class.MaxRetries()
-	fact["created_at"], fact["updated_at"] = now, now
+	fact["created_at"] = now
 	switch status {
 	case deliverylifecycle.StatusPending:
 		fact["next_eligible_at"] = now
 	case deliverylifecycle.StatusInProgress:
-		fact["claim_version"], fact["started_at"], fact["claim_expires_at"] = 2, now, now.Add(time.Minute)
+		fact["started_at"] = now
 	case deliverylifecycle.StatusFailed:
 		fact["retry_count"], fact["next_eligible_at"] = 1, now.Add(time.Second)
 		fallthrough
@@ -464,12 +494,12 @@ func historicalRouteFact(t testing.TB, route events.DeliveryRoute, status delive
 		}
 		fact["failure"] = failure
 		if status == deliverylifecycle.StatusDeadLetter {
-			fact["reason_code"], fact["settled_at"] = "terminal_failure", now
+			fact["reason_code"], fact["settled_at"], fact["settled_claim_version"] = "terminal_failure", now, 2
 		}
 	case deliverylifecycle.StatusDelivered:
-		fact["settled_at"] = now
+		fact["settled_at"], fact["settled_claim_version"] = now, 2
 	case deliverylifecycle.StatusCanceled:
-		fact["reason_code"], fact["settled_at"] = string(deliverylifecycle.CancellationTerminate), now
+		fact["reason_code"], fact["settled_at"], fact["settled_claim_version"] = string(deliverylifecycle.CancellationTerminate), now, 0
 	default:
 		t.Fatalf("unsupported test status %q", status)
 	}

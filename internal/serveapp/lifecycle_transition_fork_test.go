@@ -10,9 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
+	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -73,6 +77,16 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			if err := waitExactOriginPublications(t.Context(), publication, origins...); err != nil {
 				t.Fatal(err)
 			}
+			if gate {
+				// Branch isolation needs later business history, not runtime logs.
+				var selected interface {
+					PipelineObligations() pipelineobligation.Store
+				} = rt.Postgres
+				if rt.SQLite != nil {
+					selected = rt.SQLite
+				}
+				advanceLifecycleForkSourceHistory(t, servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash), selected, seed.RunID)
+			}
 			before := lifecycleStoredSnapshot(t, rt.ReceiverStateReader, seed.RunID)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "lifecycle-fork"}
 			var fork, duplicate apiv1.RunForkExecutionResult
@@ -96,6 +110,35 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 				t.Fatal("fork mutated parent business state/history")
 			}
 		})
+	}
+}
+
+func advanceLifecycleForkSourceHistory(t *testing.T, ctx context.Context, selected interface {
+	PipelineObligations() pipelineobligation.Store
+}, runID string) {
+	t.Helper()
+	owner := selected.PipelineObligations()
+	eventID := uuid.NewString()
+	// Hold publication before insertion so live recovery cannot consume the fixture.
+	claim, err := owner.ClaimPublication(ctx, eventID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settled := false
+	defer func() {
+		if !settled {
+			if err := owner.Release(context.WithoutCancel(ctx), claim); err != nil {
+				t.Error(err)
+			}
+		}
+	}()
+	storetest.InsertRevisionedExistingRunRootEventRecord(t, ctx, selected,
+		eventID, runID, "source.after", eventtest.Producer(events.EventProducerExternal, "fork-source"), []byte(`{"seed":true}`),
+		events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, runID), runID), time.Now().UTC())
+	outcome, err := owner.Settle(ctx, claim, pipelineobligation.Acknowledged("source_advanced_fixture"))
+	settled = outcome.Committed()
+	if err != nil || !settled {
+		t.Fatalf("settle post-cut source history: committed=%v error=%v", settled, err)
 	}
 }
 

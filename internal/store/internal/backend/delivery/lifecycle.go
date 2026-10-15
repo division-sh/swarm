@@ -777,7 +777,7 @@ func (s *DeliveryPostgresOwner) SettleProviderOriginRecoveryFailureTx(
 	settlement runtimedelivery.Settlement,
 ) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		alreadyTerminal, err := postgresDeliveryAdapter.prepareProviderOriginRecovery(ctx, tx, attempt, claim)
+		alreadyTerminal, err := postgresDeliveryAdapter.prepareProviderOriginRecovery(ctx, tx, claim)
 		if err != nil || alreadyTerminal {
 			return err
 		}
@@ -792,7 +792,7 @@ func (s *DeliverySQLiteOwner) SettleProviderOriginRecoveryFailureTx(
 	settlement runtimedelivery.Settlement,
 ) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		alreadyTerminal, err := sqliteDeliveryAdapter.prepareProviderOriginRecovery(ctx, tx, attempt, claim)
+		alreadyTerminal, err := sqliteDeliveryAdapter.prepareProviderOriginRecovery(ctx, tx, claim)
 		if err != nil || alreadyTerminal {
 			return err
 		}

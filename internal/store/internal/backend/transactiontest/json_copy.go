@@ -2,7 +2,7 @@ package transactiontest
 
 import "context"
 
-// CopyCounts measures serialized arguments at two explicit write sites, not
+// CopyCounts measures serialized arguments at explicitly observed write sites, not
 // stored JSON, WAL or whole-workload SQL. Success is the write call's returned
 // result; only commit acknowledgment can attribute successful bytes as durable.
 type CopyCounts struct {
@@ -47,18 +47,68 @@ func (c *CopyCounts) settle(acknowledged, commitAttempted, rollbackAttempted boo
 }
 
 type JSONCopyCounts struct {
-	WorkflowHeader CopyCounts
-	EntityMetadata CopyCounts
+	WorkflowHeader        CopyCounts
+	EntityMetadata        CopyCounts
+	Events                CopyCounts
+	EventDeliveries       CopyCounts
+	CommittedReplayScopes CopyCounts
+	EventReceipts         CopyCounts
+	DeadLetters           CopyCounts
 }
 
 func (c *JSONCopyCounts) add(other JSONCopyCounts) {
 	c.WorkflowHeader.add(other.WorkflowHeader)
 	c.EntityMetadata.add(other.EntityMetadata)
+	c.Events.add(other.Events)
+	c.EventDeliveries.add(other.EventDeliveries)
+	c.CommittedReplayScopes.add(other.CommittedReplayScopes)
+	c.EventReceipts.add(other.EventReceipts)
+	c.DeadLetters.add(other.DeadLetters)
 }
 
 func (c *JSONCopyCounts) settle(acknowledged, commitAttempted, rollbackAttempted bool) {
 	c.WorkflowHeader.settle(acknowledged, commitAttempted, rollbackAttempted)
 	c.EntityMetadata.settle(acknowledged, commitAttempted, rollbackAttempted)
+	c.Events.settle(acknowledged, commitAttempted, rollbackAttempted)
+	c.EventDeliveries.settle(acknowledged, commitAttempted, rollbackAttempted)
+	c.CommittedReplayScopes.settle(acknowledged, commitAttempted, rollbackAttempted)
+	c.EventReceipts.settle(acknowledged, commitAttempted, rollbackAttempted)
+	c.DeadLetters.settle(acknowledged, commitAttempted, rollbackAttempted)
+}
+
+type EventHistoryJSONFamily uint8
+
+const (
+	EventJSON EventHistoryJSONFamily = iota + 1
+	DeliveryJSON
+	ReplayScopeJSON
+	ReceiptJSON
+	DeadLetterJSON
+)
+
+// BeginEventHistoryJSON observes only the submitted event/delivery ledger
+// arguments. It neither selects history nor creates transaction authority.
+func BeginEventHistoryJSON(ctx context.Context, family EventHistoryJSONFamily, length, copies int) *JSONCopyWrite {
+	a := revisionAttempt(ctx)
+	if a == nil || copies == 0 {
+		return nil
+	}
+	var counts *CopyCounts
+	switch family {
+	case EventJSON:
+		counts = &a.jsonCopies.Events
+	case DeliveryJSON:
+		counts = &a.jsonCopies.EventDeliveries
+	case ReplayScopeJSON:
+		counts = &a.jsonCopies.CommittedReplayScopes
+	case ReceiptJSON:
+		counts = &a.jsonCopies.EventReceipts
+	case DeadLetterJSON:
+		counts = &a.jsonCopies.DeadLetters
+	default:
+		return nil
+	}
+	return beginJSONCopy(a, counts, length, copies)
 }
 
 type JSONCopyWrite struct {
