@@ -25,6 +25,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -36,8 +37,8 @@ func TestWhatsAppInboundPublicationRollbackAndLostAcknowledgmentBothStores(t *te
 			f := openStandingDispositionParityFixture(t, backend)
 			store := f.selected.(inboundPublicationProofStore)
 			candidate := f.candidate("whatsapp-publication")
-			candidate.Source = sourceartifactfixture.RequireArtifact(t, context.Background(), store,
-				sourceartifactfixture.New("schema.yaml", []byte("name: whatsapp-publication-component\n")))
+			artifact := sourceartifactfixture.New("schema.yaml", []byte("name: whatsapp-publication-component\n"))
+			candidate.Source = sourceartifactfixture.RequireArtifact(t, context.Background(), store, artifact)
 			candidate.FlowPath = "."
 			candidate.ServiceID = runtimeflowidentity.StandingServiceID(candidate.FlowPath)
 			ctx := runtimecorrelation.WithSourceArtifactFact(testAuthorActivityContextForBundle(candidate.Source.BundleHash()), candidate.Source)
@@ -143,7 +144,7 @@ ack: {mode: durable_before_dispatch}
 			}
 			eventBus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{
 				SourceArtifactFact: candidate.Source,
-				ContractBundle:     whatsappPublicationComponentSource(t, ctx, store, candidate.Source),
+				ContractBundle:     whatsappPublicationComponentSource(t, artifact),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -225,16 +226,8 @@ ack: {mode: durable_before_dispatch}
 	}
 }
 
-func whatsappPublicationComponentSource(t *testing.T, ctx context.Context, store inboundPublicationProofStore, fact runtimecorrelation.SourceArtifactFact) semanticview.Source {
+func whatsappPublicationComponentSource(t *testing.T, artifact *sourceartifact.AdmittedSourceArtifact) semanticview.Source {
 	t.Helper()
-	persisted, err := store.GetSourceArtifact(ctx, fact.BundleHash())
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := persisted.Decode()
-	if err != nil {
-		t.Fatal(err)
-	}
 	repo := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact,
 		runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
