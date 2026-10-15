@@ -53,7 +53,13 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 		if err := validateRecipeSnapshots(row); err != nil {
 			t.Fatal(err)
 		}
-		historicalMechanicalRecipe(t, row)
+		current := q10PrivateTargetCurrentRecipe(t, row)
+		if source, found, err := q10SharedCoordinatorCurrentSource(row); err != nil {
+			t.Fatal(err)
+		} else if found {
+			current.Successor = source
+		}
+		historicalMechanicalRecipe(t, current)
 	}
 	if count != 24 {
 		t.Fatalf("mechanical repair target count=%d, want24", count)
