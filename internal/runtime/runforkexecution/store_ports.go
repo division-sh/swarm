@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	rootruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -33,6 +34,7 @@ import (
 
 type SelectedDeploymentFanOutStore interface {
 	ListSelectedDeploymentFeeds(context.Context, startupownership.GrantEvidence) ([]fanoutobligation.Intent, error)
+	LoadPinnedSource(context.Context, string, string, durabledata.DeclarationRef) (durabledata.PinnedSource, error)
 }
 
 // SelectedContractForkLifecycle owns planning, materialization, activation,

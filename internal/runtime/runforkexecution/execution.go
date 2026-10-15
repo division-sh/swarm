@@ -183,6 +183,7 @@ func executeSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		AgentRuntime:          agentRuntime,
 		SourceRunID:           plan.SourceRunID,
 		ForkRunID:             materialization.ForkRunID,
+		DataPins:              materialization.DataPins,
 		ForkEventID:           plan.ForkPoint.EventID,
 		SourceEvents:          sourceEventIDs,
 		ExecutionOwner:        runfork.RunForkSelectedContractExecutionOwner,
@@ -388,6 +389,7 @@ type publishSelectedContractForkEventsRequest struct {
 	AgentRuntime          selectedContractAgentRuntimePlan
 	SourceRunID           string
 	ForkRunID             string
+	DataPins              []durabledata.Pin
 	ForkEventID           string
 	SourceEvents          []string
 	ExecutionOwner        string
