@@ -19,6 +19,8 @@ func holdServiceTestLock(t *testing.T, path string) *fileLock {
 }
 
 func TestServiceRegistryConcurrentCreationPublication(t *testing.T) {
+	t.Run("independent_registry_namespaces", proveIndependentRegistryNamespaces)
+	t.Run("namespace_refusals", proveRegistryNamespaceRefusals)
 	for _, phase := range []string{"pre_id", "new_row_after_snapshot", "terminal_after_discovery"} {
 		t.Run(phase, func(t *testing.T) {
 			publisher, record := testRegistryRecord(t, ServiceCreating)

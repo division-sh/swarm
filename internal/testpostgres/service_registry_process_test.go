@@ -210,6 +210,7 @@ func TestServiceCloseTimeoutRetainsDescendantAuthorityForReconciliation(t *testi
 }
 
 func TestSwarmTestDockerRunnersQueueBeforeSecondProvision(t *testing.T) {
+	t.Run("independent_registries_share_daemon", proveIndependentRegistryProcesses)
 	for _, capacity := range []int{1, 2} {
 		t.Run(fmt.Sprintf("capacity_%d", capacity), func(t *testing.T) {
 			proveDockerRunnerAdmission(t, capacity)
