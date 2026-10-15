@@ -38,18 +38,20 @@ func TestDeliveryOperationalWritesDoNotAdvanceForkHistoryBothStores(t *testing.T
 				t.Fatal(err)
 			}
 			defer restore()
+			var retainedFinalizations uint64
 			assertNoCapture := func(phase string) {
 				t.Helper()
 				observed, err := ReadSemanticEventFixtureEvidenceForTest(ctx, fixture.store, runID, event.ID())
 				if err != nil {
 					t.Fatal(err)
 				}
-				if observed.RevisionCount != before.RevisionCount || probe.Snapshot().Total.Revision.Finalizations != 0 {
+				if observed.RevisionCount != before.RevisionCount || probe.Snapshot().Total.Revision.Finalizations != retainedFinalizations {
 					t.Errorf("%s captured operational fork evidence: revisions=%d want=%d finalizations=%d", phase, observed.RevisionCount, before.RevisionCount, probe.Snapshot().Total.Revision.Finalizations)
 				}
 				if observed.RunEventCount != before.RunEventCount || !observed.Record.Equal(before.Record) {
 					t.Fatalf("%s changed the immutable event or physical counter", phase)
 				}
+				requireCompleteRunForkRevision(t, ctx, fixture, runID)
 			}
 			if err := runDeliveryFixtureAttempt(ctx, store, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 				adapter := sqliteDeliveryAdapter
@@ -69,7 +71,15 @@ func TestDeliveryOperationalWritesDoNotAdvanceForkHistoryBothStores(t *testing.T
 			if err != nil || claimed.Claim.Validate() != nil || claimed.Snapshot.Status != runtimedelivery.StatusInProgress {
 				t.Fatalf("real claim not acquired: claim=%+v err=%v", claimed, err)
 			}
-			assertNoCapture("claim")
+			started, err := ReadSemanticEventFixtureEvidenceForTest(ctx, fixture.store, runID, event.ID())
+			if err != nil || started.RevisionCount != before.RevisionCount+1 || probe.Snapshot().Total.Revision.Finalizations != 1 {
+				t.Fatalf("retained in-progress transition lacks exact history: evidence=%+v err=%v", started, err)
+			}
+			if started.RunEventCount != before.RunEventCount || !started.Record.Equal(before.Record) {
+				t.Fatal("retained lifecycle transition changed event identity or counter")
+			}
+			before, retainedFinalizations = started, 1
+			assertNoCapture("claim after its retained lifecycle transition")
 			renewed, err := store.RenewClaim(ctx, claimed.Claim)
 			if err != nil || !renewed.Acknowledged || renewed.Snapshot.ClaimVersion != claimed.Claim.Version() || !renewed.Snapshot.ClaimExpiresAt.After(claimed.Snapshot.ClaimExpiresAt) {
 				t.Fatalf("physical renewal not acknowledged: renewed=%+v err=%v", renewed, err)
