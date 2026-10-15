@@ -129,7 +129,11 @@ func assertSelectedProfileFencedImage(t *testing.T, f agentClaimProfileFixture, 
 	seen := make(map[string]bool, len(active))
 	for _, snapshot := range active {
 		member, found := current[snapshot.DeliveryID]
-		if !found || seen[snapshot.DeliveryID] || !reflect.DeepEqual(snapshot, member.Snapshot) {
+		// Membership returns the canonical durable row, not Snapshot's
+		// retry/clock-derived decorations or a live eligibility decision.
+		durable := member.Snapshot
+		durable.RetryScheduled, durable.ClaimReclaimable = false, false
+		if !found || seen[snapshot.DeliveryID] || snapshot.RetryScheduled || snapshot.ClaimReclaimable || !reflect.DeepEqual(snapshot, durable) {
 			t.Fatalf("native read role lost exact fenced/ordinary membership: %+v", snapshot)
 		}
 		seen[snapshot.DeliveryID] = true
