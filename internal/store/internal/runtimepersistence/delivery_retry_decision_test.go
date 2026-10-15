@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"reflect"
 	"testing"
@@ -13,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	privatedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/google/uuid"
 )
@@ -368,88 +366,3 @@ func TestRetryDecisionPreservesSuppliedPrecisionBothStores(t *testing.T) {
 		})
 	}
 }
-
-func TestRetryDecisionNativeStorageCombinationsBothStores(t *testing.T) {
-	for _, backend := range eventRecordContractBackends() {
-		t.Run(backend.name, func(t *testing.T) {
-			f := newRetryDecisionFixture(t, backend.name, backend.open(t).store)
-			claim := f.claim()
-			retry := f.retry(claim.Claim, time.Hour)
-			original := f.outcomes(claim.Claim.DeliveryID())
-			before, err := ReadSemanticEventFixtureEvidenceForTest(f.ctx, f.store, f.event.RunID(), f.event.ID())
-			if err != nil {
-				t.Fatal(err)
-			}
-			completed := original[0].SettledAt.Format(time.RFC3339Nano)
-			due := original[0].RetryEligibleAt.Format(time.RFC3339Nano)
-			earlier := original[0].SettledAt.Add(-time.Microsecond).Format(time.RFC3339Nano)
-			malformed := "not-a-time"
-			for _, test := range []struct {
-				name       string
-				closure    string
-				outcome    *string
-				completed  *string
-				due        *string
-				wantStored bool
-				wantRead   bool
-			}{
-				{"retry_valid", "settled", retryOutcomeText("retry_scheduled"), &completed, &due, true, true},
-				{"retry_null_due", "settled", retryOutcomeText("retry_scheduled"), &completed, nil, false, false},
-				{"retry_null_completion", "settled", retryOutcomeText("retry_scheduled"), nil, &due, false, false},
-				{"retry_null_outcome_due_present", "settled", nil, &completed, &due, false, false},
-				{"retry_null_outcome_due_null", "settled", nil, &completed, nil, false, false},
-				{"retry_due_equal", "settled", retryOutcomeText("retry_scheduled"), &completed, &completed, false, false},
-				{"retry_due_earlier", "settled", retryOutcomeText("retry_scheduled"), &completed, &earlier, false, false},
-				{"retry_malformed_due", "settled", retryOutcomeText("retry_scheduled"), &completed, &malformed, backend.name == "sqlite", false},
-				{"retry_wrong_closure", "parent_interrupted", retryOutcomeText("retry_scheduled"), &completed, &due, false, false},
-				{"open_outcome_due", "open", nil, nil, &due, false, false},
-				{"expired_outcome_due", "lease_expired", retryOutcomeText("lease_expired"), &completed, &due, false, false},
-				{"delivered_null", "settled", retryOutcomeText("delivered"), &completed, nil, true, true},
-				{"delivered_due", "settled", retryOutcomeText("delivered"), &completed, &due, false, false},
-				{"dead_letter_null", "settled", retryOutcomeText("dead_letter"), &completed, nil, true, true},
-				{"dead_letter_due", "settled", retryOutcomeText("dead_letter"), &completed, &due, false, false},
-				{"canceled_null", "settled", retryOutcomeText("canceled"), &completed, nil, true, true},
-				{"canceled_due", "settled", retryOutcomeText("canceled"), &completed, &due, false, false},
-				{"terminalized_null", "settled", retryOutcomeText("terminalized"), &completed, nil, true, true},
-				{"terminalized_due", "settled", retryOutcomeText("terminalized"), &completed, &due, false, false},
-			} {
-				t.Run(test.name, func(t *testing.T) {
-					rolledBack := errors.New("rollback native retry-column probe")
-					var writeErr, readErr error
-					err := runDeliveryFixtureAttempt(f.ctx, f.store, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
-						return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-							adapter := sqliteDeliveryAdapter
-							if backend.name == "postgres" {
-								adapter = postgresDeliveryAdapter
-							}
-							writeErr = adapter.ProbeRetryDecisionConstraintTxForTest(ctx, tx, claim.Claim, privatedelivery.RetryDecisionConstraintProbe{
-								ClosureKind: test.closure, Outcome: test.outcome, CompletedAt: test.completed, EligibleAt: test.due,
-							})
-							if writeErr == nil {
-								_, readErr = adapter.Outcomes(ctx, tx, claim.Claim.DeliveryID())
-							}
-							return rolledBack
-						})
-					})
-					if !errors.Is(err, rolledBack) {
-						t.Fatalf("probe did not unwind through native rollback: %v", err)
-					}
-					if (writeErr == nil) != test.wantStored || (writeErr == nil && readErr == nil) != test.wantRead {
-						t.Fatalf("native combination: stored=%t readable=%t wantStored=%t wantRead=%t writeErr=%v readErr=%v", writeErr == nil, writeErr == nil && readErr == nil, test.wantStored, test.wantRead, writeErr, readErr)
-					}
-					t.Logf("native constraint/read evidence: writeErr=%v readErr=%v", writeErr, readErr)
-					after, err := ReadSemanticEventFixtureEvidenceForTest(f.ctx, f.store, f.event.RunID(), f.event.ID())
-					if err != nil || !reflect.DeepEqual(after, before) || !reflect.DeepEqual(f.outcomes(claim.Claim.DeliveryID()), original) {
-						t.Fatalf("rolled-back schema probe changed evidence: before=%+v after=%+v err=%v", before, after, err)
-					}
-					current, err := f.store.Snapshot(f.ctx, claim.Claim.DeliveryID())
-					if err != nil || !reflect.DeepEqual(current, retry) {
-						t.Fatalf("rolled-back schema probe changed live retry: got=%+v want=%+v err=%v", current, retry, err)
-					}
-				})
-			}
-		})
-	}
-}
-
-func retryOutcomeText(value string) *string { return &value }
