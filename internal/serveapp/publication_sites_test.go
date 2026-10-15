@@ -300,8 +300,11 @@ func requirePublicationSiteReadback(t *testing.T, rt servedControlProofRuntime, 
 				index, predicate = 1, "default"
 			}
 			// Rulings6148375122/6169683113: labels project position and
-			// predicate text; predicate-less final rows display as default.
+			// predicate text; only handler.rules has the final default row.
 			wantLabel := fmt.Sprintf("%s[%d]: %s", placement, index, predicate)
+			if placement == "on_complete" && predicate == "default" {
+				wantLabel = fmt.Sprintf("%s[%d]", placement, index)
+			}
 			wantPath := fmt.Sprintf("nodes[%q].handlers[%q].%s[%d]", family, family+".requested", placement, index)
 			if selectionContext != context || disposition != "selected" || selectedFlow != flow || selectedFamily != "handler_rule" || semanticPath != wantPath || label != wantLabel {
 				t.Fatalf("selected publication cause: %s %s %s %s %s %s; want %s %s %s", selectionContext, disposition, selectedFlow, selectedFamily, semanticPath, label, context, wantPath, wantLabel)
