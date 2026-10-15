@@ -89,12 +89,17 @@ func lifecycleGateDecisionParams(t *testing.T, rt servedControlProofRuntime, run
 
 func lifecycleDecisionParamsForCard(t *testing.T, rt servedControlProofRuntime, cardID, verdict string) map[string]any {
 	t.Helper()
+	return lifecycleDecisionParamsFromEndpoint(t, rt.Endpoint, cardID, verdict)
+}
+
+func lifecycleDecisionParamsFromEndpoint(t *testing.T, endpoint, cardID, verdict string) map[string]any {
+	t.Helper()
 	var detail struct {
 		DecisionCard struct {
 			ContentHash string `json:"card_content_hash"`
 		} `json:"decision_card"`
 	}
-	requireServedJSONRPCResult(t, rt.Endpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, &detail)
+	requireServedJSONRPCResult(t, endpoint, "mailbox.get", map[string]any{"mailbox_id": cardID}, &detail)
 	if detail.DecisionCard.ContentHash == "" {
 		t.Fatal("missing frozen card hash")
 	}

@@ -51,6 +51,29 @@ func main() {
 	if len(rows) != 893 || len(history) != 36 || fmt.Sprintf("%x", sha256.Sum256(oldHistory)) != "1cafae311b85749160553e56ca1a3123336ba397882464c9c0709a16d04e10ca" {
 		panic("reviewed historical inventory changed")
 	}
+	history = appendOriginalSuccessors(rows, history)
+	// #642/6191161328 and 6191625495 append to the prior 39 receipts.
+	prior := encode(history, false)
+	if !bytes.Equal(prior, read(completion, root+"testdata/fixture_setup_successors_2617.json")) {
+		panic("reviewed completion predecessor changed")
+	}
+	history = appendCompletionSuccessors(rows, history)
+	// LIGHT: existing native observation composition under #642/6191161328
+	// and6192796272. Preserve every preceding endpoint and the refusal branch.
+	if prior := encode(history, false); fmt.Sprintf("%x", sha256.Sum256(prior)) != "dc9462f1af05ec13e8fc9c03570c48082fe74b126bb6d0da8597dd4b2689ba62" {
+		panic("reviewed 43-row predecessor changed")
+	}
+	history = appendRetainedJoinSuccessor(rows, history)
+	printReviewedPins()
+	packet := encode(history, false)
+	fmt.Printf("append-only history=%d sha256=%x\n", len(history), sha256.Sum256(packet))
+	if len(os.Args) == 2 && os.Args[1] == "-write" {
+		must(os.WriteFile(root+"recipes.json", encode(rows, true), 0644))
+		must(os.WriteFile(root+"testdata/fixture_setup_successors_2617.json", packet, 0644))
+	}
+}
+
+func appendOriginalSuccessors(rows []recipe, history []successor) []successor {
 	for _, target := range [][2]string{
 		{"internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go", "selectedContractExecutionOwnerForCatalogTest"},
 		{"internal/serveapp/fork_retained_join_test.go", "testServedJoinWriterCompletedHistoryRefusal"},
@@ -82,11 +105,10 @@ func main() {
 			panic("missing/ambiguous reviewed endpoint: " + target[1])
 		}
 	}
-	// #642/6191161328 and 6191625495 append to the prior 39 receipts.
-	prior := encode(history, false)
-	if !bytes.Equal(prior, read(completion, root+"testdata/fixture_setup_successors_2617.json")) {
-		panic("reviewed completion predecessor changed")
-	}
+	return history
+}
+
+func appendCompletionSuccessors(rows []recipe, history []successor) []successor {
 	for _, target := range [][2]string{
 		{"internal/runtime/pipeline/workflow_timer_replay_selected_store_external_test.go", "TestWorkflowTimerCauseReplayReopenAndIsolationBothStores"},
 		{"internal/runtime/runforkexecution/constructed_agent_input_execution_test.go", "proveSelectedConstructedAgentInput"},
@@ -119,11 +141,10 @@ func main() {
 			panic("missing/ambiguous completion endpoint: " + target[1])
 		}
 	}
-	// LIGHT: existing native observation composition under #642/6191161328
-	// and6192796272. Preserve every preceding endpoint and the refusal branch.
-	if prior := encode(history, false); fmt.Sprintf("%x", sha256.Sum256(prior)) != "dc9462f1af05ec13e8fc9c03570c48082fe74b126bb6d0da8597dd4b2689ba62" {
-		panic("reviewed 43-row predecessor changed")
-	}
+	return history
+}
+
+func appendRetainedJoinSuccessor(rows []recipe, history []successor) []successor {
 	matches := 0
 	for i := range rows {
 		row := &rows[i]
@@ -145,6 +166,10 @@ func main() {
 	if matches != 1 {
 		panic("missing/ambiguous native retained join endpoint")
 	}
+	return history
+}
+
+func printReviewedPins() {
 	fmt.Printf("pin requireServedRetainedJoinForkSuccess %x\n", sha256.Sum256([]byte(canonical(body(read(retainedJoinNative, "internal/serveapp/fork_retained_join_test.go"), "requireServedRetainedJoinForkSuccess")))))
 	for _, target := range [][2]string{
 		{"internal/runtime/cataloge2e/tier12_runtime_fork_e2e_test.go", "selectedContractExecutionOwnerForCatalogTestWithReplay"},
@@ -158,12 +183,6 @@ func main() {
 	}
 	const scanFile = "internal/runtime/runforkexecution/constructed_agent_input_execution_test.go"
 	fmt.Printf("pin selectedHistoricalScanProbe.CommitSelectedForkEvent %x\n", sha256.Sum256([]byte(canonical(body(read(completion, scanFile), "selectedHistoricalScanProbe.CommitSelectedForkEvent")))))
-	packet := encode(history, false)
-	fmt.Printf("append-only history=%d sha256=%x\n", len(history), sha256.Sum256(packet))
-	if len(os.Args) == 2 && os.Args[1] == "-write" {
-		must(os.WriteFile(root+"recipes.json", encode(rows, true), 0644))
-		must(os.WriteFile(root+"testdata/fixture_setup_successors_2617.json", packet, 0644))
-	}
 }
 
 // Compose the two independently reviewed receipt chains without rewriting
@@ -197,7 +216,6 @@ func integrate2672() {
 		panic("integration changed a reviewed predecessor")
 	}
 
-	type rowMap = map[string]json.RawMessage
 	var baseRows, laneRows, masterRows []rowMap
 	decode(read(base, root+"recipes.json"), &baseRows)
 	decode(read(lane, root+"recipes.json"), &laneRows)
@@ -205,20 +223,7 @@ func integrate2672() {
 	if len(baseRows) != 893 || len(laneRows) != len(baseRows) || len(masterRows) != len(baseRows) {
 		panic("integration recipe inventory changed")
 	}
-	for i := range baseRows {
-		for _, key := range []string{"Family", "File", "Function", "Before", "After", "Mechanical", "Removed"} {
-			if !reflect.DeepEqual(baseRows[i][key], laneRows[i][key]) || !reflect.DeepEqual(baseRows[i][key], masterRows[i][key]) {
-				panic(fmt.Sprintf("integration changed historical recipe %d/%s", i, key))
-			}
-		}
-		baseSuccessor, laneSuccessor, masterSuccessor := baseRows[i]["Successor"], laneRows[i]["Successor"], masterRows[i]["Successor"]
-		if !reflect.DeepEqual(masterSuccessor, baseSuccessor) {
-			if !reflect.DeepEqual(laneSuccessor, baseSuccessor) && !reflect.DeepEqual(laneSuccessor, masterSuccessor) {
-				panic(fmt.Sprintf("overlapping recipe successor %d", i))
-			}
-			laneRows[i]["Successor"] = masterSuccessor
-		}
-	}
+	mergeReviewedRecipeSuccessors(baseRows, laneRows, masterRows)
 	// Keep the established recipe field order and escaping, rather than the
 	// alphabetical map order used for the three-way validation above.
 	var combinedRows []recipe
@@ -236,6 +241,25 @@ func integrate2672() {
 	data, err := json.Marshal(mechanical)
 	must(err)
 	fmt.Printf("integrated mechanical=%d sha256=%x\n", len(mechanical), sha256.Sum256(data))
+}
+
+type rowMap = map[string]json.RawMessage
+
+func mergeReviewedRecipeSuccessors(baseRows, laneRows, masterRows []rowMap) {
+	for i := range baseRows {
+		for _, key := range []string{"Family", "File", "Function", "Before", "After", "Mechanical", "Removed"} {
+			if !reflect.DeepEqual(baseRows[i][key], laneRows[i][key]) || !reflect.DeepEqual(baseRows[i][key], masterRows[i][key]) {
+				panic(fmt.Sprintf("integration changed historical recipe %d/%s", i, key))
+			}
+		}
+		baseSuccessor, laneSuccessor, masterSuccessor := baseRows[i]["Successor"], laneRows[i]["Successor"], masterRows[i]["Successor"]
+		if !reflect.DeepEqual(masterSuccessor, baseSuccessor) {
+			if !reflect.DeepEqual(laneSuccessor, baseSuccessor) && !reflect.DeepEqual(laneSuccessor, masterSuccessor) {
+				panic(fmt.Sprintf("overlapping recipe successor %d", i))
+			}
+			laneRows[i]["Successor"] = masterSuccessor
+		}
+	}
 }
 
 func read(commit, path string) []byte {

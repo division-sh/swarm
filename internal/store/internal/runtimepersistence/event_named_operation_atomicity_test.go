@@ -314,13 +314,14 @@ func newSelectedForkAtomicityRequest(t *testing.T, ctx context.Context, fixture 
 		selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
 		declarations := emptySelectedDeclarationForTest(t, fixture.db, forkRunID)
 		process := selectedPreparationProcessForTest(t, fixture.store)
+		point := runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: sourceEventID}
 		issued, err := authorityStore.IssueRunForkSelectedContractRuntimeExecution(ctx, runfork.SelectedContractRuntimeExecutionIssueRequest{
 			DeclarationPlan: declarations,
-			Preparation:     selectedPreparationForTest(t, process, sourceRunID, forkRunID, sourceEventID, declarations),
+			Preparation:     selectedPreparationForTest(t, process, sourceRunID, forkRunID, point, declarations),
 			Admission: runfork.RunForkSelectedContractExecutionAdmission{
 				Owner: runfork.RunForkSelectedContractExecutionAdmissionOwner, FutureExecutionOwner: runfork.RunForkSelectedContractExecutionOwner,
 				NonMutating: true, ExecutionSupported: false, ForkRunID: forkRunID, SourceRunID: sourceRunID,
-				ForkPoint: runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, EventID: sourceEventID}, ForkEventID: sourceEventID,
+				ForkPoint: point, ForkEventID: point.EventID,
 				ContractSelection: selection, ContractBindingOwner: runfork.RunForkSelectedContractBindingOwner,
 				AdmissionOwner: "runtime.run_fork.frontier", AdmissionUse: runfork.RunForkSelectedContractExecutionAdmissionUseDurableBinding,
 				ExecutionModelOwner: runfork.RunForkSelectedContractExecutionModelOwner, SourceWorkflowName: "workflow", SourceWorkflowVersion: "v1",

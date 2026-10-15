@@ -81,7 +81,7 @@ func (cut historicalFlowInstanceConstructionCut) admit(source semanticview.Sourc
 }
 
 func readHistoricalFlowInstanceConstructionEvidenceTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instance pipeline.WorkflowInstance) (construction pipeline.HistoricalFlowInstanceConstruction, found bool, finalErr error) {
-	done, err := beginHistoricalPlanningRead(ctx, tx, nil, run)
+	ctx, done, err := beginHistoricalEvidenceRead(ctx, tx, run)
 	if err != nil {
 		return construction, false, err
 	}
@@ -188,7 +188,7 @@ func historicalFlowInstanceConstructionCutForHeader(ctx context.Context, run run
 }
 
 func readHistoricalFlowInstanceConstructionEvidenceBatchTx(ctx context.Context, tx *sql.Tx, run runlifecycle.Snapshot, instances []pipeline.WorkflowInstance) (results []pipelinepersistence.HistoricalFlowInstanceConstructionResult, finalErr error) {
-	done, err := beginHistoricalPlanningRead(ctx, tx, nil, run)
+	ctx, done, err := beginHistoricalEvidenceRead(ctx, tx, run)
 	if err != nil {
 		return nil, err
 	}
@@ -400,13 +400,14 @@ func readProjectedReceiverConstructionReceiptTx(ctx context.Context, tx *sql.Tx,
 	if err != nil {
 		return pipeline.FlowConstructionReceipt{}, false, err
 	}
-	var present bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM workflow_instance_initial_materializations
-		WHERE run_id=$1 AND instance_path=$2)`, run.RunID, header.StorageRef).Scan(&present); err != nil {
-		return pipeline.FlowConstructionReceipt{}, false, fmt.Errorf("inspect projected construction receipt: %w", err)
+	physical, present, err := pipelinepersistence.ReadStoredFlowConstructionReceiptTx(ctx, tx, run.RunID, header)
+	if err != nil {
+		return pipeline.FlowConstructionReceipt{}, false, err
 	}
 	if present {
-		return pipeline.FlowConstructionReceipt{}, false, fmt.Errorf("receiver has conflicting native and historical construction evidence")
+		if err := pipeline.ValidateProjectedFlowConstructionReceipt(physical, expected); err != nil {
+			return pipeline.FlowConstructionReceipt{}, false, &pipeline.FlowInstanceConstructionCorruption{RunID: run.RunID, FlowID: header.WorkflowName, InstancePath: header.StorageRef, Cause: err}
+		}
 	}
 	return expected, true, nil
 }

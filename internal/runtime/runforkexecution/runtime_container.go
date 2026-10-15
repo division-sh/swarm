@@ -981,24 +981,9 @@ func validateSelectedDeploymentFeedAgreement(plan runfork.RunForkPlan, feeds []f
 	if err != nil {
 		return err
 	}
-	expected := make(map[durabledata.DeclarationRef]durabledata.PinnedSource, len(pins))
-	for _, pin := range pins {
-		if err := pin.Declaration.Validate(); err != nil {
-			return err
-		}
-		if err := pin.VersionID.Validate(); err != nil {
-			return err
-		}
-		if err := pin.SchemaDigest.Validate(); err != nil {
-			return err
-		}
-		if pin.RowCount < 0 {
-			return errors.New("selected deployment pin has negative cardinality")
-		}
-		if _, duplicate := expected[pin.Declaration]; duplicate {
-			return errors.New("selected deployment has duplicate child pins")
-		}
-		expected[pin.Declaration] = pin
+	expected, err := selectedDeploymentChildPins(pins)
+	if err != nil {
+		return err
 	}
 	for declaration := range inherited {
 		if _, present := expected[declaration]; !present {
@@ -1035,6 +1020,29 @@ func validateSelectedDeploymentFeedAgreement(plan runfork.RunForkPlan, feeds []f
 		seen[declaration] = struct{}{}
 	}
 	return nil
+}
+
+func selectedDeploymentChildPins(pins []durabledata.PinnedSource) (map[durabledata.DeclarationRef]durabledata.PinnedSource, error) {
+	expected := make(map[durabledata.DeclarationRef]durabledata.PinnedSource, len(pins))
+	for _, pin := range pins {
+		if err := pin.Declaration.Validate(); err != nil {
+			return nil, err
+		}
+		if err := pin.VersionID.Validate(); err != nil {
+			return nil, err
+		}
+		if err := pin.SchemaDigest.Validate(); err != nil {
+			return nil, err
+		}
+		if pin.RowCount < 0 {
+			return nil, errors.New("selected deployment pin has negative cardinality")
+		}
+		if _, duplicate := expected[pin.Declaration]; duplicate {
+			return nil, errors.New("selected deployment has duplicate child pins")
+		}
+		expected[pin.Declaration] = pin
+	}
+	return expected, nil
 }
 
 func selectedDeploymentSourceDeclarations(plan runfork.RunForkPlan) (map[durabledata.DeclarationRef]struct{}, error) {

@@ -28,7 +28,8 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			}
 			forkRuntime := captureServedForkRuntimeOptions(t)
 			publication := newExactOriginPublicationProbe(t)
-			_, rt := startServedBoundaryFixture(t, nativeBackend, canonicalrouting.CopyExample(t, canonicalrouting.RootIngress))
+			start := newServedBoundaryFixtureLifetime(t, nativeBackend, canonicalrouting.CopyExample(t, canonicalrouting.RootIngress))
+			process, rt := start()
 			selected := rt.Selected
 			deliveries := selected.RuntimeDeps().DeliveryStore.SummarizeRun
 			var started struct {
@@ -166,6 +167,65 @@ func TestIssue642OriginalStartFirstTurnExecutesBothStores(t *testing.T) {
 			}
 			if !reflect.DeepEqual(before, after) {
 				t.Fatal("selected first turn changed original source execution/history")
+			}
+			if code := process.stop(); code != 0 {
+				t.Fatalf("join original process before reopening: exit=%d\n%s", code, process.outputString())
+			}
+			_, reopened := start()
+			if reopened.Selected == selected || reopened.Runtime == rt.Runtime {
+				t.Fatal("reopen retained the original native owner/runtime")
+			}
+			rt = reopened
+			freshContext := servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash)
+			freshFamily, ok := rt.Selected.RunFork()
+			if !ok {
+				t.Fatal("reopened native process lacks the selected fork family")
+			}
+			freshBaseline := rt.Runtime.Options.ProcessWorkOwner.ActiveCount()
+			persisted, found, err := freshFamily.Operations().LoadForkOperationByID(freshContext, operation.OperationID)
+			if err != nil || !found || !reflect.DeepEqual(persisted, ack) {
+				t.Fatalf("reopened process changed the immutable original-start ACK: %+v found=%t error=%v", persisted, found, err)
+			}
+			reopenedRequest := request
+			reopenedRequest.AgentRuntime = *forkRuntime
+			reopenedRequest.SourceLoader = runforkexecution.SourceArtifactSelectedContractSourceLoader{
+				RepoRoot: repoRootForTest(), PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath), Store: rt.Selected.SourceArtifactStore(),
+			}
+			coldReplay, err := freshFamily.Execute(freshContext, reopenedRequest)
+			if err != nil || !reflect.DeepEqual(coldReplay, replay) || coldReplay.Materialization.ForkRunID != persisted.ForkRunID {
+				t.Fatalf("cold original-start replay did not consume its original ACK: %+v error=%v", coldReplay, err)
+			}
+			coldTamper := reopenedRequest
+			coldTamper.ForkOperation = &tamperedOperation
+			coldTamper.AllowSourceFreeze = tamperedOperation.AllowSourceFreeze
+			if _, err := freshFamily.Execute(freshContext, coldTamper); err == nil || !strings.Contains(err.Error(), "original invocation semantics") {
+				t.Fatalf("reopened process admitted changed operation semantics or hit the wrong refusal: %v", err)
+			}
+			requireServedRunStatus(t, rt.Endpoint, persisted.ForkRunID, "completed")
+			_, restoredHeader := requireReceiverTargetState(t, rt.ReceiverStateReader, persisted.ForkRunID, ".", persisted.ForkRunID, persisted.ForkRunID)
+			if !reflect.DeepEqual(restoredHeader, childHeader) {
+				t.Fatalf("cold replay changed the exact completed receiver: before=%+v after=%+v", childHeader, restoredHeader)
+			}
+			coldEvents, err := rt.Selected.Observability().ListOperatorEvents(freshContext, operatorread.OperatorEventListOptions{
+				Filter: operatorread.OperatorEventListFilter{RunID: persisted.ForkRunID}, Limit: 10, ExcludeRuntimeLogs: true,
+			})
+			if err != nil || !reflect.DeepEqual(coldEvents, page) {
+				t.Fatalf("cold replay changed exact events, lineage or settled claims: %+v error=%v", coldEvents, err)
+			}
+			persistedAfter, found, err := freshFamily.Operations().LoadForkOperationByID(freshContext, operation.OperationID)
+			if err != nil || !found || !reflect.DeepEqual(persistedAfter, ack) {
+				t.Fatalf("cold replay/tamper changed its durable ACK: %+v error=%v", persistedAfter, err)
+			}
+			coldChild, err := storetest.ReadSelectedForkSourceDomain(freshContext, rt.Selected.RuntimeDeps().DeliveryStore, persisted.ForkRunID)
+			if err != nil || !reflect.DeepEqual(coldChild, childBefore) {
+				t.Fatalf("cold replay/tamper changed the completed child domain: %v", err)
+			}
+			coldSource, err := storetest.ReadSelectedForkSourceDomain(freshContext, rt.Selected.RuntimeDeps().DeliveryStore, started.RunID)
+			if err != nil || !reflect.DeepEqual(coldSource, before) {
+				t.Fatalf("cold replay/tamper changed the original source domain: %v", err)
+			}
+			if rt.Runtime.Options.ProcessWorkOwner.ActiveCount() != freshBaseline {
+				t.Fatal("cold ACK replay/tamper retained new runtime work")
 			}
 		})
 	}
