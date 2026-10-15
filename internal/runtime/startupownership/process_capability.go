@@ -162,6 +162,7 @@ type processCapability struct {
 	monitorDeadline time.Duration
 
 	agentRecoverySeed          *agentRecoverySeed
+	agentRecoveryWrites        *AgentRecoveryWriteObserver
 	agentRecoverySeedProbe     atomic.Pointer[AgentRecoverySeedFaultProbeForTest]
 	agentRecoverySeedFaultUsed atomic.Bool
 }
@@ -199,6 +200,11 @@ func newProcessCapability(session RetainedSession, cadence, deadline time.Durati
 	}
 	if err := session.InstallTerminalOwner(p, deadline); err != nil {
 		return nil, err
+	}
+	if owner, ok := session.(agentRecoveryWriteObserverOwner); ok {
+		if err := owner.AgentRecoveryWriteObserver().bindProcess(p); err != nil {
+			return nil, err
+		}
 	}
 	p.startPossessionMonitor()
 	return p, nil

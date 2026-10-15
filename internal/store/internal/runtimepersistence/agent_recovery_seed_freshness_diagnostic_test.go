@@ -12,21 +12,21 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/startuprecovery"
 )
 
-// This diagnostic preserves the freshness gap, not a capacity decision. No
-// native seed bytes, slots, provider attempts or production consumers escape.
-func TestAgentRecoverySeedDoesNotJoinLaterClaimOrSettlementBothStores(t *testing.T) {
+// The original gap is preserved at fe4db94f3d. These fixed-contract cuts prove
+// private observation revocation/reconstruction, not a capacity decision.
+func TestAgentRecoverySeedRevokesAcrossClaimAndSettlementBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, mutation := range []string{"claim", "settlement"} {
 			for _, cut := range []string{"read", "publication", "installed"} {
 				t.Run(backend+"/"+mutation+"/"+cut, func(t *testing.T) {
-					proveAgentRecoverySeedFreshnessGap(t, backend, mutation, cut)
+					proveAgentRecoverySeedFreshness(t, backend, mutation, cut)
 				})
 			}
 		}
 	}
 }
 
-func proveAgentRecoverySeedFreshnessGap(t *testing.T, backend, mutation, cut string) {
+func proveAgentRecoverySeedFreshness(t *testing.T, backend, mutation, cut string) {
 	t.Helper()
 	f := newAgentClaimProfileFixture(t, backend)
 	_, first, profile := f.claim(t)
@@ -107,9 +107,14 @@ func proveAgentRecoverySeedFreshnessGap(t *testing.T, backend, mutation, cut str
 		unblock()
 		err := <-seeded
 		joined = true
-		if err != nil {
-			t.Fatalf("held seed did not install after accepted writer: %v", err)
+		if err == nil || !strings.Contains(err.Error(), "complete fresh reconstruction") {
+			t.Fatalf("held seed did not refuse stale publication after accepted writer: %v", err)
 		}
+	}
+	// No grant/source operation runs here: those deliberately retain their
+	// established locking transaction. Only the named writer may revoke this seed.
+	if err := startupownership.SeedAgentRecovery(f.ctx, process); err != nil {
+		t.Fatalf("accepted writer did not permit explicit complete reconstruction: %v", err)
 	}
 	current, err := startuprecovery.InspectAgentRecoveryOccupancyCandidate(f.ctx, f.store.(startuprecovery.AgentRecoveryReader))
 	if err != nil || current.Image.Process.Authority == nil || current.Image.Process.Possession != nil ||
@@ -118,9 +123,11 @@ func proveAgentRecoverySeedFreshnessGap(t *testing.T, backend, mutation, cut str
 		*current.Image.Process.Authority != *old.Image.Process.Authority {
 		t.Fatalf("same live process/source has wrong post-writer occupancy: %+v err=%v", current, err)
 	}
-	assertAgentRecoveryCandidateOwner(t, current, process, grant)
+	if err := process.ProveCurrent(f.ctx); err != nil {
+		t.Fatalf("freshness refusal or read-only inspection lost native possession: %v", err)
+	}
 	if err := startupownership.SeedAgentRecovery(f.ctx, process); err == nil || !strings.Contains(err.Error(), "already installed") {
-		t.Fatalf("accepted writer revoked/reconstructed the installed seed: %v", err)
+		t.Fatalf("read-only inspection/proof revoked the newly reconstructed seed: %v", err)
 	}
 	if !reflect.DeepEqual(old.InProgressByProfile, map[string]int{profile.ProfileID: wantBefore}) {
 		t.Fatal("original complete observation was mutated rather than replaced")
@@ -129,5 +136,5 @@ func proveAgentRecoverySeedFreshnessGap(t *testing.T, backend, mutation, cut str
 	if after := profileFixtureSnapshot(t, f); !reflect.DeepEqual(written, after) {
 		t.Fatal("seed completion, duplicate refusal or fresh reconstruction changed complete writer storage")
 	}
-	t.Logf("diagnostic: %s ACK during seed %s; same native process and complete source plan, old count=%d current count=%d; private seed remains installed, native seed bytes UNOBSERVED; no provider attempt or slot/capacity decision", mutation, cut, wantBefore, wantAfter)
+	t.Logf("fixed private freshness: %s ACK during seed %s revoked/refused the earlier observation, explicit reconstruction succeeds once; same native process/source, old count=%d current count=%d; native seed bytes UNOBSERVED; no provider attempt or slot/capacity decision", mutation, cut, wantBefore, wantAfter)
 }
