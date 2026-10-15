@@ -16,6 +16,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
 	"github.com/division-sh/swarm/internal/runtime/core/forkrecipient"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
@@ -420,8 +421,8 @@ func ValidateFanOutPendingReplayAdmission(plan RunForkPlan) error {
 					}
 					matches++
 					if pending.EventID != candidate.SourceEventID || pending.Classification != RunForkPendingClassificationPending ||
-						pending.Status != "pending" || pending.RetryCount != 0 || pending.ActiveSessionID != "" ||
-						pending.StartedAt != nil || pending.DeliveredAt != nil || pending.ReceiptAt != nil ||
+						pending.Status != "pending" || pending.RetryCount != 0 || pending.SourceExecution.SessionBound ||
+						pending.SourceExecution.Started || pending.SourceExecution.InProgress || pending.DeliveredAt != nil || pending.ReceiptAt != nil ||
 						pending.RoutingSource.Kind() != events.RoutingSourceDeploymentFeed {
 						return fmt.Errorf("fork deployment delivery %s contradicts fixed pending phase", deliveryID)
 					}
@@ -544,26 +545,26 @@ type RunForkEntityState struct {
 }
 
 type RunForkPendingWork struct {
-	TerminalBarrierHistory *TerminalBarrierHistory `json:"terminal_barrier_history,omitempty"`
-	ClaimVersion           int64                   `json:"claim_version,omitempty"`
-	EventID                string                  `json:"event_id"`
-	EventName              string                  `json:"event_name"`
-	FlowInstance           string                  `json:"flow_instance,omitempty"`
-	RoutingSource          events.RoutingSource    `json:"routing_source"`
-	DeliveryRoute          events.DeliveryRoute    `json:"delivery_route,omitempty"`
-	DeliveryID             string                  `json:"delivery_id,omitempty"`
-	SubscriberType         string                  `json:"subscriber_type,omitempty"`
-	SubscriberID           string                  `json:"subscriber_id,omitempty"`
-	Classification         string                  `json:"classification"`
-	Status                 string                  `json:"status,omitempty"`
-	RetryCount             int                     `json:"retry_count,omitempty"`
-	ReasonCode             string                  `json:"reason_code,omitempty"`
-	ActiveSessionID        string                  `json:"active_session_id,omitempty"`
-	CreatedAt              time.Time               `json:"created_at"`
-	StartedAt              *time.Time              `json:"started_at,omitempty"`
-	DeliveredAt            *time.Time              `json:"delivered_at,omitempty"`
-	ReceiptOutcome         string                  `json:"receipt_outcome,omitempty"`
-	ReceiptAt              *time.Time              `json:"receipt_at,omitempty"`
+	TerminalBarrierHistory *TerminalBarrierHistory                   `json:"terminal_barrier_history,omitempty"`
+	ClaimVersion           int64                                     `json:"claim_version,omitempty"`
+	EventID                string                                    `json:"event_id"`
+	EventName              string                                    `json:"event_name"`
+	FlowInstance           string                                    `json:"flow_instance,omitempty"`
+	RoutingSource          events.RoutingSource                      `json:"routing_source"`
+	DeliveryRoute          events.DeliveryRoute                      `json:"delivery_route,omitempty"`
+	DeliveryID             string                                    `json:"delivery_id,omitempty"`
+	SubscriberType         string                                    `json:"subscriber_type,omitempty"`
+	SubscriberID           string                                    `json:"subscriber_id,omitempty"`
+	Classification         string                                    `json:"classification"`
+	Status                 string                                    `json:"status,omitempty"`
+	RetryCount             int                                       `json:"retry_count,omitempty"`
+	ReasonCode             string                                    `json:"reason_code,omitempty"`
+	SourceExecution        deliverylifecycle.SourceExecutionAtCut    `json:"source_execution_at_cut"`
+	RetryDecision          *deliverylifecycle.CommittedRetryDecision `json:"retry_decision,omitempty"`
+	CreatedAt              time.Time                                 `json:"created_at"`
+	DeliveredAt            *time.Time                                `json:"delivered_at,omitempty"`
+	ReceiptOutcome         string                                    `json:"receipt_outcome,omitempty"`
+	ReceiptAt              *time.Time                                `json:"receipt_at,omitempty"`
 }
 
 type RunForkUnsupportedBlocker struct {
@@ -652,8 +653,9 @@ func RunForkPendingWorkReplayableForHistoricalReplay(item RunForkPendingWork) bo
 	}
 	return strings.TrimSpace(item.Status) == "pending" &&
 		item.RetryCount == 0 &&
-		strings.TrimSpace(item.ActiveSessionID) == "" &&
-		item.StartedAt == nil &&
+		!item.SourceExecution.SessionBound &&
+		!item.SourceExecution.Started &&
+		!item.SourceExecution.InProgress &&
 		item.DeliveredAt == nil &&
 		item.ReceiptAt == nil
 }

@@ -371,7 +371,7 @@ func decodeRunForkMutationValue(raw json.RawMessage) (any, error) {
 
 func runForkPendingReferencesActiveSession(pending []runfork.RunForkPendingWork) bool {
 	for _, item := range pending {
-		if strings.TrimSpace(item.ActiveSessionID) != "" {
+		if item.SourceExecution.SessionBound {
 			return true
 		}
 	}

@@ -1668,10 +1668,8 @@ func TestRunForkDeliveryEventReplayValidationRejectsUnsafeCurrentEvidence(t *tes
 		{
 			name: "in-progress",
 			mutate: func(item *runfork.RunForkPendingWork) {
-				started := item.CreatedAt
 				item.Status = "in_progress"
-				item.ActiveSessionID = uuid.NewString()
-				item.StartedAt = &started
+				item.SourceExecution = runtimedelivery.SourceExecutionAtCut{InProgress: true, Started: true, SessionBound: true}
 				item.Classification = runfork.RunForkPendingClassificationInProgress
 			},
 		},
