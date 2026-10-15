@@ -122,8 +122,11 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 				if err := bus.PublishAcknowledged(ctx, event); err != nil {
 					t.Fatal(err)
 				}
+				t.Logf("Q10-CAS-PHASE publish=%s event=%s acknowledged=%s", name, event.ID(), time.Now().UTC().Format(time.RFC3339Nano))
 				wait, cancel := context.WithTimeout(ctx, 5*time.Second)
 				defer cancel()
+				deadline, _ := wait.Deadline()
+				t.Logf("Q10-CAS-PHASE publish=%s event=%s wait_started=%s deadline=%s", name, event.ID(), time.Now().UTC().Format(time.RFC3339Nano), deadline.UTC().Format(time.RFC3339Nano))
 				if err := bus.WaitForQuiescence(wait); err != nil {
 					t.Fatal(err)
 				}

@@ -50,8 +50,8 @@ func (g *gate) reportM25LeaseTraces(transientOnly bool) {
 		if end.IsZero() {
 			end = now
 		}
-		fmt.Fprintf(&out, "M25-LEASE gate=%p id=%d acquired=%s settled=%t elapsed=%s public=%t acquire=%s settle=%s\n",
-			g, index+1, trace.started.UTC().Format(time.RFC3339Nano), !trace.finished.IsZero(), end.Sub(trace.started), trace.public, trace.acquire, trace.settle)
+		fmt.Fprintf(&out, "M25-LEASE gate=%p id=%d acquired=%s settled=%t finished=%s observed=%s elapsed=%s public=%t acquire=%s settle=%s\n",
+			g, index+1, trace.started.UTC().Format(time.RFC3339Nano), !trace.finished.IsZero(), trace.finished.UTC().Format(time.RFC3339Nano), now.UTC().Format(time.RFC3339Nano), end.Sub(trace.started), trace.public, trace.acquire, trace.settle)
 	}
 	g.mu.Unlock()
 	fmt.Fprint(os.Stderr, out.String())
