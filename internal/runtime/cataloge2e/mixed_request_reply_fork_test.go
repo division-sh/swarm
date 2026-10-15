@@ -157,7 +157,8 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 				owner = selectedContractExecutionOwnerForCatalogHarness(t, h)
 			}
 			options := selectedContractAgentRuntimeOptionsForCatalogHarness(h, testRuntimeConfig())
-			staged := stageCatalogSelectedContractFork(t, h.ctx, selected, owner, loader, selection, options, catalogRuntimeRunID, cut)
+			operation := catalogStagedForkOperation(t, h.ctx, selected, selection, catalogRuntimeRunID, cut)
+			staged := stageCatalogSelectedContractFork(t, h.ctx, selected, owner, loader, selection, options, catalogRuntimeRunID, cut, operation)
 			childRows, err := storetest.ReadReplyContextRecords(h.ctx, selected, staged.ForkRunID)
 			if err != nil || len(childRows) != 1 || childRows[0].State != wantReplyState || childRows[0].SourceRunID != catalogRuntimeRunID || childRows[0].SourceRequestEventID != requestID || childRows[0].ID == sourceRows[0].ID {
 				t.Fatalf("mixed request staging did not retain its exact own context: %+v error=%v", childRows, err)
@@ -169,7 +170,7 @@ func runMixedRequestWholePublicationWithResponseObserver(t *testing.T, settledPr
 				}
 			})
 			executed, err := runforkexecution.ExecuteSelectedContractRunFork(h.ctx, runforkexecution.SelectedContractExecutionRequest{
-				SourceRunID: catalogRuntimeRunID, At: cut, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
+				SourceRunID: catalogRuntimeRunID, At: cut, ForkOperation: &operation, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader, ContractSelection: selection, AgentRuntime: options,
 			})
 			if err != nil || !executed.Activation.Activated || executed.Materialization.ForkRunID != staged.ForkRunID {
 				t.Fatalf("activate complete mixed request publication: %+v error=%v", executed.Activation, err)
