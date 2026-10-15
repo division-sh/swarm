@@ -21,7 +21,6 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -141,7 +140,7 @@ ack: {mode: durable_before_dispatch}
 			}
 			eventBus, err := newStoreTestEventBus(t, store, runtimebus.EventBusOptions{
 				SourceArtifactFact: candidate.Source,
-				ContractBundle:     whatsappPublicationComponentSource(t),
+				ContractBundle:     whatsappPublicationComponentSource(t, ctx, store, candidate.Source),
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -223,15 +222,20 @@ ack: {mode: durable_before_dispatch}
 	}
 }
 
-func whatsappPublicationComponentSource(t *testing.T) semanticview.Source {
+func whatsappPublicationComponentSource(t *testing.T, ctx context.Context, store inboundPublicationProofStore, fact runtimecorrelation.SourceArtifactFact) semanticview.Source {
 	t.Helper()
-	root := &runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: ".", SchemaFile: "schema.yaml"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"inbound.whatsapp.message": {Payload: runtimecontracts.EventPayloadSpec{Type: "object"}}}}
-	bundle := &runtimecontracts.WorkflowContractBundle{RootSchema: &root.Schema,
-		FlowSources: map[string]runtimecontracts.FlowSource{".": {FlowPath: ".", Schema: "schema.yaml"}},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{".": root.Schema},
-		FlowTree:    flowmodel.Tree[runtimecontracts.FlowContractView]{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{".": root}, ByPath: map[string]*runtimecontracts.FlowContractView{".": root}}}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+	persisted, err := store.GetSourceArtifact(ctx, fact.BundleHash())
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact, err := persisted.Decode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := runtimepipeline.WorkflowRepoRoot()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact,
+		runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
 		t.Fatal(err)
 	}
 	return semanticviewtest.WithProviderIngress(semanticview.Wrap(bundle), map[string][]string{".": {"inbound.whatsapp.message"}})

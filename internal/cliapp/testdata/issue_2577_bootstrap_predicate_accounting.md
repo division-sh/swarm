@@ -48,6 +48,18 @@ The only provider test adapters affected by those retired interfaces are
 interfaces. The reconstruction probe copies every surviving exported field;
 its original generic/API/fan-out refusals and event-conservation checks remain.
 
+The first integrated execution exposed a second stale fixture premise: the
+handwritten semantic bundles had no admitted artifact, while their selected
+contexts did. `sessionBusinessSemanticFixture` now compiles its existing exact
+default artifact through `LoadWorkflowContractBundleFromArtifact`.
+`whatsappPublicationComponentSource` reads, decodes and compiles its original
+selected artifact through the same owner. Neither attaches a requested hash to
+handwritten semantics or changes persisted source identity. The real compiler's
+structural root and static declarations are retained. Provider-declaration
+overlays remain explicit isolated component inputs, not source-loading proof.
+`TestSessionPublicationFixtureUsesItsAdmittedArtifact` checks the canonical
+lookup boundary positively and rejects a foreign artifact.
+
 Affected execution witnesses are the original
 `TestPrepareInboundDeliveryBatch*`,
 `TestProviderRawSettlementAdmissionRequiresCompleteInboundAuthority`,
