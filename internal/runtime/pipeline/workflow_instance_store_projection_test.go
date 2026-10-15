@@ -54,10 +54,10 @@ func TestWorkflowInstanceReadRejectsUnexpectedFieldRow(t *testing.T) {
 		t.Fatalf("valid paired record rejected: %v", err)
 	}
 	for _, tc := range []struct{ domain, want string }{
-		{"fields", "entity_state.fields must be a JSON object"},
-		{"bookkeeping", "flow_instances.bookkeeping must be a JSON object"},
-		{"gates", "flow_instances.gates must be an object of booleans"},
-		{"accumulator", "flow_instances.accumulator must be a JSON object"},
+		{"fields", "entity_state.fields must be a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}"},
+		{"bookkeeping", "flow_instances.bookkeeping must be a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}"},
+		{"gates", "flow_instances.gates must be an object of booleans: json: cannot unmarshal array into Go value of type map[string]bool"},
+		{"accumulator", "flow_instances.accumulator must be a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}"},
 	} {
 		t.Run(tc.domain, func(t *testing.T) {
 			invalid := record
