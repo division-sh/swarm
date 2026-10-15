@@ -414,8 +414,10 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 								t.Fatal(err)
 							}
 							// Corrupt only historical evidence beneath a later valid live projection.
+							var duplicateFactKey string
 							if strings.HasPrefix(invalid, "duplicate") || duplicateImport {
 								key := uuid.NewString()
+								duplicateFactKey = key
 								_, err = f.db.ExecContext(f.ctx, `INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) VALUES ($1,$2,'entity_metadata',$3,$4,TRUE)`, f.runID, revision, key, string(encoded))
 								if err == nil {
 									_, err = f.db.ExecContext(f.ctx, `INSERT INTO run_fork_fact_revisions (run_id,revision,family,fact_key,fact,present) VALUES ($1,$2,'entity_metadata',$3,'{}',FALSE)`, f.runID, latest.ForkPoint.Revision, key)
@@ -486,9 +488,9 @@ func TestRunForkSnapshotOwnershipInvalidMetadataBothStores(t *testing.T) {
 							}
 							if duplicateImport {
 								for _, refusal := range []error{planErr, materializeErr} {
-									blocker, fact, ok := runForkReplayResumeBlockerFromError(refusal)
-									if !ok || blocker.Code != runfork.RunForkBlockerEntitySnapshotMetadataUnproven || fact != runfork.RunForkReplayResumeFactEntityStateSnapshot || !strings.Contains(refusal.Error(), fmt.Sprintf("duplicate snapshot metadata entity owner %q", metadataEntityID)) {
-										t.Fatalf("duplicate empty-import birth lost exact fixed-cut ownership refusal: %v", refusal)
+									want := fmt.Sprintf("run fork historical entity_metadata fact key %q disagrees with body identity %q", duplicateFactKey, metadataEntityID)
+									if refusal == nil || refusal.Error() != want {
+										t.Fatalf("duplicate empty-import birth lost exact native fact-owner refusal: got=%v want=%s", refusal, want)
 									}
 								}
 							}
