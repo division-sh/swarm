@@ -963,8 +963,9 @@ func loadSourceSetModeTx(ctx context.Context, tx *sql.Tx, sqlite, lock bool) (ru
 		query += ` FOR SHARE`
 	}
 	var plan runtimeagenttopology.SourceSetPlan
+	var storedRevision string
 	var raw []byte
-	if err := tx.QueryRowContext(ctx, query).Scan(&plan.Revision, &raw); err != nil {
+	if err := tx.QueryRowContext(ctx, query).Scan(&storedRevision, &raw); err != nil {
 		if err == sql.ErrNoRows {
 			return runtimeagenttopology.SourceSetPlan{}, false, nil
 		}
@@ -975,6 +976,9 @@ func loadSourceSetModeTx(ctx context.Context, tx *sql.Tx, sqlite, lock bool) (ru
 	}
 	if err := plan.Validate(); err != nil {
 		return runtimeagenttopology.SourceSetPlan{}, false, err
+	}
+	if plan.Revision != storedRevision {
+		return runtimeagenttopology.SourceSetPlan{}, false, errors.New("agent topology source-set stored revision differs from decoded plan")
 	}
 	return plan, true, nil
 }
