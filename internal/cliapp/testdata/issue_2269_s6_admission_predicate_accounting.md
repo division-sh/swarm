@@ -103,3 +103,37 @@ labels. The
 recovery/process, declaration, readiness, startup sequencing and every other
 owner/caller stay unchanged. These witnesses are not S6 qualification or
 permission to connect the dispatcher, occupancy or runtime recovery.
+
+## Private Retained Recovery Read (A19/A20/A28, P18/P19/P24)
+
+Bounded gate #2269/6190014170 and reservation #2542/6190280510 retain the
+original process capability/session as the sole possession owner. The
+native-interruption proof is authorized separately at #2542/6190548200.
+The unchanged whole-file census measures two affected bodies; neither adds a
+boot caller, provider attempt, slot result, schema preparation or admission
+fallback. A19 is still read-only selected-store/schema observation; A20 still
+requires native possession plus exact generation; A28 still distinguishes
+typed read availability from complete execution authority.
+
+| Measured body | Actual owner and direct consumers | Preserved execution proof |
+| --- | --- | --- |
+| `postgres.(*Backend).NewSessionAuthority` | Existing native session constructor now retains its immutable selected Backend identity, alongside the pre-existing transaction-test slot. Its unchanged production callers are `PipelinePostgresOwner.reservePostgresPipelineClaimConnection`, `conversationForkStore.runPostgresMutation`, and `Backend.observePossessionNative`. Each keeps its original native connection, transaction, cancellation, release/discard and lock owner. `AcquireAdvisoryLockLeaseWith` records the same identity at its existing separate constructor; no caller receives new authority. | Existing native possession observation, retained-session cancellation/exit and inspection escape controls still exercise their original owners. The new both-store native seed interruption and foreign/borrowed/closed-scope controls execute the immutable backend association; neither borrowed nor foreign inspection can acquire a recovery seed. |
+| `postgres.(*Backend).InspectRetainedAgentRecovery` | One fixed retained-recovery aperture, solely consumed by `startupownership.postgresSession.ReadAgentRecoverySeed`. It reuses the original lease's `ProveCurrentWithRead` transaction and the unchanged private `inspectTransaction` binding. It refuses nil, closed, foreign and caller-supplied scopes; no SQL transaction escapes. Existing standalone `InspectSnapshot` and all public verify/schema callers are unchanged. | `TestAgentRecoverySeedNativeReadBothStores`, `TestAgentRecoverySeedRefusesBorrowedInspectionBothStores`, `TestAgentRecoverySeedMalformedMemberDoesNotFenceBothStores`, `TestAgentRecoverySeedSourceRefusalCanRecoverBothStores`, and the held release/takeover, cancellation and native-interruption roots prove one same-cut complete read, joined native cleanup, zero partial seed, domain/native error separation, and original terminal fencing. |
+
+P18 additionally retains the actual public fresh SQLite/PostgreSQL verify
+observations and `TestAdmissionInspectionRealReadScopeBothStores`: inspection
+does not acquire process authority or repair schema. P19 keeps the original
+native-generation monitor and exact-session/SQLite-proof controls. P24 keeps
+`TestInspectionNativeReadCancellationJoinsTransactionAndDisposes`, native
+possession failure/cancellation controls, public observation failure/deadline
+controls, and all three `TestAdmissionPredicateRatchetRejects*` hostile mutants.
+The seed's domain error is retained separately while the same-cut native tail
+proof and settlement still execute; actual read/commit/close/cancel errors are
+returned, not hidden or converted into free capacity.
+
+Regenerate only through `SWARM_UPDATE_ADMISSION_PREDICATE_CENSUS=1`; expected
+delta is the constructor hash plus one retained-inspection body under the
+original whole-file classifications. Preserve every prior owner/row/proof and
+the source-currentness and hostile controls. Generation supplies no execution
+credit. Exact source-bound receipts belong in the checkpoint audit. No boot,
+dispatcher, slot, accepted-tail or global DC-3 gate is opened by this accounting.
