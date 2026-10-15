@@ -1,5 +1,24 @@
 # Native delivery lifecycle and startup recovery: proof audit
 
+## Reviewed credit disposition
+
+Reviewer-b6190199609 accepts a525874ba4 for separable local stacking with
+**103 findings /76 raw credited**, not the historical124/90 proposal below.
+The exclusive standing chain is HELD21/14 (root10/7, attempt-history helper7/5,
+retry helper4/2); the shared expiry helper is not reserved again. Poison remains
+HELD10/6. Together with prior163/135, the total hold is194/155. Physical remaining
+is4177/2400; qualification-adjusted remaining is **4371/2555**. Cumulative
+accepted removals are2262/1867. Keep the physical downward baseline unchanged.
+
+The two older preservation roots are pre-batch integration defects, not waived
+guards; they require finite composition repair before landing. The two runtime
+holds remain UNCLASSIFIED. Any bounded diagnostic and authorized preservation
+repair is folded into the next combined checkpoint, with no separate repair
+round, timeout change or credit based solely on a passing diagnostic.
+The original proposed split below is retained as the historical checkpoint,
+not current accepted accounting. No outbox implementation starts before its
+separate upfront approval.
+
 Track: FULL. Binding scope: #2542 comment6188925293; pre-implementation
 record comment6188797108 and issue-2542-delivery-recovery-upfront.md.
 Accepted code predecessor: 3bb704336cdbce8e70a17e0190de6b96b453707a.
