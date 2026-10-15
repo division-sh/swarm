@@ -2,7 +2,6 @@ package runforkexecution
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -136,7 +135,7 @@ func (s selectedActivityCrashPostgresPublication) CommitPublication(ctx context.
 	return result, err
 }
 
-func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected any, owner SelectedContractExecutionOwner, capability startupownership.ProcessCapability) {
+func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, selected any, owner SelectedContractExecutionOwner, capability startupownership.ProcessCapability) {
 	t.Helper()
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -153,10 +152,6 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, bac
 		effectClass, forkPolicy, wantCalls = contracts.ActivityEffectClassReadOnly, contracts.ActivityForkReexecuteRead, 1
 	}
 	loaded := selectedContractActivityDeclaredSourceWithResultConsumer(t, server.URL, effectClass, selection, advanced)
-	fixture := activityForkFixture{db: activityForkFixtureDB{DB: db, sqlite: backend == "sqlite"}, owner: owner}
-	if native, ok := selected.(*store.SQLiteRuntimeStore); ok {
-		fixture.sqlite = native
-	}
 	sourceRun, initiatingID, entityID := uuid.NewString(), uuid.NewString(), flowidentity.EntityID("flow_a")
 	at := time.Now().UTC().Truncate(time.Microsecond)
 	activation, err := loopruntime.New(sourceRun, entityID, "flow_a", "revision", "revision_id", uuid.NewString(), "review", 3, at.Add(-time.Minute))
@@ -169,16 +164,16 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, bac
 	requestID := activityidentity.RequestEventID(fact)
 	source := eventtest.StaticFlowRoutingSource("flow_a", "flow_a", entityID)
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "flow_a", FlowInstance: "flow_a", EntityID: entityID})}
-	fixture.seedSource(t, loaded, sourceRun, entityID, requestID, at, route, source)
-	seedSelectedContractActivityLoop(t, fixture.db, sourceRun, entityID, requestID, activation, at)
-	seedSelectedContractActivityRequest(t, fixture.db, sourceRun, requestID, selectedContractActivityRequestPayload{
+	request := selectedContractActivityRequestPayload{
 		ActivityID: "connector", Tool: "provider.connector", Input: map[string]any{"value": "x"}, EffectClass: string(effectClass),
 		SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed", RetryMaxAttempts: 1, ForkPolicy: string(forkPolicy),
 		EntityID: entityID, FlowInstance: "flow_a", NodeID: fact.Owner.Key(), FlowID: "flow_a", HandlerEventKey: "review.requested", SourceEventID: initiatingID,
-		SourceRunID: sourceRun, Attempt: 1, Generation: activation.Generation(), LoopStage: "review"})
-	fixture.capture(t, sourceRun)
+		SourceRunID: sourceRun, Attempt: 1, Generation: activation.Generation(), LoopStage: "review"}
+	seedSelectedContractActivitySource(t, selected, loaded, sourceRun, entityID, requestID, at, route, source, request)
+	seedSelectedContractActivityLoop(t, selected, sourceRun, entityID, requestID, activation, at)
+	storetest.CaptureSelectedRunForkRevision(t, context.Background(), selected, sourceRun)
 	if !readOnly {
-		seedSelectedContractActivityAttempt(t, fixture.db, fact, activation.Generation(), "succeeded", "flow_a/connector.succeeded", "", "", at)
+		seedSelectedContractActivityAttempt(t, selected, fact, activation.Generation(), "succeeded", "flow_a/connector.succeeded", "", "", at)
 	}
 	t.Logf("ACTIVITY_CRASH_SOURCE_READY source=%s request=%s", sourceRun, requestID)
 	after := func(ctx context.Context, event events.Event, consumed attemptgeneration.Generation) {

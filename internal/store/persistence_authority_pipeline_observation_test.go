@@ -23,6 +23,14 @@ func pipelineObservationConsumerIsClosed(path, declaration string) bool {
 		return true
 	case "internal/store/storetest/activity_result_readback.go":
 		return declaration == "ReadActivityAttemptStorage"
+	case "internal/store/storetest/activity_fork_history_fixture.go":
+		return declaration == "SeedHistoricalActivityForkLoop" || declaration == "SeedHistoricalActivityForkAttempt"
+	case "internal/store/storetest/run_fork.go":
+		return declaration == "CaptureSelectedRunForkRevision"
+	case "internal/runtime/runforkexecution/activity_fork_execution_test.go":
+		return declaration == "seedSelectedContractActivitySource" || declaration == "seedSelectedContractActivityLoop" || declaration == "seedSelectedContractActivityAttempt"
+	case "internal/runtime/runforkexecution/activity_result_recovery_process_test.go":
+		return declaration == "runSelectedActivityResultCrashHelper"
 	case "internal/store/storetest/served_delivery_observation.go":
 		return declaration == "ReadSelectedDeploymentForkDiagnostics" || declaration == "ReadSelectedDeploymentResourceEvent" || declaration == "ReadSelectedDeploymentResourceWait" || declaration == "ReadSelectedDeploymentResourceWake"
 	case "internal/runtime/conformance/fan_out_resource_selected_fork_test.go":
@@ -67,6 +75,13 @@ func TestPipelineObservationGuardRejectsRawAndCallbackAuthority(t *testing.T) {
 		{"internal/store/storetest/handler_selection_storage.go", "ReadHandlerSelectionStorage"},
 		{"internal/store/storetest/connector_credential_storage.go", "ReadConnectorCredentialLeakStorage"},
 		{"internal/store/storetest/activity_result_readback.go", "ReadActivityAttemptStorage"},
+		{"internal/store/storetest/activity_fork_history_fixture.go", "SeedHistoricalActivityForkLoop"},
+		{"internal/store/storetest/activity_fork_history_fixture.go", "SeedHistoricalActivityForkAttempt"},
+		{"internal/store/storetest/run_fork.go", "CaptureSelectedRunForkRevision"},
+		{"internal/runtime/runforkexecution/activity_fork_execution_test.go", "seedSelectedContractActivitySource"},
+		{"internal/runtime/runforkexecution/activity_fork_execution_test.go", "seedSelectedContractActivityLoop"},
+		{"internal/runtime/runforkexecution/activity_fork_execution_test.go", "seedSelectedContractActivityAttempt"},
+		{"internal/runtime/runforkexecution/activity_result_recovery_process_test.go", "runSelectedActivityResultCrashHelper"},
 		{"internal/store/storetest/served_delivery_observation.go", "ReadSelectedDeploymentForkDiagnostics"},
 		{"internal/store/storetest/served_delivery_observation.go", "ReadSelectedDeploymentResourceEvent"},
 		{"internal/store/storetest/served_delivery_observation.go", "ReadSelectedDeploymentResourceWait"},
