@@ -2921,11 +2921,6 @@ func newEntityToolTestHarnessWithBundleAndLegacyAccess(t *testing.T, actor model
 
 const entityToolTestRunID = "11111111-1111-1111-1111-111111111111"
 
-func ensureEntityToolTestRun(t *testing.T, selected storetest.RunFixtureStore) {
-	t.Helper()
-	storetest.RequireRun(t, unmanagedToolTestContext(), selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: entityToolTestRunID, BundleHash: authorActivityTestBundleHash})
-}
-
 func asString(v any) string {
 	switch t := v.(type) {
 	case string:
