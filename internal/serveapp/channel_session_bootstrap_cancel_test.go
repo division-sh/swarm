@@ -111,7 +111,7 @@ func TestServeBootstrapConstructionCallerCancellationBothStores(t *testing.T) {
 					}
 				}
 				// Construction publishes its connection before releasing its counted
-				// use. Join publication before deciding whether Close is required.
+				// use. Join publication before closing the original connection.
 				if err := f.owner.WaitForQuiescence(f.ctx); err != nil {
 					t.Fatal("construction released caller but retained unresolved transient work", err)
 				}
@@ -122,16 +122,21 @@ func TestServeBootstrapConstructionCallerCancellationBothStores(t *testing.T) {
 				case <-f.ctx.Done():
 					t.Fatal("original construction did not settle", context.Cause(f.ctx))
 				}
+				if original.err != nil {
+					t.Fatal("original construction failed before the cleanup proof", original.err)
+				}
 				f.adapter.mu.Lock()
 				retained := f.adapter.connections[f.op.OperationID]
 				f.adapter.mu.Unlock()
 				if retained != original {
 					t.Fatal("construction replaced its original attempt before cleanup")
 				}
-				if connection := f.adapter.connection(f.op.OperationID); connection != nil {
-					if err := connection.Close(context.Background()); err != nil {
-						t.Fatal("original partial construction did not join", err)
-					}
+				connection := f.adapter.connection(f.op.OperationID)
+				if connection == nil || connection != original.connection {
+					t.Fatal("cleanup proof requires the original successfully constructed connection")
+				}
+				if err := connection.Close(context.Background()); err != nil {
+					t.Fatal("original partial construction did not join", err)
 				}
 				if err := f.owner.WaitForQuiescence(f.ctx); err != nil {
 					t.Fatal("construction released caller but retained unresolved transient work", err)
