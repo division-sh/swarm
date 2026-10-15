@@ -109,3 +109,38 @@ families plus the final two strict guards and integrated qualification remain.
 No rebase while A+D reservation is active, no PR, hosted run or duplicate local
 tier. Exact-head preflight is required after integration before any non-backup
 push; this held base lacks that gate, so no preflight pass is claimed here.
+
+## Final checkpoint receipts
+
+Code head702af7abd9e4cac916d76f158209352d261f171e is signed G. The final
+read-only real ratchet passes504.25s at4042/2300, unchanged collector and zero
+additions. Exact code-head swarm-complexity passes with cognitive hotspots
+557/196 and cyclomatic259/59, all equal to the independently measured
+a525874ba4 base. The finite codemod's newly measured complexity30 hotspot was
+simplified without changing its output; all3 finite-transform/hostile tests and
+its final vet pass. Final U1000 and affected owner/source controls also pass.
+
+The final extracted-preparation race receipt has13 roots/57 passing cases,
+zero failed/skipped cases, package PASS216.324s on both stores. HOWEVER its
+runner aggregate is RED: after child completion, removing runner-owned
+PostgreSQL container5f5fe29089279fd9d7b7a3b5d5bde9e6964591d6dfdce21015164c96835ca370
+reports signal:killed, child result:nil. One read-only docker inspect afterward
+reports that exact container absent. The cause of the runner cleanup error is
+unclassified; this is NOT an aggregate green, pressure attribution, runtime
+failure diagnosis, retry-to-green or additional debt credit. Keep this exact
+runner qualification item separate under the existing #2353 Docker territory;
+all native test-owned joins completed successfully within the passing child.
+The original37-root/121-case whole-family wrapper, the15-root/43-case siblings,
+and the separate4-cell native cleanup wrapper all exited0. Unchanged receipts
+carry over the mechanical helper extraction. No assertion was waived.
+
+Final receipt SHA256:
+- whole-family race:6562cde1f84b9cb86cbe30ec6ce89655dc2a90b8e60d009e4f84d2acd322cc6d
+- extracted-preparation child PASS / runner RED:2558e6f6d91f732f8dfa451a760a71cfbfc43fc351951b9f249cba0919842740
+- complete historical generators:8be4fa5970533853ea846dc50a6ba68ed6026e63d709d3f21ae538b0622f2c83
+
+Coarse end-to-end time split since the10:48 approval: about75min native
+fixture/production editing and investigation,15min finite history composition,
+and75min proof/build/quality/queue time (some overlapped). This is about
+50 qualified proposed removals/hour over the complete wave, not accepted
+credit before independent review. No extra family was added to hit a target.
