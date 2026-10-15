@@ -160,6 +160,10 @@ func TestFamily145StandingIngressControlCompleteHistory(t *testing.T) {
 		if recipes {
 			actual = recipeBytes
 		}
+		actual, err = selectedreadrole.BeforeAgentSnapshotHistory(root, actual, recipes)
+		if err != nil {
+			t.Fatal(err)
+		}
 		var want, have any
 		if json.Unmarshal(next, &want) != nil || json.Unmarshal(actual, &have) != nil || !reflect.DeepEqual(want, have) {
 			t.Fatal("actual history is not the complete exact composition")
@@ -203,6 +207,13 @@ var standingIngressOwnerAdditions = []standingIngressOwnerAddition{
 }
 
 func earlierStandingIngressOwnerFile(root, file string, current []byte) ([]byte, error) {
+	if file == agentSnapshotEventOwner && fmt.Sprintf("%x", sha256.Sum256(current)) == agentSnapshotEventOwnerAfter {
+		var err error
+		current, err = earlierAgentSnapshotEventOwnerFile(root, current)
+		if err != nil {
+			return nil, err
+		}
+	}
 	for _, pin := range standingIngressOwnerAdditions {
 		if pin.file != file {
 			continue

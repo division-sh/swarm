@@ -179,6 +179,10 @@ func ComposeStandingIngressHistory(root string, prior []byte, recipes bool) ([]b
 }
 
 func EarlierStandingIngressHistory(root string, current []byte, recipes bool) ([]byte, error) {
+	current, err := BeforeAgentSnapshotHistory(root, current, recipes)
+	if err != nil {
+		return nil, err
+	}
 	prior, err := PriorStandingIngressHistory(root, recipes)
 	if err != nil {
 		return nil, err

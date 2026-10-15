@@ -266,6 +266,15 @@ func (b *Backend) runTransactionOnce(ctx context.Context, opts *sql.TxOptions, o
 }
 
 func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOptions, permitWait time.Duration, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
+	return b.runTransactionWithConnectionScope(ctx, opts, permitWait, nil, operation)
+}
+
+type transactionConnectionScope interface {
+	prepare(context.Context, *sql.Conn) error
+	cleanup(*sql.Conn) error
+}
+
+func (b *Backend) runTransactionWithConnectionScope(ctx context.Context, opts *sql.TxOptions, permitWait time.Duration, scope transactionConnectionScope, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
 	poolStarted := time.Now()
 	conn, err := b.db.Conn(ctx)
 	if err != nil {
@@ -295,6 +304,9 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 				}
 			}
 		}
+		scopeDiscard, scopedCleanupErr := cleanupTransactionConnectionScope(scope, conn, cleanupErr)
+		discard = discard || scopeDiscard
+		cleanupErr = scopedCleanupErr
 		cleanupErr = errors.Join(cleanupErr, CloseConnection(conn, discard))
 		if cleanupErr != nil {
 			// This also reports cleanup failure while the original callback panic
@@ -304,6 +316,9 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 		}
 		probe.RecordCleanup(time.Since(cleanupStarted))
 	}()
+	if err = prepareTransactionConnectionScope(scope, ctx, conn); err != nil {
+		return false, err
+	}
 	beginStarted := time.Now()
 	tx, err = conn.BeginTx(ctx, opts)
 	probe.RecordAdmission(permitWait, poolWait, time.Since(beginStarted))
@@ -350,6 +365,24 @@ func (b *Backend) runTransactionOnceOutcome(ctx context.Context, opts *sql.TxOpt
 
 // A failed cleanup or an uncertain commit never grants busy-policy replay.
 type transactionTerminationError struct{ error }
+
+func prepareTransactionConnectionScope(scope transactionConnectionScope, ctx context.Context, conn *sql.Conn) error {
+	if scope == nil {
+		return nil
+	}
+	return scope.prepare(ctx, conn)
+}
+
+func cleanupTransactionConnectionScope(scope transactionConnectionScope, conn *sql.Conn, prior error) (bool, error) {
+	if scope == nil {
+		return false, prior
+	}
+	err := scope.cleanup(conn)
+	if err == nil {
+		return false, prior
+	}
+	return true, errors.Join(prior, err)
+}
 
 func (e *transactionTerminationError) Unwrap() error { return e.error }
 

@@ -33,6 +33,23 @@ import (
 
 type PublicationResultSourceStorage = eventrecord.PublicationResultSourceStorage
 
+func corruptOperatorSnapshotEventTx(ctx context.Context, tx *sql.Tx, eventID string, postgres bool) error {
+	if postgres {
+		return eventrecordpostgres.CorruptOperatorSnapshotEventPayloadTx(ctx, tx, eventID)
+	}
+	return eventrecordsqlite.CorruptOperatorSnapshotEventPayloadTx(ctx, tx, eventID)
+}
+
+func CorruptOperatorSnapshotEventForTest(ctx context.Context, selected any, eventID string) error {
+	if err := validateStandaloneStorageEvent(selected, eventID); err != nil {
+		return err
+	}
+	_, postgres := selected.(*PostgresStore)
+	return runWorkflowProjectionFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		return corruptOperatorSnapshotEventTx(ctx, tx, eventID, postgres)
+	})
+}
+
 type StandingTelegramLineageStorage = eventrecord.StandingTelegramLineageStorage
 
 func ReadEventNameStorageForTest(ctx context.Context, selected any, eventID string) (string, error) {

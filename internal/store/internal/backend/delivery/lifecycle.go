@@ -28,6 +28,58 @@ var (
 	sqliteDeliveryAdapter   = mustDeliveryAdapter(DialectSQLite)
 )
 
+func SettleOperatorSnapshotDeliveryTx(ctx context.Context, tx *sql.Tx, deliveryID string, renamed bool) error {
+	query := `UPDATE event_deliveries SET status='delivered',next_eligible_at=NULL,settled_at=$1,updated_at=$1 WHERE delivery_id=$2 AND status='pending'`
+	if renamed {
+		query = strings.Replace(query, "UPDATE event_deliveries ", "UPDATE event_deliveries_snapshot_source ", 1)
+	}
+	result, err := tx.ExecContext(ctx, query, time.Now().UTC(), deliveryID)
+	return requireOperatorSnapshotDeliveryRow(result, err)
+}
+
+func CorruptOperatorSnapshotDeliveryRouteTx(ctx context.Context, tx *sql.Tx, deliveryID string, postgres bool) error {
+	value := "$1"
+	if postgres {
+		value += "::jsonb"
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE event_deliveries SET delivery_target_route=`+value+` WHERE delivery_id=$2`, `{}`, deliveryID)
+	return requireOperatorSnapshotDeliveryRow(result, err)
+}
+
+func requireOperatorSnapshotDeliveryRow(result sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return fmt.Errorf("operator snapshot delivery mutation changed%d rows, want1", n)
+	}
+	return nil
+}
+
+func HoldOperatorDeliverySnapshotTx(ctx context.Context, tx *sql.Tx, postgres bool, id int64) error {
+	if postgres {
+		_, err := tx.ExecContext(ctx, `LOCK TABLE event_deliveries IN ACCESS EXCLUSIVE MODE`)
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE event_deliveries RENAME TO event_deliveries_snapshot_source`); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, fmt.Sprintf(`CREATE VIEW event_deliveries AS SELECT * FROM event_deliveries_snapshot_source WHERE agent_snapshot_barrier(%d)=1`, id))
+	return err
+}
+
+func RestoreOperatorDeliverySnapshotTx(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, `DROP VIEW event_deliveries`); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `ALTER TABLE event_deliveries_snapshot_source RENAME TO event_deliveries`)
+	return err
+}
+
 func SetPreparedTargetConflictTx(ctx context.Context, tx *sql.Tx, postgres bool, eventID, originalIdentity, subscriberID, corruptIdentity, corruptTarget string) (int64, error) {
 	if tx == nil {
 		return 0, fmt.Errorf("prepared target conflict requires its selected write transaction")

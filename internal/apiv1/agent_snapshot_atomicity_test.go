@@ -2,14 +2,9 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
-	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"runtime"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,13 +15,13 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	modernsqlite "modernc.org/sqlite"
 )
 
 type agentSnapshotTestStore interface {
@@ -34,67 +29,28 @@ type agentSnapshotTestStore interface {
 	AgentReadStore
 	storetest.AgentFixtureStore
 	storetest.ManagedAgentTurnFixtureStore
+	sessions.Registry
 	ListPendingAgentDeliveryFacts(context.Context, []agentidentity.Identity, time.Time) (map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts, error)
 	ListAgentDeliveryLifecycleFacts(context.Context, []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error)
 }
 
 type agentSnapshotBackend struct {
-	name   string
-	sqlite bool
-	open   func(*testing.T, context.Context) (agentSnapshotTestStore, *sql.DB)
-}
-
-type sqliteAgentSnapshotBarrier struct {
-	entered     chan struct{}
-	release     chan struct{}
-	enteredOnce sync.Once
-}
-
-var (
-	sqliteSnapshotBarrierID       atomic.Int64
-	sqliteSnapshotBarrierRegistry sync.Map
-	sqliteSnapshotFunctionOnce    sync.Once
-	sqliteSnapshotFunctionErr     error
-)
-
-func requireSQLiteAgentSnapshotFunction(t *testing.T) {
-	t.Helper()
-	sqliteSnapshotFunctionOnce.Do(func() {
-		sqliteSnapshotFunctionErr = modernsqlite.RegisterScalarFunction("agent_snapshot_barrier", 1, func(_ *modernsqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
-			id, ok := args[0].(int64)
-			if !ok {
-				return nil, fmt.Errorf("agent snapshot barrier id has type %T", args[0])
-			}
-			value, ok := sqliteSnapshotBarrierRegistry.Load(id)
-			if !ok {
-				return nil, fmt.Errorf("agent snapshot barrier %d is not registered", id)
-			}
-			barrier := value.(*sqliteAgentSnapshotBarrier)
-			barrier.enteredOnce.Do(func() { close(barrier.entered) })
-			<-barrier.release
-			return int64(1), nil
-		})
-	})
-	if sqliteSnapshotFunctionErr != nil {
-		t.Fatalf("register sqlite agent snapshot barrier function: %v", sqliteSnapshotFunctionErr)
-	}
+	name string
+	open func(*testing.T, context.Context) agentSnapshotTestStore
 }
 
 func agentSnapshotBackends() []agentSnapshotBackend {
 	return []agentSnapshotBackend{
 		{
-			name: "sqlite", sqlite: true,
-			open: func(t *testing.T, ctx context.Context) (agentSnapshotTestStore, *sql.DB) {
-				selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-				return selected, storetest.DatabaseForTest(selected)
+			name: "sqlite",
+			open: func(t *testing.T, ctx context.Context) agentSnapshotTestStore {
+				return storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
 			},
 		},
 		{
 			name: "postgres",
-			open: func(t *testing.T, _ context.Context) (agentSnapshotTestStore, *sql.DB) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			open: func(t *testing.T, _ context.Context) agentSnapshotTestStore {
+				return storetest.StartPostgresRuntimeStore(t)
 			},
 		},
 	}
@@ -104,9 +60,7 @@ func TestAgentOperatorSummarySnapshotTerminalizationIsAtomicAcrossBackends(t *te
 	for _, backend := range agentSnapshotBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := newAgentSnapshotBoundaryFixture(t, backend)
-			before := fixture.readAcrossSessionBoundary(t, func(exec agentSnapshotMutationExec) {
-				fixture.setAgentStatus(t, exec, "snapshot-agent-b", "terminated")
-			})
+			before := fixture.readSummaryCut(t, storetest.OperatorSnapshotTerminalization(sqliteAgentUsageIdentityForRun(t, fixture.runID, "snapshot-agent-b")))
 			if len(before.Agents) != 2 {
 				t.Fatalf("snapshot result agent count = %d, want complete before-state count 2", len(before.Agents))
 			}
@@ -122,10 +76,11 @@ func TestAgentOperatorSummarySnapshotActivationIsAtomicAcrossBackends(t *testing
 	for _, backend := range agentSnapshotBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := newAgentSnapshotBoundaryFixture(t, backend)
-			fixture.setAgentStatus(t, fixture.db, "snapshot-agent-b", "terminated")
-			before := fixture.readAcrossSessionBoundary(t, func(exec agentSnapshotMutationExec) {
-				fixture.setAgentStatus(t, exec, "snapshot-agent-b", "active")
-			})
+			identity := sqliteAgentUsageIdentityForRun(t, fixture.runID, "snapshot-agent-b")
+			if err := storetest.ApplyOperatorAgentTerminalized(fixture.ctx, fixture.store, identity); err != nil {
+				t.Fatal(err)
+			}
+			before := fixture.readSummaryCut(t, storetest.OperatorSnapshotActivation(identity))
 			if len(before.Agents) != 1 {
 				t.Fatalf("snapshot result agent count = %d, want complete before-state count 1", len(before.Agents))
 			}
@@ -142,9 +97,7 @@ func TestAgentOperatorSummarySnapshotSessionReplacementIsAtomicAcrossBackends(t 
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := newAgentSnapshotBoundaryFixture(t, backend)
 			newSessionID := uuid.NewString()
-			before := fixture.readAcrossSessionBoundary(t, func(exec agentSnapshotMutationExec) {
-				fixture.replaceSession(t, exec, newSessionID)
-			})
+			before := fixture.readSummaryCut(t, storetest.OperatorSnapshotSessionReplacement(fixture.identity, fixture.sessionID, newSessionID))
 			detail := requireSnapshotAgent(t, before, "snapshot-agent-a")
 			if detail.SessionID != fixture.sessionID {
 				t.Fatalf("snapshot session = %q, want complete before-state session %q", detail.SessionID, fixture.sessionID)
@@ -162,9 +115,7 @@ func TestAgentOperatorSummarySnapshotDeliveryFactsAreAtomicAcrossBackends(t *tes
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := newAgentSnapshotBoundaryFixture(t, backend)
 			delivery := fixture.seedPendingDelivery(t)
-			before := fixture.readAcrossExternalTableBoundary(t, "agent_sessions", func(exec agentSnapshotMutationExec) {
-				fixture.settlePendingSnapshotDelivery(t, exec, delivery.deliveryID)
-			})
+			before := fixture.readSummaryCut(t, storetest.OperatorSnapshotDeliverySettlement(delivery.deliveryID))
 			beforeAgent := requireSnapshotAgent(t, before, fixture.identity.AgentID())
 			if beforeAgent.PendingEvents != 1 {
 				t.Fatalf("snapshot pending events = %d, want complete before-state count 1", beforeAgent.PendingEvents)
@@ -182,9 +133,7 @@ func TestAgentOperatorSummarySnapshotLatestTurnIsAtomicAcrossBackends(t *testing
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := newAgentSnapshotBoundaryFixture(t, backend)
 			turnID := fixture.seedTurn(t, "before snapshot")
-			before := fixture.readAcrossExternalTableBoundary(t, "agent_turns", func(exec agentSnapshotMutationExec) {
-				fixture.replaceTurnSummary(t, exec, turnID, "after snapshot")
-			})
+			before := fixture.readSummaryCut(t, storetest.OperatorSnapshotTurnReplacement(turnID, "after snapshot"))
 			beforeAgent := requireSnapshotAgent(t, before, fixture.identity.AgentID())
 			if beforeAgent.LiveTurn == nil || beforeAgent.LiveTurn.AssistantVisibleOutput != "before snapshot" {
 				t.Fatalf("snapshot latest turn = %#v, want complete before-state output", beforeAgent.LiveTurn)
@@ -203,13 +152,14 @@ func TestAgentPendingFactsSnapshotIsAtomicAcrossBackends(t *testing.T) {
 			fixture := newAgentSnapshotBoundaryFixture(t, backend)
 			delivery := fixture.seedPendingDelivery(t)
 			var before map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts
-			fixture.readDeliveryWrapperAcrossBoundary(t, func() error {
+			err := storetest.ReadOperatorSnapshotAcrossCut(fixture.ctx, fixture.store, storetest.OperatorSnapshotDeliveryFactsSettlement(delivery.deliveryID), func(ctx context.Context) error {
 				var err error
-				before, err = fixture.store.ListPendingAgentDeliveryFacts(fixture.ctx, []agentidentity.Identity{fixture.identity}, time.Time{})
+				before, err = fixture.store.ListPendingAgentDeliveryFacts(ctx, []agentidentity.Identity{fixture.identity}, time.Time{})
 				return err
-			}, func(exec agentSnapshotMutationExec, table string) {
-				fixture.settlePendingSnapshotDeliveryInTable(t, exec, table, delivery.deliveryID)
 			})
+			if err != nil {
+				t.Fatal(err)
+			}
 			if got := before[fixture.identity].PendingCount; got != 1 {
 				t.Fatalf("snapshot pending facts count = %d, want complete before-state count 1", got)
 			}
@@ -230,13 +180,14 @@ func TestAgentLifecycleFactsSnapshotIsAtomicAcrossBackends(t *testing.T) {
 			fixture := newAgentSnapshotBoundaryFixture(t, backend)
 			delivery := fixture.seedPendingDelivery(t)
 			var before map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts
-			fixture.readDeliveryWrapperAcrossBoundary(t, func() error {
+			err := storetest.ReadOperatorSnapshotAcrossCut(fixture.ctx, fixture.store, storetest.OperatorSnapshotDeliveryFactsSettlement(delivery.deliveryID), func(ctx context.Context) error {
 				var err error
-				before, err = fixture.store.ListAgentDeliveryLifecycleFacts(fixture.ctx, []agentidentity.Identity{fixture.identity})
+				before, err = fixture.store.ListAgentDeliveryLifecycleFacts(ctx, []agentidentity.Identity{fixture.identity})
 				return err
-			}, func(exec agentSnapshotMutationExec, table string) {
-				fixture.settlePendingSnapshotDeliveryInTable(t, exec, table, delivery.deliveryID)
 			})
+			if err != nil {
+				t.Fatal(err)
+			}
 			if got := before[fixture.identity]; got.CurrentState != string(runtimedelivery.StateQueued) || got.BlockingLayer != "delivery_queue" {
 				t.Fatalf("snapshot lifecycle facts = %#v, want complete queued before-state", got)
 			}
@@ -256,9 +207,7 @@ func TestAgentOperatorDiagnosisSnapshotAggregateToPageIsAtomicAcrossBackends(t *
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := newAgentSnapshotBoundaryFixture(t, backend)
 			delivery := fixture.seedPendingDelivery(t)
-			before := fixture.readDiagnosisAcrossSessionBoundary(t, func(exec agentSnapshotMutationExec) {
-				fixture.settlePendingSnapshotDelivery(t, exec, delivery.deliveryID)
-			})
+			before := fixture.readDiagnosisCut(t, storetest.OperatorSnapshotDeliverySettlement(delivery.deliveryID))
 			if before.Queue.PendingCount != 1 || len(before.Queue.PendingDeliveries) != 1 {
 				t.Fatalf("snapshot diagnosis queue = %#v, want complete before-state count/page", before.Queue)
 			}
@@ -278,9 +227,7 @@ func TestAgentOperatorDiagnosisSnapshotReferenceHydrationIsAtomicAcrossBackends(
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := newAgentSnapshotBoundaryFixture(t, backend)
 			delivery := fixture.seedPendingDelivery(t)
-			before := fixture.readDiagnosisAcrossSessionBoundary(t, func(exec agentSnapshotMutationExec) {
-				fixture.updateJSONWith(t, exec, "event_deliveries", "delivery_target_route", `{}`, "delivery_id", delivery.deliveryID)
-			})
+			before := fixture.readDiagnosisCut(t, storetest.OperatorSnapshotDeliveryCorruption(delivery.deliveryID))
 			if before.Queue.PendingCount != 1 || len(before.Queue.PendingDeliveries) != 1 {
 				t.Fatalf("snapshot diagnosis delivery hydration = %#v, want complete before-state page", before.Queue)
 			}
@@ -296,12 +243,7 @@ func TestAgentOperatorDiagnosisSnapshotEventHydrationIsAtomicAcrossBackends(t *t
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := newAgentSnapshotBoundaryFixture(t, backend)
 			delivery := fixture.seedPendingDelivery(t)
-			before := fixture.readDiagnosisAcrossSessionBoundary(t, func(exec agentSnapshotMutationExec) {
-				fixture.execDialect(t, exec,
-					`UPDATE events SET payload_bytes=? WHERE event_id=?`,
-					`UPDATE events SET payload_bytes=$1 WHERE event_id=$2::uuid`,
-					[]byte{0}, delivery.eventID)
-			})
+			before := fixture.readDiagnosisCut(t, storetest.OperatorSnapshotEventCorruption(delivery.eventID))
 			if before.Queue.PendingCount != 1 || len(before.Queue.PendingDeliveries) != 1 || before.Queue.PendingDeliveries[0].EventName != "snapshot.pending" {
 				t.Fatalf("snapshot diagnosis event hydration = %#v, want complete before-state event", before.Queue)
 			}
@@ -439,11 +381,7 @@ func TestAgentOperatorSnapshotRejectsMalformedBaseAuthorityAcrossBackends(t *tes
 	for _, backend := range agentSnapshotBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			fixture := newAgentSnapshotBoundaryFixture(t, backend)
-			query := `UPDATE agents SET subscriptions='{}' WHERE agent_id=?`
-			if !backend.sqlite {
-				query = `UPDATE agents SET subscriptions='{}'::jsonb WHERE agent_id=$1`
-			}
-			if _, err := fixture.db.ExecContext(fixture.ctx, query, "snapshot-agent-a"); err != nil {
+			if err := storetest.CorruptOperatorAgentSubscriptions(fixture.ctx, fixture.store, fixture.identity); err != nil {
 				t.Fatalf("corrupt %s subscriptions: %v", backend.name, err)
 			}
 			if _, err := fixture.store.ListOperatorAgents(fixture.ctx, operatorread.OperatorAgentListOptions{}); err == nil || !strings.Contains(err.Error(), "subscriptions must be a json string array") {
@@ -463,59 +401,56 @@ func TestAgentOperatorSnapshotRejectsMalformedRelatedAuthorityAcrossBackends(t *
 			{
 				name: "opaque config",
 				mutate: func(t *testing.T, f agentSnapshotBoundaryFixture) {
-					f.updateJSON(t, "agents", "config", `[]`, "agent_id", f.identity.AgentID())
+					if err := storetest.CorruptOperatorAgentConfig(f.ctx, f.store, f.identity); err != nil {
+						t.Fatal(err)
+					}
 				},
 			},
 			{
 				name: "agent identity",
 				mutate: func(t *testing.T, f agentSnapshotBoundaryFixture) {
-					f.withRelaxedAgentIdentityConstraints(t, func(exec agentSnapshotMutationExec) {
-						f.execDialect(t, exec,
-							`UPDATE agents SET flow_scope_key='' WHERE agent_id=?`,
-							`UPDATE agents SET flow_scope_key='' WHERE agent_id=$1`,
-							f.identity.AgentID())
-					})
+					storetest.RequireMalformedOperatorAgentRoute(t, f.ctx, f.store, f.identity)
 				},
 			},
 			{
 				name: "agent status",
 				mutate: func(t *testing.T, f agentSnapshotBoundaryFixture) {
-					f.withRelaxedCheckConstraints(t, "agents", "status", func(exec agentSnapshotMutationExec) {
-						f.execDialect(t, exec,
-							`UPDATE agents SET status='unknown' WHERE agent_id=?`,
-							`UPDATE agents SET status='unknown' WHERE agent_id=$1`,
-							f.identity.AgentID())
-					})
+					storetest.RequireUnknownOperatorAgentStatus(t, f.ctx, f.store, f.identity)
 				},
 			},
 			{
 				name: "session runtime state",
 				mutate: func(t *testing.T, f agentSnapshotBoundaryFixture) {
-					f.updateJSON(t, "agent_sessions", "runtime_state", `"invalid"`, "session_id", f.sessionID)
+					if err := storetest.CorruptOperatorSessionState(f.ctx, f.store, f.sessionID); err != nil {
+						t.Fatal(err)
+					}
 				},
 			},
 			{
 				name: "turn",
 				mutate: func(t *testing.T, f agentSnapshotBoundaryFixture) {
 					turnID := f.seedTurn(t, "valid turn")
-					f.updateJSON(t, "agent_turns", "turn_blocks", `{}`, "turn_id", turnID)
+					if err := storetest.CorruptOperatorTurnBlocks(f.ctx, f.store, turnID); err != nil {
+						t.Fatal(err)
+					}
 				},
 			},
 			{
 				name: "delivery lifecycle",
 				mutate: func(t *testing.T, f agentSnapshotBoundaryFixture) {
 					delivery := f.seedPendingDelivery(t)
-					f.updateJSON(t, "event_deliveries", "delivery_target_route", `{}`, "delivery_id", delivery.deliveryID)
+					if err := storetest.CorruptOperatorDeliveryRoute(f.ctx, f.store, delivery.deliveryID); err != nil {
+						t.Fatal(err)
+					}
 				},
 			},
 			{
 				name: "event record",
 				mutate: func(t *testing.T, f agentSnapshotBoundaryFixture) {
 					delivery := f.seedPendingDelivery(t)
-					f.execDialect(t, f.db,
-						`UPDATE events SET payload_bytes=? WHERE event_id=?`,
-						`UPDATE events SET payload_bytes=$1 WHERE event_id=$2::uuid`,
-						[]byte{0}, delivery.eventID)
+					if err := storetest.CorruptOperatorSnapshotEvent(f.ctx, f.store, delivery.eventID); err != nil {
+						t.Fatal(err)
+					}
 				},
 				read: func(f agentSnapshotBoundaryFixture) error {
 					_, err := f.store.LoadOperatorAgentDiagnosis(f.ctx, f.identity, operatorread.OperatorAgentDiagnosisOptions{QueueLimit: 10})
@@ -540,15 +475,10 @@ func TestAgentOperatorSnapshotRejectsMalformedRelatedAuthorityAcrossBackends(t *
 	}
 }
 
-type agentSnapshotMutationExec interface {
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}
-
 type agentSnapshotBoundaryFixture struct {
 	backend   agentSnapshotBackend
 	ctx       context.Context
 	store     agentSnapshotTestStore
-	db        *sql.DB
 	runID     string
 	identity  agentidentity.Identity
 	sessionID string
@@ -556,19 +486,20 @@ type agentSnapshotBoundaryFixture struct {
 
 func newAgentSnapshotBoundaryFixture(t *testing.T, backend agentSnapshotBackend) agentSnapshotBoundaryFixture {
 	t.Helper()
-	if backend.sqlite {
-		requireSQLiteAgentSnapshotFunction(t)
+	if err := storetest.InitializeOperatorSnapshotReadBarrier(); err != nil {
+		t.Fatal(err)
 	}
 	ctx := testAuthorActivityContext(context.Background())
-	store, db := backend.open(t, ctx)
-	if backend.sqlite {
-		if _, err := db.ExecContext(ctx, `PRAGMA journal_mode=WAL`); err != nil {
-			t.Fatalf("enable sqlite WAL: %v", err)
-		}
+	setupStart := time.Now()
+	store := backend.open(t, ctx)
+	openedAt := time.Now()
+	if err := storetest.PrepareOperatorSnapshotReads(ctx, store); err != nil {
+		t.Fatal(err)
 	}
 	runID := uuid.NewString()
 	startedAt := time.Now().UTC().Add(-time.Minute)
 	storetest.RequireRun(t, ctx, store, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, Artifact: authorActivityTestSourceArtifact, StartedAt: startedAt})
+	runAt := time.Now()
 	identities := make(map[string]agentidentity.Identity, 2)
 	for _, agentID := range []string{"snapshot-agent-a", "snapshot-agent-b"} {
 		identity := sqliteAgentUsageIdentityForRun(t, runID, agentID)
@@ -585,12 +516,34 @@ func newAgentSnapshotBoundaryFixture(t *testing.T, backend agentSnapshotBackend)
 			t.Fatalf("seed %s %s: %v", backend.name, agentID, err)
 		}
 	}
+	agentsAt := time.Now()
 	fixture := agentSnapshotBoundaryFixture{
-		backend: backend, ctx: ctx, store: store, db: db, runID: runID,
-		identity: identities["snapshot-agent-a"], sessionID: uuid.NewString(),
+		backend: backend, ctx: ctx, store: store, runID: runID,
+		identity: identities["snapshot-agent-a"],
 	}
-	fixture.insertSession(t, db, fixture.sessionID)
+	sessionCtx := fixture.sessionAuthorityContext(t)
+	lease, err := store.Acquire(sessionCtx, fixture.identity, "snapshot-fixture-setup")
+	if err != nil {
+		t.Fatalf("issue %s snapshot session: %v", backend.name, err)
+	}
+	fixture.sessionID = lease.SessionID
+	if result, err := store.ReleaseOutcome(sessionCtx, lease); err != nil || !result.Acknowledged {
+		t.Fatalf("release %s snapshot setup grant: acknowledged=%v err=%v", backend.name, result.Acknowledged, err)
+	}
+	t.Logf("snapshot fixture setup: open=%s run=%s agents=%s session=%s", openedAt.Sub(setupStart), runAt.Sub(openedAt), agentsAt.Sub(runAt), time.Since(agentsAt))
 	return fixture
+}
+
+func (f agentSnapshotBoundaryFixture) sessionAuthorityContext(t *testing.T) context.Context {
+	t.Helper()
+	state, found, err := f.store.LoadAgentLifecycleState(f.ctx, f.identity)
+	if err != nil || !found {
+		t.Fatalf("load %s snapshot fixture lifecycle: found=%v err=%v", f.backend.name, found, err)
+	}
+	return runtimeeffects.WithLifecycleToken(f.ctx, runtimeeffects.LifecycleToken{
+		RuntimeEpoch: state.RuntimeEpoch, Identity: f.identity,
+		AgentID: f.identity.AgentID(), Generation: state.Generation,
+	})
 }
 
 func (f agentSnapshotBoundaryFixture) list(t *testing.T) operatorread.OperatorAgentListResult {
@@ -602,200 +555,23 @@ func (f agentSnapshotBoundaryFixture) list(t *testing.T) operatorread.OperatorAg
 	return result
 }
 
-func (f agentSnapshotBoundaryFixture) execDialect(t *testing.T, exec agentSnapshotMutationExec, sqliteQuery, postgresQuery string, args ...any) {
-	t.Helper()
-	query := sqliteQuery
-	if !f.backend.sqlite {
-		query = postgresQuery
-	}
-	result, err := exec.ExecContext(f.ctx, query, args...)
-	if err != nil {
-		t.Fatalf("mutate %s snapshot authority: %v", f.backend.name, err)
-	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		t.Fatalf("mutate %s snapshot authority changed %d rows, want 1", f.backend.name, changed)
-	}
-}
-
-func (f agentSnapshotBoundaryFixture) updateJSON(t *testing.T, table, column, raw, keyColumn, key string) {
-	t.Helper()
-	f.updateJSONWith(t, f.db, table, column, raw, keyColumn, key)
-}
-
-func (f agentSnapshotBoundaryFixture) updateJSONWith(t *testing.T, exec agentSnapshotMutationExec, table, column, raw, keyColumn, key string) {
-	t.Helper()
-	f.execDialect(t, exec,
-		fmt.Sprintf(`UPDATE %s SET %s=? WHERE %s=?`, table, column, keyColumn),
-		fmt.Sprintf(`UPDATE %s SET %s=$1::jsonb WHERE %s::text=$2`, table, column, keyColumn),
-		raw, key,
-	)
-}
-
-func (f agentSnapshotBoundaryFixture) withRelaxedCheckConstraints(t *testing.T, table, definitionFragment string, mutate func(agentSnapshotMutationExec)) {
-	t.Helper()
-	if f.backend.sqlite {
-		conn, err := f.db.Conn(f.ctx)
-		if err != nil {
-			t.Fatalf("acquire sqlite hostile-authority connection: %v", err)
-		}
-		defer conn.Close()
-		if _, err := conn.ExecContext(f.ctx, `PRAGMA ignore_check_constraints=ON`); err != nil {
-			t.Fatalf("relax sqlite check constraints: %v", err)
-		}
-		defer conn.ExecContext(f.ctx, `PRAGMA ignore_check_constraints=OFF`)
-		mutate(conn)
-		return
-	}
-	rows, err := f.db.QueryContext(f.ctx, `
-		SELECT conname
-		FROM pg_constraint
-		WHERE conrelid=$1::regclass AND contype='c' AND pg_get_constraintdef(oid) ILIKE $2
-		ORDER BY conname`, table, "%"+definitionFragment+"%")
-	if err != nil {
-		t.Fatalf("list postgres %s hostile-authority constraints: %v", table, err)
-	}
-	var constraints []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			_ = rows.Close()
-			t.Fatalf("scan postgres %s hostile-authority constraint: %v", table, err)
-		}
-		constraints = append(constraints, name)
-	}
-	if err := rows.Close(); err != nil {
-		t.Fatalf("close postgres %s hostile-authority constraints: %v", table, err)
-	}
-	if len(constraints) == 0 {
-		t.Fatalf("postgres %s has no check constraint containing %q", table, definitionFragment)
-	}
-	for _, name := range constraints {
-		quoted := strings.ReplaceAll(name, `"`, `""`)
-		if _, err := f.db.ExecContext(f.ctx, fmt.Sprintf(`ALTER TABLE %s DROP CONSTRAINT "%s"`, table, quoted)); err != nil {
-			t.Fatalf("drop postgres %s hostile-authority constraint %s: %v", table, name, err)
-		}
-	}
-	mutate(f.db)
-}
-
-func (f agentSnapshotBoundaryFixture) withRelaxedAgentIdentityConstraints(t *testing.T, mutate func(agentSnapshotMutationExec)) {
-	t.Helper()
-	if f.backend.sqlite {
-		conn, err := f.db.Conn(f.ctx)
-		if err != nil {
-			t.Fatalf("acquire sqlite hostile-identity connection: %v", err)
-		}
-		defer conn.Close()
-		if _, err := conn.ExecContext(f.ctx, `PRAGMA foreign_keys=OFF`); err != nil {
-			t.Fatalf("relax sqlite foreign keys: %v", err)
-		}
-		if _, err := conn.ExecContext(f.ctx, `PRAGMA ignore_check_constraints=ON`); err != nil {
-			t.Fatalf("relax sqlite identity checks: %v", err)
-		}
-		defer conn.ExecContext(f.ctx, `PRAGMA foreign_keys=ON`)
-		defer conn.ExecContext(f.ctx, `PRAGMA ignore_check_constraints=OFF`)
-		mutate(conn)
-		return
-	}
-	rows, err := f.db.QueryContext(f.ctx, `
-		SELECT conrelid::regclass::text, conname
-		FROM pg_constraint
-		WHERE confrelid='agents'::regclass AND contype='f'
-		ORDER BY conrelid::regclass::text, conname`)
-	if err != nil {
-		t.Fatalf("list postgres agent identity foreign keys: %v", err)
-	}
-	type constraint struct{ table, name string }
-	var constraints []constraint
-	for rows.Next() {
-		var item constraint
-		if err := rows.Scan(&item.table, &item.name); err != nil {
-			_ = rows.Close()
-			t.Fatalf("scan postgres agent identity foreign key: %v", err)
-		}
-		constraints = append(constraints, item)
-	}
-	if err := rows.Close(); err != nil {
-		t.Fatalf("close postgres agent identity foreign keys: %v", err)
-	}
-	for _, item := range constraints {
-		table := strings.ReplaceAll(item.table, `"`, `""`)
-		name := strings.ReplaceAll(item.name, `"`, `""`)
-		if _, err := f.db.ExecContext(f.ctx, fmt.Sprintf(`ALTER TABLE "%s" DROP CONSTRAINT "%s"`, table, name)); err != nil {
-			t.Fatalf("drop postgres agent identity foreign key %s.%s: %v", item.table, item.name, err)
-		}
-	}
-	f.withRelaxedCheckConstraints(t, "agents", "flow_scope_key", mutate)
-}
-
-func (f agentSnapshotBoundaryFixture) setAgentStatus(t *testing.T, exec agentSnapshotMutationExec, agentID, status string) {
-	t.Helper()
-	query := `UPDATE agents SET status=? WHERE agent_id=?`
-	args := []any{status, agentID}
-	if !f.backend.sqlite {
-		query = `UPDATE agents SET status=$1 WHERE agent_id=$2`
-	}
-	if _, err := exec.ExecContext(f.ctx, query, args...); err != nil {
-		t.Fatalf("set %s agent %s status: %v", f.backend.name, agentID, err)
-	}
-}
-
-func (f agentSnapshotBoundaryFixture) insertSession(t *testing.T, exec agentSnapshotMutationExec, sessionID string) {
-	t.Helper()
-	fields, err := f.identity.StorageFields()
-	if err != nil {
-		t.Fatal(err)
-	}
-	args := []any{sessionID, f.runID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, time.Now().UTC()}
-	query := `INSERT INTO agent_sessions (
-		session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-		flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
-		conversation, turn_count, runtime_state, status, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '[]', 0, '{}', 'active', ?, ?)`
-	args = append(args, args[len(args)-1])
-	if !f.backend.sqlite {
-		query = `INSERT INTO agent_sessions (
-			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
-			conversation, turn_count, runtime_state, status, created_at, updated_at
-		) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, '[]'::jsonb, 0, '{}'::jsonb, 'active', $10, $11)`
-	}
-	if _, err := exec.ExecContext(f.ctx, query, args...); err != nil {
-		t.Fatalf("insert %s agent session: %v", f.backend.name, err)
-	}
-}
-
 func (f agentSnapshotBoundaryFixture) setSessionLease(t *testing.T, holder string) {
 	t.Helper()
-	expiresAt := time.Now().UTC().Add(time.Hour)
-	f.execDialect(t, f.db,
-		`UPDATE agent_sessions SET lease_holder=?, lease_grant_id=?, lease_expires_at=? WHERE session_id=?`,
-		`UPDATE agent_sessions SET lease_holder=$1, lease_grant_id=$2, lease_expires_at=$3 WHERE session_id=$4::uuid`,
-		holder, uuid.NewString(), expiresAt, f.sessionID,
-	)
-}
-
-func (f agentSnapshotBoundaryFixture) replaceSession(t *testing.T, exec agentSnapshotMutationExec, successorID string) {
-	t.Helper()
-	table := "agent_sessions"
-	if f.backend.sqlite {
-		table = "agent_sessions_snapshot_source"
+	sessionCtx := f.sessionAuthorityContext(t)
+	lease, err := f.store.Acquire(sessionCtx, f.identity, holder)
+	if err != nil {
+		t.Fatalf("issue %s snapshot output-contract grant: %v", f.backend.name, err)
 	}
-	now := time.Now().UTC()
-	query := fmt.Sprintf(`UPDATE %s SET status='terminated', termination_reason='normal', terminated_at=?, updated_at=? WHERE session_id=?`, table)
-	args := []any{now, now, f.sessionID}
-	if !f.backend.sqlite {
-		query = `UPDATE agent_sessions SET status='terminated', termination_reason='normal', terminated_at=$1, updated_at=$2 WHERE session_id=$3::uuid`
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(sessionCtx), 10*time.Second)
+		defer cancel()
+		if result, err := f.store.ReleaseOutcome(ctx, lease); err != nil || !result.Acknowledged {
+			t.Errorf("release %s snapshot output-contract grant: acknowledged=%v err=%v", f.backend.name, result.Acknowledged, err)
+		}
+	})
+	if lease.SessionID != f.sessionID {
+		t.Fatalf("%s output-contract grant changed session: got %q want %q", f.backend.name, lease.SessionID, f.sessionID)
 	}
-	if _, err := exec.ExecContext(f.ctx, query, args...); err != nil {
-		t.Fatalf("terminate %s predecessor session: %v", f.backend.name, err)
-	}
-	if f.backend.sqlite {
-		f.insertSQLiteRenamedSession(t, exec, successorID)
-		return
-	}
-	f.insertSession(t, exec, successorID)
 }
 
 type agentSnapshotDeliveryFixture struct {
@@ -859,368 +635,32 @@ func (f agentSnapshotBoundaryFixture) seedTurnWithOutputContract(t *testing.T, t
 	return turnID
 }
 
-func (f agentSnapshotBoundaryFixture) replaceTurnSummary(t *testing.T, exec agentSnapshotMutationExec, turnID, output string) {
+func (f agentSnapshotBoundaryFixture) readSummaryCut(t *testing.T, cut storetest.OperatorSnapshotCut) operatorread.OperatorAgentListResult {
 	t.Helper()
-	table := "agent_turns"
-	if f.backend.sqlite {
-		table = "agent_turns_snapshot_source"
-	}
-	raw := fmt.Sprintf(`[{"kind":"turn_summary","data":{"assistant_visible_output":%q,"outcome":"completed"}}]`, output)
-	query := fmt.Sprintf(`UPDATE %s SET turn_blocks=? WHERE turn_id=?`, table)
-	args := []any{raw, turnID}
-	if !f.backend.sqlite {
-		query = `UPDATE agent_turns SET turn_blocks=$1::jsonb WHERE turn_id=$2::uuid`
-	}
-	result, err := exec.ExecContext(f.ctx, query, args...)
+	var out operatorread.OperatorAgentListResult
+	err := storetest.ReadOperatorSnapshotAcrossCut(f.ctx, f.store, cut, func(ctx context.Context) error {
+		var err error
+		out, err = f.store.ListOperatorAgents(ctx, operatorread.OperatorAgentListOptions{})
+		return err
+	})
 	if err != nil {
-		t.Fatalf("replace %s snapshot turn summary: %v", f.backend.name, err)
+		t.Fatalf("read atomic %s operator summary: %v", f.backend.name, err)
 	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		t.Fatalf("replace %s snapshot turn summary changed %d rows, want 1", f.backend.name, changed)
-	}
+	return out
 }
 
-func (f agentSnapshotBoundaryFixture) settlePendingSnapshotDelivery(t *testing.T, exec agentSnapshotMutationExec, deliveryID string) {
+func (f agentSnapshotBoundaryFixture) readDiagnosisCut(t *testing.T, cut storetest.OperatorSnapshotCut) operatorread.OperatorAgentDiagnosis {
 	t.Helper()
-	f.settlePendingSnapshotDeliveryInTable(t, exec, "event_deliveries", deliveryID)
-}
-
-func (f agentSnapshotBoundaryFixture) settlePendingSnapshotDeliveryInTable(t *testing.T, exec agentSnapshotMutationExec, table, deliveryID string) {
-	t.Helper()
-	now := time.Now().UTC()
-	query := fmt.Sprintf(`UPDATE %s
-		SET status='delivered', next_eligible_at=NULL, settled_at=?, updated_at=?
-		WHERE delivery_id=? AND status='pending'`, table)
-	args := []any{now, now, deliveryID}
-	if !f.backend.sqlite {
-		query = fmt.Sprintf(`UPDATE %s
-			SET status='delivered', next_eligible_at=NULL, settled_at=$1, updated_at=$1
-			WHERE delivery_id=$2::uuid AND status='pending'`, table)
-		args = []any{now, deliveryID}
-	}
-	result, err := exec.ExecContext(f.ctx, query, args...)
+	var out operatorread.OperatorAgentDiagnosis
+	err := storetest.ReadOperatorSnapshotAcrossCut(f.ctx, f.store, cut, func(ctx context.Context) error {
+		var err error
+		out, err = f.store.LoadOperatorAgentDiagnosis(ctx, f.identity, operatorread.OperatorAgentDiagnosisOptions{QueueLimit: 10})
+		return err
+	})
 	if err != nil {
-		t.Fatalf("settle %s pending snapshot delivery: %v", f.backend.name, err)
+		t.Fatalf("read atomic %s operator diagnosis: %v", f.backend.name, err)
 	}
-	if changed, _ := result.RowsAffected(); changed != 1 {
-		t.Fatalf("settle %s pending snapshot delivery changed %d rows, want 1", f.backend.name, changed)
-	}
-}
-
-func (f agentSnapshotBoundaryFixture) readDeliveryWrapperAcrossBoundary(t *testing.T, read func() error, mutate func(agentSnapshotMutationExec, string)) {
-	t.Helper()
-	if f.backend.sqlite {
-		id := sqliteSnapshotBarrierID.Add(1)
-		barrier := &sqliteAgentSnapshotBarrier{entered: make(chan struct{}), release: make(chan struct{})}
-		sqliteSnapshotBarrierRegistry.Store(id, barrier)
-		t.Cleanup(func() { sqliteSnapshotBarrierRegistry.Delete(id) })
-		const source = "event_deliveries_snapshot_source"
-		if _, err := f.db.ExecContext(f.ctx, `ALTER TABLE event_deliveries RENAME TO event_deliveries_snapshot_source`); err != nil {
-			t.Fatalf("rename sqlite delivery snapshot table: %v", err)
-		}
-		if _, err := f.db.ExecContext(f.ctx, fmt.Sprintf(`CREATE VIEW event_deliveries AS SELECT * FROM %s WHERE agent_snapshot_barrier(%d)=1`, source, id)); err != nil {
-			t.Fatalf("create sqlite delivery snapshot barrier view: %v", err)
-		}
-		resultCh := make(chan error, 1)
-		go func() { resultCh <- read() }()
-		select {
-		case <-barrier.entered:
-		case <-time.After(10 * time.Second):
-			close(barrier.release)
-			t.Fatal("sqlite wrapper did not reach the delivery snapshot boundary")
-		}
-		mutate(f.db, source)
-		close(barrier.release)
-		receiveAgentSnapshotWrapper(t, resultCh)
-		return
-	}
-
-	blocker, err := f.db.BeginTx(f.ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blocker.Rollback()
-	if _, err := blocker.ExecContext(f.ctx, `LOCK TABLE event_deliveries IN ACCESS EXCLUSIVE MODE`); err != nil {
-		t.Fatalf("lock postgres delivery wrapper boundary: %v", err)
-	}
-	resultCh := make(chan error, 1)
-	go func() { resultCh <- read() }()
-	waitForPostgresAgentSnapshotReadBlock(t, f.ctx, f.db, "event_deliveries")
-	mutate(blocker, "event_deliveries")
-	if err := blocker.Commit(); err != nil {
-		t.Fatalf("commit postgres delivery wrapper boundary: %v", err)
-	}
-	receiveAgentSnapshotWrapper(t, resultCh)
-}
-
-func receiveAgentSnapshotWrapper(t *testing.T, resultCh <-chan error) {
-	t.Helper()
-	select {
-	case err := <-resultCh:
-		if err != nil {
-			t.Fatalf("read atomic agent wrapper snapshot: %v", err)
-		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("agent wrapper snapshot read did not complete")
-	}
-}
-
-func (f agentSnapshotBoundaryFixture) insertSQLiteRenamedSession(t *testing.T, exec agentSnapshotMutationExec, sessionID string) {
-	t.Helper()
-	fields, err := f.identity.StorageFields()
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now().UTC()
-	if _, err := exec.ExecContext(f.ctx, `INSERT INTO agent_sessions_snapshot_source (
-		session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-		flow_scope_key, flow_instance_id, flow_instance, memory_enabled,
-		conversation, turn_count, runtime_state, status, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, '[]', 0, '{}', 'active', ?, ?)`,
-		sessionID, f.runID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, now, now); err != nil {
-		t.Fatalf("insert sqlite successor session: %v", err)
-	}
-}
-
-func (f agentSnapshotBoundaryFixture) readAcrossSessionBoundary(t *testing.T, mutate func(agentSnapshotMutationExec)) operatorread.OperatorAgentListResult {
-	t.Helper()
-	if f.backend.sqlite {
-		return f.readAcrossSQLiteSessionBoundary(t, mutate)
-	}
-	return f.readAcrossPostgresSessionBoundary(t, mutate)
-}
-
-func (f agentSnapshotBoundaryFixture) readAcrossPostgresSessionBoundary(t *testing.T, mutate func(agentSnapshotMutationExec)) operatorread.OperatorAgentListResult {
-	t.Helper()
-	blocker, err := f.db.BeginTx(f.ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blocker.Rollback()
-	if _, err := blocker.ExecContext(f.ctx, `LOCK TABLE agent_sessions IN ACCESS EXCLUSIVE MODE`); err != nil {
-		t.Fatalf("lock postgres session boundary: %v", err)
-	}
-	resultCh := make(chan agentSnapshotReadResult, 1)
-	go func() {
-		result, readErr := f.store.ListOperatorAgents(f.ctx, operatorread.OperatorAgentListOptions{})
-		resultCh <- agentSnapshotReadResult{result: result, err: readErr}
-	}()
-	waitForPostgresSessionReadBlock(t, f.ctx, f.db)
-	mutate(blocker)
-	if err := blocker.Commit(); err != nil {
-		t.Fatalf("commit postgres boundary mutation: %v", err)
-	}
-	return receiveAgentSnapshotRead(t, resultCh)
-}
-
-func (f agentSnapshotBoundaryFixture) readAcrossSQLiteSessionBoundary(t *testing.T, mutate func(agentSnapshotMutationExec)) operatorread.OperatorAgentListResult {
-	t.Helper()
-	id := sqliteSnapshotBarrierID.Add(1)
-	barrier := &sqliteAgentSnapshotBarrier{entered: make(chan struct{}), release: make(chan struct{})}
-	sqliteSnapshotBarrierRegistry.Store(id, barrier)
-	t.Cleanup(func() { sqliteSnapshotBarrierRegistry.Delete(id) })
-	if _, err := f.db.ExecContext(f.ctx, `ALTER TABLE agent_sessions RENAME TO agent_sessions_snapshot_source`); err != nil {
-		t.Fatalf("rename sqlite session table: %v", err)
-	}
-	if _, err := f.db.ExecContext(f.ctx, fmt.Sprintf(`CREATE VIEW agent_sessions AS SELECT * FROM agent_sessions_snapshot_source WHERE agent_snapshot_barrier(%d)=1`, id)); err != nil {
-		t.Fatalf("create sqlite session barrier view: %v", err)
-	}
-	resultCh := make(chan agentSnapshotReadResult, 1)
-	go func() {
-		result, readErr := f.store.ListOperatorAgents(f.ctx, operatorread.OperatorAgentListOptions{})
-		resultCh <- agentSnapshotReadResult{result: result, err: readErr}
-	}()
-	select {
-	case <-barrier.entered:
-	case <-time.After(10 * time.Second):
-		close(barrier.release)
-		t.Fatal("sqlite agent snapshot did not reach the session boundary")
-	}
-	mutate(f.db)
-	close(barrier.release)
-	return receiveAgentSnapshotRead(t, resultCh)
-}
-
-func (f agentSnapshotBoundaryFixture) readDiagnosisAcrossSessionBoundary(t *testing.T, mutate func(agentSnapshotMutationExec)) operatorread.OperatorAgentDiagnosis {
-	t.Helper()
-	if f.backend.sqlite {
-		return f.readDiagnosisAcrossSQLiteSessionBoundary(t, mutate)
-	}
-	blocker, err := f.db.BeginTx(f.ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blocker.Rollback()
-	if _, err := blocker.ExecContext(f.ctx, `LOCK TABLE agent_sessions IN ACCESS EXCLUSIVE MODE`); err != nil {
-		t.Fatalf("lock postgres diagnosis session boundary: %v", err)
-	}
-	resultCh := make(chan agentSnapshotDiagnosisReadResult, 1)
-	go func() {
-		result, readErr := f.store.LoadOperatorAgentDiagnosis(f.ctx, f.identity, operatorread.OperatorAgentDiagnosisOptions{QueueLimit: 10})
-		resultCh <- agentSnapshotDiagnosisReadResult{result: result, err: readErr}
-	}()
-	waitForPostgresSessionReadBlock(t, f.ctx, f.db)
-	mutate(blocker)
-	if err := blocker.Commit(); err != nil {
-		t.Fatalf("commit postgres diagnosis boundary mutation: %v", err)
-	}
-	return receiveAgentSnapshotDiagnosis(t, resultCh)
-}
-
-func (f agentSnapshotBoundaryFixture) readDiagnosisAcrossSQLiteSessionBoundary(t *testing.T, mutate func(agentSnapshotMutationExec)) operatorread.OperatorAgentDiagnosis {
-	t.Helper()
-	id := sqliteSnapshotBarrierID.Add(1)
-	barrier := &sqliteAgentSnapshotBarrier{entered: make(chan struct{}), release: make(chan struct{})}
-	sqliteSnapshotBarrierRegistry.Store(id, barrier)
-	t.Cleanup(func() { sqliteSnapshotBarrierRegistry.Delete(id) })
-	if _, err := f.db.ExecContext(f.ctx, `ALTER TABLE agent_sessions RENAME TO agent_sessions_snapshot_source`); err != nil {
-		t.Fatalf("rename sqlite diagnosis session table: %v", err)
-	}
-	if _, err := f.db.ExecContext(f.ctx, fmt.Sprintf(`CREATE VIEW agent_sessions AS SELECT * FROM agent_sessions_snapshot_source WHERE agent_snapshot_barrier(%d)=1`, id)); err != nil {
-		t.Fatalf("create sqlite diagnosis session barrier view: %v", err)
-	}
-	resultCh := make(chan agentSnapshotDiagnosisReadResult, 1)
-	go func() {
-		result, readErr := f.store.LoadOperatorAgentDiagnosis(f.ctx, f.identity, operatorread.OperatorAgentDiagnosisOptions{QueueLimit: 10})
-		resultCh <- agentSnapshotDiagnosisReadResult{result: result, err: readErr}
-	}()
-	select {
-	case <-barrier.entered:
-	case <-time.After(10 * time.Second):
-		close(barrier.release)
-		t.Fatal("sqlite agent diagnosis did not reach the session boundary")
-	}
-	mutate(f.db)
-	close(barrier.release)
-	return receiveAgentSnapshotDiagnosis(t, resultCh)
-}
-
-func (f agentSnapshotBoundaryFixture) readAcrossExternalTableBoundary(t *testing.T, table string, mutate func(agentSnapshotMutationExec)) operatorread.OperatorAgentListResult {
-	t.Helper()
-	if f.backend.sqlite {
-		return f.readAcrossSQLiteExternalTableBoundary(t, table, mutate)
-	}
-	return f.readAcrossPostgresExternalTableBoundary(t, table, mutate)
-}
-
-func (f agentSnapshotBoundaryFixture) readAcrossPostgresExternalTableBoundary(t *testing.T, table string, mutate func(agentSnapshotMutationExec)) operatorread.OperatorAgentListResult {
-	t.Helper()
-	blocker, err := f.db.BeginTx(f.ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer blocker.Rollback()
-	if _, err := blocker.ExecContext(f.ctx, fmt.Sprintf(`LOCK TABLE %s IN ACCESS EXCLUSIVE MODE`, table)); err != nil {
-		t.Fatalf("lock postgres %s snapshot boundary: %v", table, err)
-	}
-	resultCh := make(chan agentSnapshotReadResult, 1)
-	go func() {
-		result, readErr := f.store.ListOperatorAgents(f.ctx, operatorread.OperatorAgentListOptions{})
-		resultCh <- agentSnapshotReadResult{result: result, err: readErr}
-	}()
-	waitForPostgresAgentSnapshotReadBlock(t, f.ctx, f.db, table)
-	mutate(blocker)
-	if err := blocker.Commit(); err != nil {
-		t.Fatalf("commit postgres %s snapshot boundary: %v", table, err)
-	}
-	return receiveAgentSnapshotRead(t, resultCh)
-}
-
-func (f agentSnapshotBoundaryFixture) readAcrossSQLiteExternalTableBoundary(t *testing.T, table string, mutate func(agentSnapshotMutationExec)) operatorread.OperatorAgentListResult {
-	t.Helper()
-	id := sqliteSnapshotBarrierID.Add(1)
-	barrier := &sqliteAgentSnapshotBarrier{entered: make(chan struct{}), release: make(chan struct{})}
-	sqliteSnapshotBarrierRegistry.Store(id, barrier)
-	t.Cleanup(func() { sqliteSnapshotBarrierRegistry.Delete(id) })
-	source := table + "_snapshot_source"
-	if _, err := f.db.ExecContext(f.ctx, fmt.Sprintf(`ALTER TABLE %s RENAME TO %s`, table, source)); err != nil {
-		t.Fatalf("rename sqlite %s snapshot table: %v", table, err)
-	}
-	if _, err := f.db.ExecContext(f.ctx, fmt.Sprintf(`CREATE VIEW %s AS SELECT * FROM %s WHERE agent_snapshot_barrier(%d)=1`, table, source, id)); err != nil {
-		t.Fatalf("create sqlite %s snapshot barrier view: %v", table, err)
-	}
-	resultCh := make(chan agentSnapshotReadResult, 1)
-	go func() {
-		result, readErr := f.store.ListOperatorAgents(f.ctx, operatorread.OperatorAgentListOptions{})
-		resultCh <- agentSnapshotReadResult{result: result, err: readErr}
-	}()
-	select {
-	case <-barrier.entered:
-	case <-time.After(10 * time.Second):
-		close(barrier.release)
-		t.Fatalf("sqlite agent snapshot did not reach the %s boundary", table)
-	}
-	mutate(f.db)
-	close(barrier.release)
-	return receiveAgentSnapshotRead(t, resultCh)
-}
-
-type agentSnapshotReadResult struct {
-	result operatorread.OperatorAgentListResult
-	err    error
-}
-
-type agentSnapshotDiagnosisReadResult struct {
-	result operatorread.OperatorAgentDiagnosis
-	err    error
-}
-
-func receiveAgentSnapshotRead(t *testing.T, resultCh <-chan agentSnapshotReadResult) operatorread.OperatorAgentListResult {
-	t.Helper()
-	select {
-	case result := <-resultCh:
-		if result.err != nil {
-			t.Fatalf("read atomic agent snapshot: %v", result.err)
-		}
-		return result.result
-	case <-time.After(10 * time.Second):
-		t.Fatal("agent snapshot read did not complete")
-		return operatorread.OperatorAgentListResult{}
-	}
-}
-
-func receiveAgentSnapshotDiagnosis(t *testing.T, resultCh <-chan agentSnapshotDiagnosisReadResult) operatorread.OperatorAgentDiagnosis {
-	t.Helper()
-	select {
-	case result := <-resultCh:
-		if result.err != nil {
-			t.Fatalf("read atomic agent diagnosis snapshot: %v", result.err)
-		}
-		return result.result
-	case <-time.After(10 * time.Second):
-		t.Fatal("agent diagnosis snapshot read did not complete")
-		return operatorread.OperatorAgentDiagnosis{}
-	}
-}
-
-func waitForPostgresSessionReadBlock(t *testing.T, ctx context.Context, db *sql.DB) {
-	waitForPostgresAgentSnapshotReadBlock(t, ctx, db, "agent_sessions")
-}
-
-func waitForPostgresAgentSnapshotReadBlock(t *testing.T, ctx context.Context, db *sql.DB, table string) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		var blocked bool
-		err := db.QueryRowContext(ctx, `
-			SELECT EXISTS (
-				SELECT 1
-				FROM pg_stat_activity
-				WHERE datname=current_database()
-				  AND pid<>pg_backend_pid()
-				  AND wait_event_type='Lock'
-				  AND query LIKE $1
-			)`, "%"+table+"%").Scan(&blocked)
-		if err != nil {
-			t.Fatalf("inspect postgres session boundary: %v", err)
-		}
-		if blocked {
-			return
-		}
-		runtime.Gosched()
-	}
-	t.Fatalf("postgres agent snapshot did not block at the %s boundary", table)
+	return out
 }
 
 func requireSnapshotAgent(t *testing.T, result operatorread.OperatorAgentListResult, agentID string) operatorread.OperatorAgentSummary {

@@ -30,6 +30,21 @@ type Execer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
 
+func CorruptOperatorSnapshotEventPayloadTx(ctx context.Context, tx *sql.Tx, eventID string) error {
+	result, err := tx.ExecContext(ctx, `UPDATE events SET payload_bytes=$1 WHERE event_id=$2`, []byte{0}, eventID)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return fmt.Errorf("operator snapshot event corruption changed%d rows, want1", n)
+	}
+	return nil
+}
+
 func HydrationBatchSize() int { return hydrationBatchSize }
 
 // Physical payload hydration is unscoped by run and never decodes a complete

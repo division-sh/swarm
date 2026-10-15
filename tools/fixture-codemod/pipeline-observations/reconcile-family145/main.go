@@ -45,7 +45,7 @@ import (
 const base = "c96e20aa7484b23b017f1787a3ee74eced517c54"
 const ledger = "tools/fixture-codemod/pipeline-observations/recipes.json"
 const transitionLedger = "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-const targetDigest = "4f5a3432ec038c4730448484f0cf4a7feeec68828103f92745867ea6ac9b4aff"
+const targetDigest = "0a57e84fe692d2a49cbeac23591e5c77acad368aec61a3fab5c9600940022295"
 
 var sourceForkComparison = map[string]string{}
 var runDeliveryComparison = map[string]string{}
@@ -297,6 +297,9 @@ var files = []string{
 }
 
 func main() {
+	if captureAgentSnapshotCommand(os.Args) {
+		return
+	}
 	if len(os.Args) == 2 && os.Args[1] == "-standing-ingress-capture" {
 		captureStandingIngress()
 		return
@@ -341,7 +344,7 @@ func main() {
 		before := functions(commit(path))
 		data, err := os.ReadFile(path)
 		must(err)
-		after := functions(data)
+		after := agentSnapshotEarlierFunctions(path, functions(data))
 		keys := make([]string, 0, len(before))
 		for key := range before {
 			keys = append(keys, key)
@@ -382,6 +385,7 @@ func main() {
 	rows, changes = composeEntityToolHistory(rows, changes)
 	rows, changes = composeDeploymentResourceHistory(rows, changes)
 	rows, changes = composeStandingIngressHistory(rows, changes)
+	rows, changes = composeAgentSnapshotHistory(rows, changes)
 	raw, err := json.Marshal(changes)
 	must(err)
 	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
