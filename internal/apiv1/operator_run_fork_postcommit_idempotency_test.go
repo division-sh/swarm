@@ -218,7 +218,7 @@ func TestOperatorRunForkKeyedLookupPrecedesMutableAvailabilityAndConflictsWithou
 	if !errors.As(err, &appErr) || appErr.Code != IdempotencyConflictCode {
 		t.Fatalf("conflicting durable request error = %v, want %s", err, IdempotencyConflictCode)
 	}
-	if availability.calls != 1 || executor.calls != 1 || len(operations.byID) != 1 || operations.keyedReads != 3 {
+	if availability.calls != 1 || executor.calls != 1 || len(operations.byID) != 1 || operations.keyedReads != 4 {
 		t.Fatalf("conflict mutated fork or consulted availability: availability=%d execution=%d records=%d keyed_reads=%d", availability.calls, executor.calls, len(operations.byID), operations.keyedReads)
 	}
 }
