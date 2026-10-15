@@ -79,7 +79,13 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 			}
 			if gate {
 				// Branch isolation needs later business history, not runtime logs.
-				advanceLifecycleForkSourceHistory(t, rt, seed.RunID)
+				var selected interface {
+					PipelineObligations() pipelineobligation.Store
+				} = rt.Postgres
+				if rt.SQLite != nil {
+					selected = rt.SQLite
+				}
+				advanceLifecycleForkSourceHistory(t, servedRuntimeProofAuthorActivityContext(t, rt.Runtime, rt.BundleHash), selected, seed.RunID)
 			}
 			before := lifecycleStoredSnapshot(t, rt, seed.RunID)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier.EventID, "allow_source_freeze": true, "idempotency_key": "lifecycle-fork"}
@@ -108,15 +114,10 @@ func runLifecycleRootForkPolicy(t *testing.T, gate bool) {
 	}
 }
 
-func advanceLifecycleForkSourceHistory(t *testing.T, rt servedControlProofRuntime, runID string) {
+func advanceLifecycleForkSourceHistory(t *testing.T, ctx context.Context, selected interface {
+	PipelineObligations() pipelineobligation.Store
+}, runID string) {
 	t.Helper()
-	var selected interface {
-		PipelineObligations() pipelineobligation.Store
-	} = rt.Postgres
-	if rt.SQLite != nil {
-		selected = rt.SQLite
-	}
-	ctx := servedControlProofAuthorActivityContext(t, rt)
 	owner := selected.PipelineObligations()
 	eventID := uuid.NewString()
 	// Hold publication before insertion so live recovery cannot consume the fixture.
