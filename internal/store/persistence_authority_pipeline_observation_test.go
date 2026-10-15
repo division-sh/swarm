@@ -23,6 +23,10 @@ func pipelineObservationConsumerIsClosed(path, declaration string) bool {
 		return true
 	case "internal/store/storetest/activity_result_readback.go":
 		return declaration == "ReadActivityAttemptStorage"
+	case "internal/store/storetest/served_delivery_observation.go":
+		return declaration == "ReadSelectedDeploymentForkDiagnostics" || declaration == "ReadSelectedDeploymentResourceEvent" || declaration == "ReadSelectedDeploymentResourceWait" || declaration == "ReadSelectedDeploymentResourceWake"
+	case "internal/runtime/conformance/fan_out_resource_selected_fork_test.go":
+		return declaration == "logSelectedDeploymentForkFailure" || declaration == "waitDeploymentForkRowEvent"
 	case "internal/runtime/connector_journal_readback_test.go":
 		return declaration == "runtimeConnectorActivityRows" || declaration == "runtimeConnectorActivityRowsForSource"
 	case "internal/runtime/pipeline/handler_rule_selection_supported_surface_external_test.go":
@@ -63,6 +67,12 @@ func TestPipelineObservationGuardRejectsRawAndCallbackAuthority(t *testing.T) {
 		{"internal/store/storetest/handler_selection_storage.go", "ReadHandlerSelectionStorage"},
 		{"internal/store/storetest/connector_credential_storage.go", "ReadConnectorCredentialLeakStorage"},
 		{"internal/store/storetest/activity_result_readback.go", "ReadActivityAttemptStorage"},
+		{"internal/store/storetest/served_delivery_observation.go", "ReadSelectedDeploymentForkDiagnostics"},
+		{"internal/store/storetest/served_delivery_observation.go", "ReadSelectedDeploymentResourceEvent"},
+		{"internal/store/storetest/served_delivery_observation.go", "ReadSelectedDeploymentResourceWait"},
+		{"internal/store/storetest/served_delivery_observation.go", "ReadSelectedDeploymentResourceWake"},
+		{"internal/runtime/conformance/fan_out_resource_selected_fork_test.go", "logSelectedDeploymentForkFailure"},
+		{"internal/runtime/conformance/fan_out_resource_selected_fork_test.go", "waitDeploymentForkRowEvent"},
 		{"internal/runtime/connector_journal_readback_test.go", "runtimeConnectorActivityRows"},
 		{"internal/runtime/pipeline/handler_rule_selection_supported_surface_external_test.go", "assertPersistedHandlerRuleSelectionInFlow"},
 		{"internal/runtime/slack_connector_managed_credential_supported_surface_test.go", "assertSlackManagedConnectorNoStoredSecret"},

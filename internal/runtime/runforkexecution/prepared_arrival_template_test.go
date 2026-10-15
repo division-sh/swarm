@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +27,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -53,8 +53,7 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 				s := storetest.StartSQLiteRuntimeStore(t)
 				selected, owner = s, selectedContractSQLiteExecutionOwnerForTest(t, s)
 			} else {
-				_, db, _ := testutil.StartPostgres(t)
-				s := storetest.AdmitPostgresRuntimeStore(t, db)
+				s := storetest.StartPostgresRuntimeStore(t)
 				selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
 			}
 			ctx := runForkTestContext(t)
@@ -201,6 +200,20 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 			if err != nil {
 				t.Fatal(err)
 			}
+			defer func() {
+				if !t.Failed() {
+					return
+				}
+				diagnostic, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+				defer cancel()
+				debug, debugErr := storetest.ReadServedRunDebugSummary(diagnostic, selected, child)
+				plan, planErr := owner.ports.fork.PlanRunFork(diagnostic, runfork.RunForkPlanRequest{SourceRunID: child})
+				t.Logf("prepared arrival before teardown: child=%s source_due=%s joins=%+v timers=%+v pending=%+v plan_error=%v debug=%s debug_error=%v",
+					child, source.CurrentDueAt, plan.JoinSchedules, plan.WorkflowTimers, plan.PendingWork, planErr, debug, debugErr)
+				stacks := make([]byte, 512*1024)
+				n := goruntime.Stack(stacks, true)
+				t.Logf("prepared arrival blocked owners before teardown:\n%s", stacks[:n])
+			}()
 			operations := selected.(interface {
 				LoadForkOperation(context.Context, string, string, string) (runfork.ForkOperationRecord, bool, error)
 			})
@@ -244,9 +257,9 @@ func testPreparedTemplateArrivalTimeoutBothStores(t *testing.T, selectedDelay st
 				header.ParentFlowID != projected.ParentRoute.FlowID || header.ParentFlowInstance != projected.ParentRoute.FlowInstance || header.ParentEntityID != projected.ParentEntityID {
 				t.Fatalf("exact prepared orders timeout receiver lost its template/path/projected parent: want=%+v actual=%+v found=%v err=%v", projected, header, found, err)
 			}
-			if header.InstanceKind != sourceHeader.InstanceKind || header.TemplateVersion != sourceHeader.TemplateVersion || header.WorkflowVersion != target.Source.WorkflowVersion() {
-				t.Fatalf("orders descriptor changed: source kind=%q template version=%q; selected workflow version=%q; child kind=%q template version=%q workflow version=%q",
-					sourceHeader.InstanceKind, sourceHeader.TemplateVersion, target.Source.WorkflowVersion(), header.InstanceKind, header.TemplateVersion, header.WorkflowVersion)
+			if header.InstanceKind != sourceHeader.InstanceKind || header.TemplateVersion != sourceHeader.TemplateVersion || header.WorkflowVersion != sourceHeader.WorkflowVersion {
+				t.Fatalf("orders captured construction changed: source kind=%q template version=%q workflow version=%q; selected workflow version=%q; child kind=%q template version=%q workflow version=%q",
+					sourceHeader.InstanceKind, sourceHeader.TemplateVersion, sourceHeader.WorkflowVersion, target.Source.WorkflowVersion(), header.InstanceKind, header.TemplateVersion, header.WorkflowVersion)
 			}
 			buckets, err := joinruntime.PersistedBuckets(header.StateBuckets)
 			if err != nil {
