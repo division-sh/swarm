@@ -62,7 +62,7 @@ var admissionPredicateSurfaces = []admissionPredicateSurface{
 	{"internal/serveapp/channel_onboarding.go", "A10,A27", "P08,P10,P21,2577-native-readiness,2577-native-write,2577-native-retirement,2577-native-publication"},
 	{"internal/serveapp/channel_session_bootstrap.go", "A10,A27", "P08,P10,P21,2577-native-readiness,2577-native-inbox,2577-native-write,2577-native-retirement,2577-logout-original-stamp"},
 	{"internal/serveapp/channel_native.go", "A10,A27", "P08,P10,P21,2577-native-inbox"},
-	{"internal/serveapp/channel_session_bootstrap_unix.go", "A10,A27", "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait"},
+	{"internal/serveapp/channel_session_bootstrap_unix.go", "A10,A27", "P08,P10,P21,2577-native-readiness,2577-native-reuse,2577-native-write,2577-native-retirement,2577-native-completed-retirement,2577-native-reset-removal,2577-logout-original-stamp,2577-native-pending,2577-native-startup-wait,2577-native-terminal-pairing"},
 	{"internal/serveapp/channel_session_bootstrap_progress_unix.go", "A10,A27", "P08,P10,P21,2577-native-pending,2577-native-startup-wait"},
 	{"internal/serveapp/channel_session_startup.go", "A10,A27", "P08,P10,P21,2577-native-startup"},
 	{"internal/cliapp/verify_retained_dependencies.go", "A11,A12,A13,A14,A22,A24,A25", "P09,P10,P11,P12,P15,P20,P21"},
