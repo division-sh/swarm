@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
 )
@@ -54,6 +55,8 @@ func (b *Backend) RunTransactionOutcome(ctx context.Context, label string, opera
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	write := b.agentRecoveryWrites.ObserveWriteStart()
+	defer write.End()
 	label = mutationLabel(label)
 	var recoveryDeadline time.Time
 	var lastBusy error
@@ -275,6 +278,8 @@ type transactionConnectionScope interface {
 }
 
 func (b *Backend) runTransactionWithConnectionScope(ctx context.Context, opts *sql.TxOptions, permitWait time.Duration, scope transactionConnectionScope, operation func(context.Context, *sql.Tx) error) (committed bool, err error) {
+	write := b.observeWritableAgentRecovery(opts)
+	defer write.End()
 	poolStarted := time.Now()
 	conn, err := b.db.Conn(ctx)
 	if err != nil {
@@ -365,6 +370,13 @@ func (b *Backend) runTransactionWithConnectionScope(ctx context.Context, opts *s
 
 // A failed cleanup or an uncertain commit never grants busy-policy replay.
 type transactionTerminationError struct{ error }
+
+func (b *Backend) observeWritableAgentRecovery(opts *sql.TxOptions) *runtimestartupownership.AgentRecoveryWriteObservation {
+	if opts != nil && opts.ReadOnly {
+		return nil
+	}
+	return b.agentRecoveryWrites.ObserveWriteStart()
+}
 
 func prepareTransactionConnectionScope(scope transactionConnectionScope, ctx context.Context, conn *sql.Conn) error {
 	if scope == nil {

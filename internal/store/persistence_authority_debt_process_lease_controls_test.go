@@ -15,6 +15,7 @@ import (
 
 // Excluded from the collector payload to avoid a self-referential fingerprint.
 const debtProcessLeaseCollectorTo = "1a353f6c8e5cfe2e2fce2163231e4ac4832df0776daa8dbea177c6edb274bd90"
+const debtProcessLeaseFreshnessCollectorTo = "b06e27c4770377190d13b3218ff93830312175c35e1764cf331f8f61e2309e75"
 
 func TestPersistenceAuthorityDebtProcessLeaseReviewedSourcePins(t *testing.T) {
 	root, base := persistenceAuthorityRepoRoot(t), t.TempDir()
@@ -39,6 +40,9 @@ func TestPersistenceAuthorityDebtProcessLeaseReviewedSourcePins(t *testing.T) {
 	}
 	if digest, err := debtCollectorDigest(debtCatchUpHistoricalArchive(t, debtCatchUpMaster)); err != nil || digest != debtProcessLeaseCollectorTo {
 		t.Errorf("collector pin=%q error=%v", digest, err)
+	}
+	if digest, err := debtCollectorDigest(debtCatchUpHistoricalArchive(t, "a2621ebde98d9a43d9783cbfd078b63ccc3ab14a")); err != nil || digest != debtProcessLeaseFreshnessCollectorTo {
+		t.Errorf("freshness collector pin=%q error=%v", digest, err)
 	}
 }
 
@@ -164,6 +168,74 @@ func TestPersistenceAuthorityDebtProcessLeaseCollectorTransitionIsBounded(t *tes
 			}
 		})
 	}
+	t.Run("freshness-metadata", func(t *testing.T) {
+		inherited := debtControlSite("call:QueryRow", 2)
+		trusted := authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: debtProcessLeaseCollectorTo, Sites: debtControlSet(inherited)}
+		head := trusted
+		head.Collector = debtProcessLeaseFreshnessCollectorTo
+		for _, mutation := range []string{"exact", "landed-successor", "reverse", "wrong-base", "wrong-trusted", "unmatched-base", "wrong-destination", "wrong-head", "unmatched-current", "rebootstrap", "addition", "increase", "deletion"} {
+			t.Run(mutation, func(t *testing.T) {
+				base, candidate := trusted, head
+				base.Sites, candidate.Sites = maps.Clone(trusted.Sites), maps.Clone(head.Sites)
+				predecessor, current := base.Collector, candidate.Collector
+				switch mutation {
+				case "landed-successor":
+					base, predecessor = candidate, current
+				case "reverse":
+					base, candidate, predecessor, current = candidate, base, current, predecessor
+				case "wrong-base":
+					predecessor, base.Collector = strings.Repeat("a", 64), strings.Repeat("a", 64)
+				case "wrong-trusted":
+					base.Collector = strings.Repeat("a", 64)
+				case "unmatched-base":
+					predecessor = strings.Repeat("a", 64)
+				case "wrong-destination":
+					current, candidate.Collector = strings.Repeat("b", 64), strings.Repeat("b", 64)
+				case "wrong-head":
+					candidate.Collector = strings.Repeat("b", 64)
+				case "unmatched-current":
+					current = strings.Repeat("b", 64)
+				case "rebootstrap":
+					candidate.BootstrapSource = strings.Repeat("c", 40)
+				case "addition":
+					added := debtControlSite("call:Exec", 1)
+					candidate.Sites[added.identity()] = added
+				case "increase":
+					increased := inherited
+					increased.Multiplicity++
+					candidate.Sites[increased.identity()] = increased
+				case "deletion":
+					delete(candidate.Sites, inherited.identity())
+				}
+				accept := mutation == "exact" || mutation == "landed-successor"
+				if err := debtValidateCollectorIdentity(predecessor, current, base, candidate, ""); (err == nil) != accept {
+					t.Fatalf("accept=%v error=%v", accept, err)
+				}
+			})
+		}
+		root := debtCatchUpHistoricalArchive(t, "a2621ebde98d9a43d9783cbfd078b63ccc3ab14a")
+		baseline, err := os.ReadFile(filepath.Join(root, debtBaselinePath))
+		if err != nil {
+			t.Fatal(err)
+		}
+		metadata, err := os.ReadFile(filepath.Join(root, debtCollectorSidecarPath))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := debtParseCollectorMetadata(metadata, baseline, debtProcessLeaseFreshnessCollectorTo); err != nil {
+			t.Fatal("exact current sidecar rejected:", err)
+		}
+		if _, err := debtParseCollectorMetadata(metadata, baseline, debtProcessLeaseCollectorTo); err == nil {
+			t.Fatal("stale source digest admitted by current sidecar")
+		}
+		stale, err := debtCollectorMetadataBytes(debtCollectorMetadata{Version: 1, Collector: debtProcessLeaseCollectorTo, BaselineSHA256: debtBaselineChecksum(baseline), Predecessor: debtCacheCollectorFrom})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := debtParseCollectorMetadata(stale, baseline, debtProcessLeaseFreshnessCollectorTo); err == nil {
+			t.Fatal("mismatched sidecar admitted by current source")
+		}
+	})
 }
 
 func TestPersistenceAuthorityDebtProcessLeaseRelocationRejectsSourceDrift(t *testing.T) {

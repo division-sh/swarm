@@ -1779,7 +1779,7 @@
     "owner": "internal/runtime/runtime.go::AuthorActivityEventDescriptors",
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
-    "body_sha256": "6b1425175250c557600d155f5e9dc7cd5f617ea178d29194e5f0b063f0c0402f"
+    "body_sha256": "1fbd4e630c4e0569d49b64d418e4fe070861b619caf4e2d7da04f2d35eb8d47f"
   },
   {
     "owner": "internal/runtime/runtime.go::CanonicalBootProgressName",
@@ -1810,6 +1810,12 @@
     "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
     "proof_families": "P04,P08,P09,P11,P15,P20,P21",
     "body_sha256": "8ceb54088d56e9e8def3e0493795351cfb99da9e614f2971ba28450424c1d125"
+  },
+  {
+    "owner": "internal/runtime/runtime.go::authoredCreationEventKeys",
+    "audit_rows": "A05,A08,A11,A13,A18,A23,A24,A25",
+    "proof_families": "P04,P08,P09,P11,P15,P20,P21",
+    "body_sha256": "41c858203ed4f57a0961000e12d41375fa25857973d15c01ae7bd5afed444dba"
   },
   {
     "owner": "internal/runtime/runtime.go::bindRuntimeStorePayloadAdmitter",
@@ -3240,6 +3246,12 @@
     "body_sha256": "a774f51c979b75b173cdf02738526ab1d918d8759200dd214b392cce24d409f5"
   },
   {
+    "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.AgentRecoveryWriteObserver",
+    "audit_rows": "A19,A20,A28",
+    "proof_families": "P18,P19,P24",
+    "body_sha256": "0caf1e8a8b948fe131cd32383eda01f4d1ca5815c1b248f57811e8e127b534ee"
+  },
+  {
     "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.BeginTx",
     "audit_rows": "A19,A20,A28",
     "proof_families": "P18,P19,P24",
@@ -3297,7 +3309,7 @@
     "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.NewSessionAuthority",
     "audit_rows": "A19,A20,A28",
     "proof_families": "P18,P19,P24",
-    "body_sha256": "05608bf636363eecf6954b1c9e48e54630b4885153fc77484a6b0f00c7fb8480"
+    "body_sha256": "d66e1ad2afe1871d90b523ddfb08190b79fb9d1d4129c59947a55a83a3aa87ec"
   },
   {
     "owner": "internal/store/internal/backend/postgres/backend.go::*Backend.Ping",
@@ -3358,6 +3370,12 @@
     "audit_rows": "A19,A20,A28",
     "proof_families": "P18,P19,P24",
     "body_sha256": "a2ee518d568d5161c6bdccbd3ad0b40f8b3dee1e8f3390435e9c70f48bfb7f94"
+  },
+  {
+    "owner": "internal/store/internal/backend/postgres/inspection.go::*Backend.InspectRetainedAgentRecovery",
+    "audit_rows": "A19,A28",
+    "proof_families": "P18,P24",
+    "body_sha256": "201796b2dabcead4842259c65068b5e2134894c46fb380e33a3fe01fdc677994"
   },
   {
     "owner": "internal/store/internal/backend/postgres/inspection.go::*Backend.InspectSnapshot",
@@ -3525,7 +3543,7 @@
     "owner": "internal/store/internal/backend/postgres/transaction.go::*Backend.runTransactionOutcome",
     "audit_rows": "A19,A28",
     "proof_families": "P18,P24",
-    "body_sha256": "bc613d74b96a85ec802eb1454f0c5d91e4011c74570fa4eb0b954bf162effd3c"
+    "body_sha256": "80d779dc1ac33c511d03568efafb07f5f7415dd57e2b1a564ab2ad2886ba59e9"
   },
   {
     "owner": "internal/store/internal/backend/postgres/transaction.go::*rolledBackSerializationConflict.Error",
@@ -3594,10 +3612,16 @@
     "body_sha256": "3fd95d54c67216c35209a1558bb6439e86f8a0b94d0f545a03e92f1781e12dab"
   },
   {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::loadSelectedRecoveryExecutionTx",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "853985b6f32de2d81c97c1f4b37c99151cabdb6c114467de69c975440278c587"
+  },
+  {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::loadSelectedRecoveryRecordTx",
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
-    "body_sha256": "e025cc5b1191678c3f170c14e24081bffee67741d970c9e3a44164e546d1e98d"
+    "body_sha256": "5080326d7c576c92babe54766b606ce0dace182a5c2bcae63f8d479bab176b1e"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::planSelectedRecoveryTx",
@@ -3658,6 +3682,12 @@
     "audit_rows": "A22,A24",
     "proof_families": "P20,P21",
     "body_sha256": "6081fed1a66d2a3ff8c12d87895aa9d00d5d75e53fbb9dc40096505634f5c760"
+  },
+  {
+    "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::selectedRecoveryExecutionQuery",
+    "audit_rows": "A22,A24",
+    "proof_families": "P20,P21",
+    "body_sha256": "1df05b85cd9b687d0e90733662e0e99aa68ca27f36f7068cd8d9bae4350b10c3"
   },
   {
     "owner": "internal/store/internal/backend/runforkpersistence/selected_recovery.go::settleInterruptedSelectedFiniteFeedOperationTx",

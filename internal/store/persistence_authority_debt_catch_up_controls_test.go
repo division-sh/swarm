@@ -48,7 +48,7 @@ func debtCatchUpHistoricalArchive(t *testing.T, ref string) string {
 }
 
 func TestPersistenceAuthorityDebtCatchUpCollectorFingerprintIsExact(t *testing.T) {
-	root := persistenceAuthorityRepoRoot(t)
+	root := debtCatchUpHistoricalArchive(t, debtCatchUpFreshnessLane)
 	actual, err := debtCollectorDigest(root)
 	if err != nil || actual != debtCatchUpCollectorTo {
 		t.Fatalf("finished joined source: actual=%s expected=%s error=%v", actual, debtCatchUpCollectorTo, err)
@@ -148,7 +148,7 @@ func catchUpDeclarationText(t *testing.T, node any) string {
 }
 
 func TestPersistenceAuthorityDebtCatchUpCollectorPreservesBothPolicyOwners(t *testing.T) {
-	root := persistenceAuthorityRepoRoot(t)
+	root := debtCatchUpHistoricalArchive(t, debtCatchUpFreshnessLane)
 	for _, path := range debtCatchUpCollectorFiles {
 		versions := make([]map[string]string, 4)
 		for index, ref := range []string{debtCatchUpBase, debtCatchUpMaster, debtCatchUpLane, ""} {
@@ -221,7 +221,7 @@ func debtCatchUpComposedPolicyDeclaration(path, key string) bool {
 }
 
 func TestPersistenceAuthorityDebtCatchUpForwardAndForeignProvenance(t *testing.T) {
-	root := persistenceAuthorityRepoRoot(t)
+	root := debtCatchUpHistoricalArchive(t, debtCatchUpFreshnessLane)
 	raw, err := os.ReadFile(filepath.Join(root, debtBaselinePath))
 	if err != nil {
 		t.Fatal(err)
@@ -327,7 +327,12 @@ func TestPersistenceAuthorityDebtCatchUpSourceReadsRemainFresh(t *testing.T) {
 
 func debtCatchUpSourceCopy(t *testing.T) string {
 	t.Helper()
-	root, copy := persistenceAuthorityRepoRoot(t), t.TempDir()
+	return debtCatchUpSourceCopyFrom(t, debtCatchUpHistoricalArchive(t, debtCatchUpFreshnessLane))
+}
+
+func debtCatchUpSourceCopyFrom(t *testing.T, root string) string {
+	t.Helper()
+	copy := t.TempDir()
 	packet, err := debtCatchUpReadPacket(root)
 	if err != nil {
 		t.Fatal(err)
@@ -439,7 +444,7 @@ func TestPersistenceAuthorityDebtCatchUpPendingMetadataRequiresExactDownwardProv
 	t.Setenv(debtRefreshEnv, "downward")
 	t.Setenv("CI", "")
 	t.Setenv("GITHUB_ACTIONS", "")
-	root, copy := persistenceAuthorityRepoRoot(t), debtCatchUpSourceCopy(t)
+	root, copy := debtCatchUpHistoricalArchive(t, debtCatchUpFreshnessLane), debtCatchUpSourceCopy(t)
 	raw, err := os.ReadFile(filepath.Join(root, debtBaselinePath))
 	if err != nil {
 		t.Fatal(err)

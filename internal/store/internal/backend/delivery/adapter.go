@@ -750,7 +750,7 @@ func (a *Adapter) claimExactResultTx(ctx context.Context, tx *sql.Tx, attempt *m
 		result.Snapshot = snapshotAt(record, now)
 		return result, nil
 	}
-	claimed, err := a.claimLocked(ctx, tx, attempt, record, leaseTTL)
+	claimed, err := a.claimLocked(ctx, tx, attempt, event, record, leaseTTL)
 	if err != nil {
 		return ClaimResult{}, err
 	}
@@ -1212,7 +1212,7 @@ func (a *Adapter) RunIDExact(ctx context.Context, q queryer, event events.Event,
 	return runID, nil
 }
 
-func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, record deliveryRecord, leaseTTL time.Duration) (ClaimedObligation, error) {
+func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, event events.Event, record deliveryRecord, leaseTTL time.Duration) (ClaimedObligation, error) {
 	if leaseTTL <= 0 {
 		leaseTTL = DefaultLeaseTTL
 	}
@@ -1233,10 +1233,14 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutation
 	default:
 		return ClaimedObligation{}, fmt.Errorf("%w: terminal delivery reached claim mutation", ErrConflict)
 	}
+	profile, err := a.profileForClaimTx(ctx, tx, event, record)
+	if err != nil {
+		return ClaimedObligation{}, err
+	}
 	token := uuid.NewString()
 	version := record.ClaimVersion + 1
 	expiresAt := now.Add(leaseTTL)
-	if err := a.insertAttempt(ctx, tx, record.DeliveryID, version, token, now, expiresAt); err != nil {
+	if err := a.insertAttempt(ctx, tx, record.DeliveryID, version, token, now, expiresAt, profile); err != nil {
 		return ClaimedObligation{}, err
 	}
 	query := `
@@ -2829,12 +2833,12 @@ func (a *Adapter) ActiveSnapshots(ctx context.Context, q queryer) ([]Snapshot, e
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
-			return nil, err
+			return nil, errors.Join(err, rows.Close())
 		}
 		ids = append(ids, id)
 	}
-	if err := rows.Close(); err != nil {
+	iterationErr := rows.Err()
+	if err := errors.Join(iterationErr, rows.Close()); err != nil {
 		return nil, err
 	}
 	out := make([]Snapshot, 0, len(ids))
@@ -3060,11 +3064,15 @@ func (a *Adapter) requireCurrentClaim(ctx context.Context, tx *sql.Tx, claim Cla
 	return record, now, nil
 }
 
-func (a *Adapter) insertAttempt(ctx context.Context, tx *sql.Tx, deliveryID string, version int64, token string, startedAt, expiresAt time.Time) error {
-	query := `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker, closure_kind) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $1::uuid, TRUE, 'open')`
-	args := []any{deliveryID, version, token, startedAt, expiresAt}
+func (a *Adapter) insertAttempt(ctx context.Context, tx *sql.Tx, deliveryID string, version int64, token string, startedAt, expiresAt time.Time, profile []byte) error {
+	var capture any
+	if len(profile) != 0 {
+		capture = string(profile)
+	}
+	query := `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker, closure_kind, agent_claim_profile) VALUES ($1::uuid, $2, $3::uuid, $4, $5, $1::uuid, TRUE, 'open', $6::jsonb)`
+	args := []any{deliveryID, version, token, startedAt, expiresAt, capture}
 	if a.dialect == DialectSQLite {
-		query = `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker, closure_kind) VALUES (?1, ?2, ?3, ?4, ?5, ?1, TRUE, 'open')`
+		query = `INSERT INTO event_delivery_attempts (delivery_id, claim_version, claim_token, started_at, lease_expires_at, current_delivery_id, open_marker, closure_kind, agent_claim_profile) VALUES (?1, ?2, ?3, ?4, ?5, ?1, TRUE, 'open', ?6)`
 	}
 	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
 		return fmt.Errorf("record delivery claim attempt: %w", err)

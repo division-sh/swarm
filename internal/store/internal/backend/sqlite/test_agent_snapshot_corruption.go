@@ -52,6 +52,8 @@ func (b *Backend) runAgentSnapshotCorruption(ctx context.Context, foreign bool, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	writeObservation := b.agentRecoveryWrites.ObserveWriteStart()
+	defer writeObservation.End()
 	operation := mutationOperation{label: "agent snapshot corruption fixture", phase: mutationPhaseFirstAttempt, attempt: 1}
 	started := time.Now()
 	if err := b.acquireMutation(ctx, operation); err != nil {

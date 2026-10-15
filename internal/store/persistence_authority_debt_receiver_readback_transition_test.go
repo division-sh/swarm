@@ -9,7 +9,7 @@ import (
 )
 
 const debtReceiverReadbackCollectorTo = "84f9fb91bc1ec1d9f0da71ddd541905b995ada9cf6bae14960c642dca9d5596a"
-const debtActiveCollectorTo = debtServedObservationCollectorTo
+const debtActiveCollectorTo = debtCatchUpFreshnessCollectorTo
 const debtReceiverReadbackManifest = "tools/fixture-codemod/pipeline-observations/family145-receiver-public-readback-preimages.json"
 
 func TestPersistenceAuthorityDebtReceiverReadbackCompositionPreservesOriginalSource(t *testing.T) {

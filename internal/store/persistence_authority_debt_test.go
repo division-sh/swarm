@@ -2326,6 +2326,14 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if debtCatchUpCollectorTransition(base, current, trusted, head, retirement...) {
 		return nil
 	}
+	if debtCatchUpFreshnessCollectorTransition(base, current, trusted, head, retirement...) {
+		return nil
+	}
+	if base == debtProcessLeaseCollectorTo && trusted.Collector == base &&
+		current == debtProcessLeaseFreshnessCollectorTo && head.Collector == current &&
+		debtSitesEqual(trusted.Sites, head.Sites) {
+		return nil
+	}
 	if base == debtForkProofCollectorFrom && current == debtForkProofCollectorTo &&
 		trusted.Collector == base && head.Collector == current &&
 		debtForkProofCollectorTransition(trusted.Sites, head.Sites) {
