@@ -16449,6 +16449,8 @@ platform_tables:
         from events.payload_bytes so historical revision hydration reconstructs the exact admitted payload
         bytes; the derived events.payload JSON projection is not revision or replay evidence.
         The exact platform.runtime_log event is excluded from both exact and whole-family fork capture.
+        Its pipeline receipt and committed replay scope follow the same exclusion, so no diagnostic-only
+        pipeline fact is retained without its source event. Their physical records and outcomes remain unchanged.
         Its physical event, event-counter delta, operator readback and replay evidence remain in their existing
         owners; logging alone MUST NOT advance the fork revision or become a selectable cut. It also retains
         operator_reference_event_id as operator provenance, distinct from causal source_event_id, so fixed
