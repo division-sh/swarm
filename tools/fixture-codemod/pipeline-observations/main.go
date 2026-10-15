@@ -196,6 +196,11 @@ func checkpointRecipes(source []byte, rows []recipe) ([]recipe, error) {
 			}
 			continue
 		}
+		var err error
+		row, err = q10CurrentRecipe(row)
+		if err != nil {
+			return nil, err
+		}
 		if row.Successor != "" {
 			row.Before, row.After = row.After, row.Successor
 			row.Successor = ""
