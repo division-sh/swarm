@@ -66,6 +66,14 @@ generic standing artifact contained a retired `agents.yaml` wrapper; it is not
 compiled as a workaround or migrated.
 The shared standing fixture, production parser and all rollback/replay assertions
 are unchanged.
+The external native-activity journal proof is another compilation-time consumer
+of #2617's changed fixture APIs, despite having no textual conflict. It now uses
+`activityJournalProofSource`, consumes the context returned by
+`requireActivityReplayRun` and retains the normalized intent returned by
+`seedSelectedActivitySource`. These existing owners compile the original tool
+and construct/read its actual run/root/receiver; they do not supply the missing
+channel activation or install an SDK. The unchanged refusal, zero-SDK-call and
+exact reopened-journal assertions remain the proof's boundary.
 
 Affected execution witnesses are the original
 `TestPrepareInboundDeliveryBatch*`,
@@ -77,6 +85,8 @@ Affected execution witnesses are the original
 `TestWhatsAppSessionCaptureNormalizedPublicationBothStores`,
 `TestWhatsAppSessionPublicationOutputAuthorizationBeforeMutationBothStores`
 and `TestWhatsAppInboundPublicationRollbackAndLostAcknowledgmentBothStores`.
+`TestNativeActivityWithoutOriginalActivationJournalsRefusalBothStores` covers the
+updated selected-activity adapter on both stores.
 The startup-order and authored-target witnesses remain
 `TestServeRestoresNativeOwnershipBeforeRetainedProofExecution` and the
 `TestSessionActivity*` projection roots. Receipts keep their exact source pins;
