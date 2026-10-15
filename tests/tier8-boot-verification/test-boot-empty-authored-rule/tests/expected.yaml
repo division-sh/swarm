@@ -4,5 +4,5 @@ conformance:
   proves:
     - catalog.verify.boot_diagnostics
   diagnostic:
-    category: "EMPTY-AUTHORED-RULE"
-    contains: "must not be empty"
+    category: "DIALECT-RULES-DEFAULT"
+    contains: "is empty; a default row must contain an authored effect"
