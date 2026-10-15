@@ -50,12 +50,27 @@ func SeedAgentRecovery(ctx context.Context, capability ProcessCapability) error 
 	if !ok {
 		return errors.New("retained process session has no agent recovery seed reader")
 	}
-	read, err := reader.ReadAgentRecoverySeed(ctx)
+	probe := p.agentRecoverySeedProbe.Load()
+	read, err := reader.ReadAgentRecoverySeed(context.WithValue(ctx, agentRecoverySeedProbeContextKey{}, probe))
 	if err != nil {
 		return errors.Join(err, ctx.Err(), p.requireLive())
 	}
 	seed, err := p.prepareAgentRecoverySeed(read)
 	if err != nil {
+		return errors.Join(err, ctx.Err(), p.requireLive())
+	}
+	if probe != nil && probe.BeforePublication != nil {
+		probe.observe(probe.BeforePublication)
+	}
+	if err := errors.Join(ctx.Err(), p.requireLive()); err != nil {
+		return err
+	}
+	// Join the retained native owner's final proof before local publication.
+	// This is not a substitute for the same-cut proof performed by the reader.
+	if err := p.session.ProveCurrent(ctx); err != nil {
+		if ctx.Err() == nil {
+			p.terminalize(possessionTerminalResult(err))
+		}
 		return errors.Join(err, ctx.Err(), p.requireLive())
 	}
 	p.mu.Lock()
