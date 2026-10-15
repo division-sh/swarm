@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -40,6 +41,23 @@ func (b emitRefusalBoundaryBus) CheckPublishRecipientPlan(ctx context.Context, e
 	return plan, nil
 }
 
+func emitRefusalNativeInstances(t testing.TB, source semanticview.Source) emitInstanceObservationFixture {
+	t.Helper()
+	root, err := flowidentity.StandingForGeneration(source, ".", toolTestRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observations := []pipeline.FlowInstanceObservation{emitInstanceObservation(t, source, root, "")}
+	for _, flowID := range []string{"producer", "consumer"} {
+		instance, err := flowidentity.KeylessChild(source, root, flowID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observations = append(observations, emitInstanceObservation(t, source, instance, ""))
+	}
+	return emitInstanceObservationFixture{observations: observations}
+}
+
 func TestIssue642ToolEmitRefusalFailureTaxonomy(t *testing.T) {
 	connectFailure := pinrouting.TargetFailureFromConnect(pinrouting.ConnectFailureTargetUnresolved).Code()
 	for _, test := range []struct {
@@ -53,11 +71,10 @@ func TestIssue642ToolEmitRefusalFailureTaxonomy(t *testing.T) {
 		{connectFailure, failures.ClassTargetUnreachable, connectFailure},
 	} {
 		t.Run(test.code, func(t *testing.T) {
-			source := emitRoutePlanStaticSource(t, contracts.FlowConnect{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"})
+			source := emitRoutePlanSource(t, []contracts.FlowConnect{{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"}})
 			store := newEmitRoutePlanStore()
-			store.targetOwners = []bus.ActiveTargetDescriptor{{ID: "consumer", EntityID: flowidentity.EntityID("consumer"), FlowInstance: "consumer",
-				Availability: pipeline.NewDeliveryTargetAvailability("", "active", false)}}
-			eventBus := newEmitRoutePlanEventBus(t, store, source)
+			store.instanceIndex = emitRefusalNativeInstances(t, source)
+			eventBus := newEmitRoutePlanEventBus(t, store, source, emitInstanceSourceFact(t, source))
 			actor := actors.AgentConfig{ExecutionMode: "live", ID: "producer-agent", Identity: toolTestAgentIdentity(t, "producer-agent", "producer", "producer"),
 				Role: "producer", FlowID: "producer", FlowPath: "producer", EntityID: flowidentity.EntityID("producer-entity"), EmitEvents: []string{"deploy.done"}}
 			executor := NewExecutorWithOptions(emitRefusalBoundaryBus{eventBus, test.code}, ExecutorOptions{WorkflowSource: source, EmitRegistry: NewEmitRegistry(source, nil)})
@@ -173,8 +190,7 @@ func TestIssue642ToolEmitConsumesActualReplyPlanRefusals(t *testing.T) {
 			}
 			replies := &emitReplyReadOwner{record: record}
 			store := newEmitRoutePlanStore()
-			store.targetOwners = []bus.ActiveTargetDescriptor{{ID: "consumer", EntityID: record.Origin.EntityID, FlowInstance: "consumer",
-				Availability: pipeline.NewDeliveryTargetAvailability("", "active", false)}}
+			store.instanceIndex = emitRefusalNativeInstances(t, source)
 			probe := &emitCanonicalReplyPlanBus{EventBus: newEmitRoutePlanEventBusWithReplyOwner(t, store, source, replies)}
 			actor := actors.AgentConfig{ExecutionMode: "live", ID: "producer-agent", Identity: toolTestAgentIdentity(t, "producer-agent", "producer", "producer"),
 				Role: "producer", FlowID: "producer", FlowPath: "producer", EntityID: flowidentity.EntityID("producer-entity"), EmitEvents: []string{"deploy.done"}}

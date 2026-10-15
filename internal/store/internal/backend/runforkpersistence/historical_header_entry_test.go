@@ -50,7 +50,7 @@ func TestHistoricalForkHeaderAndFieldsShareLifecycleCorrespondence(t *testing.T)
 				identity := flowidentity.Stored(nil, flow, path, flowidentity.LogicalInstanceID(path), entityID, "")
 				construction := selectedWorkflowConstructionRecordFixture(t, sourceRun, "bundle-v2:sha256:"+sourceHash, identity, pipeline.WorkflowInstance{
 					WorkflowVersion: "fixture", Mode: mode, Status: "active", EntityType: entityType,
-					InstanceKey: instanceKey,
+					InstanceKey:  instanceKey,
 					CurrentState: "active", StageDefined: true, EnteredStageAt: at, CreatedAt: at,
 				}, executionmode.Mock)
 				outcomes := map[string]contracts.WorkflowGateOutcomePlan{"approve": {Verdict: "approve", AdvancesTo: "done"}}
@@ -81,7 +81,7 @@ func TestHistoricalForkHeaderAndFieldsShareLifecycleCorrespondence(t *testing.T)
 						Source:       runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance,
 						FlowInstance: path, FlowTemplate: flow, EntityType: entityType, Mode: mode, InstanceKey: instanceKey, StageDefined: true,
 						ParentInstance: identity.ParentRoute.FlowInstance,
-						FlowConfig: construction.Config, InitialMaterialization: construction.InitialMaterialization,
+						FlowConfig:     construction.Config, InitialMaterialization: construction.InitialMaterialization,
 					},
 				}
 				before, err := json.Marshal(history.Accumulator)

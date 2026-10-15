@@ -611,6 +611,7 @@ func runForkBarrierFixedRevisionMatrix(t *testing.T, generationMode string) {
 			selected := owner.(storeTestDurableEventBusStore)
 			forkOwner := owner.(interface {
 				MaterializeRunFork(context.Context, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
+				RequireMaterializedRunFork(context.Context, string, runfork.RunForkMaterializeRequest) (runfork.RunForkMaterialization, error)
 			})
 			base := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
 			cases := []struct {
@@ -760,7 +761,7 @@ func runForkBarrierFixedRevisionMatrix(t *testing.T, generationMode string) {
 					if !reflect.DeepEqual(forkContentionRowsForRun(t, before, fixture.runID), forkContentionRowsForRun(t, after, fixture.runID)) {
 						t.Fatal("barrier materialization changed source history")
 					}
-					repeated, err := forkOwner.MaterializeRunFork(ctx, request)
+					repeated, err := forkOwner.RequireMaterializedRunFork(ctx, materialized.ForkRunID, request)
 					if err != nil || repeated.ForkRunID != materialized.ForkRunID {
 						t.Fatalf("repeat %s barrier fork = %#v err=%v, want %s", tc.name, repeated, err, materialized.ForkRunID)
 					}

@@ -492,11 +492,18 @@ func bindRunForkActivitySourceEvent(raw json.RawMessage, forkRunID, sourceReques
 	payload["source_event_id"], _ = json.Marshal(activityidentity.ForkLineageEventID(forkRunID, sourceRequestEventID))
 	return json.Marshal(payload)
 }
-func loadRunForkEntityActivations(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID, entityID, instancePath, flowID string) ([]loopruntime.Activation, error) {
+func loadRunForkEntityActivations(ctx context.Context, tx *sql.Tx, lockPostgres bool, forkRunID, entityID, instancePath, flowID string) ([]loopruntime.Activation, error) {
 	if strings.TrimSpace(entityID) == "" {
 		return nil, nil
 	}
-	header, found, err := workflowheader.LoadForMutation(ctx, tx, postgres, forkRunID, entityID, instancePath)
+	var header workflowheader.Projection
+	var found bool
+	var err error
+	if lockPostgres {
+		header, found, err = workflowheader.LoadForMutation(ctx, tx, true, forkRunID, entityID, instancePath)
+	} else {
+		header, found, err = workflowheader.LoadForRead(ctx, tx, forkRunID, entityID, instancePath)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load fork-local loop state for entity %s disagrees with exact child route/type: %w", entityID, err)
 	}
