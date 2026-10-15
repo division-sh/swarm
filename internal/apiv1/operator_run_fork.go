@@ -282,7 +282,8 @@ func loadRunForkOutcomeForRequest(ctx context.Context, reader RunForkOperationRe
 	}
 	if record.Request.Actor != request.Actor || record.Request.IdempotencyKey != request.IdempotencyKey ||
 		record.Request.TransportHash != request.TransportHash || record.Request.SourceRunID != request.SourceRunID ||
-		record.Request.ForkEventID != request.ForkEventID || (request.IdempotencyKey == "" && record.Request.OperationID != request.OperationID) {
+		record.Request.ForkEventID != request.ForkEventID || record.Request.AtStart != request.AtStart ||
+		(request.IdempotencyKey == "" && record.Request.OperationID != request.OperationID) {
 		return runfork.ForkOperationRecord{}, false, errors.Join(executionErr, fmt.Errorf("durable fork outcome disagrees with original request identity"))
 	}
 	// A different operation's result is observable only after the execution
