@@ -1167,16 +1167,28 @@ func (a *Adapter) claimLocked(ctx context.Context, tx *sql.Tx, attempt *mutation
 	if err := a.recordTransition(ctx, attempt, claimed, "in_progress", nil, now); err != nil {
 		return ClaimedObligation{}, err
 	}
+	if err := declareRetainedDeliveryLifecycle(attempt, record.Snapshot, claimed.Snapshot); err != nil {
+		return ClaimedObligation{}, err
+	}
 	return ClaimedObligation{Snapshot: claimed.Snapshot, Claim: claim}, nil
+}
+
+// These lifecycle coordinates are still part of the historical contract. A new
+// worker token or lease alone must not declare another historical fact.
+func declareRetainedDeliveryLifecycle(attempt *mutationprotocol.Attempt, before, after Snapshot) error {
+	if before.Status == after.Status && before.ActiveSessionID == after.ActiveSessionID {
+		return nil
+	}
+	return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)
 }
 
 func (a *Adapter) BindAgentSession(ctx context.Context, attempt *mutationprotocol.Attempt, claim Claim, sessionID string) (Snapshot, error) {
 	return withDeliverySQL(ctx, attempt, func(ctx context.Context, tx *sql.Tx) (Snapshot, error) {
-		return a.bindAgentSessionTx(ctx, tx, claim, sessionID)
+		return a.bindAgentSessionTx(ctx, tx, attempt, claim, sessionID)
 	})
 }
 
-func (a *Adapter) bindAgentSessionTx(ctx context.Context, tx *sql.Tx, claim Claim, sessionID string) (Snapshot, error) {
+func (a *Adapter) bindAgentSessionTx(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, claim Claim, sessionID string) (Snapshot, error) {
 	if tx == nil || claim.Validate() != nil {
 		return Snapshot{}, fmt.Errorf("delivery session binding requires a current claim")
 	}
@@ -1244,6 +1256,9 @@ func (a *Adapter) bindAgentSessionTx(ctx context.Context, tx *sql.Tx, claim Clai
 		return Snapshot{}, fmt.Errorf("%w: delivery session binding lost claim", ErrConflict)
 	}
 	updated, err := a.loadByID(ctx, tx, claim.DeliveryID(), false)
+	if err == nil {
+		err = declareRetainedDeliveryLifecycle(attempt, record.Snapshot, updated.Snapshot)
+	}
 	return updated.Snapshot, err
 }
 

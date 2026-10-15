@@ -324,9 +324,10 @@ func revisionExactWriterContracts() []revisionExactWriterContract {
 		{"pipelinepersistence/owner_operations.go", "declareEventRevisionFact", []string{"attempt.AddFact(runID.String, family, key)"}},
 		{"delivery/adapter.go", "Adapter.insertExactObligation", []string{"a.persistExactObligation(ctx, tx, obligation)", "attempt.AddFact(obligation.RunID(), privaterunforkrevision.FamilyEventDeliveries, obligation.DeliveryID())"}},
 		{"delivery/adapter.go", "Adapter.persistExactObligation", []string{"a.loadByEventAndRoute(ctx, tx, obligation.EventID(), obligation.RouteIdentity(), true)", "events.SameDeliveryRouteIdentity(record.Route, obligation.Route())", "record.Authority.Equal(obligation.Authority())"}},
-		{"delivery/adapter.go", "Adapter.claimLocked", []string{"a.insertAttempt(ctx, tx, record.DeliveryID, version, token, now, expiresAt)", "a.expireAttempt(ctx, tx, record, now)", "a.recordTransition(ctx, attempt, claimed, \"in_progress\", nil, now)"}},
-		{"delivery/adapter.go", "Adapter.BindAgentSession", []string{"a.bindAgentSessionTx(ctx, tx, claim, sessionID)"}},
-		{"delivery/adapter.go", "Adapter.bindAgentSessionTx", []string{"a.requireCurrentClaim(ctx, tx, claim)", "record.Route.AgentIdentity.StorageFields()"}},
+		{"delivery/adapter.go", "Adapter.claimLocked", []string{"a.insertAttempt(ctx, tx, record.DeliveryID, version, token, now, expiresAt)", "a.expireAttempt(ctx, tx, record, now)", "a.recordTransition(ctx, attempt, claimed, \"in_progress\", nil, now)", "declareRetainedDeliveryLifecycle(attempt, record.Snapshot, claimed.Snapshot)"}},
+		{"delivery/adapter.go", "Adapter.BindAgentSession", []string{"a.bindAgentSessionTx(ctx, tx, attempt, claim, sessionID)"}},
+		{"delivery/adapter.go", "declareRetainedDeliveryLifecycle", []string{"attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)"}},
+		{"delivery/adapter.go", "Adapter.bindAgentSessionTx", []string{"a.requireCurrentClaim(ctx, tx, claim)", "record.Route.AgentIdentity.StorageFields()", "declareRetainedDeliveryLifecycle(attempt, record.Snapshot, updated.Snapshot)"}},
 		{"delivery/adapter.go", "Adapter.RenewClaim", []string{"a.renewClaimTx(ctx, tx, claim, leaseTTL)"}},
 		{"delivery/adapter.go", "Adapter.renewClaimTx", []string{"a.requireCurrentClaim(ctx, tx, claim)", "a.renewClaimWrite(ctx, tx, claim, now, leaseTTL)"}},
 		{"delivery/adapter.go", "Adapter.renewAcquiredClaim", []string{"claim.Validate()", "snapshot.ClaimExpiresAt.After(now)", "a.renewClaimWrite(ctx, tx, claim, now, leaseTTL)"}},
@@ -631,6 +632,20 @@ func validateDeliveryOperationalCaptureRetirement(source string) error {
 			return fmt.Errorf("physical delivery owner %s captures operational fork history", symbol)
 		}
 	}
+	return validateRetainedDeliveryLifecycleCapture(functions["declareRetainedDeliveryLifecycle"])
+}
+
+func validateRetainedDeliveryLifecycleCapture(fn *ast.FuncDecl) error {
+	if fn == nil || fn.Body == nil || len(fn.Body.List) != 2 {
+		return fmt.Errorf("retained delivery lifecycle capture must have one exact unchanged-state guard")
+	}
+	guard, ok := fn.Body.List[0].(*ast.IfStmt)
+	if !ok || guard.Init != nil || guard.Else != nil || len(guard.Body.List) != 1 ||
+		revisionGuardNode(guard.Cond) != "before.Status == after.Status && before.ActiveSessionID == after.ActiveSessionID" ||
+		revisionGuardNode(guard.Body.List[0]) != "return nil" ||
+		revisionGuardNode(fn.Body.List[1]) != "return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)" {
+		return fmt.Errorf("retained delivery lifecycle capture changed its exact semantic-state boundary")
+	}
 	return nil
 }
 
@@ -663,6 +678,11 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 		for _, symbol := range []string{"claimLocked", "bindAgentSessionTx", "renewClaimTx", "renewAcquiredClaim", "renewClaimWrite", "prepareProviderOriginRecovery", "insertAttempt", "expireAttempt", "CommitPipelineHandoff", "persistPipelineHandoffTx"} {
 			source += "func (a *Adapter) " + symbol + "() {}\n"
 		}
+		capture := `func declareRetainedDeliveryLifecycle() error {
+    if before.Status == after.Status && before.ActiveSessionID == after.ActiveSessionID { return nil }
+    return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)
+}`
+		source += capture
 		if err := validateDeliveryOperationalCaptureRetirement(source); err != nil {
 			t.Fatal(err)
 		}
@@ -674,6 +694,18 @@ func TestRunForkRevisionExactContributorGuardHostileControls(t *testing.T) {
 		}
 		if err := validateDeliveryOperationalCaptureRetirement(source + "func (a *Adapter) commitPipelineHandoffTx() {}\n"); err == nil {
 			t.Fatal("retired competing handoff wrapper passed")
+		}
+		for _, changed := range []string{
+			strings.Replace(capture, "before.Status == after.Status && ", "", 1),
+			strings.Replace(capture, " && before.ActiveSessionID == after.ActiveSessionID", "", 1),
+			strings.Replace(capture, "return nil", "return attempt.AddFact(after.RunID, privaterunforkrevision.FamilyEventDeliveries, after.DeliveryID)", 1),
+			strings.Replace(capture, "after.RunID,", "before.RunID,", 1),
+			strings.Replace(capture, "after.DeliveryID)", "before.DeliveryID)", 1),
+			"",
+		} {
+			if err := validateDeliveryOperationalCaptureRetirement(strings.Replace(source, capture, changed, 1)); err == nil {
+				t.Fatalf("changed retained lifecycle boundary passed: %s", changed)
+			}
 		}
 	})
 	t.Run("typed_refs", func(t *testing.T) {
