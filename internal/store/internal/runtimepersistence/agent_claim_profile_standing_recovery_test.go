@@ -60,9 +60,34 @@ func newStandingAgentProfileProcessFixture(t *testing.T, selected agentFixtureFl
 	requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: correlation.RunIDFromContext(ctx), Artifact: bundle.SourceArtifact, BundleHash: fact.BundleHash()})
 	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
-	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
+	process, err := agentfixture.ProcessCapability(t, ctx, selected)
 	if err != nil {
 		t.Fatal(err)
+	}
+	previous, found, err := process.CurrentSourceSet(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sources := append([]agenttopology.SourceCoordinate(nil), previous.Sources...)
+	present := false
+	for _, source := range sources {
+		if source == coordinate {
+			present = true
+		}
+	}
+	if !present {
+		sources = append(sources, coordinate)
+	}
+	plan, err := agenttopology.NewSourceSetPlan(sources, previous.Agents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found && plan.Revision != previous.Revision {
+		if _, err := process.RestoreSourceSet(ctx, agenttopology.SourceSetCommitRequest{
+			OperationID: uuid.NewString(), ExpectedRevision: previous.Revision, Plan: plan,
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, coordinate)
 	if err != nil {
