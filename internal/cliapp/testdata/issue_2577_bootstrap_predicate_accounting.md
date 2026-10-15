@@ -356,9 +356,10 @@ repair makes repeated observed disconnects idempotent, but leaves generic
 retirement as a clearing refusal; later disconnects cannot recreate that state.
 No execution-health, disclosure-scope or failure admission is relaxed.
 
-`TestWhatsAppPairingDuplicateDisconnectReadbackBothStores` cuts at the existing
-SDK-disconnect lifetime owner over actual selected SQLite/PostgreSQL stores and
-the original unpaired SDK connection. Both failed and observed-expired states
+`TestWhatsAppPairingDuplicateDisconnectReadbackBothStores` orders two cuts at the
+existing private read owner over actual selected SQLite/PostgreSQL stores and
+the original unpaired SDK connection, then invokes the full SDK lifetime fence.
+Both failed and observed-expired states
 are checked after events one and two through native pairing readback, onboarding
 get and connected-channel list. Scope and zero-code observations must stay
 exact, while standing readiness and channel execution remain unavailable.
@@ -367,9 +368,14 @@ followed by another event, must both refuse. These are read-owner cuts, not a
 claim that the external socket peer generated duplicate SDK callbacks. The
 existing four served public controls retain real transport execution proof.
 
-Before the repair, all four store/status leaves fail specifically on event two;
-event one and the retirement refusals pass. Raw RED SHA256:
-5b623d8af40ac635097ebb9d4807a4cb0800622fe4f8bf0895bfe01242ff0997.
+With the original clearing branch restored in a disposable overlay, all four
+ordered store/status leaves fail specifically on event two and the later full
+lifetime fence; event one and both retirement refusals pass. Raw RED SHA256:
+46b508013519ea2838e2ab07b07e6beda142ca3d0f454ec91832408d4547f35b.
+The earlier full-lifetime probe is retained separately (SHA256
+5b623d8af40ac635097ebb9d4807a4cb0800622fe4f8bf0895bfe01242ff0997):
+one PostgreSQL first read also failed, so that probe does not establish the
+callback count at its first read and is not the ordered counterexample.
 The existing isolated authorization matrix also repeats the disconnect before
 each scope/error check. Fresh focused/race, exact-head preflight and real
 QR-render/expiry receipts are required for this successor; old passes are not
