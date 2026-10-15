@@ -156,11 +156,16 @@ func TieExactPendingPublicationCreatedAtFaultTx(ctx context.Context, tx *sql.Tx,
 	if err != nil {
 		return err
 	}
-	if len(members) != 2 || !((members[0].DeliveryID == firstID && members[1].DeliveryID == secondID) || (members[0].DeliveryID == secondID && members[1].DeliveryID == firstID)) {
+	if len(members) != 2 {
 		return fmt.Errorf("pending publication tie requires its complete exact two-delivery membership")
 	}
+	wanted := map[string]bool{firstID: true, secondID: true}
 	var records [2]deliveryRecord
 	for i, member := range members {
+		if !wanted[member.DeliveryID] {
+			return fmt.Errorf("pending publication tie requires its complete exact two-delivery membership")
+		}
+		delete(wanted, member.DeliveryID)
 		records[i], err = a.loadByID(ctx, tx, member.DeliveryID, true)
 		if err != nil {
 			return err
