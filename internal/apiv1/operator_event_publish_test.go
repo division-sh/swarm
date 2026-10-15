@@ -1167,19 +1167,8 @@ func TestOperatorEventPublishPrivateTargetCannotAuthorizePublication(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(ctx, `
-		WITH authored AS (
-			UPDATE entity_state
-			SET fields = '{"entity_id":"authored-lookalike","flow_instance":"authored/lookalike"}'::jsonb
-			WHERE run_id = $1::uuid AND entity_id = $2::uuid AND flow_instance = $3
-			RETURNING run_id, entity_id, flow_instance
-		)
-		UPDATE flow_instances fi
-		SET bookkeeping = '{"entity_id":"bookkeeping-lookalike","flow_instance":"bookkeeping/lookalike"}'::jsonb
-		FROM authored
-		WHERE fi.run_id = authored.run_id AND fi.entity_id = authored.entity_id AND fi.instance_path = authored.flow_instance
-	`, runID, targetEntityID, targetFlowInstance); err != nil {
-		t.Fatalf("seed hostile entity value-map identity lookalikes: %v", err)
+	if changed, err := storetest.SetWorkflowProjectionIdentityLookalikes(ctx, pg, runID, targetEntityID, targetFlowInstance); err != nil || changed != 1 {
+		t.Fatalf("seed hostile entity value-map identity lookalikes: rows=%d err=%v", changed, err)
 	}
 	lookup, err := runtimepipeline.NewExactFlowInstanceLookup(source, mustAPITestSourceArtifactFact(bundleHash), targetOwner)
 	if err != nil {
