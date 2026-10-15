@@ -433,6 +433,107 @@ type SelectedDeploymentForkDiagnosticSection struct {
 	Failure string
 }
 
+type SelectedDeploymentResourceWaitStorage struct {
+	Intents, Cursor, Outcomes, Events, Deliveries, ReceiverInstances int
+	Status, IntentBundle, Origin                                     string
+	SourceKind, FeedID, Blocked, Claimant, Retry                     SelectedDeploymentForkDiagnosticCell
+}
+
+type SelectedDeploymentResourceWakeStorage struct {
+	Events, Grants        int
+	RunStatus, BundleHash string
+}
+
+func ReadSelectedDeploymentResourceEventForTest(ctx context.Context, selected any, runID string) (string, error) {
+	if err := validateSelectedForkStorageIdentity(runID); err != nil {
+		return "", err
+	}
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return "", err
+	}
+	var eventID string
+	found := false
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		err := tx.QueryRowContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name='root.ready' ORDER BY event_id LIMIT 1`, runID).Scan(&eventID)
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		found = err == nil
+		return err
+	})
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		return "", sql.ErrNoRows
+	}
+	return eventID, nil
+}
+
+func ReadSelectedDeploymentResourceWaitForTest(ctx context.Context, selected any, runID string) (SelectedDeploymentResourceWaitStorage, error) {
+	if err := validateSelectedForkStorageIdentity(runID); err != nil {
+		return SelectedDeploymentResourceWaitStorage{}, err
+	}
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return SelectedDeploymentResourceWaitStorage{}, err
+	}
+	var out SelectedDeploymentResourceWaitStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(cursor),0) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&out.Intents, &out.Cursor); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`, runID).Scan(&out.Outcomes); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1`, runID).Scan(&out.Events); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`, runID).Scan(&out.Deliveries); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, runID).Scan(&out.ReceiverInstances); err != nil {
+			return err
+		}
+		var sourceKind, feedID, blocked, claimant, retry sql.NullString
+		if err := tx.QueryRowContext(ctx, `SELECT status,bundle_hash,origin_kind,source_kind,deployment_feed_id,blocked_reason,claim_owner,retry_ready_at FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&out.Status, &out.IntentBundle, &out.Origin, &sourceKind, &feedID, &blocked, &claimant, &retry); err != nil {
+			return err
+		}
+		out.SourceKind = SelectedDeploymentForkDiagnosticCell{Text: sourceKind.String, Present: sourceKind.Valid}
+		out.FeedID = SelectedDeploymentForkDiagnosticCell{Text: feedID.String, Present: feedID.Valid}
+		out.Blocked = SelectedDeploymentForkDiagnosticCell{Text: blocked.String, Present: blocked.Valid}
+		out.Claimant = SelectedDeploymentForkDiagnosticCell{Text: claimant.String, Present: claimant.Valid}
+		out.Retry = SelectedDeploymentForkDiagnosticCell{Text: retry.String, Present: retry.Valid}
+		return nil
+	})
+	if err != nil {
+		return SelectedDeploymentResourceWaitStorage{}, err
+	}
+	return out, nil
+}
+
+func ReadSelectedDeploymentResourceWakeForTest(ctx context.Context, selected any, runID string) (SelectedDeploymentResourceWakeStorage, error) {
+	if err := validateSelectedForkStorageIdentity(runID); err != nil {
+		return SelectedDeploymentResourceWakeStorage{}, err
+	}
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return SelectedDeploymentResourceWakeStorage{}, err
+	}
+	var out SelectedDeploymentResourceWakeStorage
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='root.ready'`, runID).Scan(&out.Events); err != nil {
+			return err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT status,bundle_hash FROM runs WHERE run_id=$1`, runID).Scan(&out.RunStatus, &out.BundleHash); err != nil {
+			return err
+		}
+		return tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_generation_grants WHERE bundle_hash=$1 AND state='admitted' AND selected_binding_id IS NULL`, out.BundleHash).Scan(&out.Grants)
+	})
+	if err != nil {
+		return SelectedDeploymentResourceWakeStorage{}, err
+	}
+	return out, nil
+}
+
 func ReadSelectedDeploymentForkDiagnosticsForTest(ctx context.Context, selected any, runID string) ([]SelectedDeploymentForkDiagnosticSection, error) {
 	if err := validateSelectedForkStorageIdentity(runID); err != nil {
 		return nil, err

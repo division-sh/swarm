@@ -212,12 +212,11 @@ func logSelectedDeploymentForkFailure(t *testing.T, selected any, forkRunID stri
 	}
 }
 
-func waitDeploymentForkRowEvent(t *testing.T, ctx context.Context, db *sql.DB, runID string, wake func()) string {
+func waitDeploymentForkRowEvent(t *testing.T, ctx context.Context, selected any, runID string, wake func()) string {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
-		var eventID string
-		err := db.QueryRowContext(ctx, `SELECT event_id FROM events WHERE run_id=$1 AND event_name='root.ready' ORDER BY event_id LIMIT 1`, runID).Scan(&eventID)
+		eventID, err := storetest.ReadSelectedDeploymentResourceEvent(ctx, selected, runID)
 		if err == nil {
 			return eventID
 		}
@@ -226,42 +225,17 @@ func waitDeploymentForkRowEvent(t *testing.T, ctx context.Context, db *sql.DB, r
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	var intents, cursor, outcomes, events, deliveries, receiverInstances int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(cursor),0) FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&intents, &cursor); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`, runID).Scan(&outcomes); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1`, runID).Scan(&events); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1`, runID).Scan(&deliveries); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM flow_instances WHERE run_id=$1`, runID).Scan(&receiverInstances); err != nil {
-		t.Fatal(err)
-	}
-	var status, intentBundle, origin string
-	var sourceKind, feedID, blocked, claimant, retry sql.NullString
-	if err := db.QueryRowContext(ctx, `SELECT status,bundle_hash,origin_kind,source_kind,deployment_feed_id,blocked_reason,claim_owner,retry_ready_at FROM fan_out_intents WHERE run_id=$1`, runID).Scan(&status, &intentBundle, &origin, &sourceKind, &feedID, &blocked, &claimant, &retry); err != nil {
+	before, err := storetest.ReadSelectedDeploymentResourceWait(ctx, selected, runID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	wake()
 	time.Sleep(2 * time.Second)
-	var afterWake int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='root.ready'`, runID).Scan(&afterWake); err != nil {
+	after, err := storetest.ReadSelectedDeploymentResourceWake(ctx, selected, runID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	var runStatus, bundleHash string
-	if err := db.QueryRowContext(ctx, `SELECT status,bundle_hash FROM runs WHERE run_id=$1`, runID).Scan(&runStatus, &bundleHash); err != nil {
-		t.Fatal(err)
-	}
-	var grants int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_generation_grants WHERE bundle_hash=$1 AND state='admitted' AND selected_binding_id IS NULL`, bundleHash).Scan(&grants); err != nil {
-		t.Fatal(err)
-	}
-	t.Fatalf("deployment run %s never published its resource event without manual wake: intents=%d cursor=%d outcomes=%d events=%d deliveries=%d receiver_instances=%d intent_status=%s run_status=%s matching_bundle=%t origin=%s source=%+v feed=%+v grants=%d blocked=%+v claimant=%+v retry=%+v after_manual_wake=%d", runID, intents, cursor, outcomes, events, deliveries, receiverInstances, status, runStatus, intentBundle == bundleHash, origin, sourceKind, feedID, grants, blocked, claimant, retry, afterWake)
+	t.Fatalf("deployment run %s never published its resource event without manual wake: intents=%d cursor=%d outcomes=%d events=%d deliveries=%d receiver_instances=%d intent_status=%s run_status=%s matching_bundle=%t origin=%s source=%+v feed=%+v grants=%d blocked=%+v claimant=%+v retry=%+v after_manual_wake=%d", runID, before.Intents, before.Cursor, before.Outcomes, before.Events, before.Deliveries, before.ReceiverInstances, before.Status, after.RunStatus, before.IntentBundle == after.BundleHash, before.Origin, before.SourceKind, before.FeedID, after.Grants, before.Blocked, before.Claimant, before.Retry, after.Events)
 	return ""
 }
 
@@ -591,7 +565,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 						t.Fatal(err)
 					}
 					sourceRunID := startDeploymentResourceRun(t, f, server, "--data", selectedDeploymentEvent+"="+originalPath)
-					forkEventID := waitDeploymentForkRowEvent(t, f.ctx, f.db, sourceRunID, f.runtime.fanOutServing.Wake)
+					forkEventID := waitDeploymentForkRowEvent(t, f.ctx, f.selected, sourceRunID, f.runtime.fanOutServing.Wake)
 					assertSelectedDeploymentRows(t, f, server, sourceRunID, route, string(original.VersionID), originalRows)
 					page := selectedDeploymentPublicEvents(t, f.ctx, server, sourceRunID)
 					if len(page.Events) != 1 || page.Events[0].EventID != forkEventID {
@@ -605,7 +579,7 @@ func proveSourceChangedPinPublicForkAndLostResponse(t *testing.T, pointKind runf
 						t.Fatal(err)
 					}
 					changedSourceID := startDeploymentResourceRun(t, f, server, "--data", selectedDeploymentEvent+"="+changedPath)
-					waitDeploymentForkRowEvent(t, f.ctx, f.db, changedSourceID, f.runtime.fanOutServing.Wake)
+					waitDeploymentForkRowEvent(t, f.ctx, f.selected, changedSourceID, f.runtime.fanOutServing.Wake)
 					assertSelectedDeploymentRows(t, f, server, changedSourceID, route, string(changed.VersionID), changedRows)
 					if original.VersionID == changed.VersionID {
 						t.Fatal("changed dataset reused the original version identity")

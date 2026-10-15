@@ -214,7 +214,7 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 					wantVersion = newVersion
 				}
 				sourceRunID := start("old", oldRows)
-				pointEventID := waitDeploymentForkRowEvent(t, f.ctx, f.db, sourceRunID, f.runtime.fanOutServing.Wake)
+				pointEventID := waitDeploymentForkRowEvent(t, f.ctx, f.selected, sourceRunID, f.runtime.fanOutServing.Wake)
 				waitCtx, cancelWait := context.WithTimeout(f.ctx, 10*time.Second)
 				defer cancelWait()
 				if err := observed.waitCommitted(waitCtx, pointEventID); err != nil {
@@ -281,7 +281,7 @@ func TestDeploymentSourceFixedTPendingReceiverAndChangedPinBothStores(t *testing
 				}()
 				// Activation acknowledgment precedes retained publication. Observe
 				// that publication before inspecting its final ordinal settlement.
-				_ = waitDeploymentForkRowEvent(t, f.ctx, f.db, result.ForkRunID, f.runtime.fanOutServing.Wake)
+				_ = waitDeploymentForkRowEvent(t, f.ctx, f.selected, result.ForkRunID, f.runtime.fanOutServing.Wake)
 				drainDeadline := time.Now().Add(3 * time.Minute)
 				drainCtx, stopDrain := context.WithDeadline(f.ctx, drainDeadline)
 				defer stopDrain()

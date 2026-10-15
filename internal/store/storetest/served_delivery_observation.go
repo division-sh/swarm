@@ -81,6 +81,21 @@ func ReadServedRunDebugSummary(ctx context.Context, selected any, runID string) 
 type SelectedDeploymentForkDiagnosticCell = private.SelectedDeploymentForkDiagnosticCell
 type SelectedDeploymentForkDiagnosticSection = private.SelectedDeploymentForkDiagnosticSection
 
+type SelectedDeploymentResourceWaitStorage = private.SelectedDeploymentResourceWaitStorage
+type SelectedDeploymentResourceWakeStorage = private.SelectedDeploymentResourceWakeStorage
+
+func ReadSelectedDeploymentResourceEvent(ctx context.Context, selected any, runID string) (string, error) {
+	return private.ReadSelectedDeploymentResourceEventForTest(ctx, selected, runID)
+}
+
+func ReadSelectedDeploymentResourceWait(ctx context.Context, selected any, runID string) (SelectedDeploymentResourceWaitStorage, error) {
+	return private.ReadSelectedDeploymentResourceWaitForTest(ctx, selected, runID)
+}
+
+func ReadSelectedDeploymentResourceWake(ctx context.Context, selected any, runID string) (SelectedDeploymentResourceWakeStorage, error) {
+	return private.ReadSelectedDeploymentResourceWakeForTest(ctx, selected, runID)
+}
+
 func ReadSelectedDeploymentForkDiagnostics(ctx context.Context, selected any, runID string) ([]SelectedDeploymentForkDiagnosticSection, error) {
 	return private.ReadSelectedDeploymentForkDiagnosticsForTest(ctx, selected, runID)
 }
