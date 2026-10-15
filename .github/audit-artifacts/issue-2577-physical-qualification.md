@@ -2,8 +2,9 @@
 
 This is the pending P01-P09 acceptance plan for #2577/#2614, not a completed
 receipt or a claim of supported WhatsApp interoperability. Account-free SDK
-peers and served tests remain separate evidence. Use the exact final candidate
-after its compiler prerequisite has independently qualified.
+peers and served tests remain separate evidence. The Go 1.26 prerequisite
+(#2622) has merged; use the exact reviewed final provider candidate, not an old
+draft or an account-free test binary.
 
 ## People, Devices And Consent
 
@@ -47,11 +48,14 @@ hand-copy session/binding rows between sources. Use fresh public connect or
 source admission for each actual target. A bare echo is not evidence of separate
 agent memory; P03 must separately inspect the declared conversation histories.
 
-For initial native pairing, F uses the ordinary authenticated public
+For initial native pairing, use the ordinary authenticated public CLI or
 `channel.onboarding_start`/`channel.onboarding_get`/`channel.onboarding_retry`
-responses and retains the returned operation ID privately. The human CLI may
-stop at a pending pairing phase; these examples do not claim it renders a QR.
-Do not invent an operation ID or read it from private persistence.
+responses and retain the returned operation ID privately. Human/JSON CLI output
+can disclose the current pairing material and expiry; it does not render a QR
+bitmap. Quiet output contains only the operation ID. Preparing, awaiting QR and
+paired progress remain nonterminal and not READY. Advance once with explicit
+`resume`; do not add automatic polling or reconnect. Do not invent an operation
+ID or read it from private persistence.
 
 Public control examples, with private values supplied locally:
 
@@ -66,10 +70,11 @@ swarm channel logout <operation-id> --api-server <operator-origin> \
   --api-token-file <private-token-file> --json
 ```
 
-Pairing material comes only from authenticated `channel.onboarding_get` for the
-exact current operation. F displays it locally through a trusted offline QR
-renderer without recording its bytes; the renderer grants no account or
-principal authority. Expired/replaced/canceled material is discarded. Do not
+Pairing material comes only from authenticated current-operation readback,
+including the public Start/Get/Retry responses or human/JSON CLI output above.
+F displays it locally through a trusted offline QR renderer without recording
+its bytes; the renderer grants no account or principal authority.
+Expired/replaced/canceled material is discarded. Do not
 invent a provider credential, caller principal, receipt or activation to advance
 the ceremony. Pairing, Connected, principal claim, human confirmation and READY
 are separately observed facts.
@@ -104,9 +109,12 @@ PASS, FAIL or NOT RUN; never turn a healthy repeat into causal closure.
 On failure preserve the original terminal result, phase and before-cancel
 diagnostics without message bodies, phone numbers, QR or session bytes. Stop the
 affected journey; do not retry, raise a deadline, clear a row, delete history or
-adopt replacement authority to obtain green. The open #2353 PostgreSQL 5s resume
-entry observation remains separate and needs causal resolution or explicit
-LEAD/user landing-risk disposition. Physical success does not waive it.
+adopt replacement authority to obtain green. The PostgreSQL 5s resume entry
+observation remains OPEN/unclassified on #2577, as recorded in reviewer-f's
+[6180950229 acceptance](https://github.com/division-sh/swarm/issues/2577#issuecomment-6180950229).
+#2353 is closed and retains historical evidence only. This separate row needs
+causal resolution or explicit LEAD/user landing-risk disposition. Physical
+success does not waive it or authorize another unchanged timing exposure.
 
 After the session, perform the agreed explicit logout, verify Linked Devices and
 public retirement/readback, and remove disposable local evidence only after all
