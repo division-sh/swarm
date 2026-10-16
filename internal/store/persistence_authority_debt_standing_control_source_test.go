@@ -211,15 +211,31 @@ func TestPersistenceAuthorityDebtStandingControlFiveInversesAndHostileEvidence(t
 	for _, key := range debtStandingControlKeys {
 		proveDebtStandingControlInverse(t, root, pins, key)
 	}
-	copy := t.TempDir()
-	debtStandingControlCopySources(t, root, copy)
+	copy := debtCatchUpSourceCopyFrom(t, root)
+	copyRepair2698CustodySources(t, root, copy)
+	if err := debtCatchUpCollectorSource(copy); err != nil {
+		t.Fatal("unmodified complete source evidence was rejected:", err)
+	}
 	if _, err := debtStandingControlLiveSources(copy); err != nil {
 		t.Fatal("unmodified standing-control evidence was rejected:", err)
 	}
+	previous := func(copy string, pin debtRunIdentitySourceBody) error {
+		if err := debtCatchUpCollectorSource(copy); err != nil {
+			return err
+		}
+		_, err := debtStandingControlSourcePrevious(copy, pin.File, pin.Function, pin.After)
+		return err
+	}
 	for _, cut := range []string{"missing manifest", "changed manifest", "duplicate key", "changed sibling", "missing sibling", "missing history", "missing composition", "changed composition"} {
 		t.Run(cut, func(t *testing.T) {
-			copy := t.TempDir()
-			debtStandingControlCopySources(t, root, copy)
+			copy := debtCatchUpSourceCopyFrom(t, root)
+			copyRepair2698CustodySources(t, root, copy)
+			if err := debtCatchUpCollectorSource(copy); err != nil {
+				t.Fatal("unmodified complete hostile-control evidence was rejected:", err)
+			}
+			if _, err := debtStandingControlLiveSources(copy); err != nil {
+				t.Fatal("unmodified hostile-control evidence was rejected:", err)
+			}
 			mutateDebtStandingControlEvidence(t, copy, pins, cut)
 			pin := pins[0]
 			for _, row := range pins {
@@ -227,7 +243,7 @@ func TestPersistenceAuthorityDebtStandingControlFiveInversesAndHostileEvidence(t
 					pin = row
 				}
 			}
-			if _, err := debtStandingControlSourcePrevious(copy, pin.File, pin.Function, pin.After); err == nil {
+			if err := previous(copy, pin); err == nil {
 				t.Fatal("foreign standing-control evidence was accepted")
 			}
 		})

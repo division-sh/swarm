@@ -53,7 +53,39 @@ issue-2698-round2-diagnostic-tail.tsv preserves the EXACT84 unstarted roots
 plus the interrupted root from the frozen229-root store selection at ff6905.
 SHA256 f8a9bc409be73808c420461a272733b3dc4f767b302a9d9298af2d69f298eba1.
 The enumerated diagnostic supplements, never replaces, the complete unit.
-Tail execution and the final complete store receipt remain pending here.
+The one diagnostic tail ran at signed9f8140fc6df45745843979d0d098f3a587b2d60f:
+all85 roots completed,80 PASS/5 FAIL,409.454s,0 SKIP,0 timeout/interrupted.
+JSON SHA25682bfb8d521d0232b60dfb4e69266cb400b99a6f3de6734acbe9c36bd0f330eb2.
+The formerly interrupted trusted-ceiling root completed PASS81.39s.
+GOMAXPROCS2/count1/p1/600s, no overlay; no tail retry. The exact list remains
+unchanged. The complete store unit remains required, not replaced by this tail.
+
+Four reached failures share the authorized source/copy boundary:
+
+| Root suffix after TestPersistenceAuthorityDebt | Exact repair and receipt |
+| --- | --- |
+| ServedScenarioCompositionIsExactAndSourceOnly | Existing authenticated lane view before the scenario native comparator; unchanged256de06d predecessor digest. Actual-byte noncanonical refusal uses the same view. PASS0.39s. |
+| StandingControlFiveInversesAndHostileEvidence | Complete current/custody copies; validate each positive before all8 intended mutations. Compose the existing complete-image owner with the declaration inverse, including missing composition. All5 original inverse proofs remain. Final PASS11.10s. |
+| WorkflowStateMetadataIsLocalAndSourceBound | Complete current/custody copy; immutable historical copy remains separate. Every metadata/owner/foreign control retained. PASS1.58s. |
+| WriterStageUnrefreshedMetadataIsScopedAndFailClosed | Complete current/custody copy; all7 donor/missing-donor and local/CI/historical/canonical-metadata checks retained. PASS14.57s. |
+
+Focused9-root receipt pr2698-round2-tail-composition-repair.jsonl retains
+8 PASS/1 FAIL,172.688s. Its remaining missing-composition RED was a standalone
+declaration inverse accepting a historical-compatible body without the enclosing
+current-image gate. The existing complete-image gate is now composed in this
+copied CURRENT proof only; no inverse/admission predicate changes.
+pr2698-round2-standing-complete-boundary.jsonl records the repair PASS11.117s.
+Workflow history/foreign/manifest/owner controls and writer body/manifest controls
+also passed. The now-unused partial source-fork copy helper alone is retired;
+no historical record, root or assertion is removed. Collector remainsf5da43ac.
+
+The fifth reached failure is TestAdjacent2149AuthorityFindingsClosed, whose
+blanket unclassified-row assertion conflicts with the existing exact a1
+admission. BLOCKING question6220400254 retains it unchanged pending disposition.
+The actual registry root PASSED19820 exact findings with4704 admitted keys,
+strict_completion=false, digest14be09b12bd09bd915e54d6f8ce37feaaac00a3f4c1b24788774689927863f9e.
+There are0 adjacent-2149 rows; all registry hostile/effective-method controls
+passed. No unknown/stale/new key or allowance increase is proposed.
 
 Tool source/imported helpers, manifests, pinned source objects and selection
 are unchanged. The sole history-fetch addition is the exact ff6905 object

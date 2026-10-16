@@ -104,23 +104,6 @@ func TestPersistenceAuthorityDebtSourceForkDeploymentInversePinsBothCompleteFile
 	}
 }
 
-func debtSourceForkCopySourceEvidence(t *testing.T, root, copy string) {
-	t.Helper()
-	for _, path := range []string{
-		"tools/fixture-codemod/pipeline-observations/family145-source-fork-cardinality-preimages.json",
-		"internal/store/storetest/run_fork.go",
-		"internal/store/internal/runtimepersistence/test_selected_runtime_outcome_observation.go",
-		"internal/store/internal/backend/runforkpersistence/selected_refusal_observation.go",
-		"internal/serveapp/source_fork_cardinality_observation_test.go",
-	} {
-		raw, err := os.ReadFile(filepath.Join(root, path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		debtWriteModuleSource(t, copy, path, string(raw))
-	}
-}
-
 func TestPersistenceAuthorityDebtSourceForkCompositionPreservesExactHistory(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	decls, err := debtServedDebugDeclarations(filepath.Join(root, debtSourceForkPin.File))
