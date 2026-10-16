@@ -111,6 +111,10 @@ func debtServedSetupLiveSources(root string) ([]debtRunIdentitySourceBody, error
 	if err != nil {
 		return nil, err
 	}
+	inverses, err := debtServedSetupVerifiedInverses(root)
+	if err != nil {
+		return nil, err
+	}
 	files := map[string]map[string]string{}
 	for _, pin := range pins {
 		if files[pin.File] == nil {
@@ -119,21 +123,56 @@ func debtServedSetupLiveSources(root string) ([]debtRunIdentitySourceBody, error
 				return nil, err
 			}
 		}
-		current, err := debtServedScenarioSourcePrevious(root, pin.File, pin.Function, files[pin.File][pin.Function])
-		if err == nil {
-			current, err = debtStandingControlSourcePrevious(root, pin.File, pin.Function, current)
-		}
-		if err == nil {
-			current, err = debtSelectedReadRoleSourcePrevious(root, pin.File, pin.Function, current)
-		}
-		if err == nil {
-			current, err = debtChannelSettlementSourcePrevious(root, pin.File, pin.Function, current)
-		}
+		current, err := inverses.previous(root, pin.File, pin.Function, files[pin.File][pin.Function])
 		if err != nil || current != pin.After {
 			return nil, fmt.Errorf("served setup actual current source changed: %s: %v (actual=%s expected=%s)", pin.Function, err, debtBaselineChecksum([]byte(current)), debtBaselineChecksum([]byte(pin.After)))
 		}
 	}
 	return pins, nil
+}
+
+type debtServedSetupInverses struct {
+	standing, readback, roles, channel []debtRunIdentitySourceBody
+}
+
+// One proof invocation authenticates each complete prerequisite family once.
+// Nothing survives this call: subsequent proofs reread every actual source.
+func debtServedSetupVerifiedInverses(root string) (debtServedSetupInverses, error) {
+	var proof debtServedSetupInverses
+	standing, err := debtStandingControlLiveSources(root)
+	if err != nil {
+		return proof, err
+	}
+	for _, pin := range standing {
+		if slices.Contains(debtStandingControlKeys[:], [2]string{pin.File, pin.Function}) {
+			proof.standing = append(proof.standing, pin)
+		}
+	}
+	proof.readback, err = debtReadbackLiveSources(root)
+	if err == nil {
+		proof.roles, err = debtSelectedReadRoleLiveSources(root)
+	}
+	if err == nil {
+		proof.channel, err = debtChannelSettlementLiveSources(root)
+	}
+	return proof, err
+}
+
+func (proof debtServedSetupInverses) previous(root, file, function, current string) (string, error) {
+	current, err := debtServedScenarioSourcePrevious(root, file, function, current)
+	if err == nil {
+		current, err = debtReadbackSourceInverse(proof.standing, file, function, current)
+	}
+	if err == nil && debtReadbackSourceNames[function] {
+		current, err = debtReadbackSourceInverse(proof.readback, file, function, current)
+	}
+	if err == nil {
+		current, err = debtReadbackSourceInverse(proof.roles, file, function, current)
+	}
+	if err == nil {
+		current, err = debtChannelSettlementSourceInverse(root, proof.channel, file, function, current)
+	}
+	return current, err
 }
 
 func debtServedSetupVerifiedPredecessors(root string) (map[[2]string]string, error) {
