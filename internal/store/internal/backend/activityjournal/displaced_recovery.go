@@ -54,34 +54,7 @@ func reconcileDisplacedHTTPActivities(ctx context.Context, attempt *mutationprot
 			return err
 		}
 		for _, id := range ids {
-			record, found, err := Load(ctx, tx, dialect, id)
-			if err != nil {
-				return err
-			}
-			if !found {
-				return fmt.Errorf("activity recovery request %s disappeared", id)
-			}
-			if record.ExecutionBinding.IsZero() && record.Status != runtimepipeline.ActivityAttemptStatusStarted {
-				// Copied/legacy terminal history is not a displaced live execution.
-				continue
-			}
-			if record.Status != runtimepipeline.ActivityAttemptStatusStarted {
-				_, published, err := loadActivityRecoveryEvent(ctx, tx, dialect, record.ResultEventID)
-				if err != nil {
-					return err
-				}
-				if published {
-					continue
-				}
-			}
-			grant, displaced, err := cut.ProveDisplacedGrantTx(ctx, attempt, record.ExecutionBinding)
-			if err != nil {
-				return err
-			}
-			if !displaced {
-				continue
-			}
-			stored, err := reconcileDisplacedHTTPActivity(ctx, tx, attempt, dialect, record, grant.BundleHash)
+			stored, err := recoverActivityEvidence(ctx, tx, attempt, cut, dialect, id)
 			if err != nil {
 				return err
 			}
@@ -95,6 +68,32 @@ func reconcileDisplacedHTTPActivities(ctx context.Context, attempt *mutationprot
 		return runtimepipeline.ActivityRecoverySummary{}, err
 	}
 	return result, nil
+}
+
+func recoverActivityEvidence(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, cut storestartup.DisplacedHTTPActivityCut, dialect Dialect, id string) (runtimepipeline.ActivityAttemptRecord, error) {
+	var absent runtimepipeline.ActivityAttemptRecord
+	record, found, err := Load(ctx, tx, dialect, id)
+	if err != nil {
+		return absent, err
+	}
+	if !found {
+		return absent, fmt.Errorf("activity recovery request %s disappeared", id)
+	}
+	if record.Status != runtimepipeline.ActivityAttemptStatusStarted {
+		// Copied/legacy terminal history is not a displaced live execution.
+		if record.ExecutionBinding.IsZero() {
+			return absent, nil
+		}
+		_, published, err := loadActivityRecoveryEvent(ctx, tx, dialect, record.ResultEventID)
+		if err != nil || published {
+			return absent, err
+		}
+	}
+	grant, displaced, err := cut.ProveDisplacedGrantTx(ctx, attempt, record.ExecutionBinding)
+	if err != nil || !displaced {
+		return absent, err
+	}
+	return reconcileDisplacedHTTPActivity(ctx, tx, attempt, dialect, record, grant.BundleHash)
 }
 
 func activityRecoveryRequestIDs(ctx context.Context, tx *sql.Tx) ([]string, error) {
