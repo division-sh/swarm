@@ -4,13 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 )
@@ -65,4 +68,27 @@ func admitAPITestAgentExecution(t testing.TB, ctx context.Context, selected stor
 	}
 	ctx = testAuthorActivityContextForRuntime(ctx, owner.RuntimeInstanceID, fact)
 	return managedexecution.WithAdmission(ctx, admission)
+}
+
+// Observation tests that actually claim deliveries must prepare their entire
+// recipient set before admitting the native generation or publishing work.
+func prepareAPIReadbackAgents(t testing.TB, ctx context.Context, selected storetest.AgentFixtureStore, identities ...agentidentity.Identity) context.Context {
+	t.Helper()
+	fact, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("API readback fixture requires its original source context")
+	}
+	for _, identity := range identities {
+		config := apiExecutionFixtureConfig(t, selection.BackendAnthropic, withAPITestIntent(t, actors.AgentConfig{
+			Identity: identity, ID: identity.AgentID(), Role: "operator-replay-test", Type: "stub",
+			Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
+			FlowPath: identity.FlowInstance(), Config: json.RawMessage(`{}`),
+		}))
+		if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, selected, manager.PersistedAgent{
+			Config: config, Status: "active", StartedAt: time.Now().UTC(),
+		}, fact); err != nil {
+			t.Fatalf("prepare API readback agent %s: %v", identity.AgentID(), err)
+		}
+	}
+	return admitAPITestAgentExecution(t, ctx, selected, fact)
 }

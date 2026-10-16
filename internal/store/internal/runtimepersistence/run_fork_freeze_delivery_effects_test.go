@@ -30,6 +30,12 @@ func TestForkSourceDeliveryEffectMatrixBothStores(t *testing.T) {
 				runID, childID := uuid.NewString(), uuid.NewString()
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				seedAuthorActivityReceiptRun(t, fixture, ctx, childID)
+				selected := fixture.store.(agentFixtureFlowStore)
+				for _, deliveryState := range []deliverylifecycle.State{deliverylifecycle.StateQueued, deliverylifecycle.StateRetrying, deliverylifecycle.StateDelivered, deliverylifecycle.StateExhausted} {
+					id := "freeze-" + string(deliveryState)
+					seedManagedTurnFixtureAgent(t, ctx, selected, runID, id, "fixture/"+id)
+				}
+				ctx = admitPreparedAgentClaimContext(t, ctx, selected)
 				store := fixture.store.(interface {
 					deliverylifecycle.Store
 					runlifecycle.OperationOwner
@@ -141,6 +147,9 @@ func TestForkMaterializationLiveClaimRefusalBothStores(t *testing.T) {
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			f := newForkActivationFrontierFixture(t, backend, false)
+			selected := f.store.(agentFixtureFlowStore)
+			seedManagedTurnFixtureAgent(t, f.ctx, selected, f.runID, "held-source-agent", "fixture/held-source-agent")
+			f.ctx = admitPreparedAgentClaimContext(t, f.ctx, selected)
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "item.received", "freeze-test", "", []byte(`{}`), 0, f.runID, events.EventEnvelope{}, time.Now().UTC())
 			if err := insertCanonicalEventRecordFixture(f.ctx, f.store, event); err != nil {
 				t.Fatal(err)
@@ -170,6 +179,10 @@ func TestForkFreezeActivationDeliveryHistoryBothStores(t *testing.T) {
 				for _, deliveryState := range []deliverylifecycle.State{deliverylifecycle.StateQueued, deliverylifecycle.StateDelivered} {
 					t.Run(fmt.Sprintf("%s/selected=%t/rollback=%t/%s", backend.name, selected, rollback, deliveryState), func(t *testing.T) {
 						f := newForkActivationFrontierFixture(t, backend, selected)
+						agents := f.store.(agentFixtureFlowStore)
+						seedManagedTurnFixtureAgent(t, f.ctx, agents, f.runID, "retained-agent", "fixture/retained-agent")
+						f.ctx = admitPreparedAgentClaimContext(t, f.ctx, agents)
+						bindPreparedAgentProcessToSelectedMaterialization(t, f.ctx, agents)
 						descriptors, err := runtimepkg.AuthorActivityEventDescriptors(f.source)
 						if err != nil {
 							t.Fatal(err)

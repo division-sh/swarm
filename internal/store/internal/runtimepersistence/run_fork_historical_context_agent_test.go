@@ -51,6 +51,7 @@ func TestRunForkHistoricalContextNestedAgentOwningRunBothStores(t *testing.T) {
 					record := agentFixtureStaticRecord(t, identity)
 					record.Config.FlowID = target.FlowID
 					record.Config.Memory.Enabled = false
+					record.Config = resolveNativeClaimFixtureActor(t, record.Config)
 					if err := agentfixture.UpsertStatic(t, ctx, selected, record); err != nil {
 						t.Fatalf("retain exact historical agent lifecycle: %v", err)
 					}

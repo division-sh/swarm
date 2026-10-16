@@ -1126,18 +1126,7 @@ func newProviderDrainOriginClaim(t *testing.T, fixture completionSettlementFixtu
 		uuid.NewString(), "completion.origin", "gateway", "", []byte(fmt.Sprintf(`{"ordinal":%d}`, ordinal)), 0,
 		fixture.authority.Target.RunID, events.EventEnvelope{}, time.Now().UTC(),
 	)
-	route := events.DeliveryRoute{
-		Recipient:     events.MustAgentDeliveryRecipient(fixture.agentID),
-		AgentIdentity: fixture.authority.Normal.Identity,
-	}
-	if err := commitSemanticEventFixtureWithRoutes(testAuthorActivityContext(), fixture.store, event, []events.DeliveryRoute{route}); err != nil {
-		t.Fatalf("commit provider-drain origin %d: %v", ordinal, err)
-	}
-	claimed, err := claimDeliveryFixture(testAuthorActivityContext(), fixture.store.(deliveryFixtureStore), event, route)
-	if err != nil {
-		t.Fatalf("claim provider-drain origin %d: %v", ordinal, err)
-	}
-	return claimed.Claim
+	return claimCompletionOriginEventForTest(fixture.agentOwner, testAuthorActivityContext(), fixture.store, fixture.authority, event)
 }
 
 func newProviderDrainSiblingFixture(t *testing.T, fixture completionSettlementFixture) completionSettlementFixture {
@@ -1161,11 +1150,12 @@ func newProviderDrainSiblingFixture(t *testing.T, fixture completionSettlementFi
 	}
 	now := time.Now().UTC()
 	if err := agentfixture.UpsertStatic(fixture.agentOwner, testAuthorActivityContext(), fixture.store, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+		Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: fields.AgentID, Identity: sibling.authority.Normal.Identity,
 			Role: "worker", Type: "managed", Model: "regular", LLMBackend: "claude_cli",
 			ResolvedLLMBackend: "claude_cli", Memory: agentmemory.Plan{Enabled: true}, FlowPath: fields.FlowInstancePath,
-		}),
+			Config: json.RawMessage(`{}`),
+		})),
 		Status: "active", StartedAt: now,
 	}); err != nil {
 		t.Fatalf("admit provider-drain sibling agent: %v", err)
