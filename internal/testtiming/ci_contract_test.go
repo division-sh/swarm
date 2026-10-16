@@ -116,12 +116,14 @@ func TestMacOSPossessionSelectsSQLiteMatrixWithoutPostgres(t *testing.T) {
 			continue
 		}
 		found = true
-		// Keep the mixed root's SQLite release/crash cases; only its PostgreSQL
-		// children and the four PostgreSQL-only roots require excluded resources.
-		want := "go test ./internal/store/internal/startupownership -skip '^(TestPostgresPossessionObservationUsesIndependentExactSessionAndKey|TestPostgresGenerationMonitorFencesStalledNativePhase|TestPostgresGenerationMonitorHealthyQueueAndCancellation|TestPostgresGenerationMonitorWithdrawsCapabilityBeforeNativeJoin)$|^TestPossessionObservationExternalProcessReleaseAndCrashBothStores$/^postgres$' -count=1"
+		// Preserve both mixed roots' SQLite cases; only their PostgreSQL children
+		// and the four PostgreSQL-only roots require excluded resources.
+		want := "go test ./internal/store/internal/startupownership -skip '^(TestPostgresPossessionObservationUsesIndependentExactSessionAndKey|TestPostgresGenerationMonitorFencesStalledNativePhase|TestPostgresGenerationMonitorHealthyQueueAndCancellation|TestPostgresGenerationMonitorWithdrawsCapabilityBeforeNativeJoin)$|^Test(PossessionObservationExternalProcessReleaseAndCrashBothStores|AgentRecoveryNativePreBindWriteMustJoinBothStores)$/^postgres$' -count=1"
 		if strings.TrimSpace(step.Run) != want {
 			t.Fatalf("SQLite-only qualification no longer selects every SQLite package root: %s", step.Run)
 		}
+		match := regexp.MustCompile(`-skip '([^']+)'`).FindStringSubmatch(step.Run)
+		assertMacOSPossessionSubtestSelection(t, match[1])
 	}
 	if !found {
 		t.Fatal("missing macOS possession qualification")

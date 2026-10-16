@@ -505,17 +505,18 @@ func newAgentSnapshotBoundaryFixture(t *testing.T, backend agentSnapshotBackend)
 		identity := sqliteAgentUsageIdentityForRun(t, runID, agentID)
 		identities[agentID] = identity
 		if err := storetest.UpsertStaticAgentFixture(t, ctx, store, runtimemanager.PersistedAgent{
-			Config: runtimeactors.AgentConfig{
+			Config: apiExecutionFixtureConfig(t, "anthropic", runtimeactors.AgentConfig{
 				Identity: identity, ID: agentID, Role: "worker", Type: "managed", Model: "regular",
 				ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowID: "flow",
 				FlowPath: identity.FlowInstance(), Memory: agentmemory.Plan{Enabled: true}, Config: json.RawMessage(`{}`),
 				Intent: apiTestResolvedIntent(t, agentID, "Prove one atomic operator agent snapshot."),
-			},
+			}),
 			Status: "active", StartedAt: startedAt,
 		}); err != nil {
 			t.Fatalf("seed %s %s: %v", backend.name, agentID, err)
 		}
 	}
+	ctx = admitAPITestAgentExecution(t, ctx, store, authorActivityTestSourceArtifactFact)
 	agentsAt := time.Now()
 	fixture := agentSnapshotBoundaryFixture{
 		backend: backend, ctx: ctx, store: store, runID: runID,
