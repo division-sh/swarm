@@ -353,16 +353,9 @@ func (p *SourceSetPlan) normalizeAndValidate(requireRevision bool) error {
 		if err := p.Agents[i].Validate(); err != nil {
 			return fmt.Errorf("source set agent %d: %w", i, err)
 		}
-		found := false
-		for _, source := range p.Sources {
-			if source == p.Agents[i].Source {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("source set agent %d differs from the exact rooted source set", i)
-		}
+	}
+	if err := p.validateRootedAgentMembership(); err != nil {
+		return err
 	}
 	var keyErr error
 	sort.Slice(p.Agents, func(i, j int) bool {
@@ -399,6 +392,19 @@ func (p *SourceSetPlan) normalizeAndValidate(requireRevision bool) error {
 		}
 		if p.Revision != want {
 			return errors.New("agent topology source-set revision does not match canonical plan")
+		}
+	}
+	return nil
+}
+
+func (p *SourceSetPlan) validateRootedAgentMembership() error {
+	sources := make(map[SourceCoordinate]struct{}, len(p.Sources))
+	for _, source := range p.Sources {
+		sources[source] = struct{}{}
+	}
+	for i, agent := range p.Agents {
+		if _, ok := sources[agent.Source]; !ok {
+			return fmt.Errorf("source set agent %d differs from the exact rooted source set", i)
 		}
 	}
 	return nil

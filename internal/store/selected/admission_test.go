@@ -24,6 +24,7 @@ import (
 	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/store/internal/backend/generationauthority"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestAdmissionInspectionMissingSQLiteDoesNotCreateState(t *testing.T) {
@@ -42,6 +43,7 @@ func TestAdmissionInspectionMissingSQLiteDoesNotCreateState(t *testing.T) {
 
 func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 	ctx := context.Background()
+	rooted, _ := sourceartifactfixture.Rooted(t, "inspection", sourceartifactfixture.Artifact())
 	spec, err := runtimecontracts.LoadPlatformSpecDocument(filepath.Join(selectedStoreRepoRoot(t), "platform-spec.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -85,6 +87,11 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 				}
 			})
 			fresh, err := inspection.Inspect(ctx, request, func(snapshot *AdmissionSnapshot) error {
+				for _, read := range inspectionRootReads(snapshot, rooted.Admission().Reference()) {
+					if got, err := read.load(ctx); err == nil || got.Validate() == nil {
+						t.Fatalf("fresh inspection admitted %s source: %v", read.name, err)
+					}
+				}
 				if _, err := snapshot.InspectRunMutationDrift(ctx, "00000000-0000-0000-0000-000000000001"); err == nil {
 					t.Fatal("fresh store admitted mutation drift reads")
 				}
@@ -99,9 +106,26 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			if err := bootstrap.BootstrapSchema(ctx, request); err != nil {
 				t.Fatal(err)
 			}
+			writer, ok := bootstrap.(sourceartifactfixture.RootedWriter)
+			if !ok {
+				t.Fatal("native bootstrap fixture does not retain its rooted source owner")
+			}
+			if _, err := writer.EnsureRootedSource(ctx, rooted); err != nil {
+				t.Fatal(err)
+			}
 			var retained *AdmissionSnapshot
 			result, err := inspection.Inspect(ctx, request, func(snapshot *AdmissionSnapshot) error {
 				retained = snapshot
+				for _, read := range inspectionRootReads(snapshot, rooted.Admission().Reference()) {
+					got, err := read.load(ctx)
+					if read.present {
+						if err != nil || got.Admission().Reference() != rooted.Admission().Reference() || got.Validate() != nil {
+							t.Fatalf("rooted inspection %s: %+v err=%v", read.name, got.Admission().Reference(), err)
+						}
+					} else if err == nil || got.Validate() == nil {
+						t.Fatalf("missing %s responsibility disclosed source: %v", read.name, err)
+					}
+				}
 				_, driftErr := snapshot.InspectRunMutationDrift(ctx, "00000000-0000-0000-0000-000000000001")
 				var missing *runlifecycle.RunNotFoundError
 				if !errors.As(driftErr, &missing) {
@@ -162,6 +186,11 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 				}
 				cancelled, cancel := context.WithCancel(ctx)
 				cancel()
+				for _, read := range inspectionRootReads(snapshot, rooted.Admission().Reference()) {
+					if got, err := read.load(cancelled); !errors.Is(err, context.Canceled) || got.Validate() == nil {
+						t.Fatalf("canceled rooted inspection %s disclosed source: %v", read.name, err)
+					}
+				}
 				if _, err := snapshot.ActiveNonStandingRunBundleAvailabilities(cancelled); !errors.Is(err, context.Canceled) {
 					t.Fatalf("caller cancellation lost: %v", err)
 				}
@@ -172,6 +201,11 @@ func TestAdmissionInspectionRealReadScopeBothStores(t *testing.T) {
 			})
 			if err != nil || result.Fresh {
 				t.Fatalf("compatible inspection: %+v, %v", result, err)
+			}
+			for _, read := range inspectionRootReads(retained, rooted.Admission().Reference()) {
+				if got, err := read.load(ctx); !errors.Is(err, context.Canceled) || got.Validate() == nil {
+					t.Fatalf("expired rooted inspection %s disclosed source: %v", read.name, err)
+				}
 			}
 			if _, err := retained.InspectAuthority(context.Background()); !errors.Is(err, context.Canceled) {
 				t.Fatalf("expired snapshot escaped to authority reader: %v", err)

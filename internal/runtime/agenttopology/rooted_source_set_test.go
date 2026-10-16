@@ -39,4 +39,13 @@ func TestS1SourceSetRevisionFreezesRootWithoutAddingPublicContexts(t *testing.T)
 	if _, err := NewSourceSetPlan([]SourceCoordinate{a, b}, nil); err == nil {
 		t.Fatal("two roots for one public content context were admitted")
 	}
+	for _, directory := range []string{"", "first ", "../first", "first/child"} {
+		if _, err := NewSourceSetPlan([]SourceCoordinate{makeCoordinate(directory)}, nil); err == nil {
+			t.Fatalf("invalid rooted plan coordinate %q was admitted", directory)
+		}
+	}
+	first.Sources[0] = b
+	if err := first.Validate(); err == nil {
+		t.Fatal("retargeted root preserved the predecessor source-set revision")
+	}
 }

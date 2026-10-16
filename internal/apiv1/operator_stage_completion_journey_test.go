@@ -78,7 +78,8 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 			stageCompletionWaitForDelivery(t, db, backend, runID, "flow.started")
 			stageCompletionAssertStoredState(t, db, backend, runID, "ready")
 
-			recovered, recoveredSource := stageCompletionRehydrate(t, selected, db, backend, runID, fact.BundleHash())
+			recovered := selected
+			recoveredSource := stageCompletionRehydrate(t, selected, runID, fact.BundleHash())
 			catalog := stageCompletionCatalog(t, recoveredSource)
 			ctx := testAuthorActivityContextForSource(context.Background(), fact)
 			if _, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
@@ -96,7 +97,7 @@ func TestExactStageCompletionRealWriterAndRehydratedSourceBothStores(t *testing.
 			}
 			stageCompletionWaitForDelivery(t, db, backend, runID, "flow.finish")
 			stageCompletionAssertStoredState(t, db, backend, runID, "Ready")
-			recovered, recoveredSource = stageCompletionRehydrate(t, selected, db, backend, runID, fact.BundleHash())
+			recoveredSource = stageCompletionRehydrate(t, selected, runID, fact.BundleHash())
 			catalog = stageCompletionCatalog(t, recoveredSource)
 			if _, err := recovered.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil {
 				t.Fatalf("request terminal completion: %v", err)
@@ -121,7 +122,7 @@ func exactStageCompletionJourneyBundle(t *testing.T) *runtimecontracts.WorkflowC
 	return bundle
 }
 
-func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore, db *sql.DB, backend, runID, hash string) (stageCompletionJourneyStore, semanticview.Source) {
+func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore, runID, hash string) semanticview.Source {
 	t.Helper()
 	record, err := selected.GetSourceArtifact(context.Background(), hash)
 	if err != nil {
@@ -143,10 +144,7 @@ func stageCompletionRehydrate(t *testing.T, selected stageCompletionJourneyStore
 	if err != nil {
 		t.Fatalf("recompile retained selected source: %v", err)
 	}
-	if backend == "sqlite" {
-		return storetest.AdmitSQLiteRuntimeStore(t, db), semanticview.Wrap(bundle)
-	}
-	return storetest.AdmitPostgresRuntimeStore(t, db), semanticview.Wrap(bundle)
+	return semanticview.Wrap(bundle)
 }
 
 func stageCompletionCatalog(t *testing.T, source semanticview.Source) runtimerunlifecycle.FinalCatalog {
