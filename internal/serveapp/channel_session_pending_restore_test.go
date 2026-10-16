@@ -18,17 +18,9 @@ func startPendingSessionFixture(t *testing.T, backend, key string) (*channelonbo
 	service, sessions := installedSessionBootstrapFixture(t, backend)
 	adapter := sessions.(*serveSessionBootstrap)
 	cut, _, release := installSessionConstructionCut(t, adapter)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	result, err := service.Start(ctx, channelonboarding.StartInput{Verb: channelonboarding.VerbConnect,
-		Selection: channelonboarding.CandidateSelection{Provider: "whatsapp"}, IdempotencyKey: key})
-	requireSessionPendingResult(t, result, result.Operation, err)
-	select {
-	case <-cut.entered:
-	case <-ctx.Done():
-		t.Fatal("pending original construction never entered its cut", context.Cause(ctx))
-	}
-	return service, adapter, result.Operation, release
+	op, cancel := startHeldSessionRequest(t, service, adapter, cut, key)
+	cancel()
+	return service, adapter, op, release
 }
 
 func TestServeSessionStartupAwaitsOriginalPendingPreparationBothStores(t *testing.T) {
