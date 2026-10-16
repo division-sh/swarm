@@ -99,48 +99,9 @@ func TestPersistenceAuthorityDebtServedDebugModelMatchesExactReviewedManifest(t 
 
 func debtServedDebugSourceCopy(t *testing.T) string {
 	t.Helper()
-	root, copy := persistenceAuthorityRepoRoot(t), t.TempDir()
-	for _, path := range []string{
-		".github/audit-artifacts/issue-2542-served-debug-signature-transition-request.json",
-		".github/audit-artifacts/issue-2542-writer-stage-signature-transition-request.json",
-		"tools/fixture-codemod/pipeline-observations/family145-served-debug-preimages.json",
-	} {
-		raw, err := os.ReadFile(filepath.Join(root, path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		debtWriteModuleSource(t, copy, path, string(raw))
-	}
-	bodies, err := debtServedDebugBodies(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	files := map[string]string{}
-	seen := map[string]bool{}
-	for _, body := range bodies {
-		if body.After != "" && !strings.HasPrefix(body.Function, "type/") {
-			files[body.File] += body.After + "\n"
-			seen[body.Function] = true
-		}
-	}
-	original, err := os.ReadFile(filepath.Join(root, "internal/store/testdata/persistence_authority_debt_writer_stage_source_pins.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var preceding []struct{ Function, Before, After string }
-	if err := json.Unmarshal(original, &preceding); err != nil {
-		t.Fatal(err)
-	}
-	for _, body := range preceding {
-		if !seen[body.Function] {
-			files["internal/serveapp/main_runtime_test.go"] += body.After + "\n"
-		}
-	}
-	for file, source := range files {
-		debtWriteModuleSource(t, copy, file, "package serveapp\n"+source)
-	}
-	debtRunIdentityCopySourceEvidence(t, root, copy)
-	debtServedObservationCopySourceEvidence(t, root, copy)
+	root := persistenceAuthorityRepoRoot(t)
+	copy := debtCatchUpSourceCopyFrom(t, root)
+	copyRepair2698CustodySources(t, root, copy)
 	return copy
 }
 

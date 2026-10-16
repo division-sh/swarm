@@ -186,44 +186,6 @@ func debtRunIdentityHostileRows(t *testing.T, bodies []debtRunIdentitySourceBody
 	}
 }
 
-func debtRunIdentityCopySourceEvidence(t *testing.T, root, copy string) {
-	t.Helper()
-	debtSourceForkCopySourceEvidence(t, root, copy)
-	for _, path := range []string{
-		"tools/fixture-codemod/pipeline-observations/family145-run-identity-preimages.json",
-		"internal/store/storetest/api_event_storage.go",
-		"internal/store/internal/runtimepersistence/test_api_event_storage.go",
-		"internal/store/internal/backend/runlifecycle/run_identity_cardinality.go",
-		"internal/serveapp/run_identity_observation_test.go",
-	} {
-		raw, err := os.ReadFile(filepath.Join(root, path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		debtWriteModuleSource(t, copy, path, string(raw))
-	}
-	for _, pin := range debtRunIdentitySourcePins {
-		current, err := debtServedDebugDeclarations(filepath.Join(root, pin.File))
-		if err != nil {
-			t.Fatal(err)
-		}
-		entry, err := debtServedObservationSourcePrevious(root, pin.File, pin.Function, current[pin.Function])
-		if err != nil {
-			t.Fatal(err)
-		}
-		previous, err := debtRunIdentitySourcePrevious(root, pin.File, pin.Function, entry)
-		if err != nil {
-			t.Fatal(err)
-		}
-		raw, err := os.ReadFile(filepath.Join(copy, pin.File))
-		if err != nil || strings.Count(string(raw), previous) != 1 {
-			t.Fatal("copied historical source lacks one exact predecessor:", pin.Function, err)
-		}
-		debtWriteModuleSource(t, copy, pin.File, strings.Replace(string(raw), previous, current[pin.Function], 1))
-	}
-	debtSourceBlobCopySourceEvidence(t, root, copy)
-}
-
 func TestPersistenceAuthorityDebtRunIdentityCollectorAddsNoCredit(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	current := debtControlSet()

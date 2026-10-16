@@ -92,13 +92,23 @@ func debtServedObservationPin(bodies []debtRunIdentitySourceBody, key [2]string)
 }
 
 func debtServedObservationLiveSources(root string) ([]debtRunIdentitySourceBody, error) {
-	stages, err := debtServedObservationManifests(root)
+	image, err := debtCaptureServedSourceInvocation(root)
 	if err != nil {
 		return nil, err
 	}
-	// Authenticate the complete setup family once, before consuming any of its
-	// intermediate bodies. Repeating that validation for every key is quadratic.
-	verified, err := debtServedSetupVerifiedPredecessors(root)
+	previous, err := debtServedSetupBoundPrevious(root)
+	if err != nil {
+		return nil, err
+	}
+	pins, err := debtServedObservationSourcesWithSetup(root, previous)
+	if err == nil {
+		err = image.recheck(root)
+	}
+	return pins, err
+}
+
+func debtServedObservationSourcesWithSetup(root string, previous func(string, string, string) (string, error)) ([]debtRunIdentitySourceBody, error) {
+	stages, err := debtServedObservationManifests(root)
 	if err != nil {
 		return nil, err
 	}
@@ -116,10 +126,7 @@ func debtServedObservationLiveSources(root string) ([]debtRunIdentitySourceBody,
 				return nil, err
 			}
 		}
-		current, known := verified[key]
-		if !known {
-			current, err = debtServedSetupSourcePrevious(root, key[0], key[1], files[key[0]][key[1]])
-		}
+		current, err := previous(key[0], key[1], files[key[0]][key[1]])
 		if err != nil || current != pin.After {
 			return nil, fmt.Errorf("served observation actual final unique body changed: %s: %v", key[1], err)
 		}
@@ -198,11 +205,7 @@ func debtServedObservationNativeSource(root string) error {
 		if err != nil {
 			return err
 		}
-		raw, err = debtCatchUpLaneSource(root, path, raw)
-		if err != nil {
-			return err
-		}
-		if _, err := debtServedObservationNativePrevious(path, raw); err != nil {
+		if _, err := debtServedObservationNativeCurrentPrevious(root, path, raw); err != nil {
 			return err
 		}
 	}
@@ -211,6 +214,14 @@ func debtServedObservationNativeSource(root string) error {
 		return fmt.Errorf("served observation original snapshot/context/reader bridge changed: %v", err)
 	}
 	return nil
+}
+
+func debtServedObservationNativeCurrentPrevious(root, path string, raw []byte) ([]byte, error) {
+	raw, err := debtCatchUpLaneSource(root, path, raw)
+	if err != nil {
+		return nil, err
+	}
+	return debtServedObservationNativePrevious(path, raw)
 }
 
 func debtServedObservationNativePrevious(path string, raw []byte) ([]byte, error) {
@@ -396,7 +407,7 @@ func TestPersistenceAuthorityDebtServedObservationNativeComparisonPreservesAdded
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := debtServedObservationNativePrevious(path, raw); err != nil {
+		if _, err := debtServedObservationNativeCurrentPrevious(root, path, raw); err != nil {
 			t.Fatal(err)
 		}
 		_, _, functions, imports := debtServedObservationNativeCut(path)
@@ -411,14 +422,14 @@ func TestPersistenceAuthorityDebtServedObservationNativeComparisonPreservesAdded
 			if !strings.Contains(string(raw), cut) {
 				continue
 			}
-			if _, err := debtServedObservationNativePrevious(path, []byte(strings.Replace(string(raw), cut, "foreignNativeCut", 1))); err == nil {
+			if _, err := debtServedObservationNativeCurrentPrevious(root, path, []byte(strings.Replace(string(raw), cut, "foreignNativeCut", 1))); err == nil {
 				t.Fatal("changed added/retained native code was hidden by comparison:", path, cut)
 			}
 		}
-		if _, err := debtServedObservationNativePrevious(path, append(append([]byte{}, raw...), '\n')); err == nil {
+		if _, err := debtServedObservationNativeCurrentPrevious(root, path, append(append([]byte{}, raw...), '\n')); err == nil {
 			t.Fatal("stale/noncanonical native source accepted")
 		}
-		if got, err := debtServedObservationNativePrevious("foreign.go", raw); err != nil || !bytes.Equal(got, raw) {
+		if got, err := debtServedObservationNativeCurrentPrevious(root, "foreign.go", raw); err != nil || !bytes.Equal(got, raw) {
 			t.Fatal("foreign file received a native-file inverse:", err)
 		}
 	}

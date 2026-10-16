@@ -28,6 +28,8 @@ const debtRepair2698CleanupAfter = "6d6c3eafaea02d3e0fef5e3183870174436adbc1"
 const debtRepair2698CleanupSHA = "976911841d61b4088ff55ce29b0e499b5629b1e3b764b6c91169538493debd05"
 const debtRepair2698CleanupBefore = "d785d2e881965c4e7374fc71234c0b6084834cfa"
 const debtRepair2698CleanupCollectorTo = "30ae07018481378e7a90f6ad34438574b57c49705e9affd2af9b2d7a7aec21eb"
+const debtRepair2698Round2Before = "ff690517b59af2456c8c9a30c42ca216fb5ae9c1"
+const debtRepair2698Round2CollectorTo = "f5da43ac97f3155bef4d51ac115b6500ffdcd4e8d50cbd3e9f09a20f08aba296"
 
 func TestPersistenceAuthorityDebtRepair2698DeclarationCacheUsesActualBytes(t *testing.T) {
 	root := t.TempDir()
@@ -66,8 +68,8 @@ func TestPersistenceAuthorityDebtRepair2698DeclarationCacheUsesActualBytes(t *te
 
 func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
-	if actual, err := debtCollectorDigest(root); err != nil || actual != debtRepair2698CleanupCollectorTo {
-		t.Fatalf("native repair collector=%s expected=%s: %v", actual, debtRepair2698CleanupCollectorTo, err)
+	if actual, err := debtCollectorDigest(root); err != nil || actual != debtActiveCollectorTo {
+		t.Fatalf("native repair collector=%s expected=%s: %v", actual, debtActiveCollectorTo, err)
 	}
 	if err := debtCatchUpCollectorSource(root); err != nil {
 		t.Fatal(err)
@@ -80,12 +82,31 @@ func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	head.Collector = debtRepair2698CleanupCollectorTo
+	head.Collector = debtActiveCollectorTo
 	proof := debtDeliveryRetirementProof{Root: root, Actual: maps.Clone(head.Sites)}
-	if !debtRepair2698CleanupCollectorTransition(trusted.Collector, head.Collector, trusted, head, proof) {
+	if !debtRepair2698Round2CollectorTransition(trusted.Collector, head.Collector, trusted, head, proof) {
 		t.Fatal("exact forward source continuation refused")
 	}
 	assertDebtCatchUpForeignProvenance(t, trusted, head, proof)
+	t.Run("round2-forward-only", func(t *testing.T) {
+		original, _, err := debtCatchUpSignedBaseline(root, debtRepair2698Round2Before, debtRepair2698CleanupCollectorTo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		archive := debtCatchUpHistoricalArchive(t, debtRepair2698Round2Before)
+		if actual, err := debtCollectorDigest(archive); err != nil || actual != debtRepair2698CleanupCollectorTo {
+			t.Fatalf("round-2 retargeted its original collector: %s: %v", actual, err)
+		}
+		current := original
+		current.Collector = debtActiveCollectorTo
+		proof := debtDeliveryRetirementProof{Root: root, Actual: maps.Clone(current.Sites)}
+		if !debtRepair2698Round2CollectorTransition(original.Collector, current.Collector, original, current, proof) ||
+			debtRepair2698Round2CollectorTransition(current.Collector, original.Collector, current, original, proof) ||
+			debtRepair2698CleanupCollectorTransition(original.Collector, current.Collector, original, current, proof) {
+			t.Fatal("round-2 edge refused forward or accepted reverse/retargeted provenance")
+		}
+		assertDebtCatchUpForeignProvenance(t, original, current, proof)
+	})
 	t.Run("cleanup-forward-only", func(t *testing.T) {
 		original, _, err := debtCatchUpSignedBaseline(root, debtRepair2698CleanupBefore, debtRepair2698ProofCostCollectorTo)
 		if err != nil {

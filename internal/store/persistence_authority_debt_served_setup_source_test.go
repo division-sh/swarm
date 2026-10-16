@@ -115,7 +115,13 @@ func debtServedSetupLiveSources(root string) ([]debtRunIdentitySourceBody, error
 	if err != nil {
 		return nil, err
 	}
+	_, err = debtServedSetupValidateInputs(root, pins, inverses)
+	return pins, err
+}
+
+func debtServedSetupValidateInputs(root string, pins []debtRunIdentitySourceBody, inverses debtServedSetupInverses) (map[string]map[string]string, error) {
 	files := map[string]map[string]string{}
+	var err error
 	for _, pin := range pins {
 		if files[pin.File] == nil {
 			files[pin.File], err = debtCatchUpLaneDeclarations(root, pin.File)
@@ -128,7 +134,7 @@ func debtServedSetupLiveSources(root string) ([]debtRunIdentitySourceBody, error
 			return nil, fmt.Errorf("served setup actual current source changed: %s: %v (actual=%s expected=%s)", pin.Function, err, debtBaselineChecksum([]byte(current)), debtBaselineChecksum([]byte(pin.After)))
 		}
 	}
-	return pins, nil
+	return files, nil
 }
 
 type debtServedSetupInverses struct {
@@ -175,16 +181,48 @@ func (proof debtServedSetupInverses) previous(root, file, function, current stri
 	return current, err
 }
 
-func debtServedSetupVerifiedPredecessors(root string) (map[[2]string]string, error) {
-	pins, err := debtServedSetupLiveSources(root)
+// Bind only for the enclosing source proof; its owner rechecks the complete
+// image before accepting. Both listed and fallback keys use these same inputs.
+func debtServedSetupBoundPrevious(root string) (func(string, string, string) (string, error), error) {
+	pins, err := debtServedSetupSourcePins(root)
 	if err != nil {
 		return nil, err
 	}
-	verified := map[[2]string]string{}
-	for _, pin := range pins {
-		verified[[2]string{pin.File, pin.Function}] = pin.Before
+	inverses, err := debtServedSetupVerifiedInverses(root)
+	if err != nil {
+		return nil, err
 	}
-	return verified, nil
+	files, err := debtServedSetupValidateInputs(root, pins, inverses)
+	if err != nil {
+		return nil, err
+	}
+	actual := map[string]map[string]string{}
+	for path := range files {
+		actual[path], err = debtServedDebugDeclarations(filepath.Join(root, path))
+		if err != nil {
+			return nil, err
+		}
+	}
+	indexed := map[[2]string]debtRunIdentitySourceBody{}
+	for _, pin := range pins {
+		indexed[[2]string{pin.File, pin.Function}] = pin
+	}
+	return func(file, function, current string) (string, error) {
+		if body, found := actual[file][function]; found && body == current {
+			current = files[file][function]
+		}
+		current, err := inverses.previous(root, file, function, current)
+		if err != nil {
+			return "", err
+		}
+		if pin, found := indexed[[2]string{file, function}]; found {
+			if current != pin.After {
+				return "", fmt.Errorf("bound setup source differs from its actual endpoint: %s", function)
+			}
+			return pin.Before, nil
+		}
+		return current, nil
+	}, nil
 }
 
 func debtServedSetupSourcePrevious(root, file, function, current string) (string, error) {

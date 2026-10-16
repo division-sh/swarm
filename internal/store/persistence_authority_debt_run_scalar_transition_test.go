@@ -82,8 +82,8 @@ func TestPersistenceAuthorityDebtRunScalarSourcePinsAndCompositionFailClosed(t *
 			}
 		}
 	}
-	copy := t.TempDir()
-	debtSourceForkCopySourceEvidence(t, root, copy)
+	copy := debtCatchUpSourceCopyFrom(t, root)
+	copyRepair2698CustodySources(t, root, copy)
 	for _, path := range []string{"internal/serveapp/main_runtime_test.go", "internal/serveapp/postgres_three_contracts_test.go", "internal/serveapp/postgres_commit_loss_contract_test.go", "tools/fixture-codemod/pipeline-observations/family145-run-scalar-preimages.json", "tools/fixture-codemod/pipeline-observations/family145-delivery-status-preimages.json"} {
 		raw, err := os.ReadFile(filepath.Join(root, path))
 		if err != nil {
@@ -91,7 +91,6 @@ func TestPersistenceAuthorityDebtRunScalarSourcePinsAndCompositionFailClosed(t *
 		}
 		debtWriteModuleSource(t, copy, path, string(raw))
 	}
-	debtServedObservationCopySourceEvidence(t, root, copy)
 	if err := debtRunScalarSourcePins(copy); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +99,11 @@ func TestPersistenceAuthorityDebtRunScalarSourcePinsAndCompositionFailClosed(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	debtWriteModuleSource(t, copy, path, strings.Replace(string(raw), "storetest.CountPhysicalRunIdentity", "foreignScalarQuery", 1))
+	mutant := strings.Replace(string(raw), "storetest.CountPhysicalRunIdentity", "foreignScalarQuery", 1)
+	if mutant == string(raw) {
+		t.Fatal("canonical run scalar predicate mutation did not apply")
+	}
+	debtWriteModuleSource(t, copy, path, mutant)
 	if err := debtRunScalarSourcePins(copy); err == nil {
 		t.Fatal("changed canonical run scalar predicate admitted")
 	}
