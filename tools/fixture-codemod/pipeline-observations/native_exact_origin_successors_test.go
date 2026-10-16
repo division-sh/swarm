@@ -154,6 +154,10 @@ func TestExactOriginPublicationSuccessorsPreserveReviewedCuts(t *testing.T) {
 			}
 			restored := selected.Successor
 			if target.name == "TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores" {
+				restored, err = capabilityCompletionPredecessor2707(*selected, actual)
+				if err != nil {
+					t.Fatal(err)
+				}
 				// A48d11e6069, reviewed in6174528631: failure-only logging;
 				// removing that exact line must recover the prior full successor.
 				const diagnostic = "\t\t\t\t\tt.Logf(\"capability refusal snapshot delta:\\n%s\", forkReceiverCapabilityRefusalSnapshotDelta(before, after))\n"
@@ -167,9 +171,9 @@ func TestExactOriginPublicationSuccessorsPreserveReviewedCuts(t *testing.T) {
 				}
 				const failure = "\t\t\t\tif after := snapshotForkReceiverApplication(t, rt); !reflect.DeepEqual(before, after) {\n"
 				mutants := map[string]string{
-					"missing_diagnostic":   restored,
+					"missing_diagnostic":   strings.Replace(actual, diagnostic, "", 1),
 					"duplicate_diagnostic": strings.Replace(actual, diagnostic, diagnostic+diagnostic, 1),
-					"outside_failure":      strings.Replace(restored, failure, diagnostic+failure, 1),
+					"outside_failure":      strings.Replace(strings.Replace(actual, diagnostic, "", 1), failure, diagnostic+failure, 1),
 					"changed_diagnostic":   strings.Replace(actual, diagnostic, strings.Replace(diagnostic, "(before, after)", "(after, before)", 1), 1),
 				}
 				for name, mutant := range mutants {

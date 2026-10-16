@@ -757,6 +757,7 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend)+"/template_resolution_create", func(t *testing.T) {
 			publication := newExactOriginPublicationProbe(t)
+			completion := installReceiverCompletionBoundary(t)
 			root := canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintUUID})
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
 			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "validation.triggered", "bundle_hash": rt.BundleHash,
@@ -781,6 +782,9 @@ func TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores(t *testing.T
 			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID); err != nil {
 				t.Fatal(err)
 			}
+			ctx, cancel := context.WithTimeout(t.Context(), servedEventPublishLifecycleProbeWaitTimeout)
+			defer cancel()
+			requireReceiverCompletionBoundary(t, ctx, completion, rt.BundleHash, seed.RunID)
 			before := snapshotForkReceiverApplication(t, rt)
 			params := map[string]any{"source_run_id": seed.RunID, "fork_event_id": frontier, "allow_source_freeze": true, "idempotency_key": "capability-fork"}
 			for attempt := 0; attempt < 2; attempt++ {
