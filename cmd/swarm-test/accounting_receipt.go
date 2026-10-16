@@ -33,6 +33,7 @@ type accountingCertificate struct {
 	Tree            string                      `json:"tree"`
 	Plan            accountingPlan              `json:"plan"`
 	Policy          accountingPolicyObservation `json:"policy"`
+	ProofSource     accountingProofManifest     `json:"proof_source"`
 	Guards          []accountingGuardReceipt    `json:"guards"`
 	Preflight       string                      `json:"preflight"`
 	PreflightSHA256 string                      `json:"preflight_sha256"`
@@ -75,13 +76,19 @@ func checkAccountingFinalSource(ctx context.Context, root, head string, plan acc
 	if err != nil || tree != plan.SourceTree {
 		return fmt.Errorf("source changed after accounting plan")
 	}
-	if _, err = completionSource(root, head, true); err != nil {
+	if _, err = accountingSource(ctx, root, head, true); err != nil {
 		return err
 	}
 	return nil
 }
 
 func certifyAccounting(ctx context.Context, root, head string, plan accountingPlan, out io.Writer, remote accountingRemote, policy accountingPolicyObservation) error {
+	if accountingEvidenceRoot == "" || root != accountingProofRoot {
+		return fmt.Errorf("accounting certification requires owned proof and evidence directories")
+	}
+	if err := verifyFrozenAccountingSource(ctx, root); err != nil {
+		return err
+	}
 	if err := checkAccountingFinalSource(ctx, root, head, plan, policy); err != nil {
 		return err
 	}
@@ -92,14 +99,15 @@ func certifyAccounting(ctx context.Context, root, head string, plan accountingPl
 			return fmt.Errorf("accounting refuses ambient update authority %s", name)
 		}
 	}
-	if err := os.MkdirAll(filepath.Join(root, "test-results"), 0700); err != nil {
-		return err
-	}
-	directory, err := os.MkdirTemp(filepath.Join(root, "test-results"), "accounting-")
+	directory, err := os.MkdirTemp(accountingEvidenceRoot, "certificate-")
 	if err != nil {
 		return err
 	}
 	certificate := accountingCertificate{Version: 1, Head: head, Plan: plan, Policy: policy, HumanAudit: "pending"}
+	certificate.ProofSource, err = accountingTreeInputs(ctx, root, head, nil)
+	if err != nil {
+		return err
+	}
 	tree, err := accountingGit(ctx, root, "rev-parse", head+"^{tree}")
 	if err != nil {
 		return err
@@ -113,7 +121,7 @@ func certifyAccounting(ctx context.Context, root, head string, plan accountingPl
 		if err = requireAccountingPolicy(ctx, remote, policy); err != nil {
 			return err
 		}
-		guard, err := runAccountingGuards(ctx, directory, required.Package, required.Run, required.Roots)
+		guard, err := runAccountingGuards(ctx, root, directory, required.Package, required.Run, required.Roots)
 		if err != nil {
 			return err
 		}
@@ -122,14 +130,25 @@ func certifyAccounting(ctx context.Context, root, head string, plan accountingPl
 	if err = requireAccountingPolicy(ctx, remote, policy); err != nil {
 		return err
 	}
-	if code := runPreflight(ctx); code != 0 {
-		return fmt.Errorf("canonical preflight refused accounting certification")
+	if err = verifyFrozenAccountingSource(ctx, root); err != nil {
+		return err
+	}
+	preflightLog, err := os.OpenFile(filepath.Join(directory, "preflight-command.log"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	_, runErr := runPreflightProcessDirectory(ctx, root, []string{"go", "run", "./cmd/swarm-test", "preflight"}, preflightLog, preflightLog, accountingBuildEnv(runtime.GOOS, runtime.GOARCH))
+	if err = errors.Join(runErr, preflightLog.Close(), verifyFrozenAccountingSource(ctx, root)); err != nil {
+		return fmt.Errorf("canonical preflight refused accounting certification: %w", err)
 	}
 	preflight, err := newestAccountingPreflight(root, head, plan.Base)
 	if err != nil {
 		return err
 	}
-	certificate.Preflight = preflight
+	certificate.Preflight, err = retainAccountingPreflight(root, preflight, directory)
+	if err != nil {
+		return err
+	}
 	raw, err := os.ReadFile(filepath.Join(root, preflight))
 	if err != nil {
 		return err
@@ -188,16 +207,19 @@ func accountingGuardMap(ctx context.Context, root string) ([]accountingGuardRece
 	return append(required, accountingGuardReceipt{Package: "github.com/division-sh/swarm/internal/store", Run: "^(" + strings.Join(roots, "|") + ")$", Roots: roots}), nil
 }
 
-func runAccountingGuards(ctx context.Context, directory, pkg, run string, roots []string) (accountingGuardReceipt, error) {
+func runAccountingGuards(ctx context.Context, root, directory, pkg, run string, roots []string) (accountingGuardReceipt, error) {
 	result := accountingGuardReceipt{Package: pkg, Run: run, Roots: append([]string{}, roots...)}
+	if err := verifyFrozenAccountingSource(ctx, root); err != nil {
+		return result, err
+	}
 	file, err := os.CreateTemp(directory, "guard-*.jsonl")
 	if err != nil {
 		return result, err
 	}
 	result.Log = file.Name()
 	args := []string{"go", "run", "./cmd/swarm-test", "--", pkg, "-p=1", "-count=1", "-json", "-run", run}
-	_, runErr := runPreflightProcessEnvironment(ctx, args, file, os.Stderr, accountingBuildEnv(runtime.GOOS, runtime.GOARCH))
-	err = errors.Join(runErr, file.Close())
+	_, runErr := runPreflightProcessDirectory(ctx, root, args, file, os.Stderr, accountingBuildEnv(runtime.GOOS, runtime.GOARCH))
+	err = errors.Join(runErr, file.Close(), verifyFrozenAccountingSource(ctx, root))
 	if err != nil {
 		return result, err
 	}
@@ -311,6 +333,10 @@ func validateAccountingReceipt(ctx context.Context, root, head, path string, rem
 	if receipt.Version != 1 || receipt.Head != head || receipt.HumanAudit != "pending" || receipt.Policy.Digest != policy.Digest || !reflect.DeepEqual(receipt.Policy.Policy, policy.Policy) {
 		return fmt.Errorf("accounting receipt is foreign, stale or claims an unproved audit")
 	}
+	manifest, err := accountingTreeInputs(ctx, root, head, nil)
+	if err != nil || !reflect.DeepEqual(manifest, receipt.ProofSource) {
+		return fmt.Errorf("accounting receipt proof input manifest changed: %v", err)
+	}
 	if err := verifyAccountingPolicyHistory(ctx, root, receipt.Policy, policy); err != nil {
 		return err
 	}
@@ -328,11 +354,10 @@ func validateAccountingReceipt(ctx context.Context, root, head, path string, rem
 	if err = validateAccountingGuards(filepath.Dir(path), required, receipt.Guards); err != nil {
 		return err
 	}
-	preflight, err := newestAccountingPreflight(root, head, receipt.Plan.Base)
-	if err != nil || preflight != receipt.Preflight {
-		return fmt.Errorf("accounting preflight binding changed: %v", err)
+	if err = validateBoundAccountingPreflight(receipt.Preflight, head, receipt.Plan.Base); err != nil {
+		return err
 	}
-	raw, err := os.ReadFile(filepath.Join(root, preflight))
+	raw, err := os.ReadFile(receipt.Preflight)
 	if err != nil || formatproof.Digest(raw) != receipt.PreflightSHA256 {
 		return fmt.Errorf("accounting preflight receipt changed")
 	}
@@ -379,7 +404,7 @@ func publishAccountingCertificate(ctx context.Context, out io.Writer, remote acc
 	if err := requireAccountingPolicy(ctx, remote, policy); err != nil {
 		return err
 	}
-	if _, err := completionSource(".", receipt.Head, true); err != nil {
+	if _, err := accountingSource(ctx, ".", receipt.Head, true); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
