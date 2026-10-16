@@ -58,6 +58,9 @@ func validateWorkspaceDockerHostedProof(raw []byte) error {
 	if err := yaml.Unmarshal(raw, &workflow); err != nil {
 		return err
 	}
+	if err := validateWorkspaceImageCache(raw); err != nil {
+		return err
+	}
 	job, exists := workflow.Jobs["sqlite-local-dev"]
 	if !exists || job.RunsOn != "ubuntu-latest" {
 		return fmt.Errorf("missing native Ubuntu workspace proof job")
