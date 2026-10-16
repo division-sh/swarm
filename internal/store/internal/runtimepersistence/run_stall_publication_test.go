@@ -23,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/tools"
@@ -59,7 +60,7 @@ func TestRunStallAttributionPublicationEvidenceBothStores(t *testing.T) {
 		t.Run(adapter, func(t *testing.T) {
 			for _, scope := range []string{"root", "static"} {
 				t.Run(scope, func(t *testing.T) {
-					phases := []string{"no_proposal", "proposal_only", "accepted", "accepted_feedback_error", "missing_receipt", "rejected"}
+					phases := []string{"no_proposal", "proposal_only", "accepted", "accepted_feedback_error", "accepted_failed_delivery", "missing_receipt", "rejected"}
 					if adapter == "claude_cli" {
 						phases = append(phases, "native_output")
 					}
@@ -201,7 +202,7 @@ func proveRunStallPublicationEvidence(t *testing.T, adapter, scope, phase string
 			publisherStore := selected.selected.(storeTestDurableEventBusStore)
 			feedbackErr := errors.New("feedback read unavailable after publication")
 			publicationErr := errors.New("publication refused before native commit")
-			if phase == "accepted_feedback_error" || phase == "rejected" {
+			if phase == "accepted_feedback_error" || phase == "accepted_failed_delivery" || phase == "rejected" {
 				wrapper := stallFeedbackFailureStore{storeTestDurableEventBusStore: publisherStore, CommitPublicationOwner: selected.selected.(bus.CommitPublicationOwner), WorkflowEmitFeedbackOwner: selected.selected.(pipeline.WorkflowEmitFeedbackOwner)}
 				if phase == "rejected" {
 					wrapper.publicationFault = publicationErr
@@ -226,7 +227,7 @@ func proveRunStallPublicationEvidence(t *testing.T, adapter, scope, phase string
 					if result.Accepted || result.FeedbackCommitted || !errors.Is(err, publicationErr) {
 						t.Fatalf("failed commit fabricated accepted output: %+v %v", result, err)
 					}
-				} else if !result.Accepted || ((phase == "accepted" || phase == "native_output") && (err != nil || !result.FeedbackCommitted)) || (phase == "accepted_feedback_error" && (!errors.Is(err, feedbackErr) || result.FeedbackCommitted)) {
+				} else if !result.Accepted || ((phase == "accepted" || phase == "native_output") && (err != nil || !result.FeedbackCommitted)) || ((phase == "accepted_feedback_error" || phase == "accepted_failed_delivery") && (!errors.Is(err, feedbackErr) || result.FeedbackCommitted)) {
 					t.Fatalf("publication acceptance/feedback: %+v %v", result, err)
 				}
 			}
@@ -234,8 +235,21 @@ func proveRunStallPublicationEvidence(t *testing.T, adapter, scope, phase string
 		if err := handle.ConsumeCompletionResponse(ctx, nil); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := fixture.store.SettleSuccess(ctx, fixture.origin, nil, 0, deliverylifecycle.NotApplicableHandlerRuleSelection()); err != nil {
-			t.Fatal(err)
+		wantFailureCode := ""
+		if phase == "accepted_failed_delivery" {
+			failure := failures.FromError(context.Canceled, "stall-publication-proof", "feedback").Failure
+			wantFailureCode = failure.Detail.Code
+			outcome, err := fixture.store.SettleFailure(ctx, fixture.origin, deliverylifecycle.Settlement{
+				Disposition: deliverylifecycle.FailureDeadLetter, Failure: &failure, ReasonCode: wantFailureCode,
+				RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation(),
+			})
+			if err != nil || outcome.Status != deliverylifecycle.StatusDeadLetter || outcome.ReasonCode != wantFailureCode {
+				t.Fatalf("terminal delivery lost its failure: %+v %v", outcome, err)
+			}
+		} else {
+			if _, err := fixture.store.SettleSuccess(ctx, fixture.origin, nil, 0, deliverylifecycle.NotApplicableHandlerRuleSelection()); err != nil {
+				t.Fatal(err)
+			}
 		}
 		var previous *operatorread.RunTurnAttribution
 		for read := 0; read < 2; read++ {
@@ -250,7 +264,7 @@ func proveRunStallPublicationEvidence(t *testing.T, adapter, scope, phase string
 				}
 			}
 			want := operatorread.RunEmissionUnknown
-			accepted := phase == "accepted" || phase == "accepted_feedback_error" || phase == "native_output"
+			accepted := phase == "accepted" || phase == "accepted_feedback_error" || phase == "accepted_failed_delivery" || phase == "native_output"
 			if accepted {
 				want = operatorread.RunEmissionAccepted
 			} else if phase == "no_proposal" {
@@ -261,6 +275,9 @@ func proveRunStallPublicationEvidence(t *testing.T, adapter, scope, phase string
 			}
 			if phase == "proposal_only" && got.EvidenceReason != "proposed_publication_unproven" || phase == "missing_receipt" && got.EvidenceReason != "publication_origin_ambiguous" {
 				t.Fatalf("incomplete output evidence lost its exact reason: %+v", got)
+			}
+			if wantFailureCode != "" && got.EvidenceReason != wantFailureCode {
+				t.Fatalf("accepted output erased terminal failure: %+v", got)
 			}
 			wantEvents := 1
 			if phase != "proposal_only" && phase != "no_proposal" && phase != "rejected" {
