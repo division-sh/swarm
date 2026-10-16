@@ -30,6 +30,11 @@ const debtRepair2698CleanupBefore = "d785d2e881965c4e7374fc71234c0b6084834cfa"
 const debtRepair2698CleanupCollectorTo = "30ae07018481378e7a90f6ad34438574b57c49705e9affd2af9b2d7a7aec21eb"
 const debtRepair2698Round2Before = "ff690517b59af2456c8c9a30c42ca216fb5ae9c1"
 const debtRepair2698Round2CollectorTo = "f5da43ac97f3155bef4d51ac115b6500ffdcd4e8d50cbd3e9f09a20f08aba296"
+const debtRepair2698SchedulePath = "internal/serveapp/semantic_numeric_schedule_test.go"
+const debtRepair2698ScheduleBefore = "ff1ea5580af1ecf153490f5e71e9f2ea66da3616"
+const debtRepair2698ScheduleBeforeSHA = "746c7c357dad92054381626d95617e18d186d61e0a0142c23b2893ba86b08e5f"
+const debtRepair2698ScheduleAfterSHA = "8de80abaf8df0ecae4fb4fcb7c7a1d3bdbcfd5b80e157084410562af09552119"
+const debtRepair2698ScheduleCollectorTo = "d7f0674dc6481d92aef2af07f8a5eb3a349dddf5ec5c167f872e36a0cb7a3ec1"
 
 func TestPersistenceAuthorityDebtRepair2698DeclarationCacheUsesActualBytes(t *testing.T) {
 	root := t.TempDir()
@@ -84,7 +89,7 @@ func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testin
 	}
 	head.Collector = debtActiveCollectorTo
 	proof := debtDeliveryRetirementProof{Root: root, Actual: maps.Clone(head.Sites)}
-	if !debtRepair2698Round2CollectorTransition(trusted.Collector, head.Collector, trusted, head, proof) {
+	if !debtRepair2698ScheduleCollectorTransition(trusted.Collector, head.Collector, trusted, head, proof) {
 		t.Fatal("exact forward source continuation refused")
 	}
 	assertDebtCatchUpForeignProvenance(t, trusted, head, proof)
@@ -98,12 +103,27 @@ func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testin
 			t.Fatalf("round-2 retargeted its original collector: %s: %v", actual, err)
 		}
 		current := original
-		current.Collector = debtActiveCollectorTo
+		current.Collector = debtRepair2698Round2CollectorTo
 		proof := debtDeliveryRetirementProof{Root: root, Actual: maps.Clone(current.Sites)}
 		if !debtRepair2698Round2CollectorTransition(original.Collector, current.Collector, original, current, proof) ||
 			debtRepair2698Round2CollectorTransition(current.Collector, original.Collector, current, original, proof) ||
 			debtRepair2698CleanupCollectorTransition(original.Collector, current.Collector, original, current, proof) {
 			t.Fatal("round-2 edge refused forward or accepted reverse/retargeted provenance")
+		}
+		assertDebtCatchUpForeignProvenance(t, original, current, proof)
+	})
+	t.Run("schedule-forward-only", func(t *testing.T) {
+		original, _, err := debtCatchUpSignedBaseline(root, debtRepair2698ScheduleBefore, debtRepair2698Round2CollectorTo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		current := original
+		current.Collector = debtRepair2698ScheduleCollectorTo
+		proof := debtDeliveryRetirementProof{Root: root, Actual: maps.Clone(current.Sites)}
+		if !debtRepair2698ScheduleCollectorTransition(original.Collector, current.Collector, original, current, proof) ||
+			debtRepair2698ScheduleCollectorTransition(current.Collector, original.Collector, current, original, proof) ||
+			debtRepair2698Round2CollectorTransition(original.Collector, current.Collector, original, current, proof) {
+			t.Fatal("schedule edge refused forward or accepted reverse/retargeted provenance")
 		}
 		assertDebtCatchUpForeignProvenance(t, original, current, proof)
 	})
@@ -177,11 +197,48 @@ func TestPersistenceAuthorityDebtRepair2698ReconcilesLiveCensus(t *testing.T) {
 	}
 }
 
+func assertRepair2698ScheduleActualMutants(t *testing.T, root string) {
+	t.Helper()
+	path := filepath.Join(root, debtRepair2698SchedulePath)
+	current, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := os.WriteFile(path, current, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	before, err := debtRepair2698HistoricalSource(root, debtRepair2698SchedulePath, current)
+	if err != nil || debtBaselineChecksum(before) != debtRepair2698ScheduleBeforeSHA {
+		t.Fatal("exact schedule reader source did not restore its predecessor:", err)
+	}
+	for _, hostile := range [][]byte{before, append(bytes.Clone(current), '\n'), append(bytes.Clone(current), []byte("\nfunc extraScheduleRawCaller(db interface{ Exec(string, ...any) }) { db.Exec(\"DELETE FROM events\") }\n")...)} {
+		got, err := debtRepair2698HistoricalSource(root, debtRepair2698SchedulePath, hostile)
+		if err == nil && !bytes.Equal(got, hostile) {
+			t.Fatal("stale/changed/extra-call schedule source acquired preservation credit")
+		}
+		if err := os.WriteFile(path, hostile, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if debtCatchUpCollectorSource(root) == nil {
+			t.Fatal("warm copied source accepted a stale, changed or added raw caller endpoint")
+		}
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := debtRepair2698HistoricalSource(root, debtRepair2698SchedulePath, current); err == nil {
+		t.Fatal("pristine gitdir hid a missing copied schedule reader fixture")
+	}
+}
+
 func TestPersistenceAuthorityDebtRepair2698CopiedWarmSourceRefusesEscapes(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	copy := debtCatchUpSourceCopyFrom(t, root)
 	copyRepair2698CustodySources(t, root, copy)
 	assertRepair2698CleanupActualMutants(t, copy)
+	assertRepair2698ScheduleActualMutants(t, copy)
 	packet, err := debtRepair2698ReadPacket(copy)
 	if err != nil {
 		t.Fatal(err)

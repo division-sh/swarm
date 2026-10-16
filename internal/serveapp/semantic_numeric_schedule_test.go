@@ -28,8 +28,10 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 			stubServeRuntimeWorkspaceLifecycle(t)
 			var db *sql.DB
 			var deliveryReader servedRunDeliveryReader
+			var reader receiverProofStateReader
 			captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {
 				deliveryReader = p.deps.DeliveryStore.SummarizeRun
+				reader = requireReceiverProofStateReader(t, p.deps.EventStore)
 			})
 			opts := cliapp.ServeOptions{SourceRoot: root, PlatformSpecPath: defaultPlatformSpecPath, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", SelfCheck: true, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig()}
 			dialect := "sqlite"
@@ -49,7 +51,7 @@ func TestGenericScheduleSemanticPayloadExecutionParity(t *testing.T) {
 			start := func() (*serveRuntimeTestProcess, servedControlProofRuntime) {
 				process := startServeRuntimeTestProcess(t, opts)
 				process.waitForReadyLine()
-				return process, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc", DB: db, Backend: dialect, BundleHash: servedEventPublishFixtureBundleHash(t, root), Runtime: servedTestProcessRuntime(t, process)}
+				return process, servedControlProofRuntime{ReadRunDeliveries: deliveryReader, ReceiverStateReader: reader, Endpoint: "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc", DB: db, Backend: dialect, BundleHash: servedEventPublishFixtureBundleHash(t, root), Runtime: servedTestProcessRuntime(t, process)}
 			}
 			process, rt := start()
 			run := uuid.NewString()

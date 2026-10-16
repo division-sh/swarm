@@ -142,6 +142,13 @@ func TestReadbackWarmCacheRefusesChangedManifestAndActualSibling(t *testing.T) {
 		t.Fatal(err)
 	}
 	copy := t.TempDir()
+	gitdir, err := exec.Command("git", "-C", root, "rev-parse", "--absolute-git-dir").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(copy, ".git"), []byte("gitdir: "+strings.TrimSpace(string(gitdir))+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	paths := map[string]bool{ReadbackPath: true}
 	for _, pin := range pins {
 		paths[pin.File] = true
