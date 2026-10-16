@@ -364,6 +364,7 @@ func seedActivityStoryAttempt(t *testing.T, fixture authorActivityReceiptFixture
 	ctx := testAuthorActivityContext()
 	runID := uuid.NewString()
 	seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+	activityNativeJournalForFixture(t, fixture)
 	record := runtimepipeline.ActivityAttemptRecord{
 		RequestEventID: uuid.NewString(), RunID: runID, ExecutionMode: mode, EntityID: uuid.NewString(), FlowInstance: "flow/" + uuid.NewString(),
 		NodeID: activityidentity.MustNodeOwner(mustPersistenceNode("flow", "writer")).Key(), HandlerEventKey: "request", ActivityID: "write", Tool: "provider.write",
@@ -448,6 +449,9 @@ func activityStoryRequest(t *testing.T, record runtimepipeline.ActivityAttemptRe
 
 func activityStoryOuter(fixture authorActivityReceiptFixture, op string, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
 	j, ctx := fixture.store.(activityStoryJournal), testAuthorActivityContext()
+	if fixture.activityJournal != nil && fixture.activityJournal.owner != nil {
+		j = fixture.activityJournal.owner
+	}
 	switch op {
 	case "start":
 		return j.StartActivityAttempt(ctx, record)

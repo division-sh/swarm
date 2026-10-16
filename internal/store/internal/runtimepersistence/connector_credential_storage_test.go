@@ -27,7 +27,7 @@ func seedConnectorCredentialStorageWitness(t *testing.T, fixture authorActivityR
 			t.Fatal(err)
 		}
 	}
-	journal := fixture.store.(pipeline.ActivityAttemptJournal)
+	journal := activityNativeJournalForFixture(t, fixture)
 	for _, columns := range [][2]string{
 		{"fixture-secret", "safe"},
 		{"safe", "fixture-secret"},

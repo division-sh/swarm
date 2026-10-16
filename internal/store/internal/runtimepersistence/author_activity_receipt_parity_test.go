@@ -26,11 +26,13 @@ type authorActivityReceiptStore interface {
 }
 
 type authorActivityReceiptFixture struct {
-	store   authorActivityReceiptStore
-	db      *sql.DB
-	dialect authoractivityfixture.Dialect
-	stamp   func(context.Context, string, string) [2]string
-	advance func()
+	store           authorActivityReceiptStore
+	db              *sql.DB
+	dialect         authoractivityfixture.Dialect
+	stamp           func(context.Context, string, string) [2]string
+	advance         func()
+	activityJournal *activityFixtureJournal
+	activityOwner   testing.TB
 }
 
 func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
@@ -200,6 +202,8 @@ func openSQLiteAuthorActivityReceiptFixture(t *testing.T) authorActivityReceiptF
 	store.nowFn = func() time.Time { return now }
 	return authorActivityReceiptFixture{
 		store: store, db: store.backend.ConstructionHandle(), dialect: authoractivityfixture.DialectSQLite,
+		activityJournal: &activityFixtureJournal{},
+		activityOwner:   t,
 		stamp: func(ctx context.Context, eventID, agentID string) [2]string {
 			return readAuthorActivityReceiptStamps(t, ctx, store.backend.ConstructionHandle(), `
 				SELECT CAST(d.settled_at AS TEXT), CAST(o.settled_at AS TEXT)
@@ -220,6 +224,8 @@ func openPostgresAuthorActivityReceiptFixture(t *testing.T) authorActivityReceip
 	registerTestAuthorActivityCatalog(t, store)
 	return authorActivityReceiptFixture{
 		store: store, db: db, dialect: authoractivityfixture.DialectPostgres,
+		activityJournal: &activityFixtureJournal{},
+		activityOwner:   t,
 		stamp: func(ctx context.Context, eventID, agentID string) [2]string {
 			return readAuthorActivityReceiptStamps(t, ctx, db, `
 				SELECT d.settled_at::text, o.settled_at::text

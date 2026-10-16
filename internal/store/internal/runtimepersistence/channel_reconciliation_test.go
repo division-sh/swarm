@@ -41,7 +41,7 @@ func TestChannelActivityNativeAcknowledgementCutsBothStores(t *testing.T) {
 						Tool: continuation.Tool, Attempt: 1,
 						SuccessEvent: continuation.SuccessEvent, FailureEvent: continuation.FailureEvent, InputHash: continuation.EffectContentHash,
 					}
-					journal := fixture.store.(activityStoryJournal)
+					journal := captureActivityFixtureJournal(t, ctx, fixture.store)
 					write := journal.StartActivityAttempt
 					var predecessor runtimepipeline.ActivityAttemptRecord
 					switch operation {

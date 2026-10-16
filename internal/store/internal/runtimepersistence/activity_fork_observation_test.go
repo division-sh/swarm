@@ -54,11 +54,11 @@ func TestActivityForkStoragePreservesExactFactsAndSeparateCutsBothStores(t *test
 			if err != nil || result.EventName != string(event.Type()) || !bytes.Equal(result.Payload, raw) {
 				t.Fatalf("result type/native payload changed: %+v/%v", result, err)
 			}
-			journal := selected.(pipeline.ActivityAttemptJournal)
+			journal := captureActivityFixtureJournal(t, ctx, selected)
 			inputHash := sha256.Sum256([]byte(`{}`))
 			started, inserted, err := journal.StartActivityAttempt(ctx, pipeline.ActivityAttemptRecord{
 				RequestEventID: event.ID(), RunID: event.RunID(), EntityID: entity, FlowInstance: "flow-a/1", ExecutionMode: executionmode.Live,
-				ActivityID: "fork-observation", Tool: "provider.fixture", EffectClass: "non_idempotent_write", Attempt: 1,
+				ActivityID: "fork-observation", Tool: "provider.fixture", Attempt: 1,
 				SuccessEvent: "fixture.succeeded", FailureEvent: "fixture.failed", InputHash: fmt.Sprintf("sha256:%x", inputHash),
 			})
 			if err != nil || !inserted {

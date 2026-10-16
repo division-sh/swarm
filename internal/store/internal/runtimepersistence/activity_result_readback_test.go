@@ -24,7 +24,7 @@ func TestActivityResultPublicationEvidenceBothStores(t *testing.T) {
 			ctx = testAuthorActivityContext()
 			sibling := uuid.NewString()
 			requireRunningRunForTest(t, ctx, selected, sibling, time.Now().UTC())
-			journal := selected.(pipeline.ActivityAttemptJournal)
+			journal := captureActivityFixtureJournal(t, ctx, selected)
 			fault := errors.New("post-acknowledgment cleanup")
 			for _, invalid := range []any{nil, db, (*PostgresStore)(nil), (*SQLiteRuntimeStore)(nil)} {
 				if got, err := ObserveActivityResultPublicationStorageForTest(ctx, invalid); err == nil || got != (ActivityResultPublicationStorage{}) {
@@ -53,6 +53,7 @@ func TestActivityResultPublicationEvidenceBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			journalWithFault.original = journal
 			// The exact selected journal owns the actual commit verdict. The
 			// wrapper can add an error only after that acknowledgment.
 			canceled, cancel := context.WithCancel(ctx)

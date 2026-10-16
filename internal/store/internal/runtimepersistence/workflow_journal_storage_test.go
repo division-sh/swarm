@@ -30,7 +30,7 @@ func TestWorkflowJournalStoragePreservesOriginalSnapshotAndPhysicalCountsBothSto
 				if runID == other {
 					record.ExecutionMode = executionmode.Mock
 				}
-				if _, inserted, err := fixture.store.(pipeline.ActivityAttemptJournal).StartActivityAttempt(ctx, record); err != nil || !inserted {
+				if _, inserted, err := activityNativeJournalForFixture(t, fixture).StartActivityAttempt(ctx, record); err != nil || !inserted {
 					t.Fatalf("start native journal: inserted=%t err=%v", inserted, err)
 				}
 			}

@@ -103,6 +103,9 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 						if !reflect.DeepEqual(copied.ResultPayload, sourceRecord.ResultPayload) || !reflect.DeepEqual(copied.Failure, sourceRecord.Failure) {
 							t.Fatalf("result/failure changed: source=%#v child=%#v", sourceRecord, copied)
 						}
+						if !copied.ExecutionBinding.IsZero() {
+							t.Fatal("copied terminal history inherited fresh execution permission")
+						}
 						wantEntity, wantFlow := sourceRecord.EntityID, sourceRecord.FlowInstance
 						if approved {
 							wantEntity, wantFlow = child.ForkRunID, child.ForkRunID
@@ -122,10 +125,10 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 						if afterRepeat := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres"); !reflect.DeepEqual(afterFirst, afterRepeat) {
 							t.Fatal("repeated reuse changed persisted rows")
 						}
-						// Exercise the real duplicate-attempt gate, not a connector or
-						// runtime-container provider invocation.
+						// Readback is supported, but historical copies cannot borrow an
+						// ambient process's permission through an unbound writer.
 						restarted, inserted, err := journal.StartActivityAttempt(ctx, copied)
-						if err != nil || inserted || !reflect.DeepEqual(restarted, copied) {
+						if err == nil || inserted || restarted.RequestEventID != "" {
 							t.Fatalf("copied terminal request restarted: inserted=%v err=%v got=%#v want=%#v", inserted, err, restarted, copied)
 						}
 						afterStart := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
@@ -148,8 +151,8 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 									t.Fatalf("copied no-op kernel: err=%v inserted=%v drafts=%d got=%#v", err, inserted, len(spy.drafts), got)
 								}
 								got, inserted, err = activityStoryOuter(fixture, op, request)
-								if err != nil || inserted || !reflect.DeepEqual(got, copied) {
-									t.Fatalf("copied no-op outer: err=%v inserted=%v got=%#v", err, inserted, got)
+								if err == nil || inserted || got.RequestEventID != "" {
+									t.Fatalf("copied history obtained writer permission: err=%v inserted=%v got=%#v", err, inserted, got)
 								}
 								assertActivityStoryTablesUnchanged(t, fixture, backend.name == "postgres", afterFirst)
 							})
@@ -435,8 +438,8 @@ func TestRunForkActivityTimestampCopyPreservesStoredPrecisionBothStores(t *testi
 			if _, err := store.LoadRunForkSelectedContractSourceEvents(ctx, event.RunID(), child.ForkRunID, []string{event.ID()}, originalCarriageForRun(t, store, event.RunID())); err != nil {
 				t.Fatal(err)
 			}
-			if _, inserted, err := journal.StartActivityAttempt(ctx, copied); err != nil || inserted {
-				t.Fatalf("precision retry: inserted=%v err=%v", inserted, err)
+			if _, inserted, err := journal.StartActivityAttempt(ctx, copied); err == nil || inserted {
+				t.Fatalf("historical precision copy obtained writer permission: inserted=%v err=%v", inserted, err)
 			}
 			assertActivityStoryTablesUnchanged(t, fixture, postgres, before)
 		})
@@ -590,7 +593,7 @@ func seedActivityEvidenceForFork(t *testing.T, fixture authorActivityReceiptFixt
 			t.Fatal(err)
 		}
 	}
-	journal := fixture.store.(activityTimestampJournal)
+	journal := captureActivityFixtureJournal(t, ctx, fixture.store)
 	record, inserted, err := journal.StartActivityAttempt(ctx, runtimepipeline.ActivityAttemptRecord{
 		RequestEventID: requestID, RunID: runID, SourceEventID: parentID, ExecutionMode: executionmode.Live,
 		EntityID: entityID, FlowInstance: instance, NodeID: owner.Key(), HandlerEventKey: handler, ActivityID: activity, Tool: tool,
