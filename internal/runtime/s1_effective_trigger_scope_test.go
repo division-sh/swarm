@@ -249,10 +249,17 @@ func TestS1EffectiveProviderTriggerSchemasRefuseNoncanonicalFlowReaders(t *testi
 			if _, _, found := source.ResolveFlowEventCatalogEntry(flow, event); found {
 				t.Errorf("noncanonical flow %q acquired scoped catalog evidence", flow)
 			}
+			if flow != "" && semanticview.ResolveEventSchema(source, flow, event).HasSchema {
+				t.Errorf("noncanonical flow %q borrowed schema through the general resolver", flow)
+			}
 		})
 	}
 	input, found := source.FlowInputEventPin(".", event)
 	if _, bound := input.ProducerEventSchema(); !found || !bound {
 		t.Fatal("exact root lost its imported input pin")
+	}
+	readback := semanticview.ResolveEventSchema(source, "", "inbound.team_bot.text_message")
+	if !readback.HasCompiled || !compiledSchemaHasField(readback.CompiledSchema, "underscore_marker") {
+		t.Fatal("target-free inspection lost the unambiguous typed catalog")
 	}
 }
