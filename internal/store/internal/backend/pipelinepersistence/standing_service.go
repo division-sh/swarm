@@ -18,12 +18,14 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	storestandingdisposition "github.com/division-sh/swarm/internal/store/internal/backend/standingdisposition"
 	storeworkflowtimer "github.com/division-sh/swarm/internal/store/internal/backend/workflowtimer"
+	sourceartifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -115,6 +117,38 @@ func (s *standingServiceAdapter) validRunLifecycleMutation(tx *sql.Tx) bool {
 	return s != nil && tx != nil && s.attempt != nil && (s.postgresStore != nil || s.sqliteStore != nil)
 }
 
+func (s *standingServiceAdapter) runRootReferenceTx(ctx context.Context, tx *sql.Tx, runID string) (sourceartifact.RootAdmissionReference, error) {
+	if !s.validRunLifecycleMutation(tx) {
+		return sourceartifact.RootAdmissionReference{}, errors.New("standing run lifecycle owner is required")
+	}
+	var snapshot runtimerunlifecycle.Snapshot
+	var err error
+	if s.postgresStore != nil {
+		snapshot, err = s.postgresStore.RunLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, runID, false)
+	} else {
+		snapshot, err = s.sqliteStore.RunLifecycleSQLiteOwner.LoadSnapshotTx(ctx, tx, runID)
+	}
+	return snapshot.RootReference, err
+}
+
+// Desired declaration and predecessor run may differ. Bind predecessor work
+// only from that run's retained evidence, without changing the transaction.
+func (s *standingServiceAdapter) runSourceContextTx(ctx context.Context, tx *sql.Tx, runID string) (context.Context, sourceartifact.RootedSource, error) {
+	reference, err := s.runRootReferenceTx(ctx, tx, runID)
+	if err != nil {
+		return nil, sourceartifact.RootedSource{}, err
+	}
+	source, err := sourceartifactstore.LoadRootedSourceTx(ctx, tx, reference, s.postgres)
+	if err != nil {
+		return nil, sourceartifact.RootedSource{}, err
+	}
+	fact, err := runtimecorrelation.DecodeSourceArtifactFact(reference.BundleHash)
+	if err != nil {
+		return nil, sourceartifact.RootedSource{}, err
+	}
+	return runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, fact), source.Admission()), source, nil
+}
+
 func (s *standingServiceAdapter) requireActiveRunSource(ctx context.Context, tx *sql.Tx, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 	if !s.validRunLifecycleMutation(tx) {
 		return runtimecorrelation.SourceArtifactFact{}, errors.New("standing run lifecycle mutation owner is required")
@@ -139,6 +173,10 @@ func (s *standingServiceAdapter) createRun(ctx context.Context, tx *sql.Tx, requ
 	if !s.validRunLifecycleMutation(tx) {
 		return "", errors.New("standing run lifecycle mutation owner is required")
 	}
+	if err := request.Validate(); err != nil {
+		return "", err
+	}
+	ctx = runtimecorrelation.WithRootAdmission(runtimecorrelation.WithSourceArtifactFact(ctx, request.Source), request.RootAdmission)
 	if s.postgresStore != nil {
 		return s.postgresStore.RunLifecyclePostgresOwner.CreateRunTx(ctx, s.attempt, request)
 	}
@@ -148,6 +186,10 @@ func (s *standingServiceAdapter) createRun(ctx context.Context, tx *sql.Tx, requ
 func (s *standingServiceAdapter) reviseRunSource(ctx context.Context, tx *sql.Tx, request runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error) {
 	if !s.validRunLifecycleMutation(tx) {
 		return "", errors.New("standing run lifecycle mutation owner is required")
+	}
+	ctx, _, err := s.runSourceContextTx(ctx, tx, request.RunID)
+	if err != nil {
+		return "", err
 	}
 	if s.postgresStore != nil {
 		return s.postgresStore.RunLifecyclePostgresOwner.ReviseSourceTx(ctx, s.attempt, request)
@@ -159,6 +201,10 @@ func (s *standingServiceAdapter) transitionActiveRun(ctx context.Context, tx *sq
 	if !s.validRunLifecycleMutation(tx) {
 		return "", errors.New("standing run lifecycle mutation owner is required")
 	}
+	ctx, _, err := s.runSourceContextTx(ctx, tx, request.RunID)
+	if err != nil {
+		return "", err
+	}
 	if s.postgresStore != nil {
 		return s.postgresStore.RunLifecyclePostgresOwner.TransitionActiveTx(ctx, s.attempt, request)
 	}
@@ -168,6 +214,10 @@ func (s *standingServiceAdapter) transitionActiveRun(ctx context.Context, tx *sq
 func (s *standingServiceAdapter) markTerminalRun(ctx context.Context, tx *sql.Tx, request runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	if !s.validRunLifecycleMutation(tx) {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("standing run lifecycle mutation owner is required")
+	}
+	ctx, _, err := s.runSourceContextTx(ctx, tx, request.RunID)
+	if err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	if s.postgresStore != nil {
 		return s.postgresStore.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, s.attempt, request, &s.channelCardChanges)
@@ -311,6 +361,10 @@ func (s *standingServiceAdapter) requireStandingRunSourceTx(
 	if s == nil || !s.validRunLifecycleMutation(tx) {
 		return runtimecorrelation.SourceArtifactFact{}, errors.New("standing run lifecycle owner is required")
 	}
+	ctx, source, err := s.runSourceContextTx(ctx, tx, current.RunID)
+	if err != nil {
+		return runtimecorrelation.SourceArtifactFact{}, err
+	}
 	if requireActive {
 		fact, err = s.requireActiveRunSource(ctx, tx, current.RunID)
 	} else {
@@ -319,11 +373,11 @@ func (s *standingServiceAdapter) requireStandingRunSourceTx(
 	if err != nil {
 		return runtimecorrelation.SourceArtifactFact{}, err
 	}
-	bundleHash := fact.BundleHash()
-	if requireActive && current.BundleHash != bundleHash {
+	root := source.Admission().Reference()
+	if requireActive && current.RootReference != root {
 		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf(
-			"standing service %s provenance conflicts with run %s: standing bundle_hash=%s, run bundle_hash=%s",
-			current.ServiceID, current.RunID, current.BundleHash, bundleHash,
+			"standing service %s provenance conflicts with run %s: standing source=%+v, run source=%+v",
+			current.ServiceID, current.RunID, current.RootReference, root,
 		)
 	}
 	return fact, nil
@@ -357,6 +411,9 @@ func (s *standingServiceAdapter) LoadReconciledStandingService(ctx context.Conte
 	if err := candidate.Validate(); err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, false, err
 	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, candidate.RootAdmission.Reference()); err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, false, err
+	}
 	var result runtimepipeline.StandingServiceReconciliation
 	var found bool
 	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -371,8 +428,7 @@ func (s *standingServiceAdapter) LoadReconciledStandingService(ctx context.Conte
 		if err != nil {
 			return err
 		}
-		bundleHash := candidate.Source.BundleHash()
-		if !current.DeclarationPresent || current.BundleHash != bundleHash || current.BindingEnabled != candidate.BindingEnabled ||
+		if !current.DeclarationPresent || current.RootReference != candidate.RootAdmission.Reference() || current.BindingEnabled != candidate.BindingEnabled ||
 			!candidate.BindingEnabled && current.EffectiveState != candidate.BindingBlockReason.EffectiveState() {
 			return nil
 		}
@@ -660,7 +716,11 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 		if err != nil {
 			return err
 		}
-		declarationSource, err := runtimecorrelation.DecodeSourceArtifactFact(current.BundleHash)
+		declarationRoot, err := sourceartifactstore.LoadRootedSourceTx(txctx, tx, current.RootReference, s.postgres)
+		if err != nil {
+			return err
+		}
+		declarationSource, err := runtimecorrelation.DecodeSourceArtifactFact(declarationRoot.Admission().BundleHash())
 		if err != nil {
 			return err
 		}
@@ -688,7 +748,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 			return err
 		}
 		if _, err := s.createRun(txctx, tx, runtimerunlifecycle.CreateRequest{
-			RunID: nextRunID, Origin: origin, Source: declarationSource, StartedAt: now,
+			RunID: nextRunID, Origin: origin, Source: declarationSource, RootAdmission: declarationRoot.Admission(), StartedAt: now,
 		}); err != nil {
 			return err
 		}
@@ -737,7 +797,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 				return err
 			}
 		}
-		candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: current.ServiceID, FlowPath: current.FlowPath, Source: declarationSource}
+		candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true, ServiceID: current.ServiceID, FlowPath: current.FlowPath, Source: declarationSource, RootAdmission: declarationRoot.Admission()}
 		result = standingResult(candidate, nextRunID, nextGeneration, current.PublicationSequence, "reset", effectiveState, operation.Reason)
 		result.TimerCancellations = cancellations
 		result.CommittedMutation = runtimerunlifecycle.MutationApplied
@@ -835,6 +895,12 @@ func (s *standingServiceAdapter) admitStandingServiceRunTx(ctx context.Context, 
 }
 
 func (s *standingServiceAdapter) reconcileStandingServiceTx(ctx context.Context, tx *sql.Tx, candidate runtimepipeline.StandingServiceCandidate) (runtimepipeline.StandingServiceReconciliation, error) {
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, candidate.RootAdmission.Reference()); err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, err
+	}
+	if err := sourceartifactstore.RequireRootAdmissionTx(ctx, tx, candidate.RootAdmission, s.postgres); err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, err
+	}
 	current, found, err := s.loadStandingServiceTx(ctx, tx, candidate.ServiceID)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
@@ -878,6 +944,19 @@ func (s *standingServiceAdapter) PublishStandingService(ctx context.Context, ser
 	}
 	var sequence int64
 	err := s.runInPipelineTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		current, found, err := s.loadStandingServiceTx(txctx, tx, serviceID)
+		if err != nil {
+			return err
+		}
+		if !found || current.RunID != runID || current.Generation != generation {
+			return fmt.Errorf("standing service changed before ingress publication")
+		}
+		if err := runtimecorrelation.CheckRootAdmissionContext(txctx, current.RootReference); err != nil {
+			return err
+		}
+		if _, err := s.requireStandingRunSourceTx(txctx, tx, current, true); err != nil {
+			return err
+		}
 		disposition, err := storestandingdisposition.ReadByRun(txctx, tx, !s.isSQLite(), runID)
 		if err != nil {
 			return err
@@ -930,7 +1009,7 @@ func (s *standingServiceAdapter) ListStandingServiceStatuses(ctx context.Context
 	query := `
 		SELECT ss.service_id, ss.flow_path,
 		       ss.current_run_id, ss.current_generation, ss.publication_sequence,
-		       ss.effective_state, ss.current_bundle_hash,
+		       ss.effective_state, ss.current_bundle_hash, ss.source_root_directory,
 		       ss.declaration_present, ss.binding_enabled, ss.operator_override, ss.publication_state,
 		       COALESCE(ss.override_actor, ''), COALESCE(ss.override_reason, ''), ss.override_at,
 		       COALESCE((SELECT transition FROM standing_service_journal j WHERE j.service_id = ss.service_id ORDER BY sequence DESC LIMIT 1), 'resumed'),
@@ -942,7 +1021,7 @@ func (s *standingServiceAdapter) ListStandingServiceStatuses(ctx context.Context
 		query = `
 			SELECT ss.service_id::text, ss.flow_path,
 			       ss.current_run_id::text, ss.current_generation, ss.publication_sequence,
-			       ss.effective_state, ss.current_bundle_hash,
+			       ss.effective_state, ss.current_bundle_hash, ss.source_root_directory,
 			       ss.declaration_present, ss.binding_enabled, ss.operator_override, ss.publication_state,
 			       COALESCE(ss.override_actor, ''), COALESCE(ss.override_reason, ''), ss.override_at,
 			       COALESCE((SELECT transition FROM standing_service_journal j WHERE j.service_id = ss.service_id ORDER BY sequence DESC LIMIT 1), 'resumed'),
@@ -982,11 +1061,15 @@ func (s *standingServiceAdapter) listStandingServiceStatusesTx(ctx context.Conte
 		if err := rows.Scan(
 			&status.ServiceID, &status.FlowPath,
 			&status.RunID, &status.Generation, &status.PublicationSequence,
-			&status.EffectiveState, &status.BundleHash,
+			&status.EffectiveState, &status.BundleHash, &status.RootReference.RootDirectory,
 			&status.DeclarationPresent, &status.BindingEnabled, &status.OperatorOverride, &status.PublicationState,
 			&status.OverrideActor, &status.OverrideReason, &overrideAt, &status.Transition, &status.Reason,
 		); err != nil {
 			return nil, fmt.Errorf("scan standing service status: %w", err)
+		}
+		status.RootReference.BundleHash = status.BundleHash
+		if err := status.RootReference.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid standing service source: %w", err)
 		}
 		if overrideAt != nil {
 			switch value := overrideAt.(type) {
@@ -1044,7 +1127,7 @@ func (s *standingServiceAdapter) loadStandingServiceTx(ctx context.Context, tx *
 			SELECT ss.service_id, ss.flow_path,
 			       ss.current_run_id, ss.current_generation, ss.publication_sequence,
 			       ss.declaration_present, ss.binding_enabled, ss.operator_override, ss.effective_state,
-			       ss.current_bundle_hash, ss.revision_sequence,
+			       ss.current_bundle_hash, ss.source_root_directory, ss.revision_sequence,
 			       ss.publication_state, COALESCE(r.status, '')
 			FROM standing_services ss
 			LEFT JOIN runs r ON r.run_id = ss.current_run_id
@@ -1055,7 +1138,7 @@ func (s *standingServiceAdapter) loadStandingServiceTx(ctx context.Context, tx *
 			SELECT ss.service_id::text, ss.flow_path,
 			       ss.current_run_id::text, ss.current_generation, ss.publication_sequence,
 			       ss.declaration_present, ss.binding_enabled, ss.operator_override, ss.effective_state,
-			       ss.current_bundle_hash, ss.revision_sequence,
+			       ss.current_bundle_hash, ss.source_root_directory, ss.revision_sequence,
 			       ss.publication_state, COALESCE(r.status, '')
 			FROM standing_services ss
 			LEFT JOIN runs r ON r.run_id = ss.current_run_id
@@ -1067,7 +1150,7 @@ func (s *standingServiceAdapter) loadStandingServiceTx(ctx context.Context, tx *
 		&row.ServiceID, &row.FlowPath,
 		&row.RunID, &row.Generation, &row.PublicationSequence,
 		&row.DeclarationPresent, &row.BindingEnabled, &row.OperatorOverride, &row.EffectiveState,
-		&row.BundleHash, &row.RevisionSequence,
+		&row.BundleHash, &row.RootReference.RootDirectory, &row.RevisionSequence,
 		&row.PublicationState, &row.RunStatus,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1075,6 +1158,10 @@ func (s *standingServiceAdapter) loadStandingServiceTx(ctx context.Context, tx *
 	}
 	if err != nil {
 		return standingServiceRow{}, false, fmt.Errorf("load standing service %s: %w", serviceID, err)
+	}
+	row.RootReference.BundleHash = row.BundleHash
+	if err := row.RootReference.Validate(); err != nil {
+		return standingServiceRow{}, false, fmt.Errorf("invalid standing service source: %w", err)
 	}
 	return row, true, nil
 }
@@ -1084,7 +1171,7 @@ func (s *standingServiceAdapter) loadAllStandingServicesTx(ctx context.Context, 
 		SELECT ss.service_id, ss.flow_path,
 		       ss.current_run_id, ss.current_generation, ss.publication_sequence,
 		       ss.declaration_present, ss.binding_enabled, ss.operator_override, ss.effective_state,
-		       ss.current_bundle_hash, ss.revision_sequence,
+		       ss.current_bundle_hash, ss.source_root_directory, ss.revision_sequence,
 		       ss.publication_state, COALESCE(r.status, '')
 		FROM standing_services ss
 		LEFT JOIN runs r ON r.run_id = ss.current_run_id
@@ -1095,7 +1182,7 @@ func (s *standingServiceAdapter) loadAllStandingServicesTx(ctx context.Context, 
 			SELECT ss.service_id::text, ss.flow_path,
 			       ss.current_run_id::text, ss.current_generation, ss.publication_sequence,
 			       ss.declaration_present, ss.binding_enabled, ss.operator_override, ss.effective_state,
-			       ss.current_bundle_hash, ss.revision_sequence,
+			       ss.current_bundle_hash, ss.source_root_directory, ss.revision_sequence,
 			       ss.publication_state, COALESCE(r.status, '')
 			FROM standing_services ss
 			LEFT JOIN runs r ON r.run_id = ss.current_run_id
@@ -1115,10 +1202,14 @@ func (s *standingServiceAdapter) loadAllStandingServicesTx(ctx context.Context, 
 			&row.ServiceID, &row.FlowPath,
 			&row.RunID, &row.Generation, &row.PublicationSequence,
 			&row.DeclarationPresent, &row.BindingEnabled, &row.OperatorOverride, &row.EffectiveState,
-			&row.BundleHash, &row.RevisionSequence,
+			&row.BundleHash, &row.RootReference.RootDirectory, &row.RevisionSequence,
 			&row.PublicationState, &row.RunStatus,
 		); err != nil {
 			return nil, fmt.Errorf("scan standing service set: %w", err)
+		}
+		row.RootReference.BundleHash = row.BundleHash
+		if err := row.RootReference.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid standing service source: %w", err)
 		}
 		out = append(out, row)
 	}
@@ -1151,10 +1242,10 @@ func (s *standingServiceAdapter) createStandingServiceTx(ctx context.Context, tx
 				service_id, flow_path, declaration_present, binding_enabled,
 				operator_override, effective_state, current_bundle_hash,
 				revision_sequence, current_generation, current_run_id, publication_state,
-				publication_sequence, created_at, updated_at
-			) VALUES (?, ?, TRUE, TRUE, 'none', 'active', ?, 1, ?, ?, 'pending', 0, ?, ?)
+				publication_sequence, created_at, updated_at, source_root_directory
+			) VALUES (?, ?, TRUE, TRUE, 'none', 'active', ?, 1, ?, ?, 'pending', 0, ?, ?, ?)
 		`, candidate.ServiceID, candidate.FlowPath,
-			bundleHash, generation, runID, now, now); err != nil {
+			bundleHash, generation, runID, now, now, candidate.RootAdmission.RootDirectory()); err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("insert standing service: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -1169,10 +1260,10 @@ func (s *standingServiceAdapter) createStandingServiceTx(ctx context.Context, tx
 				service_id, flow_path, declaration_present, binding_enabled,
 				operator_override, effective_state, current_bundle_hash,
 				revision_sequence, current_generation, current_run_id, publication_state,
-				publication_sequence, created_at, updated_at
-			) VALUES ($1::uuid, $2, TRUE, TRUE, 'none', 'active', $3, 1, $4, $5::uuid, 'pending', 0, $6, $6)
+				publication_sequence, created_at, updated_at, source_root_directory
+			) VALUES ($1::uuid, $2, TRUE, TRUE, 'none', 'active', $3, 1, $4, $5::uuid, 'pending', 0, $6, $6, $7)
 		`, candidate.ServiceID, candidate.FlowPath,
-			bundleHash, generation, runID, now); err != nil {
+			bundleHash, generation, runID, now, candidate.RootAdmission.RootDirectory()); err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("insert standing service: %w", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
@@ -1194,13 +1285,13 @@ func (s *standingServiceAdapter) createStandingServiceTx(ctx context.Context, tx
 }
 
 func (s *standingServiceAdapter) resumeStandingServiceTx(ctx context.Context, tx *sql.Tx, current standingServiceRow, candidate runtimepipeline.StandingServiceCandidate) (runtimepipeline.StandingServiceReconciliation, error) {
-	runSource, err := s.requireStandingRunSourceTx(ctx, tx, current, current.BindingEnabled)
+	_, err := s.requireStandingRunSourceTx(ctx, tx, current, current.BindingEnabled)
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
 	bundleHash := candidate.Source.BundleHash()
 	transition := "resumed"
-	if current.BundleHash != bundleHash {
+	if current.RootReference != candidate.RootAdmission.Reference() {
 		transition = "revised"
 	}
 	effectiveState := "active"
@@ -1211,12 +1302,10 @@ func (s *standingServiceAdapter) resumeStandingServiceTx(ctx context.Context, tx
 	if transition == "revised" {
 		revisionSequence++
 	}
-	if runSource.BundleHash() != bundleHash {
-		if _, err := s.reviseRunSource(ctx, tx, runtimerunlifecycle.SourceRevisionRequest{
-			RunID: current.RunID, Source: candidate.Source,
-		}); err != nil {
-			return runtimepipeline.StandingServiceReconciliation{}, err
-		}
+	if _, err := s.reviseRunSource(ctx, tx, runtimerunlifecycle.SourceRevisionRequest{
+		RunID: current.RunID, Source: candidate.Source, RootAdmission: candidate.RootAdmission,
+	}); err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
 	now := time.Now().UTC()
 	if effectiveState == "active" {
@@ -1230,9 +1319,9 @@ func (s *standingServiceAdapter) resumeStandingServiceTx(ctx context.Context, tx
 		_, err := tx.ExecContext(ctx, `
 			UPDATE standing_services
 			SET declaration_present = TRUE, binding_enabled = TRUE, effective_state = ?, current_bundle_hash = ?,
-			    revision_sequence = ?, publication_state = 'pending', updated_at = ?
+			    revision_sequence = ?, publication_state = 'pending', updated_at = ?, source_root_directory = ?
 			WHERE service_id = ?
-		`, effectiveState, bundleHash, revisionSequence, now, candidate.ServiceID)
+		`, effectiveState, bundleHash, revisionSequence, now, candidate.RootAdmission.RootDirectory(), candidate.ServiceID)
 		if err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, err
 		}
@@ -1240,9 +1329,9 @@ func (s *standingServiceAdapter) resumeStandingServiceTx(ctx context.Context, tx
 		_, err := tx.ExecContext(ctx, `
 			UPDATE standing_services
 			SET declaration_present = TRUE, binding_enabled = TRUE, effective_state = $2, current_bundle_hash = $3,
-			    revision_sequence = $4, publication_state = 'pending', updated_at = $5
+			    revision_sequence = $4, publication_state = 'pending', updated_at = $5, source_root_directory = $6
 			WHERE service_id = $1::uuid
-		`, candidate.ServiceID, effectiveState, bundleHash, revisionSequence, now)
+		`, candidate.ServiceID, effectiveState, bundleHash, revisionSequence, now, candidate.RootAdmission.RootDirectory())
 		if err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, err
 		}
@@ -1278,14 +1367,14 @@ func (s *standingServiceAdapter) disableStandingServiceTx(ctx context.Context, t
 		}
 	}
 	revision := current.RevisionSequence
-	if current.BundleHash != candidate.Source.BundleHash() {
+	if current.RootReference != candidate.RootAdmission.Reference() {
 		revision++
 	}
 	var err error
 	if s.isSQLite() {
-		_, err = tx.ExecContext(ctx, `UPDATE standing_services SET declaration_present = TRUE, binding_enabled = FALSE, effective_state = ?, current_bundle_hash = ?, revision_sequence = ?, publication_state = 'pending', updated_at = ? WHERE service_id = ?`, state, candidate.Source.BundleHash(), revision, now, current.ServiceID)
+		_, err = tx.ExecContext(ctx, `UPDATE standing_services SET declaration_present = TRUE, binding_enabled = FALSE, effective_state = ?, current_bundle_hash = ?, revision_sequence = ?, publication_state = 'pending', updated_at = ?, source_root_directory = ? WHERE service_id = ?`, state, candidate.Source.BundleHash(), revision, now, candidate.RootAdmission.RootDirectory(), current.ServiceID)
 	} else {
-		_, err = tx.ExecContext(ctx, `UPDATE standing_services SET declaration_present = TRUE, binding_enabled = FALSE, effective_state = $2, current_bundle_hash = $3, revision_sequence = $4, publication_state = 'pending', updated_at = $5 WHERE service_id = $1::uuid`, current.ServiceID, state, candidate.Source.BundleHash(), revision, now)
+		_, err = tx.ExecContext(ctx, `UPDATE standing_services SET declaration_present = TRUE, binding_enabled = FALSE, effective_state = $2, current_bundle_hash = $3, revision_sequence = $4, publication_state = 'pending', updated_at = $5, source_root_directory = $6 WHERE service_id = $1::uuid`, current.ServiceID, state, candidate.Source.BundleHash(), revision, now, candidate.RootAdmission.RootDirectory())
 	}
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("record non-executable standing service: %w", err)
@@ -1311,7 +1400,7 @@ func (s *standingServiceAdapter) reconcileResetRequiredStandingServiceTx(
 	disposition runtimerunlifecycle.StandingRestartDisposition,
 ) (runtimepipeline.StandingServiceReconciliation, error) {
 	bundleHash := candidate.Source.BundleHash()
-	sourceChanged := current.BundleHash != bundleHash
+	sourceChanged := current.RootReference != candidate.RootAdmission.Reference()
 	restoreDeclaration := !current.DeclarationPresent
 	if !sourceChanged && !restoreDeclaration && current.BindingEnabled == candidate.BindingEnabled &&
 		(candidate.BindingEnabled || current.EffectiveState == candidate.BindingBlockReason.EffectiveState()) {
@@ -1335,7 +1424,7 @@ func (s *standingServiceAdapter) reconcileResetRequiredStandingServiceTx(
 	}
 	if restoreDeclaration && disposition.Kind == runtimerunlifecycle.StandingRestartInvalidCurrent && sourceChanged {
 		if _, err := s.reviseRunSource(ctx, tx, runtimerunlifecycle.SourceRevisionRequest{
-			RunID: current.RunID, Source: candidate.Source,
+			RunID: current.RunID, Source: candidate.Source, RootAdmission: candidate.RootAdmission,
 		}); err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, err
 		}
@@ -1343,9 +1432,9 @@ func (s *standingServiceAdapter) reconcileResetRequiredStandingServiceTx(
 	now := time.Now().UTC()
 	var err error
 	if s.isSQLite() {
-		_, err = tx.ExecContext(ctx, `UPDATE standing_services SET declaration_present = TRUE, effective_state = ?, current_bundle_hash = ?, revision_sequence = ?, publication_state = 'pending', updated_at = ?, binding_enabled = ? WHERE service_id = ?`, effectiveState, bundleHash, revisionSequence, now, candidate.BindingEnabled, current.ServiceID)
+		_, err = tx.ExecContext(ctx, `UPDATE standing_services SET declaration_present = TRUE, effective_state = ?, current_bundle_hash = ?, revision_sequence = ?, publication_state = 'pending', updated_at = ?, binding_enabled = ?, source_root_directory = ? WHERE service_id = ?`, effectiveState, bundleHash, revisionSequence, now, candidate.BindingEnabled, candidate.RootAdmission.RootDirectory(), current.ServiceID)
 	} else {
-		_, err = tx.ExecContext(ctx, `UPDATE standing_services SET declaration_present = TRUE, effective_state = $2, current_bundle_hash = $3, revision_sequence = $4, publication_state = 'pending', updated_at = $5, binding_enabled = $6 WHERE service_id = $1::uuid`, current.ServiceID, effectiveState, bundleHash, revisionSequence, now, candidate.BindingEnabled)
+		_, err = tx.ExecContext(ctx, `UPDATE standing_services SET declaration_present = TRUE, effective_state = $2, current_bundle_hash = $3, revision_sequence = $4, publication_state = 'pending', updated_at = $5, binding_enabled = $6, source_root_directory = $7 WHERE service_id = $1::uuid`, current.ServiceID, effectiveState, bundleHash, revisionSequence, now, candidate.BindingEnabled, candidate.RootAdmission.RootDirectory())
 	}
 	if err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, fmt.Errorf("reconcile reset-required standing declaration: %w", err)
@@ -1358,6 +1447,7 @@ func (s *standingServiceAdapter) reconcileResetRequiredStandingServiceTx(
 	current.BindingEnabled = candidate.BindingEnabled
 	current.EffectiveState = effectiveState
 	current.BundleHash = bundleHash
+	current.RootReference = candidate.RootAdmission.Reference()
 	current.RevisionSequence = revisionSequence
 	transition := "revised"
 	reason := "standing_declaration_source_revised"
@@ -1439,6 +1529,13 @@ func (s *standingServiceAdapter) standingClockTimeTx(ctx context.Context, tx *sq
 func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *sql.Tx, runID, bundleHash, reason, sessionReason string, now time.Time, parkDeclaredClocks bool) ([]runtimetimercancellation.Ref, error) {
 	if !s.validRunLifecycleMutation(tx) {
 		return nil, fmt.Errorf("quiesce standing run: standing transaction owner is required")
+	}
+	ctx, source, err := s.runSourceContextTx(ctx, tx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if source.Admission().BundleHash() != bundleHash {
+		return nil, fmt.Errorf("quiesce standing run source contradicts its exact run binding")
 	}
 	quiesceGeneric := storegenericschedule.CancelRunsTx
 	if parkDeclaredClocks {
@@ -1601,7 +1698,7 @@ func standingResult(candidate runtimepipeline.StandingServiceCandidate, runID st
 		ServiceID:      candidate.ServiceID, FlowPath: candidate.FlowPath,
 		RunID:      runID,
 		Generation: generation, PublicationSequence: publicationSequence, Transition: transition,
-		EffectiveState: effectiveState, BundleHash: candidate.Source.BundleHash(), Reason: reason,
+		EffectiveState: effectiveState, BundleHash: candidate.Source.BundleHash(), RootReference: candidate.RootAdmission.Reference(), Reason: reason,
 	}
 }
 
@@ -1637,7 +1734,10 @@ func (s *standingServiceAdapter) loadStandingOperationTx(ctx context.Context, tx
 	if !found {
 		return standingServiceRow{}, &runtimepipeline.StandingServiceError{ServiceID: operation.ServiceID, Err: runtimepipeline.ErrStandingServiceNotFound}
 	}
-	if _, err := s.requirePresentRunSource(ctx, tx, current.RunID); err != nil {
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, current.RootReference); err != nil {
+		return standingServiceRow{}, err
+	}
+	if _, err := s.requireStandingRunSourceTx(ctx, tx, current, false); err != nil {
 		return standingServiceRow{}, err
 	}
 	current.RestartDisposition, err = s.readStandingRestartDispositionTx(ctx, tx, current.RunID, current.ServiceID, current.Generation)

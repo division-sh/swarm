@@ -16240,8 +16240,8 @@ platform_tables:
       description: >-
         Durable declaration-owned standing-service identity and desired-state owner.
         flow_path is stable across source revisions. current_run_id and current_generation
-        select one generation. current_bundle_hash records the latest admitted declaration
-        source artifact, which can differ from a terminal or
+        select one generation. current_bundle_hash and source_root_directory record the exact latest admitted declaration
+        source pair, which can differ from a terminal or
         invalid current run's immutable source until explicit reset creates its successor.
         Operator override and publication sequence are explicit persisted facts rather than
         source-hash inference.
@@ -16254,6 +16254,7 @@ platform_tables:
             operator_override      TEXT NOT NULL DEFAULT 'none' CHECK (operator_override IN ('none', 'suspended')),
             effective_state        TEXT NOT NULL CHECK (effective_state IN ('active', 'suspended', 'orphaned', 'dormant', 'recovery_required')),
             current_bundle_hash    TEXT NOT NULL CHECK (current_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
+            source_root_directory  TEXT NOT NULL CHECK (LENGTH(source_root_directory) >= 1 AND LENGTH(source_root_directory) <= 100),
             revision_sequence      BIGINT NOT NULL CHECK (revision_sequence > 0),
             current_generation     BIGINT NOT NULL CHECK (current_generation > 0),
             current_run_id         UUID NOT NULL UNIQUE REFERENCES runs(run_id),
@@ -42856,6 +42857,7 @@ filesystem_source_model:
         Only a genuinely unbound hash request may resolve a sole retained pair. Zero pairs is missing evidence; multiple pairs is explicit ambiguity, never first/last/latest selection. Discovery freezes one exact pair before content readback, and later work consumes that pair rather than selecting again. Existing bound run, declaration, operation or selected live-context evidence wins and must not fall back to global discovery. Content-only reads remain independent of root ambiguity.
         Run creation and explicit source revision take opaque RootAdmission alongside their exact content fact. Missing root evidence and a root for another content hash refuse before mutation. Existing run-origin validation remains authoritative; a content hash alone never supplies the rooted portion of a new run or revision.
         The selected run-lifecycle owner writes source_root_directory in the same native transaction as run creation or explicit source revision and validates that exact pair through the source owner. Same-content creation under another root conflicts; same-content explicit source revision is not a no-op unless the pair matches. Bound reconstruction reads the run reference and its exact retained content within one native read snapshot. Source deletion makes reconstruction unavailable without erasing the historical pair. Neither fresh filesystem access nor unique-hash discovery repairs a missing bound reference.
+        Standing declarations retain their complete source pair independently of historical generation runs. Same-content root changes are declaration revisions, invalidate the old operation observation and pending publication, and revise an active run only through the existing source-revision owner. Dormant and terminal predecessors keep their own run-bound pair until the existing reconciliation/reset policy permits revision or creates a successor. Predecessor cleanup consumes that run's exact retained source in the same transaction; the latest declaration never supplies its root. Reset restores the exact declaration pair before creating its successor. Publication requires agreement between the active run and declaration pair and rejects a supplied stale rooted context. Service IDs, generation identity, enabled-binding retention and lifecycle transitions are unchanged; no root metadata becomes a public source selector.
     reconstruction: |
       Internal standing recovery, replay, reset and fork decode the selected-store blob and compile only the reconstructed artifact. They never require or inspect the original filesystem. Public process restart admits the same exact directory tree and reconciles its blob; a changed tree is a distinct source, never a fallback for retained work. Fresh selected stores are required; no old-row migration, export, purge, compatibility reader, or inferred reconstruction exists.
     process_epoch_rule: |
