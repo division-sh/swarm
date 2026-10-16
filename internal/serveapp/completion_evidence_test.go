@@ -281,20 +281,25 @@ func proveCompletion2720ServedSiblings(t *testing.T, rt completion2270ServedProo
 	if len(conversations.Conversations) != 2 {
 		t.Fatalf("same-slug scopes lost an independent conversation: %+v", conversations)
 	}
+	seenTurns := map[string]bool{}
 	for _, conversation := range conversations.Conversations {
-		path := conversation.FlowInstance
-		if path == "" {
-			path = runID
-		}
-		attribution, found := byPath[path]
-		if !found {
-			t.Fatalf("conversation belongs to an unattributed instance: %+v", conversation)
-		}
 		var page operatorread.OperatorConversationTurnListResult
 		requireServedJSONRPCResult(t, rt.Endpoint, "conversation.list_turns", map[string]any{"session_id": conversation.SessionID}, &page)
-		if len(page.Turns) != 1 || page.Turns[0].TurnID != attribution.ProviderTurns[0] || page.Turns[0].TriggerEventID != attribution.EventID {
+		if len(page.Turns) != 1 {
+			t.Fatalf("a scoped conversation lost its exact turn: %+v", page)
+		}
+		turn := page.Turns[0]
+		var attribution operatorread.RunTurnAttribution
+		matched := 0
+		for _, candidate := range byPath {
+			if slices.Contains(candidate.ProviderTurns, turn.TurnID) {
+				attribution, matched = candidate, matched+1
+			}
+		}
+		if matched != 1 || seenTurns[turn.TurnID] || turn.TriggerEventID != attribution.EventID || conversation.AgentID != attribution.AgentID {
 			t.Fatalf("public turn/history crossed sibling origin: %+v, attribution=%+v", page, attribution)
 		}
+		seenTurns[turn.TurnID] = true
 	}
 	stdout, stderr, code := runServedCLICommand(t, rt.Endpoint, []string{"run", "status", runID, "--json"})
 	var cliDiagnosis cliapp.DiagnosticRunDiagnosisResult
