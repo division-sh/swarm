@@ -2501,14 +2501,9 @@ func (m *RuntimeContextManager) prepareSourceSetTransition(
 		if (!loaded && !pending) || (pendingOnly && !pending) {
 			continue
 		}
-		coordinate, err := runtimeagenttopology.NewSourceCoordinate(entry.context.RootAdmission)
-		if err != nil {
+		if err := validateRuntimeContextSourceSetMember(entry.context, wanted); err != nil {
 			m.mu.Unlock()
 			return nil, err
-		}
-		if expected, survives := wanted[coordinate.Key()]; !survives || expected != coordinate {
-			m.mu.Unlock()
-			return nil, fmt.Errorf("loaded runtime context %s rooted source %+v is absent from successor source set", bundleHash, coordinate.RootReference())
 		}
 		transition.entries = append(transition.entries, runtimeSourceSetTransitionEntry{
 			bundleHash: bundleHash, entry: entry, fresh: loaded,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -15,6 +16,17 @@ func runtimeContextMetadata(contextDef *BundleContext) *BundleContext {
 	}
 	copy := *contextDef
 	return &copy
+}
+
+func validateRuntimeContextSourceSetMember(candidate *BundleContext, wanted map[string]agenttopology.SourceCoordinate) error {
+	coordinate, err := agenttopology.NewSourceCoordinate(candidate.RootAdmission)
+	if err != nil {
+		return err
+	}
+	if expected, present := wanted[coordinate.Key()]; !present || expected != coordinate {
+		return fmt.Errorf("loaded runtime context %s rooted source %+v is absent from successor source set", candidate.BundleHash(), coordinate.RootReference())
+	}
+	return nil
 }
 
 func validateRuntimeContextRoot(candidate BundleContext) error {
