@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
 
 func TestLifecycleConfigRevisionUsesCanonicalConfigFacts(t *testing.T) {
@@ -89,15 +90,10 @@ func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *r
 			return nil, ctx.Err()
 		},
 	}
-	manager := newTestAgentManagerWithOptions(t, managerBus, func(runtimeactors.AgentConfig) (Agent, error) {
+	manager, preparedCtx := newPreparedNativeTestManager(t, managerBus, func(runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	}, AgentManagerOptions{DeliveryStore: native})
-	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), PersistedAgent{
-		Config: managerRootAgentConfig(agent.id, "test.transition"), Topology: managerTestEphemeralTopologyAdmission(t),
-	}, true); err != nil {
-		t.Fatalf("spawnAgentInternal: %v", err)
-	}
-	runCtx, cancelRun := context.WithCancel(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	}, native, managerRootAgentConfig(agent.id, "test.transition"), AgentManagerOptions{})
+	runCtx, cancelRun := context.WithCancel(preparedCtx)
 	t.Cleanup(func() {
 		cancelRun()
 		unblock()
@@ -105,8 +101,8 @@ func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *r
 	if err := manager.Run(runCtx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	inbound := eventtest.RunCreatingRootIngress(eventtest.UUID("evt-transition"), events.EventType("test.transition"),
-		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
+	inbound := eventtest.ExistingRunRootIngress(eventtest.UUID("evt-transition"), events.EventType("test.transition"),
+		"tester", "", []byte(`{}`), 0, managerIdentityTestRunID, events.EventEnvelope{}, time.Now().UTC())
 	native.seedAgentDeliveries(t, agent.id, []events.Event{inbound})
 	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), inbound); err != nil {
 		t.Fatalf("Publish: %v", err)
@@ -114,7 +110,9 @@ func newBlockedManagerLifecycleFixture(t *testing.T, managerBus Bus, eventBus *r
 	select {
 	case <-started:
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for blocked manager work")
+		id, idErr := runtimedelivery.DeliveryID(inbound.ID(), managerAgentDeliveryRouteForRun(inbound.RunID(), agent.id))
+		snapshot, snapshotErr := native.Snapshot(native.Context, id)
+		t.Fatalf("timed out waiting for blocked manager work: ingress_paused=%t running=%t delivery_id_error=%v snapshot=%+v snapshot_error=%v", runtimebus.RuntimeIngressPaused(), manager.IsRunning(), idErr, snapshot, snapshotErr)
 	}
 	requireManagerNativeBlockedClaim(t, native, inbound, agent.id)
 	return blockedManagerLifecycleFixture{manager: manager, bus: eventBus, inbound: inbound, unblock: unblock, cancelRun: cancelRun}

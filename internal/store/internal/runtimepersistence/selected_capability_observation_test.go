@@ -173,7 +173,11 @@ func TestSelectedCapabilityReadPortsKeepIndependentCutsAndStrictAbsenceBothStore
 			defer restore()
 			for _, tc := range selectedCapabilityReadCases() {
 				t.Run(tc.name, func(t *testing.T) {
-					got, err := tc.read(f.ctx, f.store, state.Identity.RunID)
+					id := state.Identity.RunID
+					if tc.name == "root_flow_headers" || tc.name == "root_entity_rows" {
+						id = uuid.NewString()
+					}
+					got, err := tc.read(f.ctx, f.store, id)
 					refused := backend == "sqlite" && tc.postgresOnly
 					if (err != nil) != (tc.absent || refused) || !reflect.DeepEqual(got, selectedCapabilityEmptyResult(tc, refused)) {
 						t.Fatalf("%s borrowed unrelated construction or changed absence: %+v %v", tc.name, got, err)
@@ -191,6 +195,21 @@ func TestSelectedCapabilityReadPortsKeepIndependentCutsAndStrictAbsenceBothStore
 				t.Fatalf("capability evidence joined separate cuts or wrote storage: %+v", counts)
 			}
 			restore()
+			for _, tc := range selectedCapabilityReadCases() {
+				if tc.name != "root_flow_headers" && tc.name != "root_entity_rows" {
+					continue
+				}
+				// The native keyless root has a header but no entity row; its child
+				// has both. Neither read may borrow the child's physical evidence.
+				want := 1
+				if tc.name == "root_entity_rows" {
+					want = 0
+				}
+				got, err := tc.read(f.ctx, f.store, state.Identity.RunID)
+				if err != nil || got != want {
+					t.Fatalf("%s did not distinguish the real root from its child: %+v %v", tc.name, got, err)
+				}
+			}
 			if !reflect.DeepEqual(before, competingRevisionPairSnapshot(t, f)) {
 				t.Fatal("capability observations changed complete history or clocks")
 			}

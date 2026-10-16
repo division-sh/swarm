@@ -28,6 +28,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
+	"github.com/google/uuid"
 )
 
 type projectionTestRoute struct {
@@ -119,19 +120,24 @@ func newProjectionTestManager(t *testing.T, bus Bus, factory AgentFactory, store
 	return newTestAgentManagerWithOptions(t, bus, factory, AgentManagerOptions{WorkOwner: owner}, stores...)
 }
 
-func newNativeProjectionTestManager(t *testing.T, bus *projectionTestBus, factory AgentFactory, native *ManagerDeliveryNativeFixture) (*AgentManager, context.Context) {
+func newNativeProjectionTestManager(t *testing.T, bus *projectionTestBus, factory AgentFactory, native *ManagerDeliveryNativeFixture, cfg models.AgentConfig) (*AgentManager, context.Context, PersistedAgent) {
 	t.Helper()
-	native.RequireRun(t, managerIdentityTestRunID)
+	ctx, record, lifecycle, plan := native.PrepareActor(t, cfg)
 	owner := newTestManagerWorkOwner(t)
 	bus.owner = owner
 	am := newTestAgentManagerWithOptions(t, bus, factory, AgentManagerOptions{
 		WorkOwner: owner, DeliveryStore: native, SourceArtifactFact: native.Authority.SourceArtifact(),
+		LifecycleStore: lifecycle, BaseContext: ctx,
+		PersistenceRoles: PersistenceRoles{
+			LifecycleState: native.Store.(AgentLifecycleStateReader), LifecycleCensus: native.Store.(AgentLifecycleCellCensus), LifecycleOutcome: native.Store.(AgentLifecycleOutcomeReader),
+		},
 	})
-	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, native.Authority.ExecutionID(), native.Authority.Generation(), "", "projection-test-actors", native.Authority.SourceArtifact().BundleHash(), nil)
-	if err != nil {
+	if err := am.InstallStartupTopology(lifecycle, record.Topology, plan); err != nil {
 		t.Fatal(err)
 	}
-	return am, managedexecution.WithAdmission(native.Context, admission)
+	// Persisted construction and issued authority precede execution, but adoption
+	// remains the caller's temporal cut; this helper never installs a projection.
+	return am, ctx, record
 }
 
 func (*projectionTestBus) AdmitSourceArtifactFact(ctx context.Context) (context.Context, error) {
@@ -802,24 +808,15 @@ func ProveNativeExecutionProjectionRecoveryStartsPersistedRunningCell(t *testing
 	bus := newProjectionTestBus()
 	handled := make(chan int, 1)
 	factory := &projectionTestFactory{handled: handled}
-	am, executionCtx := newNativeProjectionTestManager(t, bus, factory.Build, native)
 	const agentID = "projection-recovery"
-	rec := PersistedAgent{
-		Config: managerTestAgentConfig(models.AgentConfig{
-			ExecutionMode: "live",
-			ID:            agentID,
-			Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "execution-projection-test"),
-			Subscriptions: []string{"test.old"},
-		}),
-		LifecycleEpoch:      runtimebus.CurrentRuntimeEpoch(),
-		LifecycleGeneration: 4, LifecyclePhase: AgentLifecycleRunning, LifecycleRunMode: AgentRunModeStandard,
-	}
-	rec.Topology = managerTestEphemeralTopologyAdmission(t)
-	if err := am.resolveAgentModel(&rec.Config); err != nil {
-		t.Fatal(err)
-	}
-	seedUnitAgentLifecycle(t, am, rec)
-	if err := am.spawnAgentInternal(testAuthorActivityContext(context.Background()), rec, false); err != nil {
+	am, executionCtx, rec := newNativeProjectionTestManager(t, bus, factory.Build, native, managerTestAgentConfig(models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            agentID,
+		Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "execution-projection-test"),
+		Subscriptions: []string{"test.old"},
+	}))
+	advanceNativeProjectionRecoveryToGenerationFour(t, executionCtx, am, &rec)
+	if err := am.spawnAgentInternal(executionCtx, rec, false); err != nil {
 		t.Fatalf("hydrate persisted running agent: %v", err)
 	}
 	if _, live := bus.current(agentID); live {
@@ -859,24 +856,43 @@ func ProveNativeExecutionProjectionRecoveryStartsPersistedRunningCell(t *testing
 	}
 }
 
+func advanceNativeProjectionRecoveryToGenerationFour(t *testing.T, ctx context.Context, am *AgentManager, rec *PersistedAgent) {
+	t.Helper()
+	state, found, err := am.roles.LifecycleState.LoadAgentLifecycleState(ctx, rec.Config.Identity)
+	if err != nil || !found || state.Generation != 2 || state.Phase != AgentLifecycleRunning {
+		t.Fatalf("native recovery predecessor: %+v found=%t err=%v", state, found, err)
+	}
+	for generation := state.Generation; generation < 4; generation++ {
+		result, err := am.lifecycle.persistence().CommitAgentLifecycleTransition(ctx, AgentLifecycleTransition{
+			OperationID: uuid.NewString(), OperationKind: "restart", RequestHash: uuid.NewString(), Identity: state.Identity, AgentID: state.AgentID,
+			Trigger: "restart", ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: generation, ExpectedPhase: AgentLifecycleRunning,
+			TargetEpoch: state.RuntimeEpoch, TargetGeneration: generation + 1, TargetPhase: AgentLifecycleRunning,
+			ConfigRevision: state.ConfigRevision, RunMode: AgentRunModeStandard, Topology: rec.Topology, Now: time.Now().UTC(),
+		})
+		if err != nil || result.Generation != generation+1 || result.Phase != AgentLifecycleRunning {
+			t.Fatalf("native recovery predecessor generation %d: %+v err=%v", generation+1, result, err)
+		}
+	}
+	rec.LifecycleEpoch, rec.LifecycleGeneration = state.RuntimeEpoch, 4
+	rec.LifecyclePhase, rec.LifecycleRunMode = AgentLifecycleRunning, AgentRunModeStandard
+}
+
 func ProveNativeExecutionProjectionSpawnDuringRunActivatesRegisteredProjection(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
 	native := newNativeDelivery(t)
 	bus := newProjectionTestBus()
 	handled := make(chan int, 1)
 	factory := &projectionTestFactory{handled: handled}
-	am, executionCtx := newNativeProjectionTestManager(t, bus, factory.Build, native)
+	const agentID = "projection-flow-activation"
+	am, executionCtx, rec := newNativeProjectionTestManager(t, bus, factory.Build, native, managerTestAgentConfig(models.AgentConfig{
+		ExecutionMode: "live", ID: agentID,
+		Identity: runtimeagentidentitytest.RootRuntime(t, agentID, "execution-projection-test"), Subscriptions: []string{"test.old"},
+	}))
 	runCtx, cancelRun := context.WithCancel(executionCtx)
 	defer cancelRun()
 	if err := am.Run(runCtx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	const agentID = "projection-flow-activation"
-	if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
-		ExecutionMode: "live",
-		ID:            agentID,
-		Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "execution-projection-test"),
-		Subscriptions: []string{"test.old"},
-	})); err != nil {
+	if err := am.MaterializeAdmittedAgentForExecution(executionCtx, rec); err != nil {
 		t.Fatalf("SpawnAgent while running: %v", err)
 	}
 	route, live := bus.current(agentID)
@@ -1096,33 +1112,33 @@ func ProveNativeRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T, new
 				}
 				opts.WorkOwner = newTestManagerWorkOwner(t)
 				bus.owner = opts.WorkOwner
-				am := newTestAgentManagerWithOptions(t, bus, func(cfg models.AgentConfig) (Agent, error) {
+				factory := func(cfg models.AgentConfig) (Agent, error) {
 					return &projectionTestAgent{id: cfg.ID, subs: []events.EventType{eventType}, handled: handled}, nil
-				}, opts)
-				baseStore := am.deliveryStore
-				if err := am.spawnAgentInternal(func() context.Context {
-					if nativeDelivery != nil {
-						return nativeDelivery.Context
-					}
-					return testAuthorActivityContext(context.Background())
-				}(), PersistedAgent{Topology: managerTestEphemeralTopologyAdmission(t), Config: managerTestAgentConfig(models.AgentConfig{
+				}
+				cfg := managerTestAgentConfig(models.AgentConfig{
 					ExecutionMode: "live", ID: agentID,
 					Identity: route.AgentIdentity, Subscriptions: []string{string(eventType)},
-				})}, true); err != nil {
-					t.Fatalf("SpawnAgent: %v", err)
+				})
+				var am *AgentManager
+				if nativeDelivery != nil && authorityName == "normal" {
+					am, _ = newPreparedNativeTestManager(t, bus, factory, nativeDelivery, cfg, opts)
+					authority = nativeDelivery.Authority
+				} else {
+					am = newTestAgentManagerWithOptions(t, bus, factory, opts)
+					ctx := testAuthorActivityContext(context.Background())
+					if nativeDelivery != nil {
+						ctx = nativeDelivery.Context
+					}
+					if err := am.spawnAgentInternal(ctx, PersistedAgent{Topology: managerTestEphemeralTopologyAdmission(t), Config: cfg}, true); err != nil {
+						t.Fatalf("SpawnAgent: %v", err)
+					}
 				}
+				baseStore := am.deliveryStore
 				runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
 				defer cancelRun()
 				managedCtx := managedExecutionTestContext(t, runCtx)
 				if nativeDelivery != nil {
 					managedCtx = nativeDelivery.Context
-					if authorityName == "normal" {
-						admission, err := managedexecution.New(managedexecution.KindNormalRuntime, authority.ExecutionID(), authority.Generation(), "", "carrier-disposition-actors", authority.SourceArtifact().BundleHash(), nil)
-						if err != nil {
-							t.Fatal(err)
-						}
-						managedCtx = managedexecution.WithAdmission(managedCtx, admission)
-					}
 				}
 				if authority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork && nativeDelivery == nil {
 					admission, err := managedexecution.New(
@@ -1316,7 +1332,9 @@ func ProveNativeAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBuffe
 	var am *AgentManager
 	var retiring *projectionSelfRetiringAgent
 	var executionCtx context.Context
-	am, executionCtx = newNativeProjectionTestManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
+	var rec PersistedAgent
+	const agentID = "self-retiring-buffered-agent"
+	am, executionCtx, rec = newNativeProjectionTestManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
 		retiring = &projectionSelfRetiringAgent{
 			projectionTestAgent: projectionTestAgent{id: cfg.ID, subs: []events.EventType{"test.old"}},
 			identity:            cfg.Identity, started: started, release: release,
@@ -1326,13 +1344,12 @@ func ProveNativeAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBuffe
 			},
 		}
 		return retiring, nil
-	}, native)
-	const agentID = "self-retiring-buffered-agent"
-	if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
+	}, native, managerTestAgentConfig(models.AgentConfig{
 		ExecutionMode: "live", ID: agentID,
 		Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "self-retiring-buffered-test"),
 		Subscriptions: []string{"test.old"},
-	})); err != nil {
+	}))
+	if err := am.MaterializeAdmittedAgentForExecution(executionCtx, rec); err != nil {
 		t.Fatalf("SpawnAgent: %v", err)
 	}
 	runCtx, cancelRun := context.WithCancel(executionCtx)

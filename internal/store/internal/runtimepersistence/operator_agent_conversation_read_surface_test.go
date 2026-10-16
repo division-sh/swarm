@@ -20,7 +20,10 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
@@ -88,7 +91,7 @@ func testOperatorAgentConfigForRun(runID, agentID, role string) runtimeactors.Ag
 }
 
 func testOperatorAgentConfigForIdentity(identity agentidentity.Identity, role string) runtimeactors.AgentConfig {
-	return runtimePersistenceTestAgentConfig(runtimeactors.AgentConfig{
+	cfg := runtimePersistenceTestAgentConfig(runtimeactors.AgentConfig{
 		Identity:      identity,
 		ID:            identity.AgentID(),
 		Role:          role,
@@ -99,6 +102,15 @@ func testOperatorAgentConfigForIdentity(identity agentidentity.Identity, role st
 		FlowPath:      "global",
 		Config:        json.RawMessage(`{}`),
 	})
+	profile, err := selection.ResolveLiveBackend(cfg.ResolvedLLMBackend)
+	if err != nil {
+		panic(err)
+	}
+	resolved, err := llm.ResolveAgentExecution(executionposture.Live, profile, nil, cfg)
+	if err != nil {
+		panic(err)
+	}
+	return resolved.Actor
 }
 
 func testOperatorAgentIdentity(agentID string) agentidentity.Identity {
@@ -537,6 +549,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryLifecyclePostgres(t *testing.T
 			t.Fatalf("UpsertAgent %s/%s: %v", agent.runID, agent.id, err)
 		}
 	}
+	ctx = admitPreparedAgentClaimContext(t, ctx, pg)
 	pendingEventID := uuid.NewString()
 	inProgressEventID := uuid.NewString()
 	deliveredEventID := uuid.NewString()
@@ -695,6 +708,7 @@ func TestSQLiteRuntimeStoreLoadAgentDeliveryLifecycle(t *testing.T) {
 			t.Fatalf("UpsertAgent %s/%s: %v", agent.runID, agent.id, err)
 		}
 	}
+	ctx = admitPreparedAgentClaimContext(t, ctx, sqliteStore)
 	pendingEventID := uuid.NewString()
 	inProgressEventID := uuid.NewString()
 	deliveredEventID := uuid.NewString()
@@ -911,6 +925,7 @@ func TestOperatorAgentReadSurfaceLoadAgentDeliveryDiagnosticsUsesCanonicalLifecy
 	}); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
+	ctx = admitPreparedAgentClaimContext(t, ctx, pg)
 	event := seedOperatorAgentEvent(t, ctx, pg, eventID, runID, "task.dead", "", time.Now().UTC())
 	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "missing_dead_letter_record", nil)
 	seedAgentDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: agentIdentity}, runtimedelivery.StateExhausted, &failure)

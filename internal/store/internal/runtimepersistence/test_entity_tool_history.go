@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	entitystore "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 )
 
 func SeedEntityToolHistoricalReadOnlyImportForTest(ctx context.Context, selected any, runID, entityID, eventID string, at time.Time) error {
@@ -25,6 +25,6 @@ func SeedEntityToolHistoricalReadOnlyImportForTest(ctx context.Context, selected
 		return err
 	}
 	return runWorkflowProjectionFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return entitystore.InsertEntityToolHistoricalReadOnlyStateTx(ctx, tx, runID, entityID, at)
+		return pipelinepersistence.InsertEntityToolHistoricalReadOnlyStateTx(ctx, tx, runID, entityID, at)
 	})
 }

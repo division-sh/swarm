@@ -39,9 +39,6 @@ func TestGateCompletionAPIWitnessKeepsCompetingActorsBothORArmsAndOrderBothStore
 				t.Fatalf("broad OR witness lost rows: %+v/%v", rows, err)
 			}
 			response := `{"retained":true}`
-			if backend.name == "postgres" {
-				response = `{"retained": true}`
-			}
 			for i, seed := range []seed{seeds[1], seeds[0], seeds[2]} {
 				want := GateCompletionAPIStorage{Method: seed.method, ActorKind: string(apiidempotency.ActorBearerToken), Actor: seed.actor, Key: seed.key, Hash: seed.hash, ResourceID: seed.resource, Response: response}
 				if !reflect.DeepEqual(rows[i], want) {
