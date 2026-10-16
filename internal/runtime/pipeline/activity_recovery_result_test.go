@@ -127,12 +127,20 @@ func TestDisplacedActivityResultReusesKnownTerminalOutcomes(t *testing.T) {
 	completed := record.StartedAt.Add(time.Second)
 	for _, success := range []bool{false, true} {
 		terminal := record
+		resultType := intent.FailureEvent
 		if success {
-			terminal = terminal.withTerminal(ActivityAttemptStatusSucceeded, activityResultEventID(intent, intent.SuccessEvent), intent.SuccessEvent, activitySuccessPayload(intent, map[string]any{"business": "original"}), nil)
+			resultType = intent.SuccessEvent
+		}
+		publication, err := admitActivityPublication(intent, resultType)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if success {
+			terminal = terminal.withTerminal(ActivityAttemptStatusSucceeded, publication.eventID, string(publication.eventType), activitySuccessPayload(intent, map[string]any{"business": "original"}), nil)
 		} else {
 			cause := runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "provider_unavailable", "activity-runtime", "http_response", nil)
 			failure := runtimefailures.Normalize(cause, "activity-runtime", "http_response")
-			terminal = terminal.withTerminal(ActivityAttemptStatusFailed, activityResultEventID(intent, intent.FailureEvent), intent.FailureEvent, activityFailurePayload(intent, cause), &failure)
+			terminal = terminal.withTerminal(ActivityAttemptStatusFailed, publication.eventID, string(publication.eventType), activityFailurePayload(intent, cause), &failure)
 		}
 		terminal.CompletedAt = &completed
 		replayed, err := DisplacedHTTPActivityResult(request, terminal, bundle)
