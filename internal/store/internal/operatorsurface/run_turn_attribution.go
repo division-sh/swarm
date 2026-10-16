@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
@@ -178,68 +179,21 @@ func loadDeliveryCompletionEvidence(ctx context.Context, q eventReadQueryer, del
 	count := 0
 	activeHeads := 0
 	for rows.Next() {
-		var turnID, sessionID, eventID, eventType, operationID, adapter, state, phase, fingerprint string
-		var identityFields agentidentity.StorageFields
-		var surfaceRaw, evidenceRaw []byte
-		var active, paired, claimKnown, drained bool
-		if err := rows.Scan(&turnID, &sessionID, &identityFields.RunID, &identityFields.AgentID, &identityFields.NameOwner, &identityFields.NameSource,
-			&identityFields.RoutePresence, &identityFields.FlowScopeKey, &identityFields.FlowInstanceID, &identityFields.FlowInstancePath,
-			&eventID, &eventType, &surfaceRaw, &operationID, &adapter, &state, &phase, &active, &evidenceRaw, &fingerprint, &paired, &claimKnown, &drained); err != nil {
+		var row completionAttributionRow
+		if err := rows.Scan(&row.turnID, &row.sessionID, &row.identity.RunID, &row.identity.AgentID, &row.identity.NameOwner, &row.identity.NameSource,
+			&row.identity.RoutePresence, &row.identity.FlowScopeKey, &row.identity.FlowInstanceID, &row.identity.FlowInstancePath,
+			&row.eventID, &row.eventType, &row.surface, &row.operationID, &row.adapter, &row.state, &row.phase, &row.active, &row.evidence, &row.fingerprint, &row.paired, &row.claimKnown, &row.drained); err != nil {
 			return nil, false, nil, err
 		}
 		count++
-		if active {
+		if row.active {
 			activeHeads++
 		}
-		identity, err := agentidentity.FromStorageFields(identityFields)
+		closed, err := row.addEvidence(delivery, out, candidates, nativeCLI)
 		if err != nil {
 			return nil, false, nil, err
 		}
-		equal, err := agentidentity.Equal(identity, delivery.Route.AgentIdentity)
-		if err != nil || !equal || !paired || !claimKnown || eventID != delivery.EventID || eventType != out.EventType {
-			return nil, false, nil, fmt.Errorf("completion evidence contradicts exact delivery origin: %w", errors.Join(err, errors.New("origin mismatch")))
-		}
-		surface, err := storecapability.Decode(surfaceRaw)
-		if err != nil {
-			return nil, false, nil, err
-		}
-		if err := storecapability.ValidateAgentTurn(surface, identity, sessionID, delivery.RunID); err != nil {
-			return nil, false, nil, err
-		}
-		out.ProviderTurns = append(out.ProviderTurns, turnID)
-		for _, tool := range surface.Tools {
-			if tool.Capability.Kind == toolcapabilities.KindEmit && tool.EffectiveCallable {
-				if !slices.Contains(out.GrantedEmitTools, tool.Name) {
-					out.GrantedEmitTools = append(out.GrantedEmitTools, tool.Name)
-				}
-				if adapter == "claude_cli" {
-					nativeCLI[toolidentity.CanonicalName(tool.Name)] = true
-				}
-			}
-		}
-		if drained {
-			complete = false
-			out.Historical = true
-			out.EvidenceReason = "historical_drained_completion"
-			continue
-		}
-		if state != string(effects.StateSettled) || phase != string(effects.CompletionProjectionResponseConsumed) {
-			complete = false
-		}
-		if state != string(effects.StateSettled) || phase == "" {
-			continue
-		}
-		payload, err := effects.ReadCompletionContinuationPayload(json.RawMessage(evidenceRaw), fingerprint)
-		if err != nil {
-			return nil, false, nil, err
-		}
-		outputs, err := llm.ReadCompletionOutputCandidates(payload, adapter, operationID, surface)
-		if err != nil {
-			return nil, false, nil, err
-		}
-		for _, output := range outputs {
-			candidates[output.EventID] = toolidentity.CanonicalName(output.ToolName)
-		}
+		complete = complete && closed
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, false, nil, err
@@ -252,6 +206,71 @@ func loadDeliveryCompletionEvidence(ctx context.Context, q eventReadQueryer, del
 	slices.Sort(out.ProviderTurns)
 	slices.Sort(out.GrantedEmitTools)
 	return candidates, complete, nativeCLI, nil
+}
+
+type completionAttributionRow struct {
+	turnID, sessionID, eventID, eventType, operationID, adapter, state, phase, fingerprint string
+	identity                                                                               agentidentity.StorageFields
+	surface, evidence                                                                      []byte
+	active, paired, claimKnown, drained                                                    bool
+}
+
+func (r completionAttributionRow) deliverySurface(delivery deliverylifecycle.Snapshot, eventType string) (managedcapabilities.Surface, error) {
+	identity, err := agentidentity.FromStorageFields(r.identity)
+	if err != nil {
+		return managedcapabilities.Surface{}, err
+	}
+	equal, err := agentidentity.Equal(identity, delivery.Route.AgentIdentity)
+	if err != nil || !equal || !r.paired || !r.claimKnown || r.eventID != delivery.EventID || r.eventType != eventType {
+		return managedcapabilities.Surface{}, fmt.Errorf("completion evidence contradicts exact delivery origin: %w", errors.Join(err, errors.New("origin mismatch")))
+	}
+	surface, err := storecapability.Decode(r.surface)
+	if err != nil {
+		return managedcapabilities.Surface{}, err
+	}
+	if err := storecapability.ValidateAgentTurn(surface, identity, r.sessionID, delivery.RunID); err != nil {
+		return managedcapabilities.Surface{}, err
+	}
+	return surface, nil
+}
+
+func (r completionAttributionRow) addEvidence(delivery deliverylifecycle.Snapshot, out *operatorread.RunTurnAttribution, candidates map[string]string, nativeCLI map[string]bool) (bool, error) {
+	surface, err := r.deliverySurface(delivery, out.EventType)
+	if err != nil {
+		return false, err
+	}
+	out.ProviderTurns = append(out.ProviderTurns, r.turnID)
+	for _, tool := range surface.Tools {
+		if tool.Capability.Kind == toolcapabilities.KindEmit && tool.EffectiveCallable {
+			if !slices.Contains(out.GrantedEmitTools, tool.Name) {
+				out.GrantedEmitTools = append(out.GrantedEmitTools, tool.Name)
+			}
+			if r.adapter == "claude_cli" {
+				nativeCLI[toolidentity.CanonicalName(tool.Name)] = true
+			}
+		}
+	}
+	if r.drained {
+		out.Historical = true
+		out.EvidenceReason = "historical_drained_completion"
+		return false, nil
+	}
+	closed := r.state == string(effects.StateSettled) && r.phase == string(effects.CompletionProjectionResponseConsumed)
+	if r.state != string(effects.StateSettled) || r.phase == "" {
+		return closed, nil
+	}
+	payload, err := effects.ReadCompletionContinuationPayload(json.RawMessage(r.evidence), r.fingerprint)
+	if err != nil {
+		return false, err
+	}
+	outputs, err := llm.ReadCompletionOutputCandidates(payload, r.adapter, r.operationID, surface)
+	if err != nil {
+		return false, err
+	}
+	for _, output := range outputs {
+		candidates[output.EventID] = toolidentity.CanonicalName(output.ToolName)
+	}
+	return closed, nil
 }
 
 func loadDeliveryAcceptedEmissions(ctx context.Context, q eventReadQueryer, postgres bool, publications PipelineObligationSource, delivery deliverylifecycle.Snapshot, deliveries []deliverylifecycle.Snapshot, candidates map[string]string, nativeCLI map[string]bool) (_ []operatorread.RunAcceptedEmission, ambiguous bool, err error) {
@@ -289,39 +308,15 @@ func loadDeliveryAcceptedEmissions(ctx context.Context, q eventReadQueryer, post
 		if err != nil {
 			return nil, false, err
 		}
-		identity := delivery.Route.AgentIdentity
-		_, _, path, err := identity.ExecutionCoordinates()
+		request, matched, uncertain, err := matchDeliveryEmissionOrigin(admitted.Event(), delivery.Route.AgentIdentity, candidates, nativeCLI, matchingOrigins)
 		if err != nil {
 			return nil, false, err
 		}
-		source := admitted.Event().RoutingSource()
-		if identity.Route.Presence == agentidentity.RouteRoot {
-			if source.Kind() != events.RoutingSourceStaticFlow || source.Route().FlowID != "." || source.Route().FlowInstance != identity.RunID {
-				continue
-			}
-		} else if source.Route().FlowInstance != path || source.Route().FlowID != identity.Route.ScopeKey {
+		if !matched {
+			ambiguous = ambiguous || uncertain
 			continue
 		}
-		declaration, err := pinrouting.PublicationDeclarationForSourceEvent(admitted.Event().Type(), source)
-		if err != nil {
-			return nil, false, err
-		}
-		toolName := tools.EmitToolName(declaration.Local())
-		if candidates[id] != toolName && (!nativeCLI[toolName] || matchingOrigins != 1) {
-			ambiguous = true
-			continue
-		}
-		instance := flowidentity.RunScopedFlowInstance{RunID: identity.RunID, Route: flowidentity.Route{
-			ScopeKey: identity.Route.ScopeKey, InstanceID: identity.Route.InstanceID, InstancePath: identity.Route.InstancePath,
-		}}
-		if identity.Route.Presence == agentidentity.RouteRoot {
-			instance.Route = flowidentity.Route{ScopeKey: ".", InstanceID: identity.RunID, InstancePath: identity.RunID}
-		}
-		request := pipeline.WorkflowPublicationStageRequest{Instance: instance, EntityID: source.Route().EntityID}
-		if err := request.ValidateEvent(admitted.Event()); err != nil {
-			return nil, false, err
-		}
-		receipt, found, err := publications.ReadWorkflowPublicationStages(ctx, id, instance)
+		receipt, found, err := publications.ReadWorkflowPublicationStages(ctx, id, request.Instance)
 		if err != nil {
 			return nil, false, err
 		}
@@ -334,7 +329,7 @@ func loadDeliveryAcceptedEmissions(ctx context.Context, q eventReadQueryer, post
 		}
 		// Entityless agents still publish from a constructed header. As in the
 		// publication owner, only an authored entity binding constrains its ID.
-		if receipt.Acceptance.EventID() != id || receipt.Acceptance.Stage().Instance != instance || request.EntityID != "" && receipt.Acceptance.Stage().EntityID != request.EntityID {
+		if receipt.Acceptance.EventID() != id || receipt.Acceptance.Stage().Instance != request.Instance || request.EntityID != "" && receipt.Acceptance.Stage().EntityID != request.EntityID {
 			return nil, false, fmt.Errorf("accepted emission contradicts its immutable publication receipt")
 		}
 		out = append(out, operatorread.RunAcceptedEmission{EventID: id, EventType: record.EventName})
@@ -349,4 +344,38 @@ func loadDeliveryAcceptedEmissions(ctx context.Context, q eventReadQueryer, post
 		return 0
 	})
 	return out, ambiguous, nil
+}
+
+func matchDeliveryEmissionOrigin(event events.Event, identity agentidentity.Identity, candidates map[string]string, nativeCLI map[string]bool, matchingOrigins int) (request pipeline.WorkflowPublicationStageRequest, matched, ambiguous bool, err error) {
+	_, _, path, err := identity.ExecutionCoordinates()
+	if err != nil {
+		return request, false, false, err
+	}
+	source := event.RoutingSource()
+	if identity.Route.Presence == agentidentity.RouteRoot {
+		if source.Kind() != events.RoutingSourceStaticFlow || source.Route().FlowID != "." || source.Route().FlowInstance != identity.RunID {
+			return request, false, false, nil
+		}
+	} else if source.Route().FlowInstance != path || source.Route().FlowID != identity.Route.ScopeKey {
+		return request, false, false, nil
+	}
+	declaration, err := pinrouting.PublicationDeclarationForSourceEvent(event.Type(), source)
+	if err != nil {
+		return request, false, false, err
+	}
+	toolName := tools.EmitToolName(declaration.Local())
+	if candidates[event.ID()] != toolName && (!nativeCLI[toolName] || matchingOrigins != 1) {
+		return request, false, true, nil
+	}
+	instance := flowidentity.RunScopedFlowInstance{RunID: identity.RunID, Route: flowidentity.Route{
+		ScopeKey: identity.Route.ScopeKey, InstanceID: identity.Route.InstanceID, InstancePath: identity.Route.InstancePath,
+	}}
+	if identity.Route.Presence == agentidentity.RouteRoot {
+		instance.Route = flowidentity.Route{ScopeKey: ".", InstanceID: identity.RunID, InstancePath: identity.RunID}
+	}
+	request = pipeline.WorkflowPublicationStageRequest{Instance: instance, EntityID: source.Route().EntityID}
+	if err := request.ValidateEvent(event); err != nil {
+		return request, false, false, err
+	}
+	return request, true, false, nil
 }
