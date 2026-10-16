@@ -136,7 +136,7 @@ func TestS1ChannelBodyLogicalReconstructionRetainsNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	retained, err := sourceartifact.DecodeLogical(artifact.LogicalBytes())
+	retained, err := sourceartifact.DecodeLogical(artifact.LogicalBlob())
 	if err != nil {
 		t.Fatal(err)
 	}
