@@ -26,6 +26,9 @@ func CompileActivityToolBindings(bundle *WorkflowContractBundle, toolsByFlow map
 	if bundle == nil {
 		return nil, fmt.Errorf("activity tool compilation requires a bundle")
 	}
+	if err := bundle.validateFrozenActivityTools(toolsByFlow); err != nil {
+		return nil, err
+	}
 	clone := *bundle
 	clone.activityToolsByFlow = make(map[string]map[string]ToolSchemaEntry, len(toolsByFlow))
 	for flow, tools := range toolsByFlow {
@@ -49,4 +52,37 @@ func CompileActivityToolBindings(bundle *WorkflowContractBundle, toolsByFlow map
 	}
 	clone.PrepareFanOutPlans()
 	return &clone, nil
+}
+
+func (b *WorkflowContractBundle) validateFrozenActivityTools(toolsByFlow map[string]map[string]ToolSchemaEntry) error {
+	if b.activityToolsByFlow == nil {
+		return nil
+	}
+	if len(toolsByFlow) != len(b.activityToolsByFlow) {
+		return fmt.Errorf("activity tool flow inventory contradicts its frozen admission")
+	}
+	for flow, admitted := range b.activityToolsByFlow {
+		tools, present := toolsByFlow[flow]
+		if !present || len(tools) != len(admitted) {
+			return fmt.Errorf("activity tools in flow %q contradict its frozen admission", flow)
+		}
+		for name, before := range admitted {
+			after, present := tools[name]
+			if !present {
+				return fmt.Errorf("activity tool %q in flow %q is missing from its frozen admission", name, flow)
+			}
+			beforeHash, err := before.CanonicalHash()
+			if err != nil {
+				return fmt.Errorf("frozen activity tool %q in flow %q: %w", name, flow, err)
+			}
+			afterHash, err := after.CanonicalHash()
+			if err != nil {
+				return fmt.Errorf("activity tool %q in flow %q contradicts its frozen admission: %w", name, flow, err)
+			}
+			if afterHash != beforeHash {
+				return fmt.Errorf("activity tool %q in flow %q contradicts its frozen admission; compile a freshly admitted source for source changes", name, flow)
+			}
+		}
+	}
+	return nil
 }

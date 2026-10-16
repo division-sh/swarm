@@ -147,3 +147,40 @@ func TestS1ActivityToolBindingsNeverFallBackFromMissingCompiledEntry(t *testing.
 		t.Fatal("zero owner gained a tool binding")
 	}
 }
+
+func TestS1ActivityToolCompilerRefusesReplacingFrozenAdmission(t *testing.T) {
+	for _, change := range []string{"replace", "delete", "insert", "invalid", "foreign-flow", "missing-flow"} {
+		t.Run(change, func(t *testing.T) {
+			source, err := semanticview.CompileActivityToolBindings(semanticview.Wrap(loadScopedActivityBundle(t, packfixture.ScopedActivityMembers())))
+			if err != nil {
+				t.Fatal(err)
+			}
+			bundle, found := semanticview.Bundle(source)
+			if !found {
+				t.Fatal("missing frozen compiler")
+			}
+			tools := map[string]map[string]runtimecontracts.ToolSchemaEntry{}
+			for _, scope := range source.FlowScopes() {
+				tools[scope.ID] = scope.Tools
+			}
+			switch change {
+			case "replace":
+				tools["child"]["shared"] = tools["."]["shared"]
+			case "delete":
+				delete(tools["child"], "shared")
+			case "insert":
+				tools["child"]["injected"] = tools["."]["shared"]
+			case "invalid":
+				tools["child"]["shared"] = runtimecontracts.ToolSchemaEntry{}
+			case "foreign-flow":
+				tools["foreign"] = tools["."]
+			case "missing-flow":
+				delete(tools, "child")
+			}
+			compiled, err := runtimecontracts.CompileActivityToolBindings(bundle, tools)
+			if err == nil || compiled != nil {
+				t.Fatalf("direct compiler caller replaced frozen authority: compiled=%v err=%v", compiled != nil, err)
+			}
+		})
+	}
+}
