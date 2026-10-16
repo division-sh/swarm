@@ -14,6 +14,13 @@ var toolEntryFields = map[string]struct{}{
 }
 
 func projectToolDeclarationsValue(root yamlsource.Value) (map[string]ToolSchemaEntry, error) {
+	return projectToolDeclarationsFromOwner(root, retiredFlowToolEffectTeaching)
+}
+
+const retiredFlowToolEffectTeaching = "effect_class is not a tool key; the runtime attempts each HTTP call once, and an interrupted call is outcome-uncertain"
+const retiredConnectorToolEffectTeaching = "effect_class is not a tool key; a connector tool takes its class from the operation or registration slot it is bound to"
+
+func projectToolDeclarationsFromOwner(root yamlsource.Value, retiredTeaching string) (map[string]ToolSchemaEntry, error) {
 	if err := root.ValidateExpansion(); err != nil {
 		return nil, err
 	}
@@ -26,7 +33,7 @@ func projectToolDeclarationsValue(root yamlsource.Value) (map[string]ToolSchemaE
 	}
 	out := make(map[string]ToolSchemaEntry, len(declarations))
 	for _, declaration := range declarations {
-		entry, err := projectToolValue(declaration.Value)
+		entry, err := projectToolValueFromOwner(declaration.Value, retiredTeaching)
 		if err != nil {
 			return nil, fmt.Errorf("tool %q: %w", declaration.Name, err)
 		}
@@ -50,14 +57,24 @@ func AdmitToolDeclarationsValue(root yamlsource.Value) (map[string]ToolSchemaEnt
 	return projectToolDeclarationsValue(root)
 }
 
+// Connector envelopes share the tool grammar; only their teaching context
+// differs. This does not grant execution policy to the admitted tool.
+func AdmitConnectorToolDeclarationsValue(root yamlsource.Value) (map[string]ToolSchemaEntry, error) {
+	return projectToolDeclarationsFromOwner(root, retiredConnectorToolEffectTeaching)
+}
+
 func projectToolValue(value yamlsource.Value) (ToolSchemaEntry, error) {
+	return projectToolValueFromOwner(value, retiredFlowToolEffectTeaching)
+}
+
+func projectToolValueFromOwner(value yamlsource.Value, retiredTeaching string) (ToolSchemaEntry, error) {
 	if value.Presence() == yamlsource.PresenceMapping || value.Presence() == yamlsource.PresenceEmptyMapping {
 		retired, err := value.Lookup("effect_class")
 		if err != nil {
 			return ToolSchemaEntry{}, err
 		}
 		if retired.Presence != yamlsource.PresenceMissing {
-			return ToolSchemaEntry{}, nodeValueError(retired.Value, fmt.Errorf("effect_class is not a tool key; interrupted HTTP calls are outcome-uncertain and not retried"))
+			return ToolSchemaEntry{}, nodeValueError(retired.Value, fmt.Errorf("%s", retiredTeaching))
 		}
 	}
 	fields, err := nodeValueFields(value, "tool", toolEntryFields)

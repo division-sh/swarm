@@ -944,7 +944,7 @@ func TestChannelConnectorRefusesRetiredEffectDeclaration(t *testing.T) {
 	for _, value := range []string{"read_only", "non_idempotent_write", "null"} {
 		t.Run(value, func(t *testing.T) {
 			_, err := providerconnectors.ParseConnectorManifest([]byte("provider: mock\ntools:\n  mock.deliver:\n    handler_type: http\n    effect_class: " + value + "\n    http: {method: POST, url: 'https://proof.invalid'}\n"))
-			if err == nil || !strings.Contains(err.Error(), "effect_class is not a tool key; interrupted HTTP calls are outcome-uncertain and not retried") {
+			if err == nil || !strings.Contains(err.Error(), "effect_class is not a tool key; a connector tool takes its class from the operation or registration slot it is bound to") {
 				t.Fatalf("connector pack did not refuse the retired tool declaration: %v", err)
 			}
 		})

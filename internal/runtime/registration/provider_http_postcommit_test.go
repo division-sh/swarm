@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packs"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -89,7 +90,7 @@ func TestProviderRegistrationAcknowledgedMutationCleanupKeepsOneDispatch(t *test
 				}
 				return registrationResponse(http.StatusOK, `{"ok":true,"result":true}`), nil
 			})}}
-			result, err := executor.Apply(ctx, "telegram.apply_webhook", tool, input, credentials, map[string]string{"binding_id": "hitl", "intent_id": uuid.NewString()})
+			result, err := executor.Apply(ctx, registrationOperationForTest(t, packs.RegistrationOperationApply, "telegram.apply_webhook", tool), input, credentials, map[string]string{"binding_id": "hitl", "intent_id": uuid.NewString()})
 			if result.Pending == nil || !errors.Is(err, cleanup) || !registrationPhaseDiagnostic(err, phase, result.Pending.Attempt()) || !result.Acknowledged || result.Output == nil {
 				t.Fatalf("acknowledged %s result = %+v, %v", phase, result, err)
 			}
@@ -200,7 +201,7 @@ func TestRegistrationAcknowledgedLaunchGuardPreventsDispatch(t *testing.T) {
 				tool := packfixture.ConnectorTool(t, "telegram", toolID).Tool
 				var err error
 				if kind == "provider_registration" {
-					result, applyErr := executor.Apply(ctx, toolID, tool, input, credentials, map[string]string{"binding_id": "hitl", "intent_id": uuid.NewString()})
+					result, applyErr := executor.Apply(ctx, registrationOperationForTest(t, packs.RegistrationOperationApply, toolID, tool), input, credentials, map[string]string{"binding_id": "hitl", "intent_id": uuid.NewString()})
 					if result.Pending != nil || result.Acknowledged || result.Output != nil {
 						t.Fatalf("no-dispatch result=%+v", result)
 					}

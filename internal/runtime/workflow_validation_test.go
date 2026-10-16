@@ -672,7 +672,7 @@ func TestValidateWorkflowContractSurface_ProviderConnectorToolFailsClosedForUnsu
 func TestValidateWorkflowContractSurface_DurableActivityIdempotentWriteFailsClosed(t *testing.T) {
 	// USER6220888538 retires the declaration, not the no-redispatch guarantee.
 	// Refuse it at shared source admission, before late runtime validation.
-	const teaching = "effect_class is not a tool key; interrupted HTTP calls are outcome-uncertain and not retried"
+	const teaching = "effect_class is not a tool key; the runtime attempts each HTTP call once, and an interrupted call is outcome-uncertain"
 	for _, value := range []string{"idempotent_write", "read_only", "non_idempotent_write", "long_running"} {
 		t.Run(value, func(t *testing.T) {
 			root := canonicalrouting.CopyPublicationActivity(t, "root", "http://127.0.0.1:1/send", false)

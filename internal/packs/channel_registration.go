@@ -55,6 +55,7 @@ type compiledRegistrationOperation struct {
 	name   string
 	toolID channelPlanIdentity
 	tool   runtimecontracts.ToolSchemaEntry
+	effect runtimecontracts.ActivityEffectClass
 	input  []compiledChannelMapping
 	output []compiledChannelMapping
 }
@@ -107,6 +108,25 @@ func (r CompiledChannelRegistration) Operation(name string) (RegistrationOperati
 func (p RegistrationOperationPlan) Name() string                           { return p.operation.name }
 func (p RegistrationOperationPlan) ToolID() string                         { return p.operation.toolID.String() }
 func (p RegistrationOperationPlan) Tool() runtimecontracts.ToolSchemaEntry { return p.operation.tool }
+
+func (p RegistrationOperationPlan) EffectClass() (runtimecontracts.ActivityEffectClass, error) {
+	expected, err := registrationSlotEffect(p.operation.name)
+	if err != nil || p.operation.toolID.String() == "" || p.operation.effect != expected {
+		return "", fmt.Errorf("registration operation requires its exact compiled slot policy")
+	}
+	return p.operation.effect, nil
+}
+
+func registrationSlotEffect(name string) (runtimecontracts.ActivityEffectClass, error) {
+	switch name {
+	case RegistrationOperationIdentify, RegistrationOperationReadback:
+		return runtimecontracts.ActivityEffectClassReadOnly, nil
+	case RegistrationOperationApply:
+		return runtimecontracts.ActivityEffectClassNonIdempotentWrite, nil
+	default:
+		return "", fmt.Errorf("registration operation %q has no platform slot", name)
+	}
+}
 
 func (p RegistrationOperationPlan) Prepare(contextValue map[string]any) (map[string]any, error) {
 	out := map[string]any{}
@@ -264,6 +284,10 @@ func compileChannelRegistration(profile ChannelRegistrationProfile, connector Co
 }
 
 func compileRegistrationOperation(name string, declared ChannelRegistrationOperation, connector ConnectorPackDescriptor, effect runtimecontracts.ActivityEffectClass, credentials []string, _ string) (compiledRegistrationOperation, error) {
+	expected, err := registrationSlotEffect(name)
+	if err != nil || effect != expected {
+		return compiledRegistrationOperation{}, fmt.Errorf("channel registration %s has a conflicting platform slot policy", name)
+	}
 	toolID := strings.TrimSpace(declared.Tool)
 	tool, ok := connector.Tools[toolID]
 	if !ok {
@@ -286,7 +310,7 @@ func compileRegistrationOperation(name string, declared ChannelRegistrationOpera
 		return compiledRegistrationOperation{}, fmt.Errorf("channel registration %s output: %w", name, err)
 	}
 	id, _ := admitChannelPlanIdentity("channel registration tool identity", toolID)
-	return compiledRegistrationOperation{name: name, toolID: id, tool: tool, input: input, output: output}, nil
+	return compiledRegistrationOperation{name: name, toolID: id, tool: tool, effect: effect, input: input, output: output}, nil
 }
 
 func compileSimpleRegistrationMappings(mappings map[string]ChannelMapping, sourceRoot string, schema runtimecontracts.ToolInputSchema, input bool) ([]compiledChannelMapping, error) {
@@ -338,7 +362,7 @@ func (r CompiledChannelRegistration) generationValue() map[string]any {
 			panic(err)
 		}
 		return map[string]any{
-			"tool": value.toolID.String(), "tool_schema": tool,
+			"tool": value.toolID.String(), "tool_schema": tool, "platform_effect": string(value.effect),
 			"input":  compiledChannelMappingGenerationValue(value.input),
 			"output": compiledChannelMappingGenerationValue(value.output),
 		}
