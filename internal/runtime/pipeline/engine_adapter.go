@@ -1107,7 +1107,7 @@ func validatePipelineEmitPayload(source semanticview.Source, flowID, eventType s
 	}
 	resolution := semanticview.ResolveEventSchema(source, flowID, eventType)
 	if !resolution.HasSchema {
-		return fmt.Errorf("%w: event %s has no resolvable payload schema in flow %s", runtimeengine.ErrEmitPayloadContractViolation, proof.EventKey(), strings.TrimSpace(flowID))
+		return fmt.Errorf("%w: event %s has no resolvable payload schema in flow %s", runtimeengine.ErrEmitPayloadContractViolation, proof.EventKey(), flowID)
 	}
 	if err := resolution.UnresolvedTypeError(); err != nil {
 		return &runtimeengine.EmitPayloadContractError{
