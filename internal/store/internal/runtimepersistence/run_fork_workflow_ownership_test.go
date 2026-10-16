@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecore "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
@@ -22,6 +23,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -267,7 +269,6 @@ func forkWorkflowOwnershipRequest(t *testing.T, fixture authorActivityReceiptFix
 
 func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorActivityReceiptFixture, postgres, seedDelivery bool) (context.Context, runforkreadiness.MaterializeRequest) {
 	t.Helper()
-	ctx := managedExecutionStoreTestContext(t, testAuthorActivityContext())
 	repo := canonicalrouting.RepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repo, canonicalrouting.CopyForkReceiverOwnership(t, []canonicalrouting.ForkReceiver{{Path: "sink", Policy: canonicalrouting.ForkReceiverOptionalAbsent}}, false), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
@@ -288,8 +289,19 @@ func forkWorkflowOwnershipRequestWithSeedDelivery(t *testing.T, fixture authorAc
 		t.Fatal(err)
 	}
 	source = effective.Source()
-	ctx = correlation.WithSourceArtifactFact(ctx, sourceFact)
+	ctx := correlation.WithSourceArtifactFact(testAuthorActivityContextForBundle(hash), sourceFact)
 	requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: hash, Artifact: bundle.SourceArtifact, StartedAt: time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)})
+	coordinate := agenttopology.SourceCoordinate{BundleHash: hash}
+	sourceSet, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := fixture.store.(agentFixtureFlowStore)
+	if _, err := agentfixture.AdmitGeneration(t, ctx, selected, sourceSet, coordinate); err != nil {
+		t.Fatal(err)
+	}
+	ctx = admitPreparedAgentClaimContext(t, ctx, selected)
+	bindPreparedAgentProcessToSelectedMaterialization(t, ctx, selected)
 	at := time.Date(2026, 7, 14, 12, 1, 0, 0, time.UTC)
 	event := eventtest.ExistingRunRootIngress(eventID, "start.requested", "test", "", []byte(`{"token":"ownership"}`), 0, runID, events.EventEnvelope{}, at)
 	node := mustPersistenceRootNode("controller")
