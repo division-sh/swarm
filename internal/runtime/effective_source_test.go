@@ -219,7 +219,6 @@ func TestEffectiveSourceProjectionHasNoProductionCompositionBypass(t *testing.T)
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	allowed := map[string]map[string]bool{
 		"SourceWithConnectorPackImports": {
-			"internal/runtime/effective_source.go":        true,
 			"internal/cliapp/provider_connector_tools.go": true, // inventory readback, not execution admission
 		},
 		"SourceWithProviderTriggerEvents": {"internal/runtime/effective_source.go": true},

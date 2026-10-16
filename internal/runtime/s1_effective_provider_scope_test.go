@@ -217,3 +217,60 @@ func TestS1EffectiveProviderDirectoryScopeRefusesPartialRoleAndAuthoredNamespace
 		})
 	}
 }
+
+func TestS1EffectiveProviderDirectoryScopeFreezesAuthoredActivityContracts(t *testing.T) {
+	for _, withProvider := range []bool{false, true} {
+		t.Run(map[bool]string{false: "local-only", true: "directory-and-local"}[withProvider], func(t *testing.T) {
+			members := packfixture.ScopedActivityMembers()
+			if withProvider {
+				members["team-bot/manifest.yaml"] = s1EffectiveProviderScopeMembers()["team-bot/manifest.yaml"]
+				members["team-bot/connector.yaml"] = packfixture.NeutralProviderMembers()["connector.yaml"]
+			}
+			bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
+			projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{
+				Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := projection.Source()
+			compiled, found := semanticview.Bundle(source)
+			if !found {
+				t.Fatal("effective source lost its frozen contract compiler")
+			}
+			for _, cell := range []struct{ flow, event, origin string }{
+				{".", "send.succeeded", "root"},
+				{"child", "child/send.succeeded", "child"},
+				{"sibling", "sibling/send.succeeded", "sibling"},
+				{"inherited", "inherited/send.succeeded", "root"},
+			} {
+				node, err := runtimeidentity.AdmitExecutableNodeDeclaration(cell.flow, "sender")
+				if err != nil {
+					t.Fatal(err)
+				}
+				tool, present := source.ActivityToolEntry(node, "shared")
+				origin, hasOrigin := tool.OutputSchema().Property("origin")
+				expected := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString, runtimecontracts.ToolSchemaEnum(cell.origin))
+				if !present || !hasOrigin || !origin.Equal(expected) {
+					t.Fatalf("effective execution lost its exact %s contract", cell.flow)
+				}
+				entry, present := compiled.GeneratedActivityEventEntries()[cell.event]
+				result := entry.Payload.Properties["result"].ExactSchema
+				if !present || result == nil || !result.Equal(tool.OutputSchema()) {
+					t.Fatalf("effective schema and execution contract disagree in %s", cell.flow)
+				}
+				view, present := bundle.FlowViewByID(cell.flow)
+				if !present {
+					t.Fatal("fixture lost its original flow")
+				}
+				delete(view.Tools, "shared")
+				scope, _ := source.FlowScopeByID(cell.flow)
+				delete(scope.Tools, "shared")
+				after, present := source.ActivityToolEntry(node, "shared")
+				if !present || !after.OutputSchema().Equal(tool.OutputSchema()) {
+					t.Fatalf("effective binding depends on mutable authored/readback tools in %s", cell.flow)
+				}
+			}
+		})
+	}
+}

@@ -16,8 +16,12 @@ import (
 	"github.com/google/uuid"
 )
 
-func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowActivityNativeFixtureForTest) {
-	verifyS1ScopedActivityDispatch(t, open, nil)
+func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowActivityNativeFixtureForTest, compose func(*testing.T, semanticview.Source) semanticview.Source) {
+	t.Helper()
+	if compose == nil {
+		t.Fatal("local activity journey requires the real effective-source compiler")
+	}
+	verifyS1ScopedActivityDispatch(t, open, compose, false)
 }
 
 func VerifyS1DirectoryConnectorDispatchUsesExactDeclarationForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowActivityNativeFixtureForTest, compose func(*testing.T, semanticview.Source) semanticview.Source) {
@@ -25,18 +29,18 @@ func VerifyS1DirectoryConnectorDispatchUsesExactDeclarationForTest(t *testing.T,
 	if compose == nil {
 		t.Fatal("directory journey requires the real effective-source compiler")
 	}
-	verifyS1ScopedActivityDispatch(t, open, compose)
+	verifyS1ScopedActivityDispatch(t, open, compose, true)
 }
 
-func verifyS1ScopedActivityDispatch(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowActivityNativeFixtureForTest, compose func(*testing.T, semanticview.Source) semanticview.Source) {
+func verifyS1ScopedActivityDispatch(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowActivityNativeFixtureForTest, compose func(*testing.T, semanticview.Source) semanticview.Source, directory bool) {
 	t.Helper()
 	toolID := "provider_write"
-	if compose != nil {
+	if directory {
 		toolID = "team-bot.send"
 	}
 	var firstCalls, secondCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if compose != nil && request.Header.Get("Authorization") != "Bearer directory-fixture-secret" {
+		if directory && request.Header.Get("Authorization") != "Bearer directory-fixture-secret" {
 			t.Errorf("directory connector did not consume its exact qualified credential")
 		}
 		origin := "research"
@@ -60,7 +64,7 @@ func verifyS1ScopedActivityDispatch(t *testing.T, open func(*testing.T, semantic
 		files[flow+"/events.yaml"] = "request:\n"
 		files[flow+"/nodes.yaml"] = fmt.Sprintf("scanner:\n  execution_type: system_node\n  subscribes_to: [request]\n  event_handlers:\n    request:\n      activity: {id: send, tool: %s, input: {}}\n", toolID)
 		tool := fmt.Sprintf("provider_write:\n  handler_type: http\n  effect_class: non_idempotent_write\n  input_schema: {type: object, additionalProperties: false}\n  output_schema:\n    type: object\n    required: [origin]\n    properties: {origin: {type: string, enum: [%s]}}\n  http: {method: POST, url: %q}\n", flow, server.URL+"/"+flow)
-		if compose == nil {
+		if !directory {
 			files[flow+"/tools.yaml"] = tool
 		} else {
 			files[flow+"/team-bot/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [send]}, cannot: [bypass journal]}\n"
@@ -68,9 +72,7 @@ func verifyS1ScopedActivityDispatch(t *testing.T, open func(*testing.T, semantic
 		}
 	}
 	source := semanticview.Wrap(loadWorkflowTempBundle(t, files))
-	if compose != nil {
-		source = compose(t, source)
-	}
+	source = compose(t, source)
 	if _, present := source.ToolEntries()[toolID]; present {
 		t.Fatal("fixture did not remove the ambiguous global tool alias")
 	}
@@ -82,7 +84,7 @@ func verifyS1ScopedActivityDispatch(t *testing.T, open func(*testing.T, semantic
 	}
 	bus := &recordingPipelineBus{}
 	options := PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}}
-	if compose != nil {
+	if directory {
 		options.Credentials = testActivityCredentialStore(t, "team-bot.token", "directory-fixture-secret")
 	}
 	pc := fixture.NewCoordinator(bus, options)

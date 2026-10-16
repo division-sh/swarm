@@ -35,26 +35,29 @@ func TestS1DirectoryConnectorDispatchUsesExactDeclarationBothStores(t *testing.T
 		t.Run(backend, func(t *testing.T) {
 			pipeline.VerifyS1DirectoryConnectorDispatchUsesExactDeclarationForTest(t, func(t *testing.T, source semanticview.Source) pipeline.WorkflowActivityNativeFixtureForTest {
 				return workflowActivityNativeSourceFixture(t, backend, source)
-			}, func(t *testing.T, source semanticview.Source) semanticview.Source {
-				bundle, found := semanticview.Bundle(source)
-				if !found {
-					t.Fatal("directory journey requires its compiled source")
-				}
-				admitted, err := packadmission.Admit(bundle.PackInventory, bundle.Platform)
-				if err != nil {
-					t.Fatal(err)
-				}
-				bundle.PackAdmission = admitted
-				projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{
-					Source: source, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact),
-				})
-				if err != nil {
-					t.Fatalf("compile real directory-owned effective source: %v", err)
-				}
-				return projection.Source()
-			})
+			}, composeS1NativeEffectiveSource)
 		})
 	}
+}
+
+func composeS1NativeEffectiveSource(t *testing.T, source semanticview.Source) semanticview.Source {
+	t.Helper()
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		t.Fatal("native activity journey requires its compiled source")
+	}
+	admitted, err := packadmission.Admit(bundle.PackInventory, bundle.Platform)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle.PackAdmission = admitted
+	projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{
+		Source: source, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact),
+	})
+	if err != nil {
+		t.Fatalf("compile real directory-owned effective source: %v", err)
+	}
+	return projection.Source()
 }
 
 func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerReplaySelectedStore, reopen func() timerReplaySelectedStore) pipeline.WorkflowActivityNativeFixtureForTest {
@@ -355,7 +358,7 @@ func TestS1ScopedActivityDispatchUsesExactDeclarationBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			pipeline.VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t, func(t *testing.T, source semanticview.Source) pipeline.WorkflowActivityNativeFixtureForTest {
 				return workflowActivityNativeSourceFixture(t, backend, source)
-			})
+			}, composeS1NativeEffectiveSource)
 		})
 	}
 }
