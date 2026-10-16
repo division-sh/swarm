@@ -14,11 +14,13 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
 type boundedRunDebugTraceStore interface {
 	authorActivityReceiptStore
+	agentfixture.Store
 	LoadRunDebugTracePage(context.Context, string, operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error)
 }
 
@@ -31,6 +33,10 @@ func TestRunDebugTracePageBoundsCanonicalHydrationParity(t *testing.T) {
 			runID := uuid.NewString()
 			base := time.Date(2026, 7, 23, 3, 30, 0, 0, time.UTC)
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			for _, id := range []string{"filtered-agent", "target-agent"} {
+				seedManagedTurnFixtureAgent(t, ctx, selected, runID, id, "fixture/"+id)
+			}
+			ctx = admitPreparedAgentClaimContext(t, ctx, selected)
 
 			filteredEvent, filteredDelivery := seedRunDebugTraceBoundedDelivery(t, ctx, selected, runID, "trace.filtered", "filtered-agent", base)
 			filteredClaim, err := claimDeliveryFixture(ctx, selected, filteredEvent, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("filtered-agent")})

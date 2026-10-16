@@ -236,7 +236,7 @@ type managedAgentTurnFixtureOptions struct {
 	OriginEvent *events.Event
 }
 
-func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store completionSettlementTestStore, runID, agentID, flowInstance string) agentmemory.Identity {
+func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store agentfixture.Store, runID, agentID, flowInstance string) agentmemory.Identity {
 	t.Helper()
 	identity := testAgentMemoryIdentity(t, runID, agentID, flowInstance)
 	memory := agentmemory.Plan{}
