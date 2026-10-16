@@ -117,18 +117,21 @@ func loadDeliveryTurnAttribution(ctx context.Context, q eventReadQueryer, postgr
 	if err != nil {
 		return out, err
 	}
-	if delivery.Status != deliverylifecycle.StatusDelivered {
-		out.EvidenceReason = delivery.ReasonCode
-		if out.EvidenceReason == "" {
-			out.EvidenceReason = "delivery_failed"
-		}
-		return out, nil
-	}
 	accepted, ambiguous, err := loadDeliveryAcceptedEmissions(ctx, q, postgres, publications, delivery, deliveries, turns, nativeCLI)
 	if err != nil {
 		return out, err
 	}
 	out.EmittedEvents = accepted
+	if delivery.Status != deliverylifecycle.StatusDelivered {
+		out.EvidenceReason = delivery.ReasonCode
+		if out.EvidenceReason == "" {
+			out.EvidenceReason = "delivery_failed"
+		}
+		if len(accepted) > 0 {
+			out.Emission = operatorread.RunEmissionAccepted
+		}
+		return out, nil
+	}
 	switch {
 	case len(accepted) > 0:
 		out.Emission = operatorread.RunEmissionAccepted
