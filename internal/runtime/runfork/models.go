@@ -30,6 +30,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -663,21 +664,23 @@ const (
 )
 
 type RunForkSelectedContractBindingRequest struct {
-	ForkRunID         string
-	SourceRunID       string
-	ForkPoint         RunForkPoint
-	ContractSelection RunForkContractSelection
+	ForkRunID           string
+	SourceRunID         string
+	ForkPoint           RunForkPoint
+	ContractSelection   RunForkContractSelection
+	TargetRootAdmission sourceartifact.RootAdmission
 }
 
 type RunForkSelectedContractBinding struct {
-	Owner             string                   `json:"owner"`
-	BindingID         string                   `json:"binding_id"`
-	ForkRunID         string                   `json:"fork_run_id"`
-	SourceRunID       string                   `json:"source_run_id"`
-	ForkPoint         RunForkPoint             `json:"fork_point"`
-	ForkEventID       string                   `json:"fork_event_id,omitempty"`
-	ContractSelection RunForkContractSelection `json:"contract_selection"`
-	CreatedAt         time.Time                `json:"created_at"`
+	Owner               string                                `json:"owner"`
+	BindingID           string                                `json:"binding_id"`
+	ForkRunID           string                                `json:"fork_run_id"`
+	SourceRunID         string                                `json:"source_run_id"`
+	ForkPoint           RunForkPoint                          `json:"fork_point"`
+	ForkEventID         string                                `json:"fork_event_id,omitempty"`
+	ContractSelection   RunForkContractSelection              `json:"contract_selection"`
+	TargetRootReference sourceartifact.RootAdmissionReference `json:"target_root_reference"`
+	CreatedAt           time.Time                             `json:"created_at"`
 }
 
 const (
