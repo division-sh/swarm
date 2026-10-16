@@ -10,9 +10,9 @@ import (
 	"testing"
 )
 
-const debtSessionInventoryCollectorTo = "pending-exact-collector-digest"
+const debtSessionInventoryCollectorTo = "b97a10de925015c93d78537a06c29a7f64035d1883e533730703ea0e548ca5da"
 
-func TestPersistenceAuthorityDebtSessionInventoryPreservesExactSource(t *testing.T) {
+func testDebtSessionInventoryPreservesExactSource(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	packet, err := debtSessionInventoryReadPacket(root)
 	if err != nil {
@@ -55,7 +55,7 @@ func TestPersistenceAuthorityDebtSessionInventoryPreservesExactSource(t *testing
 	}
 }
 
-func TestPersistenceAuthorityDebtSessionInventoryRefusesChangedCopiedInputs(t *testing.T) {
+func testDebtSessionInventoryRefusesChangedCopiedInputs(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	actual, err := os.ReadFile(filepath.Join(root, debtSessionInventorySource))
 	if err != nil {
@@ -137,7 +137,7 @@ func TestPersistenceAuthorityDebtSessionInventoryRefusesChangedCopiedInputs(t *t
 	})
 }
 
-func TestPersistenceAuthorityDebtSessionInventoryCollectorIsFiniteAndForward(t *testing.T) {
+func testDebtSessionInventoryCollectorIsFiniteAndForward(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	if actual, err := debtCollectorDigest(root); err != nil || actual != debtSessionInventoryCollectorTo {
 		t.Fatalf("session inventory collector=%s expected=%s: %v", actual, debtSessionInventoryCollectorTo, err)

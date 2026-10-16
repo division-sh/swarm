@@ -126,6 +126,9 @@ func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testin
 		}
 		assertDebtCatchUpForeignProvenance(t, original, current, proof)
 	})
+	t.Run("session-inventory-exact-source", testDebtSessionInventoryPreservesExactSource)
+	t.Run("session-inventory-copied-inputs", testDebtSessionInventoryRefusesChangedCopiedInputs)
+	t.Run("session-inventory-forward-collector", testDebtSessionInventoryCollectorIsFiniteAndForward)
 }
 
 func TestPersistenceAuthorityDebtRepair2698ProofCostForwardEdgeKeepsOriginalFingerprintAndRefusesReverse(t *testing.T) {
