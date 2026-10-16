@@ -9377,7 +9377,7 @@
     },
     {
       "name": "run.diagnose",
-      "description": "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/store/internal/operatorsurface/run_operational_status_read_surface.go and concrete failed-delivery evidence from\nRunDebugReport.FailedDeliveries, plus result.test_quiescence from\nRunDebugReport.TestQuiescence for deterministic test assertion barriers. The single canonical owner for\n\"why isn't this run progressing?\" routes persisted evidence through\nthe API instead of having every consumer recompute it.\n",
+      "description": "Interpreted run diagnosis. Returns the run header plus the\noperator-state projection from\ninternal/operatorread/behavior.go and concrete failed-delivery evidence from\nRunDebugReport.FailedDeliveries, plus result.test_quiescence from\nRunDebugReport.TestQuiescence for deterministic test assertion barriers. The single canonical owner for\n\"why isn't this run progressing?\" routes persisted evidence through\nthe API instead of having every consumer recompute it.\n",
       "params": [
         {
           "name": "run_id",
@@ -14743,7 +14743,7 @@
         "type": "object"
       },
       "BlockingLayer": {
-        "description": "Layer-of-the-system identifier when operational_state is \"stalled\".\nEmpty string when state is running or terminal. Source of truth:\nProjectRunOperationalStatus. Current owner emits:\n  \"\" (empty) — state is running or terminal\n  \"scoring_terminal_outcome\" — scoring entities have not reached\n    a terminal scoring outcome (shortlisted/marginal/rejected)\n  \"delivery_lifecycle\" — no active deliveries but events exist\nAdditional values may be added as the operator-state owner gains\nmore diagnostic semantics. Type stays string (not enum) for\nforward compatibility — additive owner extensions must not\nrequire a /v2/ bump.\n",
+        "description": "Generic blocking layer from operatorread.ProjectRunOperationalStatus. Empty for running or terminal runs; delivery_lifecycle denotes an idle non-final constructed instance with no owed work or legitimate wait. Authored domain and event names never create platform-owned output obligations. This remains a string rather than an enum for additive diagnostic compatibility.",
         "type": "string"
       },
       "BoundedLoopActivation": {
@@ -20603,7 +20603,7 @@
         "type": "string"
       },
       "OperationalState": {
-        "description": "Operational state of a run. Source of truth:\ninternal/store/internal/operatorsurface/run_operational_status_read_surface.go\nProjectRunOperationalStatus. Values are RunTableStatus values\nlowercased plus \"stalled\" as the projection's special\n\"running-but-not-progressing\" state.\n",
+        "description": "Operational state of a run. Source of truth:\ninternal/operatorread/behavior.go\nProjectRunOperationalStatus. Values are RunTableStatus values\nlowercased plus \"stalled\" as the projection's special\n\"running-but-not-progressing\" state.\n",
         "enum": [
           "running",
           "stalled",
@@ -21445,11 +21445,17 @@
         "additionalProperties": false,
         "description": "Run header plus the canonical operator-state projection and concrete failed-delivery evidence. Source of truth: ProjectRunOperationalStatus for operational_state/blocking fields, RunDebugReport.FailedDeliveries for event_deliveries/dead_letters failure evidence, and RunDebugReport.TestQuiescence for deterministic test assertion-barrier readiness.\n",
         "properties": {
+          "attributions": {
+            "items": {
+              "$ref": "#/components/schemas/RunStallAttribution"
+            },
+            "type": "array"
+          },
           "blocking_layer": {
             "$ref": "#/components/schemas/BlockingLayer"
           },
           "blocking_reason": {
-            "description": "Free-form reason string when operational_state is \"stalled\".\nEmpty when state is running or terminal. Current owner emits:\n  \"\" (empty)\n  \"terminal_scoring_outcome_missing\"\n  \"no_active_deliveries\"\nAdditional values may be added additively.\n",
+            "description": "Generic reason from the canonical operational projection. Empty for running or terminal; no_active_deliveries for a provably idle non-final constructed instance. No domain-specific obligation is inferred.",
             "type": "string"
           },
           "failed_deliveries": {
@@ -21466,6 +21472,12 @@
             "description": "Free-form diagnostic notes from the projection. Current owner\nemits one entry per detected condition, e.g. \"dead letters\nexist for this run\".\n",
             "items": {
               "type": "string"
+            },
+            "type": "array"
+          },
+          "instances": {
+            "items": {
+              "$ref": "#/components/schemas/RunInstanceOperationalStatus"
             },
             "type": "array"
           },
@@ -21487,7 +21499,9 @@
           "heuristics",
           "failed_deliveries",
           "fan_out",
-          "test_quiescence"
+          "test_quiescence",
+          "instances",
+          "attributions"
         ],
         "type": "object"
       },
@@ -21690,6 +21704,87 @@
         ],
         "type": "object"
       },
+      "RunInstanceOperationalStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "disposition": {
+            "enum": [
+              "active",
+              "waiting",
+              "stalled",
+              "final",
+              "retired",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "flow_instance": {
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "work": {
+            "additionalProperties": false,
+            "properties": {
+              "await": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "barriers": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "deliveries": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "fan_out": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "pipeline": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "retries": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "sessions": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "timers": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "deliveries",
+              "retries",
+              "pipeline",
+              "fan_out",
+              "barriers",
+              "timers",
+              "await",
+              "sessions"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "flow_instance",
+          "revision",
+          "disposition",
+          "work"
+        ],
+        "type": "object"
+      },
       "RunOrigin": {
         "description": "Immutable, explicitly discriminated run creation provenance. Exactly one variant is present and readers never infer or coalesce it from event history.\n",
         "oneOf": [
@@ -21822,6 +21917,84 @@
             "type": "object"
           }
         ]
+      },
+      "RunStallAttribution": {
+        "additionalProperties": false,
+        "description": "Detached exact settled-origin evidence for one idle constructed instance. Provider snapshots and proposed tool calls alone never prove publication or silence. Unknown linkage does not invent an agent, delivery or logical turn. Granted emit tools come from frozen provider capability evidence, not current source declarations. This projection grants no execution or settlement authority.",
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "delivery_id": {
+            "type": "string"
+          },
+          "emission_evidence": {
+            "enum": [
+              "accepted",
+              "none",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "emitted_events": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "event_id": {
+                  "type": "string"
+                },
+                "event_type": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "event_id",
+                "event_type"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "event_id": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "evidence_reason": {
+            "type": "string"
+          },
+          "flow_instance": {
+            "type": "string"
+          },
+          "granted_emit_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "historical": {
+            "type": "boolean"
+          },
+          "logical_turn_id": {
+            "type": "string"
+          },
+          "provider_turns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "flow_instance",
+          "provider_turns",
+          "granted_emit_tools",
+          "emitted_events",
+          "emission_evidence",
+          "historical"
+        ],
+        "type": "object"
       },
       "RunStatus": {
         "enum": [
