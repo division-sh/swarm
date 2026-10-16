@@ -1,7 +1,7 @@
 name: numeric-data-scatter-park
 stages: {done: {final: true}}
 pins:
-  outputs:
+  inputs:
     - item.registered
 connect:
   - event: item.registered
