@@ -59,6 +59,12 @@ func TestSelectedFiniteFeedRecoveryRequiresExactPermanentOperationBothStores(t *
 			changed = binding
 			changed.ForkPoint.Revision++
 			check(changed, request.TargetBundleHash, false)
+			changed = binding
+			changed.TargetRootReference.RootDirectory = "other-root"
+			if err := changed.TargetRootReference.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			check(changed, request.TargetBundleHash, false)
 			check(binding, "sha256:other", false)
 		})
 	}

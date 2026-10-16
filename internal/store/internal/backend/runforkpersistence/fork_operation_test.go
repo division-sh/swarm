@@ -74,9 +74,24 @@ func TestForkOperationDurableReplayAndConflictBothStores(t *testing.T) {
 				}
 				changed := request
 				changed.OperationID = uuid.NewString()
-				changed.TargetBundleHash = "sha256:other"
+				other, _ := sourceartifactfixture.Rooted(t, "other-operation", sourceartifactfixture.New("nodes.yaml", []byte("other: {type: procedure}\n")))
+				changed.TargetBundleHash = other.Artifact().BundleHash()
+				changed.TargetRootReference = other.Admission().Reference()
+				if _, _, err := changed.Canonical(); err != nil {
+					t.Fatalf("changed semantic target must be otherwise valid: %v", err)
+				}
 				if _, _, err := bindForkOperationTx(ctx, tx, changed, childID, bindingID, backend == "postgres"); err == nil {
 					t.Fatal("same keyed request changed its semantic target")
+				}
+				otherRoot, _ := sourceartifactfixture.Rooted(t, "other-root", sourceartifactfixture.Artifact())
+				changed = request
+				changed.OperationID = uuid.NewString()
+				changed.TargetRootReference = otherRoot.Admission().Reference()
+				if _, _, err := changed.Canonical(); err != nil {
+					t.Fatalf("same-content alternate root must be otherwise valid: %v", err)
+				}
+				if _, _, err := bindForkOperationTx(ctx, tx, changed, childID, bindingID, backend == "postgres"); err == nil {
+					t.Fatal("same keyed request changed its same-content target root")
 				}
 				if _, _, err := lookupForkOperationTx(ctx, tx, request.Actor, request.IdempotencyKey, "sha256:other-transport", backend == "postgres", true); err == nil {
 					t.Fatal("same key accepted a changed transport request")
