@@ -226,12 +226,17 @@ func requireSessionConstructionHandoffRefusal(t *testing.T, backend, mode, cut s
 	peer.mu.Lock()
 	connections := peer.connections
 	peer.mu.Unlock()
-	if original.connection == nil || selections.Load() != 1 || releases != 1 || connections != 0 || f.owner.ActiveCount() != 0 {
+	// The constructed native connection retains one lifetime use until Close;
+	// the additional construction use has already joined before done closes.
+	if original.connection == nil || selections.Load() != 1 || releases != 1 || connections != 0 || f.owner.ActiveCount() != 1 {
 		t.Fatal("refused handoff lost cleanup ownership or dialed later", selections.Load(), releases, connections, f.owner.ActiveCount())
 	}
 	if cut == "release_fails" {
 		if _, err := f.adapter.ReadSessionPairing(join, f.op, f.principal); !errors.Is(err, cause) {
 			t.Fatal("construction readback lost its original release failure", err)
+		}
+		if err := original.connection.Close(join); err != nil || f.owner.ActiveCount() != 0 {
+			t.Fatal("failed construction release lost its joined native cleanup", err, f.owner.ActiveCount())
 		}
 		return
 	}
@@ -251,5 +256,8 @@ func requireSessionConstructionHandoffRefusal(t *testing.T, backend, mode, cut s
 	peer.mu.Unlock()
 	if !retained || selections.Load() != 1 || releases != 1 || connections != 1 {
 		t.Fatal("later explicit request replaced or redialed its original", retained, selections.Load(), releases, connections)
+	}
+	if err := original.connection.Close(join); err != nil || f.owner.ActiveCount() != 0 {
+		t.Fatal("continued original did not join all retained work", err, f.owner.ActiveCount())
 	}
 }
