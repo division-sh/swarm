@@ -21,6 +21,7 @@ func TestWorkspaceMockInvocationStorageRetainsExactCountsBothStores(t *testing.T
 			}
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			ctx = preparePositiveAgentClaimFixture(t, ctx, fixture.store.(agentFixtureFlowStore), mustTestAgentIdentityForRun(runID, "worker", "fixture/worker"))
 			at := time.Now().UTC()
 			completed := eventtest.PersistedProjection(uuid.NewString(), "work.completed", "runtime", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, at)
 			if err := commitSemanticEventFixtureWithAgents(ctx, fixture.store, completed, []string{"worker", "pending-worker"}); err != nil {

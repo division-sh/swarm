@@ -47,18 +47,19 @@ func newCompletionControllerForTest(store completionControllerTestStore) *runtim
 }
 
 type completionSettlementFixture struct {
-	store       completionSettlementTestStore
-	lifecycle   runtimemanager.AgentLifecyclePersistence
-	agentOwner  testing.TB
-	db          *sql.DB
-	sqlite      bool
-	authority   runtimeeffects.Authority
-	origin      runtimedelivery.Claim
-	context     context.Context
-	sessionID   string
-	agentID     string
-	leaseHolder string
-	grantID     string
+	store            completionSettlementTestStore
+	lifecycle        runtimemanager.AgentLifecyclePersistence
+	agentOwner       testing.TB
+	db               *sql.DB
+	sqlite           bool
+	authority        runtimeeffects.Authority
+	origin           runtimedelivery.Claim
+	context          context.Context
+	admissionContext context.Context
+	sessionID        string
+	agentID          string
+	leaseHolder      string
+	grantID          string
 }
 
 func TestCompletionProviderHeadSettlementSQLite(t *testing.T) {
@@ -1506,12 +1507,12 @@ func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSett
 
 func newCompletionSettlementFixtureForFlow(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string) completionSettlementFixture {
 	t.Helper()
-	return newCompletionSettlementFixtureWithActor(t, store, db, sqlite, memory, flowInstance, runtimeactors.AgentConfig{
+	return newCompletionSettlementFixtureWithActor(t, store, db, sqlite, memory, flowInstance, executionposture.Live, runtimeactors.AgentConfig{
 		ExecutionMode: "live", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli",
 	})
 }
 
-func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string, actor runtimeactors.AgentConfig) completionSettlementFixture {
+func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool, memory agentmemory.Plan, flowInstance string, posture executionposture.Posture, actor runtimeactors.AgentConfig) completionSettlementFixture {
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	now := time.Now().UTC()
@@ -1530,17 +1531,15 @@ func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettl
 	if len(actor.Config) == 0 {
 		actor.Config = json.RawMessage(`{}`)
 	}
-	if actor.ExecutionMode == "live" {
-		profile, err := selection.ResolveActiveBackend(actor.ResolvedLLMBackend)
-		if err != nil {
-			t.Fatal(err)
-		}
-		resolved, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, nil, actor)
-		if err != nil {
-			t.Fatal(err)
-		}
-		actor = resolved.Actor
+	profile, err := selection.ResolveLiveBackend(actor.LLMBackend)
+	if err != nil {
+		t.Fatal(err)
 	}
+	resolved, err := runtimellm.ResolveAgentExecution(posture, profile, nil, actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor = resolved.Actor
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, actor),
 		Status: "active", StartedAt: now,
@@ -1579,13 +1578,14 @@ func newCompletionSettlementFixtureWithActor(t *testing.T, store completionSettl
 		RunID: runID, SessionID: sessionID, Memory: memory, FlowInstance: flowInstance,
 	}
 	authority.BudgetScopes = []runtimeeffects.BudgetAdmissionScope{{Kind: "system", CapUSD: 1}}
+	ctx = admitPreparedAgentClaimContext(t, ctx, store.(agentFixtureFlowStore))
 	origin := claimCompletionOriginForTest(t, ctx, store, authority, now)
 	completionCtx := runtimedelivery.WithClaim(runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), newCompletionControllerForTest(store)), origin)
 	if memory.Enabled {
 		completionCtx = runtimeeffects.WithSessionGrant(completionCtx, runtimeeffects.SessionGrant{SessionID: sessionID, GrantID: grantID, LockOwner: leaseHolder})
 	}
 	return completionSettlementFixture{
-		store: store, lifecycle: agentfixture.Lifecycle(t, store), agentOwner: t, db: db, sqlite: sqlite, authority: authority, origin: origin, context: completionCtx,
+		store: store, lifecycle: agentfixture.Lifecycle(t, store), agentOwner: t, db: db, sqlite: sqlite, authority: authority, origin: origin, context: completionCtx, admissionContext: ctx,
 		sessionID: sessionID, agentID: agentID, leaseHolder: leaseHolder, grantID: grantID,
 	}
 }
@@ -1625,7 +1625,7 @@ func claimCompletionOriginEventForTest(t testing.TB, ctx context.Context, store 
 }
 
 func (f completionSettlementFixture) contextFor(authority runtimeeffects.Authority) context.Context {
-	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), authority), newCompletionControllerForTest(f.store))
+	ctx := runtimeeffects.WithController(runtimeeffects.WithAuthority(f.admissionContext, authority), newCompletionControllerForTest(f.store))
 	if authority.Target.Memory.Enabled {
 		ctx = runtimeeffects.WithSessionGrant(ctx, runtimeeffects.SessionGrant{SessionID: f.sessionID, GrantID: f.grantID, LockOwner: f.leaseHolder})
 	}
