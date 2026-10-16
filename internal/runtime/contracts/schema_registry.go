@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
@@ -339,6 +341,37 @@ func ValidateCatalogFieldSupply(subject string, supplied map[string]any, target 
 		return fmt.Errorf("%s state schema: %w", subject, err)
 	}
 	return sourceSchema.ValidateAssignableTo(subject, targetSchema)
+}
+
+// Collection admission is exact, not assignability: collecting an item must
+// preserve its full schema, including presence, enum and format constraints.
+func ValidateCatalogListItemSupply(subject string, supplied map[string]any, target EntityFieldDecl, catalog TypeCatalogDocument) error {
+	resolved, err := (CatalogTypeReference{Type: target.Type, Catalog: catalog}).Resolve()
+	if err != nil {
+		return fmt.Errorf("%s state type: %w", subject, err)
+	}
+	if resolved.Kind != CatalogTypeList || resolved.Element == nil {
+		return fmt.Errorf("%s target must be a declared list, not %q", subject, target.Type)
+	}
+	if _, err := AdmitToolInputSchemaMap(supplied); err != nil {
+		return fmt.Errorf("%s payload schema: %w", subject, err)
+	}
+	accepted := eventSchemaForCatalogType(*resolved.Element, catalog)
+	if _, err := AdmitToolInputSchemaMap(accepted); err != nil {
+		return fmt.Errorf("%s target element schema: %w", subject, err)
+	}
+	sourceHash, err := canonicaljson.Hash(eventschema.CanonicalAcceptanceSchema(supplied))
+	if err != nil {
+		return err
+	}
+	targetHash, err := canonicaljson.Hash(eventschema.CanonicalAcceptanceSchema(accepted))
+	if err != nil {
+		return err
+	}
+	if sourceHash != targetHash {
+		return fmt.Errorf("%s payload must equal the target element type; declare _embed: [%s] on the event or change the target element type", subject, eventListItemType(target.Type))
+	}
+	return nil
 }
 
 // Catalog maps carry a key schema separately from the value schema. Reuse the
