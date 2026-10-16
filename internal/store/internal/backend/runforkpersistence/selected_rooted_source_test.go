@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,10 +25,13 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
+	"modernc.org/sqlite"
 )
 
 type selectedRootedSourceReader interface {
 	LoadSelectedForkRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 }
 
 func TestS1SelectedForkSourceRequiresWholeRetainedResponsibilityBothStores(t *testing.T) {
@@ -61,6 +65,8 @@ func TestS1SelectedForkSourceRequiresWholeRetainedResponsibilityBothStores(t *te
 				{"missing-binding", `UPDATE run_fork_selected_contract_bindings SET fork_run_id=$1 WHERE binding_id=$2`, fixture.parentID, fixture.childID},
 				{"missing-operation", `UPDATE run_fork_operations SET fork_run_id=$1 WHERE operation_id=$2`, fixture.parentID, fixture.childID},
 				{"operation-point", `UPDATE run_fork_operations SET fork_revision=$1 WHERE operation_id=$2`, int64(8), int64(7)},
+				{"missing-root", `UPDATE source_root_admissions SET root_directory=$1 WHERE root_directory=$2`, "retired-selected", fixture.target.Admission().RootDirectory()},
+				{"corrupt-content", `UPDATE source_artifacts SET source_blob=$1 WHERE bundle_hash=$2`, []byte("not a source artifact"), fixture.target.Artifact().LogicalBlob()},
 			} {
 				t.Run(cell.name, func(t *testing.T) {
 					id := fixture.childID
@@ -68,9 +74,16 @@ func TestS1SelectedForkSourceRequiresWholeRetainedResponsibilityBothStores(t *te
 						id = fixture.bindingID
 					} else if cell.name == "missing-operation" || cell.name == "operation-point" {
 						id = fixture.operationID
+					} else if cell.name == "missing-root" {
+						id = fixture.target.Admission().RootDirectory()
+					} else if cell.name == "corrupt-content" {
+						id = fixture.target.Artifact().BundleHash()
 					}
 					fixture.changeEvidence(t, cell.statement, cell.changed, id)
 					loaded, err := reader.LoadSelectedForkRootedSource(ctx, fixture.childID)
+					if cell.name == "missing-root" {
+						id = cell.changed.(string)
+					}
 					fixture.changeEvidence(t, cell.statement, cell.original, id)
 					if err == nil || loaded.Artifact() != nil || loaded.Admission() != (sourceartifact.RootAdmission{}) {
 						t.Fatalf("crossed responsibility returned compiler authority: root=%+v err=%v", loaded.Admission().Reference(), err)
@@ -99,11 +112,58 @@ func TestS1SelectedForkSourceRequiresWholeRetainedResponsibilityBothStores(t *te
 // This fixture composes the native metadata owners on the real schema. It
 // neither creates an executable selected grant nor claims activation coverage.
 type selectedRootedSourceFixture struct {
+	connector                                 *selectedRootReadConnector
 	owner                                     any
 	postgres                                  *postgresbackend.Backend
 	sqlite                                    *sqlitebackend.Backend
 	parent, target                            sourceartifact.RootedSource
 	parentID, childID, bindingID, operationID string
+}
+
+func TestS1SelectedForkSourceRefusesUnacknowledgedReadBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			f := newSelectedRootedSourceFixture(t, backend)
+			reader := f.owner.(selectedRootedSourceReader)
+			for _, responsibility := range []struct {
+				name, runID string
+				load        func(context.Context, string) (sourceartifact.RootedSource, error)
+				want        sourceartifact.RootAdmission
+			}{
+				{"selected", f.childID, reader.LoadSelectedForkRootedSource, f.target.Admission()},
+				{"original", f.parentID, reader.LoadRunRootedSource, f.parent.Admission()},
+			} {
+				for _, cut := range []string{"closure-error", "canceled-after-commit"} {
+					t.Run(responsibility.name+"/"+cut, func(t *testing.T) {
+						ctx, cancel := context.WithCancel(context.Background())
+						defer cancel()
+						cause := errors.New("rooted fork read closure failed")
+						calls := 0
+						f.connector.afterCommit = func() error {
+							calls++
+							if cut == "canceled-after-commit" {
+								cancel()
+								return nil
+							}
+							return cause
+						}
+						loaded, err := responsibility.load(ctx, responsibility.runID)
+						f.connector.afterCommit = nil
+						want := cause
+						if cut == "canceled-after-commit" {
+							want = context.Canceled
+						}
+						if calls != 1 || !errors.Is(err, want) || loaded.Artifact() != nil || loaded.Admission() != (sourceartifact.RootAdmission{}) {
+							t.Fatalf("failed read disclosed rooted evidence: calls=%d source=%+v err=%v", calls, loaded.Admission().Reference(), err)
+						}
+						if restored, err := responsibility.load(context.Background(), responsibility.runID); err != nil || !restored.Admission().Equal(responsibility.want) {
+							t.Fatalf("read fault changed retained responsibility: %v", err)
+						}
+					})
+				}
+			}
+		})
+	}
 }
 
 func newSelectedRootedSourceFixture(t *testing.T, backend string) selectedRootedSourceFixture {
@@ -132,8 +192,15 @@ func newSelectedRootedSourceFixture(t *testing.T, backend string) selectedRooted
 	parentRequest := runlifecycle.CreateRequest{RunID: f.parentID, Origin: runlifecycle.DeploymentRunOrigin(), Source: sourceartifactfixture.FactFor(f.parent.Artifact()), RootAdmission: f.parent.Admission(), StartedAt: time.Now().UTC()}
 	var write func(context.Context, func(context.Context, *mutationprotocol.Attempt) error) error
 	if backend == "postgres" {
-		_, db, cleanup := testutil.StartEmptyPostgres(t)
+		dsn, _, cleanup := testutil.StartEmptyPostgres(t)
 		t.Cleanup(cleanup)
+		f.connector = &selectedRootReadConnector{driver: &pq.Driver{}, dsn: dsn}
+		db := sql.OpenDB(f.connector)
+		t.Cleanup(func() {
+			if err := db.Close(); err != nil {
+				t.Error(err)
+			}
+		})
 		f.postgres, err = postgresbackend.New(db)
 		if err != nil {
 			t.Fatal(err)
@@ -157,7 +224,14 @@ func newSelectedRootedSourceFixture(t *testing.T, backend string) selectedRooted
 			return result.Err()
 		}
 	} else {
-		schema, native, err := schemastore.OpenSQLiteForConstruction(filepath.Join(t.TempDir(), "source.sqlite"))
+		path := filepath.Join(t.TempDir(), "source.sqlite")
+		f.connector = &selectedRootReadConnector{driver: &sqlite.Driver{}, dsn: "file:" + path + "?_pragma=" + url.QueryEscape("foreign_keys(ON)")}
+		db := sql.OpenDB(f.connector)
+		native, err := sqlitebackend.New(db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		schema, err := schemastore.NewSQLiteWithBackend(native, path)
 		if err != nil {
 			t.Fatal(err)
 		}

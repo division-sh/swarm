@@ -53,3 +53,11 @@ func (s *PostgresStore) LoadRunRootedSource(ctx context.Context, runID string) (
 func (s *SQLiteRuntimeStore) LoadRunRootedSource(ctx context.Context, runID string) (sourceartifact.RootedSource, error) {
 	return s.runLifecycleSQLiteOwner.LoadRunRootedSource(ctx, runID)
 }
+
+func (s *PostgresStore) LoadSelectedForkRootedSource(ctx context.Context, forkRunID string) (sourceartifact.RootedSource, error) {
+	return s.runForkPostgresOwner.LoadSelectedForkRootedSource(ctx, forkRunID)
+}
+
+func (s *SQLiteRuntimeStore) LoadSelectedForkRootedSource(ctx context.Context, forkRunID string) (sourceartifact.RootedSource, error) {
+	return s.runForkSQLiteOwner.LoadSelectedForkRootedSource(ctx, forkRunID)
+}
