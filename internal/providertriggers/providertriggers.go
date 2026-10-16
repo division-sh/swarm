@@ -193,17 +193,55 @@ func NewCatalogSnapshot(entries ...CatalogEntry) (*CatalogSnapshot, error) {
 			return nil, fmt.Errorf("provider trigger catalog entry for %q %w", provider, err)
 		}
 		value := catalogEntryValue{identity: identity, manifest: entry.Manifest, source: entry.Source}
-		if existing, exists := snapshot.byProvider[provider]; exists {
-			return nil, fmt.Errorf("duplicate provider trigger manifest for %q from %s and %s", provider, existing.source, entry.Source)
+		if err := recordCatalogEntry(snapshot, value); err != nil {
+			return nil, err
 		}
-		if existing, exists := snapshot.byID[identity.ID()]; exists {
-			return nil, fmt.Errorf("duplicate provider trigger pack id %q from %s and %s", identity.ID(), existing.source, entry.Source)
-		}
-		snapshot.byProvider[provider] = value
-		snapshot.byID[identity.ID()] = value
 		normalizedEntries = append(normalizedEntries, value)
 	}
-	generation, err := catalogGeneration(normalizedEntries)
+	return freezeCatalogSnapshot(snapshot, normalizedEntries)
+}
+
+// NewCatalogSnapshotFromAdmittedBodies consumes frozen typed BODY admission.
+// Byte-only manifests and reconstructed catalog readbacks cannot mint it.
+func NewCatalogSnapshotFromAdmittedBodies(manifests ...Manifest) (*CatalogSnapshot, error) {
+	snapshot := &CatalogSnapshot{byProvider: map[string]catalogEntryValue{}, byID: map[string]catalogEntryValue{}}
+	entries := make([]catalogEntryValue, 0, len(manifests))
+	for _, manifest := range manifests {
+		if err := manifest.Validate(); err != nil {
+			return nil, err
+		}
+		body := manifest.value.providerBody
+		if !body.Valid() || body.SourceValue() != manifest.value.source || body.ProviderKey() != manifest.Provider() {
+			return nil, fmt.Errorf("provider trigger catalog requires captured BODY admission")
+		}
+		identity, err := packs.NewProviderBodyIdentity(body)
+		if err != nil {
+			return nil, err
+		}
+		value := catalogEntryValue{identity: identity, manifest: manifest, source: body.Label()}
+		if err := recordCatalogEntry(snapshot, value); err != nil {
+			return nil, err
+		}
+		entries = append(entries, value)
+	}
+	return freezeCatalogSnapshot(snapshot, entries)
+}
+
+func recordCatalogEntry(snapshot *CatalogSnapshot, entry catalogEntryValue) error {
+	provider := entry.manifest.Provider()
+	if existing, exists := snapshot.byProvider[provider]; exists {
+		return fmt.Errorf("duplicate provider trigger manifest for %q from %s and %s", provider, existing.source, entry.source)
+	}
+	if existing, exists := snapshot.byID[entry.identity.ID()]; exists {
+		return fmt.Errorf("duplicate provider trigger pack id %q from %s and %s", entry.identity.ID(), existing.source, entry.source)
+	}
+	snapshot.byProvider[provider] = entry
+	snapshot.byID[entry.identity.ID()] = entry
+	return nil
+}
+
+func freezeCatalogSnapshot(snapshot *CatalogSnapshot, entries []catalogEntryValue) (*CatalogSnapshot, error) {
+	generation, err := catalogGeneration(entries)
 	if err != nil {
 		return nil, err
 	}

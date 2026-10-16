@@ -49,7 +49,12 @@ func AdmitBody(body packartifact.ProviderBody) (Manifest, error) {
 	if err := qualifyTriggerBodyNames(root, &definition); err != nil {
 		return Manifest{}, err
 	}
-	return freezeTriggerManifest(definition, root, body.Bytes())
+	manifest, err := freezeTriggerManifest(definition, root, body.Bytes())
+	if err != nil {
+		return Manifest{}, err
+	}
+	manifest.value.providerBody = body
+	return manifest, nil
 }
 
 func freezeTriggerManifest(definition manifestDefinition, root yamlsource.Value, body []byte) (Manifest, error) {

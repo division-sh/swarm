@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
@@ -50,6 +51,9 @@ func MustPackSource(provenance, path string) PackSource {
 func (s PackSource) Provenance() string { return s.provenance }
 func (s PackSource) Path() string       { return s.path }
 func (s PackSource) Diagnostic() string {
+	if s.provenance == "" {
+		return s.path
+	}
 	if s.path == "" {
 		return s.provenance
 	}
@@ -73,6 +77,26 @@ const (
 )
 
 func NewPackIdentity(id, version, manifestHash, packType string, source PackSource) (PackIdentity, error) {
+	identity, err := admitPackIdentity(id, version, manifestHash, packType, source)
+	if err != nil {
+		return PackIdentity{}, err
+	}
+	if source.Provenance() == "" {
+		return PackIdentity{}, fmt.Errorf("pack source is required")
+	}
+	return identity, nil
+}
+
+// NewProviderBodyIdentity derives diagnostic/content coordinates from captured
+// membership. It invents neither authored role IDs nor acquisition provenance.
+func NewProviderBodyIdentity(body packartifact.ProviderBody) (PackIdentity, error) {
+	if !body.Valid() {
+		return PackIdentity{}, fmt.Errorf("provider identity requires an admitted BODY")
+	}
+	return admitPackIdentity(body.ProviderKey(), body.Metadata().Version, body.Hash(), body.Role().String(), PackSource{path: body.Label()})
+}
+
+func admitPackIdentity(id, version, manifestHash, packType string, source PackSource) (PackIdentity, error) {
 	if id == "" || version == "" || strings.TrimSpace(manifestHash) == "" || strings.TrimSpace(packType) == "" {
 		return PackIdentity{}, fmt.Errorf("pack id, version, manifest hash, and type are required")
 	}
@@ -92,7 +116,7 @@ func NewPackIdentity(id, version, manifestHash, packType string, source PackSour
 	if err != nil {
 		return PackIdentity{}, err
 	}
-	if source.Provenance() == "" {
+	if source.Diagnostic() == "" {
 		return PackIdentity{}, fmt.Errorf("pack source is required")
 	}
 	return PackIdentity{id: admittedID, version: admittedVersion, manifestHash: admittedManifestHash, packType: admittedPackType, source: source}, nil

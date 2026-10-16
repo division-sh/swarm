@@ -3,6 +3,7 @@ package providertriggers
 import (
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -14,9 +15,10 @@ type Manifest struct {
 }
 
 type manifestValue struct {
-	definition manifestDefinition
-	source     yamlsource.Value
-	body       []byte
+	definition   manifestDefinition
+	source       yamlsource.Value
+	body         []byte
+	providerBody packartifact.ProviderBody
 }
 
 func (m Manifest) Validate() error {
