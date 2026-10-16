@@ -40,6 +40,10 @@ func compileDirectoryConnectorSource(source semanticview.Source, fact runtimecor
 	if err != nil {
 		return nil, err
 	}
+	source, err = sourceWithDirectoryTriggerSchemas(source, providers)
+	if err != nil {
+		return nil, err
+	}
 	out := directoryConnectorSource{Source: source, tools: map[string]runtimecontracts.ToolSchemaEntry{},
 		capabilities: source.SemanticCapabilities().WithoutConnectorPackImports()}
 	for name, tool := range source.ToolEntries() {

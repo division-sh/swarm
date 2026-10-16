@@ -880,7 +880,7 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 	}
 	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{
 		WorkflowModule: opts.WorkflowModule, SourceArtifactFact: opts.SourceArtifactFact,
-		ProviderTriggerCatalog: opts.ProviderTriggerCatalog, ChannelPlans: opts.ChannelPlans,
+		ChannelPlans: opts.ChannelPlans,
 	})
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("admit effective source projection: %w", err)

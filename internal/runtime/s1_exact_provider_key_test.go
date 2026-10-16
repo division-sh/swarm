@@ -13,7 +13,7 @@ func TestS1StandingAndSchemaOwnersKeepExactProviderKeys(t *testing.T) {
 		if target.Provider != key {
 			t.Errorf("standing target changed %q to %q", key, target.Provider)
 		}
-		owner := newProviderTriggerSchemaOwner(key, "inbound."+key+".message", providertriggers.OutputKindNormalized, providertriggers.PackIdentity{}, triggergeneration.FromCanonicalBytes([]byte("exact-key")))
+		owner := newProviderTriggerSchemaOwner(key, "inbound."+key+".message", providertriggers.OutputKindNormalized, providertriggers.PackIdentity{}, triggergeneration.FromCanonicalBytes([]byte("exact-key")), "fixture/trigger.yaml")
 		if owner.provider != key {
 			t.Errorf("schema owner changed %q to %q", key, owner.provider)
 		}

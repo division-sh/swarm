@@ -460,8 +460,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	}
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
 		WorkflowModule: loaded.module, SourceArtifactFact: sourceArtifactFact,
-		ProviderTriggerCatalog: req.ProviderTriggerCatalog,
-		ChannelPlans:           req.ChannelPlans,
+		ChannelPlans: req.ChannelPlans,
 	})
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("admit effective source projection: %w", err)

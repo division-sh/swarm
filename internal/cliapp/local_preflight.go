@@ -320,8 +320,7 @@ func loadLocalPreflightCapabilitySource(ctx context.Context, req localPreflightR
 	}
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
 		Source: source, SourceArtifactFact: sourceFact,
-		ProviderTriggerCatalog: req.ProviderTriggerCatalog,
-		ChannelPlans:           req.ChannelPacks.Plans,
+		ChannelPlans: req.ChannelPacks.Plans,
 	})
 	if err != nil {
 		report.add(localPreflightProviderPackPrerequisite, "effective_source_projection_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix provider-trigger, provider-connector, or channel declarations")

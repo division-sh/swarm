@@ -115,7 +115,7 @@ func TestSourceWithProviderTriggerEventsImportsDeclaredNormalizedSchemaWithoutAc
 	if !ok {
 		t.Fatalf("effective source = %T, want providerTriggerEventSource", wrapper)
 	}
-	owner := composed.owners[eventName]
+	owner := composed.owners[providerTriggerSchemaCoordinate{".", eventName}]
 	if owner.provider != "telegram" || owner.event != eventName || owner.kind != providertriggers.OutputKindNormalized ||
 		owner.identity.ID != "provider.telegram" || owner.identity.Version == "" || owner.identity.ManifestHash == "" ||
 		owner.identity.Provenance == "" || !owner.generation.Equal(catalog.Generation()) {

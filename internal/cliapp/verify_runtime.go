@@ -358,7 +358,7 @@ func admitStructuralSource(configResult RuntimeConfigLoadResult, bundle *runtime
 	}
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
 		Source: source, SourceArtifactFact: fact,
-		ProviderTriggerCatalog: opts.ProviderTriggerCatalog, ChannelPlans: opts.ChannelPlans,
+		ChannelPlans: opts.ChannelPlans,
 	})
 	if err != nil {
 		return nil, opts, err

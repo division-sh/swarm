@@ -73,7 +73,7 @@ func ResolveEventSchema(source Source, flowID, eventType string) EventSchemaReso
 		bindStructuralEventSchema(&resolution)
 		return resolution
 	}
-	if flowID == "" || flowID == "." {
+	if flowID == "" {
 		if compiled, ok := source.SemanticCapabilities().ProviderTriggerSchemaReadback(eventType); ok {
 			resolution := EventSchemaResolution{
 				Schema: compiled.EventSchema(), CompiledSchema: compiled,

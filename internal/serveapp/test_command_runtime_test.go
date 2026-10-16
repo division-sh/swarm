@@ -1023,7 +1023,7 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 			}
 			projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{
 				Source: semanticview.Wrap(req.Bundle), SourceArtifactFact: fact,
-				ProviderTriggerCatalog: metadata.ProviderTriggers, ChannelPlans: metadata.ChannelPlans,
+				ChannelPlans: metadata.ChannelPlans,
 			})
 			if err != nil {
 				return err

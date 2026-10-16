@@ -264,7 +264,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	}
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
 		Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceFact,
-		ProviderTriggerCatalog: metadata.ProviderTriggers, ChannelPlans: metadata.ChannelPlans,
+		ChannelPlans: metadata.ChannelPlans,
 	})
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("admit effective source: %w", err))

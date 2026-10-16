@@ -5,9 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -20,11 +18,10 @@ import (
 const admittedEffectiveSourceProjectionVersion = "admitted-effective-source-projection/v1"
 
 type EffectiveSourceProjectionRequest struct {
-	Source                 semanticview.Source
-	WorkflowModule         runtimepipeline.WorkflowModule
-	SourceArtifactFact     runtimecorrelation.SourceArtifactFact
-	ProviderTriggerCatalog *providertriggers.CatalogSnapshot
-	ChannelPlans           []packs.SatisfactionPlan
+	Source             semanticview.Source
+	WorkflowModule     runtimepipeline.WorkflowModule
+	SourceArtifactFact runtimecorrelation.SourceArtifactFact
+	ChannelPlans       []packs.SatisfactionPlan
 }
 
 // AdmittedEffectiveSourceProjection is the single owner of the composed
@@ -58,15 +55,7 @@ func AdmitEffectiveSourceProjection(request EffectiveSourceProjectionRequest) (A
 		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("effective semantic source is required")
 	}
 
-	triggerCatalog, err := triggerCatalogForEffectiveSource(source, request.ProviderTriggerCatalog)
-	if err != nil {
-		return AdmittedEffectiveSourceProjection{}, err
-	}
-	source, err = SourceWithProviderTriggerEvents(source, triggerCatalog)
-	if err != nil {
-		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("provider trigger event import failed: %w", err)
-	}
-	source, err = compileDirectoryConnectorSource(source, request.SourceArtifactFact)
+	source, err := compileDirectoryConnectorSource(source, request.SourceArtifactFact)
 	if err != nil {
 		return AdmittedEffectiveSourceProjection{}, err
 	}
@@ -88,22 +77,6 @@ func AdmitEffectiveSourceProjection(request EffectiveSourceProjectionRequest) (A
 		module = connectorPackWorkflowModule{WorkflowModule: module, source: source}
 	}
 	return AdmittedEffectiveSourceProjection{source: source, module: module, identity: identity}, nil
-}
-
-func triggerCatalogForEffectiveSource(source semanticview.Source, suppliedTriggers *providertriggers.CatalogSnapshot) (*providertriggers.CatalogSnapshot, error) {
-	bundle, ok := semanticview.Bundle(source)
-	if !ok || bundle == nil || bundle.PackInventory == nil {
-		return suppliedTriggers, nil
-	}
-	projection, err := packadmission.FromBundle(bundle)
-	if err != nil {
-		return nil, fmt.Errorf("load admitted pack projection for effective source: %w", err)
-	}
-	triggers := projection.ProviderTriggers
-	if suppliedTriggers != nil && !suppliedTriggers.Generation().Equal(triggers.Generation()) {
-		return nil, fmt.Errorf("supplied provider trigger catalog generation %s contradicts bundle effective inventory generation %s", suppliedTriggers.Generation().Diagnostic(), triggers.Generation().Diagnostic())
-	}
-	return triggers, nil
 }
 
 func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtimecorrelation.SourceArtifactFact, channelPlans []packs.SatisfactionPlan) (map[string]any, error) {
@@ -167,8 +140,8 @@ func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtime
 			})
 		}
 		sort.Slice(provenanceValues, func(left, right int) bool {
-			leftKey := provenanceValues[left]["provider"].(string) + "\x00" + provenanceValues[left]["event"].(string)
-			rightKey := provenanceValues[right]["provider"].(string) + "\x00" + provenanceValues[right]["event"].(string)
+			leftKey := provenanceValues[left]["provider"].(string) + "\x00" + provenanceValues[left]["event"].(string) + "\x00" + strings.Join(provenanceValues[left]["project_scopes"].([]string), "\x00")
+			rightKey := provenanceValues[right]["provider"].(string) + "\x00" + provenanceValues[right]["event"].(string) + "\x00" + strings.Join(provenanceValues[right]["project_scopes"].([]string), "\x00")
 			return leftKey < rightKey
 		})
 		triggerValue = map[string]any{"catalog_generation": generation.Diagnostic(), "events": provenanceValues}
