@@ -1616,7 +1616,7 @@ func buildRuntimeComposition(ctx context.Context, req runtimeCompositionRequest)
 		}
 		publicHandler := http.NotFoundHandler()
 		if inboundHandler != nil {
-			publicHandler = registrationController.Handler(inboundHandler)
+			publicHandler = runtimeProcessInboundHandler{contexts: runtimeContextManager, publicRegistration: registrationController}
 		}
 		publicExposure, controllerErr = runtimepublicingress.NewController(runtimepublicingress.Options{
 			Mode: publicIngressMode, PublicOrigin: opts.PublicWebhookBaseURL, ListenAddress: opts.PublicWebhookListen,

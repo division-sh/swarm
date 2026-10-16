@@ -673,6 +673,35 @@ func (c *ProviderRegistrationController) callbackTargetCurrent(ctx context.Conte
 	return c.opts.Readiness.CallbackTargetCurrent(ctx, c.opts.Now().UTC(), alias, provider, token)
 }
 
+// ExposureCurrent shares readiness's exposure predicate without requiring an
+// unrelated managed registration to be ready before an author route executes.
+func (c *ProviderRegistrationController) ExposureCurrent(ctx context.Context) bool {
+	if c == nil || c.opts.Readiness == nil {
+		return false
+	}
+	evaluated := c.opts.Readiness.evaluate(ctx, c.opts.Now().UTC())
+	return evaluated.output.PublicIngressEnabled && evaluated.output.Exposure != nil && evaluated.exposureReady &&
+		c.snapshot.currentRevision(evaluated.snapshot.revision)
+}
+
+// OwnsRoute also retains unresolved withdrawn registrations. It is only an
+// additional callback fence; a negative result never admits an author route.
+func (c *ProviderRegistrationController) OwnsRoute(alias, provider string) bool {
+	if c == nil || c.snapshot == nil {
+		return true
+	}
+	snapshot := c.snapshot.capture()
+	if _, selected := snapshot.routes[registrationRouteKey(alias, provider)]; selected {
+		return true
+	}
+	for _, state := range snapshot.registrations {
+		if state.Pair.Target.Alias == alias && state.Pair.Target.Provider == provider {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *ProviderRegistrationController) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")

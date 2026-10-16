@@ -35,16 +35,17 @@ const inboundWebhookMaxBodyBytes = 1 << 20
 type InboundPersistence = runtimeinbound.Runner
 
 type InboundTarget struct {
-	BundleHash          string
-	ServiceID           string
-	FlowPath            string
-	RunID               string
-	Generation          int64
-	PublicationSequence int64
-	Alias               string
-	Provider            string
-	SigningSecret       string
-	AdmissionPlan       providertriggers.InboundAdmissionPlan
+	BundleHash            string
+	ServiceID             string
+	FlowPath              string
+	RunID                 string
+	Generation            int64
+	PublicationSequence   int64
+	Alias                 string
+	Provider              string
+	SigningSecret         string
+	AdmissionPlan         providertriggers.InboundAdmissionPlan
+	registrationAdmission func(context.Context) error
 }
 
 type InboundGateway struct {
@@ -261,6 +262,12 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		return
 	}
 	validate := func() bool {
+		if target.registrationAdmission != nil {
+			if err := target.registrationAdmission(r.Context()); err != nil {
+				http.Error(w, "ingress registration admission became stale", http.StatusServiceUnavailable)
+				return false
+			}
+		}
 		if err := validateCredentials(r.Context()); err != nil {
 			http.Error(w, "standing ingress credential admission became stale; restart or explicitly admit fresh credentials", http.StatusServiceUnavailable)
 			return false
