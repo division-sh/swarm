@@ -153,10 +153,20 @@ func TestS1EffectiveReadmissionPreservesUnchangedAndFreshSources(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			expected := map[string]runtimecontracts.ToolSchemaEntry{}
+			for _, flow := range []string{".", "child", "sibling", "inherited"} {
+				node, _ := runtimeidentity.AdmitExecutableNodeDeclaration(flow, "sender")
+				tool, found := first.Source().ActivityToolEntry(node, "shared")
+				if !found {
+					t.Fatalf("unchanged fixture lost %s contract", flow)
+				}
+				expected[flow] = tool
+			}
 			again, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: first.Source(), SourceArtifactFact: fact})
 			if err != nil || !again.Identity().Equal(first.Identity()) {
 				t.Fatalf("unchanged repeated admission did not retain identity: %v", err)
 			}
+			assertS1FrozenActivityContracts(t, again.Source(), expected)
 			members := s1ReadmissionMembers(withProvider)
 			members["child/tools.yaml"] = members["tools.yaml"]
 			fresh, newRoot, _ := loadS1EffectiveProviderScope(t, members)
@@ -170,6 +180,8 @@ func TestS1EffectiveReadmissionPreservesUnchangedAndFreshSources(t *testing.T) {
 			if before.OutputSchema().Equal(after.OutputSchema()) {
 				t.Fatal("fresh source failed to admit its actual changed contract")
 			}
+			expected["child"] = expected["."]
+			assertS1FrozenActivityContracts(t, changed.Source(), expected)
 		})
 	}
 }
