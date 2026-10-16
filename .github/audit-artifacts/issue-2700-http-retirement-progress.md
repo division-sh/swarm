@@ -73,6 +73,7 @@ apply, preflight, acknowledgment-loss and post-commit controls remain mandatory.
 | amendment2-platform-served-consumers-race3-candidate1.log | PASS race x3: publicingress8.182s/serveapp187.339s/cliapp2.697s. Native-inbox startup, served restart and readback-failure readiness refusal each execute both stores x3 (18/18); all selected provider-registration lifecycle, rotation/currentness, prelaunch-marker and actual text/JSON teaching controls pass. Original business bounds unchanged, normal host load. |
 | amendment2-imported-platform-read-policy-race3-candidate1.log | PASS tools1.729s, race x3. The actual shipped identify and command-read tools execute through ordinary authored-tool admission: interrupted transport and complete503 remain distinct typed outcomes; each uses one write_or_unknown managed attempt, one physical call and one settlement, and exact logical replay cannot redispatch. Existing managed HTTP/native-search outcomes also pass. Component fake-store accounting, not R04 native takeover credit. |
 | amendment2-platform-owner-guards-count1.log | PASS after the specification update: operation inventory0.139s, public-ingress architecture/SQL census0.018s, canonical execution-tool projection0.008s and channel-activation consumer ownership0.009s. These are selected affected guards, not full preflight or hosted-tier credit. |
+| amendment2-runtime-teaching-consumer-race3-candidate1.log | PASS runtime1.085s, race x3: all4 retired authored class declarations refuse at shared source admission with the new exact flow teaching message. Validation-source refusal only, not runtime activity execution credit. |
 | amendment2-platform-complexity.log | PASS exact signed3a243803935dd466112fd3e83f3cf800da4855e3 against signed2c0c2349c0a46af5cfd0d34f7aa111f37cfa0959: cognitive hotspots537->537 and cyclomatic247->247, unchanged reviewed policy. Evidence test-results/2700-amendment2-platform-complexity/{base,head,delta}.json. |
 
 The platform specification now states the same exact operation/slot policy and
@@ -88,6 +89,7 @@ platform-race3 44fa85aba552e1eb13616fa45881b8f40b2337e5b8ae6bacb7c0566e40c966de;
 served-race3 49f876cc7a05e05d937bbbf899b6cbb15d45ac46cc546da198554789789a1c32;
 authored-import-race3 2c623fff90091a2325ed251a0d14c0ac6c861192bdc533995779c627e815ac2c;
 owner-guards d0174c01f2e5c1e58d64194944dbe337a2b42b7942eb44d0098cf744ac53a8b0;
+runtime-teaching cc006a86723a1048e69047dd9d379b81eb95cd5aea5a38a5b5369d313ee03000;
 complexity30f4f368d05e670e5391808aea082b49b27bfe1659519f495f861a76b65b8333.
 
 This local code slice is signed3a243803935dd466112fd3e83f3cf800da4855e3.
