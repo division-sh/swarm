@@ -1010,8 +1010,8 @@ func CountNestedContinuationHandoffsTx(ctx context.Context, tx *sql.Tx, event st
 	return out, nil
 }
 
-func ReadRepeatedFanOutSnapshotTx(ctx context.Context, tx *sql.Tx, run string) ([8]int64, error) {
-	var out [8]int64
+func ReadRepeatedFanOutSnapshotTx(ctx context.Context, tx *sql.Tx, run string) ([7]int64, error) {
+	var out [7]int64
 	err := tx.QueryRowContext(ctx, `SELECT
 		(SELECT COUNT(*) FROM events WHERE run_id=$1),
 		(SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1),
@@ -1019,10 +1019,9 @@ func ReadRepeatedFanOutSnapshotTx(ctx context.Context, tx *sql.Tx, run string) (
 		(SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1),
 		(SELECT COALESCE(SUM(revision),0) FROM entity_state WHERE run_id=$1),
 		(SELECT COUNT(*) FROM entity_mutations WHERE run_id=$1),
-		(SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1),
-		(SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id=$1))`, run).Scan(&out[0], &out[1], &out[2], &out[3], &out[4], &out[5], &out[6], &out[7])
+		(SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id=$1))`, run).Scan(&out[0], &out[1], &out[2], &out[3], &out[4], &out[5], &out[6])
 	if err != nil {
-		return [8]int64{}, err
+		return [7]int64{}, err
 	}
 	return out, nil
 }

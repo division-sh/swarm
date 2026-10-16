@@ -27,7 +27,7 @@ func inheritedFanOutBoundaryAllowances() map[string]historicalBoundaryAllowance 
 	edge("runtime/engine::Executor.PrepareFanOutEvaluation", "runtime/fanoutobligation::PrepareOrdinalEmission", "preparation admits the pinned immutable intent before retaining its chunk frame")
 	edge("runtime/engine::FanOutEvaluation.EvaluateOrdinal", "runtime/fanoutobligation::PrepareOrdinalEmission", "each prepared ordinal independently consumes the canonical intent and execution relation")
 	edge("store/internal/backend/pipelinepersistence::commitFanOutChunk", "runtime/fanoutobligation::PrepareOrdinalEmission", "locked intent and trigger select exact ordinal")
-	edge("runtime/bus::EventBus.prepareEnginePublicationsWithMember", "runtime/bus::EventBus.admitEnginePublishEvent", "the common engine planning owner prepares inherited origin; prospective state cannot authorize its commit")
+	edge("runtime/bus::EventBus.admitEnginePublicationOccurrence", "runtime/bus::EventBus.admitEnginePublishEvent", "the common engine planning owner prepares inherited origin; prospective state cannot authorize its commit")
 	edge("runtime/bus::EventBus.PrepareFanOutPublications", "runtime/bus::EventBus.admitEnginePublishEvent", "bounded group preparation admits each member through the same event owner before claiming")
 	edge("store/internal/backend/pipelinepersistence::publicationGroup.ClaimBatch", "runtime/fanoutobligation::ValidateCommittedOrdinalEvent", "each exact grouped ordinal is validated before any member claim is created")
 	edge("runtime/bus::EnginePublicationPlan.ValidateDurablePublicationPlan", "runtime/bus::PublicationCommand.ValidateFanOut", "pure prepared-plan shape, not write authority")

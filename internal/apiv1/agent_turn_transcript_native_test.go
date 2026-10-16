@@ -61,12 +61,13 @@ func TestAgentTurnsOwnPublicConversationTranscriptBothStores(t *testing.T) {
 				at := time.Now().UTC().Truncate(time.Second)
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: at.Add(-time.Hour)})
 				storetest.RequireStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{
-					Config: runtimeactors.AgentConfig{
+					Config: apiExecutionFixtureConfig(t, "anthropic", runtimeactors.AgentConfig{
 						ID: agentID, Identity: identity, Role: "worker", Type: "managed", Model: "cheap",
 						ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowPath: "flow/a",
 						Intent: apiTestResolvedIntent(t, agentID, "Report the persisted transcript."), Memory: agentmemory.Plan{Enabled: memory},
-					}, Status: "active", StartedAt: at.Add(-time.Minute),
+					}), Status: "active", StartedAt: at.Add(-time.Minute),
 				})
+				ctx = admitAPITestAgentExecution(t, ctx, selected, authorActivityTestSourceArtifactFact)
 				sessionID := uuid.NewString()
 				if memory {
 					seedCtx := effects.WithDifferentOwner(ctx, effects.OwnerBuildTestInfrastructure)
