@@ -135,6 +135,10 @@ func TestNativeToolRunSeedCallerInventoryIsComplete(t *testing.T) {
 		"TestSaveEntityFieldAcknowledgedErrorReturnsCommittedToolResponseOnBothStores": 2,
 		"newEntityToolTestHarnessWithBundleAndLegacyAccess":                            1,
 		"TestEntityOperationSurfaceFreshIndexAdmissionOnBothStores":                    1,
+		// Q10 readback and source-bound denial fixtures retain the selected run setup owner.
+		"TestQ10AgentReadbackAndQueryOwnershipBothStores":                                   1,
+		"TestQ10RoleScopedReadLifecycleBothStores":                                          1,
+		"TestEntityTools_SaveEntityFieldCrossFlowDenialPreservesSelectedForkRuntimeLineage": 1,
 	} {
 		if counts[name] != want {
 			t.Fatalf("run setup caller %s=%d, want%d", name, counts[name], want)

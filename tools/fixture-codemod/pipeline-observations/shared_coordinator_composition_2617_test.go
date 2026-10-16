@@ -82,6 +82,25 @@ func validateSharedCoordinatorComposition2617(row recipe, actual string, directi
 }
 
 func reviewedSharedCoordinatorCurrentBody2617(row recipe, actual string, prior reviewedSuccessorPacket2617) (string, error) {
+	current, found, err := q10SharedCoordinatorCurrentSource(row)
+	if err != nil {
+		return "", err
+	}
+	if found {
+		want, wantErr := canonicalFunction(current)
+		got, actualErr := canonicalFunction(actual)
+		if wantErr != nil || actualErr != nil || want != got {
+			return "", fmt.Errorf("account readback differs from exact Q10 header/data successor")
+		}
+		if _, err := reviewedSharedCoordinatorPriorBody2617(row, row.Successor, prior); err != nil {
+			return "", err
+		}
+		return current, nil
+	}
+	return reviewedSharedCoordinatorPriorBody2617(row, actual, prior)
+}
+
+func reviewedSharedCoordinatorPriorBody2617(row recipe, actual string, prior reviewedSuccessorPacket2617) (string, error) {
 	_, composed, err := sharedCoordinatorComposition2617(row)
 	if err != nil {
 		return "", err

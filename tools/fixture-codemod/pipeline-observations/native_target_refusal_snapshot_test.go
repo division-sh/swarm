@@ -60,13 +60,51 @@ func TestNativeTargetRefusalSnapshotsPreserveExactReadersAndAssertions(t *testin
 			if err != nil || restoreErr != nil || original != restored {
 				t.Fatal("snapshot repair changed original construction, refusal, field assertions or counts")
 			}
-			if files, changes, err := prepareFiles("../../..", []recipe{row}); err != nil || len(files) != 0 || len(changes) != 0 {
+			current := row.Successor
+			var currentEdits [][2]string
+			switch cut.family {
+			case "native-wrong-run-target":
+				currentEdits = [][2]string{
+					{"persisted, found, err := fixture.Persistence.store.LoadEntityState(ctx, testRunScopedWorkflowInstanceFromContext(ctx, wrongRunID), runtimeidentity.NormalizeEntityID(entityID))", "persisted, err := fixture.Persistence.store.LoadTargetPersistence(ctx, testRunScopedWorkflowInstanceFromContext(ctx, wrongRunID), runtimeidentity.NormalizeEntityID(entityID))"},
+					{"marker := string(persisted.Fields)", "marker := string(persisted.State.Fields)"},
+					{"err != nil || !found || !strings.Contains(marker, \"unchanged\")", "err != nil || persisted.Presence == WorkflowTargetPersistenceAbsent || !strings.Contains(marker, \"unchanged\")"},
+				}
+			case "native-missing-header-target":
+				currentEdits = [][2]string{
+					{"persisted, found, err := fixture.Persistence.store.LoadEntityState(ctx, testRunScopedWorkflowInstanceForRun(testPipelineRunID, route.InstancePath), runtimeidentity.NormalizeEntityID(entityID))", "persisted, err := fixture.Persistence.store.LoadTargetPersistence(ctx, testRunScopedWorkflowInstanceForRun(testPipelineRunID, route.InstancePath), runtimeidentity.NormalizeEntityID(entityID))"},
+					{"fieldsErr := json.Unmarshal(persisted.Fields, &fields)", "fieldsErr := json.Unmarshal(persisted.State.Fields, &fields)"},
+					{"err != nil || !found || persisted.CurrentState != \"active\" || persisted.Revision != 1 || fieldsErr != nil || fields[\"marker\"] != \"unchanged\"", "err != nil || persisted.Presence != WorkflowTargetPersistenceStateOnly || fieldsErr != nil || fields[\"marker\"] != \"unchanged\""},
+					{"t.Fatalf(\"rejected child state changed: found=%t err=%v state=%#v\", found, err, persisted)", "t.Fatalf(\"rejected child state changed or gained lifecycle: err=%v state=%#v\", err, persisted)"},
+				}
+			}
+			for _, edit := range currentEdits {
+				if strings.Count(current, edit[0]) != 1 {
+					t.Fatalf("missing or ambiguous historical target read: %q", edit[0])
+				}
+				current = strings.Replace(current, edit[0], edit[1], 1)
+			}
+			currentGuard := row
+			currentGuard.Before, currentGuard.After, currentGuard.Successor = current, current, ""
+			if files, changes, err := prepareFiles("../../..", []recipe{currentGuard}); err != nil || len(files) != 0 || len(changes) != 0 {
 				t.Fatalf("current exact-snapshot successor diverged: %v", err)
+			}
+			if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+row.Successor), currentGuard); err == nil || changed {
+				t.Fatal("retired data-row lifecycle reader accepted as current")
+			}
+			for _, edit := range currentEdits {
+				mutant := strings.Replace(current, edit[1], edit[0], 1)
+				if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+mutant), currentGuard); err == nil || changed {
+					t.Fatalf("lost paired target/presence/business-field read accepted: %q", edit[1])
+				}
 			}
 			for _, token := range []string{"LoadTargetPersistence", "runtimeidentity.NormalizeEntityID(entityID)", "!reflect.DeepEqual", "err != nil"} {
 				mutant := strings.Replace(row.Successor, cut.after, strings.Replace(cut.after, token, "foreignCut", 1), 1)
 				if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+mutant), row); err == nil || changed {
 					t.Fatalf("weakened snapshot owner, identity, equality or read-error check accepted: %s", token)
+				}
+				mutant = strings.Replace(current, cut.after, strings.Replace(cut.after, token, "foreignCut", 1), 1)
+				if _, changed, err := rewriteFunction(row.File, []byte("package probe\n"+mutant), currentGuard); err == nil || changed {
+					t.Fatalf("current snapshot lost owner, identity, equality or error check: %s", token)
 				}
 			}
 		})

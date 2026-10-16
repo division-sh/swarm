@@ -86,6 +86,8 @@ func TestJSONCopyReceiptDisabledAndCollectorReplacement(t *testing.T) {
 	BeginWorkflowHeaderJSON(ctx, 9).End(nil)
 	BeginEntityMetadataJSON(ctx, 11, 2).End(nil)
 	BeginEventHistoryJSON(ctx, EventJSON, 11, 2).End(nil)
+	BeginLifecycleStateJSON(ctx, 13).End(nil)
+	BeginEntityDataJSON(ctx, 15).End(nil)
 	var slot Slot
 	first, restore, err := slot.Install(Options{})
 	if err != nil {
@@ -124,6 +126,73 @@ func TestJSONCopyReceiptDisabledAndCollectorReplacement(t *testing.T) {
 	}
 	if got := second.Snapshot(); got.Active != 0 || got.Total.JSONCopies.WorkflowHeader.UncommittedBytes != 7 || got.Total.JSONCopies.EntityMetadata != (CopyCounts{}) {
 		t.Fatalf("successor borrowed old bytes/outcomes: %+v", got)
+	}
+}
+
+func TestStateJSONReceiptSeparationAndOutcomes(t *testing.T) {
+	for _, outcome := range []string{"commit", "rollback", "indeterminate", "failed", "unfinished"} {
+		t.Run(outcome, func(t *testing.T) {
+			var slot Slot
+			collector, restore, err := slot.Install(Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restore()
+			a := slot.Begin(false, true)
+			a.Begun()
+			ctx := WithAttempt(context.Background(), a)
+			Mark(ctx, WorkflowMutation)
+			for _, write := range []*JSONCopyWrite{BeginLifecycleStateJSON(ctx, 31), BeginEntityDataJSON(ctx, 17)} {
+				if outcome == "failed" {
+					write.End(errors.New("write refused"))
+				} else if outcome != "unfinished" {
+					write.End(nil)
+					write.End(errors.New("duplicate end"))
+				}
+			}
+			switch outcome {
+			case "commit":
+				a.BeforeCommit()
+				a.Committed()
+			case "indeterminate":
+				a.BeforeCommit()
+				a.RollbackAttempted()
+			default:
+				a.RollbackAttempted()
+			}
+			a.Finish(nil)
+			got := collector.Snapshot()
+			for _, bucket := range []struct {
+				counts CopyCounts
+				bytes  uint64
+			}{{got.Total.JSONCopies.LifecycleState, 31}, {got.Total.JSONCopies.EntityData, 17}} {
+				want := CopyCounts{Calls: 1, Copies: 1, SubmittedBytes: bucket.bytes}
+				switch outcome {
+				case "failed":
+					want.FailedCalls, want.FailedBytes = 1, bucket.bytes
+				case "unfinished":
+					want.UnfinishedBytes = bucket.bytes
+				default:
+					want.SucceededCalls, want.SucceededBytes = 1, bucket.bytes
+					if outcome == "commit" {
+						want.CommittedBytes = bucket.bytes
+					} else {
+						want.RollbackAttemptedBytes = bucket.bytes
+						if outcome == "indeterminate" {
+							want.IndeterminateBytes = bucket.bytes
+						} else {
+							want.UncommittedBytes = bucket.bytes
+						}
+					}
+				}
+				if bucket.counts != want {
+					t.Fatalf("%s state-write receipt=%+v want=%+v", outcome, bucket.counts, want)
+				}
+			}
+			if got.Active != 0 || got.Total.JSONCopies.WorkflowHeader != (CopyCounts{}) || got.Total.JSONCopies.EntityMetadata != (CopyCounts{}) || got.Retained.JSONCopies != got.Total.JSONCopies || got.ByOperation[WorkflowMutation].JSONCopies != got.Total.JSONCopies {
+				t.Fatalf("state-write receipt mixed owner/attempt attribution: %+v", got)
+			}
+		})
 	}
 }
 

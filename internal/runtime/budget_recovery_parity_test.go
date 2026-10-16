@@ -268,17 +268,15 @@ func seedBudgetRecoveryEntity(t *testing.T, ctx context.Context, db *sql.DB, pos
 	}
 	query := `
 		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES (?, ?, ?, 'budget_recovery', ?, '{}', '{}', '{}', 1, ?, ?, ?)
+			run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
+		) VALUES (?, ?, ?, 'budget_recovery', '{}', ?, ?)
 	`
-	args := []any{runID, entityID, instance, state, at, at, at}
+	args := []any{runID, entityID, instance, at, at}
 	if postgres {
 		query = `
 			INSERT INTO entity_state (
-				run_id, entity_id, flow_instance, entity_type, current_state,
-				gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-			) VALUES ($1::uuid, $2::uuid, $3, 'budget_recovery', $4, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $5, $6, $7)
+				run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at
+			) VALUES ($1::uuid, $2::uuid, $3, 'budget_recovery', '{}'::jsonb, $4, $5)
 		`
 	}
 	if _, err := db.ExecContext(ctx, query, args...); err != nil {

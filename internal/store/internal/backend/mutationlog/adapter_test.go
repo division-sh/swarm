@@ -7,6 +7,7 @@ import (
 	"time"
 
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
 func TestMutationLogWriterRequiresProtocolAttempt(t *testing.T) {
@@ -26,5 +27,12 @@ func TestMutationLogWriterRequiresProtocolAttempt(t *testing.T) {
 				t.Fatalf("write without attempt: %v", err)
 			}
 		})
+	}
+}
+
+func TestConstructionWriterRequiresLiveAttempt(t *testing.T) {
+	err := InsertConstructionEntityStateDiff(context.Background(), nil, nil, pipeline.WorkflowEngineStateRecord{}, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.Writer{}, &ConstructionOccurrence{}, true)
+	if err == nil || err.Error() != "mutation attempt is not active" {
+		t.Fatalf("construction without live attempt: %v", err)
 	}
 }

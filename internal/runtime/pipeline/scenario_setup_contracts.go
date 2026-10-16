@@ -19,7 +19,7 @@ type ScenarioSetupEntityRequest struct {
 	EntityID     string
 	FlowInstance string
 	EntityType   string
-	CurrentState string
+	CurrentState *string
 	Fields       map[string]any
 	Gates        map[string]bool
 }
@@ -36,7 +36,7 @@ type ScenarioSetupEntityResult struct {
 	EntityID     string
 	FlowInstance string
 	EntityType   string
-	CurrentState string
+	CurrentState *string
 }
 
 func (r ScenarioSetupResult) Normalized() ScenarioSetupResult {
@@ -46,7 +46,10 @@ func (r ScenarioSetupResult) Normalized() ScenarioSetupResult {
 		r.Entities[i].EntityID = strings.TrimSpace(r.Entities[i].EntityID)
 		r.Entities[i].FlowInstance = strings.Trim(strings.TrimSpace(r.Entities[i].FlowInstance), "/")
 		r.Entities[i].EntityType = strings.TrimSpace(r.Entities[i].EntityType)
-		r.Entities[i].CurrentState = strings.TrimSpace(r.Entities[i].CurrentState)
+		if r.Entities[i].CurrentState != nil {
+			state := strings.TrimSpace(*r.Entities[i].CurrentState)
+			r.Entities[i].CurrentState = &state
+		}
 	}
 	return r
 }

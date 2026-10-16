@@ -68,27 +68,27 @@ func (s *PipelinePostgresOwner) CommitScenarioSetup(ctx context.Context, command
 				if len(plans) != 0 && entity.EntityID == plans[0].Identity.EntityID {
 					continue
 				}
-				fieldsJSON, gatesJSON, fieldsAny, gatesAny, err := scenarioSetupEntityJSON(entity)
+				if err := requireScenarioImportWithoutHeader(txctx, tx, req.RunID, entity); err != nil {
+					return err
+				}
+				fieldsJSON, _, fieldsAny, _, err := scenarioSetupEntityJSON(entity)
 				if err != nil {
 					return err
 				}
 				var storedRunID, storedEntityID string
 				err = tx.QueryRowContext(txctx, `
 				INSERT INTO entity_state (
-					run_id, entity_id, flow_instance, entity_type, name,
-					current_state, gates, fields, bookkeeping, accumulator, revision,
-					entered_state_at, created_at, updated_at
+					run_id, entity_id, flow_instance, entity_type, name, fields, created_at, updated_at
 				)
 				VALUES (
 					$1::uuid, $2::uuid, $3, $4, NULL,
-					$5, $6::jsonb, $7::jsonb, '{}'::jsonb, '{}'::jsonb, 1,
-					$8, $8, $8
+					$5::jsonb, $6, $6
 				)
 				ON CONFLICT (run_id, entity_id) DO NOTHING
 				RETURNING run_id::text, entity_id::text
-			`, req.RunID, entity.EntityID, entity.FlowInstance, entity.EntityType, entity.CurrentState, string(gatesJSON), string(fieldsJSON), req.CreatedAt).Scan(&storedRunID, &storedEntityID)
+				`, req.RunID, entity.EntityID, entity.FlowInstance, entity.EntityType, string(fieldsJSON), req.CreatedAt).Scan(&storedRunID, &storedEntityID)
 				if err == sql.ErrNoRows {
-					if err := validateExistingPostgresScenarioSetupEntity(txctx, tx, req.RunID, entity, fieldsJSON, gatesJSON); err != nil {
+					if err := validateExistingPostgresScenarioSetupEntity(txctx, tx, req.RunID, entity, fieldsJSON); err != nil {
 						return err
 					}
 					continue
@@ -102,9 +102,7 @@ func (s *PipelinePostgresOwner) CommitScenarioSetup(ctx context.Context, command
 				if err := privatemutationlog.InsertEntityStateDiff(txctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 					return s.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
 				}), storedEntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
-					CurrentState: entity.CurrentState,
-					Fields:       fieldsAny,
-					Gates:        gatesAny,
+					Fields: fieldsAny,
 				}, scenarioSetupMutationWriter()); err != nil {
 					return fmt.Errorf("record postgres scenario setup entity mutation %s: %w", entity.Alias, err)
 				}
@@ -169,20 +167,20 @@ func (s *PipelineSQLiteOwner) CommitScenarioSetup(ctx context.Context, command r
 				if len(plans) != 0 && entity.EntityID == plans[0].Identity.EntityID {
 					continue
 				}
-				fieldsJSON, gatesJSON, fieldsAny, gatesAny, err := scenarioSetupEntityJSON(entity)
+				if err := requireScenarioImportWithoutHeader(txctx, tx, req.RunID, entity); err != nil {
+					return err
+				}
+				fieldsJSON, _, fieldsAny, _, err := scenarioSetupEntityJSON(entity)
 				if err != nil {
 					return err
 				}
 				res, err := tx.ExecContext(txctx, `
 				INSERT INTO entity_state (
-					run_id, entity_id, flow_instance, entity_type, name,
-					current_state, gates, fields, bookkeeping, accumulator, revision,
-					entered_state_at, created_at, updated_at
+					run_id, entity_id, flow_instance, entity_type, name, fields, created_at, updated_at
 				)
-				VALUES (?, ?, ?, ?, NULL, ?, ?, ?, '{}', '{}', 1, ?, ?, ?)
+				VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
 				ON CONFLICT (run_id, entity_id) DO NOTHING
-			`, req.RunID, entity.EntityID, entity.FlowInstance, entity.EntityType, entity.CurrentState,
-					string(gatesJSON), string(fieldsJSON), req.CreatedAt.UTC(), req.CreatedAt.UTC(), req.CreatedAt.UTC())
+				`, req.RunID, entity.EntityID, entity.FlowInstance, entity.EntityType, string(fieldsJSON), req.CreatedAt.UTC(), req.CreatedAt.UTC())
 				if err != nil {
 					return fmt.Errorf("insert sqlite scenario setup entity %s: %w", entity.Alias, err)
 				}
@@ -191,7 +189,7 @@ func (s *PipelineSQLiteOwner) CommitScenarioSetup(ctx context.Context, command r
 					return fmt.Errorf("inspect sqlite scenario setup entity insert %s: %w", entity.Alias, err)
 				}
 				if rows == 0 {
-					if err := validateExistingSQLiteScenarioSetupEntity(txctx, tx, req.RunID, entity, fieldsJSON, gatesJSON); err != nil {
+					if err := validateExistingSQLiteScenarioSetupEntity(txctx, tx, req.RunID, entity, fieldsJSON); err != nil {
 						return err
 					}
 					continue
@@ -202,9 +200,7 @@ func (s *PipelineSQLiteOwner) CommitScenarioSetup(ctx context.Context, command r
 				if err := privatemutationlog.InsertSQLiteEntityStateDiff(txctx, attempt, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 					return s.RunLifecycleSQLiteOwner.RequireActiveSourceTx(ctx, tx, runID)
 				}), entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
-					CurrentState: entity.CurrentState,
-					Fields:       fieldsAny,
-					Gates:        gatesAny,
+					Fields: fieldsAny,
 				}, scenarioSetupMutationWriter(), req.CreatedAt); err != nil {
 					return fmt.Errorf("record sqlite scenario setup entity mutation %s: %w", entity.Alias, err)
 				}
@@ -232,6 +228,12 @@ func acknowledgeScenarioSetup(result runtimepipeline.ScenarioSetupResult) runtim
 }
 
 func validateScenarioConstruction(ctx context.Context, req runtimepipeline.ScenarioSetupRequest, activations []runtimebus.FlowInstanceActivationCommand) ([]runtimepipeline.FlowInstanceActivationPlan, error) {
+	for _, entity := range req.Entities {
+		constructedRoot := len(activations) == 1 && entity.EntityID == req.RunID && entity.FlowInstance == req.RunID
+		if !constructedRoot && (entity.CurrentState != nil || entity.Gates != nil) {
+			return nil, fmt.Errorf("data-only entity %s cannot carry lifecycle inputs", entity.Alias)
+		}
+	}
 	if len(activations) == 0 {
 		return nil, nil
 	}
@@ -255,25 +257,43 @@ func validateScenarioConstruction(ctx context.Context, req runtimepipeline.Scena
 		if entity.EntityID != req.RunID {
 			continue
 		}
-		fields, gates, _, _, err := scenarioSetupEntityJSON(entity)
-		if err != nil {
+		if err := validateScenarioConstructionSeed(entity, plan); err != nil {
 			return nil, err
-		}
-		record, err := plan.PersistenceRecord()
-		if err != nil {
-			return nil, err
-		}
-		matchesType := entity.EntityType == record.EntityType
-		if record.EntityType == "" {
-			matchesType = entity.EntityType == "default" && len(entity.Fields) == 0
-		}
-		if !matchesType || entity.CurrentState != record.CurrentState ||
-			!scenarioSetupJSONEqual(string(fields), record.Fields) || !scenarioSetupJSONEqual(string(gates), record.Gates) {
-			return nil, fmt.Errorf("scenario construction changed explicit imported fields, stage or gates")
 		}
 		return []runtimepipeline.FlowInstanceActivationPlan{plan}, nil
 	}
 	return nil, fmt.Errorf("scenario construction has no exact root seed")
+}
+
+func validateScenarioConstructionSeed(entity runtimepipeline.ScenarioSetupEntityRequest, plan runtimepipeline.FlowInstanceActivationPlan) error {
+	fields, gates, _, _, err := scenarioSetupEntityJSON(entity)
+	if err != nil {
+		return err
+	}
+	record, err := plan.PersistenceRecord()
+	if err != nil {
+		return err
+	}
+	matchesType := entity.EntityType == record.EntityType
+	if record.EntityType == "" {
+		matchesType = entity.EntityType == "default" && len(entity.Fields) == 0
+	}
+	if !matchesType || entity.CurrentState == nil || *entity.CurrentState != record.CurrentState ||
+		!scenarioSetupJSONEqual(string(fields), record.Fields) || !scenarioSetupJSONEqual(string(gates), record.Gates) {
+		return fmt.Errorf("scenario construction changed explicit imported fields, stage or gates")
+	}
+	return nil
+}
+
+func requireScenarioImportWithoutHeader(ctx context.Context, tx *sql.Tx, runID string, entity runtimepipeline.ScenarioSetupEntityRequest) error {
+	var constructed bool
+	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM flow_instances WHERE run_id = $1 AND (entity_id = $2 OR instance_path = $3))`, runID, entity.EntityID, entity.FlowInstance).Scan(&constructed); err != nil {
+		return fmt.Errorf("admit data-only scenario owner: %w", err)
+	}
+	if constructed {
+		return fmt.Errorf("data-only entity %s conflicts with a constructed owner", entity.Alias)
+	}
+	return nil
 }
 
 func normalizeScenarioSetupRequest(req runtimepipeline.ScenarioSetupRequest) (runtimepipeline.ScenarioSetupRequest, error) {
@@ -315,18 +335,15 @@ func normalizeScenarioSetupRequest(req runtimepipeline.ScenarioSetupRequest) (ru
 		ids[entity.EntityID] = struct{}{}
 		entity.FlowInstance = strings.Trim(strings.TrimSpace(entity.FlowInstance), "/")
 		entity.EntityType = strings.TrimSpace(entity.EntityType)
-		entity.CurrentState = strings.TrimSpace(entity.CurrentState)
+		if entity.CurrentState != nil {
+			state := strings.TrimSpace(*entity.CurrentState)
+			entity.CurrentState = &state
+		}
 		if entity.EntityType == "" {
 			return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("entities[%d].entity_type is required", i)
 		}
-		if entity.CurrentState == "" {
-			return runtimepipeline.ScenarioSetupRequest{}, fmt.Errorf("entities[%d].current_state is required", i)
-		}
 		if entity.Fields == nil {
 			entity.Fields = map[string]any{}
-		}
-		if entity.Gates == nil {
-			entity.Gates = map[string]bool{}
 		}
 	}
 	return req, nil
@@ -345,7 +362,11 @@ func scenarioSetupEntityJSON(entity runtimepipeline.ScenarioSetupEntityRequest) 
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("marshal setup entity fields: %w", err)
 	}
-	gatesJSON, err := json.Marshal(entity.Gates)
+	gates := entity.Gates
+	if gates == nil {
+		gates = map[string]bool{}
+	}
+	gatesJSON, err := json.Marshal(gates)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("marshal setup entity gates: %w", err)
 	}
@@ -360,47 +381,42 @@ func scenarioSetupEntityJSON(entity runtimepipeline.ScenarioSetupEntityRequest) 
 type scenarioSetupEntitySnapshot struct {
 	FlowInstance string
 	EntityType   string
-	CurrentState string
 	Fields       string
-	Bookkeeping  string
-	Gates        string
-	Accumulator  string
-	Revision     int
 }
 
-func validateExistingPostgresScenarioSetupEntity(ctx context.Context, tx *sql.Tx, runID string, entity runtimepipeline.ScenarioSetupEntityRequest, fieldsJSON, gatesJSON json.RawMessage) error {
+func validateExistingPostgresScenarioSetupEntity(ctx context.Context, tx *sql.Tx, runID string, entity runtimepipeline.ScenarioSetupEntityRequest, fieldsJSON json.RawMessage) error {
 	var snapshot scenarioSetupEntitySnapshot
 	err := tx.QueryRowContext(ctx, `
-		SELECT flow_instance, entity_type, current_state, fields::text, bookkeeping::text, gates::text, accumulator::text, revision
+		SELECT flow_instance, entity_type, fields::text
 		FROM entity_state
 		WHERE run_id = $1::uuid AND entity_id = $2::uuid
-	`, runID, entity.EntityID).Scan(&snapshot.FlowInstance, &snapshot.EntityType, &snapshot.CurrentState, &snapshot.Fields, &snapshot.Bookkeeping, &snapshot.Gates, &snapshot.Accumulator, &snapshot.Revision)
+	`, runID, entity.EntityID).Scan(&snapshot.FlowInstance, &snapshot.EntityType, &snapshot.Fields)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("postgres scenario setup entity %s insert conflicted but no existing row was visible", entity.Alias)
 	}
 	if err != nil {
 		return fmt.Errorf("load existing postgres scenario setup entity %s: %w", entity.Alias, err)
 	}
-	return validateExistingScenarioSetupEntity(snapshot, entity, fieldsJSON, gatesJSON)
+	return validateExistingScenarioSetupEntity(snapshot, entity, fieldsJSON)
 }
 
-func validateExistingSQLiteScenarioSetupEntity(ctx context.Context, tx *sql.Tx, runID string, entity runtimepipeline.ScenarioSetupEntityRequest, fieldsJSON, gatesJSON json.RawMessage) error {
+func validateExistingSQLiteScenarioSetupEntity(ctx context.Context, tx *sql.Tx, runID string, entity runtimepipeline.ScenarioSetupEntityRequest, fieldsJSON json.RawMessage) error {
 	var snapshot scenarioSetupEntitySnapshot
 	err := tx.QueryRowContext(ctx, `
-		SELECT flow_instance, entity_type, current_state, fields, bookkeeping, gates, accumulator, revision
+		SELECT flow_instance, entity_type, fields
 		FROM entity_state
 		WHERE run_id = ? AND entity_id = ?
-	`, runID, entity.EntityID).Scan(&snapshot.FlowInstance, &snapshot.EntityType, &snapshot.CurrentState, &snapshot.Fields, &snapshot.Bookkeeping, &snapshot.Gates, &snapshot.Accumulator, &snapshot.Revision)
+	`, runID, entity.EntityID).Scan(&snapshot.FlowInstance, &snapshot.EntityType, &snapshot.Fields)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("sqlite scenario setup entity %s insert conflicted but no existing row was visible", entity.Alias)
 	}
 	if err != nil {
 		return fmt.Errorf("load existing sqlite scenario setup entity %s: %w", entity.Alias, err)
 	}
-	return validateExistingScenarioSetupEntity(snapshot, entity, fieldsJSON, gatesJSON)
+	return validateExistingScenarioSetupEntity(snapshot, entity, fieldsJSON)
 }
 
-func validateExistingScenarioSetupEntity(snapshot scenarioSetupEntitySnapshot, entity runtimepipeline.ScenarioSetupEntityRequest, fieldsJSON, gatesJSON json.RawMessage) error {
+func validateExistingScenarioSetupEntity(snapshot scenarioSetupEntitySnapshot, entity runtimepipeline.ScenarioSetupEntityRequest, fieldsJSON json.RawMessage) error {
 	var mismatches []string
 	if snapshot.FlowInstance != entity.FlowInstance {
 		mismatches = append(mismatches, "flow_instance")
@@ -408,23 +424,8 @@ func validateExistingScenarioSetupEntity(snapshot scenarioSetupEntitySnapshot, e
 	if snapshot.EntityType != entity.EntityType {
 		mismatches = append(mismatches, "entity_type")
 	}
-	if snapshot.CurrentState != entity.CurrentState {
-		mismatches = append(mismatches, "current_state")
-	}
-	if snapshot.Revision != 1 {
-		mismatches = append(mismatches, "revision")
-	}
 	if !scenarioSetupJSONEqual(snapshot.Fields, fieldsJSON) {
 		mismatches = append(mismatches, "fields")
-	}
-	if !scenarioSetupJSONEqual(snapshot.Bookkeeping, json.RawMessage(`{}`)) {
-		mismatches = append(mismatches, "bookkeeping")
-	}
-	if !scenarioSetupJSONEqual(snapshot.Gates, gatesJSON) {
-		mismatches = append(mismatches, "gates")
-	}
-	if !scenarioSetupJSONEqual(snapshot.Accumulator, json.RawMessage(`{}`)) {
-		mismatches = append(mismatches, "accumulator")
 	}
 	if len(mismatches) == 0 {
 		return nil

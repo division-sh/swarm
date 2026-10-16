@@ -60,6 +60,13 @@ func TestForkedSourceCanonicalTargetOwnersExcludeAndPreserveReadbackBothStores(t
 			if err != nil || !found || before.Identity() != child || before.RunState() != runtimerunlifecycle.StateRunning {
 				t.Fatalf("canonical owners before freeze = %#v, %v", before, err)
 			}
+			if err := before.ValidateSelection(lookup); err != nil {
+				t.Fatal(err)
+			}
+			original, err := selected.LoadWorkflowTargetPersistence(ctx, exact, runtimeidentity.NormalizeEntityID(child.EntityID))
+			if err != nil || original.Presence != runtimepipeline.WorkflowTargetPersistenceComplete {
+				t.Fatalf("initial constructed target = %#v, %v", original, err)
+			}
 			snapshot, disposition, err := selected.ForkRunSource(ctx, runtimerunlifecycle.ForkSourceRequest{
 				RunID: runID, ContinuedAsRunID: childRunID, EndedAt: time.Now().UTC(),
 			})
@@ -73,9 +80,9 @@ func TestForkedSourceCanonicalTargetOwnersExcludeAndPreserveReadbackBothStores(t
 			if readiness, present := after.Readiness(); !present || readiness.Eligible() {
 				t.Fatalf("forked source remained executable: %+v present=%t", readiness, present)
 			}
-			record, found, err := selected.LoadWorkflowEntityState(ctx, exact, runtimeidentity.NormalizeEntityID(child.EntityID))
-			if err != nil || !found || record.EntityID != child.EntityID || record.CurrentState != "active" {
-				t.Fatalf("historical state must remain readable = %#v, found=%t, %v", record, found, err)
+			record, err := selected.LoadWorkflowTargetPersistence(ctx, exact, runtimeidentity.NormalizeEntityID(child.EntityID))
+			if err != nil || !reflect.DeepEqual(original, record) || record.State.EntityID != child.EntityID || len(record.State.Fields) == 0 || record.State.CreatedAt.IsZero() || record.State.UpdatedAt.IsZero() {
+				t.Fatalf("frozen source must preserve historical header/data without active ownership = %#v, %v", record, err)
 			}
 		})
 	}
@@ -214,7 +221,7 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						constructHistoricalSourceFixture(t, ctx, selected.(agentFixtureFlowStore), construction)
 					}
 					otherEntity := uuid.NewString()
-					seedStateOnlyAcquisitionEntity(t, backend, db, runID, otherEntity, scope.other, "active", "same-business-key")
+					seedStateOnlyAcquisitionEntity(t, backend, db, runID, otherEntity, scope.other, "same-business-key")
 					if tc.state == "" {
 						for _, table := range []string{"flow_instances", "entity_state"} {
 							column := "instance_path"
@@ -226,22 +233,20 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 							}
 						}
 					} else {
-						for _, table := range []string{"flow_instances", "entity_state"} {
-							if _, err := db.ExecContext(ctx, "UPDATE "+table+" SET current_state=$1 WHERE run_id=$2 AND entity_id=$3", tc.state, runID, entityID); err != nil {
-								t.Fatal(err)
-							}
+						if _, err := db.ExecContext(ctx, "UPDATE flow_instances SET current_state=$1 WHERE run_id=$2 AND entity_id=$3", tc.state, runID, entityID); err != nil {
+							t.Fatal(err)
 						}
 					}
 					if tc.wrongOwner {
 						wrongID := uuid.NewString()
-						seedStateOnlyAcquisitionEntity(t, backend, db, runID, wrongID, instance, "active", "different-business-key")
+						seedStateOnlyAcquisitionEntity(t, backend, db, runID, wrongID, instance, "different-business-key")
 						if _, err := db.ExecContext(ctx, `DELETE FROM flow_instances WHERE run_id=$1 AND entity_id=$2`, runID, entityID); err != nil {
 							t.Fatal(err)
 						}
 						seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, wrongID, instance, scope.flow, "review_item", "active", "{}", time.Now().UTC())
 					}
 					if tc.duplicateOwner {
-						seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), instance, "active", "same-business-key")
+						seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), instance, "same-business-key")
 					}
 					if tc.lifecycle != "" {
 						if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET status=$1 WHERE run_id=$2 AND instance_path=$3`, tc.lifecycle, runID, instance); err != nil {
@@ -307,7 +312,7 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						err := bus.Publish(ctx, evt)
 						assertFailure(err, false)
 						if tc.appearance {
-							seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, instance, "active", "different-business-key")
+							seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, instance, "different-business-key")
 							assertFailure(bus.Publish(ctx, evt), true)
 						}
 						assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
@@ -347,7 +352,7 @@ func TestEventBusCompositionOwnerExactConnectedReceiverBothStores(t *testing.T) 
 						wantRoutes[target] = false
 					}
 					// Late rows and a reconstructed publisher cannot re-elect an accepted receiver.
-					seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), scope.other+"/later", "active", "same-business-key")
+					seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), scope.other+"/later", "same-business-key")
 					if err := newBus().Publish(ctx, evt); err != nil {
 						t.Fatalf("duplicate after reconstruction: %v", err)
 					}
@@ -405,7 +410,7 @@ func TestWorkflowEntityStateSelectionOwnerUsesExactAuthoredScope(t *testing.T) {
 
 type stateOnlyAcquisitionStore interface {
 	storeTestDurableEventBusStore
-	runtimepipeline.WorkflowEntityStatePersistenceReader
+	runtimepipeline.WorkflowTargetPersistenceReader
 }
 
 func openStateOnlyAcquisitionStore(t *testing.T, backend string) (stateOnlyAcquisitionStore, *sql.DB, context.Context, string) {
@@ -498,18 +503,18 @@ func writeStateOnlyAcquisitionFixtureFile(t *testing.T, path, content string) {
 	}
 }
 
-func seedStateOnlyAcquisitionEntity(t *testing.T, backend string, db *sql.DB, runID, entityID, instancePath, state, accountID string) {
+func seedStateOnlyAcquisitionEntity(t *testing.T, backend string, db *sql.DB, runID, entityID, instancePath, accountID string) {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	fields, err := json.Marshal(map[string]any{"account_id": accountID, "instance_key": "instance"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, ?, 'review_item', ?, '{}', ?, '{}', '{}', 1, ?, ?, ?)`
-	args := []any{runID, entityID, instancePath, state, string(fields), now, now, now}
+	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES (?, ?, ?, 'review_item', ?, ?, ?)`
+	args := []any{runID, entityID, instancePath, string(fields), now, now}
 	if backend == "postgres" {
-		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'review_item', $4, '{}'::jsonb, $5::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $6, $6, $6)`
-		args = []any{runID, entityID, instancePath, state, string(fields), now}
+		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, fields, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'review_item', $4::jsonb, $5, $5)`
+		args = []any{runID, entityID, instancePath, string(fields), now}
 	}
 	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
 		t.Fatalf("seed state-only acquisition entity: %v", err)

@@ -69,7 +69,7 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			entityID := uuid.NewString()
 			entity := pipeline.ScenarioSetupEntityRequest{
 				Alias: "domain", EntityID: entityID, FlowInstance: "freeze/domain", EntityType: "review_item",
-				CurrentState: "active", Fields: map[string]any{"account_id": "domain"},
+				Fields: map[string]any{"account_id": "domain"},
 			}
 			parent := runtimeflowidentity.Stored(source, semanticview.RootExecutionFlowID(source), fixture.sourceRun, fixture.sourceRun, "", "")
 			child, err := runtimeflowidentity.KeyedChild(source, parent, "freeze", "domain")
@@ -86,6 +86,12 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 				ConstructorInput: "test.node_emitted.upserter", ResolvedKey: "domain",
 				TriggerEvent: eventtest.ExistingRunRootIngress(uuid.NewString(), "test.node_emitted.upserter", "fixture", "", []byte(`{"account_id":"domain","instance_key":"domain"}`), 0, fixture.sourceRun, events.EventEnvelope{}, created),
 			})
+			dataQuery := `SELECT fields,updated_at FROM entity_state WHERE run_id=$1 AND entity_id=$2`
+			var baselineFields string
+			var baselineDataUpdatedAt time.Time
+			if err := fixture.db.QueryRowContext(ctx, dataQuery, fixture.sourceRun, entityID).Scan(&baselineFields, &baselineDataUpdatedAt); err != nil {
+				t.Fatal(err)
+			}
 			mutationQuery := `SELECT COUNT(*) FROM entity_mutations WHERE entity_id = ?`
 			if fixture.postgres != nil {
 				mutationQuery = `SELECT COUNT(*) FROM entity_mutations WHERE entity_id = $1::uuid`
@@ -158,16 +164,24 @@ func TestForkedSourceEntityMutationLogBudgetRouteAndDeadLetterConsumersRefuse(t 
 			}))
 
 			var entityRevision, mutationRows, spendRows, deadLetterRows int
-			query := `SELECT revision FROM entity_state WHERE run_id = ? AND entity_id = ?`
+			query := `SELECT revision FROM flow_instances WHERE run_id = ? AND entity_id = ? AND instance_path = ?`
 			spendQuery := `SELECT COUNT(*) FROM spend_ledger WHERE entity_id = ?`
 			deadLetterQuery := `SELECT COUNT(*) FROM dead_letters WHERE original_event_id = ?`
 			if fixture.postgres != nil {
-				query = `SELECT revision FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+				query = `SELECT revision FROM flow_instances WHERE run_id = $1::uuid AND entity_id = $2::uuid AND instance_path = $3`
 				spendQuery = `SELECT COUNT(*) FROM spend_ledger WHERE entity_id = $1::uuid`
 				deadLetterQuery = `SELECT COUNT(*) FROM dead_letters WHERE original_event_id = $1::uuid`
 			}
-			if err := fixture.db.QueryRowContext(ctx, query, fixture.sourceRun, entityID).Scan(&entityRevision); err != nil {
+			if err := fixture.db.QueryRowContext(ctx, query, fixture.sourceRun, entityID, entity.FlowInstance).Scan(&entityRevision); err != nil {
 				t.Fatal(err)
+			}
+			var fields string
+			var dataUpdatedAt time.Time
+			if err := fixture.db.QueryRowContext(ctx, dataQuery, fixture.sourceRun, entityID).Scan(&fields, &dataUpdatedAt); err != nil {
+				t.Fatal(err)
+			}
+			if fields != baselineFields || !dataUpdatedAt.Equal(baselineDataUpdatedAt) {
+				t.Fatalf("frozen authored data changed: fields=%s updated_at=%s, want %s / %s", fields, dataUpdatedAt, baselineFields, baselineDataUpdatedAt)
 			}
 			if err := fixture.db.QueryRowContext(ctx, mutationQuery, entityID).Scan(&mutationRows); err != nil {
 				t.Fatal(err)

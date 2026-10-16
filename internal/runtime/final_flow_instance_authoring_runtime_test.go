@@ -176,10 +176,11 @@ func TestFinalFlowInstanceAuthoringRuntime_PublishActivatesAndExecutesSelectedTe
 	templateNodeID := identitytest.FlowNode(t, finalflowinstanceauthoring.TemplateFlowID, finalflowinstanceauthoring.TemplateNodeID).Key()
 	waitRuntimeNodeDeliveryOutcome(t, ctx, db, evt.ID(), templateNodeID)
 	waitRuntimeDBCount(t, ctx, db, `
-		SELECT COUNT(*) FROM entity_state
-		WHERE flow_instance LIKE 'account/%'
-		  AND current_state = 'reviewed'
-		  AND fields @> $1::jsonb
+		SELECT COUNT(*) FROM entity_state es JOIN flow_instances fi
+		  ON fi.run_id=es.run_id AND fi.instance_path=es.flow_instance AND fi.entity_id=es.entity_id
+		WHERE es.flow_instance LIKE 'account/%'
+		  AND fi.current_state = 'reviewed'
+		  AND es.fields @> $1::jsonb
 	`, 1, `{"account_id":"acct-42","score":"91","decision":"approved"}`)
 	assertRuntimeDBCount(t, ctx, db, `
 		SELECT COUNT(*) FROM entity_state

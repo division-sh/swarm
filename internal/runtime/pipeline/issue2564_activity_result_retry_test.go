@@ -147,11 +147,11 @@ func verifyActivityResultHandlerNativeCASRetry(t *testing.T, ruleActivity bool) 
 				t.Fatalf("M25 actual HTTP/CAS/fresh fold: calls=%d attempts=%d losses=%d rival=%d committed=%d drafts=%v", calls.Load(), attempts, losses, rival, committed, drafts)
 			}
 			entityID := runID
-			state, found, err := owner.LoadWorkflowEntityState(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), identity.NormalizeEntityID(entityID))
-			if err != nil || !found {
-				t.Fatalf("load actual M25 entity: found=%t err=%v", found, err)
+			state, err := owner.LoadWorkflowTargetPersistence(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), identity.NormalizeEntityID(entityID))
+			if err != nil || state.Presence != pipeline.WorkflowTargetPersistenceComplete {
+				t.Fatalf("load actual M25 paired entity: presence=%v err=%v", state.Presence, err)
 			}
-			raw := state.Fields
+			raw := state.State.Fields
 			var fields map[string]any
 			if err := json.Unmarshal(raw, &fields); err != nil || fields["local"] != float64(40) || fields["folded"] != float64(41) || fields["received"] != float64(1) || fields["title"] != "M25 external" {
 				t.Fatalf("result consumer lost local/result effects: %s %v", raw, err)
@@ -185,9 +185,9 @@ func verifyActivityResultHandlerNativeCASRetry(t *testing.T, ruleActivity bool) 
 			if err != nil || !found || !reflect.DeepEqual(journal, stored) || calls.Load() != 1 || !reflect.DeepEqual(result, loadActivityResultForProof(t, ctx, selected, eventID)) {
 				t.Fatal("M25 replay changed the retained result or repeated HTTP")
 			}
-			after, found, err := owner.LoadWorkflowEntityState(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), identity.NormalizeEntityID(entityID))
-			if err != nil || !found || string(after.Fields) != string(raw) {
-				t.Fatalf("M25 duplicate result repeated field fold: %s found=%t err=%v", after.Fields, found, err)
+			after, err := owner.LoadWorkflowTargetPersistence(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), identity.NormalizeEntityID(entityID))
+			if err != nil || after.Presence != pipeline.WorkflowTargetPersistenceComplete || string(after.State.Fields) != string(raw) {
+				t.Fatalf("M25 duplicate result repeated field fold: %s presence=%v err=%v", after.State.Fields, after.Presence, err)
 			}
 			issue2564M25AssertReceipt(t, selected, runID, eventID, claim)
 			if ruleActivity {
@@ -202,9 +202,9 @@ func verifyActivityResultHandlerNativeCASRetry(t *testing.T, ruleActivity bool) 
 				if got := loadActivityResultForProof(t, ctx, retained, eventID); !reflect.DeepEqual(got, result) {
 					t.Fatal("retained rule-owned callback changed its complete publication")
 				}
-				state, found, err := retained.events.(pipeline.WorkflowEntityStatePersistenceReader).LoadWorkflowEntityState(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), identity.NormalizeEntityID(entityID))
-				if err != nil || !found || !reflect.DeepEqual(state, after) {
-					t.Fatalf("retained rule-owned callback changed full business state: found=%t state=%+v want=%+v err=%v", found, state, after, err)
+				state, err := retained.events.(pipeline.WorkflowTargetPersistenceReader).LoadWorkflowTargetPersistence(ctx, testRunScopedWorkflowInstanceForRun(runID, runID), identity.NormalizeEntityID(entityID))
+				if err != nil || state.Presence != pipeline.WorkflowTargetPersistenceComplete || !reflect.DeepEqual(state, after) {
+					t.Fatalf("retained rule-owned callback changed full business state: presence=%v state=%+v want=%+v err=%v", state.Presence, state, after, err)
 				}
 				assertPersistedHandlerRuleSelection(t, retained, ctx, event.ID(), handlerselection.ContextRules, handlerselection.DispositionSelected,
 					`nodes["scanner"].handlers["source.requested"].rules[0]`, "rules[0]: when payload.url != ''")
@@ -275,8 +275,8 @@ func (o *issue2564M25CASOwner) CommitWorkflowEngineMutation(ctx context.Context,
 			o.t.Fatalf("M25 result reached CAS before its durable journal: count=%d found=%t journal=%+v err=%v", storage.SuccessfulActivityAttempts, found, journal, err)
 		}
 		current, err := o.WorkflowPersistenceOwner.LoadWorkflowTargetPersistence(ctx, command.State.Identity, identity.NormalizeEntityID(command.State.EntityID))
-		if err != nil || int64(current.State.Revision) != command.State.ExpectedRevision {
-			o.t.Fatalf("M25 command not anchored on result R1: revision=%d expected=%d err=%v", current.State.Revision, command.State.ExpectedRevision, err)
+		if err != nil || current.Lifecycle.State.Revision != command.State.ExpectedRevision {
+			o.t.Fatalf("M25 command not anchored on result R1: revision=%d expected=%d err=%v", current.Lifecycle.State.Revision, command.State.ExpectedRevision, err)
 		}
 		var fields map[string]any
 		if err := json.Unmarshal(current.State.Fields, &fields); err != nil || fields["local"] != float64(0) || fields["received"] != float64(0) {
@@ -285,7 +285,7 @@ func (o *issue2564M25CASOwner) CommitWorkflowEngineMutation(ctx context.Context,
 		fields["local"] = 40
 		literal := pipeline.WorkflowEngineMutationCommand{State: command.State}
 		literal.State.Fields, _ = json.Marshal(fields)
-		literal.State.Bookkeeping, literal.State.Gates, literal.State.Accumulator = current.State.Bookkeeping, current.State.Gates, current.State.Accumulator
+		literal.State.Bookkeeping, literal.State.Gates, literal.State.Accumulator = current.Lifecycle.State.Bookkeeping, current.Lifecycle.State.Gates, current.Lifecycle.State.Accumulator
 		literal.State.UpdatedAt = time.Now().UTC().Truncate(time.Microsecond)
 		done := make(chan struct{})
 		var rival pipeline.CommittedWorkflowEngineMutation

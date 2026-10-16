@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -18,48 +19,18 @@ import (
 )
 
 func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
-	ctx := testAuthorActivityContext()
+	bundle := conversationForkConstructionBundle(t)
+	ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
 	s := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	if _, err := s.backend.ExecContext(ctx, `PRAGMA journal_mode = WAL`); err != nil {
 		t.Fatalf("enable production SQLite journal mode: %v", err)
 	}
 	now := activeConversationForkTestClock()
-	source := seedSQLiteConversationForkSource(t, s, now)
+	source := seedSQLiteConversationForkSource(t, s, now, bundle)
 	entityID := uuid.NewString()
-	if _, err := s.backend.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, bookkeeping, accumulator, revision,
-			entered_state_at, created_at, updated_at
-		) VALUES (?, ?, 'flow/forkchat', 'default', 'draft', '{}', '{}', '{}', '{}', 1, ?, ?, ?)
-	`, source.runID, entityID, source.turn1At.Add(-30*time.Second), source.turn1At.Add(-30*time.Second), source.turn1At.Add(-30*time.Second)); err != nil {
-		t.Fatalf("seed SQLite fork entity state: %v", err)
-	}
-	if _, err := s.backend.ExecContext(ctx, `
-		INSERT INTO entity_mutations (
-			run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at
-		) VALUES
-			(?, ?, 'lifecycle_state', '', NULL, '"draft"', 'platform', 'test', ?),
-			(?, ?, 'authored_field', 'removed', NULL, '"temporary"', 'platform', 'test', ?),
-			(?, ?, 'authored_field', 'removed', '"temporary"', NULL, 'platform', 'test', ?),
-			(?, ?, 'accumulator', 'removed', NULL, '9', 'platform', 'test', ?),
-			(?, ?, 'accumulator', 'removed', '9', NULL, 'platform', 'test', ?),
-			(?, ?, 'bookkeeping', 'removed', NULL, '"temporary"', 'platform', 'test', ?),
-			(?, ?, 'bookkeeping', 'removed', '"temporary"', NULL, 'platform', 'test', ?),
-			(?, ?, 'gate', 'removed', NULL, 'true', 'platform', 'test', ?),
-			(?, ?, 'gate', 'removed', 'true', NULL, 'platform', 'test', ?)
-	`,
-		source.runID, entityID, source.turn1At.Add(-30*time.Second),
-		source.runID, entityID, source.turn1At.Add(-25*time.Second),
-		source.runID, entityID, source.turn1At.Add(-20*time.Second),
-		source.runID, entityID, source.turn1At.Add(-25*time.Second),
-		source.runID, entityID, source.turn1At.Add(-20*time.Second),
-		source.runID, entityID, source.turn1At.Add(-25*time.Second),
-		source.runID, entityID, source.turn1At.Add(-20*time.Second),
-		source.runID, entityID, source.turn1At.Add(-25*time.Second),
-		source.runID, entityID, source.turn1At.Add(-20*time.Second),
-	); err != nil {
-		t.Fatalf("seed SQLite fork deletion mutations: %v", err)
+	construction := prepareNativeConversationForkConstruction(t, ctx, s, bundle, ConversationForkSourceFixture{RunID: source.runID, EntityID: entityID, Turn1At: source.turn1At, kind: conversationForkNativeChat})
+	if err := seedConversationForkChatEntityForTest(ctx, s, source.runID, entityID, source.turn1At, construction); err != nil {
+		t.Fatalf("seed closed conversation projection: %v", err)
 	}
 
 	turnFork, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
@@ -132,11 +103,8 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	if prepared.Snapshot.SourceTurn.TurnID != source.turn1ID || prepared.Snapshot.SnapshotOwner != runfork.ConversationForkChatSnapshotOwner {
 		t.Fatalf("prepared snapshot = %#v", prepared.Snapshot)
 	}
-	if len(prepared.Snapshot.EntitySnapshot) != 1 {
-		t.Fatalf("SQLite snapshot entities = %#v", prepared.Snapshot.EntitySnapshot)
-	}
-	entity := prepared.Snapshot.EntitySnapshot[0]
-	if entity.EntityID != entityID || entity.CurrentState != "draft" {
+	entity := requireConversationForkConstructedSnapshot(t, prepared.Snapshot.EntitySnapshot, source, entityID)
+	if entity.EntityID != entityID || entity.CurrentState == nil || *entity.CurrentState != "draft" || entity.Fields["name"] != "Before" {
 		t.Fatalf("SQLite reconstructed entity = %#v", entity)
 	}
 	if _, ok := entity.Fields["removed"]; ok {
@@ -254,9 +222,10 @@ func TestSQLiteRuntimeStoreConversationForkLifecycleParity(t *testing.T) {
 	if deletedAgain.Deleted || !deletedAgain.AlreadyDeleted {
 		t.Fatalf("delete replay = %#v", deletedAgain)
 	}
+	proveQ10ConversationDataOnlyCuts(t, ctx, s, source, entityID, now)
 }
 
-func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base time.Time) conversationForkSourceFixture {
+func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base time.Time, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
 	t.Helper()
 	source := conversationForkSourceFixture{
 		runID:      uuid.NewString(),
@@ -270,10 +239,16 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 		turn1At:    base.Add(-2 * time.Minute),
 		turn2At:    base.Add(-1 * time.Minute),
 	}
-	ctx := testAuthorActivityContext()
-	requireRunFixtureForTest(t, ctx, s, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
+	run := semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: source.runID, BundleHash: source.bundleHash, StartedAt: base.Add(-3 * time.Minute),
-	})
+	}
+	if len(historical) != 0 {
+		run.Artifact = historical[0].SourceArtifact
+		source.bundleHash = run.Artifact.BundleHash()
+		run.BundleHash = source.bundleHash
+	}
+	ctx := testAuthorActivityContextForBundle(source.bundleHash)
+	requireRunFixtureForTest(t, ctx, s, run)
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()
 	if err != nil {

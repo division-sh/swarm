@@ -18675,6 +18675,11 @@
       "EntityAggregateResult": {
         "additionalProperties": false,
         "properties": {
+          "absent_count": {
+            "description": "SQL-null groups, separate from every real string bucket including unknown. Sum of counts plus absent_count conserves admitted data membership.",
+            "minimum": 0,
+            "type": "integer"
+          },
           "counts": {
             "additionalProperties": {
               "minimum": 0,
@@ -18685,23 +18690,38 @@
           }
         },
         "required": [
-          "counts"
+          "counts",
+          "absent_count"
         ],
         "type": "object"
       },
       "EntityFull": {
         "additionalProperties": false,
-        "description": "Entity-native operator shape from the canonical typed entity-read owner: entity identity, authored fields, platform bookkeeping, gates and accumulator state. The v1 entity.get reader returns this decomposition directly; retired dashboard instance projections are not an alternate owner.",
+        "description": "Entity-native operator shape from the canonical typed entity-read owner: admitted data identity/fields and optional exact header lifecycle. Imports have explicit null bookkeeping/gates/accumulated/loops, never empty fabricated lifecycle maps. Constructed members retain valid maps and typed loop arrays. Retired projections are not an alternate owner.",
         "properties": {
           "accumulated": {
-            "additionalProperties": true,
             "description": "Accumulator state. Map of accumulator key → JSON value; values may be scalars, objects, or arrays depending on accumulate, data_accumulation, compute, or projection writers.",
-            "type": "object"
+            "oneOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "bookkeeping": {
-            "additionalProperties": true,
             "description": "Platform bookkeeping facts selected by explicit producers. Keys never classify authored fields.",
-            "type": "object"
+            "oneOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "entity": {
             "$ref": "#/components/schemas/EntitySummary"
@@ -18712,18 +18732,32 @@
             "type": "object"
           },
           "gates": {
-            "additionalProperties": {
-              "type": "boolean"
-            },
             "description": "Gate state. Map of gate_name → boolean.",
-            "type": "object"
+            "oneOf": [
+              {
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "loops": {
             "description": "Typed bounded-loop runtime projection. The reserved mutable control bucket is never returned.",
-            "items": {
-              "$ref": "#/components/schemas/BoundedLoopActivation"
-            },
-            "type": "array"
+            "oneOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/BoundedLoopActivation"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -18731,18 +18765,37 @@
           "fields",
           "bookkeeping",
           "gates",
-          "accumulated"
+          "accumulated",
+          "loops"
         ],
         "type": "object"
       },
       "EntitySummary": {
         "additionalProperties": false,
+        "description": "Authored-data membership and clocks with nullable header lifecycle. Data-only imports have null for every lifecycle property. Constructed no-stage members have stage_defined false, a positive header revision and lifecycle clocks, but null current_state and entered_state_at. Staged members expose the exact declared stage. created_at and updated_at are data clocks; lifecycle-only changes do not move the data-list cursor.",
         "properties": {
           "created_at": {
             "$ref": "#/components/schemas/Timestamp"
           },
           "current_state": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "entered_state_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "entity_id": {
             "$ref": "#/components/schemas/OpaqueId"
@@ -18753,18 +18806,55 @@
           "flow_instance": {
             "type": "string"
           },
+          "lifecycle_created_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lifecycle_updated_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "name": {
             "type": "string"
           },
           "revision": {
-            "minimum": 0,
-            "type": "integer"
+            "oneOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "run_id": {
             "$ref": "#/components/schemas/OpaqueId"
           },
           "slug": {
             "type": "string"
+          },
+          "stage_defined": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "updated_at": {
             "$ref": "#/components/schemas/Timestamp"
@@ -18775,8 +18865,12 @@
           "run_id",
           "flow_instance",
           "entity_type",
+          "stage_defined",
           "current_state",
           "revision",
+          "entered_state_at",
+          "lifecycle_created_at",
+          "lifecycle_updated_at",
           "created_at",
           "updated_at"
         ],
@@ -22591,8 +22685,16 @@
             "type": "string"
           },
           "current_state": {
-            "minLength": 1,
-            "type": "string"
+            "description": "Setup imports have no lifecycle; only a constructed member with named stages has a stage name.",
+            "oneOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "entity_id": {
             "$ref": "#/components/schemas/OpaqueId"

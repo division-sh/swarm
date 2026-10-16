@@ -14,19 +14,22 @@ import (
 )
 
 var entityStateTopLevelFields = map[string]struct{}{
-	"entity_id":        {},
-	"run_id":           {},
-	"flow_instance":    {},
-	"entity_type":      {},
-	"name":             {},
-	"current_state":    {},
-	"gates":            {},
-	"fields":           {},
-	"accumulator":      {},
-	"revision":         {},
-	"entered_state_at": {},
-	"created_at":       {},
-	"updated_at":       {},
+	"entity_id":            {},
+	"run_id":               {},
+	"flow_instance":        {},
+	"entity_type":          {},
+	"name":                 {},
+	"stage_defined":        {},
+	"current_state":        {},
+	"gates":                {},
+	"fields":               {},
+	"accumulator":          {},
+	"revision":             {},
+	"entered_state_at":     {},
+	"created_at":           {},
+	"updated_at":           {},
+	"lifecycle_created_at": {},
+	"lifecycle_updated_at": {},
 }
 
 func (e *Executor) entityToolDependencies(input any) (EntityPersistence, semanticview.Source, map[string]any, error) {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -196,51 +197,15 @@ func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testi
 func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	s := admitTestPostgresStore(t, db)
-	ctx := testAuthorActivityContext()
+	bundle := conversationForkConstructionBundle(t)
+	ctx := testAuthorActivityContextForBundle(bundle.SourceArtifact.BundleHash())
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now)
+	source := seedConversationForkSource(t, db, now, bundle)
 	entityID := uuid.NewString()
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type,
-				current_state, gates, fields, bookkeeping, accumulator, revision,
-			entered_state_at, created_at, updated_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, 'flow/forkchat', 'default',
-				'after', '{"review":true}'::jsonb,
-				'{"name":"After","current_state":"business-draft","gates":{"review":"authored-review"},"accumulator":{"total":"authored-total"},"bookkeeping":{"activation":"manual"}}'::jsonb,
-				'{"activation":"standing"}'::jsonb, '{"total":7}'::jsonb, 2,
-			$3, $3, $3
-		)
-	`, source.runID, entityID, source.turn1At.Add(10*time.Second)); err != nil {
-		t.Fatalf("seed source entity_state: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_mutations (run_id, entity_id, domain, path, old_value, new_value, writer_type, writer_id, created_at)
-			VALUES
-				($1::uuid, $2::uuid, 'lifecycle_state', '', NULL, '"draft"'::jsonb, 'platform', 'test', $3),
-				($1::uuid, $2::uuid, 'authored_field', 'name', NULL, '"Before"'::jsonb, 'platform', 'test', $3),
-				($1::uuid, $2::uuid, 'authored_field', 'current_state', NULL, '"business-draft"'::jsonb, 'platform', 'test', $5),
-				($1::uuid, $2::uuid, 'authored_field', 'gates.review', NULL, '"authored-review"'::jsonb, 'platform', 'test', $5),
-				($1::uuid, $2::uuid, 'authored_field', 'accumulator.total', NULL, '"authored-total"'::jsonb, 'platform', 'test', $5),
-				($1::uuid, $2::uuid, 'authored_field', 'bookkeeping.activation', NULL, '"manual"'::jsonb, 'platform', 'test', $5),
-				($1::uuid, $2::uuid, 'bookkeeping', 'activation', NULL, '"standing"'::jsonb, 'platform', 'test', $5),
-				($1::uuid, $2::uuid, 'gate', 'review', NULL, 'true'::jsonb, 'platform', 'test', $5),
-				($1::uuid, $2::uuid, 'accumulator', 'total', NULL, '7'::jsonb, 'platform', 'test', $5),
-				($1::uuid, $2::uuid, 'authored_field', 'removed', NULL, '"temporary"'::jsonb, 'platform', 'test', $6),
-				($1::uuid, $2::uuid, 'authored_field', 'removed', '"temporary"'::jsonb, NULL, 'platform', 'test', $5),
-				($1::uuid, $2::uuid, 'accumulator', 'removed', NULL, '9'::jsonb, 'platform', 'test', $6),
-				($1::uuid, $2::uuid, 'accumulator', 'removed', '9'::jsonb, NULL, 'platform', 'test', $5),
-				($1::uuid, $2::uuid, 'bookkeeping', 'removed', NULL, '"temporary"'::jsonb, 'platform', 'test', $6),
-				($1::uuid, $2::uuid, 'bookkeeping', 'removed', '"temporary"'::jsonb, NULL, 'platform', 'test', $5),
-				($1::uuid, $2::uuid, 'gate', 'removed', NULL, 'true'::jsonb, 'platform', 'test', $6),
-				($1::uuid, $2::uuid, 'gate', 'removed', 'true'::jsonb, NULL, 'platform', 'test', $5),
-				($1::uuid, $2::uuid, 'lifecycle_state', '', '"draft"'::jsonb, '"after"'::jsonb, 'platform', 'test', $4),
-				($1::uuid, $2::uuid, 'authored_field', 'name', '"Before"'::jsonb, '"After"'::jsonb, 'platform', 'test', $4)
-	`, source.runID, entityID, source.turn1At.Add(-30*time.Second), source.turn1At.Add(10*time.Second), source.turn1At.Add(-20*time.Second), source.turn1At.Add(-25*time.Second)); err != nil {
-		t.Fatalf("seed source entity mutations: %v", err)
+	construction := prepareNativeConversationForkConstruction(t, ctx, s, bundle, ConversationForkSourceFixture{RunID: source.runID, EntityID: entityID, Turn1At: source.turn1At, kind: conversationForkNativeChat})
+	if err := seedConversationForkChatEntityForTest(ctx, s, source.runID, entityID, source.turn1At, construction); err != nil {
+		t.Fatalf("seed closed conversation projection: %v", err)
 	}
 	var mutationsBefore int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM entity_mutations WHERE run_id = $1::uuid`, source.runID).Scan(&mutationsBefore); err != nil {
@@ -326,11 +291,8 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	if result.Snapshot.SnapshotOwner != runfork.ConversationForkChatSnapshotOwner || result.SandboxPolicy.Owner != runfork.ConversationForkChatSandboxOwner {
 		t.Fatalf("owners = snapshot %q policy %q", result.Snapshot.SnapshotOwner, result.SandboxPolicy.Owner)
 	}
-	if len(result.Snapshot.EntitySnapshot) != 1 {
-		t.Fatalf("snapshot entities = %#v, want one reconstructed entity", result.Snapshot.EntitySnapshot)
-	}
-	entity := result.Snapshot.EntitySnapshot[0]
-	if entity.EntityID != entityID || entity.CurrentState != "draft" || entity.Fields["name"] != "Before" {
+	entity := requireConversationForkConstructedSnapshot(t, result.Snapshot.EntitySnapshot, source, entityID)
+	if entity.EntityID != entityID || entity.CurrentState == nil || *entity.CurrentState != "draft" || entity.Fields["name"] != "Before" {
 		t.Fatalf("entity snapshot = %#v, want source-at-fork projection", entity)
 	}
 	if entity.EnteredStateAt == nil || !entity.EnteredStateAt.Equal(source.turn1At.Add(-30*time.Second)) {
@@ -456,6 +418,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	if !errors.As(err, &paramErr) || paramErr.Field != "fork_id" {
 		t.Fatalf("deleted fork chat error = %v, want fork_id invalid params", err)
 	}
+	proveQ10ConversationDataOnlyCuts(t, ctx, s, source, entityID, now)
 }
 
 func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T) {
@@ -639,7 +602,7 @@ type conversationForkSourceFixture struct {
 
 const conversationForkSourceFlowInstance = "review"
 
-func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conversationForkSourceFixture {
+func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time, historical ...*contracts.WorkflowContractBundle) conversationForkSourceFixture {
 	t.Helper()
 	source := conversationForkSourceFixture{
 		runID:      uuid.NewString(),
@@ -653,9 +616,15 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conver
 		turn1At:    base.Add(-2 * time.Minute),
 		turn2At:    base.Add(-1 * time.Minute),
 	}
-	ctx := testAuthorActivityContext()
+	run := semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: source.runID, StartedAt: base.Add(-3 * time.Minute), BundleHash: source.bundleHash}
+	if len(historical) != 0 {
+		run.Artifact = historical[0].SourceArtifact
+		source.bundleHash = run.Artifact.BundleHash()
+		run.BundleHash = source.bundleHash
+	}
+	ctx := testAuthorActivityContextForBundle(source.bundleHash)
 	store := admitTestPostgresStore(t, db)
-	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: source.runID, StartedAt: base.Add(-3 * time.Minute), BundleHash: source.bundleHash})
+	requireRunFixtureForTest(t, ctx, store, run)
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()
 	if err != nil {

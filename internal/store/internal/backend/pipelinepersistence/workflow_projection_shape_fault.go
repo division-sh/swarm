@@ -49,16 +49,44 @@ func workflowProjectionFaultResult(result sql.Result, err error) (int64, error) 
 	return changed, nil
 }
 
-func SetWorkflowProjectionObsoleteFieldRowsForTest(ctx context.Context, tx *sql.Tx, run string) (int64, error) {
-	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE entity_state SET current_state = 'obsolete', gates = '{}', bookkeeping = '{}', accumulator = '{}' WHERE run_id = $1`, run))
-}
-
 func SetWorkflowProjectionPlatformBookkeepingForTest(ctx context.Context, tx *sql.Tx, run, path string) (int64, error) {
 	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE flow_instances SET bookkeeping = '{"platform_fact":"preserve"}' WHERE run_id = $2 AND instance_path = $1`, path, run))
 }
 
-func SetEntityProjectionPrivateBookkeepingForTest(ctx context.Context, tx *sql.Tx, run, entity string) (int64, error) {
-	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE entity_state SET bookkeeping = '{"private_fact":"must-not-leak"}' WHERE run_id = $1 AND entity_id = $2`, run, entity))
+func AddWorkflowProjectionPrivateBookkeepingForTest(ctx context.Context, tx *sql.Tx, postgres bool, run, path string) (int64, error) {
+	query := `UPDATE flow_instances SET bookkeeping = json_set(bookkeeping, '$.private_fact', 'must-not-leak') WHERE run_id=$1 AND instance_path=$2`
+	if postgres {
+		query = `UPDATE flow_instances SET bookkeeping = jsonb_set(bookkeeping, '{private_fact}', '"must-not-leak"'::jsonb, true) WHERE run_id=$1 AND instance_path=$2`
+	}
+	return workflowProjectionFaultResult(tx.ExecContext(ctx, query, run, path))
+}
+
+// Fixed hostile value maps never replace the actual constructed coordinates.
+func SetWorkflowProjectionIdentityLookalikesForTest(ctx context.Context, tx *sql.Tx, postgres bool, run, entity, path string) (int64, error) {
+	if postgres {
+		return workflowProjectionFaultResult(tx.ExecContext(ctx, `WITH authored AS (
+			UPDATE entity_state es
+			SET fields = '{"entity_id":"authored-lookalike","flow_instance":"authored/lookalike"}'::jsonb
+			WHERE es.run_id=$1::uuid AND es.entity_id=$2::uuid AND es.flow_instance=$3
+			  AND EXISTS (SELECT 1 FROM flow_instances fi WHERE fi.run_id=es.run_id
+			    AND fi.entity_id=es.entity_id AND fi.instance_path=es.flow_instance AND fi.entity_type=es.entity_type)
+			RETURNING run_id, entity_id, flow_instance
+		)
+		UPDATE flow_instances fi
+		SET bookkeeping = '{"entity_id":"bookkeeping-lookalike","flow_instance":"bookkeeping/lookalike"}'::jsonb
+		FROM authored
+		WHERE fi.run_id=authored.run_id AND fi.entity_id=authored.entity_id AND fi.instance_path=authored.flow_instance`, run, entity, path))
+	}
+	if _, err := workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE entity_state
+		SET fields = '{"entity_id":"authored-lookalike","flow_instance":"authored/lookalike"}'
+		WHERE run_id=$1 AND entity_id=$2 AND flow_instance=$3
+		  AND EXISTS (SELECT 1 FROM flow_instances fi WHERE fi.run_id=entity_state.run_id
+		    AND fi.entity_id=entity_state.entity_id AND fi.instance_path=entity_state.flow_instance AND fi.entity_type=entity_state.entity_type)`, run, entity, path)); err != nil {
+		return 0, err
+	}
+	return workflowProjectionFaultResult(tx.ExecContext(ctx, `UPDATE flow_instances
+		SET bookkeeping = '{"entity_id":"bookkeeping-lookalike","flow_instance":"bookkeeping/lookalike"}'
+		WHERE run_id=$1 AND entity_id=$2 AND instance_path=$3`, run, entity, path))
 }
 
 func SetWorkflowProjectionConflictingEntityTypeForTest(ctx context.Context, tx *sql.Tx, run, entity string) (int64, error) {
@@ -71,6 +99,15 @@ func RemoveWorkflowProjectionHeaderForTest(ctx context.Context, tx *sql.Tx, run,
 
 func RemoveWorkflowProjectionFieldsForTest(ctx context.Context, tx *sql.Tx, run, entity string) (int64, error) {
 	return workflowProjectionFaultResult(tx.ExecContext(ctx, `DELETE FROM entity_state WHERE run_id = $1 AND entity_id = $2`, run, entity))
+}
+
+// This is a closed physical fixture, not construction or field-write admission.
+// Its empty payload and identity/display/clocks come only from one kept header.
+func AddWorkflowProjectionEmptyFieldsForTest(ctx context.Context, tx *sql.Tx, run, entity string) (int64, error) {
+	return workflowProjectionFaultResult(tx.ExecContext(ctx, `INSERT INTO entity_state
+		(run_id,entity_id,flow_instance,entity_type,slug,name,fields,created_at,updated_at)
+		SELECT run_id,entity_id,instance_path,entity_type,slug,name,'{}',created_at,updated_at
+		FROM flow_instances WHERE run_id=$1 AND entity_id=$2 AND entity_type IS NOT NULL`, run, entity))
 }
 
 func SetWorkflowProjectionDrainingForTest(ctx context.Context, tx *sql.Tx, run, path string) (int64, error) {
@@ -94,7 +131,7 @@ func SetWorkflowProjectionNumericFlowPathForTest(ctx context.Context, tx *sql.Tx
 }
 
 func AddAmbiguousWorkflowProjectionFieldsForTest(ctx context.Context, tx *sql.Tx, run, entity string) (int64, error) {
-	return workflowProjectionFaultResult(tx.ExecContext(ctx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,current_state) SELECT run_id,$1,flow_instance,entity_type,current_state FROM entity_state WHERE run_id=$2 AND entity_id=$3`, uuid.NewString(), run, entity))
+	return workflowProjectionFaultResult(tx.ExecContext(ctx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type) SELECT run_id,$1,flow_instance,entity_type FROM entity_state WHERE run_id=$2 AND entity_id=$3`, uuid.NewString(), run, entity))
 }
 
 // Only the evidence of the single existing transition may change. This cut

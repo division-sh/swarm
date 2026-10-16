@@ -13,7 +13,13 @@ import (
 	"time"
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestEntitiesListUsesEntityListV1RPCWithFilters(t *testing.T) {
@@ -109,17 +115,43 @@ func TestEntityCommandsUseSQLiteEntityReadStoreThroughV1API(t *testing.T) {
 	entityB := "33333333-3333-3333-3333-333333333333"
 	now := time.Unix(1700000000, 0).UTC()
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now})
-	if _, err := storetest.Database(sqliteStore).ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES
-			(?, ?, 'scoring/vertical-a', 'vertical', 'discovered',
-			 '{}', '{"vertical_name":"Healthcare"}', '{}', 1, ?, ?, ?),
-			(?, ?, 'scoring/vertical-b', 'vertical', 'pending',
-			 '{}', '{"vertical_name":"Manufacturing"}', '{}', 1, ?, ?, ?)
-	`, runID, entityA, now, now, now, runID, entityB, now, now, now); err != nil {
-		t.Fatalf("seed sqlite entity_state: %v", err)
+	source := sourceartifactfixture.Fact()
+	ctx = correlation.WithSourceArtifactFact(correlation.WithRunID(ctx, runID), source)
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope("44444444-4444-4444-4444-444444444444", source.BundleHash()))
+	ctx = effects.WithExecutionMode(ctx, effects.ExecutionModeLive)
+	// Prepared reader projections use the native commit, not public construction.
+	for _, seed := range []struct {
+		id, key, stage, name string
+	}{
+		{entityA, "vertical-a", "discovered", "Healthcare"},
+		{entityB, "vertical-b", "pending", "Manufacturing"},
+	} {
+		command, err := flowactivationfixture.Command(ctx, pipeline.WorkflowInstance{
+			InstanceID: seed.key, StorageRef: "scoring/" + seed.key, EntityID: seed.id,
+			Mode: "template", InstanceKey: seed.key,
+			WorkflowName: "scoring", WorkflowVersion: "1", EntityType: "vertical",
+			CurrentState: seed.stage, StageDefined: true, CreatedAt: now, EnteredStageAt: now,
+			Fields: map[string]any{"vertical_name": seed.name},
+		}, pipeline.WorkflowLifecycleMutationPlan{}, now)
+		if err != nil {
+			t.Fatalf("prepare sqlite entity projection: %v", err)
+		}
+		committed, err := sqliteStore.CommitFlowInstanceActivation(ctx, command)
+		if err != nil || !committed.Acknowledged || !committed.Created {
+			t.Fatalf("commit sqlite entity projection: acknowledged=%t created=%t err=%v", committed.Acknowledged, committed.Created, err)
+		}
+		owner, err := command.Plan.Readiness.FlowIdentity()
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored, found, err := sqliteStore.LoadWorkflowInstance(ctx, owner)
+		if err != nil || !found || stored.EntityID != seed.id || stored.StorageRef != "scoring/"+seed.key ||
+			stored.InstanceID != seed.key || stored.WorkflowName != "scoring" || stored.EntityType != "vertical" ||
+			!stored.StageDefined || stored.CurrentState != seed.stage || stored.Revision != 1 ||
+			!stored.CreatedAt.Equal(now) || !stored.EnteredStageAt.Equal(now) ||
+			!reflect.DeepEqual(stored.Fields, map[string]any{"vertical_name": seed.name}) {
+			t.Fatalf("native entity projection drifted before CLI read: found=%t stored=%+v err=%v", found, stored, err)
+		}
 	}
 	registry, err := apiv1.LoadRegistry(ResolvePath(RepoRoot(), defaultPlatformSpecPath))
 	if err != nil {
@@ -338,14 +370,17 @@ func TestEntityViewRendersAbsentSlugAndNameAsDash(t *testing.T) {
 	var stdout bytes.Buffer
 	writeEntityFullResult(&stdout, entityFull{
 		Entity: entitySummary{
-			EntityID:     "entity-1",
-			RunID:        "run-1",
-			FlowInstance: "review",
-			EntityType:   "vertical",
-			CurrentState: "collecting",
-			Revision:     1,
-			CreatedAt:    "2026-05-20T01:00:00Z",
-			UpdatedAt:    "2026-05-20T01:05:00Z",
+			EntityID:           "entity-1",
+			RunID:              "run-1",
+			FlowInstance:       "review",
+			EntityType:         "vertical",
+			StageDefined:       entityTestPointer(true),
+			CurrentState:       entityTestPointer("collecting"),
+			Revision:           entityTestPointer(int64(1)),
+			LifecycleCreatedAt: entityTestPointer("2026-05-20T01:00:00Z"),
+			LifecycleUpdatedAt: entityTestPointer("2026-05-20T01:05:00Z"),
+			CreatedAt:          "2026-05-20T01:00:00Z",
+			UpdatedAt:          "2026-05-20T01:05:00Z",
 		},
 		Fields:      map[string]any{},
 		Gates:       map[string]bool{},
@@ -375,7 +410,7 @@ func TestEntityAggregateUsesEntityAggregateDefaultsAndFilters(t *testing.T) {
 			t.Errorf("decode request: %v", err)
 		}
 		captured = append(captured, req)
-		writeJSONRPCResult(t, w, req.ID, map[string]any{"counts": map[string]any{"collecting": 2, "reviewing": 1}})
+		writeJSONRPCResult(t, w, req.ID, map[string]any{"counts": map[string]any{"collecting": 2, "reviewing": 1}, "absent_count": 0})
 	}))
 	defer server.Close()
 
@@ -587,7 +622,7 @@ func TestEntityCommandsMapRuntimeFailuresAndMalformedResults(t *testing.T) {
 			handler: func(w http.ResponseWriter, r *http.Request) {
 				var req jsonRPCRequest
 				_ = json.NewDecoder(r.Body).Decode(&req)
-				writeJSONRPCResult(t, w, req.ID, map[string]any{"counts": map[string]any{"collecting": -1}})
+				writeJSONRPCResult(t, w, req.ID, map[string]any{"counts": map[string]any{"collecting": -1}, "absent_count": 0})
 			},
 			wantCode:   3,
 			wantStderr: "counts[\"collecting\"] must be non-negative",
@@ -935,7 +970,7 @@ func TestEntityListUnscopedRetainsRunColumn(t *testing.T) {
 			t.Fatalf("unscoped list missing %q:\n%s", want, stdout.String())
 		}
 	}
-	if got, want := strings.Fields(strings.Split(stdout.String(), "\n")[0]), []string{"ENTITY_ID", "RUN", "TYPE", "STATE", "FLOW", "UPDATED"}; !reflect.DeepEqual(got, want) {
+	if got, want := strings.Fields(strings.Split(stdout.String(), "\n")[0]), []string{"ENTITY_ID", "RUN", "TYPE", "STATE", "FLOW", "DATA", "UPDATED"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("unscoped columns = %v, want %v:\n%s", got, want, stdout.String())
 	}
 
@@ -945,7 +980,7 @@ func TestEntityListUnscopedRetainsRunColumn(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("scoped code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	if got, want := strings.Fields(strings.Split(stdout.String(), "\n")[0]), []string{"ENTITY_ID", "TYPE", "STATE", "FLOW", "UPDATED"}; !reflect.DeepEqual(got, want) {
+	if got, want := strings.Fields(strings.Split(stdout.String(), "\n")[0]), []string{"ENTITY_ID", "TYPE", "STATE", "FLOW", "DATA", "UPDATED"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("run-scoped columns = %v, want %v:\n%s", got, want, stdout.String())
 	}
 }
@@ -956,8 +991,8 @@ func TestEntityListFlowIdentifiersRemainExactAndDistinct(t *testing.T) {
 	flowB := "scope/" + sharedPrefix + "2"
 	var stdout bytes.Buffer
 	writeEntityListResult(&stdout, entityListResult{Entities: []entitySummary{
-		{EntityID: "entity-a", RunID: "run-1", FlowInstance: flowA, EntityType: "vertical", CurrentState: "collecting", UpdatedAt: "2026-05-20T01:05:00Z"},
-		{EntityID: "entity-b", RunID: "run-1", FlowInstance: flowB, EntityType: "vertical", CurrentState: "collecting", UpdatedAt: "2026-05-20T01:05:00Z"},
+		{EntityID: "entity-a", RunID: "run-1", FlowInstance: flowA, EntityType: "vertical", StageDefined: entityTestPointer(true), CurrentState: entityTestPointer("collecting"), UpdatedAt: "2026-05-20T01:05:00Z"},
+		{EntityID: "entity-b", RunID: "run-1", FlowInstance: flowB, EntityType: "vertical", StageDefined: entityTestPointer(true), CurrentState: entityTestPointer("collecting"), UpdatedAt: "2026-05-20T01:05:00Z"},
 	}}, entityListRenderOptions{runScoped: true})
 
 	rendered := stdout.String()
@@ -980,7 +1015,7 @@ func TestEntityListFlowIdentifierSanitizesControlsWithoutTruncation(t *testing.T
 	want := "scope/" + strings.Repeat("b", 64) + " terminal segment"
 	var stdout bytes.Buffer
 	writeEntityListResult(&stdout, entityListResult{Entities: []entitySummary{
-		{EntityID: "entity-a", RunID: "run-1", FlowInstance: flow, EntityType: "vertical", CurrentState: "collecting", UpdatedAt: "2026-05-20T01:05:00Z"},
+		{EntityID: "entity-a", RunID: "run-1", FlowInstance: flow, EntityType: "vertical", StageDefined: entityTestPointer(true), CurrentState: entityTestPointer("collecting"), UpdatedAt: "2026-05-20T01:05:00Z"},
 	}}, entityListRenderOptions{runScoped: true})
 
 	rendered := stdout.String()
@@ -1067,16 +1102,20 @@ func TestFormatCLIRelativeTime(t *testing.T) {
 
 func validEntitySummary(entityID string) map[string]any {
 	return map[string]any{
-		"entity_id":     entityID,
-		"run_id":        "run-1",
-		"flow_instance": "review",
-		"entity_type":   "vertical",
-		"current_state": "collecting",
-		"slug":          "vertical-1",
-		"name":          "Vertical One",
-		"revision":      3,
-		"created_at":    "2026-05-20T01:00:00Z",
-		"updated_at":    "2026-05-20T01:05:00Z",
+		"entity_id":            entityID,
+		"run_id":               "run-1",
+		"flow_instance":        "review",
+		"entity_type":          "vertical",
+		"current_state":        "collecting",
+		"stage_defined":        true,
+		"slug":                 "vertical-1",
+		"name":                 "Vertical One",
+		"revision":             3,
+		"created_at":           "2026-05-20T01:00:00Z",
+		"updated_at":           "2026-05-20T01:05:00Z",
+		"entered_state_at":     "2026-05-20T01:00:00Z",
+		"lifecycle_created_at": "2026-05-20T01:00:00Z",
+		"lifecycle_updated_at": "2026-05-20T01:05:00Z",
 	}
 }
 
@@ -1086,6 +1125,7 @@ func validEntityFullResult(entityID string) map[string]any {
 		"fields":      map[string]any{"score": 7},
 		"bookkeeping": map[string]any{},
 		"gates":       map[string]any{"ready": true},
+		"loops":       []any{},
 		"accumulated": map[string]any{
 			"score":       3,
 			"accumulator": map[string]any{"count": 2},

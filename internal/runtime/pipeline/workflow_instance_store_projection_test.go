@@ -3,6 +3,8 @@ package pipeline
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -45,18 +47,57 @@ func TestWorkflowInstanceReadRejectsUnexpectedFieldRow(t *testing.T) {
 	if _, err := DecodeWorkflowInstancePersistenceRecord(record); err == nil || !strings.Contains(err.Error(), "missing its declared field row") {
 		t.Fatalf("declared field row absence accepted: %v", err)
 	}
+	record.Fields = []byte(`{"current_state":"business-stage","gates":"business-gates","bookkeeping":"business-bookkeeping","accumulator":"business-accumulator"}`)
+	record.StageDefined = true
+	before, err := DecodeWorkflowInstancePersistenceRecord(record)
+	if err != nil {
+		t.Fatalf("valid paired record rejected: %v", err)
+	}
+	for _, tc := range []struct{ domain, want string }{
+		{"fields", "entity_state.fields must be a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}"},
+		{"bookkeeping", "flow_instances.bookkeeping must be a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}"},
+		{"gates", "flow_instances.gates must be an object of booleans: json: cannot unmarshal array into Go value of type map[string]bool"},
+		{"accumulator", "flow_instances.accumulator must be a JSON object: json: cannot unmarshal array into Go value of type map[string]interface {}"},
+	} {
+		t.Run(tc.domain, func(t *testing.T) {
+			invalid := record
+			switch tc.domain {
+			case "fields":
+				invalid.Fields = []byte(`[]`)
+			case "bookkeeping":
+				invalid.Bookkeeping = []byte(`[]`)
+			case "gates":
+				invalid.Gates = []byte(`[]`)
+			case "accumulator":
+				invalid.Accumulator = []byte(`[]`)
+			}
+			_, err := DecodeWorkflowInstancePersistenceRecord(invalid)
+			var corruption *FlowInstanceConstructionCorruption
+			if !errors.As(err, &corruption) || corruption.FlowID != "review" || corruption.InstancePath != "review/inst-1" || corruption.Cause == nil || corruption.Cause.Error() != tc.want {
+				t.Fatalf("malformed %s lost its exact owner/identity: got=%v want=%s", tc.domain, err, tc.want)
+			}
+			if after, err := DecodeWorkflowInstancePersistenceRecord(record); err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatalf("malformed %s changed supported readback: %+v %v", tc.domain, after, err)
+			}
+		})
+	}
 }
 
 func VerifyWorkflowInstanceFixtureListUsesConstructedHeadersForTest(t *testing.T, open func(*testing.T, string) WorkflowProjectionHeaderNativeFixtureForTest) {
 	fixture := open(t, testPipelineRunID)
 	ctx := fixture.Context
+	expected := map[string]WorkflowInstance{}
 
 	for _, fielded := range []bool{false, true} {
 		path, entityType := "fieldless", ""
 		var fields map[string]any
 		if fielded {
 			path, entityType = "fielded", "subject"
-			fields = map[string]any{"value": "business"}
+			fields = map[string]any{
+				"value": "business", "current_state": "business-stage", "gates": "business-gates",
+				"bookkeeping": "business-bookkeeping", "accumulator": "business-accumulator",
+				"revision": int64(73), "entered_state_at": "business-clock",
+			}
 		}
 		instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 			StorageRef: path, WorkflowName: path, WorkflowVersion: "fixture", CurrentState: "active", StageDefined: true,
@@ -66,13 +107,7 @@ func VerifyWorkflowInstanceFixtureListUsesConstructedHeadersForTest(t *testing.T
 		if err := fixture.Construct(ctx, instance); err != nil {
 			t.Fatalf("construct fixture %s: %v", path, err)
 		}
-	}
-	changed, err := fixture.ObsoleteFieldRows(ctx, testPipelineRunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if changed != 1 {
-		t.Fatalf("obsolete shadow fixture: rows=%d err=%v", changed, err)
+		expected[path] = instance
 	}
 
 	instances, err := fixture.List(ctx, testPipelineRunID)
@@ -80,8 +115,13 @@ func VerifyWorkflowInstanceFixtureListUsesConstructedHeadersForTest(t *testing.T
 		t.Fatalf("list constructed headers: count=%d err=%v", len(instances), err)
 	}
 	for _, instance := range instances {
-		if instance.CurrentState != "active" || !instance.StageDefined || !instance.Gates["ready"] || instance.Bookkeeping["authority"] != "header" || instance.StateBuckets["count"] != int64(1) {
-			t.Fatalf("list consumed obsolete field-row lifecycle: %+v", instance)
+		want, found := expected[instance.StorageRef]
+		if !found || instance.EntityID != want.EntityID || instance.WorkflowName != want.WorkflowName {
+			t.Fatalf("list changed exact constructed membership: %+v", instance)
+		}
+		delete(expected, instance.StorageRef)
+		if instance.CurrentState != "active" || !instance.StageDefined || instance.Revision != 1 || !instance.Gates["ready"] || instance.Bookkeeping["authority"] != "header" || instance.StateBuckets["count"] != int64(1) {
+			t.Fatalf("list replaced header lifecycle with business data: %+v", instance)
 		}
 		if instance.StorageRef == "fieldless" && (instance.EntityType != "" || len(instance.Fields) != 0) {
 			t.Fatalf("fieldless header acquired fields: %+v", instance)
@@ -89,6 +129,12 @@ func VerifyWorkflowInstanceFixtureListUsesConstructedHeadersForTest(t *testing.T
 		if instance.StorageRef == "fielded" && (instance.EntityType != "subject" || instance.Fields["value"] != "business") {
 			t.Fatalf("declared field projection changed: %+v", instance)
 		}
+		if instance.StorageRef == "fielded" && !reflect.DeepEqual(instance.Fields, want.Fields) {
+			t.Fatalf("list changed complete business fields: got=%+v want=%+v", instance.Fields, want.Fields)
+		}
+	}
+	if len(expected) != 0 {
+		t.Fatalf("list omitted constructed identities: %+v", expected)
 	}
 }
 
@@ -350,11 +396,11 @@ func VerifyWorkflowInstanceStoreProjection_DoesNotExposeControlStatusAsEntityFie
 
 	observed, err := fixture.ReadControl(ctx, testPipelineRunID, workflowInstanceRowID(entityID))
 	if err != nil {
-		t.Fatalf("query entity_state projection: %v", err)
+		t.Fatalf("query workflow control projection: %v", err)
 	}
 	currentState, fieldsRaw, controlStatus := observed.CurrentState, observed.Fields, observed.ControlStatus
 	if got := strings.TrimSpace(currentState); got != "reviewing" {
-		t.Fatalf("entity_state.current_state = %q, want reviewing", got)
+		t.Fatalf("flow_instances.current_state = %q, want reviewing", got)
 	}
 	fields, err := decodeWorkflowInstanceJSONMap("entity_state.fields", fieldsRaw)
 	if err != nil {
@@ -424,7 +470,7 @@ func VerifyWorkflowInstanceStoreCreateRejectsDuplicateWithoutMutatingProjectionF
 	}
 	revision, configName, fieldsRaw := observed.Revision, observed.FieldName, observed.Fields
 	if revision != 1 {
-		t.Fatalf("entity_state.revision = %d, want 1", revision)
+		t.Fatalf("flow_instances.revision = %d, want 1", revision)
 	}
 	if configName != "alpha" {
 		t.Fatalf("entity_state.fields name = %q, want alpha", configName)
@@ -507,7 +553,7 @@ func VerifyWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapesForTes
 				return fixture.NumericGate(ctx, testPipelineRunID, key)
 			},
 			mutateKey:    "storage",
-			wantContains: "entity_state.gates must be an object of booleans",
+			wantContains: "flow_instances.gates must be an object of booleans",
 		},
 		{
 			name: "accumulator not object",
@@ -515,7 +561,7 @@ func VerifyWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapesForTes
 				return fixture.AccumulatorArray(ctx, testPipelineRunID, key)
 			},
 			mutateKey:    "storage",
-			wantContains: "entity_state.accumulator must be a JSON object",
+			wantContains: "flow_instances.accumulator must be a JSON object",
 		},
 		{
 			name: "control metadata malformed",

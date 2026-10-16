@@ -245,6 +245,7 @@ func setReplayReceiverConstructedHistory(t *testing.T, snapshot *runForkRevision
 		EntityID: entityID, FlowInstance: path, EntityType: "receipt", ConstructionKind: "constructed",
 		FlowTemplate: flowID, Mode: "static", FlowConfig: []byte(`{}`), Status: "active", CurrentState: "pending",
 		StageDefined: true, CreatedAt: at, UpdatedAt: at, EnteredStateAt: at,
+		DataCreatedAt: &at, DataUpdatedAt: &at,
 	}}
 	snapshot.EntityMutations = []runForkRevisionEntityMutation{{
 		EntityID: entityID, Domain: "lifecycle_state", NewValue: []byte(`"pending"`), CreatedAt: at,
@@ -278,7 +279,7 @@ func TestRunForkConstructedHistoryRequiresExactSnapshotState(t *testing.T) {
 				if consumer == "decoder" {
 					var state runfork.RunForkEntityState
 					state, err = loadRunForkConstructedEntityState(snapshot, snapshot.RunID)
-					if err == nil && (state.CurrentState != "pending" || state.MaterializationMetadata == nil || state.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance) {
+					if err == nil && (state.CurrentState == nil || *state.CurrentState != "pending" || state.MaterializationMetadata == nil || state.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance) {
 						t.Fatalf("constructed history lost exact state: %+v", state)
 					}
 				} else {
@@ -289,7 +290,7 @@ func TestRunForkConstructedHistoryRequiresExactSnapshotState(t *testing.T) {
 					if err == nil && (state == nil || state.Source.EntityID != snapshot.RunID || state.Fork.EntityID != forkRun || projected.RoutingSource.Route().EntityID != forkRun) {
 						t.Fatalf("producer lost exact ownership: %+v %+v", projected, state)
 					}
-					if err == nil && (state.history.EntityID != snapshot.RunID || state.history.CurrentState != "pending" || state.history.MaterializationMetadata == nil || state.history.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance) {
+					if err == nil && (state.history.EntityID != snapshot.RunID || state.history.CurrentState == nil || *state.history.CurrentState != "pending" || state.history.MaterializationMetadata == nil || state.history.MaterializationMetadata.Source != runfork.RunForkMaterializedEntitySnapshotMetadataSourceFlowInstance) {
 						t.Fatalf("producer dropped fixed-revision construction history: %+v", state.history)
 					}
 				}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -17,30 +18,31 @@ func TestTrackedMutationProjectionPreservesScopeOrderAndNullBothStores(t *testin
 		t.Run(backend.name, func(t *testing.T) {
 			fixture, ctx := backend.open(t), testAuthorActivityContext()
 			run, entity, foreignRun, foreignEntity := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-			seedEntityToolStorageWitness(t, fixture, run, entity)
-			seedEntityToolStorageWitness(t, fixture, foreignRun, entity)
-			seedEntityToolStorageWitness(t, fixture, run, foreignEntity)
+			seedEntityToolStorageWitness(t, fixture, run, entity, true, true)
+			seedEntityToolStorageWitness(t, fixture, foreignRun, entity, true, true)
+			seedEntityToolStorageWitness(t, fixture, run, foreignEntity, true, true)
 			probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer restore()
 			got, err := ReadTrackedEntityMutationProjectionStorageForTest(ctx, fixture.store, run, entity)
-			if err != nil || got.EntityType != "storage_witness" || got.Revision != 7 || got.CurrentState != "queued" || len(got.Mutations) != 4 || !bytes.Equal(got.Gates, []byte(`{}`)) {
+			if err != nil || got.EntityType != "storage_witness" || got.Revision == nil || *got.Revision != 1 || got.CurrentState == nil || *got.CurrentState != "queued" || len(got.Mutations) != 4 || !bytes.Equal(got.Gates, []byte(`{}`)) {
 				t.Fatalf("projection=%+v/%v", got, err)
 			}
 			var want []TrackedProjectionMutationStorage
-			rows, err := fixture.db.QueryContext(ctx, `SELECT domain,path,new_value FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 ORDER BY created_at ASC,mutation_id ASC`, run, entity)
+			rows, err := fixture.db.QueryContext(ctx, `SELECT domain,path,old_value,new_value,writer_type,writer_id,COALESCE(handler_step,'') FROM entity_mutations WHERE run_id=$1 AND entity_id=$2 ORDER BY created_at ASC,mutation_id ASC`, run, entity)
 			if err != nil {
 				t.Fatal(err)
 			}
 			for rows.Next() {
 				var item TrackedProjectionMutationStorage
-				var value []byte
-				if err := rows.Scan(&item.Domain, &item.Path, &value); err != nil {
+				var oldValue, value []byte
+				if err := rows.Scan(&item.Domain, &item.Path, &oldValue, &value, &item.WriterType, &item.WriterID, &item.HandlerStep); err != nil {
 					t.Fatal(err)
 				}
 				item.NewValue = append([]byte(nil), value...)
+				item.OldValue = append([]byte(nil), oldValue...)
 				want = append(want, item)
 			}
 			if err := rows.Err(); err != nil {
@@ -63,7 +65,7 @@ func TestTrackedMutationProjectionPreservesScopeOrderAndNullBothStores(t *testin
 			}); err != nil {
 				t.Fatal(err)
 			}
-			if empty, err := ReadTrackedEntityMutationProjectionStorageForTest(ctx, fixture.store, run, entity); err != nil || len(empty.Mutations) != 0 || empty.CurrentState != "queued" {
+			if empty, err := ReadTrackedEntityMutationProjectionStorageForTest(ctx, fixture.store, run, entity); err != nil || len(empty.Mutations) != 0 || empty.CurrentState == nil || *empty.CurrentState != "queued" {
 				t.Fatalf("empty physical history=%+v/%v", empty, err)
 			}
 		})
@@ -82,7 +84,7 @@ func TestTrackedMutationProjectionRefusesRawInvalidCancelledClosedAndLateFailure
 			t.Run(backend.name+"/"+cut, func(t *testing.T) {
 				fixture, ctx := backend.open(t), testAuthorActivityContext()
 				run, entity := uuid.NewString(), uuid.NewString()
-				seedEntityToolStorageWitness(t, fixture, run, entity)
+				seedEntityToolStorageWitness(t, fixture, run, entity, true, true)
 				switch cut {
 				case "invalid-run":
 					run = "bad"
@@ -119,5 +121,50 @@ func TestTrackedMutationProjectionRefusesRawInvalidCancelledClosedAndLateFailure
 				}
 			})
 		}
+	}
+}
+
+func TestTrackedMutationProjectionPreservesAbsenceAndPrivateCurrentOperandsBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture, ctx := backend.open(t), testAuthorActivityContext()
+			run := uuid.NewString()
+			for _, shape := range []struct {
+				name                 string
+				constructed, fielded bool
+			}{{"fielded", true, true}, {"fieldless", true, false}, {"data-only", false, true}} {
+				t.Run(shape.name, func(t *testing.T) {
+					entity := uuid.NewString()
+					seedEntityToolStorageWitness(t, fixture, run, entity, shape.constructed, shape.fielded)
+					got, err := ReadTrackedEntityMutationProjectionStorageForTest(ctx, fixture.store, run, entity)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if shape.fielded {
+						if string(got.Fields) != `{}` {
+							t.Fatalf("current fields were synthesized from history: %s", got.Fields)
+						}
+					} else if got.Fields != nil {
+						t.Fatalf("fieldless header acquired a data operand: %s", got.Fields)
+					}
+					if shape.constructed {
+						var accumulator map[string]any
+						if err := json.Unmarshal(got.Accumulator, &accumulator); err != nil {
+							t.Fatal(err)
+						}
+						if got.CurrentState == nil || *got.CurrentState != "queued" || string(got.Gates) != `{}` || string(got.Bookkeeping) != `{}` ||
+							!reflect.DeepEqual(accumulator, map[string]any{"handler_loops": map[string]any{}, "evidence": map[string]any{"score": float64(2)}}) {
+							t.Fatalf("private current lifecycle facts changed: %+v", got)
+						}
+					} else if got.CurrentState != nil || got.Gates != nil || got.Bookkeeping != nil || got.Accumulator != nil {
+						t.Fatalf("data-only member acquired lifecycle: %+v", got)
+					}
+					var last map[string]any
+					if len(got.Mutations) != 4 || json.Unmarshal(got.Mutations[3].NewValue, &last) != nil || last["name"] != "second" {
+						t.Fatalf("independent physical history changed: %+v", got.Mutations)
+					}
+				})
+			}
+		})
 	}
 }
