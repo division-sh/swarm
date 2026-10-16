@@ -233,6 +233,11 @@ func TestRecordDeadLetterExactDuplicateAndConflictParity(t *testing.T) {
 				time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC),
 			)
 			route := testAgentDeliveryRoute(t, event.RunID(), "dead-letter-agent", "dead-letter/primary")
+			secondRoute := testAgentDeliveryRoute(t, event.RunID(), "dead-letter-agent-two", "dead-letter/secondary")
+			requireRunFixtureForTest(t, ctx, fixture.store, semanticRunFixture{
+				RunID: event.RunID(), Origin: semanticEventRunOriginForTest(t, event.ID(), string(event.Type())), StartedAt: event.CreatedAt(),
+			})
+			ctx = preparePositiveAgentClaimFixture(t, ctx, fixture.store.(agentFixtureFlowStore), route.AgentIdentity, secondRoute.AgentIdentity)
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
 				t.Fatalf("commit event and delivery: %v", err)
 			}
@@ -320,7 +325,6 @@ func TestRecordDeadLetterExactDuplicateAndConflictParity(t *testing.T) {
 				})
 			}
 
-			secondRoute := testAgentDeliveryRoute(t, event.RunID(), "dead-letter-agent-two", "dead-letter/secondary")
 			if err := commitDeliveryObligationFixture(ctx, selected, event, secondRoute); err != nil {
 				t.Fatalf("commit second delivery: %v", err)
 			}

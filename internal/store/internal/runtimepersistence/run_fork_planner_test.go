@@ -175,6 +175,11 @@ func TestRunForkPlanner_ClassifiesPendingWorkAndNamedBlockers(t *testing.T) {
 	at := time.Unix(1700000200, 0).UTC()
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: at.Add(-time.Minute)})
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "review/inst-1", at)
+	ctx = preparePositiveAgentClaimFixture(t, ctx, pg,
+		mustTestAgentIdentityForRun(runID, "done-agent", "fixture/done-agent"),
+		mustTestAgentIdentityForRun(runID, "progress-agent", "fixture/progress-agent"),
+		mustTestAgentIdentityForRun(runID, "retry-agent", "fixture/retry-agent"),
+		mustTestAgentIdentityForRun(runID, "dead-agent", "fixture/dead-agent"))
 	retryFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retryable_error", nil)
 	deadFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "dead_letter", nil)
 	for _, fixture := range []struct {
@@ -595,6 +600,7 @@ func TestRunForkPlanner_ScopesDeadLettersToMatchingDelivery(t *testing.T) {
 	retryFailure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retryable_error", nil)
 	nodeDeadID := mustPersistenceRootNode("node-dead").Key()
 	nodeOKID := mustPersistenceRootNode("node-ok").Key()
+	ctx = preparePositiveAgentClaimFixture(t, ctx, pg, mustTestAgentIdentityForRun(runID, "agent-ok", "fixture/agent-ok"))
 	nodeDead := seedDeliveryStateFixture(t, ctx, pg, event, testEntitylessNodeDeliveryRoute("node-dead"), runtimedelivery.StateRetrying, &retryFailure)
 	seedDeliveryStateFixture(t, ctx, pg, event, testEntitylessNodeDeliveryRoute("node-ok"), runtimedelivery.StateDelivered, nil)
 	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-ok")}, runtimedelivery.StateDelivered, nil)
@@ -662,6 +668,7 @@ func TestRunForkPlanner_DeadLetterClassificationUsesExactSiblingDeliveryID(t *te
 		route.AgentIdentity = mustTestAgentIdentityForRun(runID, "agent-shared", target.FlowInstance)
 		record := agentFixtureStaticRecord(t, route.AgentIdentity)
 		record.Config.FlowID, record.Config.FlowPath, record.Config.EntityID = target.FlowID, target.FlowInstance, target.EntityID
+		record.Config = resolveNativeClaimFixtureActor(t, record.Config)
 		if err := agentfixture.UpsertStaticForSource(t, ctx, pg, record, source); err != nil {
 			t.Fatalf("admit exact sibling actor: %v", err)
 		}
@@ -752,6 +759,7 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	completedRoute := testAgentDeliveryRoute(t, runID, "completed-after-fork", "fixture/completed-after-fork")
 	pendingRoute := testAgentDeliveryRoute(t, runID, "started-after-fork", "fixture/started-after-fork")
+	ctx = preparePositiveAgentClaimFixture(t, ctx, pg, completedRoute.AgentIdentity, pendingRoute.AgentIdentity)
 	if err := commitDeliveryObligationFixture(ctx, pg, event, completedRoute); err != nil {
 		t.Fatalf("seed selected-revision completed route: %v", err)
 	}
@@ -816,6 +824,7 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 	event := seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.work", events.EventProducerPlatform, "test", "", "", at)
 	failedRoute := testAgentDeliveryRoute(t, runID, "failed-after-fork", "fixture/failed-after-fork")
 	pendingRoute := testAgentDeliveryRoute(t, runID, "pending-then-failed-after-fork", "fixture/pending-then-failed-after-fork")
+	ctx = preparePositiveAgentClaimFixture(t, ctx, pg, failedRoute.AgentIdentity, pendingRoute.AgentIdentity)
 	if err := commitDeliveryObligationFixture(ctx, pg, event, failedRoute); err != nil {
 		t.Fatalf("seed selected-revision failed route: %v", err)
 	}
@@ -882,6 +891,7 @@ func TestRunForkPlanner_AccountsForPlatformReceiptAndExactDeliveryOutcomes(t *te
 	`, eventID, at); err != nil {
 		t.Fatalf("seed platform processing fact: %v", err)
 	}
+	ctx = preparePositiveAgentClaimFixture(t, ctx, pg, mustTestAgentIdentityForRun(runID, "agent-done", "fixture/agent-done"))
 	seedDeliveryStateFixture(t, ctx, pg, event, testEntitylessNodeDeliveryRoute("node-a"), runtimedelivery.StateDelivered, nil)
 	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-done")}, runtimedelivery.StateDelivered, nil)
 
@@ -941,7 +951,7 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "fork.session", events.EventProducerPlatform, "test", "", "", at)
 	identity := mustTestAgentIdentityForRun(runID, "agent-a", "fork-planner")
 	fields := testAgentIdentityStorageFields(t, identity)
-	seedTestAgentRow(t, ctx, db, true, identity, "active")
+	ctx = preparePositiveAgentClaimFixture(t, ctx, pg, identity)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,

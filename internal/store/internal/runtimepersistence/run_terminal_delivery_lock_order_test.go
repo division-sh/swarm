@@ -21,9 +21,16 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 
 	fixture := seedNormalRunCompletionFixture(t, db, "active", "lock-order/instance", "lock-order")
 	route := testAgentDeliveryRoute(t, fixture.RunID, "lock-order-agent", "fixture/lock-order-agent")
-	event := commitPostgresDeliveryFixture(t, ctx, db, fixture.EventID, route)
-	claimed := claimPostgresDeliveryFixture(t, ctx, db, event, route)
 	settlementStore := postgresDeliveryFixtureStore(db)
+	ctx = preparePositiveAgentClaimFixture(t, ctx, settlementStore, route.AgentIdentity)
+	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, fixture.EventID)
+	if err := commitDeliveryObligationFixture(ctx, settlementStore, event, route); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := claimDeliveryFixture(ctx, settlementStore, event, route)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	terminalDB, err := sql.Open("postgres", dsn)
 	if err != nil {

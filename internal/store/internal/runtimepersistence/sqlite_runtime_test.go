@@ -1934,7 +1934,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	identity := testAgentMemoryIdentity(t, runID, "agent-cleanup-1", "global")
 
 	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+		Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "agent-cleanup-1",
 			Identity:      identity,
 			Role:          "operator",
@@ -1945,7 +1945,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 			Memory:        agentmemory.Plan{Enabled: true},
 			FlowPath:      "global",
 			Config:        json.RawMessage(`{}`),
-		}),
+		})),
 		Status:    "active",
 		StartedAt: now,
 	}); err != nil {

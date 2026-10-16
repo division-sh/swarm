@@ -21,8 +21,10 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/mcp"
 	"github.com/division-sh/swarm/internal/runtime/mockperformance"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -76,12 +78,21 @@ func TestWorkspaceGatewayRefusalBeforeProviderTurnBothStores(t *testing.T) {
 					selected, db = store, store.backend.ConstructionHandle()
 				}
 				source := []byte("def handle(input):\n    raise Exception('MODEL LAUNCHED AFTER REFUSAL')\n")
-				actor := models.AgentConfig{ExecutionMode: effects.ExecutionModeMock, LLMBackend: "mock", ResolvedLLMBackend: "mock", Mock: mockperformance.Performance{
+				actor := models.AgentConfig{Mock: mockperformance.Performance{
 					Kind: mockperformance.KindPython, Module: "mocks/refusal.py", Source: source, Digest: fmt.Sprintf("sha256:%x", sha256.Sum256(source)),
 				}}
-				fixture := newCompletionSettlementFixtureWithActor(t, selected, db, backend == "sqlite", agentmemory.Plan{Enabled: true}, "global", actor)
+				fixture := newCompletionSettlementFixtureWithActor(t, selected, db, backend == "sqlite", agentmemory.Plan{Enabled: true}, "global", executionposture.MockOnly, actor)
 				actor.ID, actor.Identity, actor.Role, actor.Type = fixture.agentID, fixture.authority.Normal.Identity, "worker", "managed"
 				actor.Model, actor.Memory, actor.FlowID, actor.FlowPath = "regular", fixture.authority.Target.Memory, "global", "global"
+				profile, err := selection.ResolveLiveBackend(selection.BackendAnthropic)
+				if err != nil {
+					t.Fatal(err)
+				}
+				resolved, err := llm.ResolveAgentExecution(executionposture.MockOnly, profile, nil, actor)
+				if err != nil {
+					t.Fatal(err)
+				}
+				actor = resolved.Actor
 				var requests, calls atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					requests.Add(1)

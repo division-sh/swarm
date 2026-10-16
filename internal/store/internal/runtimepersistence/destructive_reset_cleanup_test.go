@@ -1339,9 +1339,10 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	if err := commitDiagnosticRuntimeLogFixture(ctx, pg, noRunSemanticEvent); err != nil {
 		t.Fatalf("seed preserved runtime-log event: %v", err)
 	}
-	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a")}
+	executionCtx := preparePositiveAgentClaimFixture(t, ctx, pg, agentIdentity)
+	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: agentIdentity}
 	sourceFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "cleanup_source_exhausted", nil)
-	sourceDeliverySnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, sourceSemanticEvent, sourceRoute, "exhausted", &sourceFailure)
+	sourceDeliverySnapshot := seedAgentDeliveryStateFixture(t, executionCtx, pg, sourceSemanticEvent, sourceRoute, "exhausted", &sourceFailure)
 	var fanOutBundleHash string
 	if err := pg.backend.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1::uuid`, runA).Scan(&fanOutBundleHash); err != nil {
 		t.Fatalf("load destructive-reset fan-out bundle: %v", err)
@@ -1457,7 +1458,6 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	`, runB, runA, forkEvent); err != nil {
 		t.Fatalf("seed selected route recovery: %v", err)
 	}
-	seedTestAgentRow(t, ctx, pg.backend.ConstructionHandle(), true, agentIdentity, "active")
 	if _, err := pg.backend.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -1485,7 +1485,7 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed conversation forks: %v", err)
 	}
 	turnID := uuid.NewString()
-	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, pg, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, executionCtx, pg, runtimellm.AgentTurnRecord{
 		AgentID: agentIdentity.AgentID(), Identity: agentIdentity,
 		RunID: runA, FlowInstance: agentIdentity.FlowInstance(), Memory: agentmemory.Plan{Enabled: true}, SessionID: sessionID,
 		EntityID:       entityID,

@@ -98,13 +98,14 @@ func TestQueuedTurnTerminationBothStores(t *testing.T) {
 					if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, siblingEvent, []events.DeliveryRoute{siblingRoute}); err != nil {
 						t.Fatal(err)
 					}
-					siblings = append(siblings, loadDeliverySnapshotFixture(t, ctx, fixture.store.(deliveryFixtureStore), siblingEvent.ID(), siblingRoute))
 					other := newCompletionSettlementFixture(t, fixture.store, fixture.db, fixture.sqlite)
 					otherEvent := managedCompletionTestEventWithIdentity(other.authority, uuid.NewString(), "completion.test.requested")
 					otherRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(other.agentID), AgentIdentity: other.authority.Normal.Identity}
 					if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, otherEvent, []events.DeliveryRoute{otherRoute}); err != nil {
 						t.Fatal(err)
 					}
+					ctx = admitPreparedAgentClaimContext(t, ctx, fixture.store.(agentFixtureFlowStore))
+					siblings = append(siblings, loadDeliverySnapshotFixture(t, ctx, fixture.store.(deliveryFixtureStore), siblingEvent.ID(), siblingRoute))
 					siblings = append(siblings, loadDeliverySnapshotFixture(t, ctx, fixture.store.(deliveryFixtureStore), otherEvent.ID(), otherRoute))
 				}
 				cause := managedCompletionTestEventWithIdentity(fixture.authority, uuid.NewString(), "completion.test.requested")

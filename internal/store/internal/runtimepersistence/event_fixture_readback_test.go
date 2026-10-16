@@ -228,11 +228,12 @@ func TestSemanticEventPublicationEvidencePreservesExactCutsBothStores(t *testing
 				selected, runID := decisionCardTestStore(t, backend)
 				ctx := testAuthorActivityContext()
 				eventID := uuid.NewString()
+				admitted, settlement, routes := compoundFixtureEvent(t, runID, eventID, `{"proof":"exact-cut"}`, time.Now().UTC())
+				ctx = preparePositiveAgentClaimFixture(t, ctx, selected.(agentFixtureFlowStore), routes[0].AgentIdentity)
 				before, err := ReadSemanticEventFixtureEvidenceForTest(ctx, selected, runID, eventID)
 				if err != nil || before.RecordFound || before.RunStatus != "running" || before.CommittedScopeFound || before.PipelineReceiptCount != 0 || before.SettledDeliveryAttemptCount != 0 {
 					t.Fatalf("pre-publication evidence = %+v, %v", before, err)
 				}
-				admitted, settlement, routes := compoundFixtureEvent(t, runID, eventID, `{"proof":"exact-cut"}`, time.Now().UTC())
 				scope := runtimepipelineobligation.ScopeDirect
 				var disposition *runtimepipelineobligation.Disposition
 				var failure *runtimefailures.Envelope

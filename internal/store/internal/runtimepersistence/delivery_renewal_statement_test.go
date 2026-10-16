@@ -38,9 +38,16 @@ func TestPostgresDeliveryRenewalRetainsIndependentMutationFences(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := seedNormalRunCompletionFixture(t, db, "active", "renewal/instance", "renewal")
 			route := testAgentDeliveryRoute(t, fixture.RunID, "renewal-agent", "fixture/renewal-agent")
-			event := commitPostgresDeliveryFixture(t, ctx, db, fixture.EventID, route)
-			claimed := claimPostgresDeliveryFixture(t, ctx, db, event, route)
 			store := postgresDeliveryFixtureStore(db)
+			ctx := preparePositiveAgentClaimFixture(t, ctx, store, route.AgentIdentity)
+			event := loadPostgresDeliveryFixtureEvent(t, ctx, db, fixture.EventID)
+			if err := commitDeliveryObligationFixture(ctx, store, event, route); err != nil {
+				t.Fatal(err)
+			}
+			claimed, err := claimDeliveryFixture(ctx, store, event, route)
+			if err != nil {
+				t.Fatal(err)
+			}
 			before := loadDeliverySnapshotFixture(t, ctx, store, event.ID(), route)
 			var updated runtimedelivery.Snapshot
 			rollback := errors.New("rollback renewal fixture")
@@ -64,7 +71,7 @@ func TestPostgresDeliveryRenewalRetainsIndependentMutationFences(t *testing.T) {
 				}
 				return struct{}{}, nil
 			})
-			err := result.Err()
+			err = result.Err()
 			if tc.wantError != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantError) {
 					t.Fatalf("renewal error=%v, want %q", err, tc.wantError)

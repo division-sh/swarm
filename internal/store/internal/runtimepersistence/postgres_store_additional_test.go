@@ -176,6 +176,7 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	seedPostgresEntityStateRows(t, db, ctx, runID, entityID)
 	seedWorkflowHeaderProjectionFixture(t, ctx, db, runID, entityID, "test-flow", "test-flow", "default", "ready", "{}", time.Now().UTC())
 	route := testAgentDeliveryRoute(t, runID, "agent-1", "fixture/agent-1")
+	ctx = preparePositiveAgentClaimFixture(t, ctx, pg, route.AgentIdentity)
 	event := commitPostgresDeliveryFixture(t, ctx, db, eventID, route)
 	if err := acknowledgePipelineEventFixture(ctx, pg, eventID); err != nil {
 		t.Fatalf("seed pipeline receipt: %v", err)
@@ -2807,7 +2808,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 	resetAgentSessionsSpecTable(t, ctx, pg)
 
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-cleanup-1",
+		Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-cleanup-1",
 			Identity: mustTestAgentIdentityForRun(specEntityStateRunID, "agent-cleanup-1", "global"),
 			Role:     "worker",
 			FlowID:   "worker",
@@ -2816,7 +2817,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 			Memory:   agentmemory.Plan{Enabled: true},
 			FlowPath: "global",
 			Config:   json.RawMessage(`{}`),
-		}),
+		})),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),

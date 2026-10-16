@@ -129,7 +129,7 @@ func TestDeliveryOperationalWritesDoNotAdvanceForkHistoryBothStores(t *testing.T
 
 func proveRetainedDeliveryLifecycleAccounting(t *testing.T, fixture authorActivityReceiptFixture, completion completionSettlementFixture) {
 	t.Helper()
-	ctx, store := testAuthorActivityContext(), completion.store
+	ctx, store := completion.context, completion.store
 	event := managedCompletionTestEventWithIdentity(completion.authority, uuid.NewString(), "delivery.history")
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(completion.agentID), AgentIdentity: completion.authority.Normal.Identity}
 	if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, []events.DeliveryRoute{route}); err != nil {

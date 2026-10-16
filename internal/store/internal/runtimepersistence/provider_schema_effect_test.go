@@ -23,6 +23,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
@@ -181,7 +182,7 @@ func providerSchemaStoreFixture(t *testing.T, backend string) completionSettleme
 		fixture := openPostgresAuthorActivityReceiptFixture(t)
 		store, db = fixture.store.(completionSettlementTestStore), fixture.db
 	}
-	return newCompletionSettlementFixtureWithActor(t, store, db, backend == "sqlite", agentmemory.Plan{Enabled: true}, "global",
+	return newCompletionSettlementFixtureWithActor(t, store, db, backend == "sqlite", agentmemory.Plan{Enabled: true}, "global", executionposture.Live,
 		runtimeactors.AgentConfig{ExecutionMode: "live", LLMBackend: "anthropic", ResolvedLLMBackend: "anthropic"})
 }
 
