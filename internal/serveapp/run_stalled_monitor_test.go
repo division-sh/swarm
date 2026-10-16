@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,7 +32,7 @@ func TestRunStalledSnapshotFromDebugReportUsesProjectRunOperationalStatus(t *tes
 			wantReason: "no_active_deliveries",
 		},
 		{
-			name: "scoring terminal outcome",
+			name: "scoring names do not create obligations",
 			report: operatorread.RunDebugReport{
 				RunID:          "run-scoring",
 				RunTableStatus: "running",
@@ -40,8 +41,8 @@ func TestRunStalledSnapshotFromDebugReportUsesProjectRunOperationalStatus(t *tes
 					{EventName: "scoring/scoring.requested", Count: 1},
 				},
 			},
-			wantLayer:  "scoring_terminal_outcome",
-			wantReason: "terminal_scoring_outcome_missing",
+			wantLayer:  "delivery_lifecycle",
+			wantReason: "no_active_deliveries",
 		},
 		{
 			name: "active delivery remains running",
@@ -59,6 +60,7 @@ func TestRunStalledSnapshotFromDebugReportUsesProjectRunOperationalStatus(t *tes
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			tc.report.OperationalFacts = stalledMonitorFacts(now, "review/inst-1")
 			got := runStalledSnapshotFromDebugReport(tc.report, "review/inst-1", tc.report.LastEventAt)
 			if got.Diagnosis.BlockingLayer != tc.wantLayer {
 				t.Fatalf("blocking_layer = %q, want %q", got.Diagnosis.BlockingLayer, tc.wantLayer)
@@ -80,9 +82,10 @@ func TestRunStalledSnapshotFromDebugReportUsesNonEscalationProgressTimestamp(t *
 	progressAt := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	selfAlertAt := progressAt.Add(10 * time.Minute)
 	report := operatorread.RunDebugReport{
-		RunID:          "run-self-alert",
-		RunTableStatus: "running",
-		LastEventAt:    selfAlertAt,
+		RunID:            "run-self-alert",
+		RunTableStatus:   "running",
+		LastEventAt:      selfAlertAt,
+		OperationalFacts: stalledMonitorFacts(progressAt, "review/inst-1"),
 	}
 	got := runStalledSnapshotFromDebugReport(report, "", progressAt)
 	if !got.LastProgressAt.Equal(progressAt) {
@@ -98,12 +101,11 @@ func TestServeRunStalledReaderLoadsSnapshotProgressFromStore(t *testing.T) {
 	progressAt := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	reader := &serveRunStalledReader{store: fakeRunStalledReadStore{
 		report: operatorread.RunDebugReport{
-			RunID:          "run-1",
-			RunTableStatus: "running",
-			LastEventAt:    progressAt.Add(10 * time.Minute),
+			RunID:            "run-1",
+			RunTableStatus:   "running",
+			LastEventAt:      progressAt.Add(10 * time.Minute),
+			OperationalFacts: stalledMonitorFacts(progressAt, "review/inst-1"),
 		},
-		flowInstance: "review/inst-1",
-		progressAt:   progressAt,
 	}}
 	got, err := reader.LoadRunSnapshot(ctx, "run-1")
 	if err != nil {
@@ -125,10 +127,24 @@ func TestServeRunStalledReaderUsesSelectedProjection(t *testing.T) {
 	}
 }
 
+func TestServeRunStalledReaderKeepsMixedScopesAndDoesNotInventAlertArbitration(t *testing.T) {
+	facts := stalledMonitorFacts(time.Unix(100, 0).UTC(), "review/one")
+	facts.Instances = append(facts.Instances, operatorread.RunInstanceFacts{FlowInstance: "review/two", Complete: true, Revision: 1})
+	reader := &serveRunStalledReader{store: fakeRunStalledReadStore{report: operatorread.RunDebugReport{
+		RunID: "run", RunTableStatus: "running", OperationalFacts: facts,
+	}}}
+	if _, err := reader.LoadRunSnapshot(context.Background(), "run"); err == nil || !strings.Contains(err.Error(), "arbitration") {
+		t.Fatalf("simultaneous stalls selected an arbitrary alert scope: %v", err)
+	}
+	facts.Instances[1].Work.Timers = 1
+	snapshot, err := reader.LoadRunSnapshot(context.Background(), "run")
+	if err != nil || snapshot.Diagnosis.OperationalState != "running" || len(snapshot.Diagnosis.Attributions) != 1 || snapshot.Diagnosis.Attributions[0].FlowInstance != "review/one" {
+		t.Fatalf("waiting sibling hid the stalled sibling or invented escalation: %+v %v", snapshot, err)
+	}
+}
+
 type fakeRunStalledReadStore struct {
-	report       operatorread.RunDebugReport
-	flowInstance string
-	progressAt   time.Time
+	report operatorread.RunDebugReport
 }
 
 func (s fakeRunStalledReadStore) ListRunHeaders(context.Context, operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error) {
@@ -143,12 +159,10 @@ func (s fakeRunStalledReadStore) ListOperatorEvents(context.Context, operatorrea
 	return operatorread.OperatorEventListResult{}, nil
 }
 
-func (s fakeRunStalledReadStore) LoadLatestRunFlowInstance(context.Context, string) (string, error) {
-	return s.flowInstance, nil
-}
-
-func (s fakeRunStalledReadStore) LoadLatestRunNonEscalationProgressAt(context.Context, string, string) (time.Time, error) {
-	return s.progressAt, nil
+func stalledMonitorFacts(progress time.Time, path string) *operatorread.RunOperationalFacts {
+	return &operatorread.RunOperationalFacts{Complete: true, LastProgressAt: progress,
+		Instances: []operatorread.RunInstanceFacts{{FlowInstance: path, Complete: true, Revision: 1}},
+	}
 }
 
 func TestRunStalledFlowIDForInstanceChoosesMostSpecificScope(t *testing.T) {

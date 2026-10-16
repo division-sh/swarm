@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/division-sh/swarm/internal/cli/readwindow"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
@@ -81,14 +82,16 @@ type diagnosticRunGetResult struct {
 }
 
 type DiagnosticRunDiagnosisResult struct {
-	Run              diagnosticRunHeader            `json:"run"`
-	OperationalState *string                        `json:"operational_state"`
-	BlockingLayer    *string                        `json:"blocking_layer"`
-	BlockingReason   *string                        `json:"blocking_reason"`
-	Heuristics       []string                       `json:"heuristics"`
-	FailedDeliveries []diagnosticRunFailureDelivery `json:"failed_deliveries"`
-	FanOut           fanoutobligation.RunSummary    `json:"fan_out"`
-	TestQuiescence   *diagnosticRunTestQuiescence   `json:"test_quiescence"`
+	Run              diagnosticRunHeader                         `json:"run"`
+	OperationalState *string                                     `json:"operational_state"`
+	BlockingLayer    *string                                     `json:"blocking_layer"`
+	BlockingReason   *string                                     `json:"blocking_reason"`
+	Heuristics       []string                                    `json:"heuristics"`
+	FailedDeliveries []diagnosticRunFailureDelivery              `json:"failed_deliveries"`
+	FanOut           fanoutobligation.RunSummary                 `json:"fan_out"`
+	TestQuiescence   *diagnosticRunTestQuiescence                `json:"test_quiescence"`
+	Instances        []operatorread.RunInstanceOperationalStatus `json:"instances"`
+	Attributions     []operatorread.RunTurnAttribution           `json:"attributions"`
 }
 
 type diagnosticRunTestQuiescence struct {
@@ -1068,6 +1071,9 @@ func validateDiagnosticRunDiagnosis(result DiagnosticRunDiagnosisResult) error {
 	if result.Heuristics == nil {
 		return fmt.Errorf("malformed run.diagnose result: heuristics is required")
 	}
+	if result.Instances == nil || result.Attributions == nil {
+		return fmt.Errorf("malformed run.diagnose result: instances and attributions are required")
+	}
 	if result.TestQuiescence == nil {
 		return fmt.Errorf("malformed run.diagnose result: test_quiescence is required")
 	}
@@ -1338,8 +1344,32 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisRes
 	if out == nil {
 		return
 	}
-	rows := diagnosticRunHeaderRows(result.Run)
+	rows := make([]cliLabeledDetailRow, 0)
 	state := stringPointerValue(result.OperationalState)
+	for _, attribution := range result.Attributions {
+		value := fmt.Sprintf("instance %s", attribution.FlowInstance)
+		if attribution.AgentID != "" {
+			value = fmt.Sprintf("instance %s: agent %s, event %s (%s), delivery %s, logical turn %s",
+				attribution.FlowInstance, attribution.AgentID, attribution.EventType, attribution.EventID, attribution.DeliveryID, attribution.LogicalTurnID)
+		}
+		switch attribution.Emission {
+		case operatorread.RunEmissionNone:
+			value += "; no accepted emission"
+		case operatorread.RunEmissionAccepted:
+			value += fmt.Sprintf("; %d accepted emission(s)", len(attribution.EmittedEvents))
+		default:
+			value += "; emission evidence unknown"
+		}
+		label := "attribution"
+		if attribution.Historical {
+			label = "historical"
+		}
+		if attribution.EvidenceReason != "" {
+			value += "; " + attribution.EvidenceReason
+		}
+		rows = append(rows, cliLabeledDetailRow{Label: label, Value: value})
+	}
+	rows = append(rows, diagnosticRunHeaderRows(result.Run)...)
 	if projectedRunStatus := diagnosticRunStatusLabel(result.Run); projectedRunStatus != formatCLIHumanCode(cliHumanCodeOperationalState, state) {
 		rows = append(rows, cliLabeledDetailRow{Label: "run status", Value: projectedRunStatus})
 	}

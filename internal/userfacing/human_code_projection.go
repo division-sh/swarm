@@ -35,12 +35,10 @@ var humanCodePhrases = map[HumanCodeFamily]map[string]string{
 		"completed": "completed", "failed": "failed", "cancelled": "cancelled", "forked": "forked",
 	},
 	HumanCodeRunBlockingLayer: {
-		"scoring_terminal_outcome": "scoring outcome",
-		"delivery_lifecycle":       "delivery lifecycle",
+		"delivery_lifecycle": "delivery lifecycle",
 	},
 	HumanCodeRunBlockingReason: {
-		"terminal_scoring_outcome_missing": "waiting for a terminal scoring outcome",
-		"no_active_deliveries":             "no active deliveries",
+		"no_active_deliveries": "no active deliveries",
 	},
 	HumanCodeAgentStatus: {
 		"idle": "idle", "running": "running", "paused": "paused",
