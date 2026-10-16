@@ -12266,7 +12266,8 @@ tool_model:
       - resolve exactly one trigger and connector dependency by immutable pack id and role from the accepted inventory
       - reject duplicate pack ids across trigger, connector, and channel roles
       - require exact operation and event key sets; missing, duplicate, or unknown rows fail admission
-      - require exact compiled effect equality between each interface operation and connector tool; both read_only and non_idempotent_write are explicit, never inferred by the caller
+      - retain the platform-owned effect of the exact admitted interface operation or registration slot; identify/readback are read_only and apply is non_idempotent_write, independent of tool category or HTTP method
+      - refuse connector tools that declare effect_class; prove each binding's category, credentials, mappings and schemas against its exact operation or registration slot before execution
       - recursively require every required interface input/context leaf to be consumed once and every required connector target leaf to be assigned once
       - reject duplicate or ancestor/descendant overlap in mapped targets and recursively consumed item sources; the compiler records one topology that runtime preparation consumes
       - prove recursively that every admitted source value is assignable to its target, including object requiredness and additional-properties policy, array items and bounds, enums, patterns, and scalar bounds
@@ -13073,11 +13074,15 @@ tool_model:
     admission_rule: Only the declared tool vocabulary is admitted. Unknown fields fail strict source admission
       before tool resolution; no removed-spelling table or translator exists.
     http_interruption_rule: >
-      Every HTTP tool call, from a handler activity or an agent, has one fixed interruption behavior.
+      Every flow-made HTTP tool call, from a handler activity or an agent, has one fixed interruption behavior.
       Interruption after launch is outcome-uncertain and never authorizes automatic redispatch, including GET.
       Complete known responses and prelaunch refusals remain distinct. The retired effect_class key refuses
-      through shared source admission with its source coordinate and the teaching message:
-      effect_class is not a tool key; interrupted HTTP calls are outcome-uncertain and not retried.
+      through shared source admission with its source coordinate and the flow teaching message:
+      effect_class is not a tool key; the runtime attempts each HTTP call once, and an interrupted call is outcome-uncertain.
+      Connector declarations use that same closed admission owner with the teaching message:
+      effect_class is not a tool key; a connector tool takes its class from the operation or registration slot it is bound to.
+      Platform-made connector calls retain the policy owned by their exact admitted channel operation or registration slot.
+      Importing that connector into a flow does not grant platform read policy; category and method are not execution authority.
     agent_uncertainty_presentation: >
       Agent-facing tool-result text says: result unknown: the call may or may not have reached the system; it will not
       be retried automatically. Agent-only structured presentation preserves class, detail, retryability and identity

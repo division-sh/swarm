@@ -9,7 +9,7 @@ import (
 )
 
 func TestToolEffectClassRetirement(t *testing.T) {
-	const teaching = "effect_class is not a tool key; interrupted HTTP calls are outcome-uncertain and not retried"
+	const teaching = "effect_class is not a tool key; the runtime attempts each HTTP call once, and an interrupted call is outcome-uncertain"
 	for _, handler := range []string{"http", "mcp"} {
 		for _, value := range []string{"read_only", "idempotent_write", "non_idempotent_write", "long_running", "write_or_unknown", "unknown", "null", "''", "false", "0", "[]", "{}", "[read_only]", "{class: read_only}"} {
 			t.Run(handler+"/"+value, func(t *testing.T) {

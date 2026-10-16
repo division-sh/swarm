@@ -334,7 +334,7 @@ func (d *serveChannelDeliveryDispatcher) readNativeInboxLauncher(ctx context.Con
 	if err != nil {
 		return "", err
 	}
-	toolID, tool, err := plan.ConnectorOperation(operation)
+	_, tool, err := plan.ConnectorOperation(operation)
 	if err != nil {
 		return "", err
 	}
@@ -345,7 +345,7 @@ func (d *serveChannelDeliveryDispatcher) readNativeInboxLauncher(ctx context.Con
 	if err != nil {
 		return "", err
 	}
-	output, err := channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, admissions, tool).Read(ctx, toolID, tool, input, credentials)
+	output, err := channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, admissions, tool).ReadChannelOperation(ctx, plan, operation, input, credentials)
 	if err != nil {
 		return "", err
 	}
@@ -366,7 +366,7 @@ func (d *serveChannelDeliveryDispatcher) readNativeInboxAddress(ctx context.Cont
 	if err != nil {
 		return "", err
 	}
-	toolID, tool, err := plan.ConnectorOperation(operation)
+	_, tool, err := plan.ConnectorOperation(operation)
 	if err != nil {
 		return "", err
 	}
@@ -377,7 +377,7 @@ func (d *serveChannelDeliveryDispatcher) readNativeInboxAddress(ctx context.Cont
 	if err != nil {
 		return "", err
 	}
-	output, err := channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, admissions, tool).Read(ctx, toolID, tool, input, credentials)
+	output, err := channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, admissions, tool).ReadChannelOperation(ctx, plan, operation, input, credentials)
 	if err != nil {
 		return "", err
 	}
@@ -454,7 +454,7 @@ func (d *serveChannelDeliveryDispatcher) readNativeInboxLanguageCommands(ctx con
 	if err != nil {
 		return nil, err
 	}
-	toolID, tool, err := plan.ConnectorOperation(operation)
+	_, tool, err := plan.ConnectorOperation(operation)
 	if err != nil {
 		return nil, err
 	}
@@ -462,7 +462,7 @@ func (d *serveChannelDeliveryDispatcher) readNativeInboxLanguageCommands(ctx con
 	if err != nil {
 		return nil, err
 	}
-	output, err := channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, admissions, tool).Read(ctx, toolID, tool, input, credentials)
+	output, err := channelCredentialHTTPExecutor(d.httpClient, d.credentials, plan, admissions, tool).ReadChannelOperation(ctx, plan, operation, input, credentials)
 	if err != nil {
 		return nil, err
 	}

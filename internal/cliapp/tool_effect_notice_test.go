@@ -13,7 +13,7 @@ func TestDescribeRefusesRetiredToolEffectClassTextAndJSON(t *testing.T) {
 	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "name: notice\n")
 	writeDescribeTestFile(t, filepath.Join(root, "tools.yaml"), "probe:\n  handler_type: http\n  effect_class: read_only\n  http: {method: GET, url: 'https://example.invalid'}\n")
 	writeDescribeTestFile(t, filepath.Join(root, "agents.yaml"), "first:\n  intent: {inline: Observe one result.}\n  model: regular\n  tools: [probe]\nsecond:\n  intent: {inline: Observe another result.}\n  model: regular\n  tools: [probe]\n")
-	const wording = "effect_class is not a tool key; interrupted HTTP calls are outcome-uncertain and not retried"
+	const wording = "effect_class is not a tool key; the runtime attempts each HTTP call once, and an interrupted call is outcome-uncertain"
 	for _, jsonOutput := range []bool{false, true} {
 		args := []string{"describe", root}
 		if jsonOutput {
