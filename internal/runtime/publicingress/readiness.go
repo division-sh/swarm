@@ -335,9 +335,10 @@ func (o *ReadinessOwner) RevokeExposure(cause string) {
 }
 
 type evaluatedRegistrationSnapshot struct {
-	snapshot registrationProcessSnapshot
-	output   Snapshot
-	current  map[string]bool
+	snapshot      registrationProcessSnapshot
+	output        Snapshot
+	current       map[string]bool
+	exposureReady bool
 }
 
 func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedRegistrationSnapshot {
@@ -409,7 +410,7 @@ func (o *ReadinessOwner) evaluate(ctx context.Context, now time.Time) evaluatedR
 	}
 	output.PublicIngressReady = exposureReady && registrationsReady
 	output.Ready = output.RuntimeReady && output.PublicIngressReady
-	return evaluatedRegistrationSnapshot{snapshot: process, output: output, current: currentByKey}
+	return evaluatedRegistrationSnapshot{snapshot: process, output: output, current: currentByKey, exposureReady: exposureReady}
 }
 
 func registrationSelectionCurrent(ctx context.Context, pair RegistrationPair, selectionCurrent func(context.Context, RegistrationPair) (bool, error)) (bool, string) {

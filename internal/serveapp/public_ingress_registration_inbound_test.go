@@ -249,8 +249,17 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	if !initial.PublicIngressReady || len(initial.Registrations) != 1 {
 		t.Fatalf("initial registration readiness = %#v", initial)
 	}
-	handler := controller.Handler(runtimeProcessInboundHandler{contexts: manager})
+	handler := runtimeProcessInboundHandler{contexts: manager, publicRegistration: controller}
 	initialBody := `{"update_id":99,"message":{"message_id":7,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"initial"}}`
+	for _, callback := range []string{"/webhooks/chat/telegram", "/webhooks/chat/telegram?swarm_callback_generation=foreign"} {
+		request := httptest.NewRequest(http.MethodPost, callback, strings.NewReader(initialBody))
+		request.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret-v1")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound || len(eventsStore.events) != 0 {
+			t.Fatalf("managed callback bypassed token fence: status=%d events=%d", response.Code, len(eventsStore.events))
+		}
+	}
 	initialRequest := httptest.NewRequest(http.MethodPost, initial.Registrations[0].CallbackURL, strings.NewReader(initialBody))
 	initialRequest.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret-v1")
 	initialRecorder := httptest.NewRecorder()
