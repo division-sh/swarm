@@ -86,9 +86,16 @@ No finding reduction or complete failure-class closure is claimed here.
 
 The final repaired head must be signed and frozen, obtain the required local
 both-store HumanTask requester/producer proof, then fresh canonical preflight
-before the ONE repaired PR push and hosted FULL. Q1, the separate S1/S2
-one-landing disposition, and the 194/155 uncredited holds remain visible and
-unchanged. This local checkpoint is not that final head.
+before the ONE repaired PR push and hosted FULL. Under explicit user
+decision6205151766 and reviewer-b6205185012, Q1's causal uncertainty is accepted
+for this ONE landing only, CONDITIONAL on TestHumanTaskRealRequesterTopologyBothStores
+actually executing and PASSing on both stores in the final exact-head required
+hosted FULL. Missing, skipped, cancelled or failed evidence stops landing; local
+or earlier-head success cannot substitute. Q1 remains OPEN under B/reviewer-b
+follow-up ownership; its original REDs and unmatched-load558.803s/600.112s pair
+remain, with no inheritance or repair claim. The separate S1/S2 disposition and
+194/155 open, uncredited holds are not absorbed. This local checkpoint is not
+that final head.
 
 ## Finite H19 Bootstrap Continuation
 
