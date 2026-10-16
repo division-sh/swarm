@@ -114,10 +114,6 @@ func admitProviderDirectory(provider ProviderDirectory, manifests map[string]Man
 	if !present {
 		return ProviderDirectory{}, fmt.Errorf("provider directory %s requires manifest.yaml beside its bodies", directory)
 	}
-	// Logical roots have no host basename; disk admission checks it separately.
-	if directory != "." && path.Base(directory) != manifest.Name {
-		return ProviderDirectory{}, fmt.Errorf("folder %s holds provider %s; rename the folder", path.Base(directory), manifest.Name)
-	}
 	for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
 		if label, present := provider.bodies[role]; present {
 			if err := manifest.ValidateBodyHeader(snapshots[label].Document(label).Root()); err != nil {

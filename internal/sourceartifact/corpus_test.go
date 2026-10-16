@@ -25,7 +25,7 @@ func TestTrackedManifestRootsUseFiniteSourceGrammar(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if metadata, present := artifact.RootManifest(); !present || metadata.Name == "" || metadata.Version == "" || metadata.PlatformVersion == "" {
+			if metadata, present := artifact.RootManifest(); !present || metadata.Version == "" || metadata.PlatformVersion == "" {
 				t.Fatalf("tracked positive manifest bypassed strict metadata: %#v", metadata)
 			}
 		})

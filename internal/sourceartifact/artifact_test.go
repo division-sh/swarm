@@ -197,7 +197,7 @@ func TestManifestIsExactArtifactDataAndTypedMetadata(t *testing.T) {
 	if !ok || string(entry.Bytes()) != manifest2376 {
 		t.Fatalf("manifest artifact member = %#v, %v", entry, ok)
 	}
-	if manifest, ok := artifact.RootManifest(); !ok || manifest.Name != "Shop Reception" || manifest.Version != "1.2.3" {
+	if manifest, ok := artifact.RootManifest(); !ok || manifest.Version != "1.2.3" || manifest.PlatformVersion != ">=0.7.0 <1.0.0" {
 		t.Fatalf("root manifest = %#v, %v", manifest, ok)
 	}
 }

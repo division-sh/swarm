@@ -11,7 +11,7 @@ import (
 
 func s1ProviderMembers() map[string][]byte {
 	return map[string][]byte{
-		"manifest.yaml": []byte("name: team-bot\nversion: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [inbound.team], persist_dedupe_markers: true}, cannot: [execute code]}\n"),
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [inbound.team], persist_dedupe_markers: true}, cannot: [execute code]}\n"),
 		"trigger.yaml":  []byte("event_name: {literal: inbound.team}\n"),
 	}
 }
@@ -23,11 +23,11 @@ func TestS1ProviderArtifactOwnsExactCapturedMembers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !provider.Valid() || provider.Metadata().Name != "team-bot" || provider.Directory() != "team-bot" || provider.DeclaringFlow() != "." {
+	if !provider.Valid() || provider.Metadata().Version != "1.0.0" || provider.Directory() != "team-bot" || provider.DeclaringFlow() != "." {
 		t.Fatalf("wrong provider identity: %+v", provider)
 	}
 	body, present := provider.Body(packmodel.BodyTrigger)
-	if !present || !body.Valid() || body.Role() != packmodel.BodyTrigger || body.Label() != "team-bot/trigger.yaml" || body.Metadata().Name != "team-bot" {
+	if !present || !body.Valid() || body.Role() != packmodel.BodyTrigger || body.Label() != "team-bot/trigger.yaml" || body.Metadata().Version != "1.0.0" {
 		t.Fatalf("body lost its admitted parent: %+v", body)
 	}
 	wantHash := body.Hash()
@@ -39,8 +39,8 @@ func TestS1ProviderArtifactOwnsExactCapturedMembers(t *testing.T) {
 	readback := body.Bytes()
 	readback[0] = 'x'
 	metadata := body.Metadata()
-	metadata.Name = "foreign"
-	if !bytes.Equal(body.Bytes(), wantBody) || body.Hash() != wantHash || body.Metadata().Name != "team-bot" {
+	metadata.Version = "9.9.9"
+	if !bytes.Equal(body.Bytes(), wantBody) || body.Hash() != wantHash || body.Metadata().Version != "1.0.0" {
 		t.Fatal("mutable caller changed captured provider bytes or identity")
 	}
 	if value := body.SourceValue(); value.Location().File != "team-bot/trigger.yaml" {
@@ -49,7 +49,7 @@ func TestS1ProviderArtifactOwnsExactCapturedMembers(t *testing.T) {
 	if _, present := provider.Body(packmodel.BodyConnector); present {
 		t.Fatal("missing role was fabricated")
 	}
-	if !bytes.Contains(provider.ManifestBody(), []byte("name: team-bot\n")) {
+	if !bytes.Contains(provider.ManifestBody(), []byte("version: 1.0.0\n")) {
 		t.Fatal("manifest source bytes were reconstructed from display metadata")
 	}
 	retained, err := sourceartifact.DecodeLogical(provider.source.LogicalBlob())
@@ -61,13 +61,13 @@ func TestS1ProviderArtifactOwnsExactCapturedMembers(t *testing.T) {
 		t.Fatal(err)
 	}
 	reopenedBody, present := reopened.Body(packmodel.BodyTrigger)
-	if !present || reopenedBody.Hash() != wantHash || !bytes.Equal(reopenedBody.Bytes(), wantBody) || reopenedBody.Metadata().Name != "team-bot" {
+	if !present || reopenedBody.Hash() != wantHash || !bytes.Equal(reopenedBody.Bytes(), wantBody) || reopenedBody.Metadata().Version != "1.0.0" {
 		t.Fatal("retained reconstruction changed provider ownership or exact bytes")
 	}
 }
 
 func TestS1ProviderArtifactRefusesPathAliasesAndForeignSelection(t *testing.T) {
-	for _, directory := range []string{"", "team_bot", "../team-bot", "/team-bot", "./team-bot", "team-bot/.", "TEAM-BOT"} {
+	for _, directory := range []string{"", "../team-bot", "/team-bot", "./team-bot", "team-bot/.", "TEAM-BOT"} {
 		t.Run(directory, func(t *testing.T) {
 			if _, err := AdmitProviderMembers(directory, s1ProviderMembers()); err == nil {
 				t.Fatalf("noncanonical or mismatched directory %q admitted", directory)

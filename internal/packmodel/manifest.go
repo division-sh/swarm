@@ -6,7 +6,6 @@ import (
 
 	semver "github.com/Masterminds/semver/v3"
 	"github.com/division-sh/swarm/internal/platform"
-	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -35,7 +34,6 @@ func (k DirectoryKind) String() string {
 
 // Manifest is shared metadata admitted against a file-derived directory kind.
 type Manifest struct {
-	Name            string `json:"name"`
 	Version         string `json:"version"`
 	PlatformVersion string `json:"platform_version"`
 
@@ -83,7 +81,7 @@ func (m Manifest) ValidateBodyHeader(root yamlsource.Value) error {
 	}
 	for _, entry := range entries {
 		if entry.Name == "provider" {
-			return manifestError(entry.Value, "provider is not a body key; the provider is name in manifest.yaml")
+			return manifestError(entry.Value, "provider is not a body key; the directory is the provider name")
 		}
 	}
 	return nil
@@ -113,9 +111,6 @@ func ProjectManifest(root yamlsource.Value, kind DirectoryKind) (Manifest, error
 		return Manifest{}, err
 	}
 	if kind == DirectoryProvider {
-		if err := runtimepaths.ValidateFlowSegment(out.Name); err != nil {
-			return Manifest{}, manifestError(fields["name"], fmt.Sprintf("name %q is not an identifier: %s", out.Name, err))
-		}
 		value, present := fields["capabilities"]
 		if !present {
 			missing, err := root.Lookup("capabilities")
@@ -145,7 +140,7 @@ func manifestFields(root yamlsource.Value, kind DirectoryKind) (map[string]yamls
 			return nil, manifestError(entry.Value, "duplicate manifest field "+entry.Name)
 		}
 		switch entry.Name {
-		case "name", "version", "platform_version":
+		case "version", "platform_version":
 		case "capabilities":
 			if kind != DirectoryProvider {
 				return nil, manifestError(entry.Value, "capabilities is only a provider manifest key")
@@ -160,6 +155,8 @@ func manifestFields(root yamlsource.Value, kind DirectoryKind) (map[string]yamls
 
 func retiredManifestField(name string, value yamlsource.Value) error {
 	switch name {
+	case "name":
+		return manifestError(value, "name is not a manifest key; the directory is the name")
 	case "type":
 		return manifestError(value, "type is not a manifest key; a directory is a provider or a flow by the files it holds")
 	case "requires":
@@ -175,9 +172,9 @@ func retiredManifestField(name string, value yamlsource.Value) error {
 	case "requires.secrets", "requires.managed_credentials":
 		return manifestError(value, name+" is not a manifest key; credentials are declared on the action, trigger or channel that uses them")
 	case "id", "implements", "manifest_hash", "provenance", "tests":
-		return manifestError(value, name+" is not a manifest key; use name, version, platform_version and provider capabilities")
+		return manifestError(value, name+" is not a manifest key; use version, platform_version and provider capabilities")
 	default:
-		return manifestError(value, "unknown manifest field "+name+"; allowed: name, version, platform_version and provider capabilities")
+		return manifestError(value, "unknown manifest field "+name+"; allowed: version, platform_version and provider capabilities")
 	}
 }
 
@@ -185,7 +182,7 @@ func admitManifestHeader(root yamlsource.Value, fields map[string]yamlsource.Val
 	for _, field := range []struct {
 		name   string
 		target *string
-	}{{"name", &out.Name}, {"version", &out.Version}, {"platform_version", &out.PlatformVersion}} {
+	}{{"version", &out.Version}, {"platform_version", &out.PlatformVersion}} {
 		value, present := fields[field.name]
 		if !present {
 			missing, err := root.Lookup(field.name)

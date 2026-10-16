@@ -156,16 +156,15 @@ func (n *FlowNode) ProviderDirectories() []string {
 }
 
 type AdmittedSourceArtifact struct {
-	directoryLabel string
-	rootAdmission  RootAdmission
-	entries        []Entry
-	byLabel        map[string]int
-	yaml           map[string]yamlsource.Snapshot
-	manifests      map[string]Manifest
-	providers      map[string]ProviderDirectory
-	root           *FlowNode
-	logical        []byte
-	bundleHash     string
+	rootAdmission RootAdmission
+	entries       []Entry
+	byLabel       map[string]int
+	yaml          map[string]yamlsource.Snapshot
+	manifests     map[string]Manifest
+	providers     map[string]ProviderDirectory
+	root          *FlowNode
+	logical       []byte
+	bundleHash    string
 }
 
 // AdmitMembers applies the same admission as disk and retained decoding to an

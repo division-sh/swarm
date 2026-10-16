@@ -34,14 +34,25 @@ func (a *AdmittedSourceArtifact) HumanLabel() string {
 	if a == nil {
 		return ""
 	}
+	if admission, present := a.RootAdmission(); present {
+		return a.humanLabelForDirectory(admission.RootDirectory())
+	}
+	return ShortHashLabel(a.BundleHash())
+}
+
+func (s RootedSource) HumanLabel() string {
+	if s.Validate() != nil {
+		return ""
+	}
+	return s.artifact.humanLabelForDirectory(s.admission.RootDirectory())
+}
+
+func (a *AdmittedSourceArtifact) humanLabelForDirectory(directory string) string {
+	version := ShortHashLabel(a.BundleHash())
 	if manifest, present := a.RootManifest(); present {
-		return humanSourceLabel(manifest.Name + "@" + manifest.Version)
+		version = manifest.Version
 	}
-	short := ShortHashLabel(a.BundleHash())
-	if a.directoryLabel != "" {
-		return humanSourceLabel(a.directoryLabel + "@" + short)
-	}
-	return short
+	return humanSourceLabel(directory + "@" + version)
 }
 
 func humanSourceLabel(label string) string {

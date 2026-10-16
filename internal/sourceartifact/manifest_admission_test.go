@@ -9,22 +9,15 @@ import (
 	"testing"
 )
 
-const manifest2376 = "name: Shop Reception\nversion: 1.2.3\nplatform_version: '>=0.7.0 <1.0.0'\n"
+const manifest2376 = "version: 1.2.3\nplatform_version: '>=0.7.0 <1.0.0'\n"
 
-func Test2376ManifestHumanNamePreservesMetadataButNotTerminalControls(t *testing.T) {
-	artifact, err := newArtifact([]Entry{
+func Test2376ManifestRetiredHumanNameCannotSupplyPresentation(t *testing.T) {
+	_, err := newArtifact([]Entry{
 		{label: "schema.yaml", body: []byte("description: root\n")},
 		{label: "manifest.yaml", body: []byte("name: \"Shop\\nReception\\u001b[0m\"\nversion: 1.2.3\nplatform_version: '*'\n")},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	metadata, present := artifact.RootManifest()
-	if !present || metadata.Name != "Shop\nReception\x1b[0m" {
-		t.Fatalf("source metadata was normalized: %#v", metadata)
-	}
-	if label := artifact.HumanLabel(); strings.ContainsAny(label, "\n\r\x1b") || label != "Shop Reception [0m@1.2.3" {
-		t.Fatalf("terminal control leaked into human label: %q", label)
+	if err == nil || !strings.Contains(err.Error(), "name is not a manifest key; the directory is the name") {
+		t.Fatalf("retired human name acquired display authority: %v", err)
 	}
 }
 
@@ -74,8 +67,8 @@ func Test2376ManifestOptionalStrictPresence(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	fields := []string{"name: Shop Reception\n", "version: 1.2.3\n", "platform_version: '>=0.7.0 <1.0.0'\n"}
-	for mask := 0; mask < 8; mask++ {
+	fields := []string{"version: 1.2.3\n", "platform_version: '>=0.7.0 <1.0.0'\n"}
+	for mask := 0; mask < 4; mask++ {
 		t.Run(fmt.Sprintf("presence_%03b", mask), func(t *testing.T) {
 			body, missing := "", ""
 			for i, field := range fields {
@@ -88,7 +81,7 @@ func Test2376ManifestOptionalStrictPresence(t *testing.T) {
 			if body == "" {
 				body = "{}\n"
 			}
-			assert2376ManifestAdmission(t, body, missing, mask == 7)
+			assert2376ManifestAdmission(t, body, missing, mask == 3)
 		})
 	}
 	for _, shape := range []string{"", "null\n", "''\n", "text\n", "[]\n", "[text]\n"} {
@@ -96,7 +89,7 @@ func Test2376ManifestOptionalStrictPresence(t *testing.T) {
 			assert2376ManifestAdmission(t, shape, "", false)
 		})
 	}
-	for _, field := range []string{"name", "version", "platform_version"} {
+	for _, field := range []string{"version", "platform_version"} {
 		for _, value := range []string{"", "null", "''", "[]", "[text]", "{}", "{value: text}", "true", "12"} {
 			t.Run(field+"_"+fmt.Sprintf("%q", value), func(t *testing.T) {
 				lines := strings.Split(manifest2376, "\n")
@@ -112,12 +105,12 @@ func Test2376ManifestOptionalStrictPresence(t *testing.T) {
 }
 
 func Test2376ManifestUnknownKeysAndDuplicates(t *testing.T) {
-	for _, field := range []string{"description", "requires", "publisher", "unknown"} {
+	for _, field := range []string{"name", "description", "requires", "publisher", "unknown"} {
 		t.Run(field, func(t *testing.T) {
 			assert2376ManifestAdmission(t, manifest2376+field+": retired\n", field, false)
 		})
 	}
-	for _, field := range []string{"name", "version", "platform_version"} {
+	for _, field := range []string{"version", "platform_version"} {
 		t.Run("duplicate_"+field, func(t *testing.T) {
 			assert2376ManifestAdmission(t, manifest2376+field+": duplicate\n", field, false)
 		})
@@ -152,12 +145,12 @@ func Test2376ManifestRangeGrammar(t *testing.T) {
 }
 
 func Test2376ManifestAliasMergeProvenance(t *testing.T) {
-	assert2376ManifestAdmission(t, "name: &name Reception\nversion: 1.2.3\nplatform_version: '*'\n", "", true)
-	assert2376ManifestAdmission(t, "<<: {name: Reception, version: 1.2.3, platform_version: '*'}\n", "", true)
+	assert2376ManifestAdmission(t, "version: &version 1.2.3\nplatform_version: *version\n", "", true)
+	assert2376ManifestAdmission(t, "<<: {version: 1.2.3, platform_version: '*'}\n", "", true)
 	assert2376ManifestAdmission(t, manifest2376+"<<: {version: 1.2.3}\n", "version", false)
 	_, err := newArtifact([]Entry{
-		{label: "schema.yaml", body: []byte("description: root\n")},
-		{label: "manifest.yaml", body: []byte("name: &range 'not-a-range'\nversion: 1.2.3\nplatform_version: *range\n")},
+		{label: "trigger.yaml", body: []byte("event_name: {literal: raw}\n")},
+		{label: "manifest.yaml", body: []byte("capabilities: &range {can: {emit_events: [raw]}, cannot: [execute code]}\nversion: 1.2.3\nplatform_version: *range\n")},
 	})
 	if err == nil || !strings.Contains(err.Error(), `$["platform_version"]`) || !strings.Contains(err.Error(), "manifest.yaml:3:") || !strings.Contains(err.Error(), "manifest.yaml:1:") {
 		t.Fatalf("alias introduction and target evidence missing: %v", err)
@@ -169,7 +162,7 @@ func Test2376ManifestDispositionAndSelectedRootCompatibility(t *testing.T) {
 		{label: "schema.yaml", body: []byte("description: root\n")},
 		{label: "manifest.yaml", body: []byte(manifest2376)},
 		{label: "child/schema.yaml", body: []byte("description: child\n")},
-		{label: "child/manifest.yaml", body: []byte("name: Child\nversion: 2.0.0\nplatform_version: '>=9.0.0'\n")},
+		{label: "child/manifest.yaml", body: []byte("version: 2.0.0\nplatform_version: '>=9.0.0'\n")},
 		{label: "docs/manifest.yaml", body: []byte("[malformed\n")},
 		{label: "packs/manifest.yaml", body: []byte("description: pack resource\n")},
 	})
@@ -188,7 +181,7 @@ func Test2376ManifestDispositionAndSelectedRootCompatibility(t *testing.T) {
 	if _, present := artifact.Manifest("docs/manifest.yaml"); present {
 		t.Fatal("document classified as flow manifest")
 	}
-	child, err := newArtifact([]Entry{{label: "schema.yaml", body: []byte("description: child\n")}, {label: "manifest.yaml", body: []byte("name: Child\nversion: 2.0.0\nplatform_version: '>=9.0.0'\n")}})
+	child, err := newArtifact([]Entry{{label: "schema.yaml", body: []byte("description: child\n")}, {label: "manifest.yaml", body: []byte("version: 2.0.0\nplatform_version: '>=9.0.0'\n")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +212,7 @@ func Test2376StoredSourcePresentationHasNoInventedRoot(t *testing.T) {
 			short := strings.TrimPrefix(artifact.BundleHash(), HashPrefix)[:7]
 			want := "reception@" + short
 			if named {
-				want = "Shop Reception@1.2.3"
+				want = "reception@1.2.3"
 			}
 			if artifact.HumanLabel() != want {
 				t.Fatalf("local label %q, want %q", artifact.HumanLabel(), want)
@@ -231,9 +224,7 @@ func Test2376StoredSourcePresentationHasNoInventedRoot(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !named {
-				want = short
-			}
+			want = short
 			if stored.HumanLabel() != want {
 				t.Fatalf("stored label %q, want %q", stored.HumanLabel(), want)
 			}

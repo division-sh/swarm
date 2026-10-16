@@ -10,7 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/packmodel"
 )
 
-const s1ProviderManifest = "name: team-bot\nversion: 1.2.3\nplatform_version: '*'\ncapabilities:\n  can:\n    emit_events: [inbound.team.message]\n    receive_https_route: /webhooks/{alias}/{provider}\n    persist_dedupe_markers: true\n  cannot: [execute arbitrary code]\n"
+const s1ProviderManifest = "version: 1.2.3\nplatform_version: '*'\ncapabilities:\n  can:\n    emit_events: [inbound.team.message]\n    receive_https_route: /webhooks/{alias}/{provider}\n    persist_dedupe_markers: true\n  cannot: [execute arbitrary code]\n"
 
 func TestS1ProviderMembershipDiskLogicalParity(t *testing.T) {
 	root := t.TempDir()
@@ -36,7 +36,7 @@ func TestS1ProviderMembershipDiskLogicalParity(t *testing.T) {
 			t.Fatalf("provider acquired executable flow identity: %#v", children)
 		}
 		manifest, ok := artifact.Manifest("team-bot/manifest.yaml")
-		if !ok || manifest.Name != "team-bot" {
+		if !ok || manifest.Kind() != packmodel.DirectoryProvider || manifest.Version != "1.2.3" {
 			t.Fatalf("provider manifest missing: %+v, %t", manifest, ok)
 		}
 		if artifact.BundleHash() != admitted.BundleHash() {
@@ -49,6 +49,7 @@ func TestS1ManifestRetiredFieldsTeachCanonicalOwners(t *testing.T) {
 	for _, row := range []struct {
 		field, value, teaching string
 	}{
+		{"name", "team-bot", "the directory is the name"},
 		{"type", "provider", "a directory is a provider or a flow by the files it holds"},
 		{"requires", "{secrets: [token]}", "credentials are declared on the action, trigger or channel that uses them"},
 		{"requires", "{managed_credentials: [oauth]}", "credentials are declared on the action, trigger or channel that uses them"},
@@ -71,7 +72,7 @@ func TestS1ProviderMembershipRefusesMixedOrContradictoryDirectory(t *testing.T) 
 		name, directory, manifest, extra, teaching string
 	}{
 		{"mixed", "team-bot", s1ProviderManifest, "schema.yaml", "holds both flow files and provider bodies"},
-		{"folder mismatch", "team-old", s1ProviderManifest, "", "folder team-old holds provider team-bot; rename the folder"},
+		{"authored name", "team-old", "name: team-bot\n" + s1ProviderManifest, "", "the directory is the name"},
 		{"missing manifest", "team-bot", "", "", "manifest.yaml"},
 	} {
 		t.Run(row.name, func(t *testing.T) {
@@ -123,7 +124,7 @@ func TestS1ProviderNamesDoNotCollapseAndSnapshotsStayOwned(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, root, "schema.yaml", "description: root\n")
 	for _, name := range []string{"team-bot", "team_bot"} {
-		writeTestFile(t, root, name+"/manifest.yaml", strings.Replace(s1ProviderManifest, "name: team-bot", "name: "+name, 1))
+		writeTestFile(t, root, name+"/manifest.yaml", s1ProviderManifest)
 		writeTestFile(t, root, name+"/trigger.yaml", "event_name: {literal: inbound.team}\n")
 	}
 	artifact, err := AdmitDirectory(root)
@@ -135,7 +136,7 @@ func TestS1ProviderNamesDoNotCollapseAndSnapshotsStayOwned(t *testing.T) {
 		t.Fatalf("distinct provider keys collapsed: %+v", providers)
 	}
 	for _, provider := range providers {
-		if provider.Manifest().Name != provider.Path() || provider.FlowPath() != "." {
+		if provider.Manifest().Kind() != packmodel.DirectoryProvider || provider.FlowPath() != "." {
 			t.Fatalf("identity changed: %+v", provider)
 		}
 		if label, ok := provider.Body(packmodel.BodyTrigger); !ok || label != provider.Path()+"/trigger.yaml" {
@@ -143,10 +144,10 @@ func TestS1ProviderNamesDoNotCollapseAndSnapshotsStayOwned(t *testing.T) {
 		}
 	}
 	providers[0].directory = "changed"
-	providers[0].manifest.Name = "changed"
+	providers[0].manifest.Version = "9.9.9"
 	flow := artifact.Root()
 	flow.providers[0] = "changed"
-	if next := artifact.ProviderDirectories(); next[0].Path() != "team-bot" || next[0].Manifest().Name != "team-bot" || artifact.Root().ProviderDirectories()[0] != "team-bot" {
+	if next := artifact.ProviderDirectories(); next[0].Path() != "team-bot" || next[0].Manifest().Version != "1.2.3" || artifact.Root().ProviderDirectories()[0] != "team-bot" {
 		t.Fatal("mutable readback changed admitted membership")
 	}
 }
@@ -163,7 +164,7 @@ func TestS1ProviderMembershipEmptyMixedAndRetiredHeaders(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), "team-bot/"+role+".yaml:") {
 					t.Fatalf("malformed body gained flow or provider authority: %v", err)
 				}
-				if strings.Contains(malformed, "provider:") && !strings.Contains(err.Error(), "provider is not a body key; the provider is name in manifest.yaml") {
+				if strings.Contains(malformed, "provider:") && !strings.Contains(err.Error(), "provider is not a body key; the directory is the provider name") {
 					t.Fatalf("retired body header lost teaching: %v", err)
 				}
 			})
@@ -219,11 +220,7 @@ func TestS1ProviderCannotOwnNestedProviderDirectories(t *testing.T) {
 				writeTestFile(t, root, "schema.yaml", "description: root\n")
 			}
 			for _, directory := range []string{prefix, prefix + "nested/"} {
-				name := "team-bot"
-				if strings.Contains(directory, "nested") {
-					name = "nested"
-				}
-				writeTestFile(t, root, directory+"manifest.yaml", strings.Replace(s1ProviderManifest, "name: team-bot", "name: "+name, 1))
+				writeTestFile(t, root, directory+"manifest.yaml", s1ProviderManifest)
 				writeTestFile(t, root, directory+"trigger.yaml", "event_name: {literal: inbound.team}\n")
 			}
 			_, err := AdmitDirectory(root)

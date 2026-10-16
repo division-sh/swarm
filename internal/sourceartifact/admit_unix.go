@@ -39,11 +39,7 @@ func AdmitDirectory(root string) (*AdmittedSourceArtifact, error) {
 	if err != nil {
 		return nil, err
 	}
-	artifact.directoryLabel = directory
 	artifact.rootAdmission = RootAdmission{bundleHash: artifact.BundleHash(), rootDirectory: directory}
-	if provider, present := artifact.providers["."]; present && artifact.directoryLabel != provider.manifest.Name {
-		return nil, fmt.Errorf("folder %s holds provider %s; rename the folder", artifact.directoryLabel, provider.manifest.Name)
-	}
 	return artifact, nil
 }
 
