@@ -24,6 +24,9 @@ type entryGolden struct {
 
 // Expected entry comes from the pre-change review, never the current parser.
 func baselineEntryGoldens(root string, p plan) ([]entryGolden, error) {
+	if err := validateFiniteAccounting(root); err != nil {
+		return nil, err
+	}
 	var entries []entryGolden
 	for _, change := range p.Changes {
 		if !strings.HasSuffix(change.File, ".yaml") || change.File == "platform-spec.yaml" {
@@ -75,13 +78,9 @@ func prepareEntryGoldens(root, ledger string) error {
 		return fmt.Errorf("missing reviewed baseline entry decisions")
 	}
 	path := filepath.Join(root, "scripts/rewrite-stages-2566/entries.json")
-	previous, err := os.ReadFile(path)
+	retained, err := readCurrentEntryGoldens(root)
 	if err != nil {
 		return fmt.Errorf("read retained current selectors: %w", err)
-	}
-	var retained []entryGolden
-	if err := json.Unmarshal(previous, &retained); err != nil {
-		return err
 	}
 	entries, err = retainCurrentEntrySelectors(entries, retained)
 	if err != nil {
