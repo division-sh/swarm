@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync/atomic"
 	"testing"
 
@@ -39,7 +40,7 @@ func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, ope
 		files[flow+"/schema.yaml"] = "stages: []\n"
 		files[flow+"/events.yaml"] = "request:\n"
 		files[flow+"/nodes.yaml"] = "scanner:\n  execution_type: system_node\n  subscribes_to: [request]\n  event_handlers:\n    request:\n      activity: {id: send, tool: provider_write, input: {}}\n"
-		files[flow+"/tools.yaml"] = fmt.Sprintf("provider_write:\n  handler_type: http\n  effect_class: non_idempotent_write\n  input_schema: {type: object}\n  output_schema:\n    type: object\n    required: [origin]\n    properties: {origin: {type: string, enum: [%s]}}\n  http: {method: POST, url: %q}\n", flow, server.URL+"/"+flow)
+		files[flow+"/tools.yaml"] = fmt.Sprintf("provider_write:\n  handler_type: http\n  effect_class: non_idempotent_write\n  input_schema: {type: object, additionalProperties: false}\n  output_schema:\n    type: object\n    required: [origin]\n    properties: {origin: {type: string, enum: [%s]}}\n  http: {method: POST, url: %q}\n", flow, server.URL+"/"+flow)
 	}
 	source := semanticview.Wrap(loadWorkflowTempBundle(t, files))
 	if _, present := source.ToolEntries()["provider_write"]; present {
@@ -53,8 +54,10 @@ func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, ope
 	}
 	bus := &recordingPipelineBus{}
 	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}})
+	var expectedStatuses []string
 	for _, flow := range []string{"research", "research2"} {
 		intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
+		intent.Input = mustActivityInput(map[string]any{})
 		intent.ActivityID = "send"
 		intent.Owner = runtimeactivityidentity.MustNodeOwner(mustPipelineNode(flow, "scanner"))
 		intent.ExecutionFlowID = identity.NormalizeFlowID(flow)
@@ -73,6 +76,7 @@ func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, ope
 		if err != nil {
 			t.Fatal(err)
 		}
+		expectedStatuses = append(expectedStatuses, request.Event.ID()+":succeeded")
 		for replay := 0; replay < 2; replay++ {
 			handled, _, err := pc.handleEventResult(ctx, request.Event)
 			if err != nil || !handled {
@@ -102,7 +106,8 @@ func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, ope
 		t.Fatalf("scoped journal ownership differs: %+v %v", journal, err)
 	}
 	statuses, err := fixture.ReadAttemptStatuses(ctx)
-	if err != nil || len(statuses) != 2 || statuses[0] != "succeeded" || statuses[1] != "succeeded" {
+	slices.Sort(expectedStatuses)
+	if err != nil || !slices.Equal(statuses, expectedStatuses) {
 		t.Fatalf("scoped journal did not settle both exact effects: %+v %v", statuses, err)
 	}
 }
