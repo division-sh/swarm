@@ -67,18 +67,12 @@ func loadRunOperationalEvidence(ctx context.Context, q eventReadQueryer, adapter
 	if err != nil {
 		return nil, err
 	}
-	deliveries, err := adapter.SnapshotsForRun(ctx, q, header.RunID)
+	deliveries, err := adapter.RunOperationalEvidence(ctx, q, header.RunID)
 	if err != nil {
 		return nil, err
 	}
 	for _, delivery := range deliveries {
-		path := delivery.Route.Target.Route().FlowInstance
-		if delivery.SubscriberClass == deliverylifecycle.SubscriberAgent {
-			_, _, path, err = delivery.Route.AgentIdentity.ExecutionCoordinates()
-			if err != nil {
-				return nil, err
-			}
-		}
+		path := delivery.FlowInstance
 		work := &facts.UnscopedWork
 		if i, ok := byPath[path]; ok {
 			work = &facts.Instances[i].Work
