@@ -12435,11 +12435,17 @@ tool_model:
         and output. The exact currently admitted runtime-generation grant fences execution and handler/readiness use but is
         deliberately excluded from semantic request identity, so an unchanged startup handoff performs no provider apply.
       callback: >
-        `https-origin/webhooks/<alias>/<provider>?swarm_callback_generation=<random-token>`; the public listener admits
-        only a pair selected in the same immutable registration snapshot, with the exact verified token. Admission consumes
+        `https-origin/webhooks/<alias>/<provider>?swarm_callback_generation=<random-token>`; for managed callbacks the public listener admits
+        only a pair selected in the same immutable registration snapshot, with the exact verified token. Managed admission consumes
         the same Snapshot(now) currentness predicate as readiness, including current exposure generation and nonce evidence,
         explicit exposure revocation, evidence expiry, startup authority, effect authority, credential observations, selected pair,
-        and token. Unregistered, stale-generation, expired, observation-failed, and revoked routes return not found.
+        and token. Unregistered, stale-generation, expired, observation-failed, and revoked managed routes return not found.
+        Author-only declared routes use their declared request authentication on that same public listener without a synthetic
+        registration token. One acquired ingress runtime context supplies complete declared binding evidence and frozen learned
+        credential ownership before selecting this arm; absence from the registration snapshot is never sufficient. Explicit
+        declared registrations, operator-onboarded and prebinding registrations, and unresolved withdrawn registrations retain
+        the managed callback fence. Classification and publication use the same acquired context, source and target, retaining
+        the existing credential-replacement checks through commit. The public listener exposes no API, MCP, tools or health routes.
       apply: >
         Provider registration apply is the only durable operation. It uses the managed external-effect journal with closed
         serve-registration authority, revalidates the currently admitted runtime-generation grant and all credential snapshots, commits the launched

@@ -1,20 +1,35 @@
 package serveapp
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestQAPublicRawWebhookReadyRouteBothStores(t *testing.T) {
+	runPublicRawWebhookProof(t, false)
+}
+
+func TestPublicRawWebhookRetainsAcquiredContextAcrossWithdrawalBothStores(t *testing.T) {
+	runPublicRawWebhookProof(t, true)
+}
+
+func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
+	t.Helper()
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			root := canonicalrouting.CopyKeyedRootRawIngress(t)
@@ -45,6 +60,10 @@ func TestQAPublicRawWebhookReadyRouteBothStores(t *testing.T) {
 			opts.PublicWebhookBaseURL = origin.URL
 			opts.PublicWebhookListen = publicAddress
 			opts.PublicWebhookListener = publicListener
+			runtimes := make(chan *runtimepkg.Runtime, 1)
+			managers := make(chan *runtimepkg.RuntimeContextManager, 1)
+			opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) { runtimes <- rt }
+			opts.TestRuntimeContextsReadyHook = func(manager *runtimepkg.RuntimeContextManager) { managers <- manager }
 			process, served := start()
 			t.Cleanup(func() {
 				if code := process.stop(); code != 0 {
@@ -69,6 +88,26 @@ func TestQAPublicRawWebhookReadyRouteBothStores(t *testing.T) {
 			}
 			api := strings.TrimSuffix(served.Endpoint, "/v1/rpc") + route
 			const body = `{"delivery_id":"public-route-proof","account_id":"account-7"}`
+			for _, path := range []string{"/v1/rpc", "/healthz", "/readyz", "/mcp", "/tools/", "/webhooks/foreign/partner", "/webhooks/keyed-shop/foreign"} {
+				response, err := http.Post("http://"+publicAddress+path, "application/json", strings.NewReader(body))
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, _ = io.Copy(io.Discard, response.Body)
+				_ = response.Body.Close()
+				if response.StatusCode != http.StatusNotFound {
+					t.Errorf("public listener exposed foreign route %s: %d", path, response.StatusCode)
+				}
+			}
+			unsigned, err := http.Post("http://"+publicAddress+route, "application/json", strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = io.Copy(io.Discard, unsigned.Body)
+			_ = unsigned.Body.Close()
+			if unsigned.StatusCode != http.StatusUnauthorized {
+				t.Errorf("public route accepted missing HMAC: %d", unsigned.StatusCode)
+			}
 			for name, endpoint := range map[string]string{"api": api, "public": "http://" + publicAddress + route} {
 				code, response := a9PostSignedRawIngress(t, endpoint, "wrong-secret", body)
 				t.Logf("%s invalid-signature status=%d body=%s", name, code, response)
@@ -76,10 +115,57 @@ func TestQAPublicRawWebhookReadyRouteBothStores(t *testing.T) {
 					t.Errorf("READY route %s bypassed authentication handler: status=%d, want 401", name, code)
 				}
 			}
+			var manager *runtimepkg.RuntimeContextManager
+			var rt *runtimepkg.Runtime
+			select {
+			case manager = <-managers:
+			case <-time.After(2 * time.Second):
+				t.Fatal("serve did not expose its actual context manager")
+			}
+			select {
+			case rt = <-runtimes:
+			case <-time.After(2 * time.Second):
+				t.Fatal("serve did not expose its actual runtime")
+			}
+			withdrawn := make(chan error, 1)
+			if withdrawAfterAcquisition {
+				var once sync.Once
+				rt.InboundGateway.SetCredentialAdmission(func(ctx context.Context, target runtimepkg.InboundTarget) (credentials.SecretBinding, func(context.Context) error, error) {
+					binding, validate, err := rt.AdmitInboundCredentials(ctx, target)
+					if err == nil {
+						once.Do(func() {
+							withdrawn <- manager.SuppressStandingServiceTargets(target.ServiceID)
+						})
+					}
+					return binding, validate, err
+				})
+			}
 			tlsCode, tlsReceipt := a9PostSignedRawIngress(t, origin.URL+route, secret, body)
 			t.Logf("advertised TLS origin signed status=%d body=%s", tlsCode, tlsReceipt)
 			if tlsCode != http.StatusAccepted {
 				t.Errorf("READY public route refused a valid signed request: status=%d, want 202", tlsCode)
+			}
+			if withdrawAfterAcquisition {
+				select {
+				case err := <-withdrawn:
+					if err != nil {
+						t.Fatal(err)
+					}
+				case <-time.After(2 * time.Second):
+					t.Fatal("request did not reach its acquired-runtime credential boundary")
+				}
+				lookup := manager.LookupIngress("keyed-shop", "partner")
+				t.Cleanup(func() { _ = manager.RestoreStandingServiceTargets(lookup.Target.ServiceID) })
+				if !lookup.Found || lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseStandingSuppressed {
+					t.Fatalf("interleaving did not withdraw the actual ingress publication: %+v", lookup)
+				}
+				code, _ := a9PostSignedRawIngress(t, "http://"+publicAddress+route, secret, body)
+				if code != http.StatusServiceUnavailable {
+					t.Fatalf("fresh request bypassed withdrawal: %d", code)
+				}
+				if err := manager.RestoreStandingServiceTargets(lookup.Target.ServiceID); err != nil {
+					t.Fatal(err)
+				}
 			}
 			publicCode, publicReceipt := a9PostSignedRawIngress(t, "http://"+publicAddress+route, secret, body)
 			wantPublic := http.StatusAccepted
@@ -107,6 +193,28 @@ func TestQAPublicRawWebhookReadyRouteBothStores(t *testing.T) {
 				t.Fatalf("real publication receipt=%s err=%v", apiReceipt, err)
 			}
 			a9RequireRootIngressSettlement(t, served.Endpoint, receipt.RunID, receipt.EventIDs[0])
+			var accepted map[string]any
+			if err := json.Unmarshal(tlsReceipt, &accepted); err != nil || accepted["status"] != "accepted" {
+				t.Fatalf("accepted public receipt=%s err=%v", tlsReceipt, err)
+			}
+			delete(accepted, "status")
+			for name, raw := range map[string][]byte{"public": publicReceipt, "api": apiReceipt} {
+				var duplicate map[string]any
+				if err := json.Unmarshal(raw, &duplicate); err != nil || duplicate["status"] != "duplicate" {
+					t.Fatalf("%s duplicate receipt=%s err=%v", name, raw, err)
+				}
+				delete(duplicate, "status")
+				if !reflect.DeepEqual(accepted, duplicate) {
+					t.Fatalf("%s replay changed receipt identity: public=%#v replay=%#v", name, accepted, duplicate)
+				}
+			}
+			var entity struct {
+				Fields map[string]any `json:"fields"`
+			}
+			requireServedJSONRPCResult(t, served.Endpoint, "entity.get", map[string]any{"run_id": receipt.RunID, "entity_id": receipt.RunID}, &entity)
+			if entity.Fields["processed_count"] != float64(1) || entity.Fields["provider_event_id"] != "public-route-proof" {
+				t.Fatalf("cross-listener retries changed receiver effects: %+v", entity.Fields)
+			}
 		})
 	}
 }

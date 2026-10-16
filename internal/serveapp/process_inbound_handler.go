@@ -11,7 +11,8 @@ import (
 )
 
 type runtimeProcessInboundHandler struct {
-	contexts *runtime.RuntimeContextManager
+	contexts           *runtime.RuntimeContextManager
+	publicRegistration *runtimepublicingress.ProviderRegistrationController
 }
 
 func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -39,20 +40,46 @@ func (h runtimeProcessInboundHandler) ServeHTTP(w http.ResponseWriter, r *http.R
 	}
 	defer func() { _ = use.Done() }()
 	target := lookup.Target
+	inbound := runtime.InboundTarget{
+		BundleHash: target.BundleHash, ServiceID: target.ServiceID, FlowPath: target.FlowPath,
+		RunID: target.RunID, Generation: target.Generation, PublicationSequence: target.PublicationSequence,
+		Alias: target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
+	}
+	var required bool
+	if h.publicRegistration != nil {
+		var err error
+		inbound, required, err = use.AdmitPublicIngressTarget(inbound)
+		if err != nil {
+			http.Error(w, "ingress registration ownership is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+	}
+	forward := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveAcquiredProcessWebhook(w, r, use, target, inbound, alias, provider)
+	})
+	if h.publicRegistration != nil {
+		if !h.publicRegistration.ExposureCurrent(use.WorkContext()) {
+			http.NotFound(w, r)
+			return
+		}
+		if required || h.publicRegistration.OwnsRoute(alias, provider) {
+			h.publicRegistration.Handler(forward).ServeHTTP(w, r)
+			return
+		}
+	}
+	forward.ServeHTTP(w, r)
+}
+
+func serveAcquiredProcessWebhook(w http.ResponseWriter, r *http.Request, use *runtime.RuntimeContextUse, target runtime.StandingTarget, inbound runtime.InboundTarget, alias, provider string) {
 	if registrationTarget, managed := runtimepublicingress.CurrentRegistrationTarget(r.Context()); managed {
 		if !sameRuntimeRegistrationTarget(registrationTarget, target) {
 			http.Error(w, fmt.Sprintf("ingress target %q provider %q contradicts the current provider registration", alias, provider), http.StatusServiceUnavailable)
 			return
 		}
-		target.SigningSecret = registrationTarget.SigningCredentialKey
+		inbound.SigningSecret = registrationTarget.SigningCredentialKey
 	}
 	selectedRuntime := use.Runtime()
-	selectedRuntime.InboundGateway.HandleResolvedWebhook(w, r.WithContext(use.WorkContext()), runtime.InboundTarget{
-		BundleHash: target.BundleHash, ServiceID: target.ServiceID, FlowPath: target.FlowPath,
-		RunID: target.RunID, Generation: target.Generation,
-		PublicationSequence: target.PublicationSequence,
-		Alias:               target.Alias, Provider: target.Provider, SigningSecret: target.SigningSecret, AdmissionPlan: target.AdmissionPlan,
-	}, use.Context.Source)
+	selectedRuntime.InboundGateway.HandleResolvedWebhook(w, r.WithContext(use.WorkContext()), inbound, use.Context.Source)
 }
 
 func sameRuntimeRegistrationTarget(registration runtimepublicingress.RegistrationTarget, target runtime.StandingTarget) bool {
