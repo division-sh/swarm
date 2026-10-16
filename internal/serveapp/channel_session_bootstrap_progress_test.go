@@ -114,6 +114,7 @@ func startHeldSessionRequest(t *testing.T, service *channelonboarding.Service, a
 	}
 	readback, err := service.Get(caller, op.OperationID)
 	requireSessionPendingResult(t, readback, op, err)
+	requireCanceledSecondarySessionRequests(t, service, op)
 	select {
 	case err := <-finished:
 		finished <- err
@@ -121,6 +122,26 @@ func startHeldSessionRequest(t *testing.T, service *channelonboarding.Service, a
 	default:
 	}
 	return op, stop
+}
+
+func requireCanceledSecondarySessionRequests(t *testing.T, service *channelonboarding.Service, op channelonboarding.Operation) {
+	t.Helper()
+	// Public retries retain the original operation serializer; their own bounded
+	// wait must cancel without entering, replacing or releasing its live driver.
+	finished := make(chan error, 2)
+	for range 2 {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+			defer cancel()
+			_, err := service.Retry(ctx, channelonboarding.RetryInput{OperationID: op.OperationID})
+			finished <- err
+		}()
+	}
+	for range 2 {
+		if err := <-finished; !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatal("secondary request bypassed the live driver or lost its cancellation", err)
+		}
+	}
 }
 
 func TestServeSessionPendingConstructionFailureRemainsARefusalBothStores(t *testing.T) {
@@ -263,8 +284,8 @@ func requireSessionPendingRequestProgress(t *testing.T, backend string, retireme
 	adapter := sessions.(*serveSessionBootstrap)
 	cut, selections, release := installSessionConstructionCut(t, adapter)
 	op, cancel := startHeldSessionRequest(t, service, adapter, cut, "pending-private-preparation")
-	requirePendingConcurrentSessionRequests(t, service, ctx, op)
 	cancel()
+	requirePendingConcurrentSessionRequests(t, service, ctx, op)
 	adapter.mu.Lock()
 	attempt := adapter.connections[op.OperationID]
 	adapter.mu.Unlock()
@@ -348,7 +369,9 @@ func requireSessionRetryPendingConstruction(t *testing.T, backend string) {
 		t.Fatal("original retry returned before its held construction", got.err)
 	default:
 	}
-	requirePendingConcurrentSessionRequests(t, service, ctx, started.Operation)
+	readback, err := service.Get(ctx, started.Operation.OperationID)
+	requireSessionPendingResult(t, readback, started.Operation, err)
+	requireCanceledSecondarySessionRequests(t, service, started.Operation)
 
 	adapter.mu.Lock()
 	attempt := adapter.connections[started.Operation.OperationID]
@@ -370,6 +393,7 @@ func requireSessionRetryPendingConstruction(t *testing.T, backend string) {
 	case <-time.After(time.Second):
 		t.Fatal("original retry did not promptly cancel its construction wait")
 	}
+	requirePendingConcurrentSessionRequests(t, service, ctx, started.Operation)
 	release()
 	join, stop := context.WithTimeout(ctx, 30*time.Second)
 	defer stop()
