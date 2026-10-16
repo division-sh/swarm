@@ -379,6 +379,7 @@ func loadPlatformSpecForSQLiteSchemaTest(t *testing.T) runtimecontracts.Platform
 func platformTableNamesForSQLiteSchemaTest() []string {
 	return []string{
 		"source_artifacts",
+		"source_root_admissions",
 		"events",
 		"activity_attempts",
 		"run_fork_selected_contract_bindings",
