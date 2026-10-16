@@ -11,7 +11,7 @@ import (
 // #2698/6205327685, decision8: one finite source composition for the settled
 // native-fixture/owner repairs. This never edits any historical recipe endpoint.
 const repair2698Before = "e857a1e482a2e08ab63f2e8169b4472e608cfdc2"
-const repair2698After = "dcd9143c69"
+const repair2698After = "f5c57acafdae2cd0750f493c15ca667ca3d84e33"
 const repair2698Manifest = "tools/fixture-codemod/pipeline-observations/internal/selectedreadrole/testdata/repair_2698_sources.json"
 
 var repair2698Sources = []string{

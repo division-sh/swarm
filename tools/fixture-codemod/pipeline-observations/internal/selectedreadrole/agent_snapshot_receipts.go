@@ -46,6 +46,9 @@ func ValidateAgentSnapshotCurrent(root string, pins []EntityToolPin) error {
 		return err
 	}
 	raw, err := os.ReadFile(filepath.Join(root, AgentSnapshotFile))
+	if err == nil {
+		raw, err = Repair2698HistoricalSource(root, AgentSnapshotFile, raw)
+	}
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(raw)) != AgentSnapshotSourceDigest {
 		return fmt.Errorf("agent snapshot complete current file/types/outputs changed: %v", err)
 	}

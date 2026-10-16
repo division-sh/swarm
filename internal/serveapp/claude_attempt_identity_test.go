@@ -50,6 +50,7 @@ import (
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -283,7 +284,7 @@ func TestClaudeAttemptStartRejectionRetriesThroughSelectedStore(t *testing.T) {
 				t.Fatalf("start rejection materialized completion rows turns=%d spend=%d, want 0/0", turns, spend)
 			}
 			writeClaudeAttemptProofDocker(t, dockerBin)
-			makeClaudeAttemptProofDeliveryDueNow(t, backend, eventID)
+			makeClaudeAttemptProofDeliveryDueNow(t, backend, first.DeliveryID)
 			eventBus.SignalDeliveryContinuations()
 			processed := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusProcessed, calls)
 			if processed.RetryCount != 1 || calls.Load() != 2 {
@@ -313,20 +314,10 @@ func TestClaudeAttemptStartRejectionRetriesThroughSelectedStore(t *testing.T) {
 	}
 }
 
-func makeClaudeAttemptProofDeliveryDueNow(t *testing.T, backend claudeAttemptProofBackend, eventID string) {
+func makeClaudeAttemptProofDeliveryDueNow(t *testing.T, backend claudeAttemptProofBackend, deliveryID string) {
 	t.Helper()
-	eligibleAt := time.Now().UTC().Add(-2 * time.Minute)
-	query := `UPDATE event_deliveries SET next_eligible_at = ? WHERE event_id = ? AND subscriber_type = 'agent' AND subscriber_id = ?`
-	args := []any{eligibleAt, eventID, claudeAttemptProofAgentConfig().ID}
-	if backend.name == "postgres" {
-		query = `UPDATE event_deliveries SET next_eligible_at = $1 WHERE event_id = $2 AND subscriber_type = 'agent' AND subscriber_id = $3`
-	}
-	result, err := backend.db.ExecContext(backend.context(), query, args...)
-	if err != nil {
+	if err := storetest.MakeDeliveryRecoveryRetryEligible(backend.context(), backend.store, deliveryID); err != nil {
 		t.Fatalf("make Claude proof delivery retry eligible: %v", err)
-	}
-	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
-		t.Fatalf("retry eligibility rows = %d err=%v, want 1", affected, err)
 	}
 }
 
@@ -625,7 +616,21 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 	var backend claudeAttemptProofBackend
 	switch name {
 	case "sqlite":
-		sqliteStore := storetest.StartSQLiteRuntimeStore(t)
+		spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
+		if err != nil {
+			t.Fatal(err)
+		}
+		plans, err := store.GeneratePlatformTableDDLs(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sqliteStore, err := store.NewSQLiteRuntimeStore(filepath.Join(t.TempDir(), "runtime.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = sqliteStore.Close() })
+		bootstrapSQLiteSchemaForTest(t, context.Background(), sqliteStore, plans)
+		sqliteStore.SetEventPayloadAdmitter(claudeAttemptProofPayloadAdmitter)
 		backend = claudeAttemptProofBackend{name: name, store: sqliteStore, db: storetest.DatabaseForTest(sqliteStore), sessions: sqliteStore,
 			workflow: runtimepipeline.NewWorkflowPersistence(sqliteStore)}
 	case "postgres":
@@ -641,6 +646,10 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 	backend.source = requireServeTestSourceArtifactFact(t, backend.store)
 	backend.execution = &claudeAttemptProofExecution{}
 	return backend
+}
+
+func claudeAttemptProofPayloadAdmitter(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
+	return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
 }
 
 func newClaudeAttemptProofManager(
@@ -880,9 +889,7 @@ func newClaudeAttemptProofEventBus(
 		t.Fatalf("register Claude proof author activity catalog: %v", err)
 	}
 	t.Cleanup(lease.Release)
-	payloadAdmitter := func(_ context.Context, event events.Event, flowID string) (events.PayloadAdmission, error) {
-		return eventtest.PayloadAdmission(event, flowID, string(event.Type()))
-	}
+	payloadAdmitter := claudeAttemptProofPayloadAdmitter
 	eventBus, err := runtimebus.NewEventBusWithOptions(backend.store, runtimebus.EventBusOptions{
 		ExecutionPosture:    executionposture.Live,
 		Logger:              claudeAttemptProofLogger{RuntimeLogger: runtimepkg.NewRuntimeLogger(backend.store, executionposture.Live, payloadAdmitter), t: t},

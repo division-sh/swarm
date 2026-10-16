@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 const repairedDeliveryStatusBridge = `func ReadServedDeliveryStatusCountForTest(ctx context.Context, selected any, eventID, subscriberType, subscriberID string, statuses ...string) (int, error) {
@@ -82,6 +83,19 @@ func servedObservationEarlierToolOwnerSource(t *testing.T, path string, current 
 }
 
 func servedObservationToolOwnerPrevious(path string, current []byte) ([]byte, error) {
+	var err error
+	current, err = selectedreadrole.Repair2698HistoricalSource("../../..", path, current)
+	if err != nil {
+		return nil, err
+	}
+	if path == agentSnapshotEventOwner && fmt.Sprintf("%x", sha256.Sum256(current)) == "04d9e5826aa632dc59cc9fa0ccd643def30848294387a3de3f50121ca4a6951f" {
+		// The accepted native-entry composition follows this exact additive
+		// reader cut. Keep both whole-file endpoints, not a new current hash.
+		current, err = exec.Command("git", "-C", "../../..", "show", "d99a19dd941cd5c54ac58951d6298adf95adfcff:"+path).Output()
+		if err != nil {
+			return nil, err
+		}
+	}
 	var pin struct {
 		current, previous string
 		names             []string

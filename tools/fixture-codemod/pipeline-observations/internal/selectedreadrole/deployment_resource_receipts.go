@@ -23,6 +23,10 @@ func ReadDeploymentResourcePins(root string) ([]EntityToolPin, error) {
 	if fmt.Sprintf("%x", sha256.Sum256(raw)) != deploymentResourceFileDigest {
 		return nil, fmt.Errorf("deployment-resource complete manifest bytes changed")
 	}
+	key := "immutable-pins/" + deploymentResourceFileDigest
+	if cached, ok := sourceCache.Load(key); ok {
+		return append([]EntityToolPin(nil), cached.([]EntityToolPin)...), nil
+	}
 	var pins []EntityToolPin
 	if err := json.Unmarshal(raw, &pins); err != nil {
 		return nil, err
@@ -31,6 +35,7 @@ func ReadDeploymentResourcePins(root string) ([]EntityToolPin, error) {
 	if err != nil || len(pins) != 32 || fmt.Sprintf("%x", sha256.Sum256(canonical)) != DeploymentResourceDigest {
 		return nil, fmt.Errorf("deployment-resource complete source inventory changed: %v", err)
 	}
+	sourceCache.Store(key, append([]EntityToolPin(nil), pins...))
 	return pins, nil
 }
 

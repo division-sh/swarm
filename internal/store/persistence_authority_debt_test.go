@@ -1256,10 +1256,15 @@ func debtServedDebugBodies(root string) ([]debtServedDebugBody, error) {
 	if err != nil || debtBaselineChecksum(raw) != "5bc30573335e4c9efc8915f7db12eb345938e927b347bf368007c1b899a8bd4a" {
 		return nil, fmt.Errorf("exact served-debug85 source evidence changed: %v", err)
 	}
+	const key = "served-debug/bodies/5bc30573335e4c9efc8915f7db12eb345938e927b347bf368007c1b899a8bd4a"
+	if cached, ok := debtSelectedReadRolePinCache.Load(key); ok {
+		return append([]debtServedDebugBody(nil), cached.([]debtServedDebugBody)...), nil
+	}
 	var bodies []debtServedDebugBody
 	if err := json.Unmarshal(raw, &bodies); err != nil || len(bodies) != 85 {
 		return nil, fmt.Errorf("invalid served-debug source inventory: %v", err)
 	}
+	debtSelectedReadRolePinCache.Store(key, append([]debtServedDebugBody(nil), bodies...))
 	return bodies, nil
 }
 
@@ -1293,26 +1298,10 @@ func debtServedDebugWriterStagePrevious(root, function, current string) (string,
 }
 
 func debtServedDebugDeclarations(path string) (map[string]string, error) {
-	file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-	if err != nil {
-		return nil, err
-	}
-	bodies := map[string]string{}
-	for _, declaration := range file.Decls {
-		fn, ok := declaration.(*ast.FuncDecl)
-		if !ok || fn.Recv != nil {
-			continue
-		}
-		if _, duplicate := bodies[fn.Name.Name]; duplicate {
-			return nil, fmt.Errorf("duplicate served-debug declaration: %s", fn.Name.Name)
-		}
-		var out bytes.Buffer
-		if err := format.Node(&out, token.NewFileSet(), fn); err != nil {
-			return nil, err
-		}
-		bodies[fn.Name.Name] = out.String()
-	}
-	return bodies, nil
+	// Read actual bytes on every comparison. Only parsing of identical full
+	// content is shared; no path/mtime/current-source success is cached.
+	bodies, err := debtServedSetupDeclarations(path)
+	return maps.Clone(bodies), err
 }
 
 func debtServedDebugRequiredSources() map[string]bool {
@@ -2321,6 +2310,9 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return fmt.Errorf("debt baseline bootstrap source changed")
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
+		return nil
+	}
+	if debtRepair2698CollectorTransition(base, current, trusted, head, retirement...) {
 		return nil
 	}
 	if debtCatchUpCollectorTransition(base, current, trusted, head, retirement...) {

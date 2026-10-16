@@ -4,22 +4,27 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"sync"
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/globalname"
-	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 const BatchPredecessor = "2ad21b4f19fb1c5bc04d34fe73f94d15ad0244f8"
 
+var batchPinCache sync.Map
+
 // These immutable stages compose only this reviewed batch, in execution order.
 func BatchPins(global, settlement, lookup []byte) ([]runphysical.Pin, error) {
+	key := fmt.Sprintf("%x/%x/%x", sha256.Sum256(global), sha256.Sum256(settlement), sha256.Sum256(lookup))
+	if cached, ok := batchPinCache.Load(key); ok {
+		return slices.Clone(cached.([]runphysical.Pin)), nil
+	}
 	stages := make([][]runphysical.Pin, 3)
 	var err error
 	for index, input := range []struct {
@@ -53,6 +58,7 @@ func BatchPins(global, settlement, lookup []byte) ([]runphysical.Pin, error) {
 	if len(pins) != 48 {
 		return nil, fmt.Errorf("served batch complete unique declaration inventory changed")
 	}
+	batchPinCache.Store(key, slices.Clone(pins))
 	return pins, nil
 }
 
@@ -113,30 +119,22 @@ func ValidateBatchCurrentSource(root string, pins []runphysical.Pin) error {
 		}
 		current, err := UniqueBody(raw, pin.Function)
 		if err == nil {
-			current, err = SetupEarlierSource(root, pin.File, pin.Function, current)
+			current, err = setupPredecessorSource(root, pin.File, pin.Function, current)
+		}
+		if err == nil {
+			current, err = EarlierSource(setup, pin.File, pin.Function, current)
 		}
 		if err != nil || current != pin.After {
 			return fmt.Errorf("served batch actual unique current source changed: %s: %v", pin.Function, err)
 		}
 	}
-	return nil
+	// One bounded comparison uses the already checked setup inventory, then
+	// rechecks actual source at its end. No proof result survives this call.
+	return ValidateSetupCurrentSource(root, setup)
 }
 
 func UniqueBody(raw []byte, name string) (string, error) {
-	file, err := parser.ParseFile(token.NewFileSet(), "source.go", raw, parser.AllErrors)
-	if err != nil {
-		return "", err
-	}
-	body, count := "", 0
-	for _, declaration := range file.Decls {
-		if fn, ok := declaration.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Name.Name == name {
-			body, count = requestkey.Node(fn), count+1
-		}
-	}
-	if count != 1 {
-		return "", fmt.Errorf("served batch requires exactly one current declaration: %s", name)
-	}
-	return body, nil
+	return selectedreadrole.Body(raw, name)
 }
 
 // EarlierSource is for source-evidence copies only, never occurrence accounting.

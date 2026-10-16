@@ -38,6 +38,10 @@ func ReadPins(root string) ([]runphysical.Pin, error) {
 	if err != nil || fmt.Sprintf("%x", sha256.Sum256(raw)) != Digest {
 		return nil, fmt.Errorf("selected read-role immutable inventory changed: %v", err)
 	}
+	key := "read-role/pins/" + Digest
+	if cached, ok := sourceCache.Load(key); ok {
+		return append([]runphysical.Pin(nil), cached.([]runphysical.Pin)...), nil
+	}
 	var pins []runphysical.Pin
 	if err := json.Unmarshal(raw, &pins); err != nil || len(pins) != 43 {
 		return nil, fmt.Errorf("selected read-role declaration inventory changed")
@@ -50,24 +54,36 @@ func ReadPins(root string) ([]runphysical.Pin, error) {
 		}
 		seen[key] = true
 	}
+	sourceCache.Store(key, append([]runphysical.Pin(nil), pins...))
 	return pins, nil
 }
 
 func Body(raw []byte, name string) (string, error) {
-	file, err := parser.ParseFile(token.NewFileSet(), "source.go", raw, parser.AllErrors)
-	if err != nil {
-		return "", err
+	type declaration struct {
+		body  string
+		count int
 	}
-	body, count := "", 0
-	for _, decl := range file.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Name.Name == name {
-			body, count = requestkey.Node(fn), count+1
+	key := fmt.Sprintf("read-role/bodies/%x", sha256.Sum256(raw))
+	cached, found := sourceCache.Load(key)
+	if !found {
+		file, err := parser.ParseFile(token.NewFileSet(), "source.go", raw, parser.AllErrors)
+		if err != nil {
+			return "", err
 		}
+		bodies := map[string]declaration{}
+		for _, decl := range file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil {
+				previous := bodies[fn.Name.Name]
+				bodies[fn.Name.Name] = declaration{requestkey.Node(fn), previous.count + 1}
+			}
+		}
+		cached, _ = sourceCache.LoadOrStore(key, bodies)
 	}
-	if count != 1 {
+	result := cached.(map[string]declaration)[name]
+	if result.count != 1 {
 		return "", fmt.Errorf("selected read-role current declaration missing or duplicated: %s", name)
 	}
-	return body, nil
+	return result.body, nil
 }
 
 func ValidateCurrent(root string, pins []runphysical.Pin) error {

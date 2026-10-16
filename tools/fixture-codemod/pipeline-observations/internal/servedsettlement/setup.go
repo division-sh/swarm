@@ -24,6 +24,15 @@ const SetupMergedDigest = "c6a4fbc3de081d4cdac57652548613c805e89b3dfd995c6cf7fe7
 
 var setupBodyCache sync.Map
 var setupHistoryCache sync.Map
+var setupPinCache sync.Map
+
+var setupStages = []struct {
+	path, digest string
+	count        int
+}{
+	{SetupOwnerPath, "b6c64415787cef265ba2a50a08e6c8cdbe9df1829cb5ff2f71a1d50e5f8bbcb8", 4},
+	{SetupRolePath, "e8921f93982c571ac22d582f5bdedee63982789bb8f6b92f87ebb72327d46967", 101},
+}
 
 // Always read actual bytes; only their deterministic parse result is reusable.
 func setupCurrentBody(raw []byte, name string) (string, error) {
@@ -39,20 +48,23 @@ func setupCurrentBody(raw []byte, name string) (string, error) {
 }
 
 func ReadSetupPins(root string) ([]runphysical.Pin, error) {
-	merged := map[string]runphysical.Pin{}
-	for _, stage := range []struct {
-		path, digest string
-		count        int
-	}{
-		{SetupOwnerPath, "b6c64415787cef265ba2a50a08e6c8cdbe9df1829cb5ff2f71a1d50e5f8bbcb8", 4},
-		{SetupRolePath, "e8921f93982c571ac22d582f5bdedee63982789bb8f6b92f87ebb72327d46967", 101},
-	} {
+	inputs := make([][]byte, len(setupStages))
+	for index, stage := range setupStages {
 		raw, err := os.ReadFile(filepath.Join(root, stage.path))
 		if err != nil || fmt.Sprintf("%x", sha256.Sum256(raw)) != stage.digest {
 			return nil, fmt.Errorf("served setup immutable stage changed: %s: %v", stage.path, err)
 		}
+		inputs[index] = raw
+	}
+	// Every input was just read/authenticated. Only immutable decoding and
+	// composition are reused, never a current-source validation result.
+	if cached, ok := setupPinCache.Load(SetupMergedDigest); ok {
+		return slices.Clone(cached.([]runphysical.Pin)), nil
+	}
+	merged := map[string]runphysical.Pin{}
+	for index, stage := range setupStages {
 		var pins []runphysical.Pin
-		if err := json.Unmarshal(raw, &pins); err != nil || len(pins) != stage.count {
+		if err := json.Unmarshal(inputs[index], &pins); err != nil || len(pins) != stage.count {
 			return nil, fmt.Errorf("served setup stage inventory changed: %s", stage.path)
 		}
 		seen := map[string]bool{}
@@ -84,6 +96,7 @@ func ReadSetupPins(root string) ([]runphysical.Pin, error) {
 	if err != nil || len(pins) != 104 || fmt.Sprintf("%x", sha256.Sum256(append(raw, '\n'))) != SetupMergedDigest {
 		return nil, fmt.Errorf("served setup complete stage composition changed")
 	}
+	setupPinCache.Store(SetupMergedDigest, slices.Clone(pins))
 	return pins, nil
 }
 
@@ -116,16 +129,7 @@ func ValidateSetupCurrentSource(root string, pins []runphysical.Pin) error {
 }
 
 func SetupEarlierSource(root, file, function, current string) (string, error) {
-	var err error
-	current, err = selectedreadrole.EarlierSource(root, file, function, current)
-	if err != nil {
-		return "", err
-	}
-	current, err = budgetdiagnostic.EarlierSource(root, file, function, current)
-	if err != nil {
-		return "", err
-	}
-	current, err = channelsettlement.EarlierSource(root, file, function, current)
+	current, err := setupPredecessorSource(root, file, function, current)
 	if err != nil {
 		return "", err
 	}
@@ -142,6 +146,18 @@ func SetupEarlierSource(root, file, function, current string) (string, error) {
 		}
 	}
 	return current, nil
+}
+
+func setupPredecessorSource(root, file, function, current string) (string, error) {
+	current, err := selectedreadrole.EarlierSource(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
+	current, err = budgetdiagnostic.EarlierSource(root, file, function, current)
+	if err != nil {
+		return "", err
+	}
+	return channelsettlement.EarlierSource(root, file, function, current)
 }
 
 func ComposeSetupHistory(prior []byte, pins []runphysical.Pin, recipes bool) ([]byte, error) {

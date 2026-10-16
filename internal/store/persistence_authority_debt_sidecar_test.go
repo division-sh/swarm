@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"go/format"
 	"io"
 	"os"
 	"path/filepath"
@@ -24,6 +25,248 @@ type debtCollectorMetadata struct {
 func debtBaselineChecksum(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+type debtRepair2698SourceFile struct{ File, BeforeSHA256, AfterSHA256 string }
+type debtRepair2698SourcePacket struct {
+	BeforeCommit, AfterCommit, Authorization string
+	Files                                    []debtRepair2698SourceFile
+}
+
+type debtRepair2698FixtureNamePacket struct {
+	BeforeCommit, AfterCommit, Authorization string
+	Files                                    []debtRepair2698SourceFile
+	Guard                                    debtRepair2698SourceFile
+}
+
+func debtRepair2698ReadFixtureNamePacket(root string) (debtRepair2698FixtureNamePacket, error) {
+	var packet debtRepair2698FixtureNamePacket
+	raw, err := os.ReadFile(filepath.Join(root, debtRepair2698FixtureNamePacketPath))
+	if err != nil {
+		return packet, err
+	}
+	if debtBaselineChecksum(raw) != debtRepair2698FixtureNameSHA {
+		return packet, fmt.Errorf("fixture name source certificate changed")
+	}
+	key := "repair2698/fixture-name/" + root + "/" + debtRepair2698FixtureNameSHA
+	if cached, ok := debtSelectedReadRolePinCache.Load(key); ok {
+		packet = cached.(debtRepair2698FixtureNamePacket)
+		packet.Files = append([]debtRepair2698SourceFile(nil), packet.Files...)
+		return packet, nil
+	}
+	if err := json.Unmarshal(raw, &packet); err != nil {
+		return packet, err
+	}
+	if packet.BeforeCommit != debtRepair2698After || packet.AfterCommit != debtRepair2698FixtureNameAfter ||
+		packet.Authorization != "https://github.com/division-sh/swarm/issues/2542#issuecomment-6212534506" ||
+		len(packet.Files) != 1 || packet.Files[0].File != debtRepair2698FixtureNameSource ||
+		packet.Guard.File != "internal/store/internal/runtimepersistence/unretained_cleanup_boundary_guard_test.go" {
+		return packet, fmt.Errorf("fixture name continuation lost its exact one-row boundary")
+	}
+	for _, file := range []debtRepair2698SourceFile{packet.Files[0], packet.Guard} {
+		before, err := debtRepair2698SignedSource(root, packet.BeforeCommit, file.File, file.BeforeSHA256)
+		if err != nil {
+			return packet, err
+		}
+		after, err := debtRepair2698SignedSource(root, packet.AfterCommit, file.File, file.AfterSHA256)
+		if err != nil {
+			return packet, err
+		}
+		old := []byte("validateUnretainedCleanupHistoryInputs")
+		expected, err := format.Source(bytes.ReplaceAll(before, old, []byte("validateUnretainedCleanupHistoryInputsForTest")))
+		if err != nil || bytes.Count(before, old) != 2 || !bytes.Equal(after, expected) {
+			return packet, fmt.Errorf("fixture name continuation changed more than two identifiers: %s: %v", file.File, err)
+		}
+	}
+	copy := packet
+	copy.Files = append([]debtRepair2698SourceFile(nil), packet.Files...)
+	debtSelectedReadRolePinCache.Store(key, copy)
+	return packet, nil
+}
+
+func debtRepair2698FixtureNameHistoricalSource(root, path string, actual []byte) ([]byte, error) {
+	if path != debtRepair2698FixtureNameSource {
+		return actual, nil
+	}
+	packet, err := debtRepair2698ReadFixtureNamePacket(root)
+	if os.IsNotExist(err) {
+		return actual, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	file := packet.Files[0]
+	if debtBaselineChecksum(actual) != file.AfterSHA256 {
+		return actual, nil
+	}
+	current, err := os.ReadFile(filepath.Join(root, path))
+	if err != nil || !bytes.Equal(current, actual) {
+		return nil, fmt.Errorf("fixture name inverse does not describe actual copied source: %v", err)
+	}
+	return debtRepair2698SignedSource(root, packet.BeforeCommit, path, file.BeforeSHA256)
+}
+
+func debtRepair2698ReadPacket(root string) (debtRepair2698SourcePacket, error) {
+	var packet debtRepair2698SourcePacket
+	raw, err := os.ReadFile(filepath.Join(root, debtRepair2698SourcePath))
+	if err != nil {
+		return packet, err
+	}
+	if debtBaselineChecksum(raw) != debtRepair2698SourceSHA {
+		return packet, fmt.Errorf("native repair source certificate changed")
+	}
+	key := "repair2698/packet/" + root + "/" + debtRepair2698SourceSHA
+	if cached, ok := debtSelectedReadRolePinCache.Load(key); ok {
+		packet = cached.(debtRepair2698SourcePacket)
+		packet.Files = append([]debtRepair2698SourceFile(nil), packet.Files...)
+		return packet, nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&packet); err != nil {
+		return packet, err
+	}
+	if decoder.Decode(new(any)) != io.EOF || packet.BeforeCommit != debtRepair2698Before || packet.AfterCommit != debtRepair2698After ||
+		packet.Authorization != "https://github.com/division-sh/swarm/pull/2698#issuecomment-6205327685" || len(packet.Files) != 41 {
+		return packet, fmt.Errorf("native repair lost its exact immutable inputs")
+	}
+	previous := ""
+	for _, file := range packet.Files {
+		if !filepath.IsLocal(file.File) || filepath.ToSlash(filepath.Clean(file.File)) != file.File || file.File <= previous ||
+			!authorityDebtHex(file.BeforeSHA256, 64) || !authorityDebtHex(file.AfterSHA256, 64) || file.BeforeSHA256 == file.AfterSHA256 {
+			return packet, fmt.Errorf("native repair has a foreign, duplicate or non-forward source: %s", file.File)
+		}
+		for _, input := range [][2]string{{packet.BeforeCommit, file.BeforeSHA256}, {packet.AfterCommit, file.AfterSHA256}} {
+			if _, err := debtRepair2698SignedSource(root, input[0], file.File, input[1]); err != nil {
+				return packet, err
+			}
+		}
+		previous = file.File
+	}
+	copy := packet
+	copy.Files = append([]debtRepair2698SourceFile(nil), packet.Files...)
+	debtSelectedReadRolePinCache.Store(key, copy)
+	return packet, nil
+}
+
+func debtRepair2698SignedSource(root, ref, path, digest string) ([]byte, error) {
+	key := "repair2698/signed/" + root + "/" + ref + "/" + path + "/" + digest
+	if cached, ok := debtSelectedReadRolePinCache.Load(key); ok {
+		return bytes.Clone(cached.([]byte)), nil
+	}
+	raw, err := debtGit(root, "show", ref+":"+path)
+	if err != nil || debtBaselineChecksum(raw) != digest {
+		return nil, fmt.Errorf("native repair lost its exact signed source %s:%s: %v", ref, path, err)
+	}
+	debtSelectedReadRolePinCache.Store(key, bytes.Clone(raw))
+	return raw, nil
+}
+
+// Preservation only: callers of the live census never consume this view.
+func debtRepair2698HistoricalSource(root, path string, current []byte) ([]byte, error) {
+	actual := current
+	current, err := debtRepair2698FixtureNameHistoricalSource(root, path, current)
+	if err != nil || path == debtRepair2698FixtureNameSource && bytes.Equal(actual, current) {
+		return current, err
+	}
+	packet, err := debtRepair2698ReadPacket(root)
+	if os.IsNotExist(err) {
+		return current, nil // Immutable archives before this repair have no certificate.
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, file := range packet.Files {
+		if file.File == path && debtBaselineChecksum(current) == file.AfterSHA256 {
+			return debtRepair2698SignedSource(root, packet.BeforeCommit, path, file.BeforeSHA256)
+		}
+	}
+	return current, nil
+}
+
+func debtRepair2698SourcePolicy(root string, historical debtCatchUpSourcePacket) error {
+	name, err := debtRepair2698ReadFixtureNamePacket(root)
+	if err != nil {
+		return err
+	}
+	for _, file := range []debtRepair2698SourceFile{name.Files[0], name.Guard} {
+		raw, err := os.ReadFile(filepath.Join(root, file.File))
+		if err != nil || debtBaselineChecksum(raw) != file.AfterSHA256 {
+			return fmt.Errorf("fixture name actual source/table changed: %s: %v", file.File, err)
+		}
+	}
+	packet, err := debtRepair2698ReadPacket(root)
+	if err != nil {
+		return err
+	}
+	intersections := 0
+	for _, file := range packet.Files {
+		actual, err := os.ReadFile(filepath.Join(root, file.File))
+		if err == nil {
+			actual, err = debtRepair2698FixtureNameHistoricalSource(root, file.File, actual)
+		}
+		if err != nil || debtBaselineChecksum(actual) != file.AfterSHA256 {
+			return fmt.Errorf("native repair actual source changed: %s: %v", file.File, err)
+		}
+		for _, old := range historical.Files {
+			if old.File == file.File {
+				if old.ComposedSHA256 != file.BeforeSHA256 {
+					return fmt.Errorf("native repair does not continue its original source: %s", file.File)
+				}
+				intersections++
+			}
+		}
+	}
+	if intersections != 18 {
+		return fmt.Errorf("native repair changed its exact 18 source intersections: %d", intersections)
+	}
+	return nil
+}
+
+func debtRepair2698CollectorTransition(base, current string, trusted, head authorityDebtBaseline, proofs ...debtDeliveryRetirementProof) bool {
+	if current != debtRepair2698CollectorTo || head.Collector != current || trusted.Collector != base ||
+		trusted.BootstrapSource != debtBootstrapSource || head.BootstrapSource != debtBootstrapSource || len(proofs) != 1 {
+		return false
+	}
+	root := proofs[0].Root
+	if debtCatchUpCollectorSource(root) != nil {
+		return false
+	}
+	original, _, err := debtCatchUpSignedBaseline(root, debtRepair2698Before, debtCatchUpNativeEntryCollectorTo)
+	if err != nil {
+		return false
+	}
+	if base == debtCatchUpNativeEntryCollectorTo {
+		if !debtSitesEqual(trusted.Sites, original.Sites) {
+			return false
+		}
+	} else {
+		// Reuse the existing exact joined-input proof, then the single new edge.
+		intermediate := head
+		intermediate.Collector = debtCatchUpNativeEntryCollectorTo
+		if !debtCatchUpNativeEntryCollectorTransition(base, intermediate.Collector, trusted, intermediate, proofs...) {
+			return false
+		}
+	}
+	return len(authorityDebtRatchet(proofs[0].Actual, head.Sites, original.Sites, original.Sites, proofs[0])) == 0
+}
+
+func debtRepair2698UnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, historical bool, prior error) (authorityDebtBaseline, error) {
+	if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+		return baseline, prior
+	}
+	if _, err := debtParseCollectorMetadata(metadata, data, debtCatchUpNativeEntryCollectorTo); err != nil {
+		return baseline, err
+	}
+	original, _, err := debtCatchUpSignedBaseline(root, debtRepair2698Before, debtCatchUpNativeEntryCollectorTo)
+	if err != nil || baseline.Collector != debtCacheCollectorFrom || baseline.BootstrapSource != debtBootstrapSource || !debtSitesEqual(baseline.Sites, original.Sites) {
+		return baseline, fmt.Errorf("native repair metadata lost its exact predecessor: %v", err)
+	}
+	if err := debtCatchUpCollectorSource(root); err != nil {
+		return baseline, err
+	}
+	baseline.Collector = debtRepair2698CollectorTo
+	return baseline, nil
 }
 
 type debtCatchUpSourcePacket struct {
@@ -62,6 +305,11 @@ func debtCatchUpReadPacket(root string) (debtCatchUpSourcePacket, error) {
 // Ruling6195697761: immutable predecessor evidence only. The independent
 // composed-source control still checks every actual file before qualification.
 func debtCatchUpLaneSource(root, path string, current []byte) ([]byte, error) {
+	var err error
+	current, err = debtRepair2698HistoricalSource(root, path, current)
+	if err != nil {
+		return nil, err
+	}
 	packet, err := debtCatchUpReadPacket(root)
 	if os.IsNotExist(err) {
 		return current, nil // Historical archives predate the joined proof packet.
@@ -163,7 +411,7 @@ func debtCatchUpSignedBaseline(root, ref, collector string) (authorityDebtBaseli
 
 func debtCatchUpCollectorSource(root string) error {
 	actual, err := debtCollectorDigest(root)
-	if err != nil || (actual != debtCatchUpCollectorTo && actual != debtCatchUpFreshnessCollectorTo && actual != debtCatchUpNativeEntryCollectorTo) {
+	if err != nil || (actual != debtCatchUpCollectorTo && actual != debtCatchUpFreshnessCollectorTo && actual != debtCatchUpNativeEntryCollectorTo && actual != debtRepair2698CollectorTo) {
 		return fmt.Errorf("joined collector is not its exact enumerated source: %s: %v", actual, err)
 	}
 	if actual == debtCatchUpFreshnessCollectorTo {
@@ -171,7 +419,7 @@ func debtCatchUpCollectorSource(root string) error {
 			return err
 		}
 	}
-	if actual == debtCatchUpNativeEntryCollectorTo {
+	if actual == debtCatchUpNativeEntryCollectorTo || actual == debtRepair2698CollectorTo {
 		if err := debtCatchUpNativeEntryOwnerSource(root); err != nil {
 			return err
 		}
@@ -180,10 +428,18 @@ func debtCatchUpCollectorSource(root string) error {
 	if err != nil {
 		return err
 	}
+	if actual == debtRepair2698CollectorTo {
+		if err := debtRepair2698SourcePolicy(root, packet); err != nil {
+			return err
+		}
+	}
 	for _, file := range packet.Files {
 		raw, err := os.ReadFile(filepath.Join(root, file.File))
 		if file.ComposedSHA256 == "absent" && os.IsNotExist(err) {
 			continue
+		}
+		if err == nil && actual == debtRepair2698CollectorTo {
+			raw, err = debtRepair2698HistoricalSource(root, file.File, raw)
 		}
 		if err != nil || debtBaselineChecksum(raw) != file.ComposedSHA256 {
 			return fmt.Errorf("joined collector current-source mismatch: %s: %v", file.File, err)
@@ -494,6 +750,8 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 func debtSourceUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, collector string, historical bool, prior error) (authorityDebtBaseline, error, bool) {
 	var owner func(string, []byte, []byte, authorityDebtBaseline, bool, error) (authorityDebtBaseline, error)
 	switch collector {
+	case debtRepair2698CollectorTo:
+		owner = debtRepair2698UnrefreshedBaseline
 	case debtCatchUpNativeEntryCollectorTo:
 		owner = debtCatchUpNativeEntryUnrefreshedBaseline
 	case debtCatchUpCollectorTo:
