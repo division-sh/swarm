@@ -23,6 +23,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
@@ -39,6 +40,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 )
 
 type nodeDeliveryRecoveryStore interface {
@@ -244,7 +246,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			// readiness owner; recovery must not infer construction from agent rows.
 			predecessorProcess := worklifetime.NewProcess()
 			predecessor := newRuntime(predecessorProcess, selected)
-			predecessorCapability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, predecessor)
+			predecessorCapability, predecessorGrant := installExternalRuntimeTestGeneration(t, ctx, selected, predecessor)
 			t.Cleanup(func() {
 				if err := closeExternalRuntimeTestGeneration(predecessor, predecessorProcess, predecessorCapability); err != nil {
 					t.Errorf("close startup predecessor: %v", err)
@@ -261,9 +263,15 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			}); err != nil {
 				t.Fatalf("construct startup predecessor tree: %v", err)
 			}
-			if err := closeExternalRuntimeTestGeneration(predecessor, predecessorProcess, predecessorCapability); err != nil {
-				t.Fatalf("retire startup predecessor: %v", err)
+			predecessorEvidence, err := predecessorGrant.Evidence()
+			if err != nil {
+				t.Fatal(err)
 			}
+			predecessorAdmission, err := managedexecution.New(managedexecution.KindNormalRuntime, predecessorEvidence.GrantID, predecessorEvidence.RuntimeGeneration, "", predecessorEvidence.SourceSetRevision, persistedSource.BundleHash(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			predecessorCtx := managedexecution.WithAdmission(ctx, predecessorAdmission)
 
 			eventID := eventtest.UUID("startup-order-node-event-" + backend.name)
 			nodeRoute := startupRecoveryNodeRoute(t, "complete-task")
@@ -274,7 +282,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				eventID, "task.requested", "test", "", []byte(`{}`), 0,
 				templateInstanceDeliveryRunID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, nodeRoute.Target.Route()), time.Now().UTC(),
 			)
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, predecessorCtx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 			agentEventID := eventtest.UUID("startup-order-agent-event-" + backend.name)
 			agentRoute := startupRecoveryAgentRoute(t, templateInstanceDeliveryRunID, agentID)
@@ -282,7 +290,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				agentEventID, "task.completed", "test", "", []byte(`{}`), 0,
 				templateInstanceDeliveryRunID, events.EventEnvelope{}, time.Now().UTC(),
 			)
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, agentEvent, []events.DeliveryRoute{agentRoute}, runtimepipelineobligation.ScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, predecessorCtx, selected, agentEvent, []events.DeliveryRoute{agentRoute}, runtimepipelineobligation.ScopeSubscribed)
 			agentProof, err := selected.ProveHandoff(ctx, agentEventID, agentRoute)
 			if err != nil {
 				t.Fatalf("prove startup agent handoff: %v", err)
@@ -292,7 +300,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				t.Fatalf("load startup agent authority: %v", err)
 			}
 			predecessorAuthority, err := runtimedelivery.NewNormalExecutionAuthority(
-				agentSnapshot.Authority.SourceArtifact(), "startup-predecessor-"+backend.name, 41,
+				agentSnapshot.Authority.SourceArtifact(), predecessorEvidence.GrantID, predecessorEvidence.RuntimeGeneration,
 			)
 			if err != nil {
 				t.Fatalf("construct startup predecessor authority: %v", err)
@@ -304,6 +312,9 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				t.Fatalf("claim startup predecessor agent delivery: %v", err)
 			} else if _, ok := result.Acquired(); !ok {
 				t.Fatalf("startup predecessor claim = %#v, want acquired", result)
+			}
+			if err := closeExternalRuntimeTestGeneration(predecessor, predecessorProcess, predecessorCapability); err != nil {
+				t.Fatalf("retire startup predecessor: %v", err)
 			}
 
 			processOwner := worklifetime.NewProcess()
@@ -415,6 +426,22 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 						} else {
 							route = startupRecoveryNodeRoute(t, test.nodeID)
 						}
+						var retirePredecessor func()
+						if route.Recipient.IsAgent() && (test.state == "future_failed" || test.state == "busy") {
+							eventCtx = runtimecorrelation.WithRuntimeInstanceID(eventCtx, authorActivityTestRuntimeInstanceID)
+							eventCtx, _, _, _ = prepareRuntimeLogNativeActor(t, eventCtx, selected, eventSource, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+								ID: test.agentID, Identity: route.AgentIdentity, ExecutionMode: "live",
+							}))
+							capability, capabilityErr := agentfixture.ProcessCapability(t, eventCtx, selected)
+							if capabilityErr != nil {
+								t.Fatal(capabilityErr)
+							}
+							retirePredecessor = func() {
+								if err := capability.Release(eventCtx); err != nil {
+									t.Fatalf("retire native claimed startup predecessor: %v", err)
+								}
+							}
+						}
 						deliveryCtx = eventCtx
 						event := eventtest.ExistingRunRootIngress(
 							eventtest.UUID("recovery-disabled-event-"+backend+"-"+mode.name+"-"+test.name),
@@ -461,6 +488,9 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 						before, err = selected.Snapshot(eventCtx, deliveryID)
 						if err != nil {
 							t.Fatalf("load prepared startup delivery: %v", err)
+						}
+						if retirePredecessor != nil {
+							retirePredecessor()
 						}
 					}
 

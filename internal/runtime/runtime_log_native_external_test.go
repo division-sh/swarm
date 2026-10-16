@@ -7,13 +7,21 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
+	"github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
@@ -24,6 +32,7 @@ type runtimeLogSelectedForTest interface {
 	runlifecycle.CandidateStore
 	sourceartifactfixture.Writer
 	storetest.DeliveryPublicationFixtureStore
+	storetest.AgentFixtureStore
 }
 
 func nativeRuntimeLogFixture(t *testing.T, backend string, artifact *sourceartifact.AdmittedSourceArtifact) runtimepkg.RuntimeLogNativeFixtureForTest {
@@ -48,6 +57,9 @@ func nativeRuntimeLogFixture(t *testing.T, backend string, artifact *sourceartif
 	}
 	return runtimepkg.RuntimeLogNativeFixtureForTest{
 		Persistence: selected, Deliveries: selected, Runs: selected, Context: ctx, FanOutCapacity: capacity,
+		PrepareActor: func(t *testing.T, ctx context.Context, config actors.AgentConfig) (context.Context, manager.PersistedAgent, manager.AgentLifecyclePersistence, agenttopology.SourceSetPlan) {
+			return prepareRuntimeLogNativeActor(t, ctx, selected, fact, config)
+		},
 		RequireRun: func(ctx context.Context, run string) error {
 			return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{RunID: run, Origin: storetest.ScenarioSetupOrigin(), Artifact: artifact, BundleHash: artifact.BundleHash(), StartedAt: time.Now().UTC()})
 		},
@@ -82,6 +94,73 @@ func nativeRuntimeLogFixture(t *testing.T, backend string, artifact *sourceartif
 			return runtimepkg.RuntimeLogPhysicalForTest{Runs: rows.Runs, Events: rows.Events, Deliveries: rows.Deliveries, Entities: rows.Entities, Receipts: rows.Receipts}
 		},
 	}
+}
+
+func prepareRuntimeLogNativeActor(t *testing.T, ctx context.Context, selected storetest.AgentFixtureStore, fact correlation.SourceArtifactFact, config actors.AgentConfig) (context.Context, manager.PersistedAgent, manager.AgentLifecyclePersistence, agenttopology.SourceSetPlan) {
+	t.Helper()
+	ctx = correlation.WithRunID(ctx, config.Identity.RunID)
+	source, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found || source != fact {
+		t.Fatal("native runtime actor requires its original admitted source")
+	}
+	if config.Type == "" {
+		config.Type = "test"
+	}
+	if config.Role == "" {
+		config.Role = "worker"
+	}
+	if config.Model == "" {
+		config.Model = selection.ModelAliasRegular
+	}
+	if len(config.Config) == 0 {
+		config.Config = []byte(`{}`)
+	}
+	profile, err := selection.ResolveLiveBackend(selection.BackendAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := llm.ResolveAgentExecution(executionposture.Live, profile, selection.EffectiveModelAliases(nil), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config = resolved.Actor
+	if err := agentfixture.UpsertStaticForSource(t, ctx, selected, manager.PersistedAgent{Config: config, Status: "active", StartedAt: time.Now().UTC()}, fact); err != nil {
+		t.Fatal(err)
+	}
+	ctx, plan := admitNativeRuntimeAgentExecution(t, ctx, selected, fact)
+	records, err := selected.LoadAgents(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range records {
+		if record.Config.Identity == config.Identity {
+			record.Config.Prompt = config.Prompt
+			return ctx, record, agentfixture.Lifecycle(t, selected), plan
+		}
+	}
+	t.Fatal("native runtime fixture lost its prepared actor")
+	return nil, manager.PersistedAgent{}, nil, agenttopology.SourceSetPlan{}
+}
+
+func admitNativeRuntimeAgentExecution(t *testing.T, ctx context.Context, selected agentfixture.Store, fact correlation.SourceArtifactFact) (context.Context, agenttopology.SourceSetPlan) {
+	t.Helper()
+	authority, err := agentfixture.AdmitExecutionAuthority(t, ctx, selected, fact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability, err := agentfixture.ProcessCapability(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, found, err := capability.CurrentSourceSet(ctx)
+	if err != nil || !found {
+		t.Fatalf("native runtime actor source plan: found=%t error=%v", found, err)
+	}
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, authority.ExecutionID(), authority.Generation(), "", plan.Revision, fact.BundleHash(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return managedexecution.WithAdmission(ctx, admission), plan
 }
 
 func TestRuntimeLoggerNativeAppendRollback(t *testing.T) {
