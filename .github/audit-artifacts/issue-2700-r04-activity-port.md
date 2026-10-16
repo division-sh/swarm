@@ -107,8 +107,10 @@ publishExistingActivityAttempt -> publishJournaledActivityResult. A missing,
 started or changed row refuses without publication; no HTTP/claim/handler replay
 is available through this entry. E owns calling it after recovery ACK and before
 ordinary/selected dispatch release, under its startup fence. A publication error
-must keep that startup closed. Its focused controls are pending, not GREEN;
-genuine native rollback, ACK-loss and takeover remain separate mandatory proofs.
+must keep that startup closed. Its three focused component roots PASS race x3
+(pipeline1.201s), along with SQLmock native-frame refusal controls1.056s, receipt
+amendment2-recovery-publication-race3-candidate1.log. These are not genuine native
+rollback, ACK-loss or takeover; those remain separate mandatory proofs.
 
 ## Complete Writer Boundary
 
