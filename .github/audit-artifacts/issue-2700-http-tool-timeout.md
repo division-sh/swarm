@@ -35,11 +35,11 @@ only the changed candidate can receive GREEN credit.
 | Cell | Active proof and receipt |
 | --- | --- |
 | H01 | `TestHTTPToolDeclaredTimeoutBeyondSharedClientCap/declared_120s`: real authored YAML, normal Execute, declared 120s, actual 45s local upstream. Baseline `declared-timeout-baseline-red.log`: RED at 30.028423958s, one request, canonical transport uncertainty. `declared-timeout-fixed.log`: GREEN, exact provider receipt after 45.042525619s, one request/attempt/settlement, no redispatch. |
-| H02 | Same root `/declared_10s`: same 45s upstream, declared 10s, exact transport uncertainty, one attempt/settlement, no replay, joined server. Baseline PASS at 10.006409063s; fixed PASS at 10.001389213s. Whole fixed package 55.802s, count1/non-race. |
+| H02 | Same root `/declared_10s`: same 45s upstream, declared 10s, exact transport uncertainty, one attempt/settlement, no replay, joined server. Baseline PASS at 10.006409063s; fixed PASS at 10.001389213s. Whole fixed package 55.802s, count1/non-race. Strengthened deadline-cause assertion subsequently PASS at 10.007339173s (package 10.019s). |
 | H03 | `TestHTTPToolTimeoutIncludesResponseBody`, `...CallerCancellation`, `...StalledBody`, `...DefaultAndEarlierCallerDeadline`: body beyond injected shorter cap, explicit caller cancellation at headers/body, bounded stalled body, omitted 30s/default and earlier caller deadline. `http-timeout-fast-race3.log` PASS, 4.535s. |
 | H04 | `TestHTTPToolTimeoutOverlappingCallsPreserveClient`: simultaneous requests, separate cancellation/deadlines, original client pointer/timeout/transport/redirect/jar, actual redirect and cookie flow. `...PreservesOtherClientConsumers`: original token-client identity and actual native-search 30s outgoing deadline. Same fast race x3 PASS: six roots x3, 30 passing records, zero failures/skips. |
 | H05 | Existing after-admission timeout, rate-limit/no-retry, canonical failure taxonomy, managed launch/cancellation/identity/settlement, credential refresh/refusal and native-search controls; existing acknowledged-settlement cleanup proof on both native stores. `preserved-http-effect-controls-race1.log` PASS, 8.980s, 15 roots / 42 passing records. Both-store acknowledged-settlement root PASS, 6.60s; expected injected post-commit cleanup diagnostics retained. |
-| H06 | Exact effect/source-owner guards: `effect-source-owner-guards.log` PASS, four roots, 1.287s. Formatting/diff-check PASS. Complexity, unused and exact-head preflight outstanding before the PR push. |
+| H06 | Exact effect/source-owner guards: `effect-source-owner-guards.log` PASS, four roots, 1.287s. Formatting/diff-check PASS. Static/unused/preflight results are per-head attestations published with FINAL HEAD, not implied by these runtime receipts. |
 
 H01/H02 use a real waiting HTTP server that observes request cancellation; its
 handlers are joined. All new HTTP execution proofs use the managed-effect
@@ -55,6 +55,37 @@ Fast cancellation tests assert the canonical `platform.outcome_uncertain` /
 | Fast race x3 | `a921821482560f87582d5c6311b089e27ba181a9fd29f74d7c0cad2b239d6df6` |
 | Existing controls | `f5bfd029129afd1889ed2acaebc2aaaaafb1cfad4fbff2dc377562891ec7dc97` |
 | Effect/source guards | `c1951688ec0b491332dcfaa0d3e2c9028b8149b05387a7e0d46cbda3d8f372ef` |
+
+## Explicit-Deadline Oracle Correction
+
+Reviewer-c accepted the production repair and H01 at `d21e2868f1` in comment
+6210089436, but identified a P2 proof gap: the original H02 test logged elapsed
+time without asserting the admitted duration. A substituted 50ms budget could
+therefore satisfy that old failure oracle. Those original receipts remain
+visible; they are not credited as proving exact authored-budget application.
+
+`TestHTTPToolTimeoutExplicitAuthoredDeadline` now exercises normal YAML
+admission/Prepare/Execute with explicit 1s, 10s and 120s declarations and no
+caller deadline. Its outgoing test transport checks the actual request deadline
+against the interval of possible context-creation coordinates. This is a
+deadline-identity assertion, not a new request-performance ceiling. The actual
+10s failure also requires `errors.Is(err, context.DeadlineExceeded)`.
+
+One controlled substitution of 50ms for only the 10s request, immediately before
+`context.WithTimeout`, was rejected by the new fast root: expected RED,
+package 0.013s. The temporary diagnostic change was removed; production is
+byte-identical to the accepted `d21e2868f1` repair. No other assertion changed.
+
+| P2 receipt | Result / SHA-256 |
+| --- | --- |
+| `p2-50ms-negative-red.log` | RED, `7021c49ccce86a70849a455d43ae74a16bd3732a7f6482bd1f4252a63275f9a2` |
+| `p2-50ms-negative-mutation.patch` | Removed diagnostic only, `31ca3d36777108350e04a4173b9abd1bd924334ddff6b94bd1f95f3b5fd705c7` |
+| `p2-http-timeout-fast-race3-green.log` | PASS 4.596s, seven roots x3 / 42 records, `2d00d9bbfb331d9f9a7554e1b5762ada76882f2e6b00dcde5b1725b010903484` |
+| `p2-real-10s-deadline-cause-green.log` | PASS 10.019s, original request bound/envelope plus deadline cause, `b35ab65015c00adebb7c8e03c74885e76dadef7a18fea9d0a502728b7a636882` |
+
+The actual 45s success and unchanged managed-effect, credential, both-store
+settlement and source-owner receipts carry under 6210089436; no duplicate
+45s journey or local tier was run.
 
 ## Open Siblings (Not Discharged)
 
