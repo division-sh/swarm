@@ -33,6 +33,14 @@ func TestS1RootAdmissionExactWhitespaceSibling(t *testing.T) {
 			t.Fatal("ordinary relative/absolute selection changed its root or content")
 		}
 	}
+	t.Chdir(filepath.Join(parent, "shop-a"))
+	artifact, err := AdmitDirectory(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admission, present := artifact.RootAdmission(); !present || admission.RootDirectory() != "shop-a" {
+		t.Fatal("dot selection lost the captured directory")
+	}
 }
 
 func TestS1RootAdmissionPreservesParentTraversalBeforeOpen(t *testing.T) {
@@ -54,6 +62,11 @@ func TestS1RootAdmissionPreservesParentTraversalBeforeOpen(t *testing.T) {
 		entry, present := artifact.Entry("nodes.yaml")
 		if !present || string(entry.Bytes()) != "selected: {type: procedure}\n" {
 			t.Fatalf("source path was lexically rewritten before opening: %q", operand)
+		}
+	}
+	for _, operand := range []string{"link", "link/"} {
+		if artifact, err := AdmitDirectory(operand); err == nil || artifact != nil {
+			t.Fatalf("terminal root symlink acquired admission: %q", operand)
 		}
 	}
 }
