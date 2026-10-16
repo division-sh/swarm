@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
+	"sync"
 )
 
 const Path = "tools/fixture-codemod/pipeline-observations/family145-workflow-state-preimages.json"
@@ -18,9 +20,14 @@ type Pin struct {
 	Calls                                 int
 }
 
+var decodedPinCache sync.Map
+
 func Decode(raw []byte) ([]Pin, error) {
 	if fmt.Sprintf("%x", sha256.Sum256(raw)) != Digest {
 		return nil, fmt.Errorf("workflow state complete source manifest changed")
+	}
+	if cached, ok := decodedPinCache.Load(Digest); ok {
+		return slices.Clone(cached.([]Pin)), nil
 	}
 	var pins []Pin
 	if err := json.Unmarshal(raw, &pins); err != nil {
@@ -29,6 +36,7 @@ func Decode(raw []byte) ([]Pin, error) {
 	if len(pins) != Bodies {
 		return nil, fmt.Errorf("workflow state declaration inventory changed")
 	}
+	decodedPinCache.Store(Digest, slices.Clone(pins))
 	return pins, nil
 }
 
