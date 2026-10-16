@@ -7663,8 +7663,12 @@ engine:
             rule: >-
               The exact bytewise-sorted unclassified rows may retain only their completion reason and the raw-disallowed
               reason caused solely by that same disposition, preserving diagnostic multiplicity. The active set equals
-              the origin on first landing and may subsequently only shrink against both origin and the trusted previous
-              accepted master set; every active key remains an actual registered unclassified finding. Unknown, stale,
+              the origin on first landing, except the exact source/role-bound bootstrap authorized in #2698/6207927446:
+              origin minus two obsolete H19 identities minus the107 fixed-owner relocations, retaining exactly4704.
+              The immutable4813-row origin and hash remain unchanged. The107 retirement identities and117 canonical
+              replacement classifications are finite declaration/signature/source-bound inventories, not future-site
+              allowances or deletion credit. Subsequent active sets may only shrink against both origin and trusted
+              previous accepted master; every active key remains an actual registered unclassified finding. Unknown, stale,
               duplicate, new or resurrected keys, other invalid roles, compound-fixture violations and scan errors fail.
               Preserve unfiltered strict diagnostics and report strict_completion=false, exact retained count/digest,
               origin, trusted predecessor and decision provenance. This grants no raw authority, classifier exemption,

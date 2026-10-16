@@ -280,24 +280,37 @@ func TestCommittedRouteLaunchHasLivePublicationOwner(t *testing.T) {
 	}
 }
 
-func ProveNativePersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *testing.T, newNativeDelivery managerDeliveryNativeFactory) {
+func ProveNativePersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *testing.T, newNativeDelivery, newSelectedDelivery managerDeliveryNativeFactory) {
 	for _, mode := range []struct {
-		name string
-		run  func(*AgentManager, context.Context) error
-		want AgentRunMode
+		name       string
+		run        func(*AgentManager, context.Context) error
+		want       AgentRunMode
+		mismatched bool
 	}{
 		{name: "standard", run: (*AgentManager).Run, want: AgentRunModeStandard},
 		{name: "authoritative_delivery_only", run: (*AgentManager).RunAuthoritativeDeliveryOnly, want: AgentRunModeAuthoritativeDeliveryOnly},
+		{name: "normal_authority_refuses_authoritative_delivery_only", run: (*AgentManager).RunAuthoritativeDeliveryOnly, want: AgentRunModeAuthoritativeDeliveryOnly, mismatched: true},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
-			native := newNativeDelivery(t)
+			newDelivery := newNativeDelivery
+			if mode.want == AgentRunModeAuthoritativeDeliveryOnly && !mode.mismatched {
+				newDelivery = newSelectedDelivery
+			}
+			native := newDelivery(t)
 			bus := newProjectionTestBus()
 			handled := make(chan int, 1)
 			factory := &projectionTestFactory{handled: handled}
-			const agentID = "restored-dynamic-agent"
+			agentID := "restored-dynamic-agent"
+			identity := runtimeagentidentitytest.RootRuntime(t, agentID, "persisted-adoption-test")
+			eventType := events.EventType("test.old")
+			if native.Authority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork {
+				identity = native.SelectedRoute.AgentIdentity
+				agentID = identity.AgentID()
+				eventType = native.SelectedEvent.Type()
+			}
 			am, executionCtx, rec := newNativeProjectionTestManager(t, bus, factory.Build, native, managerTestAgentConfig(models.AgentConfig{
 				ExecutionMode: "live", ID: agentID,
-				Identity: runtimeagentidentitytest.RootRuntime(t, agentID, "persisted-adoption-test"), Subscriptions: []string{"test.old"},
+				Identity: identity, Subscriptions: []string{string(eventType)},
 			}))
 			probe := runtimelifecycleprobe.New()
 			am.testLifecycleProbe = probe
@@ -326,6 +339,9 @@ func ProveNativePersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *t
 			if readiness.Kind != executableAgentRunnableCurrentOccurrence || readiness.State.Phase != AgentLifecycleRunning || readiness.State.RunMode != mode.want {
 				t.Fatalf("readiness = %#v, want current %s occurrence", readiness, mode.want)
 			}
+			if mode.want == AgentRunModeStandard {
+				requireDesiredNativeRetirementRefused(t, am, executionCtx, identity, "static_desired_state_mismatch")
+			}
 			route, ok := bus.current(agentID)
 			wantToken := lifecycleToken(identity, readiness.State.RuntimeEpoch, readiness.State.Generation)
 			if !ok || route.token != wantToken {
@@ -348,12 +364,19 @@ func ProveNativePersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *t
 			}
 
 			event := projectionRuntimeEvent("persisted-adoption-"+mode.name, events.EventType("test.old"))
+			if native.Authority.Kind() == runtimedelivery.ExecutionAuthoritySelectedContractFork {
+				event = native.SelectedEvent
+			}
 			deliveryRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: route.token.Identity}
 			before, err := native.ClaimDelivery(native.Context, native.Authority, event, deliveryRoute)
 			if err != nil || before.Disposition != runtimedelivery.ClaimAbsent {
 				t.Fatalf("unpublished adoption delivery was claimable: %+v,error=%v", before, err)
 			}
 			native.Publish(t, native.Context, event, []events.DeliveryRoute{deliveryRoute}, native.Authority)
+			if mode.mismatched {
+				requireMismatchedNativeReceiverRefusesClaim(t, native, event, deliveryRoute, handled)
+				return
+			}
 			if err := bus.send(agentID, event); err != nil {
 				t.Fatalf("send exact receiver turn: %v", err)
 			}
@@ -387,6 +410,27 @@ func ProveNativePersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *t
 				t.Fatalf("adopted receiver did not persist exact delivery settlement: %+v,error=%v", settled, err)
 			}
 		})
+	}
+}
+
+func requireMismatchedNativeReceiverRefusesClaim(t *testing.T, native *ManagerDeliveryNativeFixture, event events.Event, route events.DeliveryRoute, handled <-chan int) {
+	t.Helper()
+	result, err := native.ClaimDelivery(native.Context, native.Authority, event, route)
+	if err == nil || err.Error() != "agent profile capture requires the exact admitted lifecycle/grant" || result.Acknowledged {
+		t.Fatalf("normal grant with authoritative-only mode must refuse exact profile capture: disposition=%s acknowledged=%t error=%v", result.Disposition, result.Acknowledged, err)
+	}
+	id, err := runtimedelivery.DeliveryID(event.ID(), route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := native.Snapshot(native.Context, id)
+	if err != nil || snapshot.Status != runtimedelivery.StatusPending || snapshot.ClaimVersion != 0 || snapshot.Authority != native.Authority {
+		t.Fatalf("mismatched mode acquired durable execution: snapshot=%+v error=%v", snapshot, err)
+	}
+	select {
+	case <-handled:
+		t.Fatal("mismatched native receiver executed a handler")
+	default:
 	}
 }
 

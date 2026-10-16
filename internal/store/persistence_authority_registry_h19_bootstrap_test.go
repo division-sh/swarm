@@ -49,7 +49,13 @@ func registryRetainedH19Bootstrap(root string, origin, active []byte) error {
 		return err
 	}
 	if !bytes.Equal(active, exact) {
-		return fmt.Errorf("first retained registry must equal origin or its exact two-key H19 retirement")
+		composed, err := registryRetainedFixedOwnerInitial(root, exact)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(active, composed) {
+			return fmt.Errorf("first retained registry differs from the exact H19/fixed-owner retirement")
+		}
 	}
 	for _, pin := range registryH19SourcePins {
 		declarations, err := debtServedDebugDeclarations(filepath.Join(root, pin[0]))
