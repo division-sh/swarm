@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -17,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
-	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -75,6 +74,7 @@ type runForkSourceStateAdmission struct {
 	postgres  bool
 	firstTurn *runfork.InputPublication
 	point     runfork.RunForkPoint
+	sourceAt  func(context.Context, *sql.Tx, string) (correlation.SourceArtifactFact, error)
 }
 
 func (a runForkSourceStateAdmission) projectReplyReference(replyID string) (string, error) {
@@ -294,18 +294,15 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if err := json.Unmarshal(event.Payload, &request); err != nil {
 		return event, fmt.Errorf("decode selected-contract activity request %s: %w", event.SourceEventID, err)
 	}
-	proposed, err := loadRunForkProposedEffectAuthority(ctx, tx, requestID)
+	proposed, err := admission.requireOriginalActivityApproval(ctx, tx, sourceEvent.SourceEventID)
 	if err != nil {
 		return event, err
-	}
-	if !proposed {
-		return event, fmt.Errorf("activity request %s has no settled proposed-effect authority; unapproved activity fork continuation is unavailable", event.SourceEventID)
 	}
 	evidence, err := loadRunForkActivityAttemptEvidence(ctx, tx, requestID)
 	if err != nil {
 		return event, fmt.Errorf("approved proposed effect %s cannot authorize a fork-local call: %w", event.SourceEventID, err)
 	}
-	if evidence.Status == "uncertain" {
+	if proposed && evidence.Status == "uncertain" {
 		return event, fmt.Errorf("approved proposed effect %s has ambiguous dispatch evidence and cannot authorize a fork-local call", event.SourceEventID)
 	}
 	if evidence.ExecutionMode != event.ExecutionMode {
@@ -395,26 +392,6 @@ func (a runForkSourceStateAdmission) prepareNonActivitySourceEvent(ctx context.C
 	}
 	projected.Payload = payload
 	return projected, nil
-}
-
-func loadRunForkProposedEffectAuthority(ctx context.Context, tx *sql.Tx, requestEventID string) (bool, error) {
-	var status, verdict, state string
-	err := tx.QueryRowContext(ctx, `
-		SELECT c.status, COALESCE(c.verdict, ''), p.state
-		FROM proposed_effect_continuations p
-		JOIN decision_cards c ON c.card_id = p.card_id
-		WHERE p.request_event_id = $1
-	`, strings.TrimSpace(requestEventID)).Scan(&status, &verdict, &state)
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("load proposed-effect fork authority for request %s: %w", requestEventID, err)
-	}
-	if status != decisioncard.StatusDecided || verdict != "approve" || state != decisioncard.ProposedEffectRequestReleased {
-		return false, fmt.Errorf("approved proposed effect %s is not terminal fork evidence: card=%s verdict=%s continuation=%s", requestEventID, status, verdict, state)
-	}
-	return true, nil
 }
 
 func bindRunForkActivitySourceEvent(raw json.RawMessage, forkRunID, sourceRequestEventID, entityID string, reference *loopruntime.ForkChildReference) (json.RawMessage, error) {

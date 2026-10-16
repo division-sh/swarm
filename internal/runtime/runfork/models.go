@@ -309,6 +309,7 @@ type RunForkPlan struct {
 	historicalRequests        map[string][]string
 	historicalReplyReturns    *historicalReplyReturns
 	historicalRouteSelectors  *historicalRouteSelectors
+	activityRequestOrigins    []semanticview.ActivityRequestOrigin
 }
 
 // RunForkFanOutObligation is the exact semantic fan-out progress visible at a

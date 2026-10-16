@@ -694,6 +694,7 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx conte
 				return err
 			}
 			stateAdmission.carriage = original
+			stateAdmission.sourceAt = s.RequirePresentSourceTx
 			physicalIDs, pendingInputs, err := loadRunForkPendingJoinInputs(ctx, tx, stateAdmission, ids)
 			if err != nil {
 				return err

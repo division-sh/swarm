@@ -111,6 +111,7 @@ func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractSourceEvents(ctx context
 				return err
 			}
 			stateAdmission.carriage = original
+			stateAdmission.sourceAt = s.RequirePresentSourceTx
 			physicalIDs, pendingInputs, err := loadRunForkPendingJoinInputs(txctx, tx, stateAdmission, ids)
 			if err != nil {
 				return err

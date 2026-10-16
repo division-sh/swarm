@@ -32,6 +32,7 @@ type runForkDeliveryEventReplayAdapter struct {
 	deliveries     *storedelivery.Adapter
 	commitScope    func(context.Context, *mutationprotocol.Attempt, string, runtimepipelineobligation.CommittedScope, time.Time) error
 	loadSnapshot   runForkLifecycleSnapshotLoader
+	sourceAt       func(context.Context, *sql.Tx, string) (runtimecorrelation.SourceArtifactFact, error)
 }
 
 func (s *RunForkPostgresOwner) deliveryEventReplayAdapter() runForkDeliveryEventReplayAdapter {
@@ -39,6 +40,7 @@ func (s *RunForkPostgresOwner) deliveryEventReplayAdapter() runForkDeliveryEvent
 		postgres:       true,
 		requireCurrent: s.requireCurrentSchema, events: s.events, deliveries: postgresDeliveryAdapter,
 		commitScope: s.PipelinePostgresOwner.CommitScopeAtTx,
+		sourceAt:    s.RequirePresentSourceTx,
 		loadSnapshot: func(ctx context.Context, tx *sql.Tx, runID string) (runlifecycle.Snapshot, error) {
 			return s.LoadSnapshotTx(ctx, tx, runID, false)
 		},
@@ -50,6 +52,7 @@ func (s *RunForkSQLiteOwner) deliveryEventReplayAdapter() runForkDeliveryEventRe
 		requireCurrent: s.requireCurrentSchema, events: s.events, deliveries: sqliteDeliveryAdapter,
 		commitScope:  s.PipelineSQLiteOwner.CommitScopeAtTx,
 		loadSnapshot: s.LoadSnapshotTx,
+		sourceAt:     s.RequirePresentSourceTx,
 	}
 }
 
@@ -94,7 +97,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, attempt *m
 	if err != nil {
 		return result, err
 	}
-	admission := runForkSourceStateAdmission{carriage: original, forkRunID: lineage.ForkRunID, snapshot: snapshot, postgres: store.postgres}
+	admission := runForkSourceStateAdmission{carriage: original, forkRunID: lineage.ForkRunID, snapshot: snapshot, postgres: store.postgres, sourceAt: store.sourceAt}
 	sourceEvents := map[string]events.Event{}
 	bundleSource, err := runtimecorrelation.NewSourceArtifactFact(lineage.ForkBundleHash)
 	if err != nil {

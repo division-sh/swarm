@@ -273,6 +273,10 @@ func (o SelectedContractExecutionOwner) prepareWithOperation(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
+	original, err = retainOriginalActivityHistory(ctx, req.SourceLoader, original, plan)
+	if err != nil {
+		return nil, err
+	}
 	deferredWorkAdmission, err := admitSelectedContractDeferredWork(plan, loadedSource.Source)
 	if err != nil {
 		return nil, err

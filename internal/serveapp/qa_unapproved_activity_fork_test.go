@@ -65,7 +65,6 @@ func TestQAUnapprovedRecordedHTTPWriteForkBothStores(t *testing.T) {
 			tool := fmt.Sprintf(`recorded_write:
   description: Loopback HTTP write with a recorded result and no approval.
   handler_type: http
-  effect_class: non_idempotent_write
   http: {method: POST, url: %q}
   output_schema:
     type: object
@@ -100,12 +99,14 @@ func TestQAUnapprovedRecordedHTTPWriteForkBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT CAST(event_id AS TEXT), CAST(payload AS TEXT) FROM events WHERE CAST(run_id AS TEXT)=$1 AND event_name='platform.activity_requested'`, started.RunID).Scan(&requestID, &rawRequest); err != nil {
 				t.Fatal(err)
 			}
-			var request struct {
-				Policy string `json:"fork_policy"`
-				Effect string `json:"effect_class"`
-			}
+			var request map[string]json.RawMessage
 			if err := json.Unmarshal([]byte(rawRequest), &request); err != nil {
 				t.Fatal(err)
+			}
+			for _, retired := range []string{"effect_class", "fork_policy", "retry_max_attempts", "retry_backoff"} {
+				if _, present := request[retired]; present {
+					t.Fatalf("source request restored retired policy carrier %s", retired)
+				}
 			}
 			var proposals int
 			if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM proposed_effect_continuations WHERE CAST(request_event_id AS TEXT)=$1`, requestID).Scan(&proposals); err != nil || proposals != 0 {
@@ -115,7 +116,7 @@ func TestQAUnapprovedRecordedHTTPWriteForkBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT CAST(result_payload AS TEXT) FROM activity_attempts WHERE CAST(request_event_id AS TEXT)=$1 AND status='succeeded' AND completed_at IS NOT NULL`, requestID).Scan(&sourceResult); err != nil || sourceResult == "" || calls.Load() != 1 {
 				t.Fatalf("recorded source result=%s calls=%d err=%v", sourceResult, calls.Load(), err)
 			}
-			t.Logf("QA source_run=%s request=%s policy=%s effect=%s proposals=%d calls=%d result=%s", started.RunID, requestID, request.Policy, request.Effect, proposals, calls.Load(), sourceResult)
+			t.Logf("QA source_run=%s request=%s proposals=%d calls=%d result=%s", started.RunID, requestID, proposals, calls.Load(), sourceResult)
 			response := requestServedJSONRPC(t, rt.Endpoint, "run.fork", map[string]any{
 				"source_run_id": started.RunID, "fork_event_id": requestID,
 				"bundle_hash": rt.BundleHash, "allow_source_freeze": true, "idempotency_key": "qa-recorded-write-fork",

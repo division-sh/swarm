@@ -17,12 +17,14 @@ import (
 type OriginalLoopCarriage struct{ state *originalLoopCarriage }
 
 type originalLoopCarriage struct {
-	bundleHash string
-	rootFlow   string
-	inputs     map[loopInputScope]LoopRevisionRole
-	outputs    map[loopOutputScope][]loopOutputMeaning
-	activities map[loopActivityScope]originalActivityMeaning
-	fanOuts    map[contracts.FanOutPlanRef]loopFanOutMeaning
+	bundleHash      string
+	rootFlow        string
+	inputs          map[loopInputScope]LoopRevisionRole
+	outputs         map[loopOutputScope][]loopOutputMeaning
+	activities      map[loopActivityScope]originalActivityMeaning
+	activityHistory map[string]*originalLoopCarriage
+	activityOrigins map[activityRequestScope]ActivityRequestOrigin
+	fanOuts         map[contracts.FanOutPlanRef]loopFanOutMeaning
 }
 
 type loopInputScope struct{ flow, event string }
