@@ -12,6 +12,7 @@ import (
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -128,6 +129,76 @@ func ProcessCapability(t testing.TB, ctx context.Context, selected Store) (runti
 		return nil, err
 	}
 	return session.capability, nil
+}
+
+// AdmitExecutionAuthority promotes an explicitly prepared execution fixture,
+// not a storage-only fixture or a live runtime with unsettled probe prerequisites.
+// The caller must already own its complete source/actor setup; this helper never
+// installs a missing source plan, creates an actor or repairs lifecycle binding.
+func AdmitExecutionAuthority(t testing.TB, ctx context.Context, selected Store, fact runtimecorrelation.SourceArtifactFact) (runtimedelivery.ExecutionAuthority, error) {
+	t.Helper()
+	var absent runtimedelivery.ExecutionAuthority
+	if ctx == nil || selected == nil {
+		return absent, errors.New("execution fixture requires its context and selected store")
+	}
+	if err := fact.Validate(); err != nil {
+		return absent, err
+	}
+	if source, found := runtimecorrelation.SourceArtifactFactFromContext(ctx); found && source != fact {
+		return absent, errors.New("execution fixture source differs from caller source")
+	}
+	capability, err := ProcessCapability(t, ctx, selected)
+	if err != nil {
+		return absent, err
+	}
+	plan, found, err := capability.CurrentSourceSet(ctx)
+	if err != nil || !found {
+		return absent, errors.Join(errors.New("execution fixture requires its current complete source set"), err)
+	}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	session, err := fixtureSessionFor(t, ctx, selected)
+	if err != nil {
+		return absent, err
+	}
+	session.mu.Lock()
+	grant, revision, sourceKey := session.grant, session.grantRevision, session.grantSourceKey
+	session.mu.Unlock()
+	if grant != nil {
+		// Keep this original issued owner even if it has retired. Re-admission
+		// must not silently replace the grant or rebind an existing actor.
+		if revision != plan.Revision || sourceKey != coordinate.Key() {
+			return absent, errors.New("execution fixture requires its exact prepared generation")
+		}
+	} else {
+		grant, err = AdmitGeneration(t, ctx, selected, plan, coordinate)
+		if err != nil {
+			return absent, err
+		}
+	}
+	evidence, err := grant.Evidence()
+	if err != nil {
+		return absent, err
+	}
+	if evidence.State == runtimestartupownership.GrantPrepared {
+		// This explicit fixture route has an empty probe prerequisite set.
+		evidence, err = grant.MarkProbesSettled(ctx, nil)
+		if err != nil {
+			return absent, err
+		}
+	}
+	if evidence.State == runtimestartupownership.GrantProbeSettled {
+		evidence, err = grant.AdmitExecution(ctx)
+		if err != nil {
+			return absent, err
+		}
+	}
+	if evidence.State != runtimestartupownership.GrantAdmitted {
+		return absent, fmt.Errorf("execution fixture grant is not admitted: %s", evidence.State)
+	}
+	if err := grant.ProveCurrent(ctx); err != nil {
+		return absent, err
+	}
+	return runtimedelivery.NewNormalExecutionAuthority(fact, evidence.GrantID, evidence.RuntimeGeneration)
 }
 
 // AdmitGeneration installs the caller's complete source plan before a fixture
