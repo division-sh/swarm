@@ -18,17 +18,18 @@ func TestServeActivityRecoveryPrecedesBothDispatchStartupPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var run *ast.FuncDecl
+	functions := map[string]*ast.FuncDecl{}
 	for _, declaration := range file.Decls {
-		if function, ok := declaration.(*ast.FuncDecl); ok && function.Name.Name == "Run" {
-			run = function
+		if function, ok := declaration.(*ast.FuncDecl); ok {
+			functions[function.Name.Name] = function
 		}
 	}
-	if run == nil {
-		t.Fatal("serve entrypoint is absent")
+	composition := functions["buildRuntimeComposition"]
+	if functions["Run"] == nil || composition == nil {
+		t.Fatal("serve entrypoint or composition is absent")
 	}
 	positions := map[string][]token.Pos{}
-	ast.Inspect(run.Body, func(node ast.Node) bool {
+	ast.Inspect(composition.Body, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
 		if !ok {
 			return true
