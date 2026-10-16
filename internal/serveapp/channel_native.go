@@ -338,7 +338,7 @@ func (d *serveChannelDeliveryDispatcher) readNativeInboxLauncher(ctx context.Con
 	if err != nil {
 		return "", err
 	}
-	if tool.Effect() != runtimecontracts.ActivityEffectClassReadOnly {
+	if effect, err := plan.OperationEffectClass(operation); err != nil || effect != runtimecontracts.ActivityEffectClassReadOnly {
 		return "", fmt.Errorf("native inbox launcher requires a compiled read-only operation")
 	}
 	credentials, err := resolveChannelDeliveryCredentials(ctx, d.credentials, plan, admissions, tool)
@@ -370,7 +370,7 @@ func (d *serveChannelDeliveryDispatcher) readNativeInboxAddress(ctx context.Cont
 	if err != nil {
 		return "", err
 	}
-	if tool.Effect() != runtimecontracts.ActivityEffectClassReadOnly {
+	if effect, err := plan.OperationEffectClass(operation); err != nil || effect != runtimecontracts.ActivityEffectClassReadOnly {
 		return "", fmt.Errorf("native inbox address requires a read-only operation")
 	}
 	credentials, err := resolveChannelDeliveryCredentials(ctx, d.credentials, plan, admissions, tool)
@@ -498,7 +498,7 @@ func (d *serveChannelDeliveryDispatcher) installNativeInboxCommands(ctx context.
 	if err != nil {
 		return err
 	}
-	if tool.Effect() != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+	if effect, err := plan.OperationEffectClass(operation); err != nil || effect != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		return fmt.Errorf("native inbox install is not a managed write")
 	}
 	credentials, err := resolveChannelDeliveryCredentials(ctx, d.credentials, plan, activation.CredentialAdmissions, tool)

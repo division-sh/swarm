@@ -287,7 +287,7 @@ func TestBuildShowsApprovedOutwardEffectAsCanonicalApprovalPoint(t *testing.T) {
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"telegram_send": runtimecontracts.MustToolSchemaEntry(
 				runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-				runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+
 				runtimecontracts.WithToolSchemas(
 					runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
 					runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),

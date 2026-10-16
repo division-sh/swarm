@@ -4,7 +4,6 @@ tools:
     category: provider_connector
     description: append Notion block children
     handler_type: http
-    effect_class: non_idempotent_write
     managed_credential:
       key: notion_oauth
       grant_model: workspace_grant

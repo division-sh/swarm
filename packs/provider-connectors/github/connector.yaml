@@ -9,7 +9,7 @@ generation:
     profile:
         path: catalog/generator-profiles/github.yaml
         schema_version: "1"
-        sha256: sha256:1992268f155b9ea2bf3d0da7f3727253b6df2bd5cd53c983c964ddba28765ced
+        sha256: sha256:c7629e728265d18ed8ec186da11213c15617a2951eb5fc3cb4a36b91a72a98ec
     operations:
         - operation_id: issues/add-labels
           tool_id: github.add_labels_to_issue
@@ -45,7 +45,6 @@ tools:
     github.add_labels_to_issue:
         category: provider_connector
         description: add labels to GitHub issues
-        effect_class: non_idempotent_write
         handler_type: http
         http:
             body:
@@ -90,7 +89,6 @@ tools:
     github.create_issue:
         category: provider_connector
         description: create GitHub issues
-        effect_class: non_idempotent_write
         handler_type: http
         http:
             body:
@@ -130,7 +128,6 @@ tools:
     github.create_issue_comment:
         category: provider_connector
         description: create GitHub issue comments
-        effect_class: non_idempotent_write
         handler_type: http
         http:
             body:

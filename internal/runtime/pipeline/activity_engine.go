@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/providerconnectors"
-	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -245,30 +244,19 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	if !ok {
 		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassTargetUnreachable, "activity_tool_not_declared", "activity-runtime", "execute_activity", map[string]any{"tool": intent.Tool}))
 	}
-	toolEffectClass := tool.Effect()
-	if toolEffectClass != intent.EffectClass {
-		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "activity_effect_class_changed", "activity-runtime", "execute_activity", map[string]any{
-			"tool": intent.Tool, "requested_effect_class": string(intent.EffectClass), "declared_effect_class": string(toolEffectClass),
-		}))
+	if reused, err := d.reuseExistingNonIdempotentActivityAttempt(ctx, intent); err != nil || reused {
+		return err
 	}
-	if !runtimecontracts.SupportedActivityEffectClass(toolEffectClass) {
-		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "activity_effect_class_unsupported", "activity-runtime", "execute_activity", map[string]any{
-			"tool": intent.Tool, "effect_class": string(toolEffectClass),
+	if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "activity_historical_execution_policy_unavailable", "activity-runtime", "execute_activity", map[string]any{
+			"tool": intent.Tool, "effect_class": string(intent.EffectClass),
 		}))
 	}
 	var mockResponse *providerconnectors.AdmittedMockResponse
 	if intent.ExecutionMode == runtimeeffects.ExecutionModeMock {
-		if toolEffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
-			return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "mock_activity_effect_class_unsupported", "activity-runtime", "admit_mock_activity", map[string]any{
-				"tool": intent.Tool, "effect_class": string(toolEffectClass), "required_effect_class": string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
-			}))
-		}
 		responsePlan, err := d.coordinator.mockResponsePlanForRun(ctx, intent.SourceRunID, source)
 		if err != nil {
 			return d.publishActivityFailure(ctx, intent, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "scenario_execution_profile_not_admitted", "activity-runtime", "admit_mock_activity", map[string]any{"tool": intent.Tool, "run_id": intent.SourceRunID}, err))
-		}
-		if reused, err := d.reuseExistingNonIdempotentActivityAttempt(ctx, intent); err != nil || reused {
-			return err
 		}
 		admitted, err := responsePlan.Admit(intent.Tool, tool)
 		if err != nil {
@@ -276,68 +264,7 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 		}
 		mockResponse = &admitted
 	}
-	if toolEffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
-		if err := d.admitReadOnlyActivityGeneration(ctx, intent); err != nil {
-			return d.publishActivityFailure(ctx, intent, err)
-		}
-	}
-	if toolEffectClass == runtimecontracts.ActivityEffectClassNonIdempotentWrite {
-		return d.executeNonIdempotentActivityIntent(ctx, intent, tool, mockResponse)
-	}
-	client := d.client
-	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
-	}
-	if recorded, ok, err := d.recordedActivityResult(ctx, intent); err != nil {
-		return err
-	} else if ok {
-		d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{
-			"activity_id":       intent.ActivityID,
-			"tool":              intent.Tool,
-			"effect_class":      string(intent.EffectClass),
-			"result_event_id":   recorded.EventID,
-			"result_event_type": recorded.EventType,
-		})
-		return nil
-	}
-	maxAttempts := activityRetryMaxAttempts(intent, toolEffectClass)
-	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		attemptIntent := intent
-		attemptIntent.Attempt = attempt
-		d.logActivityRuntime(ctx, attemptIntent, "attempt_started", map[string]any{
-			"activity_id":        attemptIntent.ActivityID,
-			"tool":               attemptIntent.Tool,
-			"effect_class":       string(attemptIntent.EffectClass),
-			"attempt":            attempt,
-			"retry_max_attempts": maxAttempts,
-		})
-		result, err := d.executeActivityHTTPTool(ctx, client, attemptIntent, tool)
-		if err == nil {
-			return d.publishActivitySuccess(ctx, attemptIntent, result)
-		}
-		lastErr = err
-		failure := runtimefailures.FromError(err, "activity-runtime", "execute_http_tool")
-		d.logActivityRuntime(ctx, attemptIntent, "attempt_failed", map[string]any{
-			"activity_id":        attemptIntent.ActivityID,
-			"tool":               attemptIntent.Tool,
-			"effect_class":       string(attemptIntent.EffectClass),
-			"attempt":            attempt,
-			"retry_max_attempts": maxAttempts,
-			"failure":            failure.Failure,
-		})
-		if runtimeengine.FailureDispositionFor(failure) != runtimeengine.FailureDispositionRetry {
-			break
-		}
-		if attempt < maxAttempts {
-			if err := waitActivityRetryBackoff(ctx, intent.RetryBackoff, attempt); err != nil {
-				return err
-			}
-		}
-	}
-	failureIntent := intent
-	failureIntent.Attempt = maxAttempts
-	return d.publishActivityFailure(ctx, failureIntent, lastErr)
+	return d.executeNonIdempotentActivityIntent(ctx, intent, tool, mockResponse)
 }
 
 func (pc *PipelineCoordinator) mockResponsePlanForRun(ctx context.Context, runID string, source semanticview.Source) (*providerconnectors.MockResponsePlan, error) {
@@ -616,15 +543,6 @@ func activityDependencyFailure(err error, tool, operation string) error {
 	return runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "activity_journal_operation_failed", "activity-runtime", operation, map[string]any{"tool": strings.TrimSpace(tool)}, err)
 }
 
-type activityRecordedResult = runtimeactivityresult.Record
-
-func (d pipelineActivityDispatcher) recordedActivityResult(ctx context.Context, intent runtimeengine.ActivityIntent) (activityRecordedResult, bool, error) {
-	if d.coordinator == nil || d.coordinator.workflowStore == nil {
-		return activityRecordedResult{}, false, nil
-	}
-	return d.coordinator.workflowStore.recordedActivityResult(ctx, intent)
-}
-
 func (d pipelineActivityDispatcher) logActivityRuntime(ctx context.Context, intent runtimeengine.ActivityIntent, action string, detail map[string]any) {
 	if d.coordinator == nil || d.coordinator.bus == nil {
 		return
@@ -872,42 +790,6 @@ func activityRetryMaxAttempts(intent runtimeengine.ActivityIntent, effectClass r
 	return 1
 }
 
-func waitActivityRetryBackoff(ctx context.Context, backoff string, completedAttempt int) error {
-	delay := activityRetryDelay(backoff, completedAttempt)
-	if delay <= 0 {
-		return nil
-	}
-	timer := time.NewTimer(delay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
-func activityRetryDelay(backoff string, completedAttempt int) time.Duration {
-	switch strings.TrimSpace(strings.ToLower(backoff)) {
-	case "", "none":
-		return 0
-	case "exponential":
-		if completedAttempt < 1 {
-			completedAttempt = 1
-		}
-		delay := 10 * time.Millisecond
-		for i := 1; i < completedAttempt && delay < time.Second; i++ {
-			delay *= 2
-		}
-		if delay > time.Second {
-			return time.Second
-		}
-		return delay
-	default:
-		return 10 * time.Millisecond
-	}
-}
-
 func activityRequestPayloadFromIntent(intent runtimeengine.ActivityIntent) activityRequestPayload {
 	intent = intent.Normalized()
 	var planGeneration *plangeneration.Generation
@@ -1043,14 +925,6 @@ type preparedActivityHTTPTool struct {
 	validateAdmission  func(context.Context) error
 }
 
-func (d pipelineActivityDispatcher) executeActivityHTTPTool(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (any, error) {
-	prepared, err := d.prepareActivityHTTPTool(ctx, client, intent, tool)
-	if err != nil {
-		return nil, err
-	}
-	return executePreparedActivityHTTPTool(ctx, prepared)
-}
-
 func (d pipelineActivityDispatcher) prepareActivityHTTPTool(ctx context.Context, client *http.Client, intent runtimeengine.ActivityIntent, tool runtimecontracts.ToolSchemaEntry) (preparedActivityHTTPTool, error) {
 	httpExecution, hasHTTP := tool.HTTPExecution()
 	if !hasHTTP {
@@ -1164,8 +1038,13 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 			return nil, err
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "activity_dispatch_not_attempted", "activity-runtime", "dispatch_http_request", map[string]any{"tool": prepared.toolName, "dispatch_attempted": false}, err)
+	}
 	reqCtx, cancel := context.WithTimeout(ctx, prepared.timeout)
 	defer cancel()
+	client := *prepared.client
+	client.Timeout = 0
 	refreshedAfterUnauthorized := false
 	for {
 		var body io.Reader
@@ -1181,12 +1060,12 @@ func executePreparedActivityHTTPTool(ctx context.Context, prepared preparedActiv
 				req.Header.Add(key, value)
 			}
 		}
-		resp, err := prepared.client.Do(req)
+		if err := reqCtx.Err(); err != nil {
+			return nil, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "activity_dispatch_not_attempted", "activity-runtime", "dispatch_http_request", map[string]any{"tool": prepared.toolName, "dispatch_attempted": false}, err)
+		}
+		resp, err := client.Do(req)
 		if err != nil {
 			cause := redactActivityError(err, prepared.secrets)
-			if errors.Is(err, context.DeadlineExceeded) || errors.Is(reqCtx.Err(), context.DeadlineExceeded) {
-				return nil, runtimefailures.Wrap(runtimefailures.ClassTimeout, "activity_http_timeout", "activity-runtime", "dispatch_http_request", map[string]any{"tool": prepared.toolName}, cause)
-			}
 			return nil, activityHTTPUncertainError{err: runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "activity_http_transport_uncertain", "activity-runtime", "dispatch_http_request", map[string]any{"tool": prepared.toolName}, cause)}
 		}
 		raw, readErr := io.ReadAll(resp.Body)
@@ -1492,8 +1371,16 @@ func redactActivityError(err error, secrets []string) error {
 	if _, ok := runtimefailures.As(err); ok {
 		return err
 	}
-	return fmt.Errorf("%s", runtimemanagedcredentials.RedactString(err.Error(), secrets...))
+	return activityRedactedError{cause: err, message: runtimemanagedcredentials.RedactString(err.Error(), secrets...)}
 }
+
+type activityRedactedError struct {
+	cause   error
+	message string
+}
+
+func (e activityRedactedError) Error() string { return e.message }
+func (e activityRedactedError) Unwrap() error { return e.cause }
 
 func (d pipelineActivityDispatcher) publishActivitySuccess(ctx context.Context, intent runtimeengine.ActivityIntent, result any) error {
 	return d.publishActivityResult(ctx, intent, intent.SuccessEvent, activitySuccessPayload(intent, result))

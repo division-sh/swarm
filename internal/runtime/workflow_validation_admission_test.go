@@ -108,7 +108,7 @@ func invalidWorkflowAdmissionConnectorSource(t *testing.T) semanticview.Source {
 		"provider.send": runtimecontracts.MustToolSchemaEntry(
 			runtimecontracts.WithToolCategory("provider_connector"),
 			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+
 			runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
 			runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid"}),
 		),

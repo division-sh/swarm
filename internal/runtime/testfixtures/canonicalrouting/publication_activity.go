@@ -58,10 +58,8 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 	}
 	writeClosedVariantFile(t, root, prefix+"schema.yaml", schema)
 	activity := "producer:\n  execution_type: system_node\n  subscribes_to: [activity.requested]\n  event_handlers:\n    activity.requested:\n      activity:\n        id: send\n        tool: send\n        input: {message: payload.message}\n"
-	effect := "read_only"
 	if approval {
 		activity += "        approval: {decision: approve_send}\n"
-		effect = "non_idempotent_write"
 		// Approval execution requires existing receiver state. A real upstream
 		// handler acquires it; the approval test must not seed a database row.
 		activity = strings.ReplaceAll(activity, "activity.requested", "activity.execute")
@@ -85,7 +83,6 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
 	writeClosedVariantFile(t, root, prefix+"tools.yaml", fmt.Sprintf(`send:
   description: Send the exact activity input to the test provider
   handler_type: http
-  effect_class: %s
   input_schema:
     type: object
     properties: {message: {type: string}}
@@ -99,7 +96,7 @@ func CopyPublicationActivity(t testing.TB, mode, providerURL string, approval bo
     method: POST
     url: %q
     body: {message: "{{input.message}}"}
-`, effect, providerURL))
+`, providerURL))
 	writeClosedVariantFile(t, root, "sink/schema.yaml", "name: sink\npins:\n  inputs:\n"+outputs)
 	writeClosedVariantFile(t, root, "sink/nodes.yaml", local)
 	// Reused names with an incompatible schema must not supply source authority.
