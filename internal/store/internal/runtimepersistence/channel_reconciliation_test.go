@@ -163,7 +163,7 @@ func TestChannelPostCommitActivityHintsBothStores(t *testing.T) {
 					if linked {
 						want = render.ReconcileOrdinary
 					}
-					journal := cards.(activityStoryJournal)
+					journal := captureActivityFixtureJournal(t, ctx, cards)
 					write := journal.StartActivityAttempt
 					var cleanupCause error
 					switch operation {
@@ -181,7 +181,7 @@ func TestChannelPostCommitActivityHintsBothStores(t *testing.T) {
 						}
 						record = activityStoryTerminal(t, started, status)
 						cleanupCause = errors.New("activity post-acknowledgment cleanup cut")
-						faulted, err := activityJournalCleanupFaultForTest(cards, cleanupCause)
+						faulted, _, err := ActivityJournalCleanupBoundFaultForTest(cards, journal, cleanupCause)
 						if err != nil {
 							t.Fatal(err)
 						}
