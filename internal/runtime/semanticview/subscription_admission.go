@@ -229,11 +229,9 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 	if req.Authored == "" {
 		return result
 	}
-	if source != nil {
-		if _, found := FlowScopeByID(source, req.FlowID); !found {
-			return failedAuthoredSubscription(result, AuthoredSubscriptionFailureSemanticScopeInvalid,
-				fmt.Sprintf("%s %q flow selector %q must identify an exact admitted flow; use . for the selected root without whitespace", req.ConsumerKind, req.ConsumerID, req.FlowID))
-		}
+	if _, found := FlowScopeByID(source, req.FlowID); source != nil && !found {
+		return failedAuthoredSubscription(result, AuthoredSubscriptionFailureSemanticScopeInvalid,
+			fmt.Sprintf("%s %q flow selector %q must identify an exact admitted flow; use . for the selected root without whitespace", req.ConsumerKind, req.ConsumerID, req.FlowID))
 	}
 	fillAuthoredSubscriptionScope(source, &req)
 
