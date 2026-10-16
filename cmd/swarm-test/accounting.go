@@ -81,37 +81,8 @@ func superviseAccounting(ctx context.Context, args []string, out, stderr io.Writ
 			result = errors.Join(result, os.RemoveAll(directory))
 		}
 	}()
-	inputs, err := accountingClosure(ctx, directory)
+	binary, err := buildAccountingExecutor(ctx, repo, directory, evidence, policy.Policy, snapshot, stderr)
 	if err != nil {
-		return err
-	}
-	if !reflect.DeepEqual(inputs, policy.Policy.Inputs) {
-		return fmt.Errorf("approved accounting dependency names or bytes changed")
-	}
-	executorManifest, err := accountingTreeInputs(ctx, repo, policy.Policy.ExecutorSource, nil)
-	if err != nil {
-		return err
-	}
-	if err = saveAccountingManifest(filepath.Join(evidence, "executor-inputs.json"), executorManifest); err != nil {
-		return err
-	}
-	goVersion, err := accountingGitHubToolchain(ctx, directory)
-	if err != nil || goVersion != "go1.26.8" {
-		return fmt.Errorf("accounting requires its approved Go1.26.8 toolchain: %v", err)
-	}
-	binary := filepath.Join(directory, "accounting-executor")
-	link := "-X main.accountingExecutorSource=" + policy.Policy.ExecutorSource + " -X main.accountingExecutorDigest=" + policy.Policy.DependencyDigest + " -X main.accountingExecutorRoot=" + directory
-	link += " -X main.accountingProofRoot=" + snapshot.Root + " -X main.accountingProofDigest=" + accountingManifestDigest(snapshot.Manifest) + " -X main.accountingEvidenceRoot=" + evidence + " -X main.accountingWorkingRoot=" + repo
-	link += " -X main.accountingProofOrigin=" + snapshot.Origin + " -X main.accountingProofConfig=" + snapshot.ConfigDigest
-	build := []string{"go", "-C", directory, "build", "-mod=readonly", "-trimpath", "-ldflags", link, "-o", binary, "./cmd/swarm-test"}
-	if _, err = runPreflightProcessEnvironment(ctx, build, stderr, stderr, accountingBuildEnv(runtime.GOOS, runtime.GOARCH)); err != nil {
-		return err
-	}
-	after, err := accountingClosure(ctx, directory)
-	if err != nil || !reflect.DeepEqual(inputs, after) {
-		return fmt.Errorf("accounting executor closure changed during build: %v", err)
-	}
-	if err = checkAccountingExtractedTree(directory, executorManifest, "accounting-executor"); err != nil {
 		return err
 	}
 	if err = requireAccountingPolicy(ctx, accountingGitHub, policy); err != nil {
@@ -146,6 +117,43 @@ func superviseAccounting(ctx context.Context, args []string, out, stderr io.Writ
 	return err
 }
 
+func buildAccountingExecutor(ctx context.Context, repo, directory, evidence string, policy accountingPolicy, snapshot accountingProofSnapshot, stderr io.Writer) (string, error) {
+	inputs, err := accountingClosure(ctx, directory)
+	if err != nil {
+		return "", err
+	}
+	if !reflect.DeepEqual(inputs, policy.Inputs) {
+		return "", fmt.Errorf("approved accounting dependency names or bytes changed")
+	}
+	executorManifest, err := accountingTreeInputs(ctx, repo, policy.ExecutorSource, nil)
+	if err != nil {
+		return "", err
+	}
+	if err = saveAccountingManifest(filepath.Join(evidence, "executor-inputs.json"), executorManifest); err != nil {
+		return "", err
+	}
+	goVersion, err := accountingGitHubToolchain(ctx, directory)
+	if err != nil || goVersion != "go1.26.8" {
+		return "", fmt.Errorf("accounting requires its approved Go1.26.8 toolchain: %v", err)
+	}
+	binary := filepath.Join(directory, "accounting-executor")
+	link := "-X main.accountingExecutorSource=" + policy.ExecutorSource + " -X main.accountingExecutorDigest=" + policy.DependencyDigest + " -X main.accountingExecutorRoot=" + directory
+	link += " -X main.accountingProofRoot=" + snapshot.Root + " -X main.accountingProofDigest=" + accountingManifestDigest(snapshot.Manifest) + " -X main.accountingEvidenceRoot=" + evidence + " -X main.accountingWorkingRoot=" + repo
+	link += " -X main.accountingProofOrigin=" + snapshot.Origin + " -X main.accountingProofConfig=" + snapshot.ConfigDigest
+	build := []string{"go", "-C", directory, "build", "-mod=readonly", "-trimpath", "-ldflags", link, "-o", binary, "./cmd/swarm-test"}
+	if _, err = runPreflightProcessEnvironment(ctx, build, stderr, stderr, accountingBuildEnv(runtime.GOOS, runtime.GOARCH)); err != nil {
+		return "", err
+	}
+	after, err := accountingClosure(ctx, directory)
+	if err != nil || !reflect.DeepEqual(inputs, after) {
+		return "", fmt.Errorf("accounting executor closure changed during build: %v", err)
+	}
+	if err = checkAccountingExtractedTree(directory, executorManifest, "accounting-executor"); err != nil {
+		return "", err
+	}
+	return binary, nil
+}
+
 func checkAccountingWorkingSource(ctx context.Context, root, head string, applying bool) error {
 	if _, err := accountingSource(ctx, root, head, !applying); err != nil {
 		return err
@@ -153,12 +161,8 @@ func checkAccountingWorkingSource(ctx context.Context, root, head string, applyi
 	if !applying {
 		return nil
 	}
-	status, err := accountingGit(ctx, root, "status", "--porcelain", "-z", "--untracked-files=all")
-	if err != nil {
+	if err := checkAccountingWorkingTree(ctx, root, head, formatproof.Successors); err != nil {
 		return err
-	}
-	if string(status) != " M "+formatproof.Successors+"\x00" {
-		return fmt.Errorf("accounting apply changed more than its single unstaged successor output")
 	}
 	raw, err := os.ReadFile(filepath.Join(root, formatproof.Successors))
 	if err != nil {

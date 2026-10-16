@@ -172,7 +172,7 @@ func TestAccountingProofManifestIndirectionIsFrozen(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(repo, "inputs.list"), []byte("ignored.yaml\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := accountingSource(context.Background(), repo, head, true); err != nil {
+	if _, err := completionSource(repo, head, true); err != nil {
 		t.Fatalf("fixture must hide both indirection and target: %v", err)
 	}
 	var out bytes.Buffer
@@ -249,10 +249,57 @@ func TestAccountingProofRefusesWrongOrMissingHistoryAndControls(t *testing.T) {
 }
 
 func TestAccountingExecutorArchiveCannotHideGitEntriesWithAttributes(t *testing.T) {
-	repo, _, head, _ := accountingSnapshotFixture(t)
-	if directory, err := archiveAccountingExecutor(context.Background(), repo, head); err == nil {
-		_ = os.RemoveAll(directory)
-		t.Fatal("export-ignore hid a real reviewed Git input")
+	for _, kind := range []string{"export-ignore", "export-subst"} {
+		t.Run(kind, func(t *testing.T) {
+			repo, _, _, _ := accountingSnapshotFixture(t)
+			name := accountingRuntimeFixturePaths[0]
+			if err := os.WriteFile(filepath.Join(repo, ".gitattributes"), []byte(name+" "+kind+"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(repo, name), []byte("$Format:%H$\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			completionGit(t, repo, "add", ".")
+			completionGit(t, repo, "commit", "-qm", "archive attribute counterexample")
+			head := completionGit(t, repo, "rev-parse", "HEAD")
+			directory, err := archiveAccountingExecutor(context.Background(), repo, head)
+			if err == nil {
+				_ = os.RemoveAll(directory)
+				t.Fatalf("%s hid or rewrote a reviewed Git input", kind)
+			}
+			if !strings.Contains(err.Error(), "omitted") && !strings.Contains(err.Error(), "differs from Git object") {
+				t.Fatalf("unrelated refusal masked the archive-byte control: %v", err)
+			}
+		})
+	}
+}
+
+func TestAccountingProofAdmissionDoesNotExecuteCallerCleanFilters(t *testing.T) {
+	repo, _, _, _ := accountingSnapshotFixture(t)
+	name := accountingRuntimeFixturePaths[0]
+	if err := os.WriteFile(filepath.Join(repo, ".gitattributes"), []byte(name+" filter=hostile\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	completionGit(t, repo, "add", ".")
+	completionGit(t, repo, "commit", "-qm", "unconfigured filter declaration")
+	head := completionGit(t, repo, "rev-parse", "HEAD")
+	marker := filepath.Join(t.TempDir(), "unapproved-filter-executed")
+	completionGit(t, repo, "config", "filter.hostile.clean", "touch '"+marker+"'; cat")
+	if err := os.WriteFile(filepath.Join(repo, name), []byte("original proof input\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := accountingSource(context.Background(), repo, head, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatal("source admission executed a candidate-configured clean filter")
+	}
+	completionGit(t, repo, "update-index", "--assume-unchanged", name)
+	if err := os.WriteFile(filepath.Join(repo, name), []byte("hidden changed input\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := accountingSource(context.Background(), repo, head, true); err == nil {
+		t.Fatal("assume-unchanged hid modified working bytes at admission")
 	}
 }
 
@@ -281,7 +328,7 @@ func TestAccountingProofInputPathsKeepTheirCallerMeaning(t *testing.T) {
 
 func TestAccountingProofSnapshotRejectsWritesMissingAndReplacedInputs(t *testing.T) {
 	repo, _, head, policy := accountingSnapshotFixture(t)
-	for _, kind := range []string{"write", "missing", "symlink", "bytes", "extra", "manifest"} {
+	for _, kind := range []string{"write", "missing", "symlink", "bytes", "extra", "extra_directory", "manifest"} {
 		t.Run(kind, func(t *testing.T) {
 			snapshot := freezeAccountingFixture(t, repo, head, policy)
 			path := filepath.Join(snapshot.Root, accountingRuntimeFixturePaths[0])
@@ -316,6 +363,10 @@ func TestAccountingProofSnapshotRejectsWritesMissingAndReplacedInputs(t *testing
 				}
 			case "extra":
 				if err := os.WriteFile(filepath.Join(filepath.Dir(path), "extra.yaml"), nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			case "extra_directory":
+				if err := os.Mkdir(filepath.Join(filepath.Dir(path), "extra"), 0555); err != nil {
 					t.Fatal(err)
 				}
 			case "manifest":
