@@ -23,7 +23,11 @@ func runPreflightProcess(ctx context.Context, args []string, out, stderr io.Writ
 }
 
 func runPreflightProcessEnvironment(ctx context.Context, args []string, out, stderr io.Writer, environment []string) (preflightProcessTiming, error) {
-	return runPreflightProcessDirectory(ctx, "", args, out, stderr, environment)
+	directory, err := os.Getwd()
+	if err != nil {
+		return preflightProcessTiming{}, err
+	}
+	return runPreflightProcessDirectory(ctx, directory, args, out, stderr, environment)
 }
 
 func runPreflightProcessDirectory(ctx context.Context, directory string, args []string, out, stderr io.Writer, environment []string) (preflightProcessTiming, error) {
