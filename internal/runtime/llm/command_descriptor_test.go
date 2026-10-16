@@ -99,3 +99,27 @@ func TestDescriptorReadRejectsCorruptionWithoutRepair(t *testing.T) {
 		t.Fatal("live executable double accepted")
 	}
 }
+
+func TestS1AgentExecutionSelectionPreservesRawFlowSelector(t *testing.T) {
+	profile, err := llmselection.ResolveLiveBackend(llmselection.BackendClaudeCLI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, flow := range []string{".", " . ", "\t.\n", "sibling", " sibling ", "/sibling/", "", " "} {
+		for _, posture := range []executionposture.Posture{executionposture.Live, executionposture.MockOnly} {
+			actor := resolvedMockAgent("listener")
+			actor.FlowID, actor.Model = flow, llmselection.ModelAliasRegular
+			before := actor
+			selected, err := ResolveAgentExecution(posture, profile, llmselection.EffectiveModelAliases(nil), actor)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(actor, before) || selected.Actor.FlowID != flow {
+				t.Errorf("%s selection changed raw flow %q into %q", posture, flow, selected.Actor.FlowID)
+			}
+			if _, err := ValidateAgentExecutionDescriptor(profile, selected.Actor); err != nil {
+				t.Fatalf("unchanged model/backend descriptor contract failed: %v", err)
+			}
+		}
+	}
+}

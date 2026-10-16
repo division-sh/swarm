@@ -37,6 +37,48 @@ func TestPersistedAgentProjectionRoundTripsExactIntentArtifact(t *testing.T) {
 	}
 }
 
+func TestS1PersistedAgentDescriptorPreservesRawFlowSelector(t *testing.T) {
+	for _, flow := range []string{".", " . ", "\t.\n", "sibling", " sibling ", "", " "} {
+		cfg := persistedIntentTestAgent(t)
+		cfg.FlowID = flow
+		projection, err := ProjectPersistedAgentConfig(cfg, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var descriptor map[string]json.RawMessage
+		if err := json.Unmarshal(projection.RuntimeDescriptor, &descriptor); err != nil {
+			t.Fatal(err)
+		}
+		var encoded string
+		if raw, present := descriptor["flow_id"]; present {
+			if err := json.Unmarshal(raw, &encoded); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if encoded != flow {
+			t.Errorf("write projection repaired %q into %q", flow, encoded)
+		}
+		// Exercise readback independently of any write-time normalization.
+		descriptor["flow_id"], err = json.Marshal(flow)
+		if err != nil {
+			t.Fatal(err)
+		}
+		projection.RuntimeDescriptor, err = json.Marshal(descriptor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for attempt := 0; attempt < 3; attempt++ {
+			hydrated, err := HydratePersistedAgentConfig(projection)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hydrated.FlowID != flow {
+				t.Errorf("read attempt %d repaired %q into %q", attempt, flow, hydrated.FlowID)
+			}
+		}
+	}
+}
+
 func TestPersistedAgentProjectionRoundTripsConfigNumberKinds(t *testing.T) {
 	cfg := persistedIntentTestAgent(t)
 	cfg.Config = json.RawMessage(`{"enabled":false,"nested":[7,7.0,null]}`)
