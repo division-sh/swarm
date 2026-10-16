@@ -86,6 +86,25 @@ func TestOptionalNullOneOfCannotBorrowAnotherBranch(t *testing.T) {
 	}
 }
 
+func TestOptionalNullOneOfRefusesDistinctCanonicalResults(t *testing.T) {
+	payload := map[string]any{"value": map[string]any{"label": nil}}
+	opaque := optionalNullObject(map[string]any{"value": map[string]any{}}, "value")
+	opaque["enum"] = []any{payload}
+	record := optionalNullObject(map[string]any{"value": optionalNullObject(map[string]any{"label": map[string]any{"type": "string"}})}, "value")
+	for _, branches := range [][]any{{opaque, record}, {record, opaque}} {
+		schema := map[string]any{"type": "object", "oneOf": branches}
+		if err := ValidatePayloadAgainstSchema(schema, payload); err != nil {
+			t.Fatalf("opaque branch must accept the original value: %v", err)
+		}
+		if err := ValidatePayloadAgainstSchema(schema, map[string]any{"value": map[string]any{}}); err != nil {
+			t.Fatalf("record branch must accept its distinct omission result: %v", err)
+		}
+		if _, err := NormalizeOptionalFieldNulls(schema, payload); err == nil {
+			t.Fatal("two different valid canonical results acquired a branch-order-dependent normalization")
+		}
+	}
+}
+
 func TestOptionalNullOneOfRefusalsRemainClosed(t *testing.T) {
 	parentRequired := optionalNullAlternatives()
 	parentRequired["properties"] = map[string]any{"label": map[string]any{"type": "string"}}
