@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 	artifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -65,11 +66,26 @@ func TestS1SelectedForkSourceRequiresWholeRetainedResponsibilityBothStores(t *te
 				requireSource(t)
 			})
 			for _, cell := range []struct {
+				name            string
+				change, restore func(*testing.T)
+			}{
+				{"child-root", func(t *testing.T) { fixture.reviseChildRoot(t, fixture.parent) }, func(t *testing.T) { fixture.reviseChildRoot(t, fixture.target) }},
+				{"child-point", func(t *testing.T) { fixture.corruptChildRevision(t, 8) }, func(t *testing.T) { fixture.corruptChildRevision(t, 7) }},
+			} {
+				t.Run(cell.name, func(t *testing.T) {
+					cell.change(t)
+					loaded, err := reader.LoadSelectedForkRootedSource(ctx, fixture.childID)
+					cell.restore(t)
+					if err == nil || loaded.Artifact() != nil || loaded.Admission() != (sourceartifact.RootAdmission{}) {
+						t.Fatalf("crossed child responsibility returned compiler authority: root=%+v err=%v", loaded.Admission().Reference(), err)
+					}
+					requireSource(t)
+				})
+			}
+			for _, cell := range []struct {
 				name, statement   string
 				changed, original any
 			}{
-				{"child-root", `UPDATE runs SET source_root_directory=$1 WHERE run_id=$2`, fixture.parent.Admission().RootDirectory(), fixture.target.Admission().RootDirectory()},
-				{"child-point", `UPDATE runs SET forked_from_revision=$1 WHERE run_id=$2`, int64(8), int64(7)},
 				{"binding-root", `UPDATE run_fork_selected_contract_bindings SET source_root_directory=$1 WHERE fork_run_id=$2`, fixture.parent.Admission().RootDirectory(), fixture.target.Admission().RootDirectory()},
 				{"binding-point", `UPDATE run_fork_selected_contract_bindings SET fork_revision=$1 WHERE fork_run_id=$2`, int64(8), int64(7)},
 				{"missing-binding", `UPDATE run_fork_selected_contract_bindings SET fork_run_id=$1 WHERE binding_id=$2`, fixture.parentID, fixture.childID},
@@ -130,6 +146,7 @@ func TestS1SelectedForkSourceRequiresWholeRetainedResponsibilityBothStores(t *te
 // neither creates an executable selected grant nor claims activation coverage.
 type selectedRootedSourceFixture struct {
 	connector                                 *selectedRootReadConnector
+	db                                        *sql.DB
 	owner                                     any
 	postgres                                  *postgresbackend.Backend
 	sqlite                                    *sqlitebackend.Backend
@@ -252,6 +269,7 @@ func newSelectedRootedSourceFixture(t *testing.T, backend string) selectedRooted
 		t.Cleanup(cleanup)
 		f.connector = &selectedRootReadConnector{driver: &pq.Driver{}, dsn: dsn}
 		db := sql.OpenDB(f.connector)
+		f.db = db
 		t.Cleanup(func() {
 			if err := db.Close(); err != nil {
 				t.Error(err)
@@ -283,6 +301,7 @@ func newSelectedRootedSourceFixture(t *testing.T, backend string) selectedRooted
 		path := filepath.Join(t.TempDir(), "source.sqlite")
 		f.connector = &selectedRootReadConnector{driver: &sqlite.Driver{}, dsn: "file:" + path + "?_pragma=" + url.QueryEscape("foreign_keys(ON)")}
 		db := sql.OpenDB(f.connector)
+		f.db = db
 		native, err := sqlitebackend.New(db)
 		if err != nil {
 			t.Fatal(err)
@@ -371,6 +390,30 @@ func newSelectedRootedSourceFixture(t *testing.T, backend string) selectedRooted
 		}
 	}
 	return f
+}
+
+func (f selectedRootedSourceFixture) reviseChildRoot(t *testing.T, source sourceartifact.RootedSource) {
+	t.Helper()
+	ctx := authoractivity.WithScope(context.Background(), authoractivity.BundleScope(uuid.NewString(), source.Artifact().BundleHash()))
+	owner := f.owner.(interface {
+		ReviseRunSource(context.Context, runlifecycle.SourceRevisionRequest) (runlifecycle.MutationDisposition, error)
+	})
+	if _, err := owner.ReviseRunSource(ctx, runlifecycle.SourceRevisionRequest{RunID: f.childID, Source: sourceartifactfixture.FactFor(source.Artifact()), RootAdmission: source.Admission()}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f selectedRootedSourceFixture) corruptChildRevision(t *testing.T, revision int64) {
+	t.Helper()
+	origin, err := runlifecycle.ForkMaterializationRunOrigin(f.parentID, runlifecycle.ForkOriginPointDeploymentRevision, revision, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.postgres != nil {
+		runlifecyclefixture.CorruptPostgresOrigin(t, context.Background(), f.db, f.childID, origin)
+	} else {
+		runlifecyclefixture.CorruptSQLiteOrigin(t, context.Background(), f.db, f.childID, origin)
+	}
 }
 
 func (f selectedRootedSourceFixture) changeEvidence(t *testing.T, statement string, args ...any) {

@@ -53,7 +53,7 @@ func runReceiverMaterializationSelectedForkExecution(t *testing.T, publicationFr
 				t.Fatal(err)
 			}
 			var sourceStore interface {
-				storetest.DurableDataCatalogStore
+				storetest.RootedDataCatalogStore
 				forkexecution.SourceArtifactSelectedContractSourceStore
 			} = h.pg
 			var store interface {

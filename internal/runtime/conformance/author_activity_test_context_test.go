@@ -214,7 +214,18 @@ func installConformanceRuntimeStartupGeneration(
 		t.Fatal("conformance runtime grant requires a constructed runtime and semantic source")
 	}
 	bundleHash := rt.Options.SourceArtifactFact.BundleHash()
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
+	bundle, ok := semanticview.Bundle(rt.Options.WorkflowModule.SemanticSource())
+	if !ok || bundle == nil {
+		t.Fatal("conformance source set requires its compiled rooted source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	desired, err := rt.Manager.CompileStaticTopologyDesiredAgents(rt.Options.WorkflowModule.SemanticSource(), coordinate)
 	if err != nil {
 		t.Fatalf("compile conformance runtime source set: %v", err)

@@ -2435,8 +2435,13 @@ func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtim
 		if err != nil {
 			return nil, err
 		}
+		rooted, err := contextDef.loaded.bundle.RootedSource()
+		if err != nil {
+			return nil, err
+		}
 		planned = append(planned, runtime.BundleContext{
 			SourceArtifactFact:         contextDef.sourceArtifactFact,
+			RootAdmission:              rooted.Admission(),
 			BundleIdentity:             contextDef.bootIdentity,
 			Source:                     contextDef.loaded.source,
 			PlatformSpecPath:           contextDef.loaded.platformSpecPath,
@@ -2661,8 +2666,13 @@ func prepareServeRuntimeContextSet(ctx context.Context, contexts []serveRuntimeB
 					return nil, err
 				}
 			}
+			rooted, err := contextDef.loaded.bundle.RootedSource()
+			if err != nil {
+				return nil, err
+			}
 			definition := runtime.BundleContext{
 				SourceArtifactFact:         contextDef.sourceArtifactFact,
+				RootAdmission:              rooted.Admission(),
 				BundleIdentity:             contextDef.bootIdentity,
 				Source:                     contextDef.loaded.source,
 				PlatformSpecPath:           contextDef.loaded.platformSpecPath,

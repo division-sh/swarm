@@ -65,7 +65,7 @@ import (
 
 type notifyAllChildrenStore interface {
 	conformanceDurableEventBusStore
-	storetest.DurableDataCatalogStore
+	storetest.RootedDataCatalogStore
 	runtimepipeline.WorkflowPersistenceOwner
 	runtimerunlifecycle.OperationOwner
 	runtimemanager.ManagerPersistence

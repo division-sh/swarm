@@ -236,7 +236,7 @@ func TestRunScopedSelectedForkReconstructsFlowAndAgentOnBothStores(t *testing.T)
 			sourceAgent := catalogRunScopedAgentDeliveryIdentity(t, h, sourceRunID, flowPath, string(sourceEvent.Type()), "pending")
 
 			var sourceStore interface {
-				storetest.DurableDataCatalogStore
+				storetest.RootedDataCatalogStore
 				runtimerunforkexecution.SourceArtifactSelectedContractSourceStore
 			} = h.pg
 			if h.sqlite != nil {

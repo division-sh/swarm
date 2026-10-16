@@ -44,6 +44,12 @@ func (m *RuntimeContextManager) ReleaseResetExecution(contexts ...BundleContext)
 		if seen[hash] || !runtimeContextEntryLoaded(entry) || entry.runtime != candidate.Runtime || entry.workOwner != candidate.WorkOwner {
 			return fmt.Errorf("reset execution release does not match published source %s", hash)
 		}
+		if err := validateRuntimeContextRoot(candidate); err != nil {
+			return err
+		}
+		if !entry.context.RootAdmission.Equal(candidate.RootAdmission) {
+			return fmt.Errorf("reset execution release changes rooted source %s", hash)
+		}
 		seen[hash] = true
 	}
 	m.resetExecutionFenced = false
@@ -70,6 +76,12 @@ func (m *RuntimeContextManager) installResetRuntimeContexts(publish, recovered b
 		old := m.contexts[hash]
 		if seen[hash] || (!recovered && (old == nil || runtimeContextEntryLoaded(old))) {
 			return fmt.Errorf("reset source %s is duplicate, changed, or still selectable", hash)
+		}
+		if err := validateRuntimeContextRoot(candidate); err != nil {
+			return err
+		}
+		if old != nil && !old.context.RootAdmission.Equal(candidate.RootAdmission) {
+			return fmt.Errorf("reset source %s root %+v differs from frozen predecessor %+v", hash, candidate.RootAdmission.Reference(), old.context.RootAdmission.Reference())
 		}
 		seen[hash] = true
 		if candidate.Runtime == nil || candidate.WorkOwner == nil {

@@ -41,7 +41,7 @@ func TestSelectedForkPendingRootAgentInputBothStores(t *testing.T) {
 			}
 			assertPending()
 			var artifact interface {
-				storetest.DurableDataCatalogStore
+				storetest.RootedDataCatalogStore
 				runforkexecution.SourceArtifactSelectedContractSourceStore
 			} = h.pg
 			if h.sqlite != nil {

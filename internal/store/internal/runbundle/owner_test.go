@@ -1,18 +1,22 @@
 package runbundle
 
 import (
+	"context"
 	"database/sql"
 	"testing"
+	"time"
 
 	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
+	sourceartifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
-const testBundleHash = "bundle-v2:sha256:1111111111111111111111111111111111111111111111111111111111111111"
+var testBundleHash = sourceartifactfixture.Artifact().BundleHash()
 
 func TestLoadAvailabilityClassifiesSourceArtifactPresence(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
@@ -22,12 +26,7 @@ func TestLoadAvailabilityClassifiesSourceArtifactPresence(t *testing.T) {
 	missingHash := "bundle-v2:sha256:2222222222222222222222222222222222222222222222222222222222222222"
 	missing := seedRunBundleAvailability(t, db, "running", missingHash)
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO source_artifacts (bundle_hash, source_blob, member_count, total_bytes)
-		VALUES ($1, $2::bytea, 1, 0)
-	`, testBundleHash, []byte{0}); err != nil {
-		t.Fatalf("seed source artifact row: %v", err)
-	}
+	seedRetainedRunBundleSource(t, owner)
 
 	for _, tc := range []struct {
 		name       string
@@ -60,12 +59,7 @@ func TestListActiveNonStandingUsesArtifactPresenceOwner(t *testing.T) {
 	missing := seedRunBundleAvailability(t, db, "paused", "bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	completed := seedRunBundleAvailability(t, db, "completed", "bundle-v2:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO source_artifacts (bundle_hash, source_blob, member_count, total_bytes)
-		VALUES ($1, $2::bytea, 1, 0)
-	`, testBundleHash, []byte{0}); err != nil {
-		t.Fatalf("seed source artifact row: %v", err)
-	}
+	seedRetainedRunBundleSource(t, owner)
 
 	availabilities, err := owner.ListActiveNonStanding(ctx)
 	if err != nil {
@@ -98,6 +92,17 @@ func newPostgresOwnerForTest(t *testing.T, db *sql.DB) *Postgres {
 	return owner
 }
 
+func seedRetainedRunBundleSource(t *testing.T, owner *Postgres) {
+	t.Helper()
+	rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+	if err := owner.backend.RunTransaction(testAuthorActivityContext(), func(ctx context.Context, tx *sql.Tx) error {
+		_, err := sourceartifactstore.EnsurePostgresRootedSourceTx(ctx, tx, rooted, time.Now().UTC())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func seedRunBundleAvailability(t *testing.T, db *sql.DB, status, bundleHash string) string {
 	t.Helper()
 	runID := uuid.NewString()
@@ -105,8 +110,9 @@ func seedRunBundleAvailability(t *testing.T, db *sql.DB, status, bundleHash stri
 		testAuthorActivityContext(),
 		db,
 		runlifecyclefixture.CorruptSnapshot{
-			OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
-			RunID:      runID, State: status, BundleHash: bundleHash,
+			OriginKind:    runlifecyclefixture.ScenarioSetupOriginKind(),
+			RootDirectory: "fixture",
+			RunID:         runID, State: status, BundleHash: bundleHash,
 		},
 	); err != nil {
 		t.Fatalf("materialize corrupt PostgreSQL run snapshot %s: %v", runID, err)

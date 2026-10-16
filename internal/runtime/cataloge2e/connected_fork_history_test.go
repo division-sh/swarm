@@ -58,7 +58,7 @@ func TestConnectedForkCompletedDynamicHistoryRefusalBothStores(t *testing.T) {
 				t.Fatalf("frontier %s has no completed connection-authorized dynamic ancestor %s", frontier, ancestorID)
 			}
 			var source interface {
-				storetest.DurableDataCatalogStore
+				storetest.RootedDataCatalogStore
 				forkexecution.SourceArtifactSelectedContractSourceStore
 			} = h.pg
 			if h.sqlite != nil {

@@ -208,7 +208,14 @@ func (f mutationProtocolJourneyFixture) start(t *testing.T, bootstrap bool) *mut
 	if err != nil {
 		t.Fatal(err)
 	}
-	coordinate := agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := agenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
 	agents, err := s.runtime.Manager.CompileStaticTopologyDesiredAgents(module.SemanticSource(), coordinate)
 	if err != nil {
 		t.Fatal(err)

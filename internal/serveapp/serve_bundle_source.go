@@ -11,13 +11,13 @@ import (
 )
 
 type serveSourceArtifactPlan struct {
-	fact     runtimecorrelation.SourceArtifactFact
-	artifact *sourceartifact.AdmittedSourceArtifact
-	catalog  durabledata.Catalog
+	fact    runtimecorrelation.SourceArtifactFact
+	rooted  sourceartifact.RootedSource
+	catalog durabledata.Catalog
 }
 
 type sourceArtifactDataWriter interface {
-	EnsureSourceArtifactWithData(context.Context, *sourceartifact.AdmittedSourceArtifact, durabledata.Catalog) (sourceartifact.EnsureResult, error)
+	EnsureRootedSourceWithData(context.Context, sourceartifact.RootedSource, durabledata.Catalog) (sourceartifact.RootedEnsureResult, error)
 }
 
 func prepareServeSourceArtifact(ctx context.Context, writer sourceArtifactDataWriter, bundle *runtimecontracts.WorkflowContractBundle) (runtimecorrelation.SourceArtifactFact, error) {
@@ -39,6 +39,10 @@ func planServeSourceArtifact(writer sourceArtifactDataWriter, bundle *runtimecon
 	if bundle == nil || bundle.SourceArtifact == nil {
 		return serveSourceArtifactPlan{}, fmt.Errorf("serve requires an admitted source artifact")
 	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return serveSourceArtifactPlan{}, fmt.Errorf("serve requires its compiled rooted source: %w", err)
+	}
 	catalog, err := runtimecontracts.BuildDurableDataCatalog(bundle)
 	if err != nil {
 		return serveSourceArtifactPlan{}, fmt.Errorf("project durable data catalog: %w", err)
@@ -50,24 +54,31 @@ func planServeSourceArtifact(writer sourceArtifactDataWriter, bundle *runtimecon
 	if err != nil {
 		return serveSourceArtifactPlan{}, err
 	}
-	return serveSourceArtifactPlan{fact: fact, artifact: bundle.SourceArtifact, catalog: catalog}, nil
+	return serveSourceArtifactPlan{fact: fact, rooted: rooted, catalog: catalog}, nil
 }
 
 func persistServeSourceArtifactPlan(ctx context.Context, writer sourceArtifactDataWriter, plan serveSourceArtifactPlan) (runtimecorrelation.SourceArtifactFact, error) {
 	if err := plan.fact.Validate(); err != nil {
 		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("planned source artifact fact: %w", err)
 	}
-	if plan.artifact == nil {
-		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("source artifact plan requires an admitted source artifact")
+	if err := plan.rooted.Validate(); err != nil {
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("source artifact plan requires its rooted source: %w", err)
 	}
-	if plan.artifact.BundleHash() != plan.fact.BundleHash() || plan.catalog.BundleHash != plan.fact.BundleHash() {
+	if plan.rooted.Admission().BundleHash() != plan.fact.BundleHash() || plan.catalog.BundleHash != plan.fact.BundleHash() {
 		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("planned source artifact and durable data hashes must match source fact %q", plan.fact.BundleHash())
 	}
 	if writer == nil {
 		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("source artifact plan requires a source artifact store")
 	}
-	if _, err := writer.EnsureSourceArtifactWithData(ctx, plan.artifact, plan.catalog); err != nil {
+	result, err := writer.EnsureRootedSourceWithData(ctx, plan.rooted, plan.catalog)
+	if err != nil {
 		return runtimecorrelation.SourceArtifactFact{}, err
+	}
+	if err := result.Source.Validate(); err != nil {
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("rooted source ingest returned no admitted source: %w", err)
+	}
+	if !result.Source.Admission().Equal(plan.rooted.Admission()) {
+		return runtimecorrelation.SourceArtifactFact{}, fmt.Errorf("rooted source ingest acknowledged a different source root")
 	}
 	return plan.fact, nil
 }

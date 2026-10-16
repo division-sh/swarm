@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -41,6 +42,7 @@ type RunBundleAvailabilityReader interface {
 type BundleContext struct {
 	ProviderTriggerCatalog      *providertriggers.CatalogSnapshot
 	SourceArtifactFact          runtimecorrelation.SourceArtifactFact
+	RootAdmission               sourceartifact.RootAdmission `json:"-"`
 	BundleIdentity              runtimecontracts.BundleIdentity
 	RuntimeInstanceID           string
 	PublicationGeneration       uint64
@@ -747,6 +749,9 @@ func validateRuntimeContextDefinition(contextDef BundleContext, executable bool)
 	}
 	if contextDef.Runtime.Bus == nil {
 		return BundleContext{}, fmt.Errorf("runtime context %s event bus is required", bundleHash)
+	}
+	if err := validateRuntimeContextRoot(contextDef); err != nil {
+		return BundleContext{}, err
 	}
 	if !equalRuntimeContextSlice(contextDef.ChannelPlans, contextDef.Runtime.Options.ChannelPlans) {
 		return BundleContext{}, fmt.Errorf("runtime context %s channel plans do not belong to runtime", bundleHash)
@@ -1462,6 +1467,12 @@ func (m *RuntimeContextManager) acquireEntryLocked(ctx context.Context, entry *r
 	if !runtimeContextEntryLoaded(entry) || entry.runtime == nil || entry.workOwner == nil {
 		return nil, fmt.Errorf("runtime context is unavailable")
 	}
+	definition := *entry.context
+	definition.Runtime = entry.runtime
+	ctx, err := rootedRuntimeContextUse(ctx, definition)
+	if err != nil {
+		return nil, err
+	}
 	owner := entry.workOwner
 	ctx, releaseAdmission, admitted := entry.runtime.shutdownGate.BeginContext(ctx)
 	if !admitted {
@@ -1550,7 +1561,7 @@ func runtimeContextLookupForEntry(entry *runtimeContextEntry) RuntimeContextLook
 	}
 	lookup := RuntimeContextLookup{State: state, Cause: cause, Found: true}
 	if state == RuntimeContextStateLoaded {
-		lookup.Context = entry.context
+		lookup.Context = runtimeContextMetadata(entry.context)
 	}
 	return lookup
 }
@@ -1568,7 +1579,7 @@ func (m *RuntimeContextManager) Primary() (*BundleContext, bool) {
 	if !runtimeContextEntryLoaded(entry) {
 		return nil, false
 	}
-	return entry.context, true
+	return runtimeContextMetadata(entry.context), true
 }
 
 func (m *RuntimeContextManager) CurrentPublication() (RuntimeContextPublicationSnapshot, error) {
@@ -1664,7 +1675,7 @@ func (m *RuntimeContextManager) LookupIngress(alias, provider string) RuntimeIng
 			out.Found = true
 			out.Target = target
 			if state == RuntimeContextStateLoaded {
-				out.Context = entry.context
+				out.Context = runtimeContextMetadata(entry.context)
 			}
 			return out
 		}
@@ -1853,7 +1864,7 @@ func validateStandingOperationDeclaration(entry *runtimeContextEntry, expected r
 		if strings.TrimSpace(target.ServiceID) != expected.ServiceID {
 			continue
 		}
-		if declares || !runtimeContextEntryLoaded(entry) || entry.context.BundleHash() != expected.BundleHash {
+		if declares || !runtimeContextEntryLoaded(entry) || entry.context.BundleHash() != expected.BundleHash || entry.context.RootAdmission.Reference() != expected.RootReference {
 			return false, fmt.Errorf("standing service %s has conflicting process source ownership", expected.ServiceID)
 		}
 		declares = true
@@ -2379,7 +2390,7 @@ func (m *RuntimeContextManager) publishStandingServiceTargets(serviceID string, 
 
 func (m *RuntimeContextManager) validateAdmittedStandingPublicationLocked(admitted *RuntimeContextUse) error {
 	current := m.contexts[admitted.Context.BundleHash()]
-	if !runtimeContextEntryLoaded(current) || current.runtime != admitted.Runtime() || current.context.RuntimeInstanceID != admitted.Context.RuntimeInstanceID || current.context.PublicationGeneration != admitted.Context.PublicationGeneration || admitted.WorkContext().Err() != nil || m.resetExecutionFenced {
+	if !runtimeContextEntryLoaded(current) || current.runtime != admitted.Runtime() || current.context.RuntimeInstanceID != admitted.Context.RuntimeInstanceID || current.context.PublicationGeneration != admitted.Context.PublicationGeneration || !current.context.RootAdmission.Equal(admitted.Context.RootAdmission) || admitted.WorkContext().Err() != nil || m.resetExecutionFenced {
 		return fmt.Errorf("%w: channel target runtime ownership changed at publication", channelonboarding.ErrRevisionConflict)
 	}
 	return admitted.Runtime().ValidateStandingIngressCredentials(admitted.WorkContext())
@@ -2419,7 +2430,10 @@ func (m *RuntimeContextManager) LookupRunStatus(ctx context.Context, runID strin
 	if strings.TrimSpace(availability.BundleHash) == "" {
 		return RuntimeContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}, availability, nil
 	}
-	return m.LookupBundleHashStatus(availability.BundleHash), availability, nil
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, lookup, err := m.runContextEntryLocked(availability)
+	return lookup, availability, err
 }
 
 // PrepareSourceSetTransition fences every surviving loaded runtime before the
@@ -2467,9 +2481,9 @@ func (m *RuntimeContextManager) prepareSourceSetTransition(
 		default:
 		}
 	}
-	wanted := make(map[string]struct{}, len(plan.Sources))
+	wanted := make(map[string]runtimeagenttopology.SourceCoordinate, len(plan.Sources))
 	for _, source := range plan.Sources {
-		wanted[source.Normalize().Key()] = struct{}{}
+		wanted[source.Normalize().Key()] = source.Normalize()
 	}
 	transition := &PreparedRuntimeSourceSetTransition{manager: m, locked: true}
 	m.mu.Lock()
@@ -2487,10 +2501,14 @@ func (m *RuntimeContextManager) prepareSourceSetTransition(
 		if (!loaded && !pending) || (pendingOnly && !pending) {
 			continue
 		}
-		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: entry.context.SourceArtifactFact.BundleHash()}.Normalize()
-		if _, survives := wanted[coordinate.Key()]; !survives {
+		coordinate, err := runtimeagenttopology.NewSourceCoordinate(entry.context.RootAdmission)
+		if err != nil {
 			m.mu.Unlock()
-			return nil, fmt.Errorf("loaded runtime context %s is absent from successor source set", bundleHash)
+			return nil, err
+		}
+		if expected, survives := wanted[coordinate.Key()]; !survives || expected != coordinate {
+			m.mu.Unlock()
+			return nil, fmt.Errorf("loaded runtime context %s rooted source %+v is absent from successor source set", bundleHash, coordinate.RootReference())
 		}
 		transition.entries = append(transition.entries, runtimeSourceSetTransitionEntry{
 			bundleHash: bundleHash, entry: entry, fresh: loaded,
@@ -2720,7 +2738,13 @@ func (m *RuntimeContextManager) AcquireRun(ctx context.Context, runID string) (*
 		lookup := RuntimeContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}
 		return nil, lookup, availability, nil
 	}
-	use, lookup, err := m.AcquireBundleHash(ctx, availability.BundleHash)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry, lookup, err := m.runContextEntryLocked(availability)
+	if err != nil || !lookup.Loaded() {
+		return nil, lookup, availability, err
+	}
+	use, err := m.acquireEntryLocked(ctx, entry)
 	return use, lookup, availability, err
 }
 
@@ -2761,7 +2785,7 @@ func (m *RuntimeContextManager) AcquireIngress(ctx context.Context, alias, provi
 				}
 				return nil, lookup, nil
 			}
-			lookup.Context = entry.context
+			lookup.Context = runtimeContextMetadata(entry.context)
 			use, err := m.acquireEntryLocked(ctx, entry)
 			if err != nil {
 				return nil, lookup, err

@@ -534,7 +534,11 @@ func seedStandingRuntimeContextBundle(t *testing.T, writer sourceArtifactDataWri
 	if err != nil {
 		t.Fatalf("project standing runtime-context source data: %v", err)
 	}
-	if _, err := writer.EnsureSourceArtifactWithData(context.Background(), bundle.SourceArtifact, catalog); err != nil {
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.EnsureRootedSourceWithData(context.Background(), rooted, catalog); err != nil {
 		t.Fatalf("persist standing runtime-context bundle: %v", err)
 	}
 }

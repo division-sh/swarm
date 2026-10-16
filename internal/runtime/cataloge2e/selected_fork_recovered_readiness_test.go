@@ -36,7 +36,7 @@ func TestSelectedForkRecoveredReceiverReadinessBothStores(t *testing.T) {
 				ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
 				frontierID := activateLocalReadinessFrontier(t, ctx, h, "worker.ready")
 				var sourceStore interface {
-					storetest.DurableDataCatalogStore
+					storetest.RootedDataCatalogStore
 					forkexecution.SourceArtifactSelectedContractSourceStore
 				} = h.pg
 				var forkStore forkexecution.SelectedContractForkLifecycle = h.pg

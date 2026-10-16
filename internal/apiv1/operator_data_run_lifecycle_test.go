@@ -29,6 +29,7 @@ var dataRunMissingBundleHash = dataRunMissingSourceArtifact.BundleHash()
 
 type dataRunLifecycleStore interface {
 	runtimebus.EventStore
+	storetest.RootedDataCatalogStore
 	RunReadStore
 	ObservabilityReadStore
 	APIIdempotencyStore

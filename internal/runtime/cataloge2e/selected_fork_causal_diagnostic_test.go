@@ -138,7 +138,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimeLogDiagnostic(t *
 				ctx := worklifetime.WithOccurrence(catalogRunContext(h, catalogRuntimeRunID), h.rt.WorkOccurrence())
 				frontierID := activateLocalReadinessFrontier(t, ctx, h, "worker.ready")
 				var sourceStore interface {
-					storetest.DurableDataCatalogStore
+					storetest.RootedDataCatalogStore
 					runforkexecution.SourceArtifactSelectedContractSourceStore
 				} = h.pg
 				var logStore runtimepkg.RuntimeLogPersistence = h.pg

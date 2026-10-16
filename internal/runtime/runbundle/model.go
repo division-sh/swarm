@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 // AvailabilityStore separates exact run diagnosis from the generic
@@ -31,6 +33,8 @@ type Availability struct {
 	RunID                 string
 	Status                string
 	BundleHash            string
+	RootReference         sourceartifact.RootAdmissionReference `json:"-"`
+	RootAdmissionPresent  bool                                  `json:"-"`
 	SourceArtifactPresent bool
 	ErrorCode             string
 	Cause                 string
@@ -39,7 +43,8 @@ type Availability struct {
 func (a Availability) Available() bool {
 	return a.ErrorCode == "" &&
 		a.BundleHash != "" &&
-		a.SourceArtifactPresent
+		a.RootReference.BundleHash == a.BundleHash && a.RootReference.Validate() == nil &&
+		a.SourceArtifactPresent && a.RootAdmissionPresent
 }
 
 func (a Availability) Unavailable() bool {
