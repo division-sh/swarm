@@ -13,6 +13,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -47,6 +48,7 @@ type StandingServiceCandidate struct {
 	ServiceID          string
 	FlowPath           string
 	Source             runtimecorrelation.SourceArtifactFact
+	RootAdmission      sourceartifact.RootAdmission
 }
 
 func (c StandingServiceCandidate) Normalized() StandingServiceCandidate {
@@ -92,6 +94,7 @@ type StandingServiceReconciliation struct {
 	Transition                   string
 	EffectiveState               string
 	BundleHash                   string
+	RootReference                sourceartifact.RootAdmissionReference `json:"-"`
 	Reason                       string
 	RestartDisposition           runtimestanding.StandingRestartDisposition
 	CommittedMutation            runtimestanding.MutationDisposition
