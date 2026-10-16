@@ -147,7 +147,7 @@ func TestIssue2589NativeAdmissionFrameIsolationBothStores(t *testing.T) {
 						return runSelectedFixtureMutation(ctx, opened.store, "issue2589 native admission controls", func(txctx context.Context, attempt *mutationprotocol.Attempt) error {
 							return attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
 								for _, runID := range runs {
-									if _, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID); err != nil || cached {
+									if _, _, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID); err != nil || cached {
 										t.Fatalf("fresh native frame reused admission: cached=%t err=%v", cached, err)
 									}
 								}
@@ -167,7 +167,7 @@ func TestIssue2589NativeAdmissionFrameIsolationBothStores(t *testing.T) {
 												return err
 											}
 											for _, runID := range runs {
-												fact, cached, err := mutationprotocol.CachedActiveRunSource(nestedctx, nestedtx, runID)
+												fact, _, cached, err := mutationprotocol.CachedActiveRunSource(nestedctx, nestedtx, runID)
 												if err != nil || !cached || fact.BundleHash() != authorActivityTestBundleHash {
 													t.Fatalf("nested exact admission for %s = %t %+v %v", runID, cached, fact, err)
 												}

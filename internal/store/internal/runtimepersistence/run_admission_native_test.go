@@ -96,7 +96,7 @@ func TestRunAdmissionCanonicalInvalidationBothStores(t *testing.T) {
 							return err
 						}
 						if err := attempt.WithSQL(txctx, func(txctx context.Context, tx *sql.Tx) error {
-							if _, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID); err != nil || cached {
+							if _, _, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID); err != nil || cached {
 								return errors.Join(errors.New("canonical write retained old admission"), err)
 							}
 							fact, err := writer.RequireActiveSourceTx(txctx, tx, runID)
@@ -164,7 +164,7 @@ func TestRunAdmissionMissingRunRefusesBeforeMutationBothStores(t *testing.T) {
 					if !errors.As(err, &missing) || missing == nil || missing.RunID != runID || fact.Validate() == nil {
 						return fmt.Errorf("missing active run: fact=%q error=%v; want missing %q and invalid fact", fact.BundleHash(), err, runID)
 					}
-					if _, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID); err != nil || cached {
+					if _, _, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID); err != nil || cached {
 						return errors.Join(errors.New("missing run minted active admission"), err)
 					}
 					var runs, mutations int
@@ -208,7 +208,7 @@ func TestRunAdmissionWarmArtifactLossRefusesBothStores(t *testing.T) {
 					if err := sourceartifactstore.DeleteSourceArtifactForFixtureRefusalTx(txctx, tx, backend, original); err != nil {
 						return err
 					}
-					cachedFact, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID)
+					cachedFact, _, cached, err := mutationprotocol.CachedActiveRunSource(txctx, tx, runID)
 					if err != nil || !cached || !cachedFact.Matches(original) {
 						return errors.Join(errors.New("artifact fault erased warmed run admission"), err)
 					}

@@ -18,6 +18,13 @@ func RequireRootAdmissionTx(ctx context.Context, tx *sql.Tx, admission sourceart
 	if err := admission.Validate(); err != nil {
 		return err
 	}
+	return RequireRootReference(ctx, tx, admission.Reference(), postgres)
+}
+
+func RequireRootReference(ctx context.Context, queryer rootAdmissionQueryer, reference sourceartifact.RootAdmissionReference, postgres bool) error {
+	if err := reference.Validate(); err != nil {
+		return err
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -26,7 +33,7 @@ func RequireRootAdmissionTx(ctx context.Context, tx *sql.Tx, admission sourceart
 		query = `SELECT EXISTS (SELECT 1 FROM source_root_admissions WHERE bundle_hash = $1 AND root_directory = $2)`
 	}
 	var exists bool
-	if err := tx.QueryRowContext(ctx, query, admission.BundleHash(), admission.RootDirectory()).Scan(&exists); err != nil {
+	if err := queryer.QueryRowContext(ctx, query, reference.BundleHash, reference.RootDirectory).Scan(&exists); err != nil {
 		return fmt.Errorf("validate exact source root admission: %w", err)
 	}
 	if err := ctx.Err(); err != nil {

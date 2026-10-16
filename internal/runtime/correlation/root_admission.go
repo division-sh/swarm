@@ -2,6 +2,7 @@ package correlation
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
@@ -27,4 +28,26 @@ func RootAdmissionFromContext(ctx context.Context) (sourceartifact.RootAdmission
 		return sourceartifact.RootAdmission{}, false
 	}
 	return admission, true
+}
+
+// CheckRootAdmissionContext never supplies missing admission. Root-independent
+// callers may have no root context; a supplied root must agree exactly.
+func CheckRootAdmissionContext(ctx context.Context, reference sourceartifact.RootAdmissionReference) error {
+	if err := reference.Validate(); err != nil {
+		return err
+	}
+	if ctx == nil {
+		return nil
+	}
+	admission, supplied := ctx.Value(rootAdmissionContextKey{}).(sourceartifact.RootAdmission)
+	if !supplied {
+		return nil
+	}
+	if err := admission.Validate(); err != nil {
+		return err
+	}
+	if _, valid := RootAdmissionFromContext(ctx); !valid || admission.Reference() != reference {
+		return fmt.Errorf("rooted execution context does not match the exact run source root")
+	}
+	return nil
 }

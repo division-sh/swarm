@@ -14,6 +14,7 @@ import (
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/runhandoff"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 const admissionTestRunID = "00000000-0000-4000-8000-000000000001"
@@ -28,10 +29,11 @@ func TestRunAdmissionMutableSourceStatementCount(t *testing.T) {
 			mock.ExpectBegin()
 			// Three independent SQL loans share one run-row query, not the artifact checks.
 			mock.ExpectQuery(admissionTestRunSQL(postgres, false)).WithArgs(admissionTestRunID).
-				WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", admissionTestBundle))
+				WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", admissionTestBundle, "fixture"))
 			for range 3 {
 				mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+				admissionTestExpectRoot(mock, postgres, admissionTestBundle, true)
 			}
 			admissionTestNativeAttempt(t, db, mock, postgres, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 				for range 3 {
@@ -74,19 +76,22 @@ func TestRunAdmissionNonMutableSourceCannotMint(t *testing.T) {
 				// despite existing admission: four run queries and five artifact checks.
 				for range 2 {
 					mock.ExpectQuery(admissionTestRunSQL(postgres, mode.readOnly)).WithArgs(admissionTestRunID).
-						WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", admissionTestBundle))
+						WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", admissionTestBundle, "fixture"))
 					mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 						WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+					admissionTestExpectRoot(mock, postgres, admissionTestBundle, true)
 				}
 				mock.ExpectQuery(admissionTestRunSQL(postgres, false)).WithArgs(admissionTestRunID).
-					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", admissionTestBundle))
+					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", admissionTestBundle, "fixture"))
 				mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+				admissionTestExpectRoot(mock, postgres, admissionTestBundle, true)
 				mock.ExpectQuery(admissionTestRunSQL(postgres, mode.readOnly)).WithArgs(admissionTestRunID).
-					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", admissionTestBundle))
+					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", admissionTestBundle, "fixture"))
 				for range 2 {
 					mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 						WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+					admissionTestExpectRoot(mock, postgres, admissionTestBundle, true)
 				}
 				admissionTestNativeAttempt(t, db, mock, postgres, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 					return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
@@ -131,10 +136,13 @@ func TestRunAdmissionMissingArtifactAfterAdmission(t *testing.T) {
 			db, mock := admissionTestSQLMock(t)
 			mock.ExpectBegin()
 			mock.ExpectQuery(admissionTestRunSQL(postgres, false)).WithArgs(admissionTestRunID).
-				WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", admissionTestBundle))
+				WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", admissionTestBundle, "fixture"))
 			for _, exists := range []bool{true, false} {
 				mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(exists))
+				if exists {
+					admissionTestExpectRoot(mock, postgres, admissionTestBundle, true)
+				}
 			}
 			admissionTestNativeAttempt(t, db, mock, postgres, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 				return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
@@ -169,9 +177,12 @@ func TestRunAdmissionMissingArtifactCannotMint(t *testing.T) {
 			// A failed first admission must leave the second use reading the run again.
 			for _, exists := range []bool{false, true} {
 				mock.ExpectQuery(admissionTestRunSQL(postgres, false)).WithArgs(admissionTestRunID).
-					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", admissionTestBundle))
+					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", admissionTestBundle, "fixture"))
 				mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(exists))
+				if exists {
+					admissionTestExpectRoot(mock, postgres, admissionTestBundle, true)
+				}
 			}
 			admissionTestNativeAttempt(t, db, mock, postgres, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 				return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
@@ -199,39 +210,50 @@ func TestRunAdmissionCanonicalSourceRevisionReloads(t *testing.T) {
 		t.Run(admissionTestDialect(postgres), func(t *testing.T) {
 			db, mock := admissionTestSQLMock(t)
 			candidates := runhandoff.NewCandidateCoordinator()
-			revised := admissionTestSource(t, admissionTestRevisedBundle)
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.New("nodes.yaml", []byte("replacement: {type: procedure}\n")))
+			revised := sourceartifactfixture.FactFor(rooted.Artifact())
+			revisedHash := revised.BundleHash()
 			selectedNow := time.Unix(1700000000, 0).UTC()
 			mock.ExpectBegin()
 			mock.ExpectQuery(admissionTestRunSQL(postgres, false)).WithArgs(admissionTestRunID).
-				WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("paused", admissionTestBundle))
+				WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("paused", admissionTestBundle, "fixture"))
 			for range 2 {
 				mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+				admissionTestExpectRoot(mock, postgres, admissionTestBundle, true)
 			}
+			rootQuery := "SELECT bundle_hash, source_root_directory FROM runs WHERE run_id = ?"
+			if postgres {
+				rootQuery = "SELECT bundle_hash, source_root_directory FROM runs WHERE run_id = $1::uuid"
+			}
+			mock.ExpectQuery(rootQuery).WithArgs(admissionTestRunID).
+				WillReturnRows(sqlmock.NewRows([]string{"bundle_hash", "source_root_directory"}).AddRow(admissionTestBundle, "fixture"))
 			if postgres {
 				mock.ExpectExec("LOCK TABLE runs IN ROW EXCLUSIVE MODE").WillReturnResult(sqlmock.NewResult(0, 0))
 			}
-			mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestRevisedBundle).
+			mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(revisedHash).
 				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+			admissionTestExpectRoot(mock, postgres, revisedHash, true)
 			if postgres {
-				mock.ExpectExec("UPDATE runs SET bundle_hash = $2 WHERE run_id = $1::uuid AND status IN ('running', 'paused')").
-					WithArgs(admissionTestRunID, admissionTestRevisedBundle).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("UPDATE runs SET bundle_hash = $2, source_root_directory = $3 WHERE run_id = $1::uuid AND status IN ('running', 'paused')").
+					WithArgs(admissionTestRunID, revisedHash, "fixture").WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectQuery("SELECT LOWER(status), bundle_hash, completion_due_at, completion_revision, clock_timestamp() FROM runs WHERE run_id = $1::uuid FOR UPDATE").
 					WithArgs(admissionTestRunID).WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "completion_due_at", "completion_revision", "now"}).
-					AddRow("paused", admissionTestRevisedBundle, nil, 0, selectedNow))
+					AddRow("paused", revisedHash, nil, 0, selectedNow))
 			} else {
-				mock.ExpectExec("UPDATE runs SET bundle_hash = ? WHERE run_id = ? AND status IN ('running', 'paused')").
-					WithArgs(admissionTestRevisedBundle, admissionTestRunID).WillReturnResult(sqlmock.NewResult(0, 1))
+				mock.ExpectExec("UPDATE runs SET bundle_hash = ?, source_root_directory = ? WHERE run_id = ? AND status IN ('running', 'paused')").
+					WithArgs(revisedHash, "fixture", admissionTestRunID).WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectQuery("SELECT LOWER(status), bundle_hash, completion_due_at, completion_revision FROM runs WHERE run_id = ?").
 					WithArgs(admissionTestRunID).WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "completion_due_at", "completion_revision"}).
-					AddRow("paused", admissionTestRevisedBundle, nil, 0))
+					AddRow("paused", revisedHash, nil, 0))
 			}
 			// The canonical writer must invalidate the old admission; only the reload mints the new one.
 			mock.ExpectQuery(admissionTestRunSQL(postgres, false)).WithArgs(admissionTestRunID).
-				WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("paused", admissionTestRevisedBundle))
+				WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("paused", revisedHash, "fixture"))
 			for range 2 {
-				mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestRevisedBundle).
+				mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(revisedHash).
 					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+				admissionTestExpectRoot(mock, postgres, revisedHash, true)
 			}
 			admissionTestNativeAttempt(t, db, mock, postgres, candidates, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 				return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
@@ -242,7 +264,7 @@ func TestRunAdmissionCanonicalSourceRevisionReloads(t *testing.T) {
 					if err := attempt.RequireActiveRunSourceAdmission(ctx, admissionTestRunID, original); err != nil {
 						return err
 					}
-					request := runtimerunlifecycle.SourceRevisionRequest{RunID: admissionTestRunID, Source: revised}
+					request := runtimerunlifecycle.SourceRevisionRequest{RunID: admissionTestRunID, Source: revised, RootAdmission: rooted.Admission()}
 					var disposition runtimerunlifecycle.MutationDisposition
 					if postgres {
 						backend, backendErr := postgresbackend.New(db)
@@ -305,11 +327,12 @@ func TestRunAdmissionInvalidationReloadsTerminalState(t *testing.T) {
 				db, mock := admissionTestSQLMock(t)
 				mock.ExpectBegin()
 				mock.ExpectQuery(admissionTestRunSQL(postgres, false)).WithArgs(admissionTestRunID).
-					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow("running", admissionTestBundle))
+					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow("running", admissionTestBundle, "fixture"))
 				mock.ExpectQuery(admissionTestArtifactSQL(postgres)).WithArgs(admissionTestBundle).
 					WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+				admissionTestExpectRoot(mock, postgres, admissionTestBundle, true)
 				mock.ExpectQuery(admissionTestRunSQL(postgres, false)).WithArgs(admissionTestRunID).
-					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash"}).AddRow(string(state), admissionTestBundle))
+					WillReturnRows(sqlmock.NewRows([]string{"status", "bundle_hash", "source_root_directory"}).AddRow(string(state), admissionTestBundle, "fixture"))
 				admissionTestNativeAttempt(t, db, mock, postgres, nil, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 					return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 						fact, err := admissionTestLoadSource(ctx, tx, postgres, false, true)
@@ -392,9 +415,9 @@ func admissionTestLoadSource(ctx context.Context, tx *sql.Tx, postgres, readOnly
 
 func admissionTestRunSQL(postgres, readOnly bool) string {
 	if !postgres {
-		return "SELECT status, bundle_hash FROM runs WHERE run_id = ?"
+		return "SELECT status, bundle_hash, source_root_directory FROM runs WHERE run_id = ?"
 	}
-	query := "SELECT status, bundle_hash FROM runs WHERE run_id = $1::uuid"
+	query := "SELECT status, bundle_hash, source_root_directory FROM runs WHERE run_id = $1::uuid"
 	if !readOnly {
 		query += " FOR UPDATE"
 	}
@@ -406,6 +429,15 @@ func admissionTestArtifactSQL(postgres bool) string {
 		return "SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = $1)"
 	}
 	return "SELECT EXISTS (SELECT 1 FROM source_artifacts WHERE bundle_hash = ?)"
+}
+
+func admissionTestExpectRoot(mock sqlmock.Sqlmock, postgres bool, hash string, exists bool) {
+	query := "SELECT EXISTS (SELECT 1 FROM source_root_admissions WHERE bundle_hash = ? AND root_directory = ?)"
+	if postgres {
+		query = "SELECT EXISTS (SELECT 1 FROM source_root_admissions WHERE bundle_hash = $1 AND root_directory = $2)"
+	}
+	mock.ExpectQuery(query).WithArgs(hash, "fixture").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(exists))
 }
 
 func admissionTestSource(t *testing.T, bundle string) runtimecorrelation.SourceArtifactFact {
