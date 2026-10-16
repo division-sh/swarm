@@ -92,7 +92,11 @@ func TestS1TriggerProviderKeyNeverUsesProtocolNormalization(t *testing.T) {
 			if err != nil || len(delivery.Events) != 1 || delivery.Events[0].Payload["provider"] != key {
 				t.Fatalf("delivery changed provider identity: %+v err=%v", delivery, err)
 			}
-			for _, foreign := range []string{" " + key, key + " ", strings.ToUpper(key), "another"} {
+			otherKey := "telegram-sales"
+			if key == otherKey {
+				otherKey = "telegram_sales"
+			}
+			for _, foreign := range []string{" " + key, key + " ", strings.ToUpper(key), "another", otherKey} {
 				request.Provider = foreign
 				if _, err := plan.AdmitRequest(request); err == nil {
 					t.Errorf("plan accepted foreign provider %q", foreign)
