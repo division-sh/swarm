@@ -55,3 +55,13 @@ remain separate obligations.
 The accepted clock repair is the parent. Current onboarding/reporter
 uncertainties and the newly captured H2 RED remain explicit in the final
 finite-ledger packet; this fixture repair does not dispose of them.
+
+The complete retained410-root codemod selection reached409 PASS and one
+source-pin RED in367.676s. That guard still compared the live schedule fixture
+directly with the immutable historical recipe. Compose only this exact
+file/declaration through the authenticated current-source inverse before the
+same exact predicate comparison. No row or assertion is skipped, and the
+immutable recipe remains unchanged. The affected guard then PASSes0.259s
+(pr2698-schedule-delivery-pin-composed.jsonl); the original full-unit RED is
+retained, not presented as a whole-unit PASS. Subsequent complete-unit evidence
+belongs to its exact frozen source, not this prose addendum.

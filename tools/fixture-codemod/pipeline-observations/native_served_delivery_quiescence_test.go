@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 func servedDeliveryCallerSource(source, name string) (string, error) {
@@ -157,6 +158,13 @@ func TestServedDeliveryQuiescenceOwnerRecipesRemainSourcePinned(t *testing.T) {
 		}
 		matched++
 		actual := selectedCausalObservationBody(t, row.File, row.Function)
+		if row.File == "internal/serveapp/semantic_numeric_schedule_test.go" && row.Function == "TestGenericScheduleSemanticPayloadExecutionParity" {
+			var err error
+			actual, err = selectedreadrole.CatchUp2542HistoricalFunction("../../..", row.File, row.Function, actual)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
 		current := row.After
 		if row.Successor != "" {
 			current = row.Successor
