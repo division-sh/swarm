@@ -19,6 +19,7 @@ func TestForkActivationLoadsExactMaterializedPointBothStores(t *testing.T) {
 				t.Run(string(point.Kind), func(t *testing.T) {
 					point.Input = point.EventID
 					db := forkOperationTestDatabase(t, backend)
+					root := forkOperationTargetRoot(t)
 					if _, err := db.Exec(`CREATE TABLE run_fork_selected_contract_bindings (
 						binding_id TEXT PRIMARY KEY, fork_run_id TEXT NOT NULL, source_run_id TEXT NOT NULL,
 						fork_point_kind TEXT NOT NULL, fork_revision BIGINT NOT NULL, fork_event_id TEXT,
@@ -31,7 +32,7 @@ func TestForkActivationLoadsExactMaterializedPointBothStores(t *testing.T) {
 					request := runfork.ForkOperationRequest{
 						OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "exact-activation",
 						TransportHash: "sha256:exact-activation", SourceRunID: uuid.NewString(), ForkEventID: point.EventID,
-						TargetBundleHash: "sha256:bundle", ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+						TargetBundleHash: root.BundleHash, TargetRootReference: root, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 						ResolvedPoint: &point,
 					}
 					withForkOperationTx(t, db, func(tx *sql.Tx) {
@@ -93,12 +94,13 @@ func TestForkActivationLoadsExactMaterializedPointBothStores(t *testing.T) {
 
 func TestForkOperationPostgresReadOnlyResultLookup(t *testing.T) {
 	db := forkOperationTestDatabase(t, "postgres")
+	root := forkOperationTargetRoot(t)
 	ctx := context.Background()
 	point := runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 3}
 	request := runfork.ForkOperationRequest{
 		OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "read-only-result",
 		TransportHash: "sha256:read-only-result", SourceRunID: uuid.NewString(),
-		TargetBundleHash: "sha256:bundle", ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+		TargetBundleHash: root.BundleHash, TargetRootReference: root, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 		ResolvedPoint: &point,
 	}
 	childID, bindingID := uuid.NewString(), uuid.NewString()

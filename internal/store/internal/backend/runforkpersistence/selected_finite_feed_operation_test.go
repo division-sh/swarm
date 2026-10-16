@@ -17,17 +17,18 @@ func TestSelectedFiniteFeedRecoveryRequiresExactPermanentOperationBothStores(t *
 		t.Run(backend, func(t *testing.T) {
 			db := forkOperationTestDatabase(t, backend)
 			ctx := context.Background()
+			root := forkOperationTargetRoot(t)
 			point := runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 5}
 			childID, bindingID := uuid.NewString(), uuid.NewString()
 			request := runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "recovery",
 				TransportHash: "sha256:recovery", SourceRunID: uuid.NewString(),
-				TargetBundleHash: "sha256:bundle", ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+				TargetBundleHash: root.BundleHash, TargetRootReference: root, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 				ResolvedPoint: &point,
 			}
 			binding := runfork.RunForkSelectedContractBinding{
 				BindingID: bindingID, ForkRunID: childID, SourceRunID: request.SourceRunID,
-				ForkPoint: point, ContractSelection: request.ContractSelection,
+				ForkPoint: point, ContractSelection: request.ContractSelection, TargetRootReference: root,
 			}
 			check := func(b runfork.RunForkSelectedContractBinding, bundle string, want bool) {
 				t.Helper()
@@ -126,15 +127,16 @@ func TestInterruptedSelectedFiniteFeedSettlesPermanentOperationBothStores(t *tes
 			t.Run(backend+map[bool]string{false: "/failed", true: "/uncertain"}[uncertain], func(t *testing.T) {
 				db := forkOperationTestDatabase(t, backend)
 				ctx := context.Background()
+				root := forkOperationTargetRoot(t)
 				point := runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 5}
 				request := runfork.ForkOperationRequest{
 					OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: uuid.NewString(),
 					TransportHash: "sha256:interrupted", SourceRunID: uuid.NewString(), ResolvedPoint: &point,
-					TargetBundleHash: "sha256:bundle", ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+					TargetBundleHash: root.BundleHash, TargetRootReference: root, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 				}
 				binding := runfork.RunForkSelectedContractBinding{
 					BindingID: uuid.NewString(), ForkRunID: uuid.NewString(), SourceRunID: request.SourceRunID,
-					ForkPoint: point, ContractSelection: request.ContractSelection,
+					ForkPoint: point, ContractSelection: request.ContractSelection, TargetRootReference: root,
 				}
 				failure, ok := failures.EnvelopeFromError(failures.New(failures.ClassLifecycleConflict,
 					"selected_recovery_prelaunch_abandoned", "selected-fork", "startup_recovery", nil))
@@ -186,16 +188,17 @@ func TestSelectedFiniteFeedRecoveryRequiresCheckpointAndOnlySettledExternalEffec
 			}
 			ctx := context.Background()
 			point := runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 5}
+			root := forkOperationTargetRoot(t)
 			childID, bindingID, predecessorID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 			request := runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "resume",
 				TransportHash: "sha256:resume", SourceRunID: uuid.NewString(),
-				TargetBundleHash: "sha256:bundle", ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+				TargetBundleHash: root.BundleHash, TargetRootReference: root, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 				ResolvedPoint: &point,
 			}
 			binding := runfork.RunForkSelectedContractBinding{
 				BindingID: bindingID, ForkRunID: childID, SourceRunID: request.SourceRunID,
-				ForkPoint: point, ContractSelection: request.ContractSelection,
+				ForkPoint: point, ContractSelection: request.ContractSelection, TargetRootReference: root,
 			}
 			withForkOperationTx(t, db, func(tx *sql.Tx) {
 				if _, _, err := bindForkOperationTx(ctx, tx, request, childID, bindingID, backend == "postgres"); err != nil {

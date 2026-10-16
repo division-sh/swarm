@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 )
@@ -19,10 +21,11 @@ func TestForkOperationDurableReplayAndConflictBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			db := forkOperationTestDatabase(t, backend)
 			ctx := context.Background()
+			root := forkOperationTargetRoot(t)
 			request := runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "fork-request-1",
 				TransportHash: "sha256:exact-transport", SourceRunID: uuid.NewString(), ForkEventID: uuid.NewString(),
-				TargetBundleHash: "sha256:bundle", ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+				TargetBundleHash: root.BundleHash, TargetRootReference: root, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 			}
 			request.ResolvedPoint = &runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, Input: request.ForkEventID, EventID: request.ForkEventID}
 			childID, bindingID := uuid.NewString(), uuid.NewString()
@@ -92,9 +95,10 @@ func TestForkOperationKeylessIsInvocationScopedBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			db := forkOperationTestDatabase(t, backend)
+			root := forkOperationTargetRoot(t)
 			request := runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "bearer_token:operator", TransportHash: "sha256:keyless",
-				SourceRunID: uuid.NewString(), ForkEventID: uuid.NewString(), TargetBundleHash: "sha256:bundle",
+				SourceRunID: uuid.NewString(), ForkEventID: uuid.NewString(), TargetBundleHash: root.BundleHash, TargetRootReference: root,
 				ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 			}
 			request.ResolvedPoint = &runfork.RunForkPoint{Kind: runfork.RunForkPointEvent, Revision: 1, Input: request.ForkEventID, EventID: request.ForkEventID}
@@ -124,10 +128,11 @@ func TestForkOperationDeploymentRevisionIsDurableAndEventlessBothStores(t *testi
 		t.Run(backend, func(t *testing.T) {
 			db := forkOperationTestDatabase(t, backend)
 			ctx := context.Background()
+			root := forkOperationTargetRoot(t)
 			request := runfork.ForkOperationRequest{
 				OperationID: uuid.NewString(), Actor: "bearer:operator", IdempotencyKey: "eventless-fork",
 				TransportHash: "sha256:eventless", SourceRunID: uuid.NewString(),
-				TargetBundleHash: "sha256:bundle", ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+				TargetBundleHash: root.BundleHash, TargetRootReference: root, ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 				ResolvedPoint: &runfork.RunForkPoint{Kind: runfork.RunForkPointDeploymentRevision, Revision: 7},
 			}
 			childID, bindingID := uuid.NewString(), uuid.NewString()
@@ -171,6 +176,12 @@ func TestForkOperationDeploymentRevisionIsDurableAndEventlessBothStores(t *testi
 			})
 		})
 	}
+}
+
+func forkOperationTargetRoot(t *testing.T) sourceartifact.RootAdmissionReference {
+	t.Helper()
+	source, _ := sourceartifactfixture.Rooted(t, "fork-operation", sourceartifactfixture.Artifact())
+	return source.Admission().Reference()
 }
 
 func forkOperationTestDatabase(t *testing.T, backend string) *sql.DB {
