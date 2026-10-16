@@ -1,8 +1,10 @@
-package contracts
+package contracts_test
 
 import (
 	"testing"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -14,8 +16,8 @@ func TestS1ActivityOutcomeSchemasUseDeclaringFlowTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	rooted, _ := sourceartifactfixture.Rooted(t, "scoped-activity", artifact)
-	repo := repoRootForContractsTest(t)
-	bundle, err := LoadWorkflowContractBundleFromRootedSource(repo, rooted, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+	repo := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +41,7 @@ func TestS1ActivityOutcomeSchemasUseDeclaringFlowTools(t *testing.T) {
 				t.Fatal("generated outcome lost exact tool output schema")
 			}
 			origin, present := result.Property("origin")
-			if !present || !origin.Equal(MustToolInputSchema(ToolSchemaString, ToolSchemaEnum(cell.origin))) {
+			if !present || !origin.Equal(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaString, runtimecontracts.ToolSchemaEnum(cell.origin))) {
 				t.Fatalf("generated outcome borrowed another flow's tool: %+v", origin.Projection())
 			}
 		})
