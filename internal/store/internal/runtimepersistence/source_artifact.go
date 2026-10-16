@@ -37,3 +37,11 @@ func (s *PostgresStore) GetRootedSource(ctx context.Context, reference sourceart
 func (s *SQLiteRuntimeStore) GetRootedSource(ctx context.Context, reference sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error) {
 	return s.sourceArtifactOwner.GetRootedSource(ctx, reference)
 }
+
+func (s *PostgresStore) ResolveUnboundRootedSource(ctx context.Context, hash string) (sourceartifact.RootedSource, error) {
+	return s.sourceArtifactOwner.ResolveUnboundRootedSource(ctx, hash)
+}
+
+func (s *SQLiteRuntimeStore) ResolveUnboundRootedSource(ctx context.Context, hash string) (sourceartifact.RootedSource, error) {
+	return s.sourceArtifactOwner.ResolveUnboundRootedSource(ctx, hash)
+}

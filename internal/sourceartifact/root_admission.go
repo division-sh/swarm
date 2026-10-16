@@ -8,6 +8,7 @@ import (
 )
 
 var ErrRootAdmissionMissing = errors.New("source root admission is unavailable")
+var ErrRootAdmissionAmbiguous = errors.New("source root admission is ambiguous")
 
 // RootAdmission is frozen root evidence, separate from byte-content identity.
 type RootAdmission struct {

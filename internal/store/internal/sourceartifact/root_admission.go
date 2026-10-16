@@ -35,6 +35,36 @@ type rootAdmissionQueryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+// Only unbound selection may discover a sole retained pair. Bound operations
+// use loadRootedSource with their frozen reference, never this fallback.
+func resolveUnboundRootedSource(ctx context.Context, queryer rootAdmissionQueryer, hash string, postgres bool) (sourceartifact.RootedSource, error) {
+	if err := sourceartifact.ValidateHash(hash); err != nil {
+		return sourceartifact.RootedSource{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return sourceartifact.RootedSource{}, err
+	}
+	query := `SELECT COUNT(*), COALESCE(MIN(root_directory), '') FROM source_root_admissions WHERE bundle_hash = ?`
+	if postgres {
+		query = `SELECT COUNT(*), COALESCE(MIN(root_directory), '') FROM source_root_admissions WHERE bundle_hash = $1`
+	}
+	var count int64
+	var directory string
+	if err := queryer.QueryRowContext(ctx, query, hash).Scan(&count, &directory); err != nil {
+		return sourceartifact.RootedSource{}, fmt.Errorf("resolve unbound source root admission: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return sourceartifact.RootedSource{}, err
+	}
+	if count == 0 {
+		return sourceartifact.RootedSource{}, sourceartifact.ErrRootAdmissionMissing
+	}
+	if count != 1 {
+		return sourceartifact.RootedSource{}, fmt.Errorf("%w for %s: %d retained roots; use existing bound source evidence", sourceartifact.ErrRootAdmissionAmbiguous, hash, count)
+	}
+	return loadRootedSource(ctx, queryer, sourceartifact.RootAdmissionReference{BundleHash: hash, RootDirectory: directory}, postgres)
+}
+
 func loadRootedSource(ctx context.Context, queryer rootAdmissionQueryer, reference sourceartifact.RootAdmissionReference, postgres bool) (sourceartifact.RootedSource, error) {
 	if err := reference.Validate(); err != nil {
 		return sourceartifact.RootedSource{}, err

@@ -29,3 +29,10 @@ func (s *SQLite) GetRootedSource(ctx context.Context, reference sourceartifact.R
 	}
 	return loadRootedSource(ctx, s.backend, reference, false)
 }
+
+func (s *SQLite) ResolveUnboundRootedSource(ctx context.Context, hash string) (sourceartifact.RootedSource, error) {
+	if err := s.schemaGuard(); err != nil {
+		return sourceartifact.RootedSource{}, err
+	}
+	return resolveUnboundRootedSource(ctx, s.backend, hash, false)
+}

@@ -30,3 +30,10 @@ func (s *Postgres) GetRootedSource(ctx context.Context, reference sourceartifact
 	}
 	return loadRootedSource(ctx, s.backend, reference, true)
 }
+
+func (s *Postgres) ResolveUnboundRootedSource(ctx context.Context, hash string) (sourceartifact.RootedSource, error) {
+	if err := s.schemaGuard(); err != nil {
+		return sourceartifact.RootedSource{}, err
+	}
+	return resolveUnboundRootedSource(ctx, s.backend, hash, true)
+}
