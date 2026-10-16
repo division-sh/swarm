@@ -137,7 +137,7 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 				terminal.RequestEventID != started.RequestEventID || terminal.ExecutionBinding != started.ExecutionBinding || calls.Load() != 1 {
 				t.Fatal("takeover lost original identity or repeated the HTTP call")
 			}
-			if err := runtimepipeline.ValidateActivityAttemptExecutionIdentity(terminal, started); err != nil {
+			if err := runtimepipeline.ValidateActivityAttemptExecutionIdentity(terminal.ActivityAttemptRecord, started); err != nil {
 				t.Fatal(err)
 			}
 			for range 2 {
@@ -146,7 +146,26 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 					t.Fatalf("recovery replay changed the original result: %v", err)
 				}
 			}
-			if _, changed, err := journal.CompleteActivityAttempt(ctx, terminal); err == nil || changed {
+			if err := pc.PublishRecoveredHTTPActivity(ctx, terminal); err != nil {
+				t.Fatalf("acknowledged native result publication: %v", err)
+			}
+			result := loadActivityResultForProof(t, ctx, selected, terminal.ResultEventID)
+			if !result.Event.Event().CreatedAt().Equal(*terminal.CompletedAt) {
+				t.Fatal("recovery publication changed the original terminal timestamp")
+			}
+			beforeReplay := storetest.ObserveActivityResultPublicationStorage(t, ctx, selected.events)
+			if err := pc.PublishRecoveredHTTPActivity(ctx, terminal); err != nil {
+				t.Fatalf("exact recovered result replay: %v", err)
+			}
+			if !reflect.DeepEqual(result, loadActivityResultForProof(t, ctx, selected, terminal.ResultEventID)) ||
+				!reflect.DeepEqual(beforeReplay, storetest.ObserveActivityResultPublicationStorage(t, ctx, selected.events)) ||
+				storetest.ObserveEventCardinality(t, ctx, selected.events, terminal.ResultEventID) != 1 || calls.Load() != 1 {
+				t.Fatal("result replay changed durable publication or repeated the HTTP call")
+			}
+			if settled, err := startupownership.ReconcileDisplacedHTTPActivities(ctx, successor); err != nil || len(settled.Results) != 0 {
+				t.Fatalf("published original result retained a recovery obligation: %v", err)
+			}
+			if _, changed, err := journal.CompleteActivityAttempt(ctx, terminal.ActivityAttemptRecord); err == nil || changed {
 				t.Fatal("late predecessor writer retained permission after displacement")
 			}
 			finishProvider()
