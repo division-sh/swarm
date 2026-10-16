@@ -55,6 +55,7 @@ func TestActivityMockTerminalTimestampReplayDoesNotRequireCurrentResponsePlan(t 
 				MockConnectorResponses: plan,
 			})
 			intent = seedSelectedActivitySource(t, ctx, selected, first, intent)
+			_, releaseJournal := installActivityReplayJournal(t, ctx, selected, firstBus, first)
 			if err := runtimepipeline.ExecuteActivityIntentForTest(ctx, first, nil, intent); err != nil {
 				t.Fatalf("execute initial mock activity: %v", err)
 			}
@@ -67,6 +68,7 @@ func TestActivityMockTerminalTimestampReplayDoesNotRequireCurrentResponsePlan(t 
 			if err := firstBus.WaitForQuiescence(ctx); err != nil {
 				t.Fatal(err)
 			}
+			releaseJournal()
 			if err := closeStore(); err != nil {
 				t.Fatal(err)
 			}

@@ -45,6 +45,7 @@ func TestKeyFreeHTTPActivityFixedSettlementBothStores(t *testing.T) {
 					pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
 					intent := runtimepipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString())
 					intent = seedSelectedActivitySource(t, ctx, selected, pc, intent)
+					_, releaseJournal := installActivityReplayJournal(t, ctx, selected, bus, pc)
 					var calls atomic.Int32
 					interrupted := &fixedHTTPInterruptedBody{cause: errors.New("provider body interrupted")}
 					client := &http.Client{Timeout: time.Millisecond, Transport: activityTerminalRoundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -101,6 +102,7 @@ func TestKeyFreeHTTPActivityFixedSettlementBothStores(t *testing.T) {
 					if err := bus.WaitForQuiescence(ctx); err != nil {
 						t.Fatal(err)
 					}
+					releaseJournal()
 					if err := closeStore(); err != nil {
 						t.Fatal(err)
 					}
