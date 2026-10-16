@@ -127,6 +127,23 @@ func TestSQLiteStatementsForPlanTranslatesDeliveryAuthorityBundleHashExactly(t *
 	}
 }
 
+func TestS1SQLiteSelectedTargetHashPredicateUsesExactColumn(t *testing.T) {
+	statements, err := SQLiteStatementsForPlan(SchemaTableDDL{
+		TableName: "run_fork_selected_contract_bindings", SchemaKind: "platform_spec",
+		Statements: []string{`CREATE TABLE IF NOT EXISTS run_fork_selected_contract_bindings (
+    bundle_hash TEXT CHECK (bundle_hash IS NULL OR bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
+    target_bundle_hash TEXT NOT NULL CHECK (target_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$')
+)`},
+	})
+	if err != nil || len(statements) != 1 {
+		t.Fatalf("render selected target: %#v, %v", statements, err)
+	}
+	if !strings.Contains(statements[0], "CHECK ("+sqliteBundleHashPredicate("target_bundle_hash")+")") ||
+		!strings.Contains(statements[0], "bundle_hash IS NULL OR "+sqliteBundleHashPredicate("bundle_hash")) || strings.Contains(statements[0], "target_(") {
+		t.Fatalf("target column or nullable selection predicate was partially rewritten: %s", statements[0])
+	}
+}
+
 func TestSQLiteStatementsForPlanTranslatesLifecycleBundleHashExactly(t *testing.T) {
 	t.Parallel()
 
