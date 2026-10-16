@@ -58,6 +58,15 @@ func completionResumeJournalEligible(recovered completionRecoveryAttempt, attemp
 		journal.SessionID != attempt.Authority.Target.SessionID || journal.BodyFingerprint != recovered.RequestFingerprint {
 		return false, nil
 	}
+	identityContext := runtimeeffects.WithLogicalOperationIdentity(context.Background(), journal.LogicalOperationIdentity)
+	if err := runtimeeffects.ValidateProviderRequestJournalAdmission(identityContext, attempt.Authority, runtimeeffects.AuthorizeRequest{
+		OperationID: attempt.OperationID, Adapter: attempt.Adapter, Kind: attempt.Kind,
+		Class: runtimeeffects.EffectWriteOrUnknown, Transport: attempt.Transport,
+		RequestFingerprint: recovered.RequestFingerprint, AgentFrame: &frame, CapabilitySurface: &surface,
+		ProviderRequestJournal: &journal, Lineage: journal.Lineage,
+	}); err != nil {
+		return false, nil
+	}
 	// The independent renderer validates the original body and physical-request
 	// pins. Recovery never substitutes current configuration or conversation.
 	if _, err := runtimellm.RebuildProviderRequestJournal(journal, frame, surface, recovered.RequestFingerprint); err != nil {

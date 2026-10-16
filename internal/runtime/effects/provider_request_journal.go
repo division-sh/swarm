@@ -29,6 +29,7 @@ type ProviderRequestJournal struct {
 	SessionID                string            `json:"session_id"`
 	TurnOrdinal              int               `json:"turn_ordinal"`
 	LogicalOperationIdentity string            `json:"logical_operation_identity"`
+	Lineage                  map[string]string `json:"lineage"`
 	Memory                   *agentmemory.Plan `json:"memory"`
 	Method                   string            `json:"method"`
 	Destination              string            `json:"destination"`
@@ -45,6 +46,7 @@ func NewProviderRequestJournal(input ProviderRequestJournal, body []byte) (Provi
 	}
 	input.Rendering = bytes.Clone(input.Rendering)
 	input.SemanticHeaders = maps.Clone(input.SemanticHeaders)
+	input.Lineage = maps.Clone(input.Lineage)
 	if input.Memory != nil {
 		memory := *input.Memory
 		input.Memory = &memory
@@ -211,7 +213,8 @@ func ValidateProviderRequestJournalAdmission(ctx context.Context, authority Auth
 		journal.FrameContentHash != request.AgentFrame.ContentHash || journal.SurfaceID != request.CapabilitySurface.ID ||
 		journal.SurfaceFingerprint != fingerprint || journal.SessionID != authority.Target.SessionID ||
 		journal.TurnOrdinal != request.CapabilitySurface.Authority.TurnOrdinal || *journal.Memory != authority.Target.Memory ||
-		journal.BodyFingerprint != request.RequestFingerprint || journal.LogicalOperationIdentity != logicalOperationIdentity(ctx) {
+		journal.BodyFingerprint != request.RequestFingerprint || journal.LogicalOperationIdentity != logicalOperationIdentity(ctx) ||
+		!maps.Equal(journal.Lineage, request.Lineage) {
 		return fmt.Errorf("provider request journal differs from its exact admitted request or execution coordinates")
 	}
 	operationID, err := canonicalOperationID(ctx, authority, request.Adapter, request.Lineage)

@@ -13,6 +13,7 @@ import (
 func TestProviderRequestJournalBindsPhysicalRequest(t *testing.T) {
 	payload := []byte(`{"model":"frozen","input":[{"count":1.0}]}`)
 	input := providerRequestJournalTestInput()
+	input.Lineage = map[string]string{"provider_call": "original-coordinate"}
 	journal, err := NewProviderRequestJournal(input, payload)
 	if err != nil {
 		t.Fatal(err)
@@ -31,7 +32,9 @@ func TestProviderRequestJournalBindsPhysicalRequest(t *testing.T) {
 	input.SemanticHeaders["content-type"] = "changed"
 	input.Rendering[0] = '['
 	input.Memory.Enabled = true
-	if decoded.SemanticHeaders["content-type"] != "application/json" || journal.Rendering[0] != '{' || journal.Memory.Enabled {
+	input.Lineage["provider_call"] = "changed"
+	if decoded.SemanticHeaders["content-type"] != "application/json" || journal.Rendering[0] != '{' || journal.Memory.Enabled ||
+		journal.Lineage["provider_call"] != "original-coordinate" || decoded.Lineage["provider_call"] != "original-coordinate" {
 		t.Fatal("journal retained caller-owned mutable inputs")
 	}
 	for _, scenario := range []string{"body", "operation", "destination", "method", "version_header", "body_pin", "request_pin", "missing_rendering", "unknown_version"} {

@@ -182,6 +182,46 @@ func TestProviderResumeTakeoverPreservesTerminalFallbackBothStores(t *testing.T)
 	}
 }
 
+func TestProviderResumeTakeoverPreservesOriginalLogicalLineageBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture, _ := openProviderJournalFixture(t, backend, agentmemory.Plan{})
+			ctx, journal, frame, _, body := providerJournalAdmissionInputs(t, fixture)
+			lineage := map[string]string{"provider_call": "original-call-coordinate"}
+			handle, err := effects.BeginJournaledManagedCompletion(ctx, "anthropic_api", body, frame, journal, lineage)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := handle.MarkLaunched(ctx); err != nil {
+				t.Fatal(err)
+			}
+			before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			original := providerResumeSnapshotRow(t, before, "runtime_external_effect_operations", "operation_id", handle.Attempt().OperationID)
+			grant, request, _ := prepareProviderTakeover(t, fixture, nil)
+			if _, err := grant.CommitAgentLifecycleTransition(ctx, request); err != nil {
+				t.Fatal(err)
+			}
+			after, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			delivery := providerResumeSnapshotRow(t, after, "event_deliveries", "delivery_id", fixture.origin.DeliveryID())
+			if status, _ := delivery["status"].Text(); status != "failed" {
+				t.Fatal("exact original nonempty lineage did not retain its budgeted continuation")
+			}
+			retained := providerResumeSnapshotRow(t, after, "runtime_external_effect_operations", "operation_id", handle.Attempt().OperationID)
+			for _, column := range []string{"authority_evidence", "lineage", "request_fingerprint", "agent_frame_bytes", "bundle_hash", "runtime_epoch", "generation"} {
+				if _, exists := original[column]; !exists || !reflect.DeepEqual(original[column], retained[column]) {
+					t.Fatalf("startup rewrote original logical operation %s", column)
+				}
+			}
+		})
+	}
+}
+
 func providerResumeSnapshotRow(t *testing.T, snapshot map[string]SelectedForkStorageTableSnapshot, table, column, id string) map[string]SelectedForkSnapshotCell {
 	t.Helper()
 	rows, err := DecodeSelectedForkSnapshotRowsForTest(snapshot[table])

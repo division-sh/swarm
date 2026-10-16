@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -1091,6 +1092,7 @@ func BeginJournaledManagedCompletion(ctx context.Context, adapter string, reques
 	if err := journal.ValidateRequest(request, Fingerprint(request)); err != nil {
 		return nil, err
 	}
+	journal.Lineage = maps.Clone(lineage)
 	return beginCompletion(ctx, adapter, request, &frame, &journal, lineage)
 }
 
