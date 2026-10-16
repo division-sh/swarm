@@ -48,6 +48,7 @@ func TestMigrationPhysicalLedgerInventoryRejectsForeignMissingAndDuplicateEdges(
 				"wrong caller":     {{Scope: finding.Scope + "Sibling", Kind: finding.Kind}},
 				"extra same owner": {finding, {Scope: finding.Scope, Kind: finding.Kind + "_other"}},
 				"delivery ledger":  {finding, {Scope: "store/internal/backend/delivery::ReadRepeatedFanOutSnapshotTx", Kind: "ledger_sql"}},
+				"raw decode":       {finding, {Scope: finding.Scope, Kind: "raw_decode"}},
 			} {
 				t.Run(name, func(t *testing.T) {
 					if got := historicalBoundaryProblems(findings, one, true); len(got) == 0 {
