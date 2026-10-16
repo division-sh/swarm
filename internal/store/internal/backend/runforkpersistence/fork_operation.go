@@ -291,6 +291,7 @@ func resolvedForkOperationForActivationTx(ctx context.Context, tx *sql.Tx, calle
 	if !found || record.Status != runfork.ForkOperationMaterialized || record.ForkRunID != lineage.ForkRunID ||
 		record.SemanticHash != semanticHash || record.Request.Actor != canonical.Actor ||
 		record.Request.IdempotencyKey != canonical.IdempotencyKey || record.Request.TransportHash != canonical.TransportHash ||
+		record.Request.TargetRootReference != lineage.ForkRootReference ||
 		record.Request.SourceRunID != lineage.SourceRunID || record.Request.TargetBundleHash != lineage.ForkBundleHash {
 		return runfork.ForkOperationRequest{}, fmt.Errorf("selected activation differs from materialized fork operation")
 	}
@@ -305,8 +306,10 @@ func resolvedForkOperationForActivationTx(ctx context.Context, tx *sql.Tx, calle
 		WHERE binding_id=$1 AND fork_run_id=$2 AND source_run_id=$3
 		AND fork_point_kind=$4 AND fork_revision=$5 AND COALESCE(CAST(fork_event_id AS TEXT),'')=$6
 		AND mode=$7 AND COALESCE(bundle_hash,'')=$8
+		AND target_bundle_hash=$9 AND source_root_directory=$10
 	)`, record.BindingID, lineage.ForkRunID, lineage.SourceRunID, point.Kind, point.Revision, point.EventID,
-		record.Request.ContractSelection.Mode, record.Request.ContractSelection.BundleHash).Scan(&bound)
+		record.Request.ContractSelection.Mode, record.Request.ContractSelection.BundleHash,
+		record.Request.TargetRootReference.BundleHash, record.Request.TargetRootReference.RootDirectory).Scan(&bound)
 	if err != nil {
 		return runfork.ForkOperationRequest{}, fmt.Errorf("verify selected fork operation binding: %w", err)
 	}

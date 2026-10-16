@@ -93,7 +93,7 @@ func activateRunForkForSelectedContractExecution(ctx context.Context, req runfor
 			return fmt.Errorf("load selected contract binding: %w", err)
 		}
 		result.SelectedContractBinding = &binding
-		if binding.SourceRunID != lineage.SourceRunID || binding.ForkPoint != lineage.ForkPoint {
+		if binding.SourceRunID != lineage.SourceRunID || binding.ForkPoint != lineage.ForkPoint || binding.TargetRootReference != lineage.ForkRootReference {
 			return fmt.Errorf("selected-contract fork activation binding differs from child origin")
 		}
 

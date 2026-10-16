@@ -11,6 +11,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
@@ -20,6 +21,7 @@ import (
 )
 
 type runForkActivationLineage struct {
+	ForkRootReference sourceartifact.RootAdmissionReference
 	ForkRunID         string
 	ForkStatus        string
 	ForkBundleHash    string
@@ -384,11 +386,12 @@ func loadRunForkActivationLineage(ctx context.Context, lifecycle *privaterunlife
 		)
 	}
 	lineage := runForkActivationLineage{
-		ForkRunID:      snapshot.RunID,
-		ForkStatus:     string(snapshot.State),
-		ForkBundleHash: snapshot.BundleHash,
-		SourceRunID:    snapshot.Origin.SourceRunID(),
-		ForkEventID:    snapshot.Origin.SourceEventID(),
+		ForkRunID:         snapshot.RunID,
+		ForkStatus:        string(snapshot.State),
+		ForkBundleHash:    snapshot.BundleHash,
+		ForkRootReference: snapshot.RootReference,
+		SourceRunID:       snapshot.Origin.SourceRunID(),
+		ForkEventID:       snapshot.Origin.SourceEventID(),
 		ForkPoint: runfork.RunForkPoint{Kind: snapshot.Origin.ForkPointKind(), Revision: snapshot.Origin.ForkRevision(),
 			EventID: snapshot.Origin.SourceEventID()},
 	}
@@ -450,7 +453,8 @@ func loadSQLiteRunForkActivationLineage(ctx context.Context, lifecycle *privater
 	}
 	lineage := runForkActivationLineage{
 		ForkRunID: snapshot.RunID, ForkStatus: string(snapshot.State), ForkBundleHash: snapshot.BundleHash,
-		SourceRunID: snapshot.Origin.SourceRunID(), ForkEventID: snapshot.Origin.SourceEventID(),
+		ForkRootReference: snapshot.RootReference,
+		SourceRunID:       snapshot.Origin.SourceRunID(), ForkEventID: snapshot.Origin.SourceEventID(),
 		ForkPoint: runfork.RunForkPoint{Kind: snapshot.Origin.ForkPointKind(), Revision: snapshot.Origin.ForkRevision(),
 			EventID: snapshot.Origin.SourceEventID()},
 	}
