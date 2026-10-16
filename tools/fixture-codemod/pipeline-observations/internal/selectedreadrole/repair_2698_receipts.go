@@ -93,6 +93,9 @@ func repair2698CleanupHistoricalSource(root, path string, actual []byte) ([]byte
 }
 
 func Repair2698SuccessorHistoricalSource(root, path string, current []byte) ([]byte, error) {
+	if path == repair2698SchedulePath {
+		return repair2698ScheduleHistoricalSource(root, path, current)
+	}
 	if path == Repair2698CleanupPath {
 		return repair2698CleanupHistoricalSource(root, path, current)
 	}

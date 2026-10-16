@@ -166,10 +166,24 @@ func debtRepair2698CleanupHistoricalSource(root, path string, actual []byte) ([]
 }
 
 func debtRepair2698SuccessorHistoricalSource(root, path string, current []byte) ([]byte, error) {
+	if path == debtRepair2698SchedulePath {
+		return debtRepair2698ScheduleHistoricalSource(root, path, current)
+	}
 	if path == debtRepair2698CleanupSource {
 		return debtRepair2698CleanupHistoricalSource(root, path, current)
 	}
 	return debtRepair2698FixtureNameHistoricalSource(root, path, current)
+}
+
+func debtRepair2698ScheduleHistoricalSource(root, path string, actual []byte) ([]byte, error) {
+	if path != debtRepair2698SchedulePath || debtBaselineChecksum(actual) != debtRepair2698ScheduleAfterSHA {
+		return actual, nil
+	}
+	current, err := os.ReadFile(filepath.Join(root, path))
+	if err != nil || !bytes.Equal(current, actual) {
+		return nil, fmt.Errorf("schedule reader inverse does not describe actual copied source: %v", err)
+	}
+	return debtRepair2698SignedSource(root, debtRepair2698ScheduleBefore, path, debtRepair2698ScheduleBeforeSHA)
 }
 
 func debtRepair2698ReadPacket(root string) (debtRepair2698SourcePacket, error) {
@@ -485,6 +499,51 @@ func debtRepair2698Round2UnrefreshedBaseline(root string, metadata, data []byte,
 	return baseline, nil
 }
 
+func debtRepair2698ScheduleCollectorTransition(base, current string, trusted, head authorityDebtBaseline, proofs ...debtDeliveryRetirementProof) bool {
+	if current != debtRepair2698ScheduleCollectorTo || head.Collector != current || trusted.Collector != base ||
+		trusted.BootstrapSource != debtBootstrapSource || head.BootstrapSource != debtBootstrapSource || len(proofs) != 1 {
+		return false
+	}
+	root := proofs[0].Root
+	if debtCatchUpCollectorSource(root) != nil {
+		return false
+	}
+	original, _, err := debtCatchUpSignedBaseline(root, debtRepair2698ScheduleBefore, debtRepair2698Round2CollectorTo)
+	if err != nil {
+		return false
+	}
+	if base == debtRepair2698Round2CollectorTo {
+		if !debtSitesEqual(trusted.Sites, original.Sites) {
+			return false
+		}
+	} else {
+		intermediate := head
+		intermediate.Collector = debtRepair2698Round2CollectorTo
+		if !debtRepair2698Round2CollectorTransition(base, intermediate.Collector, trusted, intermediate, proofs...) {
+			return false
+		}
+	}
+	return len(authorityDebtRatchet(proofs[0].Actual, head.Sites, original.Sites, original.Sites, proofs[0])) == 0
+}
+
+func debtRepair2698ScheduleUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, historical bool, prior error) (authorityDebtBaseline, error) {
+	if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+		return baseline, prior
+	}
+	if _, err := debtParseCollectorMetadata(metadata, data, debtRepair2698Round2CollectorTo); err != nil {
+		return baseline, err
+	}
+	original, _, err := debtCatchUpSignedBaseline(root, debtRepair2698ScheduleBefore, debtRepair2698Round2CollectorTo)
+	if err != nil || baseline.Collector != debtCacheCollectorFrom || baseline.BootstrapSource != debtBootstrapSource || !debtSitesEqual(baseline.Sites, original.Sites) {
+		return baseline, fmt.Errorf("schedule reader metadata lost its exact signed predecessor: %v", err)
+	}
+	if err := debtCatchUpCollectorSource(root); err != nil {
+		return baseline, err
+	}
+	baseline.Collector = debtRepair2698ScheduleCollectorTo
+	return baseline, nil
+}
+
 type debtCatchUpSourcePacket struct {
 	Base, Master, Lane string
 	Files              []debtCatchUpSourceFile
@@ -627,7 +686,7 @@ func debtCatchUpSignedBaseline(root, ref, collector string) (authorityDebtBaseli
 
 func debtCatchUpCollectorSource(root string) error {
 	actual, err := debtCollectorDigest(root)
-	if err != nil || (actual != debtCatchUpCollectorTo && actual != debtCatchUpFreshnessCollectorTo && actual != debtCatchUpNativeEntryCollectorTo && actual != debtRepair2698CollectorTo && actual != debtRepair2698ProofCostCollectorTo && actual != debtRepair2698CleanupCollectorTo && actual != debtRepair2698Round2CollectorTo) {
+	if err != nil || (actual != debtCatchUpCollectorTo && actual != debtCatchUpFreshnessCollectorTo && actual != debtCatchUpNativeEntryCollectorTo && actual != debtRepair2698CollectorTo && actual != debtRepair2698ProofCostCollectorTo && actual != debtRepair2698CleanupCollectorTo && actual != debtRepair2698Round2CollectorTo && actual != debtRepair2698ScheduleCollectorTo) {
 		return fmt.Errorf("joined collector is not its exact enumerated source: %s: %v", actual, err)
 	}
 	if actual == debtCatchUpFreshnessCollectorTo {
@@ -635,7 +694,7 @@ func debtCatchUpCollectorSource(root string) error {
 			return err
 		}
 	}
-	if actual == debtCatchUpNativeEntryCollectorTo || actual == debtRepair2698CollectorTo || actual == debtRepair2698ProofCostCollectorTo || actual == debtRepair2698CleanupCollectorTo || actual == debtRepair2698Round2CollectorTo {
+	if actual == debtCatchUpNativeEntryCollectorTo || actual == debtRepair2698CollectorTo || actual == debtRepair2698ProofCostCollectorTo || actual == debtRepair2698CleanupCollectorTo || actual == debtRepair2698Round2CollectorTo || actual == debtRepair2698ScheduleCollectorTo {
 		if err := debtCatchUpNativeEntryOwnerSource(root); err != nil {
 			return err
 		}
@@ -644,9 +703,15 @@ func debtCatchUpCollectorSource(root string) error {
 	if err != nil {
 		return err
 	}
-	if actual == debtRepair2698CollectorTo || actual == debtRepair2698ProofCostCollectorTo || actual == debtRepair2698CleanupCollectorTo || actual == debtRepair2698Round2CollectorTo {
+	if actual == debtRepair2698CollectorTo || actual == debtRepair2698ProofCostCollectorTo || actual == debtRepair2698CleanupCollectorTo || actual == debtRepair2698Round2CollectorTo || actual == debtRepair2698ScheduleCollectorTo {
 		if err := debtRepair2698SourcePolicy(root, packet); err != nil {
 			return err
+		}
+	}
+	if actual == debtRepair2698ScheduleCollectorTo {
+		raw, err := os.ReadFile(filepath.Join(root, debtRepair2698SchedulePath))
+		if err != nil || debtBaselineChecksum(raw) != debtRepair2698ScheduleAfterSHA {
+			return fmt.Errorf("schedule reader actual endpoint changed: %v", err)
 		}
 	}
 	for _, file := range packet.Files {
@@ -654,7 +719,7 @@ func debtCatchUpCollectorSource(root string) error {
 		if file.ComposedSHA256 == "absent" && os.IsNotExist(err) {
 			continue
 		}
-		if err == nil && (actual == debtRepair2698CollectorTo || actual == debtRepair2698ProofCostCollectorTo || actual == debtRepair2698CleanupCollectorTo || actual == debtRepair2698Round2CollectorTo) {
+		if err == nil && (actual == debtRepair2698CollectorTo || actual == debtRepair2698ProofCostCollectorTo || actual == debtRepair2698CleanupCollectorTo || actual == debtRepair2698Round2CollectorTo || actual == debtRepair2698ScheduleCollectorTo) {
 			raw, err = debtRepair2698HistoricalSource(root, file.File, raw)
 		}
 		if err != nil || debtBaselineChecksum(raw) != file.ComposedSHA256 {
@@ -966,6 +1031,8 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 func debtSourceUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, collector string, historical bool, prior error) (authorityDebtBaseline, error, bool) {
 	var owner func(string, []byte, []byte, authorityDebtBaseline, bool, error) (authorityDebtBaseline, error)
 	switch collector {
+	case debtRepair2698ScheduleCollectorTo:
+		owner = debtRepair2698ScheduleUnrefreshedBaseline
 	case debtRepair2698Round2CollectorTo:
 		owner = debtRepair2698Round2UnrefreshedBaseline
 	case debtRepair2698CleanupCollectorTo:

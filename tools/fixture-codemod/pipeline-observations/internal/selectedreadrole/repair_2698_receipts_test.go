@@ -13,6 +13,7 @@ import (
 
 func TestRepair2698SourceCompositionPreservesBothSignedCuts(t *testing.T) {
 	root := filepath.Clean("../../../../..")
+	t.Run("schedule-original-reader", func(t *testing.T) { assertRepair2698ScheduleReaderInverse(t, root) })
 	pins, err := Repair2698Sources()
 	if err != nil {
 		t.Fatal(err)
@@ -60,6 +61,57 @@ func TestRepair2698SourceCompositionPreservesBothSignedCuts(t *testing.T) {
 				t.Fatal("foreign source path received an inverse:", err)
 			}
 		})
+	}
+}
+
+func assertRepair2698ScheduleReaderInverse(t *testing.T, root string) {
+	t.Helper()
+	current, err := os.ReadFile(filepath.Join(root, repair2698SchedulePath))
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(current)) != repair2698ScheduleAfterSHA {
+		t.Fatal("schedule fixture is not its exact repaired endpoint:", err)
+	}
+	before, err := Repair2698HistoricalSource(root, repair2698SchedulePath, current)
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(before)) != repair2698ScheduleBeforeSHA {
+		t.Fatal("schedule fixture lost its signed predecessor:", err)
+	}
+	for _, hostile := range [][]byte{before, append(bytes.Clone(current), '\n'), bytes.Replace(current, []byte("admit(\"7e0\")"), []byte("admit(\"8e0\")"), 1)} {
+		got, err := Repair2698HistoricalSource(root, repair2698SchedulePath, hostile)
+		if err == nil && !bytes.Equal(got, hostile) {
+			t.Fatal("stale, repeated or changed assertion source received a schedule inverse")
+		}
+	}
+	if got, err := Repair2698HistoricalSource(root, repair2698SchedulePath+".foreign", current); err != nil || !bytes.Equal(got, current) {
+		t.Fatal("foreign path received a schedule inverse:", err)
+	}
+	copy := t.TempDir()
+	gitdir, err := exec.Command("git", "-C", root, "rev-parse", "--absolute-git-dir").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(copy, ".git"), []byte("gitdir: "+strings.TrimSpace(string(gitdir))+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(copy, repair2698SchedulePath)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, current, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Repair2698HistoricalSource(copy, repair2698SchedulePath, current); err != nil || !bytes.Equal(got, before) {
+		t.Fatal("exact copied schedule source refused:", err)
+	}
+	if err := os.WriteFile(path, append(bytes.Clone(current), '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Repair2698HistoricalSource(copy, repair2698SchedulePath, current); err == nil {
+		t.Fatal("pristine gitdir hid a changed copied schedule fixture")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Repair2698HistoricalSource(copy, repair2698SchedulePath, current); err == nil {
+		t.Fatal("warm source view hid a missing copied schedule fixture")
 	}
 }
 
