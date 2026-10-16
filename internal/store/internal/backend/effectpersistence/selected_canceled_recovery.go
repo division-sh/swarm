@@ -29,7 +29,9 @@ func selectedCancellationRecoveryScope(ctx context.Context, tx *sql.Tx, executio
 		return scope, err
 	}
 	fact, found := correlation.SourceArtifactFactFromContext(ctx)
-	if !found || fact.Validate() != nil || fact.BundleHash() != bundleHash || !noLease || (scope.state != "failed" && scope.state != "closed") {
+	// Control-only recovery also fences its exact predecessor as quiesced;
+	// the enclosing selected transaction proves abandonment and succession.
+	if !found || fact.Validate() != nil || fact.BundleHash() != bundleHash || !noLease || (scope.state != "failed" && scope.state != "closed" && scope.state != "quiesced") {
 		return scope, fmt.Errorf("selected cancellation recovery lacks fenced exact-source possession")
 	}
 	return scope, nil
