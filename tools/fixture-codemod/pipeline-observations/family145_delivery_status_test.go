@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	_ "embed"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/deliverystatus"
@@ -113,9 +115,32 @@ func deliveryStatusHostiles(t *testing.T, pin deliverystatus.Pin) {
 }
 
 func TestFamily145DeliveryStatusOwnedInventoryHasNoRawCallerOrAlias(t *testing.T) {
-	root := "../../.."
-	calls, definitions := 0, 0
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
+	started := time.Now()
+	pins, forkPins := deliveryStatusPins(t), sourceForkPins(t)
+	inventory := deliveryStatusOwnedInventory("../../..", func(path, function, current string) bool {
+		current = servedObservationEarlierSource(t, path, function, current)
+		current = runphysical.Previous(forkPins, path, function, current)
+		current = family145EventNameCallerInverse(function, current)
+		return deliverystatus.Previous(pins, path, function, current) != current
+	})
+	t.Logf("delivery status inventory=%d/%d compositions=%d elapsed=%s", inventory.calls, inventory.definitions, inventory.compositions, time.Since(started))
+	if inventory.err != nil || inventory.calls != 28 || inventory.definitions != 4 {
+		t.Fatalf("delivery status complete inventory=%d/%d want28/4 err=%v", inventory.calls, inventory.definitions, inventory.err)
+	}
+}
+
+type deliveryStatusInventoryResult struct {
+	calls, definitions, compositions int
+	err                              error
+}
+
+func deliveryStatusOwnedInventory(root string, exactSource func(path, function, current string) bool) deliveryStatusInventoryResult {
+	var inventory deliveryStatusInventoryResult
+	var declarations []struct {
+		path string
+		fn   *ast.FuncDecl
+	}
+	walkErr := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
 			return err
 		}
@@ -127,19 +152,31 @@ func TestFamily145DeliveryStatusOwnedInventoryHasNoRawCallerOrAlias(t *testing.T
 		if err != nil {
 			return err
 		}
-		n, d := deliveryStatusOwnedFile(t, filepath.ToSlash(rel), file)
-		calls += n
-		definitions += d
+		n, d, matching, err := deliveryStatusOwnedFile(filepath.ToSlash(rel), file)
+		inventory.calls += n
+		inventory.definitions += d
+		inventory.err = errors.Join(inventory.err, err)
+		for _, fn := range matching {
+			declarations = append(declarations, struct {
+				path string
+				fn   *ast.FuncDecl
+			}{filepath.ToSlash(rel), fn})
+		}
 		return nil
 	})
-	if err != nil || calls != 28 || definitions != 4 {
-		t.Fatalf("delivery status complete inventory=%d/%d want28/4 err=%v", calls, definitions, err)
+	inventory.err = errors.Join(inventory.err, walkErr)
+	// Enumerate every call and alias before composing each complete declaration
+	// once. Nothing is retained between scans, including decoded source ASTs.
+	for _, decl := range declarations {
+		inventory.compositions++
+		if !exactSource(decl.path, decl.fn.Name.Name, requestkey.Node(decl.fn)) {
+			inventory.err = errors.Join(inventory.err, fmt.Errorf("delivery status caller escaped exact chain: %s %s", decl.path, decl.fn.Name.Name))
+		}
 	}
+	return inventory
 }
 
-func deliveryStatusOwnedFile(t *testing.T, path string, file *ast.File) (int, int) {
-	t.Helper()
-	calls, definitions := 0, 0
+func deliveryStatusOwnedFile(path string, file *ast.File) (calls, definitions int, matching []*ast.FuncDecl, failure error) {
 	allowed := map[token.Pos]bool{}
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -150,6 +187,7 @@ func deliveryStatusOwnedFile(t *testing.T, path string, file *ast.File) (int, in
 			definitions++
 			allowed[fn.Name.Pos()] = true
 		}
+		hasCall := false
 		ast.Inspect(fn, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
@@ -159,23 +197,21 @@ func deliveryStatusOwnedFile(t *testing.T, path string, file *ast.File) (int, in
 			if ok && deliverystatus.Helpers[id.Name] {
 				calls++
 				allowed[id.Pos()] = true
-				current := servedObservationEarlierSource(t, path, fn.Name.Name, requestkey.Node(fn))
-				current = runphysical.Previous(sourceForkPins(t), path, fn.Name.Name, current)
-				current = family145EventNameCallerInverse(fn.Name.Name, current)
-				if deliverystatus.Previous(deliveryStatusPins(t), path, fn.Name.Name, current) == current {
-					t.Error("delivery status caller escaped exact chain:", path, fn.Name.Name)
-				}
+				hasCall = true
 			}
 			return true
 		})
+		if hasCall {
+			matching = append(matching, fn)
+		}
 	}
 	ast.Inspect(file, func(node ast.Node) bool {
 		if id, ok := node.(*ast.Ident); ok && deliverystatus.Helpers[id.Name] && !allowed[id.Pos()] {
-			t.Error("delivery status helper escaped as alias/initializer:", path, id.Name)
+			failure = errors.Join(failure, fmt.Errorf("delivery status helper escaped as alias/initializer: %s %s", path, id.Name))
 		}
 		return true
 	})
-	return calls, definitions
+	return calls, definitions, matching, failure
 }
 
 func TestFamily145DeliveryStatusPollingStatementsAndExistingQueryOwnerAreUnchanged(t *testing.T) {
