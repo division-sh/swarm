@@ -955,7 +955,7 @@ contract_formats:
         generation. Recurring timers connected to a loop region or operation are
         rejected by verify, boot, and runtime construction.
       activity_claim: >
-        A loop-owned non_idempotent_write activity checks the durable generation
+        A loop-owned HTTP activity checks the durable generation
         and inserts or reads activity_attempts.started in one selected-store
         transaction under the entity lock, before credential resolution or
         outbound preparation. Repeat/close winning first yields stale admission
@@ -969,11 +969,9 @@ contract_formats:
         stamped cap but deterministically mint fork-local activation/revision IDs
         and remint generation-bearing event payloads, timer/join/accumulator
         identities, pending activity requests, journal evidence, and result IDs.
-        read_only activity requests use reexecute_read under fork-local identity.
-        Unapproved non_idempotent_write requests use reuse_recorded_result: accepted
-        terminal source evidence is copied into a fork-local terminal activity_attempt
-        and the existing dispatcher republishes that fork-local result without invoking
-        the connector. An activity.approval proposal pending at the fork point mints a
+        No authored class, retry budget or fork-policy field selects re-execution.
+        The separately tracked unapproved-activity continuation remains unavailable;
+        this retirement does not enable it. An activity.approval proposal pending at the fork point mints a
         fork-local card, request identity, effect hash, and continuation, clears source-run
         reply context authority, and requires a fresh decision. A revised or rejected proposal remains terminal evidence. An
         approved proposal may copy only an unambiguous succeeded or failed terminal
@@ -5194,7 +5192,7 @@ handler_specification:
       type: object
       purpose: >
         Declares a durable, node-owned external tool call. An activity without approval persists
-        platform.activity_requested in the handler transaction. An approved non_idempotent_write instead atomically persists
+        platform.activity_requested in the handler transaction. An approved HTTP activity instead atomically persists
         the handler mutation, a pending proposed_effect decision card, and its immutable continuation; no request, attempt,
         credential lookup, or provider call exists while that card is pending. Approval later releases the deterministic
         request through the same durable activity path. Every tool call executes only after its owning transaction commits
@@ -5204,11 +5202,11 @@ handler_specification:
         id: 'required for handler.rules activities; optional for handler-level activities'
         tool: string — authored tools.yaml tool id
         input: object — maps tool input field names to the same expression value grammar used by emit.fields
-        approval: 'optional object for non_idempotent_write only; canonical minimal form is `{decision: <stable-decision-id>}`'
+        approval: 'optional object for any authored HTTP activity; canonical minimal form is `{decision: <stable-decision-id>}`'
       mock_execution: >
         Mock-mode activity execution is admitted before journal, credential, preparation, or transport work. Only an exact
         effective provider_connector tool with a source-compiled deterministic response matching that tool's output_schema may execute,
-        and only through the non_idempotent_write attempt journal. Read-only tools, non-provider tools, and missing or invalid
+        and only through the activity attempt journal. Non-provider tools and missing or invalid
         responders fail closed without an attempt row. A newly claimed mock attempt materializes the response and persists it with
         execution_mode mock; duplicate and restart delivery reuse that terminal row without rematerializing the response.
         The process posture is an earlier ceiling: mock_only rejects every live activity intent before attempt claim,
@@ -5228,8 +5226,8 @@ handler_specification:
           verifier output, and effective node produces. They are not authored in events.yaml. The verifier MUST reject any
           generated result-event name that collides with an authored event or another generated activity result event after
           event-name normalization.
-        success_payload: activity_id, tool, effect_class, attempt, result. The result field is shaped by the tool output_schema.
-        failure_payload: activity_id, tool, effect_class, attempt, failure (required platform.failure/v1 envelope).
+        success_payload: activity_id, tool, result. The result field is shaped by the tool output_schema.
+        failure_payload: activity_id, tool, failure (required platform.failure/v1 envelope).
       generated_approval_events:
         naming: <flow>.<activity_id>.revision_requested and <flow>.<activity_id>.rejected.
         materialization: >
@@ -5238,15 +5236,14 @@ handler_specification:
           rejected carries an optional reason. Neither verdict creates platform.activity_requested or calls the provider.
       approval:
         grammar: 'activity.approval has exactly one required field: decision. Aliases, defaults, emit placement, and unknown fields fail closed.'
-        supported_class: >
-          V1 permits approval only for executable non_idempotent_write authored HTTP activities. read_only approval fails
-          with the teaching error that reads do not need approval because approvals guard outward effects. Other effect
-          classes and tool sources remain rejected by their existing admission owners.
+        supported_tools: >
+          Approval is permitted for every executable authored HTTP activity, including GET and POST. The same tool,
+          input, revision-consumer, decision-authority and credential owners remain required; method and a retired class
+          declaration do not select approval eligibility.
         immutable_effect: >
           Input expressions evaluate once into the closed semantic value model before hashing or persistence. The proposed
           effect contains the reserved deterministic request identity, tool, exact bundle_hash and workflow_version contract
-          pin, effect class,
-          admitted input, generated outcome events, source lineage, delivery context, and loop generation. Credentials and
+          pin, admitted input, generated outcome events, source lineage, delivery context, and loop generation. Credentials and
           transport authentication are excluded and resolve only after approval and attempt admission. effect_content_hash
           covers this full value; card_content_hash separately covers presentation and verdict-input material.
         continuation: >
@@ -5270,8 +5267,8 @@ handler_specification:
           supersede it.
         readback: >
           Mailbox list/get/subscribe and CLI projection expose authorization and dispatch as independent axes. approved never
-          implies sent. The authoring view exposes approval_points with exact flow, node, handler, activity, tool, decision,
-          and effect class for graph/prove consumers.
+          implies sent. The authoring view exposes approval_points with exact flow, node, handler, activity, tool and decision
+          for graph/prove consumers. No class or retry/fork policy is exposed by the approval point.
       durable_request_event:
         event_name: platform.activity_requested
         owner: platform_events.catalog["platform.activity_requested"]
@@ -5324,10 +5321,10 @@ handler_specification:
             transaction-start time do not produce this immutable fact. Submitted candidate timestamps are ignored.
             Duplicate terminal operations and reopened receipt reads preserve the original fact exactly, even when
             a later caller submits a different clock value; rollback persists neither the result nor its terminal time.
-          retry_default: max_attempts 1, no retry
-          fork_default: explicit proposed-effect/evidence disposition under runtime.run_fork.selected_contract_execution; never infer fork authorization from source approval
+          dispatch: One physical attempt per admitted request; no authored retry, class or fork-policy field exists. Native attempt1 identity remains an internal atomic fence.
+          fork_evidence: Explicit proposed-effect/evidence disposition under runtime.run_fork.selected_contract_execution; never infer fork authorization from source approval. The separately tracked unapproved-activity continuation remains unavailable.
           interruption: After physical launch, timeout, transport failure, interrupted response or process death has an uncertain outcome and never authorizes automatic redispatch. Preparation/admission refusal before launch and complete known provider responses remain distinct. A retained started row alone cannot prove the predecessor has lost commit authority.
-          retained_evidence: Historical request, journal and result class fields remain immutable evidence. They do not select an HTTP retry policy or authorize reexecute_read.
+          retained_evidence: Historical packets remain immutable evidence; current request/result/card schemas omit retired class, retry and fork-policy fields. Copied terminal evidence conveys no child dispatch or recovery authority.
           admission: The retired effect_class tool key is refused on presence with the teaching error defined by tool_model.http_interruption_rule; there is no ignored declaration or method-based safety inference.
       interactions:
         with_emit: PROHIBITED in Stage 1. Use generated activity result events instead. Immediate authored emit+activity ordering
@@ -11228,7 +11225,7 @@ tool_model:
       execution: "handler `activity` lowering to `platform.activity_requested`."
       non_idempotent_journal: "`activity_attempts`."
       mock_response_plan: >
-        One immutable exact-tool response plan satisfies mock-mode non_idempotent_write execution. It is compiled from every effective
+        One immutable exact-tool response plan satisfies mock-mode HTTP activity execution. It is compiled from every effective
         canonical provider_connector ToolSchemaEntry and output_schema after explicit connector-pack imports, regardless of whether
         the effective declaration is flow-local or pack-imported. Declaration origin is provenance/readback only and MUST NOT select
         response eligibility. Ordinary served construction and each disk- or catalog-loaded selected contract compile and consume the
@@ -11339,7 +11336,7 @@ tool_model:
       profile_owner: >
         Strict known-field files under `internal/providerconnectors/catalog/generator-profiles` are the reviewed semantic
         source for the selected operation id/path/method, stable published tool id, canonical body variant, required fields,
-        injected inputs, credential mode, permissions, non-idempotent effect class, response-success policy, output shape,
+        injected inputs, credential mode, permissions, response-success policy, output shape,
         fixture identity/status, and review status. These trust-bearing and product-narrowing fields have no inferred
         defaults. Unsupported OpenAPI forms, ambiguous variants, missing selected local parameter refs, unbound path
         parameters, missing 2xx declarations, unknown selected-operation fields, or profile/source disagreement fail closed.
@@ -14202,8 +14199,8 @@ flow_model:
           second transition-authoring owner.
         approval_point_rule: >
           The expanded authoring view projects every activity.approval from the canonical lowered activity-site owner as one
-          approval_points row containing flow, node, handler event, source location, activity, tool, decision, and effect
-          class. describe --graph and future describe --prove rendering consume this projection and MUST NOT rediscover
+          approval_points row containing flow, node, handler event, source location, activity, tool and decision.
+          describe --graph and future describe --prove rendering consume this projection and MUST NOT rediscover
           approval points from YAML or event names.
         source_location_rule: >
           Diagnostics in the expanded view must carry check_id, message,
@@ -17978,18 +17975,18 @@ platform_tables:
             INDEX idx_reply_contexts_correlation (request_correlation_id, state)
         );
     activity_attempts:
-      description: 'Durable attempt/result journal for executable non-idempotent activity calls. A platform.activity_requested
+      description: 'Durable attempt/result journal for executable HTTP activity calls. A platform.activity_requested
         event is the request owner; this table is the provider-attempt truth owner after the request is admitted. The
         runtime must insert the started row before outbound provider dispatch, update the row with the canonical terminal
         result after the dispatch outcome, and consume the row on request redelivery/replay/restart before deciding whether
-        a provider call may occur. For non_idempotent_write activities, any existing started, uncertain, succeeded, or
+        a provider call may occur. For every authored HTTP activity, any existing started, uncertain, succeeded, or
         failed row blocks automatic provider re-dispatch. Generated result events are published from this journaled terminal
         state, with CreatedAt taken from the store-returned or loaded completed_at and normalized by the canonical event
         constructor. First publication and replay consume the same durable timestamp, including recovery when no result event
         has yet been persisted. A loaded terminal receipt without a valid completion time fails closed before publication;
-        no fresh-clock fallback or compatibility repair is permitted. In live mode, static credentials and admitted managed credentials for provider_connector tools are resolved through
-        their respective credential-store/import-boundary owners before the started row is inserted; missing, unbound, unusable, or
-        mismatched credentials therefore fail before provider dispatch and do not create an attempt row. In mock mode, exact
+        no fresh-clock fallback or compatibility repair is permitted. In live mode, the started row is inserted before
+        static or admitted managed credential resolution and outbound preparation; missing, unbound, unusable, or
+        mismatched credentials produce a known failed terminal result without provider dispatch. In mock mode, exact
         provider-connector response admission occurs before the row is inserted and no credential owner or transport is consulted.
         Every row stores the mandatory causal execution_mode, and duplicate identity conflicts across modes fail closed.
         The nullable execution_binding is immutable attribution to the exact runtime_generation_grants snapshot:
@@ -17998,9 +17995,42 @@ platform_tables:
         installed role and prove the current process/grant and selected fences in its native transaction.
         Terminal historical reuse does not require an obsolete grant to remain live. On duplicate/redelivered
         request events, the existing row is consumed before static or managed credential resolution, token refresh, or outbound
-        preparation. response_mapping, rate_limit, MCP/platform/native/generated tools, idempotent_write, and long_running remain
+        preparation. response_mapping, rate_limit, and MCP/platform/native/generated tools remain
         split/fail-closed.'
-      ddl: "CREATE TABLE activity_attempts (\n    request_event_id UUID PRIMARY KEY,\n    run_id            UUID NOT NULL REFERENCES runs(run_id),\n    execution_mode    TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),\n    execution_binding JSONB,\n    source_event_id   UUID,\n    parent_event_id   UUID,\n    entity_id         UUID,\n    flow_instance     TEXT,\n    node_id           TEXT NOT NULL,\n    handler_event_key TEXT NOT NULL,\n    activity_id       TEXT NOT NULL,\n    tool              TEXT NOT NULL,\n    effect_class      TEXT NOT NULL CHECK (effect_class = 'non_idempotent_write'),\n    attempt           INTEGER NOT NULL DEFAULT 1 CHECK (attempt = 1),\n    status            TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'uncertain')),\n    success_event     TEXT NOT NULL,\n    failure_event     TEXT NOT NULL,\n    result_event_id   UUID,\n    result_event_type TEXT,\n    result_payload    JSONB,\n    failure           JSONB,\n    input_hash        TEXT NOT NULL,\n    loop_generation   JSONB NOT NULL DEFAULT '{}'::jsonb,\n    loop_stage        TEXT,\n    reply_context_id  TEXT REFERENCES reply_contexts(reply_context_id),\n    started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    completed_at      TIMESTAMPTZ,\n    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),\n    CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND failure IS NULL AND completed_at IS NULL) OR (status = 'succeeded' AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NULL AND completed_at IS NOT NULL) OR (status IN ('failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NOT NULL AND completed_at IS NOT NULL)),\n    INDEX idx_activity_attempts_run (run_id, started_at),\n    INDEX idx_activity_attempts_activity (run_id, activity_id, tool),\n    INDEX idx_activity_attempts_result_event (result_event_id) WHERE result_event_id IS NOT NULL\n);"
+      ddl: |
+        CREATE TABLE activity_attempts (
+            request_event_id UUID PRIMARY KEY,
+            run_id            UUID NOT NULL REFERENCES runs(run_id),
+            execution_mode    TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
+            execution_binding JSONB,
+            source_event_id   UUID,
+            parent_event_id   UUID,
+            entity_id         UUID,
+            flow_instance     TEXT,
+            node_id           TEXT NOT NULL,
+            handler_event_key TEXT NOT NULL,
+            activity_id       TEXT NOT NULL,
+            tool              TEXT NOT NULL,
+            attempt           INTEGER NOT NULL DEFAULT 1 CHECK (attempt = 1),
+            status            TEXT NOT NULL CHECK (status IN ('started', 'succeeded', 'failed', 'uncertain')),
+            success_event     TEXT NOT NULL,
+            failure_event     TEXT NOT NULL,
+            result_event_id   UUID,
+            result_event_type TEXT,
+            result_payload    JSONB,
+            failure           JSONB,
+            input_hash        TEXT NOT NULL,
+            loop_generation   JSONB NOT NULL DEFAULT '{}'::jsonb,
+            loop_stage        TEXT,
+            reply_context_id  TEXT REFERENCES reply_contexts(reply_context_id),
+            started_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            completed_at      TIMESTAMPTZ,
+            updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CHECK ((status = 'started' AND result_event_id IS NULL AND result_event_type IS NULL AND result_payload IS NULL AND failure IS NULL AND completed_at IS NULL) OR (status = 'succeeded' AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NULL AND completed_at IS NOT NULL) OR (status IN ('failed', 'uncertain') AND result_event_id IS NOT NULL AND result_event_type IS NOT NULL AND result_payload IS NOT NULL AND failure IS NOT NULL AND completed_at IS NOT NULL)),
+            INDEX idx_activity_attempts_run (run_id, started_at),
+            INDEX idx_activity_attempts_activity (run_id, activity_id, tool),
+            INDEX idx_activity_attempts_result_event (result_event_id) WHERE result_event_id IS NOT NULL
+        );
     run_fork_selected_contract_bindings:
       description: Durable selected-contract source binding for event or deployment-revision forks. One row binds a fork run to the selected
         contract source identity that was admitted before materialization. This is prerequisite fork-run state for future
@@ -22115,7 +22145,6 @@ platform_events:
           type: string?
           description: Required for a request released by proposed_effect approval; omitted for an immediate unapproved request.
         input: object
-        effect_class: string
         success_event: string
         failure_event: string
         revision_event:
@@ -22124,9 +22153,6 @@ platform_events:
         rejected_event:
           type: string?
           description: Generated typed rejection event for an approved activity.
-        retry_max_attempts: integer
-        retry_backoff: string
-        fork_policy: string
         entity_id: string
         node_id: string
         flow_id: string
@@ -22139,7 +22165,6 @@ platform_events:
         source_task_id: string
         parent_event_id: string
         chain_depth: integer
-        attempt: integer
         loop_generation:
           type: object?
           description: Durable bounded-loop attempt identity.

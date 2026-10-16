@@ -491,7 +491,7 @@ func assertCatalogActivityJournal(t *testing.T, ctx context.Context, h *runtimeH
 		result, resultFound := observed[record.ResultEventID]
 		if err != nil || !found || !resultFound || record.Status != wantStatus || record.Attempt != 1 ||
 			record.RunID != runID || record.SourceEventID != event.SourceEventID || record.CompletedAt == nil ||
-			record.ResultEventType != result.EventName || record.EffectClass != "non_idempotent_write" {
+			record.ResultEventType != result.EventName {
 			t.Fatalf("journal/public readback differs: record=%+v found=%t result=%+v err=%v", record, found, result, err)
 		}
 		return

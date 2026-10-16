@@ -29,7 +29,7 @@ func TestForkGenerationPreparationReconstructedOwnersBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				want, err := loopruntime.ForkGeneration(source.Generation, child.ForkRunID, payload.EntityID)
-				if err != nil || payload.Generation != want || want.Attempt != 2 || payload.Attempt != 1 {
+				if err != nil || payload.Generation != want || want.Attempt != 2 {
 					t.Fatalf("loop attempt confused with activity attempt: payload=%#v want=%#v err=%v", payload, want, err)
 				}
 				node, err := activityidentity.ParseOwnerKey(payload.NodeID)
@@ -41,7 +41,7 @@ func TestForkGenerationPreparationReconstructedOwnersBothStores(t *testing.T) {
 					ActivityID: payload.ActivityID, Tool: payload.Tool, Attempt: 1, RevisionID: want.RevisionID}
 				requestID := activityidentity.RequestEventID(fact)
 				copied, found, err := fixture.store.(activityTimestampJournal).LoadActivityAttempt(ctx, requestID)
-				if err != nil || !found || copied.Generation != want || copied.Status != status || copied.ResultPayload[want.RevisionField] != want.RevisionID || copied.ResultEventID != activityidentity.ResultEventID(fact, copied.ResultEventType) {
+				if err != nil || !found || copied.Attempt != 1 || copied.Generation != want || copied.Status != status || copied.ResultPayload[want.RevisionField] != want.RevisionID || copied.ResultEventID != activityidentity.ResultEventID(fact, copied.ResultEventType) {
 					t.Fatalf("initial exact generation result: %#v found=%v err=%v", copied, found, err)
 				}
 				before := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")

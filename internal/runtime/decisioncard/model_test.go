@@ -710,10 +710,10 @@ func TestProposedEffectContinuationValidationBindsAnchorSource(t *testing.T) {
 	continuation := ProposedEffectContinuation{
 		CardID: uuid.NewString(), RunID: "run-1", RequestEventID: uuid.NewString(), ActivityID: "send",
 		Tool: "provider.send", BundleHash: "bundle-hash", WorkflowVersion: "1", Input: semanticvalue.EmptyObject(),
-		EffectClass:  runtimecontracts.ActivityEffectClassNonIdempotentWrite,
+
 		SuccessEvent: "send.succeeded", FailureEvent: "send.failed", RevisionEvent: "send.revision_requested", RejectedEvent: "send.rejected",
 		EntityID: "entity-1", NodeID: "sender", FlowID: "support", FlowInstance: "root", HandlerEventKey: "support.send",
-		SourceEventID: uuid.NewString(), SourceRunID: "run-1", Attempt: 1,
+		SourceEventID: uuid.NewString(), SourceRunID: "run-1",
 		ExecutionMode: "live", State: ProposedEffectPending, CreatedAt: now, UpdatedAt: now,
 	}.Canonical()
 	effect, err := continuation.EffectValue()

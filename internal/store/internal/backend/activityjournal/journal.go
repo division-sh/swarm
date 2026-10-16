@@ -99,27 +99,27 @@ func start(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun Re
 	query := `
 		INSERT INTO activity_attempts (
 			request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
-			node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
+			node_id, handler_event_key, activity_id, tool, attempt, status,
 			success_event, failure_event, input_hash, loop_generation, loop_stage, reply_context_id, execution_mode, execution_binding
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
 		ON CONFLICT (request_event_id) DO NOTHING
 	`
 	if dialect == DialectPostgres {
 		query = `
 			INSERT INTO activity_attempts (
 				request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
-				node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
+				node_id, handler_event_key, activity_id, tool, attempt, status,
 				success_event, failure_event, input_hash, loop_generation, loop_stage, reply_context_id, execution_mode, execution_binding
 			) VALUES (
 				$1::uuid, $2::uuid, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, NULLIF($6, ''),
-				$7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, NULLIF($18, ''), NULLIF($19, ''), $20, $21::jsonb
+				$7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, NULLIF($17, ''), NULLIF($18, ''), $19, $20::jsonb
 			)
 			ON CONFLICT (request_event_id) DO NOTHING
 		`
 	}
 	result, err := tx.ExecContext(ctx, query,
 		record.RequestEventID, record.RunID, nullableUUID(record.SourceEventID), nullableUUID(record.ParentEventID), nullableUUID(record.EntityID), nullableString(record.FlowInstance),
-		record.NodeID, record.HandlerEventKey, record.ActivityID, record.Tool, record.EffectClass, record.Attempt, record.Status,
+		record.NodeID, record.HandlerEventKey, record.ActivityID, record.Tool, record.Attempt, record.Status,
 		record.SuccessEvent, record.FailureEvent, record.InputHash, string(generationJSON), nullableString(record.LoopStage), record.ReplyContextID, record.ExecutionMode, executionBinding,
 	)
 	if err != nil {
@@ -342,7 +342,7 @@ func Load(ctx context.Context, db QueryRower, dialect Dialect, requestEventID st
 
 const activityAttemptSelect = `
 	SELECT request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
-	       node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
+	       node_id, handler_event_key, activity_id, tool, attempt, status,
 	       success_event, failure_event, result_event_id, result_event_type, result_payload,
 	       failure, input_hash, loop_generation, loop_stage, reply_context_id, execution_mode,
 	       started_at, completed_at, updated_at, execution_binding
@@ -358,7 +358,7 @@ func scan(row interface{ Scan(...any) error }) (runtimepipeline.ActivityAttemptR
 	var executionBindingRaw any
 	if err := row.Scan(
 		&record.RequestEventID, &record.RunID, &sourceEventID, &parentEventID, &entityID, &flowInstance,
-		&record.NodeID, &record.HandlerEventKey, &record.ActivityID, &record.Tool, &record.EffectClass, &record.Attempt, &record.Status,
+		&record.NodeID, &record.HandlerEventKey, &record.ActivityID, &record.Tool, &record.Attempt, &record.Status,
 		&record.SuccessEvent, &record.FailureEvent, &resultEventID, &resultEventType, &rawPayload,
 		&rawFailure, &record.InputHash, &rawGeneration, &loopStage, &replyContextID, &record.ExecutionMode,
 		&startedAtRaw, &completedAtRaw, &updatedAtRaw, &executionBindingRaw,

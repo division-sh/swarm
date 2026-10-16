@@ -337,7 +337,7 @@ func TestProposedEffectReadbackKeepsAuthorizationAndDispatchAxesSeparateOnBothSt
 					RequestEventID: continuation.RequestEventID, RunID: runID, ExecutionMode: continuation.ExecutionMode, SourceEventID: continuation.SourceEventID,
 					EntityID: continuation.EntityID, FlowInstance: continuation.FlowInstance, NodeID: continuation.NodeID,
 					HandlerEventKey: continuation.HandlerEventKey, ActivityID: continuation.ActivityID, Tool: continuation.Tool,
-					EffectClass: string(continuation.EffectClass), Attempt: 1, Status: runtimepipeline.ActivityAttemptStatusStarted,
+					Attempt: 1, Status: runtimepipeline.ActivityAttemptStatusStarted,
 					SuccessEvent: continuation.SuccessEvent, FailureEvent: continuation.FailureEvent, InputHash: continuation.EffectContentHash,
 				})
 				if err != nil || !inserted {
@@ -592,10 +592,10 @@ func newProposedEffectTestCard(t *testing.T, runID string, now time.Time, genera
 		CardID: decisioncard.ProposedEffectCardID(requestID, "support_reply"), RunID: runID,
 		RequestEventID: requestID, ActivityID: "send_support_reply", Tool: "telegram.send_message", Input: input,
 		BundleHash: authorActivityTestBundleHash, WorkflowVersion: "1",
-		EffectClass:  runtimecontracts.ActivityEffectClassNonIdempotentWrite,
+
 		SuccessEvent: "support_reply.succeeded", FailureEvent: "support_reply.failed",
 		RevisionEvent: "support_reply.revision_requested", RejectedEvent: "support_reply.rejected",
-		RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
+
 		EntityID: entityID, NodeID: owner.Key(), FlowID: ".", FlowInstance: "root",
 		HandlerEventKey: "support.drafted", SourceEventID: uuid.NewString(), SourceRunID: runID,
 		Generation: generation, ExecutionMode: "live", ReplyContextID: "reply-context-source", State: decisioncard.ProposedEffectPending, CreatedAt: now, UpdatedAt: now,

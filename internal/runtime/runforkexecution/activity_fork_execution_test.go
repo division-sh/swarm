@@ -65,21 +65,21 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 		{
 			name:            "manual confirmation does not authorize another write",
 			effectClass:     runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-			forkPolicy:      runtimecontracts.ActivityForkRequireConfirmation,
+			forkPolicy:      "require_manual_confirmation",
 			resultEventType: "flow_a/connector.succeeded",
 			wantError:       "fork policy \"require_manual_confirmation\" is not executable",
 		},
 		{
 			name:               "read-only reexecutes exactly once",
 			effectClass:        runtimecontracts.ActivityEffectClassReadOnly,
-			forkPolicy:         runtimecontracts.ActivityForkReexecuteRead,
+			forkPolicy:         "reexecute_read",
 			resultEventType:    "flow_a/connector.succeeded",
 			wantConnectorCalls: 1,
 		},
 		{
 			name:                  "succeeded write publishes recorded result",
 			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-			forkPolicy:            runtimecontracts.ActivityForkReuseRecordedResult,
+			forkPolicy:            "reuse_recorded_result",
 			sourceAttemptStatus:   "succeeded",
 			resultEventType:       "flow_a/connector.succeeded",
 			wantForkAttemptStatus: "succeeded",
@@ -87,7 +87,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 		{
 			name:                  "failed write publishes recorded typed failure",
 			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-			forkPolicy:            runtimecontracts.ActivityForkReuseRecordedResult,
+			forkPolicy:            "reuse_recorded_result",
 			sourceAttemptStatus:   "failed",
 			resultEventType:       "flow_a/connector.failed",
 			failureClass:          string(runtimefailures.ClassDependencyUnavailable),
@@ -97,7 +97,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 		{
 			name:                  "uncertain write stays uncertain and publishes outcome-uncertain failure",
 			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-			forkPolicy:            runtimecontracts.ActivityForkReuseRecordedResult,
+			forkPolicy:            "reuse_recorded_result",
 			sourceAttemptStatus:   "uncertain",
 			resultEventType:       "flow_a/connector.failed",
 			failureClass:          string(runtimefailures.ClassOutcomeUncertain),
@@ -387,7 +387,7 @@ func selectedContractActivityDescriptorExists(descriptors []runtimeauthoractivit
 type selectedContractActivityForkCase struct {
 	name                  string
 	effectClass           runtimecontracts.ActivityEffectClass
-	forkPolicy            runtimecontracts.ActivityForkPolicy
+	forkPolicy            string
 	sourceAttemptStatus   string
 	resultEventType       string
 	failureClass          string
@@ -589,12 +589,12 @@ func seedSelectedContractActivityAttempt(t *testing.T, db activityForkFixtureDB,
 	if _, err := db.ExecContext(context.Background(), `
 		INSERT INTO activity_attempts (
 			request_event_id, run_id, execution_mode, source_event_id, entity_id, flow_instance, node_id, handler_event_key,
-			activity_id, tool, effect_class, attempt, status, success_event, failure_event,
+			activity_id, tool, attempt, status, success_event, failure_event,
 			result_event_id, result_event_type, result_payload, failure, input_hash, loop_generation, loop_stage,
 			started_at, completed_at, updated_at
 		) VALUES (
 			$1::uuid, $2::uuid, 'live', $3::uuid, $4::uuid, 'flow_a', $13, 'review.requested',
-			'connector', 'provider.connector', 'non_idempotent_write', 1, $5, 'flow_a/connector.succeeded', 'flow_a/connector.failed',
+			'connector', 'provider.connector', 1, $5, 'flow_a/connector.succeeded', 'flow_a/connector.failed',
 			$6::uuid, $7, $8::jsonb, $9::jsonb, $10, $11::jsonb, 'review', $12, $12, $12
 		)
 	`, requestEventID, fact.RunID, fact.SourceEventID, fact.EntityID, status, resultEventID, resultEventType,

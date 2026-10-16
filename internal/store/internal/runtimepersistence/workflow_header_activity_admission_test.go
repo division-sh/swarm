@@ -68,7 +68,7 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 					record := pipeline.ActivityAttemptRecord{
 						RequestEventID: uuid.NewString(), RunID: run, EntityID: req.Instance.EntityID, FlowInstance: req.Instance.InstancePath,
 						NodeID: activityidentity.MustNodeOwner(mustPersistenceNode(".", "writer")).Key(), HandlerEventKey: "request", ActivityID: "write", Tool: "provider.write",
-						EffectClass: "non_idempotent_write", Attempt: 1, ExecutionMode: executionmode.Live,
+						Attempt: 1, ExecutionMode: executionmode.Live,
 						SuccessEvent: "write.succeeded", FailureEvent: "write.failed", InputHash: "exact-input", Generation: loop.Generation(), LoopStage: "review",
 					}
 					if cell == "current" || cell == "stale" {

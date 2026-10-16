@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
@@ -61,6 +62,7 @@ type PipelineCoordinator struct {
 
 	module                 WorkflowModule
 	workflowStore          *workflowInstanceStore
+	activityJournalRole    atomic.Pointer[activityJournalRole]
 	expressionEval         *workflowExpressionEvaluator
 	timerScheduler         *Scheduler
 	genericSchedules       GenericScheduleWakeupOwner

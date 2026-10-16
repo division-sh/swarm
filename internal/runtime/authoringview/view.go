@@ -236,7 +236,6 @@ type ApprovalPointView struct {
 	ActivityID   string `json:"activity_id"`
 	Tool         string `json:"tool"`
 	Decision     string `json:"decision"`
-	EffectClass  string `json:"effect_class"`
 }
 
 type RequiredAgentsView struct {
@@ -420,7 +419,6 @@ func buildApprovalPoints(bundle *runtimecontracts.WorkflowContractBundle) ([]App
 			ActivityID:   result.ActivityID,
 			Tool:         strings.TrimSpace(site.Spec.Tool),
 			Decision:     strings.TrimSpace(site.Spec.Approval.Decision),
-			EffectClass:  string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		})
 	}
 	return out, nil
