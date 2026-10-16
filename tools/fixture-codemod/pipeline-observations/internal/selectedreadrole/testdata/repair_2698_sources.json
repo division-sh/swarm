@@ -1,0 +1,212 @@
+{
+  "BeforeCommit": "e857a1e482a2e08ab63f2e8169b4472e608cfdc2",
+  "AfterCommit": "dcd9143c696a854e16c072114f656887fd1a10bd",
+  "Authorization": "https://github.com/division-sh/swarm/pull/2698#issuecomment-6205327685",
+  "Files": [
+    {
+      "File": "internal/apiv1/agent_snapshot_atomicity_test.go",
+      "BeforeSHA256": "02b0f2dba8e136b66272c1d9a76f14faa96437056bb3c7c3a4f9ae125e07089c",
+      "AfterSHA256": "219066848fe9e263f01e294630dd4b009319dd3284b37efd94eaf57978d55cd3"
+    },
+    {
+      "File": "internal/apiv1/conversation_fork_commit_omission_probe_test.go",
+      "BeforeSHA256": "90d71c3e8edc001e810e4c9868b23ac818f4ccb3a03622b8d4172dab36ffda3e",
+      "AfterSHA256": "ed3d8676bfcf7336b6eb4667ad1525e45565743b781eccd9f81a570ed72e09c8"
+    },
+    {
+      "File": "internal/apiv1/operator_event_replay_test.go",
+      "BeforeSHA256": "87b53c4fc363ed984240c15f655340d5a619bbff64f730d2cb0ef9ef33e5e9a5",
+      "AfterSHA256": "9874ac96fa2f54c8a35a4a7ddec609e714ad35d8e024a436b376686e6a574d8c"
+    },
+    {
+      "File": "internal/apiv1/retired_dashboard_preservation_test.go",
+      "BeforeSHA256": "50381555b9e9511b3deced684cbf3059aa25c1c76b1213b51308c0bf714082ca",
+      "AfterSHA256": "59478a87860a33e7de6d37040fde6de93df00c71c92dde92c7b30cf2d213061d"
+    },
+    {
+      "File": "internal/apiv1/selected_store_read_supported_surface_test.go",
+      "BeforeSHA256": "30be4f18c3e9b0c3ea10becd4888f91a8172774fd792b84c72168dc82ece4ba5",
+      "AfterSHA256": "4cae4b765e7d3c1f14295852abf7404b56236efce7e26620f4d72645fc45c10f"
+    },
+    {
+      "File": "internal/apiv1/sqlite_observability_supported_surface_test.go",
+      "BeforeSHA256": "32283cb44884f006f9bc49094f3e4bcffb4b448af4ba869377605185791d836b",
+      "AfterSHA256": "8e216e2e7b4f11bff6e2fea1cd0a6d1c65c16fbc14ee22cf86ed7b65c5d492de"
+    },
+    {
+      "File": "internal/apiv1/sqlite_operator_read_supported_surface_test.go",
+      "BeforeSHA256": "2e864123aa81d29746c7b6c5376b79ca0604b9bd6fa213c70bda8e1085944b93",
+      "AfterSHA256": "f748c4fb3fb8b1a0a8bba0ef19c60060094c984a23292208f9aa5b1f95a6ef7d"
+    },
+    {
+      "File": "internal/runtime/bus/event_identity_dispatch_surface_test.go",
+      "BeforeSHA256": "bc7eb471193ce0faa0fb2e7490c908c05a5326e8c2bfebff0230bc1be162c8f7",
+      "AfterSHA256": "fe4e3af79ddce044b64e5bca82114273bc711f1cc84658dd328fde8a4b259ebf"
+    },
+    {
+      "File": "internal/runtime/bus/eventbus_agent_route_test.go",
+      "BeforeSHA256": "fe945b0259acc668d71412872079fc70801460da253b92a10d009f400de39417",
+      "AfterSHA256": "a86bf04b21b23cf6ae902477654b919a5d7edf79637dc1748203dd2ca9c6209b"
+    },
+    {
+      "File": "internal/runtime/bus/eventbus_publish_test.go",
+      "BeforeSHA256": "138e366ca4cdb5beb93aa02677739746828aeb7f5c6da2ef22200763dd9499f0",
+      "AfterSHA256": "37134ef31346bbf45a41906933bb03758a030531d12a3a61cb481be4e2ca1027"
+    },
+    {
+      "File": "internal/runtime/bus/pause_eligibility_test.go",
+      "BeforeSHA256": "d8229f13dadee9055576ff63ba02fca9eef7f67eeb5c4c36bb43dfc9dc7ca79a",
+      "AfterSHA256": "a396d29fe037f97eb22158542c053500b1dd48eb1c649a1bd4018ea3327a498c"
+    },
+    {
+      "File": "internal/runtime/conformance/a2_repeated_fan_out_conformance_test.go",
+      "BeforeSHA256": "83cccb6fa3229730907bc7ae439235c75f81071e6a0a9eb8b2e70e4a705304f6",
+      "AfterSHA256": "b51aa8ddd70a11e9a334acb9bf4a17ec10e52a1311783896fb540771f3aab825"
+    },
+    {
+      "File": "internal/runtime/conformance/managed_capability_test.go",
+      "BeforeSHA256": "cab6fedbb842442754bfb5e00a54e5918b04b885483854e617998672f4fec579",
+      "AfterSHA256": "714cf34cfc95e80963786eb4b43ec9524ed6ec420e7b65e74d37e5f898f326df"
+    },
+    {
+      "File": "internal/runtime/conformance/persisted_surfaces_test.go",
+      "BeforeSHA256": "98b1f1be796b5b3d2acaf87854df032d7d83a4becac0cf0cbbc2d864a474c5bc",
+      "AfterSHA256": "854e6468964a6273ba28dddd31dd8ae4f6538481ae8daa39ae561919c50901fb"
+    },
+    {
+      "File": "internal/runtime/manager/delivery_claim_ack_test.go",
+      "BeforeSHA256": "89c60b4d60f1d40af45871ebdcec3fc16fc7c562c9b65dc4899d4983ec71d7d9",
+      "AfterSHA256": "64924f3cbf1c812080827495802f125f50b1ba9d30c389e6a4e610c2dcafa4b3"
+    },
+    {
+      "File": "internal/runtime/manager/delivery_native_owner_external_test.go",
+      "BeforeSHA256": "0d884e8493a552708984e5e19980c65f063329ccc83a686235b74f29ddd17ccc",
+      "AfterSHA256": "5da079deed7aafebceffeb21c9bb78acda8f1bccbf6a88f25beb8a9d779e8e2e"
+    },
+    {
+      "File": "internal/runtime/manager/delivery_native_selected_external_test.go",
+      "BeforeSHA256": "a3d91954bf36f69fa303fd2c43586b4c24edaf7c4c495d15bf6df8c260ef765e",
+      "AfterSHA256": "bfced1e929844b246357ef7f89712ece64e81e85f40bdfe8a1da0c8cc96650ee"
+    },
+    {
+      "File": "internal/runtime/manager/execution_projection_test.go",
+      "BeforeSHA256": "389215e1e3c4f0b0028023945374b1f6272b0dbf46233e6920400ef994d0fdb9",
+      "AfterSHA256": "2b567cd708748589dc240df81a0a0f4f21f389996a07726412cbe9d3b73260a5"
+    },
+    {
+      "File": "internal/runtime/manager/failure_test.go",
+      "BeforeSHA256": "c60a6ed79db97988eb6b59f22400efd4fc4cb912fff66eccf8c3e2d5c3b4c1e8",
+      "AfterSHA256": "6a178a0fd68efdae1f462a4722eab928228c18196ad2d942e7f745bd15f38b52"
+    },
+    {
+      "File": "internal/runtime/manager/lifecycle_coordinator_test.go",
+      "BeforeSHA256": "658c471dfc1819adafc045050365b05fe1718f23068691fc120eb6e5457eb86f",
+      "AfterSHA256": "0cb90c18f2a67f82134e92f0a94939cd168e35e1a79d8cb474599fe622f34dcd"
+    },
+    {
+      "File": "internal/runtime/manager/receipt_selected_store_test.go",
+      "BeforeSHA256": "9db5de475eaa90507c7f77fed1d245695bc8fa50c4be18a972f7a1c61ad515c7",
+      "AfterSHA256": "96c62782663b3a49cf0d2ebfedd791823c7c4612ff1cfe35d7445c94b35d06f8"
+    },
+    {
+      "File": "internal/runtime/manager/receipt_settlement_outcome_test.go",
+      "BeforeSHA256": "3afd5a918cfd940262cc09b954a1c63fb52e6e7c951dd570c4b8ba98af85c489",
+      "AfterSHA256": "fc93b736de2b2184a751b4bd047adb6764a5e8bc180bd15429864ae4bcc6541e"
+    },
+    {
+      "File": "internal/runtime/manager/receipts_test.go",
+      "BeforeSHA256": "2ab2c82ce62369ab6b864b53455ce3e9e204b8b4c4f8026cf7b60b2b50a24480",
+      "AfterSHA256": "340d51ad3cd679cfc91fb2adc8a5f82ddabed00fe4082746da61ef776c8e33cb"
+    },
+    {
+      "File": "internal/runtime/node_delivery_startup_recovery_test.go",
+      "BeforeSHA256": "2491380920650e0e969370bd20f53e8142cded38f58d7720a7e7ff628d058de4",
+      "AfterSHA256": "dbc9765ea1e02c08371f036be9ac43e4e14f0da17f507a943c65699520ff0b7c"
+    },
+    {
+      "File": "internal/runtime/runforkexecution/execution_test.go",
+      "BeforeSHA256": "8ded476d1f5afc201d4b2f32ff855cf1de3572d97c678db9d2a28d27efc1383a",
+      "AfterSHA256": "a83a5fcfa8e784937c21f1a1ad079714368aacff35c39c32b5d81877bc87c3da"
+    },
+    {
+      "File": "internal/runtime/runtime_log_native_external_test.go",
+      "BeforeSHA256": "21a1141f32df073b9114188b23899e056066f277791c9f413b952cf084c65747",
+      "AfterSHA256": "fcc753fd9d251590562b14db963785d0799e101b578d573a49b7fb80640abc7a"
+    },
+    {
+      "File": "internal/runtime/runtime_log_native_fixture_test.go",
+      "BeforeSHA256": "b80ab70d8bb258623b412ee169eb07015712db078f20fc8b7049ea94ce4a76be",
+      "AfterSHA256": "af9e70a3aeb85458229eb839eeeea43d5bc1d9d62824a7a21a4f9b87910e8715"
+    },
+    {
+      "File": "internal/runtime/runtime_shutdown_admission_test.go",
+      "BeforeSHA256": "451e92f48b1935c578e3ac87f1743aed58309daa9960341f27e7e8ffc388b5d5",
+      "AfterSHA256": "0d4ff09d58a06ed962c1a4590d490021c7bdc8a167a238eecf2f70d49081e597"
+    },
+    {
+      "File": "internal/runtime/runtime_shutdown_fan_out_test.go",
+      "BeforeSHA256": "279ba94344f05d8c10722f802887a6259a9806f0ed09e1ba6e169fc481da9147",
+      "AfterSHA256": "f740c5eea172a60f3d41f8b8d5a4187751006df2ff39db8078795aed65993eec"
+    },
+    {
+      "File": "internal/serveapp/a2_join_public_projection_agreement_test.go",
+      "BeforeSHA256": "0047bc1b9b104f2dbcc5ce2947e80a8bac89f84245374d5f21868cabf95f7da2",
+      "AfterSHA256": "088867e57d47217f616a1719550085693d28e7a973c96e5cf6db7a54a95d9e3a"
+    },
+    {
+      "File": "internal/serveapp/main_runtime_test.go",
+      "BeforeSHA256": "87c7b9fbee68b0cff96dcf9fed2b7fdd9611282b817d998ed172ce0b77c16eb0",
+      "AfterSHA256": "ee08bf214fb6f03292d073fcfa08da14d6380efcf45a4309342e799b674d5453"
+    },
+    {
+      "File": "internal/serveapp/receiver_initialization_test.go",
+      "BeforeSHA256": "3630d74267292b7aa1f9cfb582a9ddc2385d63ef6326bf9f9ac113e0968cea2a",
+      "AfterSHA256": "2ae9a3f2925b84e1339d0e49efea7e3beb293d899161e9bf2fc5cd6b03eb564f"
+    },
+    {
+      "File": "internal/store/internal/backend/delivery/read_projections.go",
+      "BeforeSHA256": "80e9bcafe29741da3cf094e017b4a973b88e30e3dd3dcc2ef27d27446c52f0a3",
+      "AfterSHA256": "a7657bcc4d003feeb212a097e59cf49128d54864adacc0a9eb4ffad115cd642f"
+    },
+    {
+      "File": "internal/store/internal/backend/pipelinepersistence/owner_operations.go",
+      "BeforeSHA256": "d85456e42bb8294e0d80fbbb1937786c879aeafef0b893ceb192b9217868318e",
+      "AfterSHA256": "219ba624a22357d8dc5b224ff04dcea7f9443308551a619fab9509520a464f67"
+    },
+    {
+      "File": "internal/store/internal/backend/pipelinepersistence/template_storage_observation.go",
+      "BeforeSHA256": "ae35cf20624b080cf975beb64e7456ad0babeb779a54acf96a00dcd6ee058412",
+      "AfterSHA256": "7326df0ccec8a53b1a617ea550a8ef7efa89669ddd13b40553187c928e1f8f5c"
+    },
+    {
+      "File": "internal/store/internal/runtimepersistence/run_debug_read_surface_test.go",
+      "BeforeSHA256": "e70ebd323a5ab369197d36d99635a4e657719379fadb7cfe5d4a7992bb410941",
+      "AfterSHA256": "9ebaf12a026164f929138fab730cec83ad69e61f948769f724025b3f138fbf4b"
+    },
+    {
+      "File": "internal/store/internal/runtimepersistence/sqlite_run_api_read_surface_test.go",
+      "BeforeSHA256": "1d4557f5cdd32c11da5e503bf7f7881a229cf3df07c737daa22d7873f0a32e22",
+      "AfterSHA256": "1a58cc390d05842ed13f580298ab46439c07c5c59799c6f516ac5a178a6556ae"
+    },
+    {
+      "File": "internal/store/internal/runtimepersistence/test_deployment_resource_observation.go",
+      "BeforeSHA256": "46046842fde1ab4dece1202a3e05ed2e20a6e62bb95ae7ac4fcb4a6e53193c93",
+      "AfterSHA256": "245a9e5e34975e504af78d68a0a65dbd7466c53a203a61f0a42060734d887c6c"
+    },
+    {
+      "File": "internal/store/internal/runtimepersistence/test_event_support.go",
+      "BeforeSHA256": "04d9e5826aa632dc59cc9fa0ccd643def30848294387a3de3f50121ca4a6951f",
+      "AfterSHA256": "e41e673afe92fccae09cea255f4cffdb6a30969db7c1cdb763f0d33ff3075146"
+    },
+    {
+      "File": "internal/store/internal/runtimepersistence/test_served_delivery_observation.go",
+      "BeforeSHA256": "cb2c3ad4af72616d7a2c28145c0e3a2cf5d4e7908f92b9bfaaabfb6d793d9021",
+      "AfterSHA256": "84c83b7996f769a5b77ed444164d162ded761a0fb02d2c17973b72c4692e8d28"
+    },
+    {
+      "File": "internal/store/internal/runtimepersistence/workflow_route_recovery_owner_test.go",
+      "BeforeSHA256": "cebd2394875a43a3e6cd12398ea0f33f9f6f35bb931c740617f481a086706d63",
+      "AfterSHA256": "330c55d31f61baf48793ae042a5c9ead2760394d4b85a5ef54dd334e9900daae"
+    }
+  ]
+}

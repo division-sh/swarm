@@ -117,6 +117,10 @@ func catchUp2542LaneLedger(root string, current []byte) ([]byte, error) {
 
 func CatchUp2542HistoricalSource(root, path string, current []byte) ([]byte, error) {
 	var err error
+	current, err = Repair2698HistoricalSource(root, path, current)
+	if err != nil {
+		return nil, err
+	}
 	current, err = NativeEntry2542HistoricalSource(root, path, current)
 	if err != nil {
 		return nil, err
@@ -146,6 +150,10 @@ func CatchUp2542HistoricalSource(root, path string, current []byte) ([]byte, err
 
 func CatchUp2542HistoricalFunction(root, path, name, current string) (string, error) {
 	var err error
+	current, err = repair2698HistoricalFunction(root, path, name, current)
+	if err != nil {
+		return "", err
+	}
 	current, err = nativeEntry2542HistoricalFunction(root, path, name, current)
 	if err != nil {
 		return "", err
