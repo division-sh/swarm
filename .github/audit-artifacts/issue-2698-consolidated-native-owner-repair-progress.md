@@ -89,3 +89,28 @@ both-store HumanTask requester/producer proof, then fresh canonical preflight
 before the ONE repaired PR push and hosted FULL. Q1, the separate S1/S2
 one-landing disposition, and the 194/155 uncredited holds remain visible and
 unchanged. This local checkpoint is not that final head.
+
+## Finite H19 Bootstrap Continuation
+
+Decision9's exact two-key initial retirement is implemented separately. The
+immutable origin remains4813 with its unchanged digest. The active artifact
+removes only the two original eight-slot signatures (4811). Three complete
+source declarations and the exact three replacement-role rows bind this
+transition; no arbitrary initial subset is accepted. All seven retained-registry
+roots PASS0.673s, including changed-source/role, a third deletion, addition,
+substitution, resurrection and disappeared-artifact reseed refusal.
+
+The read-only current registry diagnostic is honestly RED (7.989s):117 new
+identities and107 stale identities, all at the authorized fixed-owner moves and
+their consumers. All107 stale identities are still retained origin keys. Their
+sorted LF list digest is603bc985e775d1e0db3f83a177c6ac275c621df415cf08f526b27266d731bf82.
+That intersects the decision9 initial4811 constraint: an actual stale origin key
+cannot stay retained, but this checkpoint does NOT silently delete those107 or
+admit their117 replacements as new retained debt. A finite disposition is needed
+for that combined source/role accounting before final qualification.
+
+At514e38b2ee, the independent exact-snapshot complexity ratchet PASSes against
+pinned master9beb615299 (>=30 cognitive539->539; cyclomatic247->247); vet PASS.
+The affected native boundary/read/fault selection PASSes under race59.077s.
+The separate publication-schema consumer selection PASSes under race71.804s,
+including uncertainty, rollback and the exact installed-fault observations.
