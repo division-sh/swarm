@@ -375,8 +375,43 @@ jobs:
           cache: true
       - name: Build swarm binary
         run: go build ./cmd/swarm
-      - name: Build workspace image
-        run: docker build -t swarm-workspace:latest -f Dockerfile.workspace .
+      - name: Restore workspace image
+        id: workspace-image-cache
+        if: hashFiles('Dockerfile.workspace') != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/swarm-workspace-image
+          key: workspace-image-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Dockerfile.workspace') }}
+      - name: Prepare workspace image
+        shell: bash
+        env:
+          CACHE_HIT: ${{ steps.workspace-image-cache.outputs.cache-hit }}
+          DOCKERFILE_HASH: ${{ hashFiles('Dockerfile.workspace') }}
+          WORKSPACE_IMAGE_CACHE: ${{ runner.temp }}/swarm-workspace-image
+        run: |
+          set -euo pipefail
+          [[ "$DOCKERFILE_HASH" =~ ^[0-9a-f]{64}$ ]]
+          test -n "$WORKSPACE_IMAGE_CACHE"
+          if [ "$CACHE_HIT" = true ]; then
+            echo 'Workspace image cache: exact hit (load only)'
+            test -s "$WORKSPACE_IMAGE_CACHE/image.tar.zst"
+            expected_id=$(cat "$WORKSPACE_IMAGE_CACHE/image.id")
+            [[ "$expected_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+            zstd -dc "$WORKSPACE_IMAGE_CACHE/image.tar.zst" | docker load
+          else
+            echo 'Workspace image cache: miss (pinned public mirror build)'
+            rm -rf "$WORKSPACE_IMAGE_CACHE"
+            mkdir -p "$WORKSPACE_IMAGE_CACHE"
+            docker build -t swarm-workspace:latest -f Dockerfile.workspace .
+            expected_id=$(docker image inspect --format '{{.Id}}' swarm-workspace:latest)
+            [[ "$expected_id" =~ ^sha256:[0-9a-f]{64}$ ]]
+            printf '%s\n' "$expected_id" > "$WORKSPACE_IMAGE_CACHE/image.id"
+            docker save swarm-workspace:latest | zstd -T0 -o "$WORKSPACE_IMAGE_CACHE/image.tar.zst"
+          fi
+          actual_id=$(docker image inspect --format '{{.Id}}' swarm-workspace:latest)
+          test "$actual_id" = "$expected_id"
+          printf 'Workspace image ID: %s\n' "$actual_id"
+          du -h "$WORKSPACE_IMAGE_CACHE/image.tar.zst"
       - name: Prove real container MCP emission and successor refusal
         env:
           SWARM_TEST_WORKSPACE_MCP_DOCKER: "1"
@@ -391,6 +426,12 @@ jobs:
             --event item.received \
             --payload "$payload" \
             --api-port 18091
+      - name: Save workspace image
+        if: steps.workspace-image-cache.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/swarm-workspace-image
+          key: ${{ steps.workspace-image-cache.outputs.cache-primary-key }}
 
   macos-sqlite-possession:
     needs: [ci-plan]
