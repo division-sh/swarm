@@ -92,6 +92,9 @@ func compileToolValuePath(raw string, requiredRoot string) (toolValuePath, error
 }
 
 func (p toolValuePath) lookup(root any) (any, bool) {
+	if len(p.segments) > 1 && p.segments[0].kind == toolPathProperty && p.segments[0].name == "credentials" {
+		return lookupToolCredentialPath(root, p.segments[1:])
+	}
 	current := root
 	for _, segment := range p.segments {
 		switch segment.kind {

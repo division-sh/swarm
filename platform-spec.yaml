@@ -10991,7 +10991,11 @@ tool_model:
         field; it evaluates its response-rooted path against parsed HTTP response data.
       variables:
         input: Tool call arguments from the agent. Accessed as {{input.field_name}}.
-        credentials: Values from the credential store for keys listed in the tool's credentials field. Accessed as {{credentials.key_name}}.
+        credentials: >
+          Values from the credential store for keys listed in the tool's credentials field. The suffix of
+          {{credentials.key_name}} is one exact store key, including a directory-qualified key such as
+          {{credentials.telegram.bot_token}}. It is not nested object or array traversal and cannot fall back to an
+          unqualified, foreign or nested-map value. Input and response paths retain their ordinary traversal semantics.
         response: HTTP response data. Available only in response_success and response_mapping. Accessed as
           {{response.body}}, {{response.status}}, {{response.headers.header_name}}.
       missing_variable: If a required template variable cannot be resolved (missing input field, missing credential), the tool
@@ -11233,6 +11237,17 @@ tool_model:
       Existing wire protocol URLs, headers, credentials, payloads, descriptions and HTTP response rules are not renamed
       by provider-key admission. Directory-owned BODY lowering qualifies local names separately; a name cannot grant
       installation, credential, activity or journal authority.
+    directory_body_admission: >
+      A connector BODY consumes the immutable admitted provider-directory view. Authored tool names and static or
+      managed credential roles are short local identifiers; the directory qualifies them once to <directory>.<local>.
+      The canonical tool declaration owner projects existing schemas, HTTP execution and credential policies from the
+      captured lexical source, retaining the original source bytes and hash. Static credential references in compiled
+      URL, header and recursive body templates bind only declared short roles; input paths and literal payload values
+      are not renamed. Managed role qualification preserves grant, scopes, header and token-request policy and creates
+      no static template variables. Generation tool_id references likewise name declared short tools before projection.
+      Qualified authored names, foreign/undeclared roles and whitespace aliases refuse with source-local teaching
+      errors. The existing registry, conformance, response policy, effect admission and journal remain authoritative;
+      BODY membership, namespace projection or readback alone does not grant installation or execution authority.
     canonical_owners:
       declaration: "ToolSchemaEntry with `category: provider_connector`, authored in tools.yaml or imported from a verified connector pack."
       pack_import: schema.yaml imports.connector_packs owns explicit connector tool enablement; selected-root packs/manifest.yaml owns project pack inventory.
