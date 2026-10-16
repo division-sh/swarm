@@ -6,7 +6,7 @@ import "fmt"
 // ambiguous global tool aliases. It grants no execution or provider authority.
 func ScopedActivityMembers() map[string][]byte {
 	members := map[string][]byte{
-		"events.yaml": []byte("send.requested: {}\n"),
+		"events.yaml": []byte("send.requested:\n"),
 	}
 	for _, flow := range []string{".", "child", "sibling", "inherited"} {
 		prefix := ""
