@@ -19,6 +19,15 @@ import (
 )
 
 func TestActivityMockTerminalTimestampReplayDoesNotRequireCurrentResponsePlan(t *testing.T) {
+	testActivityMockTerminalTimestampReplay(t, http.MethodPost)
+}
+
+func TestActivityMockGETTerminalTimestampReplayDoesNotRequireCurrentResponsePlan(t *testing.T) {
+	testActivityMockTerminalTimestampReplay(t, http.MethodGet)
+}
+
+func testActivityMockTerminalTimestampReplay(t *testing.T, method string) {
+	t.Helper()
 	for _, backend := range activityTerminalReplayStoreCases() {
 		t.Run(backend.name, func(t *testing.T) {
 			selected, closeStore, reopen := openActivityReplayStore(t, backend.name)
@@ -29,6 +38,13 @@ func TestActivityMockTerminalTimestampReplayDoesNotRequireCurrentResponsePlan(t 
 			}))
 			defer server.Close()
 			tool := runtimepipeline.TelegramConnectorToolForTest(server.URL)
+			httpSpec, _ := tool.HTTP()
+			httpSpec.Method = method
+			var err error
+			tool, err = tool.WithHTTP(httpSpec)
+			if err != nil {
+				t.Fatal(err)
+			}
 			output := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"ok": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("boolean"))}), runtimecontracts.ToolSchemaRequired("ok"))
 			tool, _ = tool.WithSchemas(tool.InputSchema(), output)
 

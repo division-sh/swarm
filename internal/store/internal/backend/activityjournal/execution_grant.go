@@ -65,7 +65,9 @@ func (g *activityExecutionGrant) prepareRecord(ctx context.Context, record runti
 		record.ExecutionBinding = g.reference
 	}
 	if record.ExecutionBinding != g.reference {
-		return runtimepipeline.ActivityAttemptRecord{}, errors.New("activity mutation differs from its original installed execution role")
+		expected := record
+		expected.ExecutionBinding = g.reference
+		return runtimepipeline.ActivityAttemptRecord{}, runtimepipeline.ValidateActivityAttemptExecutionIdentity(record, expected)
 	}
 	return record, nil
 }

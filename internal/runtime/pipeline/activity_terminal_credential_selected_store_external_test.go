@@ -14,6 +14,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -21,7 +22,7 @@ import (
 
 func TestActivityCredentialTerminalTimestampReplayBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, posture := range []string{"static_present", "static_absent", "connector_absent"} {
+		for _, posture := range []string{"static_present", "static_absent", "connector_absent", "managed_present", "managed_absent"} {
 			t.Run(backend+"/"+posture, func(t *testing.T) {
 				ctx := testAuthorActivityContext(t, context.Background())
 				selected, closeStore, reopen := openActivityReplayStore(t, backend)
@@ -30,7 +31,7 @@ func TestActivityCredentialTerminalTimestampReplayBothStores(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					calls.Add(1)
 					if r.Header.Get("Authorization") != "Bearer provider-secret" {
-						t.Error("provider did not receive the admitted static credential")
+						t.Error("provider did not receive the admitted credential")
 					}
 					_ = json.NewEncoder(w).Encode(map[string]any{"echoed_authorization": r.Header.Get("Authorization")})
 				}))
@@ -57,10 +58,11 @@ func TestActivityCredentialTerminalTimestampReplayBothStores(t *testing.T) {
 					intent.Input = runtimepipeline.ActivityInputForTest(map[string]any{"chat_id": "42", "text": "hello"})
 					tool = runtimepipeline.TelegramConnectorToolForTest(server.URL)
 				}
+				tool, managed := activityReplayManagedCredentials(t, posture, tool)
 				source := activityJournalProofSource(t, map[string]runtimecontracts.ToolSchemaEntry{intent.Tool: tool})
 				ctx = requireActivityReplayRun(t, selected, source, intent.SourceRunID)
 				bus := newActivityJournalProofBus(t, selected, source)
-				pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}, Credentials: credentialStore})
+				pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}, Credentials: credentialStore, ManagedCredentials: managed})
 				intent = seedSelectedActivitySource(t, ctx, selected, pc, intent)
 				_, releaseJournal := installActivityReplayJournal(t, ctx, selected, bus, pc)
 				if err := runtimepipeline.ExecuteActivityIntentForTest(ctx, pc, nil, intent); err != nil {
@@ -70,12 +72,19 @@ func TestActivityCredentialTerminalTimestampReplayBothStores(t *testing.T) {
 				if err != nil || !found || receipt.CompletedAt == nil || receipt.CompletedAt.IsZero() {
 					t.Fatalf("missing durable credentialed outcome: found=%t err=%v", found, err)
 				}
-				if posture == "static_present" {
+				if posture == "static_present" || posture == "managed_present" {
 					if receipt.Status != runtimepipeline.ActivityAttemptStatusSucceeded || calls.Load() != 1 || receipt.ResultPayload["result"].(map[string]any)["echoed_authorization"] != "Bearer [REDACTED]" {
 						t.Fatal("credentialed dispatch or redaction changed")
 					}
 				} else if receipt.Status != runtimepipeline.ActivityAttemptStatusFailed || calls.Load() != 0 || receipt.Failure == nil || receipt.Failure.Class != runtimefailures.ClassAuthenticationNeeded || receipt.Failure.Detail.Code != "activity_credential_required" {
 					t.Fatal("missing credential did not journal the exact pre-dispatch refusal")
+				}
+				wantManagedReads := int32(0)
+				if posture == "managed_present" || posture == "managed_absent" {
+					wantManagedReads = 1
+				}
+				if managed.reads.Load() != wantManagedReads {
+					t.Fatalf("managed credential reads=%d, want %d", managed.reads.Load(), wantManagedReads)
 				}
 				original := loadActivityResultForProof(t, ctx, selected, receipt.ResultEventID)
 				if !original.Event.Event().CreatedAt().Equal(receipt.CompletedAt.UTC().Truncate(time.Microsecond)) {
@@ -92,7 +101,8 @@ func TestActivityCredentialTerminalTimestampReplayBothStores(t *testing.T) {
 				selected = reopen()
 				replayBus := newActivityJournalProofBus(t, selected, source)
 				unavailableCredentials := &activityReplayCredentialProbe{}
-				replay := newGateRecoveryCoordinator(replayBus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}, Credentials: unavailableCredentials})
+				unavailableManaged := &activityReplayManagedCredentialProbe{Store: managedcredentials.NewMemoryStore()}
+				replay := newGateRecoveryCoordinator(replayBus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}, Credentials: unavailableCredentials, ManagedCredentials: unavailableManaged})
 				if err := runtimepipeline.ExecuteActivityIntentForTest(ctx, replay, nil, intent); err != nil {
 					t.Fatalf("credentialed terminal reopen replay: %v", err)
 				}
@@ -101,13 +111,45 @@ func TestActivityCredentialTerminalTimestampReplayBothStores(t *testing.T) {
 					t.Fatal("credentialed replay changed the journal, result, or durable side effects")
 				}
 				wantCalls := int32(0)
-				if posture == "static_present" {
+				if posture == "static_present" || posture == "managed_present" {
 					wantCalls = 1
 				}
-				if calls.Load() != wantCalls || unavailableCredentials.reads.Load() != 0 {
-					t.Fatalf("terminal replay redispatched or reread credentials: calls=%d reads=%d", calls.Load(), unavailableCredentials.reads.Load())
+				if calls.Load() != wantCalls || unavailableCredentials.reads.Load() != 0 || unavailableManaged.reads.Load() != 0 {
+					t.Fatalf("terminal replay redispatched or reread credentials: calls=%d static=%d managed=%d", calls.Load(), unavailableCredentials.reads.Load(), unavailableManaged.reads.Load())
 				}
 			})
 		}
 	}
+}
+
+type activityReplayManagedCredentialProbe struct {
+	managedcredentials.Store
+	reads atomic.Int32
+}
+
+func (p *activityReplayManagedCredentialProbe) Get(ctx context.Context, key string) (managedcredentials.Record, bool, error) {
+	p.reads.Add(1)
+	return p.Store.Get(ctx, key)
+}
+
+func activityReplayManagedCredentials(t *testing.T, posture string, tool runtimecontracts.ToolSchemaEntry) (runtimecontracts.ToolSchemaEntry, *activityReplayManagedCredentialProbe) {
+	t.Helper()
+	store := &activityReplayManagedCredentialProbe{Store: managedcredentials.NewMemoryStore()}
+	if posture != "managed_present" && posture != "managed_absent" {
+		return tool, store
+	}
+	httpSpec, _ := tool.HTTP()
+	httpSpec.Headers = nil
+	tool = runtimecontracts.MustToolSchemaEntry(
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+		runtimecontracts.WithToolSchemas(tool.InputSchema(), tool.OutputSchema()),
+		runtimecontracts.WithToolHTTP(httpSpec),
+		runtimecontracts.WithToolManagedCredential(runtimecontracts.ManagedCredentialRef{Key: "provider_token", Header: "Authorization", Prefix: "Bearer ", GrantType: managedcredentials.GrantClientCredentials}),
+	)
+	if posture == "managed_present" {
+		if err := store.Put(context.Background(), managedcredentials.Record{Key: "provider_token", Provider: "fixture", GrantType: managedcredentials.GrantClientCredentials, AccessToken: "provider-secret", TokenType: "Bearer", Status: managedcredentials.StatusConnected, ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return tool, store
 }

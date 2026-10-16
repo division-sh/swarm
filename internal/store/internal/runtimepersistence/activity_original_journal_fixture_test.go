@@ -17,6 +17,31 @@ type activityFixtureJournal struct {
 	owner pipeline.ActivityAttemptJournal
 }
 
+// Selected preparation must share the seeding owner's possession, rather than
+// acquire a second native process while the original journal is still retained.
+func retainActivityFixtureProcessForMaterialization(t *testing.T, ctx context.Context, selected any) {
+	t.Helper()
+	process, err := agentfixture.ProcessCapability(t, ctx, selected.(agentfixture.Store))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := process.ProveCurrent(ctx); err != nil {
+		t.Fatal(err)
+	}
+	storeTestWorkOwner(t)
+	value, _ := storeTestWorkFixtures.Load(t)
+	work := value.(*storeTestWorkFixture)
+	work.capabilitiesMu.Lock()
+	defer work.capabilitiesMu.Unlock()
+	if previous := work.capabilities[selected]; previous != nil && previous != process {
+		t.Fatal("activity materialization cannot replace another retained process")
+	}
+	if work.capabilities == nil {
+		work.capabilities = make(map[any]startupownership.ProcessCapability)
+	}
+	work.capabilities[selected] = process
+}
+
 func activityNativeJournalForFixture(t *testing.T, fixture authorActivityReceiptFixture) pipeline.ActivityAttemptJournal {
 	t.Helper()
 	if fixture.activityJournal == nil || fixture.activityOwner == nil {

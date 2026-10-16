@@ -11,6 +11,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
 	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimeownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -282,8 +283,10 @@ func TestActivityGrantBinderKeepsOriginalRoleAndCannotRebind(t *testing.T) {
 				foreign := prepared
 				foreign.ExecutionBinding.GrantID = uuid.NewString()
 				for _, starting := range []bool{false, true} {
-					if _, err := grant.prepareRecord(context.Background(), foreign, starting); err == nil {
-						t.Fatal("grant binding replaced a foreign original reference")
+					got, err := grant.prepareRecord(context.Background(), foreign, starting)
+					failure, ok := runtimefailures.EnvelopeFromError(err)
+					if err == nil || !ok || failure.Class != runtimefailures.ClassConflictingDuplicate || failure.Detail.Code != "activity_execution_identity_conflict" || got.RequestEventID != "" {
+						t.Fatalf("grant binding lost its exact identity refusal: record=%+v err=%v", got, err)
 					}
 				}
 				if got, err := grant.prepareRecord(context.Background(), prepared, false); err != nil || got.ExecutionBinding != prepared.ExecutionBinding {
