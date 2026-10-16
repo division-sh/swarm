@@ -170,8 +170,16 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 					previous := http.DefaultTransport
 					http.DefaultTransport = completion2270Transport{t: t, profile: profileID, requests: &requests, base: previous, emit: kind == "ordinary_emit" || kind == "siblings"}
 					t.Cleanup(func() { http.DefaultTransport = previous })
+					started := time.Now()
+					t.Logf("completion startup phase=initial-start at=%s", started.UTC().Format(time.RFC3339Nano))
 					process := startServeRuntimeTestProcess(t, opts)
+					cancelInitial := process.cancel
+					process.cancel = func() {
+						t.Logf("completion startup phase=initial-stop-request at=%s", time.Now().UTC().Format(time.RFC3339Nano))
+						cancelInitial()
+					}
 					process.waitForReadyLine()
+					t.Logf("completion startup phase=initial-ready at=%s elapsed=%s", time.Now().UTC().Format(time.RFC3339Nano), time.Since(started))
 					rt.Endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 					rt.AuthorContext = servedRuntimeProofAuthorActivityContext(t, servedTestProcessRuntime(t, process), rt.BundleHash)
 					if profileID == llmselection.BackendClaudeCLI {
@@ -192,8 +200,16 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 					if code := process.stop(); code != 0 {
 						t.Fatalf("join completed provider runtime: code=%d\n%s", code, process.outputString())
 					}
+					started = time.Now()
+					t.Logf("completion startup phase=restart-start at=%s", started.UTC().Format(time.RFC3339Nano))
 					process = startServeRuntimeTestProcess(t, opts)
+					cancelRestart := process.cancel
+					process.cancel = func() {
+						t.Logf("completion startup phase=restart-stop-request at=%s", time.Now().UTC().Format(time.RFC3339Nano))
+						cancelRestart()
+					}
 					process.waitForReadyLine()
+					t.Logf("completion startup phase=restart-ready at=%s elapsed=%s", time.Now().UTC().Format(time.RFC3339Nano), time.Since(started))
 					rt.Endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
 					var after cliapp.DiagnosticRunDiagnosisResult
 					requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &after)
