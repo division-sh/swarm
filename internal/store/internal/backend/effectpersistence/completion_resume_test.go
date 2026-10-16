@@ -22,7 +22,7 @@ func TestCompletionResumeReadOnlyRequiresFrozenHTTPToolSurface(t *testing.T) {
 					tool := managedcapabilities.PlannedTool{
 						Name: "read_file", DefinitionHash: "frozen-tool-definition",
 						Capability: toolcapabilities.Capability{Name: "read_file", Visible: true, Callable: true},
-						Bindings: []managedcapabilities.DeliveryBinding{{Kind: managedcapabilities.BindingAPIDefinition, ExactName: "read_file", RequiredEvidenceKind: "api_request_delivered"}},
+						Bindings:   []managedcapabilities.DeliveryBinding{{Kind: managedcapabilities.BindingAPIDefinition, ExactName: "read_file", RequiredEvidenceKind: "api_request_delivered"}},
 					}
 					switch shape {
 					case "provider_builtin", "hidden_provider_builtin":
@@ -56,7 +56,7 @@ func TestCompletionResumeReadOnlyRequiresFrozenHTTPToolSurface(t *testing.T) {
 }
 
 func TestCompletionResumeSurfaceRejectsUnsupportedOrContradictoryEvidence(t *testing.T) {
-	for _, scenario := range []string{"claude_cli_without_tools", "mock", "authored_http_get", "unknown_adapter", "missing_surface", "tampered_surface", "foreign_profile", "foreign_provider", "foreign_runtime_mode", "selected", "missing_request"} {
+	for _, scenario := range []string{"claude_cli_without_tools", "mock", "authored_http_get", "unknown_adapter", "missing_surface", "tampered_surface", "missing_binding", "foreign_profile", "foreign_provider", "foreign_runtime_mode", "selected", "missing_request"} {
 		t.Run(scenario, func(t *testing.T) {
 			backend := llmselection.BackendAnthropic
 			if scenario == "claude_cli_without_tools" {
@@ -86,6 +86,12 @@ func TestCompletionResumeSurfaceRejectsUnsupportedOrContradictoryEvidence(t *tes
 			case "missing_request":
 				request = runtimeeffects.CompletionRequest{}
 				wantErr = true
+			case "missing_binding":
+				plan.Tools = []managedcapabilities.PlannedTool{{
+					Name: "read_file", DefinitionHash: "frozen-tool-definition",
+					Capability: toolcapabilities.Capability{Name: "read_file", Visible: true, Callable: true},
+					Bindings:   []managedcapabilities.DeliveryBinding{{Kind: managedcapabilities.BindingAPIDefinition, ExactName: "read_file", RequiredEvidenceKind: "api_request_delivered"}},
+				}}
 			}
 			surface, err := managedcapabilities.New(plan)
 			if err != nil {
@@ -97,6 +103,9 @@ func TestCompletionResumeSurfaceRejectsUnsupportedOrContradictoryEvidence(t *tes
 			} else if scenario == "tampered_surface" {
 				surface.Tools = []managedcapabilities.Tool{}
 				surface.Provider = "foreign"
+				wantErr = true
+			} else if scenario == "missing_binding" {
+				surface.Tools[0].Bindings = nil
 				wantErr = true
 			}
 			readOnly, err := completionResumeSurfaceAllowsHTTP(adapter, request, surface)
