@@ -119,3 +119,62 @@ additional root deletion, accounting waiver or E capacity import.
 Canonical preflight and final local HumanTask both-store receipts still bind
 the eventual frozen head before the single qualifying push. Five USER9
 conditions, Q1, H2/#2715 and194/155 holds remain unchanged and explicit.
+
+## Required complete-store attempt: aggregate ceiling remains blocking
+
+One complete store-admission-full attempt ran at signed
+0615b8e22c15ab1daf164437f14d58b154b31ce4,
+tree827de41f43010ffa1424c343006e8ee1570827c2, base0b7f1188a6.
+Go1.26.8, GOMAXPROCS2/count1/p1/600s, sequential, no overlay. Source stayed
+clean and unchanged for the complete command. No other B test ran alongside.
+
+internal/store: RED600.280s;126 top-level PASS,0 assertion FAIL,0 SKIP,
+1 interrupted and102 unstarted out of the unchanged229-root selection.
+The interrupted root is
+TestPersistenceAuthorityDebtRunFixturePolicyDestinationMatchesSource,
+running approximately1s when the PACKAGE alarm fired. Its stack waits for
+debtGit("show",44c4047f0...:baseline) after materializing40c0b18bf...;
+this does not identify that root as the cause of the aggregate overrun.
+testpostgres subsequently completed122 PASS/2 auxiliary SKIP,0 FAIL,
+PASS39.357s. The complete command exits1 and is NOT qualified.
+
+The126 completed store roots sum599.13s. Measured groups (not causal claims):
+
+| Completed group | Roots | Summed seconds |
+| --- | ---: | ---: |
+| Debt preservation/policy controls | 102 | 539.04 |
+| Durable-data behavioral roots | 22 | 59.01 |
+| Other | 2 | 1.08 |
+
+Largest completed roots:
+
+| Root suffix after TestPersistenceAuthorityDebt | Seconds |
+| --- | ---: |
+| PublicRollbackRetirementCollectorUsesExactHistoricalCopies | 142.91 |
+| PublicRollbackCollectorAddsNoInverseCredit | 43.14 |
+| FreshnessCatchUpForwardAndForeignProvenance | 30.52 |
+| CatchUpForwardAndForeignProvenance | 29.12 |
+| ReceiverReadbackCompositionPreservesOriginalSource | 28.42 |
+| Repair2698ReconcilesLiveCensus | 27.47 |
+| DeliveryRetirementIsFiniteSourceVerifiedAndOneWay | 25.10 |
+
+The REQUIRED current-source census root completed GREEN27.47s; it is retained.
+No root is blamed on host pressure or declared inherited by this measurement.
+Load context only:18.17/14.42/12.40 at17:02:26Z command start;
+3.68/11.25/13.84 at17:13:22Z command completion.
+
+Exact229-root PASS/INTERRUPTED/UNSTARTED ledger:
+issue-2698-round2-store-unit-results.tsv. No missing root is silently counted.
+JSON receipt SHA256
+73029585f1e20ed636b247993fa75455424f2db59dd5a62a25908d6647cdc98f;
+stderr SHA256
+33781d7b939fb3626a222fd95dff891be46dcc154164b19cec7a4f0ee962972b.
+Both are under pr2698-round2-0615b8e22c15ab1daf164437f14d58b154b31ce4-store-admission-full,
+with exact source/tree/toolchain/selector/flags/load/timestamps in its .meta.
+
+Per6219738630, STOP unchanged attempts and serial cost-repair rounds here.
+Return this aggregate/unfinished-root evidence for ONE owner-level disposition.
+No sharding, timeout increase, deletion, new cache/allowance or qualifying retry
+is implemented or claimed. Preflight, final-head local HumanTask, PR push and
+hosted FULL have NOT started. The410-root tool PASS remains unchanged-input
+carry only; the85-root diagnostic is not substituted for complete qualification.
