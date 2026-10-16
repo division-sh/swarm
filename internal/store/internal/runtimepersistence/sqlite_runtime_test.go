@@ -1546,8 +1546,8 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 
-	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+	record := runtimemanager.PersistedAgent{
+		Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "agent-1",
 			Identity:      mustTestAgentIdentityForRun(runID, "agent-1", "global"),
 			Role:          "operator",
@@ -1558,10 +1558,11 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 			Memory:        agentmemory.Plan{Enabled: true},
 			FlowPath:      "global",
 			Config:        json.RawMessage(`{}`),
-		}),
+		})),
 		Status:    "active",
 		StartedAt: now,
-	}); err != nil {
+	}
+	if err := agentfixture.UpsertStatic(t, ctx, store, record); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 	fixtureCapability, err := agentfixture.ProcessCapability(t, ctx, store)
@@ -1643,109 +1644,117 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 		t.Fatalf("release successor process capability: %v", err)
 	}
 
-	identity := testAgentMemoryIdentity(t, runID, "agent-1", "global")
-	lease, err := store.Acquire(ctx, identity, "owner-1")
-	if err != nil {
-		t.Fatalf("Acquire session: %v", err)
-	}
-	if lease.Identity != identity {
-		t.Fatalf("session identity = %+v, want %+v", lease.Identity, identity)
-	}
-	if _, err := store.Acquire(ctx, identity, "owner-2"); !errors.Is(err, runtimesessions.ErrSessionLeased) {
-		t.Fatalf("competing Acquire error = %v, want ErrSessionLeased", err)
-	}
-	renewed, err := store.Renew(ctx, lease)
-	if err != nil || renewed.GrantID != lease.GrantID {
-		t.Fatalf("Renew exact grant: lease=%+v err=%v", renewed, err)
-	}
-	if _, err := store.IncrementTurnOutcome(ctx, lease); err != nil {
-		t.Fatalf("IncrementTurn: %v", err)
-	}
-	if err := store.UpsertConversation(ctx, lease, runtimellm.ConversationRecord{
-		SessionID: lease.SessionID,
-		AgentID:   identity.AgentID(),
-		Identity:  identity,
-		Memory:    agentmemory.Plan{Enabled: true},
-		Messages:  []runtimellm.Message{{Role: "user", Content: "hello"}},
-		Summary:   "greeting",
-		TurnCount: 1,
-		Status:    "active",
-	}); err != nil {
-		t.Fatalf("UpsertConversation: %v", err)
-	}
-	conversation, ok, err := store.LoadActiveConversation(ctx, identity)
-	if err != nil {
-		t.Fatalf("LoadActiveConversation: %v", err)
-	}
-	if !ok || conversation.Summary != "greeting" || len(conversation.Messages) != 1 {
-		t.Fatalf("conversation = %+v ok=%v, want persisted greeting", conversation, ok)
-	}
+	// The startup proof above joins and releases both real process owners. The
+	// trace phase acquires its own native owner instead of reusing that receipt.
+	t.Run("conversation_and_trace", func(t *testing.T) {
+		if err := agentfixture.UpsertStatic(t, ctx, store, record); err != nil {
+			t.Fatal(err)
+		}
+		ctx := admitPreparedAgentClaimContext(t, ctx, store)
+		identity := testAgentMemoryIdentity(t, runID, "agent-1", "global")
+		lease, err := store.Acquire(ctx, identity, "owner-1")
+		if err != nil {
+			t.Fatalf("Acquire session: %v", err)
+		}
+		if lease.Identity != identity {
+			t.Fatalf("session identity = %+v, want %+v", lease.Identity, identity)
+		}
+		if _, err := store.Acquire(ctx, identity, "owner-2"); !errors.Is(err, runtimesessions.ErrSessionLeased) {
+			t.Fatalf("competing Acquire error = %v, want ErrSessionLeased", err)
+		}
+		renewed, err := store.Renew(ctx, lease)
+		if err != nil || renewed.GrantID != lease.GrantID {
+			t.Fatalf("Renew exact grant: lease=%+v err=%v", renewed, err)
+		}
+		if _, err := store.IncrementTurnOutcome(ctx, lease); err != nil {
+			t.Fatalf("IncrementTurn: %v", err)
+		}
+		if err := store.UpsertConversation(ctx, lease, runtimellm.ConversationRecord{
+			SessionID: lease.SessionID,
+			AgentID:   identity.AgentID(),
+			Identity:  identity,
+			Memory:    agentmemory.Plan{Enabled: true},
+			Messages:  []runtimellm.Message{{Role: "user", Content: "hello"}},
+			Summary:   "greeting",
+			TurnCount: 1,
+			Status:    "active",
+		}); err != nil {
+			t.Fatalf("UpsertConversation: %v", err)
+		}
+		conversation, ok, err := store.LoadActiveConversation(ctx, identity)
+		if err != nil {
+			t.Fatalf("LoadActiveConversation: %v", err)
+		}
+		if !ok || conversation.Summary != "greeting" || len(conversation.Messages) != 1 {
+			t.Fatalf("conversation = %+v ok=%v, want persisted greeting", conversation, ok)
+		}
 
-	eventID := uuid.NewString()
-	event := eventtest.PersistedProjection(eventID,
+		eventID := uuid.NewString()
+		event := eventtest.PersistedProjection(eventID,
 
-		events.EventType("trace.visible"),
-		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now)
+			events.EventType("trace.visible"),
+			"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now)
 
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
-	if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, []events.DeliveryRoute{route}); err != nil {
-		t.Fatalf("PersistEventWithDeliveries trace event: %v", err)
-	}
-	claimed, err := claimDeliveryFixture(ctx, store, event, route)
-	if err != nil {
-		t.Fatalf("ClaimAgentDelivery trace event: %v", err)
-	}
-	if bound, err := store.BindAgentSession(ctx, claimed.Claim, lease.SessionID); err != nil {
-		t.Fatalf("BindAgentSession trace event: %v", err)
-	} else if !bound.Acknowledged {
-		t.Fatal("BindAgentSession trace event was not acknowledged")
-	}
-	if released, err := store.ReleaseOutcome(ctx, lease); err != nil || !released.Acknowledged {
-		t.Fatalf("Release session before managed turn: result=%+v err=%v", released, err)
-	}
-	if err := persistManagedAgentTurnReadbackFixture(t, runtimedelivery.WithClaim(ctx, claimed.Claim), store, runtimellm.AgentTurnRecord{
-		AgentID:          "agent-1",
-		Memory:           agentmemory.Plan{Enabled: true},
-		SessionID:        lease.SessionID,
-		RunID:            runID,
-		FlowInstance:     identity.FlowInstance(),
-		TriggerEventID:   eventID,
-		TriggerEventType: "trace.visible",
-		RequestPayload:   []byte(`{"prompt":"hello"}`),
-		ResponseRaw:      []byte(`{"content":"ok"}`),
-		ParseOK:          true,
-	}); err != nil {
-		t.Fatalf("ManagedTurnReadbackFixture: %v", err)
-	}
-	trace, _, err := store.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10})
-	if err != nil {
-		t.Fatalf("LoadRunDebugTracePage: %v", err)
-	}
-	if len(trace) != 1 || trace[0].EventID != eventID || trace[0].SessionID != lease.SessionID || trace[0].TurnTriggerEventID != eventID {
-		t.Fatalf("trace = %#v, want event/session/turn visibility", trace)
-	}
-	eventsPage, err := store.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{Filter: operatorread.OperatorEventListFilter{RunID: runID}, Limit: 10})
-	if err != nil {
-		t.Fatalf("ListOperatorEvents: %v", err)
-	}
-	if len(eventsPage.Events) != 1 || eventsPage.Events[0].EventID != eventID || !operatorDeliveriesContain(eventsPage.Events[0].Deliveries, "agent", "agent-1") {
-		t.Fatalf("events page = %#v, want event with delivery", eventsPage)
-	}
+		route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
+		if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, []events.DeliveryRoute{route}); err != nil {
+			t.Fatalf("PersistEventWithDeliveries trace event: %v", err)
+		}
+		claimed, err := claimDeliveryFixture(ctx, store, event, route)
+		if err != nil {
+			t.Fatalf("ClaimAgentDelivery trace event: %v", err)
+		}
+		if bound, err := store.BindAgentSession(ctx, claimed.Claim, lease.SessionID); err != nil {
+			t.Fatalf("BindAgentSession trace event: %v", err)
+		} else if !bound.Acknowledged {
+			t.Fatal("BindAgentSession trace event was not acknowledged")
+		}
+		if released, err := store.ReleaseOutcome(ctx, lease); err != nil || !released.Acknowledged {
+			t.Fatalf("Release session before managed turn: result=%+v err=%v", released, err)
+		}
+		if err := persistManagedAgentTurnReadbackFixture(t, runtimedelivery.WithClaim(ctx, claimed.Claim), store, runtimellm.AgentTurnRecord{
+			AgentID:          "agent-1",
+			Memory:           agentmemory.Plan{Enabled: true},
+			SessionID:        lease.SessionID,
+			RunID:            runID,
+			FlowInstance:     identity.FlowInstance(),
+			TriggerEventID:   eventID,
+			TriggerEventType: "trace.visible",
+			RequestPayload:   []byte(`{"prompt":"hello"}`),
+			ResponseRaw:      []byte(`{"content":"ok"}`),
+			ParseOK:          true,
+		}); err != nil {
+			t.Fatalf("ManagedTurnReadbackFixture: %v", err)
+		}
+		trace, _, err := store.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10})
+		if err != nil {
+			t.Fatalf("LoadRunDebugTracePage: %v", err)
+		}
+		if len(trace) != 1 || trace[0].EventID != eventID || trace[0].SessionID != lease.SessionID || trace[0].TurnTriggerEventID != eventID {
+			t.Fatalf("trace = %#v, want event/session/turn visibility", trace)
+		}
+		eventsPage, err := store.ListOperatorEvents(ctx, operatorread.OperatorEventListOptions{Filter: operatorread.OperatorEventListFilter{RunID: runID}, Limit: 10})
+		if err != nil {
+			t.Fatalf("ListOperatorEvents: %v", err)
+		}
+		if len(eventsPage.Events) != 1 || eventsPage.Events[0].EventID != eventID || !operatorDeliveriesContain(eventsPage.Events[0].Deliveries, "agent", "agent-1") {
+			t.Fatalf("events page = %#v, want event with delivery", eventsPage)
+		}
 
-	logID := uuid.NewString()
-	if err := commitDiagnosticRuntimeLogFixture(ctx, store, eventtest.DiagnosticDirect(logID,
+		logID := uuid.NewString()
+		if err := commitDiagnosticRuntimeLogFixture(ctx, store, eventtest.DiagnosticDirect(logID,
 
-		events.EventTypePlatformRuntimeLog,
-		"runtime", "", json.RawMessage(`{"log_level":"warn","message":"runtime warning","details":{"component":"scheduler","action":"session_warning","session_id":"`+lease.SessionID+`"}}`), 0, runID, "", events.EventEnvelope{}, now.Add(time.Second))); err != nil {
-		t.Fatalf("AppendEvent runtime log: %v", err)
-	}
-	logs, err := store.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{RunID: runID, Level: "warn", Component: "scheduler", Limit: 10})
-	if err != nil {
-		t.Fatalf("ListOperatorRuntimeLogs: %v", err)
-	}
-	if len(logs.Logs) != 1 || logs.Logs[0].LogID != logID || logs.Logs[0].SessionID != lease.SessionID {
-		t.Fatalf("runtime logs = %#v, want persisted runtime log", logs)
-	}
+			events.EventTypePlatformRuntimeLog,
+			"runtime", "", json.RawMessage(`{"log_level":"warn","message":"runtime warning","details":{"component":"scheduler","action":"session_warning","session_id":"`+lease.SessionID+`"}}`), 0, runID, "", events.EventEnvelope{}, now.Add(time.Second))); err != nil {
+			t.Fatalf("AppendEvent runtime log: %v", err)
+		}
+		logs, err := store.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{RunID: runID, Level: "warn", Component: "scheduler", Limit: 10})
+		if err != nil {
+			t.Fatalf("ListOperatorRuntimeLogs: %v", err)
+		}
+		if len(logs.Logs) != 1 || logs.Logs[0].LogID != logID || logs.Logs[0].SessionID != lease.SessionID {
+			t.Fatalf("runtime logs = %#v, want persisted runtime log", logs)
+		}
+	})
 }
 
 func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
