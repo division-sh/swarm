@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/userfacing"
 )
 
@@ -362,7 +363,13 @@ func cloneStringMap(values map[string]string) map[string]string {
 
 func normalizeSubject(subject *Subject) error {
 	subject.ID = strings.TrimSpace(subject.ID)
-	subject.Provider = strings.TrimSpace(subject.Provider)
+	if subject.Kind == SubjectProviderTrigger {
+		if err := runtimepaths.ValidateFlowSegment(subject.Provider); err != nil {
+			return fmt.Errorf("provider trigger subject requires an exact portable directory key: %w", err)
+		}
+	} else {
+		subject.Provider = strings.TrimSpace(subject.Provider)
+	}
 	subject.Action = strings.TrimSpace(subject.Action)
 	subject.Source = strings.TrimSpace(subject.Source)
 	subject.Provenance = strings.TrimSpace(subject.Provenance)

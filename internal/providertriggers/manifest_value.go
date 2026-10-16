@@ -77,6 +77,9 @@ func (m Manifest) admitRequest(req Request) (manifestAdmission, error) {
 	if err := m.Validate(); err != nil {
 		return manifestAdmission{}, err
 	}
+	if req.Provider != "" && req.Provider != m.Provider() {
+		return manifestAdmission{}, badRequest(fmt.Sprintf("provider trigger %q does not match request provider %q; use its exact directory key", m.Provider(), req.Provider))
+	}
 	return m.value.definition.admitRequest(req)
 }
 

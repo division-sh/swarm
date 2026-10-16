@@ -239,7 +239,7 @@ func (g *InboundGateway) handleResolvedWebhook(w http.ResponseWriter, r *http.Re
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	provider := providertriggers.NormalizeProviderName(target.Provider)
+	provider := target.Provider
 	if provider == "" {
 		_, provider, _ = parseWebhookPath(r.URL.Path)
 	}
@@ -900,7 +900,7 @@ func parseWebhookPath(path string) (entityID, provider string, ok bool) {
 		return "", "", false
 	}
 	entityID = parts[1]
-	provider = strings.TrimSpace(parts[2])
+	provider = parts[2]
 	if entityID == "" || provider == "" {
 		return "", "", false
 	}

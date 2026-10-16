@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
@@ -123,9 +124,9 @@ func (s *CatalogSnapshot) CompileAdmission(req CompileAdmissionRequest) (Inbound
 	if err := runtimecontracts.ValidateIngressAlias(alias); err != nil {
 		return InboundAdmissionPlan{}, err
 	}
-	provider := NormalizeProviderName(req.Provider)
-	if provider == "" {
-		return InboundAdmissionPlan{}, fmt.Errorf("ingress admission requires alias and provider")
+	provider := req.Provider
+	if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
+		return InboundAdmissionPlan{}, fmt.Errorf("ingress admission requires an exact portable provider directory key: %w", err)
 	}
 	if s == nil {
 		return InboundAdmissionPlan{}, fmt.Errorf("ingress alias %q provider %q cannot compile admission: provider trigger catalog snapshot is required", alias, provider)
@@ -502,7 +503,7 @@ func (p InboundAdmissionPlan) AdmitRequest(req Request) (AdmittedRequest, error)
 	if !p.Valid() {
 		return AdmittedRequest{}, badRequest("compiled inbound admission plan is required")
 	}
-	provider := NormalizeProviderName(req.Provider)
+	provider := req.Provider
 	if provider == "" {
 		provider = p.provider
 	}

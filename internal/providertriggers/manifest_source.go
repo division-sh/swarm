@@ -32,7 +32,6 @@ func parseManifestAt(body []byte, file string) (Manifest, error) {
 	if err := definition.validate(); err != nil {
 		return Manifest{}, triggerSourceError(root, err.Error())
 	}
-	definition.Provider = NormalizeProviderName(definition.Provider)
 	definition.outputs = definition.OutputManifest()
 	return Manifest{value: &manifestValue{definition: definition, source: root, body: snapshot.Bytes()}}, nil
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -331,9 +332,9 @@ func (eb *EventBus) ApplyInboundDeliveryCommit(ctx context.Context, plan Inbound
 }
 
 func preflightInboundDeliveryBatch(verifier ProviderOutputAuthorizationVerifier, batch InboundDeliveryBatch) (InboundDeliveryBatch, error) {
-	provider := strings.TrimSpace(batch.Provider)
-	if provider == "" {
-		return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery batch requires provider")
+	provider := batch.Provider
+	if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
+		return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery batch requires an exact portable provider directory key: %w", err)
 	}
 	if len(batch.Events) < 1 || len(batch.Events) > 2 {
 		return InboundDeliveryBatch{}, fmt.Errorf("inbound delivery batch requires raw plus zero or one normalized event")

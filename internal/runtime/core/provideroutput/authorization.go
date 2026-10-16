@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
 	"github.com/division-sh/swarm/internal/runtime/core/packidentity"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
 
@@ -30,12 +31,12 @@ type Authorization struct {
 }
 
 func NewAuthorization(provider, event, packID, packVersion, manifestHash string, generation triggergeneration.Generation) (Authorization, error) {
-	values := []*string{&provider, &event}
-	for _, value := range values {
-		*value = strings.TrimSpace(*value)
-		if *value == "" {
-			return Authorization{}, fmt.Errorf("provider output authorization fields are required")
-		}
+	if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
+		return Authorization{}, fmt.Errorf("provider output authorization requires an exact portable directory key: %w", err)
+	}
+	event = strings.TrimSpace(event)
+	if event == "" {
+		return Authorization{}, fmt.Errorf("provider output authorization fields are required")
 	}
 	admittedPackID, err := packidentity.ParseID(packID)
 	if err != nil {

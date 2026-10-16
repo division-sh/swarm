@@ -101,7 +101,7 @@ func (g *testInboundGateway) HandleResolvedWebhook(w http.ResponseWriter, r *htt
 			declaration = providertriggers.AdmissionDeclaration{
 				Kind: "raw", Acknowledge: providertriggers.UnsignedWebhookAcknowledgement,
 				Authentication: providertriggers.RawAuthenticationDeclaration{Kind: "none"},
-				Event:          "inbound." + providertriggers.NormalizeProviderName(target.Provider),
+				Event:          "inbound." + target.Provider,
 				DeliveryID:     providertriggers.RawDeliveryIDDeclaration{Source: "json_path", JSONPath: "$.id"}, Payload: "json",
 			}
 		}

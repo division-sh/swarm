@@ -1639,7 +1639,6 @@ func (m *RuntimeContextManager) LookupIngress(alias, provider string) RuntimeIng
 	if m == nil {
 		return RuntimeIngressContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}
 	}
-	provider = strings.TrimSpace(provider)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	aliasFound := false
@@ -2747,7 +2746,6 @@ func (m *RuntimeContextManager) AcquireIngress(ctx context.Context, alias, provi
 	if m == nil {
 		return nil, RuntimeIngressContextLookup{State: RuntimeContextStateUnloaded, Cause: RuntimeContextCauseNotLoaded}, nil
 	}
-	provider = strings.TrimSpace(provider)
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	aliasFound := false

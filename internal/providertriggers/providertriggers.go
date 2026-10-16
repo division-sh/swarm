@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
@@ -499,7 +500,7 @@ func (s *CatalogSnapshot) entryValueByProvider(provider string) (catalogEntryVal
 	if s == nil {
 		return catalogEntryValue{}, false
 	}
-	entry, ok := s.byProvider[NormalizeProviderName(provider)]
+	entry, ok := s.byProvider[provider]
 	return entry, ok
 }
 
@@ -664,9 +665,9 @@ func parseManifestStrict(body []byte) (Manifest, error) {
 }
 
 func (m manifestDefinition) validate() error {
-	provider := NormalizeProviderName(m.Provider)
-	if provider == "" {
-		return fmt.Errorf("provider is required")
+	provider := m.Provider
+	if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
+		return fmt.Errorf("provider requires its exact portable directory key: %w", err)
 	}
 	signatureType := strings.TrimSpace(m.Signature.Type)
 	if m.Secret.Required && signatureType == "" {
@@ -800,7 +801,7 @@ type manifestAdmission struct {
 }
 
 func (m manifestDefinition) admitRequest(req Request) (manifestAdmission, error) {
-	provider := NormalizeProviderName(m.Provider)
+	provider := m.Provider
 	secret := strings.TrimSpace(req.Target.WebhookSecret)
 	if m.Secret.Required && secret == "" {
 		return manifestAdmission{}, unauthorized(provider + " webhook signing secret is required")
@@ -882,7 +883,7 @@ func (m manifestDefinition) projectAdmission(admitted manifestAdmission) (Delive
 
 func (m manifestDefinition) verifySignature(secret string, req Request) error {
 	if strings.TrimSpace(secret) == "" {
-		return unauthorized(NormalizeProviderName(m.Provider) + " webhook signing secret is required")
+		return unauthorized(m.Provider + " webhook signing secret is required")
 	}
 	if strings.TrimSpace(m.Signature.Type) == signatureTypeTokenEquality {
 		return m.verifyTokenEquality(secret, req)
@@ -1113,7 +1114,7 @@ func (m manifestDefinition) buildPublishPayload(provider, deliveryID, eventType 
 		}
 	}
 	return map[string]any{
-		"provider":             strings.TrimSpace(provider),
+		"provider":             provider,
 		"event_type":           strings.TrimSpace(eventType),
 		"provider_event_type":  strings.TrimSpace(eventType),
 		"provider_event_id":    strings.TrimSpace(deliveryID),
@@ -1343,14 +1344,6 @@ func (p headerParams) Values(key string) []string {
 		}
 	}
 	return out
-}
-
-func NormalizeProviderName(raw string) string {
-	token := strings.TrimSpace(strings.ToLower(raw))
-	token = strings.ReplaceAll(token, ".", "_")
-	token = strings.ReplaceAll(token, "-", "_")
-	token = strings.ReplaceAll(token, " ", "_")
-	return token
 }
 
 func NormalizeEventToken(raw string) string {

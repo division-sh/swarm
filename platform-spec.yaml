@@ -12506,6 +12506,16 @@ tool_model:
       provider trigger admission. Runtime-local Go implementations for selected configured providers are non-authoritative.
       A selected configured provider must consume a provider-trigger manifest for signing, replay checks, delivery-id
       extraction, event-type extraction, event naming, acknowledgement timing, and redaction.
+    provider_directory_identity: >
+      The trigger provider key is its exact admitted portable directory spelling, not a normalized protocol token.
+      Manifest admission, catalog lookup and generation, admission-plan compilation, explicit request matching,
+      normalized-output authorization and capability subjects preserve that key byte-for-byte. Validate raw keys
+      through the portable-directory owner; never trim, lowercase or replace dots, hyphens, underscores or spaces
+      to select an installed provider or grant execution. `telegram-sales` and `telegram_sales` are distinct keys.
+      Webhook routing and standing-context lookup compare the exact key. An omitted request provider may consume
+      its already-selected immutable plan, but a nonempty mismatched key refuses before authentication/projection.
+      Provider wire event-type conversion remains the separate declared event-type operation; it cannot rename
+      the directory, select another catalog entry, or confer normalized-output authority.
     body_admission_authority:
       owner: internal/providertriggers.Manifest
       source_owner: internal/yamlsource and existing shared ToolInputSchema admission

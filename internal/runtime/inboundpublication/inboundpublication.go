@@ -20,6 +20,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
@@ -55,7 +56,10 @@ func (i Identity) Validate() error {
 			return fmt.Errorf("inbound identity %s requires an exact UUID", field)
 		}
 	}
-	if i.Generation <= 0 || i.Provider == "" || i.Provider != strings.ToLower(strings.TrimSpace(i.Provider)) ||
+	if err := runtimepaths.ValidateFlowSegment(i.Provider); err != nil {
+		return fmt.Errorf("inbound identity requires its exact portable provider directory key: %w", err)
+	}
+	if i.Generation <= 0 ||
 		i.ProviderEventID == "" || i.ProviderEventID != strings.TrimSpace(i.ProviderEventID) {
 		return fmt.Errorf("inbound identity requires its exact generation, provider and provider delivery")
 	}
@@ -83,7 +87,6 @@ type Request struct {
 
 func (r Request) Normalized() Request {
 	r.PublicationID = strings.TrimSpace(r.PublicationID)
-	r.Provider = strings.ToLower(strings.TrimSpace(r.Provider))
 	r.ProviderEventID = strings.TrimSpace(r.ProviderEventID)
 	r.RequestFingerprint = strings.ToLower(strings.TrimSpace(r.RequestFingerprint))
 	r.RequestProjectionVersion = strings.TrimSpace(r.RequestProjectionVersion)

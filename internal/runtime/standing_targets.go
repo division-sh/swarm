@@ -76,7 +76,6 @@ func (t StandingTarget) normalized() StandingTarget {
 	t.ServiceID = strings.TrimSpace(t.ServiceID)
 	t.SourcePath = strings.TrimSpace(t.SourcePath)
 	t.FlowPath = strings.Trim(strings.TrimSpace(t.FlowPath), "/")
-	t.Provider = providertriggers.NormalizeProviderName(t.Provider)
 	t.RunID = strings.TrimSpace(t.RunID)
 	t.SigningSecret = strings.TrimSpace(t.SigningSecret)
 	return t
@@ -139,7 +138,7 @@ func ResolveStandingTargetDeclarations(source semanticview.Source, catalog *prov
 			}
 			seenProviders := map[string]struct{}{}
 			for _, binding := range view.Schema.Ingress.Providers {
-				provider := providertriggers.NormalizeProviderName(binding.Provider)
+				provider := binding.Provider
 				if provider == "" {
 					return nil, fmt.Errorf("%s ingress provider is required", location)
 				}

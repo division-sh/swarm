@@ -37,7 +37,7 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 		location := flowSchemaLocation(view)
 		seen := map[string]struct{}{}
 		for index, declaration := range view.Schema.Imports.ProviderTriggerEvents {
-			provider := providertriggers.NormalizeProviderName(declaration.Provider)
+			provider := declaration.Provider
 			eventName := strings.TrimSpace(declaration.Event)
 			declarationKey := provider + "\x00" + eventName
 			if _, duplicate := seen[declarationKey]; duplicate {
@@ -124,7 +124,7 @@ func SourceWithProviderTriggerEvents(source semanticview.Source, catalog *provid
 				ingressEvents[normalizedProviderTriggerProjectKey(flowID)] = append(ingressEvents[normalizedProviderTriggerProjectKey(flowID)], eventName)
 				if normalized {
 					authorization, err := runtimeprovideroutput.NewAuthorization(
-						providertriggers.NormalizeProviderName(binding.Provider),
+						binding.Provider,
 						eventName,
 						identity.ID,
 						identity.Version,
@@ -275,7 +275,7 @@ type providerTriggerSchemaOwner struct {
 
 func newProviderTriggerSchemaOwner(provider, event string, kind providertriggers.OutputKind, identity providertriggers.PackIdentity, generation triggergeneration.Generation) providerTriggerSchemaOwner {
 	return providerTriggerSchemaOwner{
-		provider: providertriggers.NormalizeProviderName(provider), event: strings.TrimSpace(event), kind: kind,
+		provider: provider, event: strings.TrimSpace(event), kind: kind,
 		identity: identity, generation: generation,
 	}
 }

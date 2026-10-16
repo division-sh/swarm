@@ -1591,7 +1591,7 @@ func newTestCatalogSnapshot(manifests ...triggerFixture) (*CatalogSnapshot, erro
 }
 
 func acceptInstalled(snapshot *CatalogSnapshot, req Request) (Delivery, error) {
-	provider := NormalizeProviderName(req.Provider)
+	provider := req.Provider
 	if provider == "" {
 		return Delivery{}, badRequest("provider is required")
 	}
