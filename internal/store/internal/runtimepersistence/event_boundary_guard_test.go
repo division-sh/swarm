@@ -63,6 +63,9 @@ var eventRecordImportFiles = map[string]struct{}{
 	"internal/store/internal/operatorsurface/operator_event_batch.go":                {},
 	"internal/store/internal/operatorsurface/operator_observability_read_surface.go": {},
 	"internal/store/internal/operatorsurface/sqlite_runtime_observability.go":        {},
+	// #2720 Gate E 6221291258: read-only exact turn/publication attribution
+	// consumes the canonical record decoder, never event SQL or admission.
+	"internal/store/internal/operatorsurface/run_turn_attribution.go": {},
 	// The materialization dependency owner decodes complete publication records; it does not reconstruct event identity.
 	"internal/store/internal/backend/delivery/receiver_materialization.go": {},
 	// Historical inherited ordinals are revalidated by the complete-record decoder before the shared fan-out owner.
@@ -571,6 +574,7 @@ func TestHostileEventRecordConsumerClassificationDoesNotGrantSQL(t *testing.T) {
 		"internal/store/internal/operatorsurface/operator_event_batch.go",
 		"internal/store/internal/operatorsurface/operator_observability_read_surface.go",
 		"internal/store/internal/operatorsurface/sqlite_runtime_observability.go",
+		"internal/store/internal/operatorsurface/run_turn_attribution.go",
 	} {
 		if _, ok := eventRecordImportFiles[path]; !ok {
 			t.Errorf("missing canonical consumer %s", path)
