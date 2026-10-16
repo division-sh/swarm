@@ -160,29 +160,48 @@ the existing durable journal/readback obligation, not treat the summary as ACK.
 
 The same candidate includes sealed retained-generation journal capture and
 per-dispatch retention. Replacement cannot redirect a callback to the successor
-journal; original native currentness fences still refuse late writes. Runtime
-installation hunks and actual native takeover remain open until E's concrete
-bind-once assembly is composed. Model/SQLmock controls are not substituted for
-the required genuine both-store takeover, rollback, ACK-loss and late-writer
-proofs. The race3 candidate log is
-amendment2-activity-carriers-and-r04-race3-candidate1.log; its outcome must be
-recorded after completion, not assumed here.
+journal; original native currentness fences still refuse late writes. Signed
+e0b5c7b395 adds installation after normal admission, source refresh and both
+selected admission arms. E's concrete bind-once assembly and recovery startup
+hook remain E-owned. Model/SQLmock controls are not substituted for the required
+genuine both-store takeover, rollback, ACK-loss and late-writer proofs.
+
+| Later local receipt | Actual result / boundary |
+| --- | --- |
+| amendment2-activity-carriers-and-r04-race3-candidate1.log | Cancelled while queued before any test started; no pass credit. |
+| amendment2-activity-carriers-and-r04-race3-candidate2.log | Pipeline RED/incomplete at the original180s package limit. One new terminal-content test used a bare result type instead of its canonical routed type; corrected test-only at e0b5c7b395. The old proposed-effect source fixture still declared the removed key; corrected at the same head. Native terminal roots exposed the deliberately unbound original journal before E's assembly was connected; they remain unqualified, with all native assertions retained. |
+| Same candidate2 log, separate completed packages | Race x3 PASS: contracts1.093s, engine2.928s, decisioncard1.034s, authoringview1.173s, runtime/startupownership1.043s, activityjournal1.448s and schemastore16.607s. The schema controls use real generated DDL on SQLite and PostgreSQL. The activityjournal controls do not prove genuine takeover. |
+| amendment2-recovery-content-and-capture-race3-candidate3.log | Race x3 PASS at e0b5c7b395: pipeline3.334s and runtime/startupownership1.027s. Exact terminal content/reuse, original request/source/input/reply checks, retired-carrier refusals, captured-journal replacement and sealed generation capture; no native takeover claim. |
+| amendment2-carriers-complexity-candidate1.log | Original candidate RED on the new recovery sweep's cognitive42 hotspot. |
+| amendment2-carriers-complexity-candidate2.log | PASS after factoring at de02b6c105, against253df7f075: cognitive hotspots537->537, >=50 hotspots190->189, cyclomatic247->247. No baseline raise; later changes still require the final refresh. |
+
+E's blocking prerequisite question6224909578 is answered by the signed LOCAL
+integration-only common source8984035819cc962bb3d0da13712ae01720919ced,
+treecf1920926485e9ab99083d37d30155149d9ac565, parents A e0b5c7b395 and
+E b7b7c08de7 (handoff6224987535). This is not a landing branch, push or compiled
+qualification. It contains the genuine original writers/schema/capture/adapter
+and E's exact session seam. E retains its two native assembly bindings and
+startup hook. Merge resolutions keep B/E's native historical fixture owner,
+remove its retired column/argument, and do not mint execution permission for
+historical copies. Both production branches remain unchanged by that object-only
+composition.
 
 ## Still Open
 
 R04 now has the nullable native execution_binding column and strict codec,
 exact pre-mutation identity checks and explicit non-executing fork-copy NULL.
 The original-role process/grant/selected fences are now called by each native
-owner writer. Per-dispatch capture and A's private native adapter now exist as
-staging above, but runtime installation and E's fixed-session recovery integration
-are not yet composed. Joint gate6221888821/6221925281 is approved;
+owner writer. Per-dispatch capture, runtime installation and A's private native
+adapter now exist as staging above, but E's fixed-session assembly/startup
+integration and genuine connected native execution are not yet qualified.
+Joint gate6221888821/6221925281 is approved;
 the exact port and historical/non-executing writer map are in
 issue-2700-r04-activity-port.md. The native staging boundary and all original
 REDs are accounted in issue-2700-r04-native-progress.md. No startup recovery sweep has
-been enabled, no reference-only claim supplies permission, and the original
-component reopen RED remains visible. Original writers refuse unbound roles;
-the currently uninstalled runtime journal must be connected before native HTTP
-execution can be qualified again. There is no fresh-NULL permission or completed
+been enabled in A's production branch, no reference-only claim supplies
+permission, and the original component reopen RED remains visible. Original
+writers refuse unbound roles; the runtime installation must receive E's genuine
+bound session before native HTTP execution can be qualified again. There is no fresh-NULL permission or completed
 R04 repair. Earlier native HTTP receipts remain historical component evidence,
 not exact-head credit across this pending assembly.
 

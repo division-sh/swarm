@@ -100,9 +100,14 @@ repeated boot rereads the same result, not a new timestamp or provider call.
 | runforkpersistence/run_fork_activity_generation.go terminal copies | Historical/non-executing. Preserve exact result/time/lineage; no copied reference or NULL can become a child launch/recovery grant. |
 | activityjournal/fork_history_fixture.go on B/E's pin | Historical/non-executing fixture writer, absent from A's pre-B base. Must be composed on actual B; no production fallback or copied-terminal promotion. |
 
-Next work is native column/codec plus original-role binding and all four writer
-fences, followed by the exact private adapter. This declaration and the DTO's
-race x3 proof do NOT qualify the native fence or actual takeover. Both-store
-live duplicate/takeover orderings, still-alive predecessor refusal, selected/
-foreign/current isolation, rollback, lost ACK, historical terminal reuse and
-one physical HTTP call/one durable uncertain outcome remain mandatory.
+The native column/codec, original-role binding and all four writer fences,
+private adapter, sealed capture and runtime installation are now staged in A's
+signed e0b5c7b395 source. They do NOT qualify genuine takeover. E's prerequisite
+question6224909578 is answered by the explicitly integration-only common source
+8984035819cc962bb3d0da13712ae01720919ced (A e0b5c7b395 + E b7b7c08de7),
+treecf1920926485e9ab99083d37d30155149d9ac565, handoff6224987535. No checkout,
+push, assembly enablement or compiled qualification is implied. E still owns
+the two native assembly bindings and startup recovery call. Both-store live
+duplicate/takeover orderings, still-alive predecessor refusal, selected/foreign/
+current isolation, rollback, lost ACK, historical terminal reuse and one
+physical HTTP call/one durable uncertain outcome remain mandatory.
