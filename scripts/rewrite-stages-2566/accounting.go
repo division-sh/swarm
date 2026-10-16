@@ -67,6 +67,9 @@ func validateFinitePreparation(root string, selected ...bool) error {
 }
 
 func finiteCurrentOutput(root string, c change, historical []byte) ([]byte, error) {
+	if endpoint, handled, err := finiteNativeRepairOutput(root, c, historical); handled || err != nil {
+		return endpoint, err
+	}
 	raw, err := os.ReadFile(filepath.Join(root, formatproof.Successors))
 	if os.IsNotExist(err) {
 		if c.File == formatproof.Source {
@@ -101,6 +104,9 @@ func finiteCurrentOutput(root string, c change, historical []byte) ([]byte, erro
 }
 
 func finiteCurrentSource(root string, c change, body []byte) ([]byte, error) {
+	if endpoint, handled, err := finiteNativeRepairSource(root, c, body); handled || err != nil {
+		return endpoint, err
+	}
 	if c.File != formatproof.Source {
 		return rewrite(c, body)
 	}
