@@ -923,6 +923,7 @@ type RunTestQuiescence struct {
 }
 
 type RunDebugReport struct {
+	Header            RunHeader                   `json:"-"`
 	RunID             string                      `json:"run_id"`
 	RunTableStatus    string                      `json:"run_table_status,omitempty"`
 	RootEventID       string                      `json:"root_event_id,omitempty"`
@@ -946,6 +947,7 @@ type RunDebugReport struct {
 	RuntimeLogs       []RunDebugRuntimeLog        `json:"runtime_logs,omitempty"`
 	FanOut            fanoutobligation.RunSummary `json:"fan_out"`
 	TestQuiescence    RunTestQuiescence           `json:"test_quiescence"`
+	OperationalFacts  *RunOperationalFacts        `json:"-"`
 }
 
 type RunDebugTraceQueryOptions struct {
@@ -1036,6 +1038,8 @@ type RunOperationalStatus struct {
 	BlockingLayer  string
 	BlockingReason string
 	Heuristics     []string
+	Instances      []RunInstanceOperationalStatus
+	Attributions   []RunTurnAttribution
 }
 
 type AgentDeliveryLifecycleFacts struct {

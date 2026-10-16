@@ -139,6 +139,11 @@ func sortedContractKeys[T any](m map[string]T) []string {
 // loadYAMLFile is reserved for the platform-owned specification. Authored
 // source is decoded exclusively from AdmittedSourceArtifact snapshots.
 func loadYAMLFile(path string, target *PlatformSpecDocument) error {
+	if path == platform.PlatformSpecDisplayPath {
+		var err error
+		*target, err = ParsePlatformSpecDocument(platform.PlatformSpecYAML(), path)
+		return err
+	}
 	source, err := yamlsource.LoadFile(path)
 	if err != nil {
 		if cause, ok := yamlsource.ParseCause(err); ok {

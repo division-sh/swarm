@@ -214,8 +214,7 @@ func TestCLIHumanCodeProjectionOwnsCurrentProducerTuples(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, lifecycle, "delivered_exclusion"), "not an AgentDeliveryLifecycleState")
 
 	wantRunBlocking := map[string]string{
-		"scoring_terminal_outcome": "terminal_scoring_outcome_missing",
-		"delivery_lifecycle":       "no_active_deliveries",
+		"delivery_lifecycle": "no_active_deliveries",
 	}
 	assertCurrentCodePairs(t, mustMappingValue(t, mustMappingValue(t, families, "run_blocking_tuples"), "current_non_empty"), "blocking_layer", "blocking_reason", wantRunBlocking)
 

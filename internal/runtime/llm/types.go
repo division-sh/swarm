@@ -91,6 +91,10 @@ type ToolCall struct {
 	Arguments any    `json:"arguments,omitempty"`
 }
 
+func completionToolCallIdentity(turnCount, callIndex int, call ToolCall) string {
+	return fmt.Sprintf("tool_call:%d:%d:%s:%s", turnCount, callIndex, strings.TrimSpace(call.ID), strings.TrimSpace(call.Name))
+}
+
 // ToolOutputAuthority is the immutable occurrence coordinate minted by a
 // successful provider settlement for its post-provider tool outputs.
 type ToolOutputAuthority struct {

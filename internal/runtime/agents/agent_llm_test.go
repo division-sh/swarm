@@ -410,6 +410,36 @@ func TestLLMAgent_OnEvent_UsesSinglePostStepExecutionPath(t *testing.T) {
 	}
 }
 
+type recorderObservingRuntime struct {
+	*boardTestRuntime
+	recorder *runtimebus.EmittedEventsRecorder
+}
+
+func (r *recorderObservingRuntime) continueAgentTest(ctx context.Context, session *llm.Session, message llm.Message) (*llm.Response, error) {
+	r.recorder, _ = runtimebus.EmittedEventsRecorderFromContext(ctx)
+	return r.boardTestRuntime.continueAgentTest(ctx, session, message)
+}
+
+func TestLLMAgentOnEventSharesExactRecorderWithoutRepublishing(t *testing.T) {
+	runID := eventtest.UUID(t.Name())
+	runtime := &recorderObservingRuntime{boardTestRuntime: &boardTestRuntime{
+		steps: []*llm.Response{{Message: llm.Message{Role: "assistant", Content: "Finished without using a tool."}}},
+	}}
+	agent := mustBuildLLMAgent(t, models.AgentConfig{
+		ExecutionMode: "live", ID: "worker", Role: "analysis", Identity: agentidentitytest.RootRuntimeForRun(t, runID, "worker", "agent-recorder-test"),
+	}, runtime, nil, nil)
+	recorder := runtimebus.NewEmittedEventsRecorder()
+	ctx := runtimebus.WithEmittedEventsRecorder(agentManagedTestContext(t, agent), recorder)
+	event := eventtest.ExistingRunRootIngress(eventtest.UUID("recorder-input"), "analysis/requested", "operator", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
+	returned, err := agent.OnEvent(ctx, event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.recorder != recorder || len(returned) != 0 || len(recorder.Snapshot()) != 0 || runtime.call != 1 {
+		t.Fatalf("turn replaced its recorder or invented execution/publication: shared=%t returned=%d recorded=%d calls=%d", runtime.recorder == recorder, len(returned), len(recorder.Snapshot()), runtime.call)
+	}
+}
+
 func TestLLMAgentOnEventPreventsMockCausalityFromEscalatingToLive(t *testing.T) {
 	for _, tc := range []struct {
 		name        string

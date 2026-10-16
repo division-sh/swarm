@@ -946,6 +946,8 @@ type fakeRunReadStore struct {
 	reports      map[string]operatorread.RunDebugReport
 	notFound     map[string]bool
 	lastListOpts operatorread.RunHeaderListOptions
+	headerReads  int
+	reportReads  int
 }
 
 func (s *fakeRunReadStore) ListFanOutIntents(_ context.Context, query fanoutobligation.ListQuery) (fanoutobligation.ListPage, error) {
@@ -956,6 +958,7 @@ func (s *fakeRunReadStore) ListFanOutIntents(_ context.Context, query fanoutobli
 }
 
 func (s *fakeRunReadStore) LoadRunHeader(_ context.Context, runID string) (operatorread.RunHeader, error) {
+	s.headerReads++
 	if s.notFound[runID] {
 		return operatorread.RunHeader{}, operatorread.ErrRunNotFound
 	}
@@ -984,6 +987,7 @@ func (s *fakeRunReadStore) ListRunHeaders(_ context.Context, opts operatorread.R
 }
 
 func (s *fakeRunReadStore) LoadRunDebugReport(_ context.Context, runID string, _ operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
+	s.reportReads++
 	if s.notFound[runID] {
 		return operatorread.RunDebugReport{}, operatorread.ErrRunNotFound
 	}
@@ -991,6 +995,7 @@ func (s *fakeRunReadStore) LoadRunDebugReport(_ context.Context, runID string, _
 	if !ok {
 		return operatorread.RunDebugReport{}, operatorread.ErrRunNotFound
 	}
+	report.Header = s.headers[runID]
 	return report, nil
 }
 

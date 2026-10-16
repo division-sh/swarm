@@ -18,8 +18,6 @@ type ProjectionReader interface {
 	ListRunHeaders(context.Context, operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error)
 	LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
 	ListOperatorEvents(context.Context, operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error)
-	LoadLatestRunFlowInstance(context.Context, string) (string, error)
-	LoadLatestRunNonEscalationProgressAt(context.Context, string, string) (time.Time, error)
 }
 
 const (
@@ -35,6 +33,7 @@ type Diagnosis struct {
 	OperationalState string
 	BlockingLayer    string
 	BlockingReason   string
+	Attributions     []operatorread.RunTurnAttribution
 }
 
 type RunSnapshot struct {
@@ -224,6 +223,7 @@ func (m *Monitor) eventForSnapshot(snapshot RunSnapshot, now time.Time) (events.
 		"threshold_seconds":   int(policy.Threshold / time.Second),
 		"stalled_for_seconds": int(stalledFor / time.Second),
 		"emitted_at":          now.UTC().Format(time.RFC3339Nano),
+		"attributions":        append([]operatorread.RunTurnAttribution{}, snapshot.Diagnosis.Attributions...),
 	})
 	if err != nil {
 		return none, EscalationKey{}, false, err

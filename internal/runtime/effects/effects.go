@@ -373,20 +373,9 @@ func AdmitCompletionContinuation(attempt Attempt, evidence json.RawMessage, requ
 		attempt.Origin.Kind != CompletionOriginDelivery || !phase.Valid() {
 		return Attempt{}, fmt.Errorf("completion continuation requires a normal provider delivery attempt and phase")
 	}
-	var document map[string]json.RawMessage
-	if err := json.Unmarshal(evidence, &document); err != nil {
-		return Attempt{}, fmt.Errorf("decode completion continuation evidence: %w", err)
-	}
-	var continuation completionContinuationEvidence
-	if err := json.Unmarshal(document[completionContinuationEvidenceKey], &continuation); err != nil {
-		return Attempt{}, fmt.Errorf("decode settled completion continuation: %w", err)
-	}
-	continuation.Request = bytes.TrimSpace(continuation.Request)
-	continuation.Payload = bytes.TrimSpace(continuation.Payload)
-	if continuation.Version != completionContinuationEvidenceVersion || len(continuation.Request) == 0 ||
-		len(continuation.Payload) == 0 || !json.Valid(continuation.Payload) ||
-		Fingerprint(continuation.Request) != strings.TrimSpace(requestFingerprint) {
-		return Attempt{}, fmt.Errorf("settled completion continuation evidence is missing, invalid, or request-mismatched")
+	continuation, err := readCompletionContinuationEvidence(evidence, requestFingerprint)
+	if err != nil {
+		return Attempt{}, err
 	}
 	if err := surface.Validate(); err != nil {
 		return Attempt{}, fmt.Errorf("settled completion continuation capability surface: %w", err)
@@ -408,6 +397,35 @@ func AdmitCompletionContinuation(attempt Attempt, evidence json.RawMessage, requ
 		attempt.completionSuccessor = &successor
 	}
 	return attempt, nil
+}
+
+// ReadCompletionContinuationPayload exposes immutable evidence without admitting
+// the attempt for recovery, response consumption, or tool execution.
+func ReadCompletionContinuationPayload(evidence json.RawMessage, requestFingerprint string) (json.RawMessage, error) {
+	continuation, err := readCompletionContinuationEvidence(evidence, requestFingerprint)
+	if err != nil {
+		return nil, err
+	}
+	return append(json.RawMessage(nil), continuation.Payload...), nil
+}
+
+func readCompletionContinuationEvidence(evidence json.RawMessage, requestFingerprint string) (completionContinuationEvidence, error) {
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(evidence, &document); err != nil {
+		return completionContinuationEvidence{}, fmt.Errorf("decode completion continuation evidence: %w", err)
+	}
+	var continuation completionContinuationEvidence
+	if err := json.Unmarshal(document[completionContinuationEvidenceKey], &continuation); err != nil {
+		return completionContinuationEvidence{}, fmt.Errorf("decode settled completion continuation: %w", err)
+	}
+	continuation.Request = bytes.TrimSpace(continuation.Request)
+	continuation.Payload = bytes.TrimSpace(continuation.Payload)
+	if continuation.Version != completionContinuationEvidenceVersion || len(continuation.Request) == 0 ||
+		len(continuation.Payload) == 0 || !json.Valid(continuation.Payload) ||
+		Fingerprint(continuation.Request) != strings.TrimSpace(requestFingerprint) {
+		return completionContinuationEvidence{}, fmt.Errorf("settled completion continuation evidence is missing, invalid, or request-mismatched")
+	}
+	return continuation, nil
 }
 
 type CompletionContinuationSnapshot struct {

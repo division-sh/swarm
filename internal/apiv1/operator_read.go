@@ -78,14 +78,16 @@ type runTraceListResult struct {
 }
 
 type runDiagnosis struct {
-	Run              operatorread.RunHeader                 `json:"run"`
-	OperationalState string                                 `json:"operational_state"`
-	BlockingLayer    string                                 `json:"blocking_layer"`
-	BlockingReason   string                                 `json:"blocking_reason"`
-	Heuristics       []string                               `json:"heuristics"`
-	FailedDeliveries []operatorread.RunDebugFailureDelivery `json:"failed_deliveries"`
-	FanOut           fanoutobligation.RunSummary            `json:"fan_out"`
-	TestQuiescence   operatorread.RunTestQuiescence         `json:"test_quiescence"`
+	Run              operatorread.RunHeader                      `json:"run"`
+	OperationalState string                                      `json:"operational_state"`
+	BlockingLayer    string                                      `json:"blocking_layer"`
+	BlockingReason   string                                      `json:"blocking_reason"`
+	Heuristics       []string                                    `json:"heuristics"`
+	FailedDeliveries []operatorread.RunDebugFailureDelivery      `json:"failed_deliveries"`
+	FanOut           fanoutobligation.RunSummary                 `json:"fan_out"`
+	TestQuiescence   operatorread.RunTestQuiescence              `json:"test_quiescence"`
+	Instances        []operatorread.RunInstanceOperationalStatus `json:"instances"`
+	Attributions     []operatorread.RunTurnAttribution           `json:"attributions"`
 }
 
 var runListStatuses = map[string]struct{}{
@@ -197,11 +199,11 @@ func OperatorRunReadHandlers(opts RunReadHandlerOptions) map[string]MethodHandle
 		},
 		"run.diagnose": func(ctx context.Context, req Request) (any, error) {
 			runID := stringParam(req.Params, "run_id")
-			header, err := loadRunHeaderWithClocks(ctx, opts.Runs, runID)
+			runs, err := requireRunReadStore(opts.Runs)
 			if err != nil {
 				return nil, err
 			}
-			report, err := opts.Runs.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{})
+			report, err := runs.LoadRunDebugReport(ctx, runID, operatorread.RunDebugQueryOptions{})
 			if errors.Is(err, operatorread.ErrRunNotFound) {
 				return nil, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": runID})
 			}
@@ -214,7 +216,7 @@ func OperatorRunReadHandlers(opts RunReadHandlerOptions) map[string]MethodHandle
 				failedDeliveries = []operatorread.RunDebugFailureDelivery{}
 			}
 			return runDiagnosis{
-				Run:              header,
+				Run:              report.Header,
 				OperationalState: strings.TrimSpace(status.State),
 				BlockingLayer:    strings.TrimSpace(status.BlockingLayer),
 				BlockingReason:   strings.TrimSpace(status.BlockingReason),
@@ -222,6 +224,8 @@ func OperatorRunReadHandlers(opts RunReadHandlerOptions) map[string]MethodHandle
 				FailedDeliveries: failedDeliveries,
 				FanOut:           normalizeRunFanOut(report.FanOut),
 				TestQuiescence:   report.TestQuiescence,
+				Instances:        status.Instances,
+				Attributions:     status.Attributions,
 			}, nil
 		},
 	}

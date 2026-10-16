@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 )
 
@@ -161,7 +162,7 @@ func TestMonitorHonorsDisabledAndExtendedPolicies(t *testing.T) {
 	}
 }
 
-func TestMonitorPublishesBothSupportedStalledDiagnosisReasons(t *testing.T) {
+func TestMonitorPublishesDomainNeutralDiagnosisWithExactAttribution(t *testing.T) {
 	now := time.Date(2026, 6, 4, 12, 0, 0, 0, time.UTC)
 	reader := newFakeReader(
 		RunSnapshot{
@@ -171,10 +172,11 @@ func TestMonitorPublishesBothSupportedStalledDiagnosisReasons(t *testing.T) {
 			Diagnosis:      stalledDiagnosis("delivery_lifecycle", "no_active_deliveries"),
 		},
 		RunSnapshot{
-			RunID:          "scoring-run",
+			RunID:          "unrelated-run",
 			RunTableStatus: "running",
 			LastProgressAt: now.Add(-DefaultPolicy().Threshold),
-			Diagnosis:      stalledDiagnosis("scoring_terminal_outcome", "terminal_scoring_outcome_missing"),
+			Diagnosis: Diagnosis{OperationalState: "stalled", BlockingLayer: "delivery_lifecycle", BlockingReason: "no_active_deliveries",
+				Attributions: []operatorread.RunTurnAttribution{{FlowInstance: "review/one", AgentID: "reviewer", EventID: "request", DeliveryID: "delivery", Emission: operatorread.RunEmissionNone}}},
 		},
 	)
 	publisher := &fakePublisher{}
@@ -190,12 +192,25 @@ func TestMonitorPublishesBothSupportedStalledDiagnosisReasons(t *testing.T) {
 	for _, evt := range publisher.events {
 		payload := eventPayload(t, evt)
 		got[evt.RunID()] = payload["blocking_layer"].(string) + "/" + payload["blocking_reason"].(string)
+		attributions, ok := payload["attributions"].([]any)
+		if !ok {
+			t.Fatalf("attributions must be an array: %#v", payload)
+		}
+		if evt.RunID() == "unrelated-run" {
+			if len(attributions) != 1 {
+				t.Fatalf("exact origin disappeared: %#v", payload)
+			}
+			attribution := attributions[0].(map[string]any)
+			if attribution["flow_instance"] != "review/one" || attribution["agent_id"] != "reviewer" || attribution["event_id"] != "request" || attribution["delivery_id"] != "delivery" || attribution["emission_evidence"] != "none" {
+				t.Fatalf("exact origin changed: %#v", attribution)
+			}
+		}
 	}
 	if got["delivery-run"] != "delivery_lifecycle/no_active_deliveries" {
 		t.Fatalf("delivery-run payload = %q", got["delivery-run"])
 	}
-	if got["scoring-run"] != "scoring_terminal_outcome/terminal_scoring_outcome_missing" {
-		t.Fatalf("scoring-run payload = %q", got["scoring-run"])
+	if got["unrelated-run"] != "delivery_lifecycle/no_active_deliveries" {
+		t.Fatalf("unrelated-run payload = %q", got["unrelated-run"])
 	}
 }
 

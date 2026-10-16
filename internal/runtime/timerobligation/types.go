@@ -114,6 +114,7 @@ type Activation struct {
 	ActivationID              string    `json:"activation_id"`
 	Family                    Family    `json:"family"`
 	RunID                     string    `json:"run_id,omitempty"`
+	FlowInstance              string    `json:"-"`
 	Status                    string    `json:"status"`
 	DueAt                     time.Time `json:"due_at"`
 	InitialDueAt              time.Time `json:"initial_due_at,omitempty"`
