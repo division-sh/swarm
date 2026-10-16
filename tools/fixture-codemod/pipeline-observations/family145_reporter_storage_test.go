@@ -4,11 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"go/parser"
-	"go/token"
-	"os"
 	"strings"
-	"testing"
 )
 
 func family145ReporterRebaseProofError(before, after string) error {

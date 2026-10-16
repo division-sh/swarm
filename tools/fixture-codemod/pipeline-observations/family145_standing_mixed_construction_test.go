@@ -1,12 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
-	"testing"
-
-	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 func family145StandingMixedConstructionProofError(before, after string) error {

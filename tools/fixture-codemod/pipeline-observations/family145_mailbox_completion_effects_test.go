@@ -2,10 +2,8 @@ package main
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"fmt"
 	"go/ast"
-	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"

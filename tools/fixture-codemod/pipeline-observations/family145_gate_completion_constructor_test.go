@@ -1,10 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
-	"testing"
 )
 
 func family145GateCompletionConstructorProofError(before, after string) error {

@@ -1,11 +1,8 @@
 package main
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"os"
-	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
