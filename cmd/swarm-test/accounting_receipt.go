@@ -64,9 +64,8 @@ func checkAccountingFinalSource(ctx context.Context, root, head string, plan acc
 	if plan.Version != 1 || plan.Rows != 1 || plan.Policy.Digest != policy.Digest || !reflect.DeepEqual(plan.Policy.Policy, policy.Policy) {
 		return fmt.Errorf("accounting plan is foreign, empty or no longer approved")
 	}
-	fresh, err := planAccounting(ctx, root, plan.Base, plan.Head, plan.Policy)
-	if err != nil || !reflect.DeepEqual(plan, fresh) {
-		return fmt.Errorf("accounting plan lacks independently replayed provenance: %v", err)
+	if err := replayAccountingPlan(ctx, root, plan, policy); err != nil {
+		return err
 	}
 	actual, err := accountingHistoryAt(ctx, root, head)
 	if err != nil || !reflect.DeepEqual(actual, plan.Output) {
@@ -311,6 +310,9 @@ func validateAccountingReceipt(ctx context.Context, root, head, path string, rem
 	}
 	if receipt.Version != 1 || receipt.Head != head || receipt.HumanAudit != "pending" || receipt.Policy.Digest != policy.Digest || !reflect.DeepEqual(receipt.Policy.Policy, policy.Policy) {
 		return fmt.Errorf("accounting receipt is foreign, stale or claims an unproved audit")
+	}
+	if err := verifyAccountingPolicyHistory(ctx, root, receipt.Policy, policy); err != nil {
+		return err
 	}
 	if err := checkAccountingFinalSource(ctx, root, head, receipt.Plan, policy); err != nil {
 		return err

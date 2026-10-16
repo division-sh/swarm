@@ -276,10 +276,10 @@ func applyApprovedAccounting(ctx context.Context, root, head, path string, out i
 	if head != plan.Head {
 		return fmt.Errorf("accounting source moved before apply")
 	}
-	fresh, err := planAccounting(ctx, root, plan.Base, head, policy)
-	if err != nil || !reflect.DeepEqual(fresh, plan) {
-		return fmt.Errorf("accounting plan changed: %v", err)
+	if err := replayAccountingPlan(ctx, root, plan, policy); err != nil {
+		return err
 	}
+	var err error
 	if err = requireAccountingPolicy(ctx, remote, policy); err != nil {
 		return err
 	}
@@ -294,6 +294,37 @@ func applyApprovedAccounting(ctx context.Context, root, head, path string, out i
 	}
 	_, err = fmt.Fprintln(out, "accounting successor prepared; commit and certify the frozen head; no certification yet")
 	return err
+}
+
+func verifyAccountingPolicyHistory(ctx context.Context, root string, expected, current accountingPolicyObservation) error {
+	if expected.Digest != current.Digest || expected.Blob != current.Blob || !reflect.DeepEqual(expected.Policy, current.Policy) {
+		return fmt.Errorf("historical accounting approval differs from fresh protected policy")
+	}
+	if err := checkAccountingBase(ctx, root, expected.Commit, current); err != nil {
+		return err
+	}
+	raw, err := gitAccountingBlob(ctx, root, expected.Commit, accountingPolicyPath)
+	if err != nil || formatproof.Digest(raw) != current.Digest {
+		return fmt.Errorf("claimed historical approval was not the actual protected policy: %v", err)
+	}
+	return nil
+}
+
+func replayAccountingPlan(ctx context.Context, root string, plan accountingPlan, current accountingPolicyObservation) error {
+	if err := verifyAccountingPolicyHistory(ctx, root, plan.Policy, current); err != nil {
+		return err
+	}
+	fresh, err := planAccounting(ctx, root, plan.Base, plan.Head, current)
+	if err != nil {
+		return err
+	}
+	// Master may advance without changing the policy. Preserve the authenticated
+	// planning observation, not a caller-chosen replacement for current authority.
+	fresh.Policy = plan.Policy
+	if !reflect.DeepEqual(fresh, plan) {
+		return fmt.Errorf("accounting plan changed")
+	}
+	return nil
 }
 
 func readAccountingJSON(path string, out any) error {

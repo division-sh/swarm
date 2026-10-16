@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha1"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -228,5 +230,48 @@ func TestAccountingApprovedSourceCannotBeReboundByLocalGitReplacement(t *testing
 	defer os.RemoveAll(directory)
 	if _, err := os.Stat(filepath.Join(directory, "foreign.go")); !os.IsNotExist(err) {
 		t.Fatal("replacement contents entered the trusted executor archive")
+	}
+}
+
+func TestAccountingSavedPolicyCannotInventItsApprovalOrForceLatestRebase(t *testing.T) {
+	repo, unapproved := completionRepo(t)
+	policy := approvedAccountingPolicy(t)
+	raw, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(repo, accountingPolicyPath)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	completionGit(t, repo, "add", ".")
+	completionGit(t, repo, "commit", "-qm", "reviewed policy fixture")
+	old := accountingPolicyObservation{Commit: completionGit(t, repo, "rev-parse", "HEAD"), Policy: policy, Digest: formatproof.Digest(raw), Blob: fmt.Sprintf("%x", sha1.Sum(append([]byte(fmt.Sprintf("blob %d\x00", len(raw))), raw...)))}
+	completionGit(t, repo, "commit", "--allow-empty", "-qm", "unrelated master advance")
+	current := old
+	current.Commit = completionGit(t, repo, "rev-parse", "HEAD")
+	if err := verifyAccountingPolicyHistory(context.Background(), repo, old, current); err != nil {
+		t.Fatalf("unchanged historical approval required a latest-master rebase: %v", err)
+	}
+	for _, field := range []string{"commit", "blob", "digest", "executor"} {
+		t.Run(field, func(t *testing.T) {
+			forged := old
+			switch field {
+			case "commit":
+				forged.Commit = unapproved
+			case "blob":
+				forged.Blob = strings.Repeat("0", 40)
+			case "digest":
+				forged.Digest = strings.Repeat("0", 64)
+			case "executor":
+				forged.Policy.ExecutorSource = strings.Repeat("c", 40)
+			}
+			if verifyAccountingPolicyHistory(context.Background(), repo, forged, current) == nil {
+				t.Fatal("saved plan invented its historical authority")
+			}
+		})
 	}
 }
