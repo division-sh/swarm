@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -23,6 +24,7 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -43,6 +45,7 @@ type completion2270Transport struct {
 	profile  string
 	requests *atomic.Int32
 	base     http.RoundTripper
+	emit     bool
 }
 
 func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
@@ -52,7 +55,7 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 	}
 	for _, backend := range servedparity.RequiredBackends {
 		for _, profileID := range []string{llmselection.BackendAnthropic, llmselection.BackendOpenAICompatible, llmselection.BackendOpenAIResponses, llmselection.BackendClaudeCLI} {
-			for _, kind := range []string{"ordinary", "selected"} {
+			for _, kind := range []string{"ordinary", "ordinary_emit", "selected"} {
 				t.Run(string(backend)+"/"+profileID+"/"+kind, func(t *testing.T) {
 					if profileID == llmselection.BackendClaudeCLI {
 						if os.Getenv("SWARM_TEST_WORKSPACE_MCP_DOCKER") != "1" {
@@ -91,6 +94,9 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 					probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
 					rt.Probe = probe
 					root := writeServedLiveAgentFixture(t)
+					if kind == "ordinary_emit" {
+						root = canonicalrouting.CopyRootIngressServedCompletionEmit(t)
+					}
 					if kind == "selected" {
 						root = canonicalrouting.CopyForkReceiverBusinessMutationOwnership(t, false)
 						writeSelectedForkAgentProofFixture(t, root, "loaded-decoy", "[receiver.closed]", "Source configuration must not execute at the selected frontier.", "return {'text': 'source only', 'usage': {'input_tokens': 2, 'output_tokens': 2}}")
@@ -112,7 +118,7 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 						stubServeRuntimeWorkspaceLifecycle(t)
 						opts.StoreMode, opts.StoreModeSet = "postgres", true
 					}
-					text := fmt.Sprintf("runtime:\n  recovery_on_startup: false\n%sllm:\n  backend: %s\n  models:\n    regular:\n      %s: request-A\n  openai_compatible:\n    base_url: http://completion-2270.test\n  openai_responses:\n    base_url: http://completion-2270.test\n  session:\n    lock_ttl: 10s\n    rotate_after_turns: 40\n    rotate_on_parse_failures: 3\n", storeConfig, profileID, profileID)
+					text := fmt.Sprintf("runtime:\n  recovery_on_startup: true\n%sllm:\n  backend: %s\n  models:\n    regular:\n      %s: request-A\n  openai_compatible:\n    base_url: http://completion-2270.test\n  openai_responses:\n    base_url: http://completion-2270.test\n  session:\n    lock_ttl: 10s\n    rotate_after_turns: 40\n    rotate_on_parse_failures: 3\n", storeConfig, profileID, profileID)
 					wantObserved := "reported-B"
 					if profileID == llmselection.BackendClaudeCLI {
 						text += fmt.Sprintf("workspace:\n  image: %s\n", image)
@@ -158,11 +164,12 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 					}
 					var requests atomic.Int32
 					previous := http.DefaultTransport
-					http.DefaultTransport = completion2270Transport{t: t, profile: profileID, requests: &requests, base: previous}
+					http.DefaultTransport = completion2270Transport{t: t, profile: profileID, requests: &requests, base: previous, emit: kind == "ordinary_emit"}
 					t.Cleanup(func() { http.DefaultTransport = previous })
-					endpoint, runtime := startServedEventPublishFollowUpRuntime(t, opts)
-					rt.Endpoint = endpoint
-					rt.AuthorContext = servedRuntimeProofAuthorActivityContext(t, runtime, rt.BundleHash)
+					process := startServeRuntimeTestProcess(t, opts)
+					process.waitForReadyLine()
+					rt.Endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+					rt.AuthorContext = servedRuntimeProofAuthorActivityContext(t, servedTestProcessRuntime(t, process), rt.BundleHash)
 					if profileID == llmselection.BackendClaudeCLI {
 						requireCompletion2270NoBusinessStartup(t, rt.Selected.Effects(), &invocationProof)
 					}
@@ -170,14 +177,33 @@ func TestServedCompletion2270RunServePublicReadbackBothStores(t *testing.T) {
 						proveCompletion2270ServedSelected(t, rt, selected, profileID, &requests, &invocationProof)
 						return
 					}
-					proveCompletion2270ServedOrdinary(t, rt, profileID, wantObserved, &requests, &invocationProof)
+					runID, before := proveCompletion2270ServedOrdinary(t, rt, profileID, wantObserved, &requests, &invocationProof, kind == "ordinary_emit")
+					if code := process.stop(); code != 0 {
+						t.Fatalf("join completed provider runtime: code=%d\n%s", code, process.outputString())
+					}
+					process = startServeRuntimeTestProcess(t, opts)
+					process.waitForReadyLine()
+					rt.Endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString()) + "/v1/rpc"
+					var after cliapp.DiagnosticRunDiagnosisResult
+					requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &after)
+					if after.OperationalState == nil || *after.OperationalState != "stalled" || !reflect.DeepEqual(before.Attributions, after.Attributions) || !reflect.DeepEqual(before.Instances, after.Instances) {
+						t.Fatalf("restart lost or replaced completed-turn evidence: before=%+v after=%+v", before, after)
+					}
+					if profileID == llmselection.BackendClaudeCLI {
+						attempts, err := storetest.ReadCompletionAttemptStorage(context.Background(), rt.Selected.Effects(), "claude_cli", "")
+						if err != nil || len(attempts) != 1 || attempts[0].State != string(effects.StateSettled) {
+							t.Fatalf("restart relaunched CLI provider work: %+v %v", attempts, err)
+						}
+					} else if requests.Load() != 1 {
+						t.Fatalf("restart re-prompted completed agent: calls=%d", requests.Load())
+					}
 				})
 			}
 		}
 	}
 }
 
-func proveCompletion2270ServedOrdinary(t *testing.T, rt completion2270ServedProof, profileID, wantObserved string, requests *atomic.Int32, proof *completion2270InvocationProof) {
+func proveCompletion2270ServedOrdinary(t *testing.T, rt completion2270ServedProof, profileID, wantObserved string, requests *atomic.Int32, proof *completion2270InvocationProof, emit bool) (string, cliapp.DiagnosticRunDiagnosisResult) {
 	t.Helper()
 	runID, eventID := createCompletion2270WaitingRun(t, rt)
 	publishCompletion2270BusinessEvent(t, rt, runID, eventID)
@@ -189,7 +215,8 @@ func proveCompletion2270ServedOrdinary(t *testing.T, rt completion2270ServedProo
 	sessionID := conversations.Conversations[0].SessionID
 	var page operatorread.OperatorConversationTurnListResult
 	requireServedJSONRPCResult(t, rt.Endpoint, "conversation.list_turns", map[string]any{"session_id": sessionID}, &page)
-	if len(page.Turns) != 1 || page.Turns[0].ResolvedModel != wantObserved || page.Turns[0].CompletionEvidence.Request.RequestedModel != "request-A" {
+	wantTurns := 1
+	if len(page.Turns) != wantTurns || page.Turns[0].ResolvedModel != wantObserved || page.Turns[0].CompletionEvidence.Request.RequestedModel != "request-A" {
 		t.Fatalf("served admitted/provider identities collapsed: %+v, calls=%d", page, requests.Load())
 	}
 	var detail operatorread.OperatorPublicConversationTurnDetail
@@ -197,13 +224,91 @@ func proveCompletion2270ServedOrdinary(t *testing.T, rt completion2270ServedProo
 	if detail.Turn.CompletionEvidence.Request.RequestedModel != "request-A" || detail.Turn.ResolvedModel != wantObserved {
 		t.Fatalf("served detail lost evidence: %+v", detail.Turn)
 	}
+	if emit && profileID != llmselection.BackendClaudeCLI {
+		for _, activity := range detail.Turn.Activity {
+			if activity.Kind == "publish" && activity.EventType == "external.observed" {
+				t.Fatal("pre-tool provider row was rewritten to fabricate terminal publication evidence")
+			}
+		}
+	}
 	proveCompletion2270ServedAgentHistory(t, rt, runID, detail.Turn)
 	var usage operatorread.OperatorAgentUsage
 	requireServedJSONRPCResult(t, rt.Endpoint, "agent.usage", map[string]any{"run_id": runID, "agent_id": "load-agent"}, &usage)
-	if len(usage.Breakdown) != 1 || usage.Usage.Exact.LedgerEntries != 1 || usage.Usage.Exact.InputTokens != 12 || usage.Breakdown[0].ResolvedModel != wantObserved || usage.Breakdown[0].CompletionEvidence.Request.RequestedModel != "request-A" {
+	if len(usage.Breakdown) != 1 || usage.Usage.Exact.LedgerEntries != wantTurns || usage.Usage.Exact.InputTokens != int64(12*wantTurns) || usage.Breakdown[0].ResolvedModel != wantObserved || usage.Breakdown[0].CompletionEvidence.Request.RequestedModel != "request-A" {
 		t.Fatalf("served spend lost exact request/report separation: %+v", usage)
 	}
-	requireCompletion2270BusinessInvocation(t, rt.Selected.Effects(), profileID, requests, proof, "")
+	attemptID := ""
+	if profileID == llmselection.BackendClaudeCLI {
+		attemptID = requireCompletion2270BusinessInvocation(t, rt.Selected.Effects(), profileID, requests, proof, "")
+	} else if requests.Load() != int32(wantTurns) {
+		t.Fatalf("provider calls=%d, want exactly %d", requests.Load(), wantTurns)
+	}
+	var diagnosis cliapp.DiagnosticRunDiagnosisResult
+	if emit {
+		var outputs operatorread.OperatorEventListResult
+		requireServedJSONRPCResult(t, rt.Endpoint, "event.list", map[string]any{"filter": map[string]any{"run_id": runID, "event_name": "external.observed"}, "limit": 100}, &outputs)
+		if len(outputs.Events) != 1 {
+			t.Fatalf("provider's terminal publication was not accepted: %+v", outputs)
+		}
+		output := outputs.Events[0]
+		if output.SourceEventID != detail.Turn.TriggerEventID || output.ProducerType != events.EventProducerAgent || output.Source != "load-agent" || len(output.Deliveries) != 1 || output.Deliveries[0].SubscriberType != "node" {
+			t.Fatalf("terminal output lost its exact agent origin/consumer: %+v", output)
+		}
+		rt.Probe.Expect(output.EventID).NodeDelivered(output.Deliveries[0].SubscriberID).PostCommitDispatchCompleted().Within(servedEventPublishLifecycleProbeWaitTimeout)
+		if _, err := rt.Selected.Runs().LoadRunDebugReport(context.Background(), runID, operatorread.RunDebugQueryOptions{}); err != nil {
+			t.Fatalf("native accepted-output diagnostics: %v", err)
+		}
+	}
+	requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis)
+	if diagnosis.OperationalState == nil || *diagnosis.OperationalState != "stalled" {
+		t.Fatalf("completed silent provider turn did not expose a stalled run: %+v", diagnosis)
+	}
+	var exact *operatorread.RunTurnAttribution
+	for i := range diagnosis.Attributions {
+		if diagnosis.Attributions[i].AgentID == "load-agent" {
+			if exact != nil {
+				t.Fatalf("silent provider turn acquired duplicate blame: %+v", diagnosis.Attributions)
+			}
+			exact = &diagnosis.Attributions[i]
+		}
+	}
+	wantEmission, emissionText, wantOutputs := operatorread.RunEmissionNone, "no accepted emission", 0
+	if emit {
+		wantEmission, emissionText, wantOutputs = operatorread.RunEmissionAccepted, "1 accepted emission(s)", 1
+	}
+	if exact == nil || exact.EventID == "" || exact.EventID == eventID || exact.EventType != "item.processed" || exact.DeliveryID == "" || exact.LogicalTurnID == "" || exact.Historical ||
+		exact.Emission != wantEmission || exact.EvidenceReason != "" || len(exact.ProviderTurns) != wantTurns || len(exact.EmittedEvents) != wantOutputs {
+		t.Fatalf("public diagnostics lost the exact completed silent turn: %+v, turn=%+v", exact, detail.Turn)
+	}
+	for _, turn := range page.Turns {
+		if !slices.Contains(exact.ProviderTurns, turn.TurnID) {
+			t.Fatalf("attribution omitted physical provider turn %s: %+v", turn.TurnID, exact)
+		}
+	}
+	if emit {
+		var output operatorread.OperatorEventFull
+		requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": exact.EmittedEvents[0].EventID}, &output)
+		if output.EventName != "external.observed" || output.SourceEventID != exact.EventID || output.RunID != runID {
+			t.Fatalf("accepted emission has a foreign committed origin: %+v", output)
+		}
+	}
+	stdout, stderr, code := runServedCLICommand(t, rt.Endpoint, []string{"run", "status", runID, "--json"})
+	var cliDiagnosis cliapp.DiagnosticRunDiagnosisResult
+	if code != 0 || json.Unmarshal([]byte(stdout), &cliDiagnosis) != nil || !reflect.DeepEqual(diagnosis, cliDiagnosis) {
+		t.Fatalf("CLI JSON disagrees with the public attribution: code=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+	stdout, stderr, code = runServedCLICommand(t, rt.Endpoint, []string{"run", "status", runID})
+	for _, want := range []string{"stalled", "load-agent", exact.EventID, exact.DeliveryID, exact.LogicalTurnID, emissionText} {
+		if code != 0 || !strings.Contains(stdout, want) {
+			t.Fatalf("CLI text omitted %q: code=%d stdout=%s stderr=%s", want, code, stdout, stderr)
+		}
+	}
+	if profileID == llmselection.BackendClaudeCLI {
+		requireCompletion2270BusinessInvocation(t, rt.Selected.Effects(), profileID, requests, proof, attemptID)
+	} else if requests.Load() != int32(wantTurns) {
+		t.Fatalf("diagnostics re-invoked provider: calls=%d want%d", requests.Load(), wantTurns)
+	}
+	return runID, diagnosis
 }
 
 func proveCompletion2270ServedAgentHistory(t *testing.T, rt completion2270ServedProof, runID string, want operatorread.OperatorPublicConversationTurn) {
@@ -342,7 +447,7 @@ func (p completion2270Transport) RoundTrip(request *http.Request) (*http.Respons
 	if err := json.NewDecoder(request.Body).Decode(&body); err != nil || body["model"] != "request-A" {
 		return nil, fmt.Errorf("provider primitive did not consume admitted request: body=%v error=%v", body, err)
 	}
-	p.requests.Add(1)
+	ordinal := p.requests.Add(1)
 	var response string
 	switch p.profile {
 	case llmselection.BackendAnthropic:
@@ -353,6 +458,16 @@ func (p completion2270Transport) RoundTrip(request *http.Request) (*http.Respons
 		response = `{"id":"response-2270","model":"reported-B","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":12,"output_tokens":3}}`
 	default:
 		return nil, fmt.Errorf("unexpected fake HTTP provider %q", p.profile)
+	}
+	if p.emit && ordinal == 1 {
+		switch p.profile {
+		case llmselection.BackendAnthropic:
+			response = `{"model":"reported-B","content":[{"type":"tool_use","id":"terminal-emission","name":"emit_external_observed","input":{}}],"stop_reason":"tool_use","usage":{"input_tokens":12,"output_tokens":3}}`
+		case llmselection.BackendOpenAICompatible:
+			response = `{"model":"reported-B","choices":[{"message":{"role":"assistant","tool_calls":[{"id":"terminal-emission","type":"function","function":{"name":"emit_external_observed","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":12,"completion_tokens":3}}`
+		case llmselection.BackendOpenAIResponses:
+			response = `{"id":"response-emit","model":"reported-B","output":[{"type":"function_call","call_id":"terminal-emission","name":"emit_external_observed","arguments":"{}"}],"usage":{"input_tokens":12,"output_tokens":3}}`
+		}
 	}
 	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(response))}, nil
 }

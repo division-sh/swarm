@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -65,6 +66,13 @@ func TestFanOutDeliveryBarrierMixedDispositionLifecycleOnBothStores(t *testing.T
 			advanceFanOutBarriersForTest(t, ctx, selected, fixture.runID, base.Add(6*time.Second))
 			assertFanOutBarrierState(t, ctx, db, fixture.runID, fixture.deliveryID, fixture.semanticPath, fanoutbarrier.StatusArmed, nil, "")
 			assertFanOutBarrierTimerCount(t, ctx, db, fixture.runID, 0)
+			report, err := owner.(selectedFanOutDiagnosticOwner).LoadRunDebugReport(ctx, fixture.runID, operatorread.RunDebugQueryOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if projected := operatorread.ProjectRunOperationalStatus(report); report.TestQuiescence.FanOutBarriers != 1 || projected.State != "running" || len(projected.Attributions) != 0 {
+				t.Fatalf("armed delivery barrier was diagnosed as an agent stall: status=%+v work=%+v", projected, report.TestQuiescence)
+			}
 
 			settleFanOutBarrierRouteSuccess(t, ctx, selected, eventsByOrdinal[1], routes[1][0])
 			settleFanOutBarrierRouteDeadLetter(t, ctx, selected, eventsByOrdinal[2], routes[2][0])
@@ -88,6 +96,13 @@ func TestFanOutDeliveryBarrierMixedDispositionLifecycleOnBothStores(t *testing.T
 			}
 			if summary.BarrierArmed != 0 || summary.BarrierPending != 1 || summary.BarrierTerminal != 0 || !summary.BlocksCompletion() {
 				t.Fatalf("mixed barrier public summary = %#v", summary)
+			}
+			report, err = owner.(selectedFanOutDiagnosticOwner).LoadRunDebugReport(ctx, fixture.runID, operatorread.RunDebugQueryOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if projected := operatorread.ProjectRunOperationalStatus(report); report.TestQuiescence.FanOutBarriers != 1 || projected.State != "running" || len(projected.Attributions) != 0 {
+				t.Fatalf("pending barrier outcome was diagnosed as an agent stall: status=%+v work=%+v", projected, report.TestQuiescence)
 			}
 		})
 	}

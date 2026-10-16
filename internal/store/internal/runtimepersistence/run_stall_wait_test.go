@@ -12,10 +12,75 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
+
+func TestRunOperationalSessionWorkIsNotStalledBothStores(t *testing.T) {
+	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
+		fixture := newCompletionSettlementFixture(t, selected.selected.(completionSettlementTestStore), selected.db, !selected.postgres)
+		ctx := correlation.WithRunID(fixture.context, fixture.origin.RunID())
+		ctx = correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.Fact())
+		ctx = effects.WithLifecycleToken(ctx, fixture.authority.Normal)
+		bundle, err := contracts.LoadWorkflowContractBundleFromArtifact("", sourceartifactfixture.Artifact(), platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		constructStaticPublicationSourceFixture(t, ctx, fixture.store.(agentFixtureFlowStore), bundle, "global")
+		origin, err := fixture.store.Snapshot(ctx, fixture.origin.DeliveryID())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fixture.store.SettleSuccess(ctx, fixture.origin, nil, 0, deliverylifecycle.NotApplicableHandlerRuleSelection()); err != nil {
+			t.Fatal(err)
+		}
+		if err := acknowledgePipelineEventFixture(ctx, fixture.store, origin.EventID); err != nil {
+			t.Fatal(err)
+		}
+		registry := fixture.store.(sessions.Registry)
+		lease, err := registry.Acquire(ctx, testAgentMemoryIdentity(t, fixture.origin.RunID(), fixture.agentID, "global"), fixture.leaseHolder)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, released := range []bool{false, true} {
+			if released {
+				if result, err := registry.ReleaseOutcome(ctx, lease); err != nil || !result.Acknowledged {
+					t.Fatalf("release exact native session: %+v %v", result, err)
+				}
+			}
+			for read := 0; read < 2; read++ {
+				report, err := fixture.store.(operatorread.RunReader).LoadRunDebugReport(ctx, fixture.origin.RunID(), operatorread.RunDebugQueryOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				projected := operatorread.ProjectRunOperationalStatus(report)
+				wantState, wantDisposition, wantSessions := "running", "active", 1
+				if released {
+					wantState, wantDisposition, wantSessions = "stalled", "stalled", 0
+				}
+				if projected.State != wantState || report.TestQuiescence.ActiveSessionLeases != wantSessions || report.EventCount != 1 {
+					t.Fatalf("session work changed classification: released=%t status=%+v work=%+v", released, projected, report.TestQuiescence)
+				}
+				found := false
+				for _, instance := range projected.Instances {
+					if instance.FlowInstance == "global" {
+						found = true
+						if instance.Disposition != wantDisposition || instance.Work.Sessions != wantSessions || instance.Work.Deliveries != 0 {
+							t.Fatalf("session lost its exact instance owner: %+v", instance)
+						}
+					}
+				}
+				if !found {
+					t.Fatal("session work omitted the constructed instance")
+				}
+			}
+		}
+		requireProviderAttemptCount(t, fixture, 0)
+	})
+}
 
 func TestRunOperationalFutureTimerIsWaitingBothStores(t *testing.T) {
 	eachExactFactStore(t, func(t *testing.T, selected exactFactStore) {
