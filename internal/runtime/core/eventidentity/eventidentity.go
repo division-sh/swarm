@@ -1,6 +1,7 @@
 package eventidentity
 
 import (
+	"fmt"
 	"path"
 	"regexp"
 	"strings"
@@ -39,9 +40,8 @@ func IsValidName(raw string) bool {
 		}
 		if strings.Contains(segment, ".") {
 			parts := strings.Split(segment, ".")
-			for index, part := range parts {
-				part = strings.TrimSpace(part)
-				if part == "" || !eventTypeTokenPattern.MatchString(part) && !isProviderDirectoryEventToken(parts, index, part) {
+			for index := range parts {
+				if !validDottedEventToken(parts, index, false) {
 					return false
 				}
 			}
@@ -80,8 +80,8 @@ func IsCanonicalPattern(raw string) bool {
 			continue
 		}
 		parts := strings.Split(segment, ".")
-		for index, part := range parts {
-			if part != "*" && !eventTypeTokenPattern.MatchString(part) && !isProviderDirectoryEventToken(parts, index, part) {
+		for index := range parts {
+			if !validDottedEventToken(parts, index, true) {
 				return false
 			}
 		}
@@ -89,10 +89,39 @@ func IsCanonicalPattern(raw string) bool {
 	return true
 }
 
-// Only the provider-key position inherits directory spelling. Local event
-// tokens and ordinary business names retain their existing grammar.
-func isProviderDirectoryEventToken(parts []string, index int, token string) bool {
-	return len(parts) >= 3 && parts[0] == "inbound" && index == 1 && parts[index] == token && runtimepaths.ValidateFlowSegment(token) == nil
+func validDottedEventToken(parts []string, index int, allowWildcard bool) bool {
+	token := parts[index]
+	if allowWildcard && token == "*" {
+		return true
+	}
+	if isProviderDirectoryEventPosition(parts, index) {
+		return runtimepaths.ValidateFlowSegment(token) == nil
+	}
+	if !allowWildcard {
+		token = strings.TrimSpace(token)
+	}
+	return eventTypeTokenPattern.MatchString(token)
+}
+
+// Recognize the position before validation so no ordinary-token acceptance or
+// whitespace repair can bypass the directory owner.
+func isProviderDirectoryEventPosition(parts []string, index int) bool {
+	return len(parts) >= 3 && parts[0] == "inbound" && index == 1
+}
+
+// ProviderKeyError supplies the directory owner's teaching error. It diagnoses
+// only concrete provider keys, not general event validity or wildcard admission.
+func ProviderKeyError(raw string) error {
+	for _, segment := range strings.Split(raw, "/") {
+		parts := strings.Split(segment, ".")
+		if !isProviderDirectoryEventPosition(parts, 1) || parts[1] == "*" {
+			continue
+		}
+		if err := runtimepaths.ValidateFlowSegment(parts[1]); err != nil {
+			return fmt.Errorf("provider event %q must use inbound.<provider-directory>.<local-event> with an exact portable directory key: %w", raw, err)
+		}
+	}
+	return nil
 }
 
 func IsCanonicalDeclaration(raw string) bool {

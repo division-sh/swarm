@@ -80,7 +80,7 @@ func CompileFlowInputPin(context FlowPinCompilationContext, pin FlowInputEventPi
 func validateAuthoredFlowInputPin(pin FlowInputEventPin) error {
 	event := pin.Event
 	if event == "" || event != strings.TrimSpace(event) || !eventidentity.IsValidName(event) || strings.ContainsAny(event, "/*") {
-		return fmt.Errorf("input pin event %q is not an exact local canonical event identity", event)
+		return eventNameAdmissionError(fmt.Errorf("input pin event %q is not an exact local canonical event identity", event), event)
 	}
 	return nil
 }
@@ -209,7 +209,7 @@ func CompileFlowOutputPin(context FlowPinCompilationContext, pin FlowOutputEvent
 func validateAuthoredFlowOutputPin(pin FlowOutputEventPin) error {
 	event := pin.Event
 	if event == "" || event != strings.TrimSpace(event) || !eventidentity.IsValidName(event) || strings.ContainsAny(event, "/*") {
-		return fmt.Errorf("output pin event %q is not an exact local canonical event identity", event)
+		return eventNameAdmissionError(fmt.Errorf("output pin event %q is not an exact local canonical event identity", event), event)
 	}
 	return nil
 }

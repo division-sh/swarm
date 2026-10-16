@@ -1,6 +1,7 @@
 package eventidentity
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 
@@ -75,7 +76,11 @@ func TestS1EveryConcreteProviderKeyUsesPortableDirectoryOwner(t *testing.T) {
 		{"newline", "team\n", false},
 		{"empty", "", false},
 	}
-	for _, reserved := range []string{"con", "prn", "aux", "nul", "com1", "com9", "lpt1", "lpt9"} {
+	reservedNames := []string{"con", "prn", "aux", "nul"}
+	for index := 1; index <= 9; index++ {
+		reservedNames = append(reservedNames, "com"+strconv.Itoa(index), "lpt"+strconv.Itoa(index))
+	}
+	for _, reserved := range reservedNames {
 		cases = append(cases, boundaryCase{"reserved_" + reserved, reserved, false})
 	}
 	for _, tc := range cases {
@@ -92,6 +97,11 @@ func TestS1EveryConcreteProviderKeyUsesPortableDirectoryOwner(t *testing.T) {
 				if IsCanonicalPattern(pattern) != tc.valid || IsCanonicalDeclaration(pattern) != tc.valid {
 					t.Errorf("fixed-key pattern disagrees with directory owner: %q want valid=%v", pattern, tc.valid)
 				}
+				if err := ProviderKeyError(name); (err == nil) != tc.valid {
+					t.Errorf("directory diagnostic disagrees with validation: %q %v", name, err)
+				} else if err != nil && !strings.Contains(err.Error(), "inbound.<provider-directory>.<local-event>") {
+					t.Errorf("directory diagnostic lost the new form: %v", err)
+				}
 			}
 			pattern := "**/inbound." + tc.key + ".*"
 			if IsCanonicalPattern(pattern) != tc.valid {
@@ -100,11 +110,16 @@ func TestS1EveryConcreteProviderKeyUsesPortableDirectoryOwner(t *testing.T) {
 		})
 	}
 	for _, pattern := range []string{"inbound.*.message", "inbound.*.*", "**/inbound.*.message"} {
-		if !IsCanonicalPattern(pattern) {
+		if !IsCanonicalPattern(pattern) || ProviderKeyError(pattern) != nil {
 			t.Errorf("whole-token provider wildcard refused: %q", pattern)
 		}
 	}
 	if IsCanonicalPattern("inbound.**.message") || IsCanonicalName("inbound.*.message") {
 		t.Fatal("provider wildcard became concrete or partial globstar became valid")
+	}
+	for _, ordinary := range []string{"business._team.message", "business.con.message", "business." + strings.Repeat("a", 101) + ".message", "inbound.team." + strings.Repeat("a", 101)} {
+		if !IsCanonicalName(ordinary) {
+			t.Errorf("provider-key constraint changed an ordinary event token: %q", ordinary)
+		}
 	}
 }

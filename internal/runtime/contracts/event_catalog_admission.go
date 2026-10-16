@@ -81,7 +81,7 @@ func admitEventCatalogDocument(document yamlsource.Document) (map[string]EventCa
 	for _, declaration := range fields {
 		name := declaration.Name
 		if !eventidentity.IsCanonicalDeclaration(name) {
-			return nil, fmt.Errorf("event declaration name %q at %s must be an exact canonical event identity or supported wildcard pattern", name, declaration.KeyLocation)
+			return nil, eventNameAdmissionError(fmt.Errorf("event declaration name %q at %s must be an exact canonical event identity or supported wildcard pattern", name, declaration.KeyLocation), name)
 		}
 		if eventDeclarationClaimsInboundNamespace(name) {
 			return nil, fmt.Errorf("event declaration %q at %s (introduced at %s, resolved at %s) claims reserved provider namespace inbound.*; declare provider events in trigger.yaml and reference them from the flow interface", name, declaration.KeyLocation, declaration.IntroductionLocation(), declaration.Value.ResolvedLocation())

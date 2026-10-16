@@ -37,7 +37,7 @@ func projectSchemaConnectValue(value yamlsource.Value) ([]FlowConnect, error) {
 			return nil, err
 		}
 		if !eventidentity.IsValidName(row.Event) || row.Rename != "" && !eventidentity.IsValidName(row.Rename) {
-			return nil, nodeValueError(item, fmt.Errorf("connect event/rename must be an exact canonical event identity"))
+			return nil, nodeValueError(item, eventNameAdmissionError(fmt.Errorf("connect event/rename must be an exact canonical event identity"), row.Event, row.Rename))
 		}
 		if row.Rename != "" && eventidentity.Normalize(row.Rename) == eventidentity.Normalize(row.Event) {
 			return nil, nodeValueError(item, fmt.Errorf("connect.rename is redundant with event"))
@@ -90,7 +90,7 @@ func validateAuthoredConnectReply(row FlowConnect) error {
 		return nil
 	}
 	if !eventidentity.IsValidName(row.RepliesTo) || strings.ContainsAny(row.RepliesTo, "/*") {
-		return fmt.Errorf("connect.replies_to must be an exact local event identity")
+		return eventNameAdmissionError(fmt.Errorf("connect.replies_to must be an exact local event identity"), row.RepliesTo)
 	}
 	if row.Resolution != FlowInputResolutionModeNone || row.KeyFrom != "" {
 		return fmt.Errorf("connect.replies_to cannot declare resolution or key_from")
@@ -192,7 +192,7 @@ func projectSchemaPinValue(value yamlsource.Value, direction string) (FlowInputE
 		return input, output, nodeValueError(value, err)
 	}
 	if !eventidentity.IsValidName(event) || strings.ContainsAny(event, "/*") {
-		return input, output, nodeValueError(value, fmt.Errorf("pin event %q must be an exact local canonical event identity", event))
+		return input, output, nodeValueError(value, eventNameAdmissionError(fmt.Errorf("pin event %q must be an exact local canonical event identity", event), event))
 	}
 	input.Event, output.Event = event, event
 	if direction == "inputs" {

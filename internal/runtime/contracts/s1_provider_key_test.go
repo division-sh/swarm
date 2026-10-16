@@ -77,10 +77,11 @@ func TestS1ProviderDirectoryKeyDoesNotGrantAuthoredCatalogOwnership(t *testing.T
 }
 
 func TestS1ProviderKeyBoundariesReachEveryReferenceAndSchemaOwner(t *testing.T) {
-	for _, tc := range []struct {
+	type boundaryCase struct {
 		label, key string
 		valid      bool
-	}{
+	}
+	cases := []boundaryCase{
 		{"plain", "team", true},
 		{"hyphen", "team-bot", true},
 		{"underscore", "team_bot", true},
@@ -93,15 +94,20 @@ func TestS1ProviderKeyBoundariesReachEveryReferenceAndSchemaOwner(t *testing.T) 
 		{"reserved_prn", "prn", false},
 		{"reserved_aux", "aux", false},
 		{"reserved_nul", "nul", false},
-		{"reserved_com", "com1", false},
-		{"reserved_lpt", "lpt9", false},
 		{"leading_space", " team", false},
 		{"trailing_space", "team ", false},
 		{"leading_tab", "\tteam", false},
 		{"trailing_tab", "team\t", false},
 		{"newline", "team\n", false},
 		{"empty", "", false},
-	} {
+	}
+	for index := 1; index <= 9; index++ {
+		for _, prefix := range []string{"com", "lpt"} {
+			key := fmt.Sprintf("%s%d", prefix, index)
+			cases = append(cases, boundaryCase{"reserved_" + key, key, false})
+		}
+	}
+	for _, tc := range cases {
 		t.Run(tc.label, func(t *testing.T) {
 			if got := runtimepaths.ValidateFlowSegment(tc.key) == nil; got != tc.valid {
 				t.Fatalf("directory-owner control=%v want %v for %q", got, tc.valid, tc.key)
@@ -111,6 +117,8 @@ func TestS1ProviderKeyBoundariesReachEveryReferenceAndSchemaOwner(t *testing.T) 
 				{"input", fmt.Sprintf("pins: {inputs: [%q]}\n", event)},
 				{"output", fmt.Sprintf("pins: {outputs: [%q]}\n", event)},
 				{"connect", fmt.Sprintf("connect: [{event: %q, from: ., to: child, resolution: select}]\n", event)},
+				{"rename", fmt.Sprintf("connect: [{event: business.message, from: ., to: child, resolution: select, rename: %q}]\n", event)},
+				{"reply", fmt.Sprintf("connect: [{event: business.reply, from: child, to: ., replies_to: %q}]\n", event)},
 			} {
 				t.Run(authored.label, func(t *testing.T) {
 					snapshot, err := yamlsource.Load([]byte(authored.body))
@@ -121,15 +129,22 @@ func TestS1ProviderKeyBoundariesReachEveryReferenceAndSchemaOwner(t *testing.T) 
 					if (err == nil) != tc.valid {
 						t.Errorf("authored %s disagrees with directory owner for %q: %v", authored.label, tc.key, err)
 					}
+					if err != nil && (!strings.Contains(err.Error(), "inbound.<provider-directory>.<local-event>") || !strings.Contains(err.Error(), "schema.yaml:")) {
+						t.Errorf("authored refusal lost the new form or source location: %v", err)
+					}
 				})
 			}
 			for _, flow := range []string{".", "child"} {
 				context := FlowPinCompilationContext{FlowID: flow, FlowPath: flow, SourceFile: "schema.yaml"}
 				if _, err := CompileFlowInputPin(context, FlowInputEventPin{Event: event}); (err == nil) != tc.valid {
 					t.Errorf("compiled input disagrees with directory owner: %s %q %v", flow, tc.key, err)
+				} else if err != nil && !strings.Contains(err.Error(), "inbound.<provider-directory>.<local-event>") {
+					t.Errorf("compiled input lost the new form: %v", err)
 				}
 				if _, err := CompileFlowOutputPin(context, FlowOutputEventPin{Event: event}); (err == nil) != tc.valid {
 					t.Errorf("compiled output disagrees with directory owner: %s %q %v", flow, tc.key, err)
+				} else if err != nil && !strings.Contains(err.Error(), "inbound.<provider-directory>.<local-event>") {
+					t.Errorf("compiled output lost the new form: %v", err)
 				}
 				entry := EventCatalogEntry{Payload: EventPayloadSpec{Required: []string{"text"}, Properties: map[string]EventFieldSpec{"text": {Type: "text"}}}}
 				for _, prefix := range []string{"", "child/"} {
@@ -141,7 +156,25 @@ func TestS1ProviderKeyBoundariesReachEveryReferenceAndSchemaOwner(t *testing.T) 
 					if err == nil && compiled.EventName() != name {
 						t.Errorf("imported schema rewrote provider spelling: %q -> %q", name, compiled.EventName())
 					}
+					if err != nil && !strings.Contains(err.Error(), "inbound.<provider-directory>.<local-event>") {
+						t.Errorf("imported schema lost the new form: %v", err)
+					}
 				}
+			}
+			snapshot, err := yamlsource.Load([]byte(fmt.Sprintf("%q:\n", event)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries, err := admitEventCatalogDocument(snapshot.Document("events.yaml"))
+			if err == nil || len(entries) != 0 {
+				t.Fatalf("provider spelling acquired authored catalog ownership: %v %v", entries, err)
+			}
+			if tc.valid {
+				if !strings.Contains(err.Error(), "reserved provider namespace inbound.*") {
+					t.Errorf("valid provider spelling missed namespace ownership refusal: %v", err)
+				}
+			} else if !strings.Contains(err.Error(), "inbound.<provider-directory>.<local-event>") {
+				t.Errorf("invalid provider declaration lost the new form: %v", err)
 			}
 		})
 	}
