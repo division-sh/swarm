@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/testplanning"
 	"github.com/division-sh/swarm/scripts/rewrite-stages-2566/formatproof"
 )
 
@@ -18,22 +21,47 @@ func accountingClosureRepo(t *testing.T) (string, string, accountingPolicy, []by
 	if err != nil {
 		t.Fatal(err)
 	}
-	head := completionGit(t, root, "rev-parse", "HEAD")
-	repo, err := archiveAccountingExecutor(context.Background(), root, head)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := os.RemoveAll(repo); err != nil {
-			t.Error(err)
+	repo := t.TempDir()
+	put := func(path string, body []byte) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(repo, path)), 0700); err != nil {
+			t.Fatal(err)
 		}
-	})
-	original, err := os.ReadFile(filepath.Join(repo, formatproof.Source))
+		if err := os.WriteFile(filepath.Join(repo, path), body, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Admission only lists inputs; it does not execute this fixture. Keep its
+	// graph small. The separate real-source closure test covers the complete graph.
+	for path, name := range map[string]string{
+		"cmd/swarm-test": "main", "cmd/swarm-openrpc-gen": "main", "cmd/swarm-complexity": "main",
+		"scripts/rewrite-stages-2566": "main", "internal/testplanning": "testplanning",
+		"internal/testtiming": "testtiming", "internal/store": "store",
+	} {
+		put(path+"/main.go", []byte("package "+name+"\n"))
+	}
+	put("cmd/swarm-test/main.go", []byte("package main\nimport _ \"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting\"\n"))
+	accountingGuardFixtureFiles(t, root, put)
+	put("go.mod", []byte("module github.com/division-sh/swarm\n\ngo 1.26.8\n"))
+	put("go.sum", nil)
+	for _, path := range []string{
+		".github/test-proof-plan.yaml", ".github/test-proof-history-inputs.json", ".github/scripts/prepare-proof-history.sh",
+		testplanning.GeneratedWeightModelPath, ".github/flake-ledger.json", "internal/apiv1/testdata/public_surface_backend_matrix.yaml",
+		formatproof.Ledger, "scripts/rewrite-stages-2566/intent.json", "scripts/rewrite-stages-2566/entries.json",
+		"scripts/rewrite-stages-2566/formatproof/testdata/original.go.txt",
+	} {
+		body, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		put(path, body)
+	}
+	original, err := os.ReadFile(filepath.Join(root, formatproof.Source))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if formatproof.Digest(original) != formatproof.Origin {
-		raw, err := os.ReadFile(filepath.Join(repo, formatproof.Successors))
+		raw, err := os.ReadFile(filepath.Join(root, formatproof.Successors))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -46,15 +74,14 @@ func accountingClosureRepo(t *testing.T) (string, string, accountingPolicy, []by
 			t.Fatal("immutable source changed")
 		}
 	}
-	if err := os.WriteFile(filepath.Join(repo, formatproof.Source), original, 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, formatproof.Successors), []byte(`{"version":1,"records":[]}`), 0644); err != nil {
-		t.Fatal(err)
-	}
+	put(formatproof.Source, original)
+	put(formatproof.Successors, []byte(`{"version":1,"records":[]}`))
 	inputs, err := accountingClosure(context.Background(), repo)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(inputs, func(input accountingInput) bool { return input.Path == formatproof.Source }) {
+		t.Fatal("fixture must include the exact F1 source in its executable closure")
 	}
 	completionGit(t, repo, "init", "-q")
 	completionGit(t, repo, "add", ".")
@@ -68,6 +95,26 @@ func accountingClosureRepo(t *testing.T) (string, string, accountingPolicy, []by
 	}
 	policy.DependencyDigest = formatproof.Digest(raw)
 	return repo, base, policy, original
+}
+
+func accountingGuardFixtureFiles(t *testing.T, root string, put func(string, []byte)) {
+	t.Helper()
+	for path, name := range map[string]string{
+		"internal/runtime": "runtime", "internal/serveapp": "serveapp", "internal/releasee2e": "releasee2e",
+		"internal/store/internal/runtimepersistence": "runtimepersistence",
+	} {
+		files, err := os.ReadDir(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for index, file := range files {
+			filename := file.Name()
+			if file.IsDir() || !strings.HasSuffix(filename, ".go") || (!strings.Contains(filename, "guard") && !strings.HasSuffix(filename, "_static_test.go") && filename != "boundary_test.go") {
+				continue
+			}
+			put(path+"/"+filename, []byte(fmt.Sprintf("package %s\nimport \"testing\"\nfunc TestFixtureOwner%d(t *testing.T) {}\n", name, index)))
+		}
+	}
 }
 
 func TestAccountingCandidateClosureRejectsAddedExecutableMembers(t *testing.T) {
