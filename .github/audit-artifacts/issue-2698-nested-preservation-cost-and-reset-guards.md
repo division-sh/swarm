@@ -92,3 +92,32 @@ Docker disconnect=false, schema no-launch, ManagedEmit and ColdStatic shutdown
 REDs remain unwaived. Frozen HumanTask/Q1 and H2 actual-execution requirements,
 194/155 holds and separate S1/S2 disposition stay visible. This checkpoint does
 not clear those runtime obligations or authorize a qualifying PR push.
+
+## Standalone unit and bounded continuation
+
+At signed0108351e35 the sequential, otherwise unchanged codemod-owner-guards unit
+times out at600.211s:212 completed roots PASS, zero explicit assertion failures,
+out of647 statically selected roots. The interrupted run-identity history root
+and all unstarted work remain unqualified. Receipt is
+pr2698-0108351e35-sequential-whole-codemod-owner-guards.jsonl; BLOCKING packet
+6214934410 retains it. No concurrent B test/analysis ran alongside that unit.
+
+The newly exposed run-identity caller inventory costs120.84s because it normalizes
+every function even when no watched identifier occurs. The exact final-file AST
+walk, eight calls/one definition and all original alias/foreign-owner refusals
+remain. An AST-reference precheck now avoids only irrelevant normalization;
+string-only mentions do not acquire authority. Focused three-root receipt
+pr2698-run-identity-reference-scoped-normalization.jsonl PASS5.642s, inventory2.68s.
+This is observed cost repair, not a complete-unit PASS or controlled speed ratio.
+
+One profile of the interrupted history root completes PASS33.139s, with the
+original full-ledger/order checks, in pr2698-run-identity-history-profile.jsonl.
+It identifies repeated construction of the same setup/batch/blob invocation
+within the existing fork/delivery restoration chain. The continuation carries
+that same authenticated invocation through the entire chain; no inverse or
+current-source check is skipped. The affected history/source-image receipt
+pr2698-history-dependency-one-source-invocation.jsonl PASS52.312s. Two now-unused
+wrappers are deleted; unchanged preservation receipts otherwise carry.
+
+The cold-census USER disposition is still pending6214693627/6214751470; no known
+cold root or store unit is rerun unchanged. Runtime/Q1/H2/194/155 holds remain.
