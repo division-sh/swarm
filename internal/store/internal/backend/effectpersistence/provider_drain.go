@@ -478,6 +478,10 @@ func settleProviderDrainRecovery(
 			return nil, err
 		}
 	}
+	return closeRecoveredProviderDrain(ctx, tx, attempt, settlement, permit, expired, postgres)
+}
+
+func closeRecoveredProviderDrain(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement, permit providerDrainPermit, expired, postgres bool) (*runtimeeffects.ProviderDrainFinalization, error) {
 	state := "settled"
 	var failure any
 	if expired {
@@ -489,6 +493,7 @@ func settleProviderDrainRecovery(
 		failure = string(raw)
 	}
 	var result sql.Result
+	var err error
 	if postgres {
 		result, err = tx.ExecContext(ctx, `UPDATE runtime_provider_attempt_drains SET state=$2,failure=$3::jsonb,settled_at=$4 WHERE drain_id=$1::uuid AND state='pending'`, permit.DrainID, state, failure, settlement.Now.UTC())
 	} else {

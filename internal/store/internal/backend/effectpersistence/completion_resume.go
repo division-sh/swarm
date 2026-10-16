@@ -1,12 +1,70 @@
 package effectpersistence
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
+	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 )
+
+func queueCompletionResume(ctx context.Context, mutation *mutationprotocol.Attempt, delivery providerDrainDeliveryOwner, recovered completionRecoveryAttempt, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement, resolution providerDrainRecoveryResolution, takeover *startupProviderTakeover) (bool, error) {
+	if takeover == nil || resolution.Kind != completionSettlementDrained || resolution.Expired ||
+		resolution.Drain.Target != runtimeeffects.ProviderDrainTargetRunning || attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent ||
+		attempt.Origin.Kind != runtimeeffects.CompletionOriginDelivery || settlement.Settlement.State != runtimeeffects.StateOutcomeUncertain {
+		return false, nil
+	}
+	eligible, err := completionResumeJournalEligible(recovered, attempt)
+	if err != nil || !eligible {
+		return false, err
+	}
+	if delivery == nil {
+		return false, fmt.Errorf("provider resume delivery owner is not bound")
+	}
+	return delivery.QueueProviderResumeTx(ctx, mutation, attempt.Origin.Delivery, deliverylifecycle.Settlement{
+		Disposition: deliverylifecycle.FailureRetry,
+		ReasonCode:  "provider_resume_queued", Failure: settlement.Settlement.Failure,
+		RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation(),
+	})
+}
+
+func completionResumeJournalEligible(recovered completionRecoveryAttempt, attempt runtimeeffects.Attempt) (bool, error) {
+	if recovered.ProviderRequestJournal == "" {
+		return false, nil
+	}
+	journal, err := runtimeeffects.DecodeProviderRequestJournal([]byte(recovered.ProviderRequestJournal))
+	if err != nil {
+		return false, nil
+	}
+	surface, err := storemanagedcapability.Decode([]byte(recovered.CapabilitySurface))
+	if err != nil {
+		return false, err
+	}
+	eligible, err := completionResumeSurfaceAllowsHTTP(attempt.Adapter, attempt.Authority.CompletionRequest, surface)
+	if err != nil || !eligible {
+		return false, err
+	}
+	frame, err := agentframe.DecodeDurable(recovered.AgentFrame)
+	if err != nil {
+		return false, err
+	}
+	if journal.Adapter != attempt.Adapter || journal.Memory == nil || *journal.Memory != attempt.Authority.Target.Memory ||
+		journal.SessionID != attempt.Authority.Target.SessionID || journal.BodyFingerprint != recovered.RequestFingerprint {
+		return false, nil
+	}
+	// The independent renderer validates the original body and physical-request
+	// pins. Recovery never substitutes current configuration or conversation.
+	if _, err := runtimellm.RebuildProviderRequestJournal(journal, frame, surface, recovered.RequestFingerprint); err != nil {
+		return false, nil
+	}
+	return true, nil
+}
 
 // This classifies only the original frozen provider surface. It does not
 // authorize recovery, an origin retry, or a network invocation.
