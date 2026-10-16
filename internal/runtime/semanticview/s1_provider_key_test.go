@@ -3,14 +3,13 @@ package semanticview
 import (
 	"testing"
 
-	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestS1ProviderKeySpellingCannotMintInputOrSubscription(t *testing.T) {
 	rooted, _ := sourceartifactfixture.Rooted(t, "selected", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
-	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource("", rooted, "", contracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource("", rooted, "", contracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
