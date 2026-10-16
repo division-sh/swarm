@@ -152,6 +152,7 @@ func TestFlatEmbeddingTwentyTwoFieldsAndNestedDomains(t *testing.T) {
 }
 
 func TestFlatEmbeddingRefusesInvalidReferencesAndCollisions(t *testing.T) {
+	t.Run("reference_kind_is_not_retyped_by_declaration", testFlatEmbeddingReferenceKind)
 	base := "scalars: {Label: text}\nenums:\n  Status: {values: [open], default: open}\ntypes:\n  Lead: {slug: text}\n  Other: {slug: text}\n  Empty: {}\n"
 	for _, tc := range []struct{ name, declaration, want string }{
 		{"scalar_sequence", "  _embed: Lead\n", "list of named types"},
@@ -197,6 +198,26 @@ func TestFlatEmbeddingRefusesInvalidReferencesAndCollisions(t *testing.T) {
 					if !strings.Contains(err.Error(), "types.yaml:") || (tc.name != "embed_embed" && !strings.Contains(err.Error(), file+":")) {
 						t.Fatalf("collision lost defining/own coordinates: %v", err)
 					}
+				}
+			})
+		}
+	}
+}
+
+func testFlatEmbeddingReferenceKind(t *testing.T) {
+	for _, name := range []string{"[Lead]", "map[text]Lead", "Lead?"} {
+		for _, role := range []string{"event", "state"} {
+			t.Run(role+"/"+name, func(t *testing.T) {
+				types := "types:\n  Lead: {slug: text}\n  '" + name + "': {wrong: text}\n"
+				event, state := "  own: text\n", "  own: text\n"
+				if role == "event" {
+					event = "  _embed: ['" + name + "']\n"
+				} else {
+					state = "  _embed: ['" + name + "']\n"
+				}
+				bundle, err := loadFlatEmbeddingFixture(t, types, event, state)
+				if bundle != nil || err == nil || !strings.Contains(err.Error(), "named records") {
+					t.Fatalf("collection/optional expression admitted by a same-spelled declaration: bundle=%t err=%v", bundle != nil, err)
 				}
 			})
 		}

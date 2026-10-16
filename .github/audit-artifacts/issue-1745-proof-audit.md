@@ -120,6 +120,22 @@ Receipts are retained under
   six current endpoints are separately pinned, and exact inversion must
   recover each historical whole-file output. This is archival corpus-check
   evidence, never a state.yaml/entities.yaml runtime compatibility reader.
+- Exacta04217a802 preflight PASS535.896s, including the real debt ratchet at its
+  unchanged20m bound, all selected structural packages and vet. Receipt:
+  `test-results/preflight/20261016T053004.114122672-0459c156-1083-4845-a6e7-55917ebacffc/`.
+  This is that head's informational receipt, not credit for subsequent edits.
+- A read-only overlay then reproduced two E04 kind errors at that head:
+  declarations literally named `[Lead]` or `map[text]Lead` could cause expansion
+  to ignore the shared resolver's collection kind and copy the declaration.
+  Preserve `collection-kind-a04217a802-red` separately. Require the returned
+  named-record kind/identity, and reject optional reference spelling even if a
+  same-spelled declaration exists. Six permanent event/state controls remain
+  in the existing refusal root. Final-head focused/preflight/unused refresh is
+  required after this bounded implementation correction.
+- `flat-final-kind-green-candidate14`: the original two-cell overlay and the
+  permanent controls pass, alongside all ten feature roots and connected
+  producer-scope controls. Contracts0.419s, native pipeline1.184s, tools0.122s,
+  public API1.173s and CLI0.304s; both stores participate in the native/API cells.
 
 Historical codemod `recipes.json` stays byte-identical (SHA256
 `4fd3948cf98e828528dd5681e1f93cf79102ac5a0887573a65893e27dd531c70`).

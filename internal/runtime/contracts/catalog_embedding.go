@@ -59,11 +59,15 @@ func expandCatalogEmbeddings(refs []catalogEmbedding, catalog TypeCatalogDocumen
 	var result []expandedCatalogField
 	for _, ref := range refs {
 		decl, ok := catalog.Types[ref.Type]
-		if !ok || len(decl.Fields) == 0 {
+		if !ok || len(decl.Fields) == 0 || strings.Contains(ref.Type, "?") {
 			return nil, fmt.Errorf("%s at %s is not a nonempty record; _embed takes named records", ref.Type, ref.Source)
 		}
-		if _, err := (CatalogTypeReference{Type: ref.Type, Catalog: catalog}).Resolve(); err != nil {
+		resolved, err := (CatalogTypeReference{Type: ref.Type, Catalog: catalog}).Resolve()
+		if err != nil {
 			return nil, fmt.Errorf("_embed %s at %s: %w", ref.Type, ref.Source, err)
+		}
+		if resolved.Kind != CatalogTypeObject || resolved.Name != ref.Type {
+			return nil, fmt.Errorf("%s at %s is not a named record reference; _embed takes named records", ref.Type, ref.Source)
 		}
 		for _, name := range sortedContractKeys(decl.Fields) {
 			field := decl.Fields[name]
