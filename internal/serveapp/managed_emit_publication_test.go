@@ -52,7 +52,7 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 					var rawSource, payload []byte
 					var id, producer, producerType, parent, kind, authority string
 					if err := rt.DB.QueryRow("SELECT event_id,source_route,payload,produced_by,produced_by_type,source_event_id,routing_source_kind,COALESCE(routing_source_authority,'') FROM events WHERE run_id=$1 AND event_name=$2", runID, name).Scan(&id, &rawSource, &payload, &producer, &producerType, &parent, &kind, &authority); err != nil {
-						t.Fatalf("managed publication: %v\n%s", err, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID))
+						t.Fatalf("managed publication: %v\n%s", err, servedInspectionRunDebugSummary(rt.ReceiverStateReader, runID))
 					}
 					var feedbackOwner pipeline.WorkflowEmitFeedbackOwner = rt.SQLite
 					if rt.Postgres != nil {
@@ -147,7 +147,7 @@ func TestManagedEmitPublicationExactScopeBothStores(t *testing.T) {
 				var count int
 				var failure []byte
 				if err := rt.DB.QueryRow("SELECT failure FROM event_deliveries WHERE run_id=$1 AND subscriber_type='agent' AND status='dead_letter'", hostile.RunID).Scan(&failure); err != nil || len(failure) == 0 {
-					t.Fatalf("missing exact sibling-tool refusal: %s %v\n%s", failure, err, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, hostile.RunID))
+					t.Fatalf("missing exact sibling-tool refusal: %s %v\n%s", failure, err, servedInspectionRunDebugSummary(rt.ReceiverStateReader, hostile.RunID))
 				}
 				// The mock provider adapter rejects an invisible tool before gateway
 				// dispatch. Its durable raw turn proves the attempted call, unlike a

@@ -2,7 +2,6 @@ package apiv1
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
@@ -21,7 +20,6 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -178,6 +176,10 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 	lateDeliveryID := "00000000-0000-0000-0000-000000001402"
 	secondDeliveryID := "00000000-0000-0000-0000-000000001403"
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Minute)})
+	ctx = prepareAPIReadbackAgents(t, ctx, sqliteStore,
+		agentidentitytest.RuntimeForRun(t, runID, "agent-late", "observability-surface-test", "trace", "agent-late", "trace/agent-late"),
+		agentidentitytest.RuntimeForRun(t, runID, "agent-second", "observability-surface-test", "trace", "agent-second", "trace/agent-second"),
+	)
 	for _, fixture := range []struct {
 		id        string
 		eventType events.EventType
@@ -276,16 +278,13 @@ type observabilitySurfaceFixture struct {
 func newSQLiteObservabilitySurfaceFixture(t *testing.T, ctx context.Context) observabilitySurfaceFixture {
 	t.Helper()
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-	return newObservabilitySurfaceFixture(t, ctx, sqliteStore, storetest.DatabaseForTest(sqliteStore), true)
+	return newObservabilitySurfaceFixture(t, ctx, sqliteStore)
 }
 
 func newPostgresObservabilitySurfaceFixture(t *testing.T, ctx context.Context) observabilitySurfaceFixture {
 	t.Helper()
-	_, db, cleanup := testutil.StartPostgres(t)
-	t.Cleanup(cleanup)
-	pg := storetest.NewPostgresStoreForTest(db)
-	storetest.BootstrapPostgresRuntimeStore(t, pg)
-	return newObservabilitySurfaceFixture(t, ctx, pg, db, false)
+	pg := storetest.StartPostgresRuntimeStore(t)
+	return newObservabilitySurfaceFixture(t, ctx, pg)
 }
 
 type observabilityFixtureStore interface {
@@ -296,7 +295,7 @@ type observabilityFixtureStore interface {
 	storetest.AgentFixtureStore
 }
 
-func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store observabilityFixtureStore, db *sql.DB, sqlite bool) observabilitySurfaceFixture {
+func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store observabilityFixtureStore) observabilitySurfaceFixture {
 	t.Helper()
 	registrar, ok := store.(authorActivityTestCatalogRegistrar)
 	if !ok {
@@ -312,6 +311,7 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 		events.EventType("trace.visible"),
 		"agent-1", "", json.RawMessage(`{"trace":true}`), 0, runID, "", events.EventEnvelope{}, now)
 	identity := agentidentitytest.RuntimeForRun(t, runID, "agent-1", "observability-surface-test", "trace", "agent-1", "trace/agent-1")
+	ctx = prepareAPIReadbackAgents(t, ctx, store, identity)
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-1"), AgentIdentity: identity}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, store, event,
 		[]events.DeliveryRoute{route},
@@ -320,7 +320,7 @@ func newObservabilitySurfaceFixture(t *testing.T, ctx context.Context, store obs
 	if err != nil {
 		t.Fatalf("ClaimAgentDelivery: %v", err)
 	}
-	sessionID := seedOperatorReplayDeliverySession(t, ctx, store, db, sqlite, runID, identity)
+	sessionID := seedOperatorReplayDeliverySession(t, ctx, store, identity)
 	if _, err := store.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("BindAgentSession: %v", err)
 	}

@@ -166,6 +166,8 @@ func ObserveH2NodeDeliveries(ctx context.Context, selected any, runID string) ([
 type H2WorkloadSnapshotEvidence = private.H2WorkloadSnapshotEvidence
 type H2TransitionCutsEvidence = private.H2TransitionCutsEvidence
 type H2CounterCommitEvidence = private.H2CounterCommitEvidence
+type H2CommittedFactEvidence = private.H2CommittedFactEvidence
+type H2CommittedHistoryEvidence = private.H2CommittedHistoryEvidence
 type H2SessionEvidence = private.H2SessionEvidence
 type H2SessionObservation = private.H2SessionObservation
 
@@ -175,6 +177,10 @@ func ObserveH2WorkloadSnapshot(ctx context.Context, selected any, runID string) 
 
 func ObserveH2CounterCommits(ctx context.Context, selected any, runID string) ([]H2CounterCommitEvidence, error) {
 	return private.ObserveH2CounterCommitsForTest(ctx, selected, runID)
+}
+
+func ObserveH2CommittedHistory(ctx context.Context, selected any, runID string) (H2CommittedHistoryEvidence, error) {
+	return private.ObserveH2CommittedHistoryForTest(ctx, selected, runID)
 }
 
 func ObserveH2ServerCapacity(ctx context.Context, selected any) (int, error) {

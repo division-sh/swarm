@@ -272,6 +272,10 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	if err != nil {
 		return nil, err
 	}
+	managed, err = prepareManagedProviderRequestJournal(ctx, "openai_compatible", openAICompatibleChatCompletionsURL(r.baseURL), s, message, reqJSON, managed)
+	if err != nil {
+		return nil, err
+	}
 
 	start := time.Now()
 	rawResp, parsed, dispatch, err := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON, managed)
@@ -482,11 +486,16 @@ func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byt
 	}
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("authorization", "Bearer "+r.credentialCache.snapshot())
+	if err := validateHTTPProviderRequestJournal("openai_compatible", req, managed); err != nil {
+		return nil, openAICompatibleResponse{}, nil, err
+	}
 	var attempt *runtimeeffects.Handle
 	if managed == nil {
 		attempt, err = runtimeeffects.BeginCompletion(ctx, "openai_compatible", payload, nil)
-	} else {
+	} else if managed.requestJournal == nil {
 		attempt, err = runtimeeffects.BeginManagedCompletion(ctx, "openai_compatible", payload, managed.frame, nil)
+	} else {
+		attempt, err = runtimeeffects.BeginJournaledManagedCompletion(ctx, "openai_compatible", payload, managed.frame, *managed.requestJournal, nil)
 	}
 	if err != nil {
 		return nil, openAICompatibleResponse{}, nil, err

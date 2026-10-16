@@ -90,14 +90,14 @@ func TestServedMailboxCompletionProcessBoundariesBothStores(t *testing.T) {
 				first, rt := start(true)
 				db := rt.DB
 				seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.requested", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "seed"})
-				entityID := requireServedEventPublishEntityState(t, db, backend, seed.RunID, "", "review")
+				entityID := requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, "", "review")
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				var id, hash string
 				if err := db.QueryRow(`SELECT card_id,card_content_hash FROM decision_cards WHERE run_id=$1 AND status='pending'`, seed.RunID).Scan(&id, &hash); err != nil {
 					t.Fatal(err)
 				}
 				params := map[string]any{"card_id": id, "observed_content_hash": hash, "verdict": "approve", "idempotency_key": "process-cut"}
-				domain := gateCompletionRequestDomain(t, db, params)
+				domain := gateCompletionRequestDomain(t, rt.ReceiverStateReader, params)
 				response := make(chan gateCompletionHTTPResult, 1)
 				go func() { response <- gateCompletionHTTP(context.Background(), rt.Endpoint, params) }()
 				reached := make(chan error, 1)
@@ -110,7 +110,7 @@ func TestServedMailboxCompletionProcessBoundariesBothStores(t *testing.T) {
 				case <-time.After(20 * time.Second):
 					t.Fatalf("commit barrier not reached\n%s", first.output.String())
 				}
-				committed := gateCompletionRead(t, rt, "committed_before_handler_release", seed.RunID, id, domain)
+				committed := gateCompletionRead(t, rt.ReceiverStateReader, "committed_before_handler_release", seed.RunID, id, domain)
 				if len(committed.API) != 1 || committed.DecisionEvents != 1 || committed.OutcomeEvents != 2 {
 					t.Fatalf("missing atomic commit at cut: %+v", committed)
 				}
@@ -129,17 +129,17 @@ func TestServedMailboxCompletionProcessBoundariesBothStores(t *testing.T) {
 						t.Fatal(err)
 					}
 					gateCompletionAssertResponse(t, <-response, committed, false)
-					requireServedEventPublishEntityState(t, db, backend, seed.RunID, entityID, "done")
+					requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "done")
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 					if err := first.stop(); err != nil {
 						t.Fatalf("graceful stop: %v\n%s", err, first.output.String())
 					}
 				}
 				second, rt := start(false)
-				requireServedEventPublishEntityState(t, db, backend, seed.RunID, entityID, "done")
+				requireServedEventPublishEntityState(t, rt.ReceiverStateReader, backend, seed.RunID, entityID, "done")
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
 				replay := gateCompletionHTTP(context.Background(), rt.Endpoint, params)
-				after := gateCompletionRead(t, rt, "retained_restart_exact_replay", seed.RunID, id, domain)
+				after := gateCompletionRead(t, rt.ReceiverStateReader, "retained_restart_exact_replay", seed.RunID, id, domain)
 				gateCompletionAssertResponse(t, replay, after, true)
 				if after.DecisionEventID != committed.DecisionEventID || after.DecisionEvents != 1 || after.OutcomeEvents != 2 || fmt.Sprint(after.Changes) != fmt.Sprint(committed.Changes) || fmt.Sprint(after.API) != fmt.Sprint(committed.API) {
 					t.Fatal("process interruption or replay changed committed decision facts")

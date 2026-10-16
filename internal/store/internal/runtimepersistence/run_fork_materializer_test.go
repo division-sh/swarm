@@ -1577,7 +1577,14 @@ func TestRunForkActivation_RejectsOwnerWorkOutsideCurrentSafePendingEvidence(t *
 			seed: func(t *testing.T, ctx context.Context, db *sql.DB, sourceRunID, eventID string, at time.Time) string {
 				t.Helper()
 				event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
-				return seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("done-agent")}, runtimedelivery.StateDelivered, nil).DeliveryID
+				store := postgresDeliveryFixtureStore(db)
+				route := canonicalDeliveryFixtureRoute(t, sourceRunID, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("done-agent")})
+				admission := admitAgentClaimProfileIdentity(t, runtimecorrelation.WithRunID(ctx, sourceRunID), store, route.AgentIdentity, mustStoreTestSourceArtifactFact(authorActivityTestBundleHash))
+				seedDeliveryStateFixture(t, ctx, store, event, route, runtimedelivery.StateQueued, nil)
+				if err := store.ActivateDeliveryAuthority(ctx, admission.authority); err != nil {
+					t.Fatal(err)
+				}
+				return settleDeliveryStateFixture(t, ctx, store, event, route, runtimedelivery.StateDelivered, nil).DeliveryID
 			},
 			work: func(req runfork.RunForkHistoricalReplayExecutionRequest, targetDeliveryID string) []runfork.RunForkHistoricalReplayExecutableWork {
 				return []runfork.RunForkHistoricalReplayExecutableWork{runForkHistoricalReplayWorkForDelivery(req, targetDeliveryID)}
@@ -1882,13 +1889,13 @@ func TestRunForkActivation_FailsClosedForForkReplayStateWithTaxonomy(t *testing.
 func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
-		seed      func(context.Context, *PostgresStore, *sql.DB, string, string, string, time.Time) error
+		seed      func(*testing.T, context.Context, *PostgresStore, *sql.DB, string, string, string, time.Time) error
 		wantCode  string
 		wantError string
 	}{
 		{
 			name: "fork session",
-			seed: func(ctx context.Context, _ *PostgresStore, db *sql.DB, _, _, forkRunID string, at time.Time) error {
+			seed: func(t *testing.T, ctx context.Context, _ *PostgresStore, db *sql.DB, _, _, forkRunID string, at time.Time) error {
 				fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(forkRunID, "agent-a", "fork-state"))
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_sessions (
@@ -1906,7 +1913,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 		},
 		{
 			name: "fork conversation audit",
-			seed: func(ctx context.Context, _ *PostgresStore, db *sql.DB, _, _, forkRunID string, at time.Time) error {
+			seed: func(t *testing.T, ctx context.Context, _ *PostgresStore, db *sql.DB, _, _, forkRunID string, at time.Time) error {
 				fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(forkRunID, "agent-task", "fork-state"))
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_conversation_audits (
@@ -1924,7 +1931,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 		},
 		{
 			name: "fork turn",
-			seed: func(ctx context.Context, pg *PostgresStore, db *sql.DB, _, _, forkRunID string, at time.Time) error {
+			seed: func(t *testing.T, ctx context.Context, pg *PostgresStore, db *sql.DB, _, _, forkRunID string, at time.Time) error {
 				turnID := uuid.NewString()
 				sessionID := uuid.NewString()
 				originRunID := uuid.NewString()
@@ -1933,7 +1940,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 				requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
 					Origin: semanticScenarioSetupRunOriginForTest(), RunID: originRunID, StartedAt: at.Add(-time.Minute),
 				})
-				seedTestAgentRow(t, ctx, db, true, identity, "active")
+				ctx = preparePositiveAgentClaimFixture(t, ctx, pg, identity)
 				if _, err := db.ExecContext(ctx, `
 					INSERT INTO agent_sessions (
 						session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -1958,6 +1965,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 				// Isolate the activation guard without reintroducing a frame-less
 				// writer: create a valid source turn, then move only its replay-state
 				// classification coordinate into the fork run.
+				seedTestAgentRow(t, ctx, db, true, mustTestAgentIdentityForRun(forkRunID, "agent-a", "fork-state"), "active")
 				if _, err := db.ExecContext(ctx, `UPDATE agent_turns SET run_id=$1::uuid WHERE turn_id=$2::uuid`, forkRunID, turnID); err != nil {
 					return err
 				}
@@ -1984,8 +1992,10 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 			if err != nil {
 				t.Fatalf("MaterializeRunFork: %v", err)
 			}
-			seedTestAgentRow(t, ctx, db, true, mustTestAgentIdentityForRun(materialized.ForkRunID, "agent-a", "fork-state"), "active")
-			if err := tc.seed(ctx, pg, db, sourceRunID, eventID, materialized.ForkRunID, at.Add(time.Second)); err != nil {
+			if tc.name != "fork turn" {
+				seedTestAgentRow(t, ctx, db, true, mustTestAgentIdentityForRun(materialized.ForkRunID, "agent-a", "fork-state"), "active")
+			}
+			if err := tc.seed(t, ctx, pg, db, sourceRunID, eventID, materialized.ForkRunID, at.Add(time.Second)); err != nil {
 				t.Fatalf("seed %s: %v", tc.name, err)
 			}
 

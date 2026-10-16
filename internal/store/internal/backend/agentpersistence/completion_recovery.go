@@ -18,8 +18,8 @@ func CompletionRecoveryAgentJoinSQL() string {
 }
 
 func CompletionRecoveryAgentStaleSQL(sqlite bool) string {
-	query := fmt.Sprintf(`g.agent_id IS NULL OR g.lifecycle_runtime_epoch IS DISTINCT FROM o.runtime_epoch OR
-		g.lifecycle_generation IS DISTINCT FROM o.generation OR g.lifecycle_phase <> '%s'`, manager.AgentLifecycleRunning)
+	query := fmt.Sprintf(`g.agent_id IS NULL OR g.lifecycle_runtime_epoch IS DISTINCT FROM a.runtime_epoch OR
+		g.lifecycle_generation IS DISTINCT FROM a.generation OR g.lifecycle_phase <> '%s'`, manager.AgentLifecycleRunning)
 	if sqlite {
 		query = strings.ReplaceAll(query, "IS DISTINCT FROM", "IS NOT")
 	}

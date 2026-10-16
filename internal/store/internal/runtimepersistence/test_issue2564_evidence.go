@@ -2,6 +2,7 @@ package runtimepersistence
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
@@ -34,17 +35,19 @@ func requireIssue2564EvidenceOwner(selected any) error {
 }
 
 func ObserveWriterStageForTest(ctx context.Context, selected any, runID, entityID, stage string) (WriterStageEvidence, error) {
-	if err := requireIssue2564EvidenceOwner(selected); err != nil {
+	if err := validateChannelObservationOwner(selected); err != nil {
 		return WriterStageEvidence{}, err
 	}
-	switch owner := selected.(type) {
-	case *PostgresStore:
-		return owner.pipelinePostgresOwner.ObserveWriterStageForTest(ctx, runID, entityID, stage)
-	case *SQLiteRuntimeStore:
-		return owner.pipelineSQLiteOwner.ObserveWriterStageForTest(ctx, runID, entityID, stage)
-	default:
-		return WriterStageEvidence{}, fmt.Errorf("writer stage requires selected owner")
+	var out WriterStageEvidence
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = storepipeline.ObserveWriterStageTxForTest(ctx, tx, runID, entityID, stage)
+		return err
+	})
+	if err != nil {
+		return WriterStageEvidence{}, err
 	}
+	return out, nil
 }
 func ObserveCardContentionForTest(ctx context.Context, selected any, key, cardID string) (CardContentionEvidence, error) {
 	if err := requireIssue2564EvidenceOwner(selected); err != nil {
@@ -227,7 +230,11 @@ func RetirePlannedReadinessForTest(ctx context.Context, selected any, plan pipel
 	}
 }
 
-type SelectedPoolEvidence struct{ InUse, Idle, OpenConnections, MaxOpenConnections int }
+type SelectedPoolEvidence struct {
+	InUse, Idle, OpenConnections, MaxOpenConnections int
+	WaitCount                                        int64
+	WaitDuration                                     time.Duration
+}
 
 // ObserveSelectedPoolForTest observes only the original construction's pool.
 // Neither the handle nor connection admission escapes this owner.
@@ -236,13 +243,21 @@ func ObserveSelectedPoolForTest(selected any) (SelectedPoolEvidence, error) {
 	case *PostgresStore:
 		if owner != nil && owner.backend != nil {
 			stats := owner.backend.ConstructionHandle().Stats()
-			return SelectedPoolEvidence{stats.InUse, stats.Idle, stats.OpenConnections, stats.MaxOpenConnections}, nil
+			return selectedPoolEvidence(stats), nil
 		}
 	case *SQLiteRuntimeStore:
 		if owner != nil && owner.backend != nil {
 			stats := owner.backend.ConstructionHandle().Stats()
-			return SelectedPoolEvidence{stats.InUse, stats.Idle, stats.OpenConnections, stats.MaxOpenConnections}, nil
+			return selectedPoolEvidence(stats), nil
 		}
 	}
 	return SelectedPoolEvidence{}, fmt.Errorf("pool evidence requires original selected construction, got %T", selected)
+}
+
+func selectedPoolEvidence(stats sql.DBStats) SelectedPoolEvidence {
+	return SelectedPoolEvidence{
+		InUse: stats.InUse, Idle: stats.Idle, OpenConnections: stats.OpenConnections,
+		MaxOpenConnections: stats.MaxOpenConnections,
+		WaitCount:          stats.WaitCount, WaitDuration: stats.WaitDuration,
+	}
 }

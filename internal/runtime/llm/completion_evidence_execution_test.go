@@ -87,12 +87,13 @@ func TestCompletion2270APIExecutionEvidence(t *testing.T) {
 				rt := completion2270RuntimeForExecution(t, protocol.profile, server.URL, harness)
 				ctx := runtimeactors.WithActor(harness.CompletionContext(t.Name()), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: "regular", FlowPath: "test/stateless"})
 				ctx = withTestStatelessMemory(t, ctx, "agent-1", "test/stateless")
-				session, err := rt.StartSession(ctx, "agent-1", "system", nil)
+				session, err := rt.StartSession(ctx, "agent-1", managedProviderPromptForEffectTest(t), nil)
 				if err != nil {
 					t.Fatal(err)
 				}
 				ctx = managedProviderTestContext(t, ctx, rt, session, nil)
-				_, err = rt.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, managedProviderCallForEffectTest(t, ctx))
+				managed := managedProviderCallForEffectTest(t, ctx)
+				_, err = rt.continueSession(ctx, session, managedProviderInputForEffectTest(t, managed), managed)
 				if (err != nil) != tc.wantError || calls.Load() != 1 {
 					t.Fatalf("execution verdict changed or provider repeated: calls=%d, error=%v", calls.Load(), err)
 				}

@@ -31,6 +31,7 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Hour)})
 	seedSQLiteAgentUsageAgentForRun(t, ctx, sqliteStore, runID, agentID)
+	ctx = admitAPITestAgentExecution(t, ctx, sqliteStore, authorActivityTestSourceArtifactFact)
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
@@ -45,8 +46,8 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 		identityFields.FlowInstancePath, base.Add(-5*time.Minute), base); err != nil {
 		t.Fatalf("seed sqlite session: %v", err)
 	}
-	storetest.InsertExistingRunRootEventRecord(
-		t, ctx, storetest.DatabaseForTest(sqliteStore), "sqlite", eventID, runID, events.EventType("operator.read"),
+	storetest.InsertNativeExistingRunRootEvent(
+		t, ctx, sqliteStore, eventID, runID, events.EventType("operator.read"),
 		eventtest.Producer(events.EventProducerExternal, "operator-read-fixture"), []byte(`{}`),
 		events.EventEnvelope{Scope: events.EventScopeGlobal}, base.Add(-4*time.Minute),
 	)

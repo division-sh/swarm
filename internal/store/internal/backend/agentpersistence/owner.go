@@ -35,10 +35,12 @@ type DirectivePipelineOwner interface {
 
 type ProviderAttemptDrainPostgresCapturer interface {
 	CaptureProviderAttemptDrainsPostgresTx(context.Context, *mutationprotocol.Attempt, runtimeeffects.ProviderAttemptDrainCapture) (runtimeeffects.ProviderAttemptDrainCaptureResult, error)
+	RecoverStartupProviderAttemptsPostgresTx(context.Context, *mutationprotocol.Attempt, runtimemanager.AgentLifecycleTransition, runtimemanager.AgentLifecycleTransitionResult) error
 }
 
 type ProviderAttemptDrainSQLiteCapturer interface {
 	CaptureProviderAttemptDrainsSQLiteTx(context.Context, *mutationprotocol.Attempt, runtimeeffects.ProviderAttemptDrainCapture) (runtimeeffects.ProviderAttemptDrainCaptureResult, error)
+	RecoverStartupProviderAttemptsSQLiteTx(context.Context, *mutationprotocol.Attempt, runtimemanager.AgentLifecycleTransition, runtimemanager.AgentLifecycleTransitionResult) error
 }
 
 type AgentSource interface {

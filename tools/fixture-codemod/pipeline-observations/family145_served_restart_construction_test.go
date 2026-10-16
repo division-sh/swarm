@@ -1,0 +1,72 @@
+package main
+
+import (
+	"fmt"
+	"strings"
+)
+
+var family145ServedRestartConstructors = map[string]string{
+	"lifecycleRestartHarness":                      "",
+	"TestReceiverCompositionRestartBothStores":     "receiver.sqlite",
+	"TestServedMailboxCursorRetainedRestartParity": "mailbox.sqlite",
+	"TestAudit2277StoppedRunReadinessRestart":      "audit2277.sqlite",
+}
+
+func family145ServedRestartConstructionInverse(before, after string) (string, error) {
+	begin := strings.Index(before, "buildStoresForServe = func(")
+	if begin < 0 {
+		return "", fmt.Errorf("missing reviewed selected construction")
+	}
+	indent := before[strings.LastIndex(before[:begin], "\n")+1 : begin]
+	end := strings.Index(before[begin:], "\n"+indent+"t.Cleanup(func() {")
+	native := "buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {\n" + indent + "\treturn storeselected.OpenRuntime(ctx, storeselected.RuntimeRequest{Selection: selection, PostgresDSN: dsn, SessionLockTTL: runtimeSessionLockTTL(cfg)})\n" + indent + "}"
+	if end < 0 || strings.Count(after, native) != 1 {
+		return "", fmt.Errorf("native serving construction lost context/selection/DSN/TTL")
+	}
+	return strings.Replace(after, native, before[begin:begin+end], 1), nil
+}
+
+func family145ServedRestartConstructionProofError(function, before, after string) error {
+	after = family145WriterStageCallerInverse(function, after)
+	if function == "lifecycleRestartHarness" {
+		var err error
+		after, err = family145ServedSnapshotCaptureInverse(after, 1)
+		if err != nil {
+			return err
+		}
+	}
+	sqliteFile, known := family145ServedRestartConstructors[function]
+	if !known {
+		return fmt.Errorf("unreviewed serving constructor: %s", function)
+	}
+	for _, old := range []string{"store.NewPostgresStore(", "BootstrapPostgresRuntimeStore(", "DatabaseForTest(", "openSelectedPostgresOwner("} {
+		if strings.Contains(after, old) {
+			return fmt.Errorf("serving callback retains independent construction: %s", old)
+		}
+	}
+	normalized, err := family145ServedRestartConstructionInverse(before, after)
+	if err != nil {
+		return err
+	}
+	if sqliteFile != "" {
+		sqliteCapture := "captureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {\n\t\t\t\t\tdb, _, _ = selectedRuntimeStoreForTest(t, p)\n\t\t\t\t})"
+		if function == "TestServedMailboxCursorRetainedRestartParity" {
+			if strings.Contains(after, "selectedRuntimeStoreForTest(") || strings.Contains(after, "*sql.DB") {
+				return fmt.Errorf("public cursor journey retains unused raw observation")
+			}
+			normalized = strings.Replace(normalized, "\n\t\t\tvar deliveryReader", "\n\t\t\tvar db *sql.DB\n\t\t\tvar deliveryReader", 1)
+		} else {
+			common := "\n\t\t\tcaptureSelectedRuntimePersistence(t, func(p serveRuntimePersistence) {\n\t\t\t\tdb, _, _ = selectedRuntimeStoreForTest(t, p)\n\t\t\t})"
+			if strings.Count(after, common) != 1 || strings.Index(after, common) > strings.Index(after, "if backend ==") {
+				return fmt.Errorf("serving restart does not capture actual owner on both backends")
+			}
+			normalized = strings.Replace(normalized, common, "", 1)
+		}
+		config := "opts.ConfigPath = writeStoreBackendRuntimeConfig(t, \"sqlite\", filepath.Join(t.TempDir(), \"" + sqliteFile + "\"))"
+		normalized = strings.Replace(normalized, config, config+"\n\t\t\t\t"+sqliteCapture, 1)
+	}
+	if normalized != before {
+		return fmt.Errorf("serving rewrite changed source/options/assertions/faults/receipts/identity/restart or joined cleanup: %s", function)
+	}
+	return nil
+}

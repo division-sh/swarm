@@ -429,9 +429,17 @@ func runInboundAdmissionSupportedSurfacePolicyMatrix(t *testing.T, backend strin
 		for _, eventName := range test.eventNames {
 			var count int
 			if backend == "sqlite" {
-				err = storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = ?`, eventName).Scan(&count)
+				err = func() error {
+					var err error
+					count, err = storetest.CountEventNameStorage(context.Background(), sqliteStore, eventName)
+					return err
+				}()
 			} else {
-				err = storetest.DatabaseForTest(postgresStore).QueryRow(`SELECT COUNT(*) FROM events WHERE event_name = $1`, eventName).Scan(&count)
+				err = func() error {
+					var err error
+					count, err = storetest.CountEventNameStorage(context.Background(), postgresStore, eventName)
+					return err
+				}()
 			}
 			want := 1
 			if test.provider == "telegram" {

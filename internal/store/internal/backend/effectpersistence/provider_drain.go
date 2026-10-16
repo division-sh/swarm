@@ -42,6 +42,7 @@ const (
 
 type providerDrainPermit struct {
 	DrainID               string
+	LifecycleOperationID  string
 	LifecycleTransitionID string
 	Target                runtimeeffects.ProviderDrainTarget
 	SuccessorEpoch        int64
@@ -286,15 +287,15 @@ type providerDrainRecoveryResolution struct {
 	Expired bool
 }
 
-func resolveProviderDrainRecoveryPostgres(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time) (providerDrainRecoveryResolution, error) {
-	return resolveProviderDrainRecovery(ctx, tx, attempt, now, true)
+func resolveProviderDrainRecoveryPostgres(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time, takeover *startupProviderTakeover) (providerDrainRecoveryResolution, error) {
+	return resolveProviderDrainRecovery(ctx, tx, attempt, now, true, takeover)
 }
 
-func resolveProviderDrainRecoverySQLite(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time) (providerDrainRecoveryResolution, error) {
-	return resolveProviderDrainRecovery(ctx, tx, attempt, now, false)
+func resolveProviderDrainRecoverySQLite(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time, takeover *startupProviderTakeover) (providerDrainRecoveryResolution, error) {
+	return resolveProviderDrainRecovery(ctx, tx, attempt, now, false, takeover)
 }
 
-func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time, postgres bool) (providerDrainRecoveryResolution, error) {
+func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time, postgres bool, takeover *startupProviderTakeover) (providerDrainRecoveryResolution, error) {
 	if attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent {
 		return providerDrainRecoveryResolution{Kind: completionSettlementCurrent}, nil
 	}
@@ -321,7 +322,15 @@ func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 			map[string]any{"attempt_id": attempt.AttemptID},
 		)
 	}
-	if !providerDrainMatchesSuccessor(permit, observation.State) {
+	matched := providerDrainMatchesSuccessor(permit, observation.State)
+	if !matched && takeover != nil && permit.Target == runtimeeffects.ProviderDrainTargetRunning {
+		matched, err = storeagent.ReadStartupProviderTakeoverChainTx(ctx, tx, takeover.request, observation.State,
+			attempt.Authority.Normal, permit.LifecycleOperationID, permit.LifecycleTransitionID, permit.SuccessorEpoch, permit.SuccessorGeneration, !postgres)
+		if err != nil {
+			return providerDrainRecoveryResolution{}, err
+		}
+	}
+	if !matched {
 		return providerDrainRecoveryResolution{}, runtimefailures.New(
 			runtimefailures.ClassLifecycleConflict,
 			"provider_attempt_drain_successor_mismatch",
@@ -334,35 +343,43 @@ func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 }
 
 func loadProviderDrainForRecovery(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, postgres bool) (providerDrainPermit, bool, error) {
+	return loadProviderRecoveryDrain(ctx, tx, attempt, postgres, false)
+}
+
+func loadProviderRecoveryDrain(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, postgres, settled bool) (providerDrainPermit, bool, error) {
 	var permit providerDrainPermit
 	var expires conversationForkTimeValue
 	var generation int64
 	var target, originKind, deliveryID, runID, routeIdentity, claimToken, subscriber, directiveID, directiveOwner string
 	var claimVersion int64
 	var err error
+	state := "state='pending'"
+	if settled {
+		state = "state='settled' AND settled_at IS NOT NULL"
+	}
 	if postgres {
 		err = tx.QueryRowContext(ctx, `
-			SELECT drain_id::text,lifecycle_transition_id::text,target_phase,successor_runtime_epoch,successor_generation,
+			SELECT drain_id::text,lifecycle_operation_id::text,lifecycle_transition_id::text,target_phase,successor_runtime_epoch,successor_generation,
 				       origin_kind,COALESCE(origin_delivery_id::text,''),COALESCE(origin_run_id::text,''),COALESCE(origin_route_identity,''),COALESCE(origin_claim_token::text,''),
 				       COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_id,''),COALESCE(origin_directive_operation_id::text,''),COALESCE(origin_directive_owner_id,''),expires_at
 			FROM runtime_provider_attempt_drains
 			WHERE attempt_id=$1::uuid AND operation_id=$2::uuid
-			  AND predecessor_runtime_epoch=$3 AND predecessor_generation=$4 AND state='pending'
+			  AND predecessor_runtime_epoch=$3 AND predecessor_generation=$4 AND `+state+`
 			FOR UPDATE
 		`, attempt.AttemptID, attempt.OperationID, attempt.Authority.Normal.RuntimeEpoch, attempt.Authority.Normal.Generation).Scan(
-			&permit.DrainID, &permit.LifecycleTransitionID, &target, &permit.SuccessorEpoch, &generation,
+			&permit.DrainID, &permit.LifecycleOperationID, &permit.LifecycleTransitionID, &target, &permit.SuccessorEpoch, &generation,
 			&originKind, &deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriber, &directiveID, &directiveOwner, &expires,
 		)
 	} else {
 		err = tx.QueryRowContext(ctx, `
-			SELECT drain_id,lifecycle_transition_id,target_phase,successor_runtime_epoch,successor_generation,
+			SELECT drain_id,lifecycle_operation_id,lifecycle_transition_id,target_phase,successor_runtime_epoch,successor_generation,
 				       origin_kind,COALESCE(origin_delivery_id,''),COALESCE(origin_run_id,''),COALESCE(origin_route_identity,''),COALESCE(origin_claim_token,''),
 				       COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_id,''),COALESCE(origin_directive_operation_id,''),COALESCE(origin_directive_owner_id,''),expires_at
 			FROM runtime_provider_attempt_drains
 			WHERE attempt_id=? AND operation_id=?
-			  AND predecessor_runtime_epoch=? AND predecessor_generation=? AND state='pending'
+			  AND predecessor_runtime_epoch=? AND predecessor_generation=? AND `+state+`
 		`, attempt.AttemptID, attempt.OperationID, attempt.Authority.Normal.RuntimeEpoch, attempt.Authority.Normal.Generation).Scan(
-			&permit.DrainID, &permit.LifecycleTransitionID, &target, &permit.SuccessorEpoch, &generation,
+			&permit.DrainID, &permit.LifecycleOperationID, &permit.LifecycleTransitionID, &target, &permit.SuccessorEpoch, &generation,
 			&originKind, &deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriber, &directiveID, &directiveOwner, &expires,
 		)
 	}
@@ -469,6 +486,10 @@ func settleProviderDrainRecovery(
 			return nil, err
 		}
 	}
+	return closeRecoveredProviderDrain(ctx, tx, attempt, settlement, permit, expired, postgres)
+}
+
+func closeRecoveredProviderDrain(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement, permit providerDrainPermit, expired, postgres bool) (*runtimeeffects.ProviderDrainFinalization, error) {
 	state := "settled"
 	var failure any
 	if expired {
@@ -480,6 +501,7 @@ func settleProviderDrainRecovery(
 		failure = string(raw)
 	}
 	var result sql.Result
+	var err error
 	if postgres {
 		result, err = tx.ExecContext(ctx, `UPDATE runtime_provider_attempt_drains SET state=$2,failure=$3::jsonb,settled_at=$4 WHERE drain_id=$1::uuid AND state='pending'`, permit.DrainID, state, failure, settlement.Now.UTC())
 	} else {
@@ -663,7 +685,7 @@ func (s *EffectPostgresOwner) CaptureProviderAttemptDrainsPostgresTx(
 		  AND o.agent_id=$1 AND o.agent_name_owner=$2 AND o.agent_name_source=$3
 		  AND o.agent_route_presence=$4 AND o.flow_scope_key=$5
 		  AND o.flow_instance_id=$6 AND o.flow_instance=$7
-		  AND o.runtime_epoch=$8 AND o.generation=$9 AND o.agent_run_id=$10::uuid
+		  AND a.runtime_epoch=$8 AND a.generation=$9 AND o.agent_run_id=$10::uuid
 		  AND a.state IN ('authorized','launched','response_observed')
 		ORDER BY a.attempt_id
 		FOR UPDATE OF a,o
@@ -709,7 +731,7 @@ func (s *EffectSQLiteOwner) CaptureProviderAttemptDrainsSQLiteTx(
 		  AND o.agent_id=? AND o.agent_name_owner=? AND o.agent_name_source=?
 		  AND o.agent_route_presence=? AND o.flow_scope_key=?
 		  AND o.flow_instance_id=? AND o.flow_instance=?
-		  AND o.runtime_epoch=? AND o.generation=? AND o.agent_run_id=?
+		  AND a.runtime_epoch=? AND a.generation=? AND o.agent_run_id=?
 		  AND a.state IN ('authorized','launched','response_observed')
 		ORDER BY a.attempt_id
 	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,

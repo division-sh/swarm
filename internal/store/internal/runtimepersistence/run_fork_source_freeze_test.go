@@ -247,7 +247,7 @@ func TestRunForkSourceFreezeBlocksOnlyLiveExecutionAuthority(t *testing.T) {
 	tests := []struct {
 		name        string
 		blockerName string
-		seed        func(*testing.T, context.Context, *sql.DB, runForkActivationLineage, time.Time, bool)
+		seed        func(*testing.T, context.Context, *PostgresStore, runForkActivationLineage, time.Time, bool)
 	}{
 		{name: "delivery", blockerName: "claimed_delivery", seed: seedRunForkFreezeDeliveryAuthority},
 		{name: "session", blockerName: "leased_session", seed: seedRunForkFreezeSessionAuthority},
@@ -269,7 +269,7 @@ func TestRunForkSourceFreezeBlocksOnlyLiveExecutionAuthority(t *testing.T) {
 				ctx := testAuthorActivitySourceArtifactContext()
 				now := time.Now().UTC().Truncate(time.Microsecond)
 				lineage := seedRunForkSourceFreezePair(t, db, "running", runfork.RunForkMaterializedStatus, now)
-				test.seed(t, ctx, db, lineage, now, live)
+				test.seed(t, ctx, pg, lineage, now, live)
 
 				err := commitRunForkSourceFreezeForTest(ctx, pg, lineage, now.Add(time.Second), true)
 				if live {
@@ -294,8 +294,13 @@ func TestRunForkSourceFreezeBlocksOnlyLiveExecutionAuthority(t *testing.T) {
 	}
 }
 
-func seedRunForkFreezeDeliveryAuthority(t *testing.T, ctx context.Context, db *sql.DB, lineage runForkActivationLineage, now time.Time, live bool) {
+func seedRunForkFreezeDeliveryAuthority(t *testing.T, ctx context.Context, pg *PostgresStore, lineage runForkActivationLineage, now time.Time, live bool) {
 	t.Helper()
+	db := pg.backend.ConstructionHandle()
+	identity := mustTestAgentIdentityForRun(lineage.SourceRunID, "freeze-agent", "fixture/freeze-agent")
+	if live {
+		ctx = prepareSelectedContractSourceActorsForTest(t, pg, lineage.SourceRunID, identity)
+	}
 	eventID := uuid.NewString()
 	event := seedPostgresSemanticEventRecordFixture(
 		t, ctx, db, eventID, lineage.SourceRunID, events.EventType("freeze.delivery"),
@@ -305,11 +310,12 @@ func seedRunForkFreezeDeliveryAuthority(t *testing.T, ctx context.Context, db *s
 	if live {
 		state = runtimedelivery.StateLaunching
 	}
-	seedDeliveryStateFixture(t, ctx, postgresDeliveryFixtureStore(db), event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("freeze-agent")}, state, nil)
+	seedDeliveryStateFixture(t, ctx, pg, event, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("freeze-agent"), AgentIdentity: identity}, state, nil)
 }
 
-func seedRunForkFreezeSessionAuthority(t *testing.T, ctx context.Context, db *sql.DB, lineage runForkActivationLineage, now time.Time, live bool) {
+func seedRunForkFreezeSessionAuthority(t *testing.T, ctx context.Context, pg *PostgresStore, lineage runForkActivationLineage, now time.Time, live bool) {
 	t.Helper()
+	db := pg.backend.ConstructionHandle()
 	agentID := "freeze-session-agent"
 	sessionID := uuid.NewString()
 	seedRunForkSessionProjection(t, db, lineage.SourceRunID, agentID, sessionID, "active", now)
@@ -326,8 +332,9 @@ func seedRunForkFreezeSessionAuthority(t *testing.T, ctx context.Context, db *sq
 	}
 }
 
-func seedRunForkFreezeActivityAuthority(t *testing.T, ctx context.Context, db *sql.DB, lineage runForkActivationLineage, now time.Time, live bool) {
+func seedRunForkFreezeActivityAuthority(t *testing.T, ctx context.Context, pg *PostgresStore, lineage runForkActivationLineage, now time.Time, live bool) {
 	t.Helper()
+	db := pg.backend.ConstructionHandle()
 	status := "succeeded"
 	resultEventID := any(uuid.NewString())
 	resultEventType := any("activity.succeeded")
@@ -352,8 +359,9 @@ func seedRunForkFreezeActivityAuthority(t *testing.T, ctx context.Context, db *s
 	}
 }
 
-func seedRunForkFreezeDirectiveAuthority(t *testing.T, ctx context.Context, db *sql.DB, lineage runForkActivationLineage, now time.Time, live bool) {
+func seedRunForkFreezeDirectiveAuthority(t *testing.T, ctx context.Context, pg *PostgresStore, lineage runForkActivationLineage, now time.Time, live bool) {
 	t.Helper()
+	db := pg.backend.ConstructionHandle()
 	eventID := uuid.NewString()
 	if err := insertPostgresCanonicalEventRecordFixture(ctx, db, eventtest.DiagnosticDirect(
 		eventID, events.EventTypePlatformAgentDirective, "operator", "", []byte(`{}`), 0,
@@ -389,8 +397,9 @@ func seedRunForkFreezeDirectiveAuthority(t *testing.T, ctx context.Context, db *
 	}
 }
 
-func seedRunForkFreezeExternalEffectAuthority(t *testing.T, ctx context.Context, db *sql.DB, lineage runForkActivationLineage, now time.Time, live bool) {
+func seedRunForkFreezeExternalEffectAuthority(t *testing.T, ctx context.Context, pg *PostgresStore, lineage runForkActivationLineage, now time.Time, live bool) {
 	t.Helper()
+	db := pg.backend.ConstructionHandle()
 	agentID := "freeze-effect-agent"
 	identity := mustTestAgentIdentityForRun(lineage.SourceRunID, agentID, "freeze/effect")
 	fields := testAgentIdentityStorageFields(t, identity)

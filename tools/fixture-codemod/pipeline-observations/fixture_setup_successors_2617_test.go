@@ -40,6 +40,11 @@ type fixtureSetupSuccessor2617 struct {
 // These settled fixture receipts compose with, but do not replace, the earlier
 // historical transformation and current-endpoint packets.
 func fixtureSetupCurrentEndpoint2617(row recipe, actual string) (recipe, error) {
+	var integrationErr error
+	row, actual, integrationErr = catchUp2542PriorMasterPair(row, actual)
+	if integrationErr != nil {
+		return recipe{}, integrationErr
+	}
 	switch row.Family + "/" + row.File + "/" + row.Function {
 	case "native-fanout-barrier-authority/internal/store/internal/runtimepersistence/fan_out_delivery_barrier_selected_store_test.go/TestFanOutDeliveryBarrierCompletionAndSupersessionWinnerMatrixOnBothStores",
 		"native-pipeline-delivery-exact-join-semantic/internal/runtime/pipeline/workflow_join_lifecycle_test.go/TestWorkflowJoinUsesSelectedStoreScheduleOwnerOnBothStores",
@@ -199,6 +204,11 @@ func TestFixtureSetupSuccessors2617PreservePriorHistoryAndExactCurrentOwners(t *
 				t.Fatal(err)
 			}
 			valid := func(candidate recipe, source string) bool {
+				var integrationErr error
+				candidate, source, integrationErr = catchUp2542PriorMasterPair(candidate, source)
+				if integrationErr != nil {
+					return false
+				}
 				history := candidate
 				history.Successor = pin.Original.Successor
 				current, sourceErr := canonicalFunction(source)

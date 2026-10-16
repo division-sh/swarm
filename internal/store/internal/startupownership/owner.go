@@ -25,6 +25,7 @@ import (
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/google/uuid"
 )
 
@@ -42,19 +43,49 @@ type StartupPostgresOwner struct {
 	destructiveReset     *storeadmin.DestructiveResetPostgresOwner
 	fanOutPipeline       *storepipeline.PipelinePostgresOwner
 	channelChanges       *runtimechanneldelivery.ReconcileSignal
+	lifecycleCandidates  *storerunhandoff.CandidateCoordinator
+	activityJournal      displacedHTTPActivityJournal
 }
 
 type StartupSQLiteOwner struct {
 	processOperations
-	backend         *sqlitebackend.Backend
-	path            string
-	backendIdentity *SQLiteBackendIdentity
-	schemaGuard     func() error
-	catalogEmpty    func(context.Context) (bool, error)
-	agents          *storeagent.AgentSQLiteOwner
-	ownerMu         sync.Mutex
-	fanOutPipeline  *storepipeline.PipelineSQLiteOwner
-	channelChanges  *runtimechanneldelivery.ReconcileSignal
+	backend             *sqlitebackend.Backend
+	path                string
+	backendIdentity     *SQLiteBackendIdentity
+	schemaGuard         func() error
+	catalogEmpty        func(context.Context) (bool, error)
+	agents              *storeagent.AgentSQLiteOwner
+	ownerMu             sync.Mutex
+	fanOutPipeline      *storepipeline.PipelineSQLiteOwner
+	channelChanges      *runtimechanneldelivery.ReconcileSignal
+	lifecycleCandidates *storerunhandoff.CandidateCoordinator
+	activityJournal     displacedHTTPActivityJournal
+}
+
+func (s *StartupPostgresOwner) BindLifecycleCandidates(candidates *storerunhandoff.CandidateCoordinator) error {
+	if s == nil || candidates == nil || s.lifecycleCandidates != nil {
+		return errors.New("startup PostgreSQL lifecycle candidates must be bound exactly once")
+	}
+	s.lifecycleCandidates = candidates
+	return nil
+}
+
+func (s *StartupSQLiteOwner) BindLifecycleCandidates(candidates *storerunhandoff.CandidateCoordinator) error {
+	if s == nil || candidates == nil || s.lifecycleCandidates != nil {
+		return errors.New("startup SQLite lifecycle candidates must be bound exactly once")
+	}
+	s.lifecycleCandidates = candidates
+	return nil
+}
+
+func lifecycleMutationCandidates(kind string, candidates *storerunhandoff.CandidateCoordinator) (*storerunhandoff.CandidateCoordinator, error) {
+	if kind != "process_takeover" {
+		return nil, nil
+	}
+	if candidates == nil {
+		return nil, errors.New("startup process takeover requires bound lifecycle candidates")
+	}
+	return candidates, nil
 }
 
 func (s *StartupPostgresOwner) BindChannelReconciliation(signal *runtimechanneldelivery.ReconcileSignal) error {
@@ -146,7 +177,7 @@ func (s *StartupPostgresOwner) AcquireProcessCapability(ctx context.Context, req
 	if err := contextError(ctx); err != nil {
 		return nil, errors.Join(err, capability.Release(context.WithoutCancel(ctx)))
 	}
-	s.bindProcess(capability)
+	s.bindProcess(capability, session)
 	return capability, nil
 }
 
@@ -203,7 +234,7 @@ func (s *StartupSQLiteOwner) AcquireProcessCapability(ctx context.Context, req r
 	if err := contextError(ctx); err != nil {
 		return nil, errors.Join(err, capability.Release(context.WithoutCancel(ctx)))
 	}
-	s.bindProcess(capability)
+	s.bindProcess(capability, session)
 	return capability, nil
 }
 
@@ -217,6 +248,10 @@ type postgresSession struct {
 	fenced           bool
 	released         bool
 	fanOutStore      runtimestartupownership.FanOutServingStore
+}
+
+func (s *postgresSession) AgentRecoveryWriteObserver() *runtimestartupownership.AgentRecoveryWriteObserver {
+	return s.owner.backend.AgentRecoveryWriteObserver()
 }
 
 func (s *postgresSession) Authority() (runtimestartupownership.Authority, error) {
@@ -382,7 +417,11 @@ func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req 
 }
 
 func (s *postgresSession) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	commit := mutationprotocol.RunRetainedPostgres(ctx, s.lease.Session(), mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	candidates, err := lifecycleMutationCandidates(req.OperationKind, s.owner.lifecycleCandidates)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	commit := mutationprotocol.RunRetainedPostgres(ctx, s.lease.Session(), mutationprotocol.Story, mutationprotocol.Ordinary, nil, candidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimemanager.AgentLifecycleTransitionResult, error) {
 		return s.owner.agents.CommitAgentLifecycleTransitionTx(txctx, attempt, req)
 	})
 	result, ok := commit.Value()
@@ -419,6 +458,10 @@ type sqliteSession struct {
 	fenced           bool
 	released         bool
 	fanOutStore      runtimestartupownership.FanOutServingStore
+}
+
+func (s *sqliteSession) AgentRecoveryWriteObserver() *runtimestartupownership.AgentRecoveryWriteObserver {
+	return s.owner.backend.AgentRecoveryWriteObserver()
 }
 
 func (s *sqliteSession) Authority() (runtimestartupownership.Authority, error) {
@@ -577,7 +620,11 @@ func (s *sqliteSession) ApplyDestructiveResetCleanup(ctx context.Context, req ru
 }
 
 func (s *sqliteSession) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	commit := mutationprotocol.RunSQLite(ctx, s.owner.backend, "commit retained agent lifecycle transition", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	candidates, err := lifecycleMutationCandidates(req.OperationKind, s.owner.lifecycleCandidates)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	commit := mutationprotocol.RunSQLite(ctx, s.owner.backend, "commit retained agent lifecycle transition", mutationprotocol.Story, mutationprotocol.Ordinary, nil, candidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimemanager.AgentLifecycleTransitionResult, error) {
 		return s.owner.agents.CommitAgentLifecycleTransitionTx(txctx, attempt, req)
 	})
 	result, ok := commit.Value()
@@ -886,14 +933,16 @@ func commitSourceSetTx(ctx context.Context, tx *sql.Tx, req runtimeagenttopology
 		loadHead += ` FOR UPDATE`
 	}
 	var previous runtimeagenttopology.SourceSetPlan
+	var storedRevision string
 	var previousRaw []byte
-	err = tx.QueryRowContext(ctx, loadHead).Scan(&previous.Revision, &previousRaw)
+	err = tx.QueryRowContext(ctx, loadHead).Scan(&storedRevision, &previousRaw)
 	hasPrevious := err == nil
 	if err != nil && err != sql.ErrNoRows {
 		return runtimeagenttopology.SourceSetCommitResult{}, err
 	}
 	if hasPrevious {
-		if err := json.Unmarshal(previousRaw, &previous); err != nil {
+		previous, err = decodeSourceSetHead(previousRaw, storedRevision)
+		if err != nil {
 			return runtimeagenttopology.SourceSetCommitResult{}, err
 		}
 	} else {
@@ -962,21 +1011,33 @@ func loadSourceSetModeTx(ctx context.Context, tx *sql.Tx, sqlite, lock bool) (ru
 	if !sqlite && lock {
 		query += ` FOR SHARE`
 	}
-	var plan runtimeagenttopology.SourceSetPlan
+	var storedRevision string
 	var raw []byte
-	if err := tx.QueryRowContext(ctx, query).Scan(&plan.Revision, &raw); err != nil {
+	if err := tx.QueryRowContext(ctx, query).Scan(&storedRevision, &raw); err != nil {
 		if err == sql.ErrNoRows {
 			return runtimeagenttopology.SourceSetPlan{}, false, nil
 		}
 		return runtimeagenttopology.SourceSetPlan{}, false, err
 	}
-	if err := json.Unmarshal(raw, &plan); err != nil {
-		return runtimeagenttopology.SourceSetPlan{}, false, err
-	}
-	if err := plan.Validate(); err != nil {
+	plan, err := decodeSourceSetHead(raw, storedRevision)
+	if err != nil {
 		return runtimeagenttopology.SourceSetPlan{}, false, err
 	}
 	return plan, true, nil
+}
+
+func decodeSourceSetHead(raw []byte, storedRevision string) (runtimeagenttopology.SourceSetPlan, error) {
+	var plan runtimeagenttopology.SourceSetPlan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		return runtimeagenttopology.SourceSetPlan{}, err
+	}
+	if err := plan.Validate(); err != nil {
+		return runtimeagenttopology.SourceSetPlan{}, err
+	}
+	if plan.Revision != storedRevision {
+		return runtimeagenttopology.SourceSetPlan{}, errors.New("agent topology source-set stored revision differs from decoded plan")
+	}
+	return plan, nil
 }
 
 func sourceSetContains(plan runtimeagenttopology.SourceSetPlan, source runtimeagenttopology.SourceCoordinate) bool {

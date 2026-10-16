@@ -292,6 +292,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	)
 	identity := mustTestAgentIdentityForRun(created.RunID, agentID, "standing/ingress")
 	fields := testAgentIdentityStorageFields(t, identity)
+	fixtureCtx = preparePositiveAgentClaimFixture(t, fixtureCtx, store, identity)
 	workRoute := testAgentDeliveryRoute(t, created.RunID, agentID, "standing/ingress")
 	if err := commitSemanticEventFixtureWithRoutes(fixtureCtx, store, workEvent, []events.DeliveryRoute{workRoute}); err != nil {
 		t.Fatal(err)
@@ -302,7 +303,6 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	)); err != nil {
 		t.Fatal(err)
 	}
-	seedTestAgentRow(t, ctx, store.backend.ConstructionHandle(), false, identity, "active")
 	if _, err := store.backend.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -495,11 +495,11 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	}
 	identity := mustTestAgentIdentityForRun(created[0].RunID, agentID, "standing/ingress")
 	fields := testAgentIdentityStorageFields(t, identity)
+	fixtureCtx = preparePositiveAgentClaimFixture(t, fixtureCtx, selected, identity)
 	workRoute := testAgentDeliveryRoute(t, created[0].RunID, agentID, "standing/ingress")
 	if err := commitSemanticEventFixtureWithRoutes(fixtureCtx, selected, workEvent, []events.DeliveryRoute{workRoute}); err != nil {
 		t.Fatal(err)
 	}
-	seedTestAgentRow(t, ctx, db, true, identity, "active")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,

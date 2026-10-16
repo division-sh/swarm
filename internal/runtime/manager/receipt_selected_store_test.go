@@ -13,8 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	runlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -33,19 +31,15 @@ func (*receiptCandidateSink) Cancel() error { return nil }
 func TestManagerReceiptOutcomeBothSelectedStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			var selected interface {
+			fixture := openManagerNativeDelivery(t, backend)
+			selected, ok := fixture.Store.(interface {
 				runtimedelivery.Store
 				runlifecycle.OperationOwner
 				runlifecycle.CandidateStore
 				runlifecycle.CandidateRegistrar
-			}
-			dialect := authoractivityfixture.DialectSQLite
-			if backend == "postgres" {
-				_, db, _ := testutil.StartPostgres(t)
-				selected = storetest.AdmitPostgresRuntimeStore(t, db)
-				dialect = authoractivityfixture.DialectPostgres
-			} else {
-				selected = storetest.StartSQLiteRuntimeStore(t)
+			})
+			if !ok {
+				t.Fatal("native receipt owner lacks its original candidate registration")
 			}
 			for _, status := range []manager.ReceiptStatus{manager.ReceiptStatusProcessed, manager.ReceiptStatusError, manager.ReceiptStatusDeadLetter, manager.ReceiptStatusTerminal} {
 				for _, fail := range []bool{false, true} {
@@ -57,13 +51,12 @@ func TestManagerReceiptOutcomeBothSelectedStores(t *testing.T) {
 						}
 					}
 					t.Run(string(status)+"/"+phase, func(t *testing.T) {
-						ctx := manager.TerminalPanicFixtureContext()
 						runID := uuid.NewString()
-						storetest.RequireRunningRun(t, ctx, selected, runID, time.Now().UTC())
 						identity := agentidentitytest.RootRuntimeForRun(t, runID, "agent-a", "receipt-selected-store")
+						ctx, _, _, _ := fixture.PrepareActor(t, managerNativeClaimActor(t, identity))
 						route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 						evt := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.requested", "", "", nil, 0, runID, events.EventEnvelope{}, time.Now().UTC())
-						storetest.InsertCanonicalEventRecord(t, ctx, storetest.Database(selected), dialect, evt)
+						storetest.CommitSemanticEvent(t, ctx, selected, evt)
 						storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, selected, evt, []events.DeliveryRoute{route})
 						claimed, err := storetest.ClaimDelivery(ctx, selected, evt, route)
 						if err != nil {

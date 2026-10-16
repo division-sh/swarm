@@ -2,7 +2,6 @@ package runtime_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -24,6 +23,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
@@ -40,7 +40,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 )
 
 type nodeDeliveryRecoveryStore interface {
@@ -162,14 +162,12 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 	persistedBundleHash := persistedSource.BundleHash()
 	for _, backend := range []struct {
 		name  string
-		setup func(*testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore)
+		setup func(*testing.T) (context.Context, startupRecoveryOrderStore)
 	}{
 		{
 			name: "postgres",
-			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore) {
-				_, db, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected := storetest.AdmitPostgresRuntimeStore(t, db)
+			setup: func(t *testing.T) (context.Context, startupRecoveryOrderStore) {
+				selected := storetest.StartPostgresRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
 				ensureStartupRecoverySourceArtifact(t, ctx, selected, bundle.SourceArtifact)
@@ -177,12 +175,12 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
 					BundleHash: persistedBundleHash,
 				})
-				return ctx, db, db, selected
+				return ctx, selected
 			},
 		},
 		{
 			name: "sqlite",
-			setup: func(t *testing.T) (context.Context, *sql.DB, *sql.DB, startupRecoveryOrderStore) {
+			setup: func(t *testing.T) (context.Context, startupRecoveryOrderStore) {
 				selected := storetest.StartSQLiteRuntimeStore(t)
 				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), templateInstanceDeliveryRunID)
 				ctx = runtimecorrelation.WithSourceArtifactFact(ctx, persistedSource)
@@ -191,12 +189,12 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 					Origin: storetest.ScenarioSetupOrigin(), RunID: templateInstanceDeliveryRunID,
 					BundleHash: persistedBundleHash,
 				})
-				return ctx, nil, storetest.Database(selected), selected
+				return ctx, selected
 			},
 		},
 	} {
 		t.Run(backend.name, func(t *testing.T) {
-			ctx, _, _, selected := backend.setup(t)
+			ctx, selected := backend.setup(t)
 			activationCleanupErr := errors.New("injected delivery authority postcommit cleanup failure")
 			activationProbe := &startupRecoveryActivationProbe{Store: selected, cleanupErr: activationCleanupErr}
 			const agentID = "startup-order-agent"
@@ -248,7 +246,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			// readiness owner; recovery must not infer construction from agent rows.
 			predecessorProcess := worklifetime.NewProcess()
 			predecessor := newRuntime(predecessorProcess, selected)
-			predecessorCapability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, predecessor)
+			predecessorCapability, predecessorGrant := installExternalRuntimeTestGeneration(t, ctx, selected, predecessor)
 			t.Cleanup(func() {
 				if err := closeExternalRuntimeTestGeneration(predecessor, predecessorProcess, predecessorCapability); err != nil {
 					t.Errorf("close startup predecessor: %v", err)
@@ -265,9 +263,15 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			}); err != nil {
 				t.Fatalf("construct startup predecessor tree: %v", err)
 			}
-			if err := closeExternalRuntimeTestGeneration(predecessor, predecessorProcess, predecessorCapability); err != nil {
-				t.Fatalf("retire startup predecessor: %v", err)
+			predecessorEvidence, err := predecessorGrant.Evidence()
+			if err != nil {
+				t.Fatal(err)
 			}
+			predecessorAdmission, err := managedexecution.New(managedexecution.KindNormalRuntime, predecessorEvidence.GrantID, predecessorEvidence.RuntimeGeneration, "", predecessorEvidence.SourceSetRevision, persistedSource.BundleHash(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			predecessorCtx := managedexecution.WithAdmission(ctx, predecessorAdmission)
 
 			eventID := eventtest.UUID("startup-order-node-event-" + backend.name)
 			nodeRoute := startupRecoveryNodeRoute(t, "complete-task")
@@ -278,7 +282,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				eventID, "task.requested", "test", "", []byte(`{}`), 0,
 				templateInstanceDeliveryRunID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, nodeRoute.Target.Route()), time.Now().UTC(),
 			)
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, predecessorCtx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 			agentEventID := eventtest.UUID("startup-order-agent-event-" + backend.name)
 			agentRoute := startupRecoveryAgentRoute(t, templateInstanceDeliveryRunID, agentID)
@@ -286,7 +290,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				agentEventID, "task.completed", "test", "", []byte(`{}`), 0,
 				templateInstanceDeliveryRunID, events.EventEnvelope{}, time.Now().UTC(),
 			)
-			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, agentEvent, []events.DeliveryRoute{agentRoute}, runtimepipelineobligation.ScopeSubscribed)
+			storetest.CommitSemanticEventWithRoutes(t, predecessorCtx, selected, agentEvent, []events.DeliveryRoute{agentRoute}, runtimepipelineobligation.ScopeSubscribed)
 			agentProof, err := selected.ProveHandoff(ctx, agentEventID, agentRoute)
 			if err != nil {
 				t.Fatalf("prove startup agent handoff: %v", err)
@@ -296,7 +300,7 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				t.Fatalf("load startup agent authority: %v", err)
 			}
 			predecessorAuthority, err := runtimedelivery.NewNormalExecutionAuthority(
-				agentSnapshot.Authority.SourceArtifact(), "startup-predecessor-"+backend.name, 41,
+				agentSnapshot.Authority.SourceArtifact(), predecessorEvidence.GrantID, predecessorEvidence.RuntimeGeneration,
 			)
 			if err != nil {
 				t.Fatalf("construct startup predecessor authority: %v", err)
@@ -308,6 +312,9 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 				t.Fatalf("claim startup predecessor agent delivery: %v", err)
 			} else if _, ok := result.Acquired(); !ok {
 				t.Fatalf("startup predecessor claim = %#v, want acquired", result)
+			}
+			if err := closeExternalRuntimeTestGeneration(predecessor, predecessorProcess, predecessorCapability); err != nil {
+				t.Fatalf("retire startup predecessor: %v", err)
 			}
 
 			processOwner := worklifetime.NewProcess()
@@ -387,19 +394,11 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 		for _, mode := range modes {
 			for _, test := range cases {
 				t.Run(backend+"/"+mode.name+"/"+test.name, func(t *testing.T) {
-					var (
-						db       *sql.DB
-						selected startupRecoveryOrderStore
-					)
+					var selected startupRecoveryOrderStore
 					if backend == "postgres" {
-						_, postgresDB, cleanup := testutil.StartPostgres(t)
-						t.Cleanup(cleanup)
-						db = postgresDB
-						selected = storetest.AdmitPostgresRuntimeStore(t, postgresDB)
+						selected = storetest.StartPostgresRuntimeStore(t)
 					} else {
-						sqliteStore := storetest.StartSQLiteRuntimeStore(t)
-						db = storetest.Database(sqliteStore)
-						selected = sqliteStore
+						selected = storetest.StartSQLiteRuntimeStore(t)
 					}
 
 					currentRunID := eventtest.UUID("recovery-disabled-current-" + backend + "-" + mode.name + "-" + test.name)
@@ -426,6 +425,22 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 							route = startupRecoveryAgentRoute(t, eventRunID, test.agentID)
 						} else {
 							route = startupRecoveryNodeRoute(t, test.nodeID)
+						}
+						var retirePredecessor func()
+						if route.Recipient.IsAgent() && (test.state == "future_failed" || test.state == "busy") {
+							eventCtx = runtimecorrelation.WithRuntimeInstanceID(eventCtx, authorActivityTestRuntimeInstanceID)
+							eventCtx, _, _, _ = prepareRuntimeLogNativeActor(t, eventCtx, selected, eventSource, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+								ID: test.agentID, Identity: route.AgentIdentity, ExecutionMode: "live",
+							}))
+							capability, capabilityErr := agentfixture.ProcessCapability(t, eventCtx, selected)
+							if capabilityErr != nil {
+								t.Fatal(capabilityErr)
+							}
+							retirePredecessor = func() {
+								if err := capability.Release(eventCtx); err != nil {
+									t.Fatalf("retire native claimed startup predecessor: %v", err)
+								}
+							}
 						}
 						deliveryCtx = eventCtx
 						event := eventtest.ExistingRunRootIngress(
@@ -462,16 +477,20 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 								t.Fatalf("claim busy startup delivery: %v", claimErr)
 							}
 						case "reclaimable":
-							if _, claimErr := storetest.ClaimDelivery(eventCtx, selected, event, route); claimErr != nil {
+							claim, claimErr := storetest.ClaimDelivery(eventCtx, selected, event, route)
+							if claimErr != nil {
 								t.Fatalf("claim reclaimable startup delivery: %v", claimErr)
 							}
-							expireNodeDeliveryClaim(t, eventCtx, db, backend == "postgres", deliveryID)
+							expireNodeDeliveryClaim(t, eventCtx, selected, claim.Claim)
 						default:
 							t.Fatalf("unknown startup delivery state %q", test.state)
 						}
 						before, err = selected.Snapshot(eventCtx, deliveryID)
 						if err != nil {
 							t.Fatalf("load prepared startup delivery: %v", err)
+						}
+						if retirePredecessor != nil {
+							retirePredecessor()
 						}
 					}
 
@@ -569,9 +588,7 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 		t.Run(backend, func(t *testing.T) {
 			var selected startupRecoveryOrderStore
 			if backend == "postgres" {
-				_, postgresDB, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected = storetest.AdmitPostgresRuntimeStore(t, postgresDB)
+				selected = storetest.StartPostgresRuntimeStore(t)
 			} else {
 				sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 				selected = sqliteStore
@@ -1233,36 +1250,9 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 	}
 }
 
-func expireNodeDeliveryClaim(t *testing.T, ctx context.Context, db *sql.DB, postgres bool, deliveryID string) {
+func expireNodeDeliveryClaim(t *testing.T, ctx context.Context, selected any, claim runtimedelivery.Claim) {
 	t.Helper()
-	transaction, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin node claim expiry: %v", err)
-	}
-	defer func() { _ = transaction.Rollback() }()
-	startedAt := time.Now().Add(-2 * time.Hour).UTC()
-	expiresAt := time.Now().Add(-time.Hour).UTC()
-	deliveryQuery := `UPDATE event_deliveries SET created_at = $1, started_at = $1, updated_at = $2 WHERE delivery_id = $3::uuid AND status = 'in_progress'`
-	attemptQuery := `UPDATE event_delivery_attempts SET started_at = $1, lease_expires_at = $2 WHERE delivery_id = $3::uuid AND open_marker = TRUE`
-	if !postgres {
-		deliveryQuery = `UPDATE event_deliveries SET created_at = ?, started_at = ?, updated_at = ? WHERE delivery_id = ? AND status = 'in_progress'`
-		attemptQuery = `UPDATE event_delivery_attempts SET started_at = ?, lease_expires_at = ? WHERE delivery_id = ? AND open_marker = TRUE`
-	}
-	deliveryArgs := []any{startedAt, expiresAt, deliveryID}
-	if !postgres {
-		deliveryArgs = []any{startedAt, startedAt, expiresAt, deliveryID}
-	}
-	if result, execErr := transaction.ExecContext(ctx, deliveryQuery, deliveryArgs...); execErr != nil {
-		t.Fatalf("expire node delivery claim: %v", execErr)
-	} else if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
-		t.Fatalf("expire node delivery claim affected %d rows, err=%v", rows, rowsErr)
-	}
-	if result, execErr := transaction.ExecContext(ctx, attemptQuery, startedAt, expiresAt, deliveryID); execErr != nil {
-		t.Fatalf("expire node delivery attempt: %v", execErr)
-	} else if rows, rowsErr := result.RowsAffected(); rowsErr != nil || rows != 1 {
-		t.Fatalf("expire node delivery attempt affected %d rows, err=%v", rows, rowsErr)
-	}
-	if err := transaction.Commit(); err != nil {
+	if err := storetest.ExpireExactDeliveryClaimFault(ctx, selected, claim); err != nil {
 		t.Fatalf("commit node claim expiry: %v", err)
 	}
 }

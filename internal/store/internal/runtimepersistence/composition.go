@@ -306,6 +306,12 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err != nil {
 		return nil, err
 	}
+	if err := startupOwner.BindLifecycleCandidates(candidates); err != nil {
+		return nil, err
+	}
+	if err := startupOwner.BindActivityJournalRole(activityJournal); err != nil {
+		return nil, err
+	}
 	store.startupPostgresOwner = startupOwner
 	if err := effectOwner.BindPreparedProcessOwner(startupOwner); err != nil {
 		return nil, err
@@ -321,6 +327,12 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.runtimeIngressPostgresOwner = ingressOwner
+	if err := storestartupownership.BindPostgresAgentRecoveryReader(startupOwner, store); err != nil {
+		return nil, err
+	}
+	if err := storestartupownership.BindPostgresAgentRecoveryClaims(startupOwner, deliveryOwner); err != nil {
+		return nil, err
+	}
 	return store, nil
 }
 
@@ -529,6 +541,12 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err != nil {
 		return nil, err
 	}
+	if err := startupOwner.BindLifecycleCandidates(candidates); err != nil {
+		return nil, err
+	}
+	if err := startupOwner.BindActivityJournalRole(activityJournal); err != nil {
+		return nil, err
+	}
 	store.startupSQLiteOwner = startupOwner
 	if err := startupOwner.BindChannelReconciliation(&store.channelChanges); err != nil {
 		return nil, err
@@ -619,6 +637,12 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.runtimeIngressSQLiteOwner = ingressOwner
+	if err := storestartupownership.BindSQLiteAgentRecoveryReader(startupOwner, store); err != nil {
+		return nil, err
+	}
+	if err := storestartupownership.BindSQLiteAgentRecoveryClaims(startupOwner, deliveryOwner); err != nil {
+		return nil, err
+	}
 	return store, nil
 }
 

@@ -81,7 +81,7 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, run, eventID, input)
+				seedSelectedOperationSource(t, ctx, selected, loaded, run, eventID, input)
 				claimed := false
 				var claimedAuthority effects.Authority
 				if fault == "missing_authority" || fault == "foreign_authority" || fault == "retired_execution" {

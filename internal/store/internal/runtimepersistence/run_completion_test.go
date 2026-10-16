@@ -152,6 +152,7 @@ func TestPostgresStore_ConvergeNormalRunCompletion_FailsClosedWhileDeliveryActiv
 		uuid.NewString(), events.EventType("completion.agent.delivery"), eventtest.Producer(events.EventProducerPlatform, "test"), "", []byte(`{}`), 0,
 		fixture.RunID, fixture.EventID, events.EventEnvelope{}, time.Now().UTC(),
 	)
+	ctx = preparePositiveAgentClaimFixture(t, ctx, pg, mustTestAgentIdentityForRun(fixture.RunID, "agent-1", "fixture/agent-1"))
 	if err := commitSemanticEventFixtureWithAgents(ctx, pg, deliveryEvent, []string{"agent-1"}); err != nil {
 		t.Fatalf("seed active delivery: %v", err)
 	}

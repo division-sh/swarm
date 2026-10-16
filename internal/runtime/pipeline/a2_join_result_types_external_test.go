@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -129,8 +130,8 @@ func TestA2JoinResultTypesRealExecutionAndRestartOnBothStores(t *testing.T) {
 					}
 					a2KnownTargetWaitForSettlement(t, ctx, bus, probe, event, node.Key(), handlerStatus, deliveryStatus, logger)
 					if want != "" {
-						var rawFailure string
-						if err := selected.db.QueryRowContext(ctx, `SELECT CAST(failure AS TEXT) FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node' AND subscriber_id=$2`, event.ID(), node.Key()).Scan(&rawFailure); err != nil {
+						rawFailure, err := storetest.ReadGateNodeFailure(ctx, selected.events, event.ID(), node.Key())
+						if err != nil {
 							t.Fatal(err)
 						}
 						var failure failures.Envelope

@@ -3,7 +3,6 @@ package serveapp
 import (
 	"context"
 	"database/sql/driver"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -20,58 +19,19 @@ var mailboxCompletionFaultFunction struct {
 	counters sync.Map
 }
 
-func mailboxCompletionRunEffects(t *testing.T, rt servedControlProofRuntime, runID string) []string {
+func mailboxCompletionRunEffects(t *testing.T, reader receiverProofStateReader, runID string) []string {
 	t.Helper()
 	// Delivery settlement precedes the durable pipeline-to-continuation handoff.
 	// Snapshot only after that owner has acknowledged the actual publication.
-	waitPublicationSiteCompletion(t, rt, runID)
+	waitPublicationSiteCompletion(t, reader, runID)
 	var snapshot []string
-	for _, query := range []string{
-		`SELECT * FROM decision_cards WHERE run_id=$1 ORDER BY card_id`,
-		`SELECT d.* FROM decision_card_input_drafts d JOIN decision_cards c ON c.card_id=d.card_id WHERE c.run_id=$1 ORDER BY d.input_draft_id`,
-		`SELECT d.* FROM decision_card_changes d JOIN decision_cards c ON c.card_id=d.card_id WHERE c.run_id=$1 ORDER BY d.change_id`,
-		`SELECT * FROM human_task_continuations WHERE run_id=$1 ORDER BY card_id`,
-		`SELECT * FROM proposed_effect_continuations WHERE run_id=$1 ORDER BY card_id`,
-		// Diagnostics are asynchronous observations, not mailbox domain effects.
-		// Keep every execution/control event and every field, including timestamps.
-		`SELECT * FROM events WHERE run_id=$1 AND event_class NOT IN ('runtime_diagnostic','diagnostic_direct') ORDER BY event_id`,
-		`SELECT d.* FROM event_deliveries d JOIN events e ON e.event_id=d.event_id WHERE e.run_id=$1 ORDER BY d.delivery_id`,
-		`SELECT * FROM entity_state WHERE run_id=$1 ORDER BY entity_id,flow_instance`,
-		`SELECT * FROM flow_instances WHERE run_id=$1 ORDER BY instance_path`,
-	} {
-		rows, err := rt.DB.Query(query, runID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		columns, err := rows.Columns()
-		if err != nil {
-			rows.Close()
-			t.Fatal(err)
-		}
-		for rows.Next() {
-			values := make([]any, len(columns))
-			pointers := make([]any, len(columns))
-			for i := range values {
-				pointers[i] = &values[i]
-			}
-			if err := rows.Scan(pointers...); err != nil {
-				rows.Close()
-				t.Fatal(err)
-			}
-			raw, err := json.Marshal(values)
-			if err != nil {
-				rows.Close()
-				t.Fatal(err)
-			}
-			snapshot = append(snapshot, query+":"+string(raw))
-		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			t.Fatal(err)
-		}
-		if err := rows.Close(); err != nil {
-			t.Fatal(err)
-		}
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		snapshot, err = storetest.ReadMailboxCompletionRunEffects(ctx, reader, runID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	return snapshot
 }

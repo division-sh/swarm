@@ -12,12 +12,9 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
-
-func managedConformanceExecutionContext(t testing.TB, ctx context.Context, authorityID string) context.Context {
-	return managedConformanceExecutionContextForBundle(t, ctx, authorityID, authorActivityTestSourceArtifactFact)
-}
 
 func managedConformanceExecutionContextForBundle(t testing.TB, ctx context.Context, authorityID string, fact runtimecorrelation.SourceArtifactFact) context.Context {
 	t.Helper()
@@ -67,4 +64,29 @@ func persistConformanceAgentTurnReadbackFixture(
 		ParseOK: rec.ParseOK, Latency: rec.Latency, CreatedAt: time.Now().UTC(),
 	})
 	return nil
+}
+
+func admitConformancePreparedAgentExecution(t testing.TB, ctx context.Context, selected *store.PostgresStore) context.Context {
+	t.Helper()
+	fact, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("native conformance execution requires its original source")
+	}
+	authority, err := agentfixture.AdmitExecutionAuthority(t, ctx, selected, fact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability, err := agentfixture.ProcessCapability(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, found, err := capability.CurrentSourceSet(ctx)
+	if err != nil || !found {
+		t.Fatalf("conformance native source plan: found=%t error=%v", found, err)
+	}
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, authority.ExecutionID(), authority.Generation(), "", plan.Revision, fact.BundleHash(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return managedexecution.WithAdmission(ctx, admission)
 }

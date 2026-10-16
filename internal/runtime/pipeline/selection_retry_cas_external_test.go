@@ -2,9 +2,7 @@ package pipeline_test
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"fmt"
 	"testing"
 	"time"
 
@@ -27,7 +25,7 @@ import (
 
 type selectionCASPersistence struct {
 	pipeline.WorkflowPersistenceOwner
-	db        *sql.DB
+	selected  gateRecoverySelectedStore
 	fired     bool
 	selection handlerselection.HandlerRuleSelectionFact
 	err       error
@@ -43,26 +41,7 @@ func (p *selectionCASPersistence) CommitWorkflowEngineMutation(ctx context.Conte
 		}
 		// Model a different writer after the real engine's read, not a forged
 		// command revision or a synthetic CAS error returned by the test.
-		tx, err := p.db.BeginTx(ctx, nil)
-		if err != nil {
-			return pipeline.CommittedWorkflowEngineMutation{}, err
-		}
-		defer tx.Rollback()
-		result, err := tx.ExecContext(ctx, `UPDATE flow_instances SET revision=revision+1 WHERE run_id=$1 AND entity_id=$2 AND revision=$3`, command.State.Identity.RunID, command.State.EntityID, command.State.ExpectedRevision)
-		if err != nil {
-			return pipeline.CommittedWorkflowEngineMutation{}, err
-		}
-		if n, err := result.RowsAffected(); err != nil || n != 1 {
-			return pipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("competing writer rows=%d: %v", n, err)
-		}
-		result, err = tx.ExecContext(ctx, `UPDATE entity_state SET revision=revision+1, fields='{"marker":"second"}' WHERE run_id=$1 AND entity_id=$2 AND revision=$3`, command.State.Identity.RunID, command.State.EntityID, command.State.ExpectedRevision)
-		if err != nil {
-			return pipeline.CommittedWorkflowEngineMutation{}, err
-		}
-		if n, err := result.RowsAffected(); err != nil || n != 1 {
-			return pipeline.CommittedWorkflowEngineMutation{}, fmt.Errorf("competing field writer rows=%d: %v", n, err)
-		}
-		if err := tx.Commit(); err != nil {
+		if err := storetest.AdvanceSelectionRevisionPair(ctx, p.selected, command.State); err != nil {
 			return pipeline.CommittedWorkflowEngineMutation{}, err
 		}
 		p.fired = true
@@ -98,7 +77,7 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			fault := &selectionCASPersistence{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner), db: selected.db}
+			fault := &selectionCASPersistence{WorkflowPersistenceOwner: selected.events.(pipeline.WorkflowPersistenceOwner), selected: selected.events}
 			handler, found := source.ExecutableNodeEventHandler(externalPipelineSourceNode(t, source, ".", "select"), "select")
 			if !found || len(handler.Rules) != 2 || handler.Rules[0].Condition != "entity.marker == 'first'" || handler.Rules[1].Condition != "entity.marker == 'second'" || handler.Rules[0].PolicyRow.Kind != contracts.PolicySheetRowKindWhen || handler.Rules[1].PolicyRow.Kind != contracts.PolicySheetRowKindWhen {
 				t.Fatal("CAS proof requires both exact admitted selection predicates without an empty default")
@@ -140,7 +119,7 @@ func TestSelectionRetryAfterRealCASConflictBothStores(t *testing.T) {
 			event := publish("select")
 			failure, typed := failures.EnvelopeFromError(fault.err)
 			if !fault.fired || !typed || failure.Detail.Code != "workflow_engine_state_revision_conflict" || !fault.selection.Ref().Equal(fault.rules[0]) || fault.selection.DisplayLabel() != "rules[0]: when entity.marker == 'first'" {
-				t.Fatalf("did not reach exact selected CAS rejection: fired=%v selection=%#v err=%v diagnostic=%s", fault.fired, fault.selection, fault.err, proposedEffectProofFailure(t, selected, event.ID()))
+				t.Fatalf("did not reach exact selected CAS rejection: fired=%v selection=%#v err=%v diagnostic=%s", fault.fired, fault.selection, fault.err, proposedEffectProofFailure(t, selected.events, event.ID()))
 			}
 			evidence := storetest.ObserveDeliveryEventEvidence(t, ctx, selected.events, event.ID())
 			if len(evidence.Deliveries) != 1 {

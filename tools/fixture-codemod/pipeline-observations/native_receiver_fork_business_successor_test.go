@@ -68,6 +68,7 @@ func TestReceiverForkBusinessSetupPreservesAllHistoricalAssertions(t *testing.T)
 		}
 		matched++
 		actual := selectedCausalObservationBody(t, row.File, row.Function)
+		row, actual = requireCatchUp2672MasterPair(t, row, actual)
 		if err := validateReceiverForkMilestoneSuccessor(row, actual); err != nil {
 			t.Fatal(err)
 		}

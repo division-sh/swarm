@@ -1,6 +1,7 @@
 package serveapp
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 // Source artifact admission is private setup, not proof of public publication.
@@ -22,8 +24,13 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 			t.Run(string(backend)+"/"+mode, func(t *testing.T) {
 				var selected *selectedStoreOwner
 				previous := projectRuntimePersistenceForServe
-				projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence { selected = owner; return previous(owner) }
-				t.Cleanup(func() { projectRuntimePersistenceForServe = previous })
+				projectRuntimePersistenceForServe = func(owner *selectedStoreOwner) serveRuntimePersistence {
+					selected = owner
+					return previous(owner)
+				}
+				t.Cleanup(func() {
+					projectRuntimePersistenceForServe = previous
+				})
 				variant := canonicalrouting.PendingInputOriginal
 				if mode == "ordinary_root" {
 					variant = canonicalrouting.PendingInputOrdinaryRoot
@@ -36,7 +43,7 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				})
 				waitServedEventPublishedLog(t, rt.Endpoint, seed.RunID, seed.EventID)
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-				requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
+				requirePendingInputStateCount(t, rt.ReceiverStateReader, seed.RunID, "ready", 2)
 				requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "input-pause"})
 				params := map[string]any{"event_name": "work.first", "run_id": seed.RunID, "payload": map[string]any{"token": "proof"}, "idempotency_key": "input-pending"}
 				wantDone := 2
@@ -62,15 +69,15 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 					if err := waitExactOriginPublications(t.Context(), publication, seed.EventID); err != nil {
 						t.Fatal(err)
 					}
-					before := snapshotForkReceiverApplication(t, rt)
+					before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 					response := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", params)
 					if response.Data["code"] != apiv1.EventNotDeclaredCode {
 						t.Fatalf("private/non-input publication must fail admission: %+v", response)
 					}
-					if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
+					if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)) {
 						t.Fatal("rejected publication changed application state")
 					}
-					requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
+					requirePendingInputStateCount(t, rt.ReceiverStateReader, seed.RunID, "ready", 2)
 					return
 				}
 				point := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
@@ -78,20 +85,20 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				if mode == "explicit_child" && len(point.Deliveries) != 1 {
 					t.Fatalf("explicit connected receiver restriction admitted %d deliveries, want one child", len(point.Deliveries))
 				}
-				requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
+				requirePendingInputStateCount(t, rt.ReceiverStateReader, seed.RunID, "ready", 2)
 				if mode == "ambiguous_artifact" {
 					// Duplicate endpoint identity is rejected by canonical artifact
 					// compilation, before a selectable artifact or fork can exist.
 					if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, point.EventID); err != nil {
 						t.Fatal(err)
 					}
-					before := snapshotForkReceiverApplication(t, rt)
+					before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 					candidate := canonicalrouting.CopySelectedForkPendingInput(t, canonicalrouting.PendingInputDuplicateEndpoint)
 					_, err := contracts.LoadWorkflowContractBundleWithOverrides(repoRootForTest(), candidate, filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
 					if err == nil || !strings.Contains(err.Error(), "declared more than once") {
 						t.Fatalf("ambiguous input artifact: %v", err)
 					}
-					if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
+					if !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)) {
 						t.Fatal("invalid artifact changed application state")
 					}
 					return
@@ -99,8 +106,8 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 				if mode == "pause_resume" {
 					requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": seed.RunID, "idempotency_key": "input-resume"})
 					waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-					requirePendingInputStateCount(t, rt, seed.RunID, "done", 2)
-					requirePendingInputPublicStates(t, rt, seed.RunID, 2)
+					requirePendingInputStateCount(t, rt.ReceiverStateReader, seed.RunID, "done", 2)
+					requirePendingInputPublicStates(t, rt.Endpoint, seed.RunID, 2)
 					return
 				}
 				forkParams := map[string]any{"source_run_id": seed.RunID, "fork_event_id": point.EventID, "allow_source_freeze": true, "idempotency_key": "input-fork"}
@@ -113,7 +120,7 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 						variant = canonicalrouting.PendingInputMissingEndpoint
 					}
 					bundle := loadWorkflowValidationBundleAt(t, canonicalrouting.CopySelectedForkPendingInput(t, variant))
-					fact, err := prepareServeSourceArtifact(servedControlProofAuthorActivityContext(t, rt), selected.SourceArtifactWriter(), bundle)
+					fact, err := prepareServeSourceArtifact(servedControlProofAuthorActivityContext(t, rt.BundleHash, rt.Runtime), selected.SourceArtifactWriter(), bundle)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -123,7 +130,11 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 					forkParams["bundle_hash"] = fact.BundleHash()
 				}
 				var before int
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&before); err != nil {
+				if err := rt.ReceiverStateReader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+					var err error
+					before, err = storetest.CountGlobalRunStorage(ctx, rt.ReceiverStateReader)
+					return err
+				}); err != nil {
 					t.Fatal(err)
 				}
 				response := requestServedJSONRPC(t, rt.Endpoint, "run.fork", forkParams)
@@ -133,16 +144,24 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 					}
 					var after int
 					var status string
-					if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM runs`).Scan(&after); err != nil {
+					if err := rt.ReceiverStateReader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+						var err error
+						after, err = storetest.CountGlobalRunStorage(ctx, rt.ReceiverStateReader)
+						return err
+					}); err != nil {
 						t.Fatal(err)
 					}
-					if err := rt.DB.QueryRow(`SELECT status FROM runs WHERE run_id=$1`, seed.RunID).Scan(&status); err != nil {
+					if err := rt.ReceiverStateReader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+						var err error
+						status, err = storetest.ReadRunStatusStorage(ctx, rt.ReceiverStateReader, seed.RunID)
+						return err
+					}); err != nil {
 						t.Fatal(err)
 					}
 					if after != before || status != "paused" {
 						t.Fatalf("invalid preparation mutated fork/source: runs %d -> %d, status %s", before, after, status)
 					}
-					requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
+					requirePendingInputStateCount(t, rt.ReceiverStateReader, seed.RunID, "ready", 2)
 					return
 				}
 				if response.Error != nil {
@@ -153,12 +172,16 @@ func TestSelectedForkPendingInputBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, fork.ForkRunID)
-				requirePendingInputStateCount(t, rt, fork.ForkRunID, "done", wantDone)
-				requirePendingInputStateCount(t, rt, fork.ForkRunID, "ready", 2-wantDone)
-				requirePendingInputPublicStates(t, rt, fork.ForkRunID, wantDone)
+				requirePendingInputStateCount(t, rt.ReceiverStateReader, fork.ForkRunID, "done", wantDone)
+				requirePendingInputStateCount(t, rt.ReceiverStateReader, fork.ForkRunID, "ready", 2-wantDone)
+				requirePendingInputPublicStates(t, rt.Endpoint, fork.ForkRunID, wantDone)
 				var copied int
-				if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='work.seeded'`, fork.ForkRunID).Scan(&copied); err != nil {
-					t.Fatal(err)
+				{
+					var err error
+					copied, err = readServedEventNameCountForRun(context.Background(), rt.ReceiverStateReader, fork.ForkRunID, "work.seeded")
+					if err != nil {
+						t.Fatal(err)
+					}
 				}
 				if copied != 0 {
 					t.Fatal("completed seed input was executed again")
@@ -174,11 +197,9 @@ func TestExplicitTargetRestrictsConnectedSiblingsBothStores(t *testing.T) {
 			root := canonicalrouting.CopySelectedForkPendingInput(t, canonicalrouting.PendingInputConnectedSiblings)
 			publication := newExactOriginPublicationProbe(t)
 			rt := startServedTestSetupEntitiesProofRuntimeFromSource(t, backend, root)
-			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
-				"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "target-seed",
-			})
+			seed := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{"event_name": "work.seeded", "bundle_hash": rt.BundleHash, "payload": map[string]any{"seed": true}, "idempotency_key": "target-seed"})
 			waitServedRunDeliveryQuiescence(t, rt.ReadRunDeliveries, seed.RunID)
-			requirePendingInputStateCount(t, rt, seed.RunID, "ready", 3)
+			requirePendingInputStateCount(t, rt.ReceiverStateReader, seed.RunID, "ready", 3)
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.pause", map[string]any{"run_id": seed.RunID, "idempotency_key": "target-pause"})
 			var childEntity, siblingEntity string
 			if err := rt.DB.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance='child'`, seed.RunID).Scan(&childEntity); err != nil {
@@ -187,15 +208,12 @@ func TestExplicitTargetRestrictsConnectedSiblingsBothStores(t *testing.T) {
 			if err := rt.DB.QueryRow(`SELECT entity_id FROM entity_state WHERE run_id=$1 AND flow_instance='sibling'`, seed.RunID).Scan(&siblingEntity); err != nil {
 				t.Fatal(err)
 			}
-			params := map[string]any{
-				"event_name": "work.first", "run_id": seed.RunID, "payload": map[string]any{"token": "selected"},
-				"target": map[string]any{"flow_instance": "child", "entity_id": childEntity}, "idempotency_key": "target-child",
-			}
+			params := map[string]any{"event_name": "work.first", "run_id": seed.RunID, "payload": map[string]any{"token": "selected"}, "target": map[string]any{"flow_instance": "child", "entity_id": childEntity}, "idempotency_key": "target-child"}
 			point := requireServedEventPublishRPCResult(t, rt.Endpoint, params)
 			if len(point.Deliveries) != 1 {
 				t.Fatalf("targeted publication deliveries = %+v, want one child", point.Deliveries)
 			}
-			assertNoUnselectedTargetActivation(t, rt, seed.RunID)
+			assertNoUnselectedTargetActivation(t, rt.ReceiverStateReader, seed.RunID)
 			var readback operatorread.OperatorEventFull
 			requireServedJSONRPCResult(t, rt.Endpoint, "event.get", map[string]any{"event_id": point.EventID}, &readback)
 			if len(readback.Deliveries) != 1 || readback.Deliveries[0].Target.FlowInstance != "child" || readback.Deliveries[0].Target.EntityID != childEntity {
@@ -208,13 +226,13 @@ func TestExplicitTargetRestrictsConnectedSiblingsBothStores(t *testing.T) {
 			if err := waitExactOriginPublications(t.Context(), publication, seed.EventID, point.EventID); err != nil {
 				t.Fatal(err)
 			}
-			before := snapshotForkReceiverApplication(t, rt)
+			before := snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)
 			invalid := map[string]any{
 				"event_name": "work.first", "run_id": seed.RunID, "payload": map[string]any{"token": "invalid"},
 				"target": map[string]any{"flow_instance": "child", "entity_id": siblingEntity}, "idempotency_key": "target-invalid",
 			}
 			response := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", invalid)
-			if response.Data["code"] != apiv1.EventNotDeclaredCode || !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt)) {
+			if response.Data["code"] != apiv1.EventNotDeclaredCode || !reflect.DeepEqual(before, snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)) {
 				t.Fatalf("invalid target changed application state: %+v", response)
 			}
 			requireServedOKJSONRPC(t, rt.Endpoint, "run.continue", map[string]any{"run_id": seed.RunID, "idempotency_key": "target-resume"})
@@ -229,16 +247,22 @@ func TestExplicitTargetRestrictsConnectedSiblingsBothStores(t *testing.T) {
 			if childState != "done" || siblingState != "ready" {
 				t.Fatalf("unselected sibling executed: child=%s sibling=%s", childState, siblingState)
 			}
-			assertNoUnselectedTargetActivation(t, rt, seed.RunID)
-			requirePendingInputStateCount(t, rt, seed.RunID, "ready", 2)
+			assertNoUnselectedTargetActivation(t, rt.ReceiverStateReader, seed.RunID)
+			requirePendingInputStateCount(t, rt.ReceiverStateReader, seed.RunID, "ready", 2)
 		})
 	}
 }
 
-func assertNoUnselectedTargetActivation(t *testing.T, rt servedControlProofRuntime, runID string) {
+func assertNoUnselectedTargetActivation(t *testing.T, selectedProofReceiverStateReader receiverProofStateReader, runID string) {
 	t.Helper()
 	var count int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM flow_instances WHERE run_id=$1 AND flow_template='on_demand'`, runID).Scan(&count); err != nil {
+	if err := func() error {
+		observed, err := readServedSelectedRole(context.Background(), selectedProofReceiverStateReader, func(ctx context.Context) (int, error) {
+			return storetest.CountRunUnselectedTemplateActivationsStorage(ctx, selectedProofReceiverStateReader, runID)
+		})
+		count = observed
+		return err
+	}(); err != nil {
 		t.Fatal(err)
 	}
 	if count != 0 {
@@ -246,17 +270,17 @@ func assertNoUnselectedTargetActivation(t *testing.T, rt servedControlProofRunti
 	}
 }
 
-func requirePendingInputPublicStates(t *testing.T, rt servedControlProofRuntime, runID string, wantDone int) {
+func requirePendingInputPublicStates(t *testing.T, selectedProofEndpoint string, runID string, wantDone int) {
 	t.Helper()
 	var list operatorread.OperatorEntityListResult
-	requireServedJSONRPCResult(t, rt.Endpoint, "entity.list", map[string]any{"run_id": runID}, &list)
+	requireServedJSONRPCResult(t, selectedProofEndpoint, "entity.list", map[string]any{"run_id": runID}, &list)
 	if len(list.Entities) != 2 {
 		t.Fatalf("public entity census: %+v", list)
 	}
 	done := 0
 	for _, entity := range list.Entities {
 		var full operatorread.OperatorEntityFull
-		requireServedJSONRPCResult(t, rt.Endpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entity.EntityID}, &full)
+		requireServedJSONRPCResult(t, selectedProofEndpoint, "entity.get", map[string]any{"run_id": runID, "entity_id": entity.EntityID}, &full)
 		if entity.RunID != runID || !reflect.DeepEqual(entity, full.Entity) {
 			t.Fatal("public input result lost exact run/entity identity")
 		}
@@ -271,10 +295,15 @@ func requirePendingInputPublicStates(t *testing.T, rt servedControlProofRuntime,
 	}
 }
 
-func requirePendingInputStateCount(t *testing.T, rt servedControlProofRuntime, runID, state string, want int) {
+func requirePendingInputStateCount(t *testing.T, reader receiverProofStateReader, runID, state string, want int) {
 	t.Helper()
 	var count int
-	if err := rt.DB.QueryRow(`SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND current_state=$2`, runID, state).Scan(&count); err != nil {
+	err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
+		var err error
+		count, err = storetest.CountRunStateEntityStorage(ctx, reader, runID, state)
+		return err
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if count != want {

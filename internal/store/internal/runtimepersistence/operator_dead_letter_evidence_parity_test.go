@@ -41,10 +41,10 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			identity := mustTestAgentIdentityForRun(runID, "agent-a", "global")
 			if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{
-				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+				Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: "agent-a", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
 					Memory: agentmemory.Plan{}, FlowPath: "global", Config: json.RawMessage(`{}`),
-				}),
+				})),
 				Status: "active", StartedAt: now,
 			}); err != nil {
 				t.Fatalf("upsert agent-a: %v", err)
@@ -161,14 +161,15 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			identity := mustTestAgentIdentityForRun(runID, "terminal-agent", "global")
 			if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{
-				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+				Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: "terminal-agent", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
 					Memory: agentmemory.Plan{}, FlowPath: "global", Config: json.RawMessage(`{}`),
-				}),
+				})),
 				Status: "active", StartedAt: now,
 			}); err != nil {
 				t.Fatalf("upsert terminal-agent: %v", err)
 			}
+			ctx = admitPreparedAgentClaimContext(t, ctx, selected)
 			event := eventtest.PersistedProjection(
 				eventID, events.EventType("delivery.terminalized"), "gateway", "", json.RawMessage(`{"message":"stop"}`), 0,
 				runID, "", events.EventEnvelope{}, now,

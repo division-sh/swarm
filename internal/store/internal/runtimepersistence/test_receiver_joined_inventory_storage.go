@@ -8,6 +8,26 @@ import (
 )
 
 type ReceiverJoinedInventoryStorageRow = pipelinepersistence.ReceiverJoinedInventoryStorageRow
+type LifecycleBusinessStorageRow = pipelinepersistence.LifecycleBusinessStorageRow
+
+func ReadLifecycleBusinessStorageForTest(ctx context.Context, selected any, runID string) ([]LifecycleBusinessStorageRow, error) {
+	if err := validateSelectedForkStorageIdentity(runID); err != nil {
+		return nil, err
+	}
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return nil, err
+	}
+	var out []LifecycleBusinessStorageRow
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		out, err = pipelinepersistence.ReadLifecycleBusinessStorageTx(ctx, tx, runID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
 
 func ReadReceiverJoinedInventoryStorageForTest(ctx context.Context, selected any, runID string) ([]ReceiverJoinedInventoryStorageRow, error) {
 	if err := validateSelectedForkStorageIdentity(runID); err != nil {

@@ -690,7 +690,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 	)
 	ctx = llmTestWorkContext(t, ctx)
 
-	s, err := runtime.StartSession(ctx, "agent-1", "system", nil)
+	s, err := runtime.StartSession(ctx, "agent-1", managedProviderPromptForEffectTest(t), nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
@@ -700,7 +700,8 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 	publisher.marks = nil
 	ctx = managedProviderTestContext(t, ctx, runtime, s, nil)
 
-	if _, err := runtime.continueSession(ctx, s, Message{Role: "user", Content: "hello"}, managedProviderCallForEffectTest(t, ctx)); err != nil {
+	managed := managedProviderCallForEffectTest(t, ctx)
+	if _, err := runtime.continueSession(ctx, s, managedProviderInputForEffectTest(t, managed), managed); err != nil {
 		t.Fatalf("ContinueSession: %v", err)
 	}
 	if len(publisher.marks) != 1 {

@@ -9,6 +9,10 @@ import (
 type ReplyContextStorageCounts = private.ReplyContextStorageCounts
 type FirstReplyContextStorage = private.FirstReplyContextStorage
 
+func CorruptOpenReplyOrigin(ctx context.Context, selected any, runID, contextID, origin string) error {
+	return private.CorruptOpenReplyOriginForTest(ctx, selected, runID, contextID, origin)
+}
+
 func ReadReplyContextRequestIDs(ctx context.Context, selected any, run string) ([]string, error) {
 	return private.ReadReplyContextRequestIDsForTest(ctx, selected, run)
 }

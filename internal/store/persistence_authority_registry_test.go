@@ -57,13 +57,9 @@ func TestPersistenceAuthorityFindingRegistry(t *testing.T) {
 		writeAuthorityRegistry(t, registryPath, findings, expected)
 	}
 	expected = readAuthorityRegistry(t, registryPath)
-	actual := make(map[string]authorityFinding, len(findings))
-	for _, finding := range findings {
-		key := finding.key()
-		if prior, exists := actual[key]; exists {
-			t.Fatalf("duplicate resolved authority finding:\n%s\n%s", prior.registryLine(), finding.registryLine())
-		}
-		actual[key] = finding
+	actual, err := indexAuthorityRegistryFindings(findings)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	var unknown, stale, invalid []string
@@ -88,15 +84,35 @@ func TestPersistenceAuthorityFindingRegistry(t *testing.T) {
 	sort.Strings(unknown)
 	sort.Strings(stale)
 	sort.Strings(invalid)
+	strict := fmt.Sprintf("persistence authority registry mismatch (set %s=1 only after classifying every changed finding):\nunknown:\n%s\nstale:\n%s\ninvalid raw authority:\n%s",
+		authorityRegistryUpdateEnv, strings.Join(unknown, "\n"), strings.Join(stale, "\n"), strings.Join(invalid, "\n"))
 	if len(unknown)+len(stale)+len(invalid) != 0 {
-		t.Fatalf("persistence authority registry mismatch (set %s=1 only after classifying every changed finding):\nunknown:\n%s\nstale:\n%s\ninvalid raw authority:\n%s",
-			authorityRegistryUpdateEnv,
-			strings.Join(unknown, "\n"),
-			strings.Join(stale, "\n"),
-			strings.Join(invalid, "\n"),
-		)
+		t.Logf("original unfiltered strict diagnostics:\n%s", strict)
 	}
-	t.Logf("verified %d exact resolved authority findings", len(findings))
+	retained, err := loadRegistryRetainedAdmission(root, registryRetainedAuthorization{
+		Origin: registryRetainedOrigin, Decision: registryRetainedDecision,
+	})
+	if err == nil {
+		err = validateRegistryRetainedAdmission(retained, actual, expected, unknown, stale, invalid)
+	}
+	if err != nil {
+		t.Fatalf("%s\nretained completion admission refused: %v", strict, err)
+	}
+	t.Logf("verified %d exact resolved authority findings; strict_completion=%t authorized_retained=%d digest=%s user_decision=%s contract=%s qualification=%s origin=%s origin_tree=%s trusted_previous=%s",
+		len(findings), len(invalid) == 0, len(retained.Active), retained.Digest, registryRetainedDecision,
+		registryRetainedContract, registryRetainedQualification, registryRetainedOrigin, retained.OriginTree, retained.PreviousSource)
+}
+
+func indexAuthorityRegistryFindings(findings []authorityFinding) (map[string]authorityFinding, error) {
+	actual := make(map[string]authorityFinding, len(findings))
+	for _, finding := range findings {
+		key := finding.key()
+		if prior, exists := actual[key]; exists {
+			return nil, fmt.Errorf("duplicate resolved authority finding:\n%s\n%s", prior.registryLine(), finding.registryLine())
+		}
+		actual[key] = finding
+	}
+	return actual, nil
 }
 
 func TestPersistenceEffectiveMethodSetsDoNotExposeRawAuthority(t *testing.T) {

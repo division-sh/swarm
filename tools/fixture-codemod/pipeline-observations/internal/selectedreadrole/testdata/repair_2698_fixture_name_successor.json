@@ -1,0 +1,17 @@
+{
+  "BeforeCommit": "f5c57acafdae2cd0750f493c15ca667ca3d84e33",
+  "AfterCommit": "6a6c51b3924ff248e5a6b4c382f4631d3ff734c8",
+  "Authorization": "https://github.com/division-sh/swarm/issues/2542#issuecomment-6212534506",
+  "Files": [
+    {
+      "File": "internal/store/internal/runtimepersistence/test_event_support.go",
+      "BeforeSHA256": "e41e673afe92fccae09cea255f4cffdb6a30969db7c1cdb763f0d33ff3075146",
+      "AfterSHA256": "a851556a9b64f0dd65c1e53fb403f42f8c105806a34929e634e9b1316f79e514"
+    }
+  ],
+  "Guard": {
+    "File": "internal/store/internal/runtimepersistence/unretained_cleanup_boundary_guard_test.go",
+    "BeforeSHA256": "ec8413766a36194a9c2673dd60e054f11f498850ad852fa84ab190773be02450",
+    "AfterSHA256": "f562cdb6de4209f47d48ec06f4d3d9536a0e12f4a9758603f7cd3d98fcc187a3"
+  }
+}

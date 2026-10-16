@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/servedparity"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestServedParityHarnessRunStartDeploymentFeedLifecycle(t *testing.T) {
@@ -57,17 +58,10 @@ func TestServedParityHarnessRunStartDeploymentFeedLifecycle(t *testing.T) {
 					break
 				}
 				if time.Now().After(deadline) {
-					rows, queryErr := fixture.db.QueryContext(fixture.ctx, `SELECT e.event_id,e.event_name,COALESCE(r.outcome,'missing')
-						FROM events e LEFT JOIN event_receipts r ON r.event_id=e.event_id
-						AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'
-						WHERE e.run_id=$1 ORDER BY e.created_at`, runID)
+					rows, queryErr := storetest.ReadDeploymentSettlementDiagnosticsStorage(fixture.ctx, fixture.selected, runID)
 					if queryErr == nil {
-						defer rows.Close()
-						for rows.Next() {
-							var eventID, eventName, outcome string
-							if scanErr := rows.Scan(&eventID, &eventName, &outcome); scanErr == nil {
-								t.Logf("event %s %s pipeline_receipt=%s", eventID, eventName, outcome)
-							}
+						for _, row := range rows {
+							t.Logf("event %s %s pipeline_receipt=%s", row.EventID, row.EventName, row.Outcome)
 						}
 					}
 					t.Fatalf("run %s did not settle: %v", runID, failures)

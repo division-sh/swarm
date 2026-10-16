@@ -110,11 +110,13 @@ func proveSupplementalContention(t *testing.T, backend string, intents, cardinal
 	if stats.Err != nil || stats.Loaded != capacity || stats.PeakLoaded != capacity {
 		t.Fatalf("actual loaded phases=%+v capacity=%d", stats, capacity)
 	}
-	var claimed, cursor, outcomes int
-	if err := f.db.QueryRow(`SELECT SUM(CASE WHEN claim_owner IS NOT NULL THEN 1 ELSE 0 END),SUM(cursor) FROM fan_out_intents`).Scan(&claimed, &cursor); err != nil {
+	state, err := storetest.ReadSupplementalGlobalClaimCursor(context.Background(), f.selected)
+	claimed, cursor := state.Claimed, state.Cursor
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.db.QueryRow(`SELECT COUNT(*) FROM fan_out_outcomes`).Scan(&outcomes); err != nil {
+	outcomes, err := storetest.CountSupplementalGlobalOutcomes(context.Background(), f.selected)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if claimed != capacity || cursor != 0 || outcomes != 0 {
@@ -230,8 +232,8 @@ func logSupplementalState(t *testing.T, f *servingMatrixFixture, p *supplemental
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	var intents, cursor, owed, claimed, retry, blocked int
-	err := f.db.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(SUM(cursor),0),COALESCE(SUM(cardinality-cursor),0),COALESCE(SUM(CASE WHEN claim_owner IS NOT NULL THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN retry_ready_at IS NOT NULL THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN status='blocked' THEN 1 ELSE 0 END),0) FROM fan_out_intents`).Scan(&intents, &cursor, &owed, &claimed, &retry, &blocked)
+	state, err := storetest.ReadSupplementalGlobalProgress(ctx, f.selected)
+	intents, cursor, owed, claimed, retry, blocked := state.Intents, state.Cursor, state.Owed, state.Claimed, state.Retry, state.Blocked
 	if err != nil {
 		t.Fatal(err)
 	}

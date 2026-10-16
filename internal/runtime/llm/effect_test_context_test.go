@@ -125,12 +125,8 @@ func managedEffectHarnessContext(t testing.TB, harness *effecttest.Harness, iden
 	return runtimecorrelation.WithInboundEvent(ctx, managedProviderEffectTestEvent(surface.Authority.RunID, mode))
 }
 
-func managedProviderCallForEffectTest(t testing.TB, ctx context.Context) *managedProviderCall {
+func managedProviderIntentForEffectTest(t testing.TB) (agentintent.Resolved, agentintent.ProviderPrompt) {
 	t.Helper()
-	surface, ok := managedcapabilities.FromContext(ctx)
-	if !ok {
-		t.Fatal("effect test requires managed capability surface")
-	}
 	intent, err := agentintent.Resolve(agentintent.SourceInline, "inline", "agents.yaml#agents.effect-test.intent", "Process the admitted effect test.")
 	if err != nil {
 		t.Fatal(err)
@@ -143,6 +139,26 @@ func managedProviderCallForEffectTest(t testing.TB, ctx context.Context) *manage
 	if err != nil {
 		t.Fatal(err)
 	}
+	return intent, providerPrompt
+}
+
+func managedProviderPromptForEffectTest(t testing.TB) string {
+	t.Helper()
+	_, prompt := managedProviderIntentForEffectTest(t)
+	text, err := prompt.Text()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return text
+}
+
+func managedProviderCallForEffectTest(t testing.TB, ctx context.Context) *managedProviderCall {
+	t.Helper()
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		t.Fatal("effect test requires managed capability surface")
+	}
+	intent, providerPrompt := managedProviderIntentForEffectTest(t)
 	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
 	if !ok {
 		mode = runtimeeffects.ExecutionModeLive
@@ -197,4 +213,13 @@ func withEffectTestRequest(t testing.TB, ctx context.Context, profile llmselecti
 func beginManagedTestCompletion(t testing.TB, ctx context.Context, adapter string, request []byte) (*runtimeeffects.Handle, error) {
 	t.Helper()
 	return runtimeeffects.BeginManagedCompletion(ctx, adapter, request, managedProviderCallForEffectTest(t, ctx).frame, nil)
+}
+
+func managedProviderInputForEffectTest(t testing.TB, managed *managedProviderCall) Message {
+	t.Helper()
+	role, content, err := managed.frame.ProviderInput()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Message{Role: role, Content: content}
 }

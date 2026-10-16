@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -604,6 +606,7 @@ func TestProviderAttemptDrainStartupRecoveryParity(t *testing.T) {
 		capture       bool
 		originExpired bool
 		wantCode      string
+		recoveryScope string
 	}{
 		{name: "after_launch", capture: false, wantCode: "effect_recovery_outcome_unconfirmed"},
 		{name: "after_capture", capture: true, wantCode: "effect_recovery_outcome_unconfirmed"},
@@ -611,6 +614,9 @@ func TestProviderAttemptDrainStartupRecoveryParity(t *testing.T) {
 		{name: "after_launch_expired_origin", capture: false, originExpired: true, wantCode: "effect_recovery_outcome_unconfirmed"},
 		{name: "after_capture_expired_origin", capture: true, originExpired: true, wantCode: "effect_recovery_outcome_unconfirmed"},
 		{name: "drain_expiry", observe: true, capture: true, expire: true, wantCode: "provider_attempt_drain_expired"},
+		{name: "runtime_scope", capture: true, recoveryScope: "runtime", wantCode: "effect_recovery_outcome_unconfirmed"},
+		{name: "other_bundle_context", capture: true, recoveryScope: "other_bundle", wantCode: "effect_recovery_outcome_unconfirmed"},
+		{name: "missing_runtime_scope", capture: true, recoveryScope: "missing"},
 	}
 	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
 		for _, candidate := range cases {
@@ -643,7 +649,33 @@ func TestProviderAttemptDrainStartupRecoveryParity(t *testing.T) {
 				if candidate.expire {
 					now = now.Add(10 * time.Minute)
 				}
-				summary, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now))
+				recoveryCtx := testAuthorActivityContext()
+				wantRuntimeID := authorActivityTestRuntimeInstanceID
+				if candidate.recoveryScope == "runtime" || candidate.recoveryScope == "other_bundle" {
+					wantRuntimeID = uuid.NewString()
+					scope := runtimeauthoractivity.RuntimeScope(wantRuntimeID)
+					if candidate.recoveryScope == "other_bundle" {
+						scope = runtimeauthoractivity.BundleScope(wantRuntimeID, "bundle-v2:sha256:"+strings.Repeat("b", 64))
+					}
+					recoveryCtx = runtimeauthoractivity.WithScope(context.Background(), scope)
+				} else if candidate.recoveryScope == "missing" {
+					recoveryCtx = context.Background()
+				}
+				before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
+				if err != nil {
+					t.Fatal(err)
+				}
+				summary, err := fixture.store.ReconcileExternalEffectAttempts(recoveryCtx, liveExternalEffectRecoveryRequest(now))
+				if candidate.recoveryScope == "missing" {
+					if err == nil || summary != (runtimeeffects.RecoverySummary{}) {
+						t.Fatalf("missing runtime scope committed recovery: %+v err=%v", summary, err)
+					}
+					after, readErr := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
+					if readErr != nil || !reflect.DeepEqual(before, after) {
+						t.Fatalf("scope refusal changed native rows: %v", readErr)
+					}
+					return
+				}
 				if err != nil {
 					t.Fatalf("recover completion: %v", err)
 				}
@@ -655,6 +687,31 @@ func TestProviderAttemptDrainStartupRecoveryParity(t *testing.T) {
 				assertCompletionFrameBytes(t, fixture, "agent_turns", "turn_id", handle.Attempt().Authority.Target.ID, wantFrame)
 				requireCompletion2270UncertainRecoveryEvidence(t, fixture, handle.Attempt())
 				requireOriginDeliveryOutcome(t, fixture, "dead_letter", candidate.wantCode)
+				after, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
+				if err != nil {
+					t.Fatal(err)
+				}
+				stories, err := DecodeSelectedForkSnapshotRowsForTest(after["author_activity_occurrences"])
+				if err != nil {
+					t.Fatal(err)
+				}
+				turnStories := 0
+				for _, story := range stories {
+					owner, _ := story["source_owner"].Text()
+					identity, _ := story["source_identity"].Text()
+					if owner != "agent_turns" || identity != handle.Attempt().Authority.Target.ID+":failed" {
+						continue
+					}
+					turnStories++
+					bundle, _ := story["bundle_hash"].Text()
+					runtimeID, _ := story["runtime_instance_id"].Text()
+					if bundle != authorActivityTestBundleHash || runtimeID != wantRuntimeID {
+						t.Fatalf("recovered turn scope used caller bundle or predecessor runtime: bundle=%s runtime=%s", bundle, runtimeID)
+					}
+				}
+				if turnStories != 1 {
+					t.Fatalf("recovered turn story count=%d, want exactly one", turnStories)
+				}
 				if candidate.capture {
 					wantDrain := "settled"
 					if candidate.expire {
@@ -663,9 +720,13 @@ func TestProviderAttemptDrainStartupRecoveryParity(t *testing.T) {
 					requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, wantDrain)
 					requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleTerminated, transition.Generation)
 				}
-				again, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(time.Second)))
+				again, err := fixture.store.ReconcileExternalEffectAttempts(recoveryCtx, liveExternalEffectRecoveryRequest(now.Add(time.Second)))
 				if err != nil || again != (runtimeeffects.RecoverySummary{}) {
 					t.Fatalf("idempotent recovery summary=%+v err=%v", again, err)
+				}
+				repeated, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
+				if err != nil || !reflect.DeepEqual(after, repeated) {
+					t.Fatalf("repeat recovery changed settled native rows: %v", err)
 				}
 			})
 		}
@@ -1126,18 +1187,7 @@ func newProviderDrainOriginClaim(t *testing.T, fixture completionSettlementFixtu
 		uuid.NewString(), "completion.origin", "gateway", "", []byte(fmt.Sprintf(`{"ordinal":%d}`, ordinal)), 0,
 		fixture.authority.Target.RunID, events.EventEnvelope{}, time.Now().UTC(),
 	)
-	route := events.DeliveryRoute{
-		Recipient:     events.MustAgentDeliveryRecipient(fixture.agentID),
-		AgentIdentity: fixture.authority.Normal.Identity,
-	}
-	if err := commitSemanticEventFixtureWithRoutes(testAuthorActivityContext(), fixture.store, event, []events.DeliveryRoute{route}); err != nil {
-		t.Fatalf("commit provider-drain origin %d: %v", ordinal, err)
-	}
-	claimed, err := claimDeliveryFixture(testAuthorActivityContext(), fixture.store.(deliveryFixtureStore), event, route)
-	if err != nil {
-		t.Fatalf("claim provider-drain origin %d: %v", ordinal, err)
-	}
-	return claimed.Claim
+	return claimCompletionOriginEventForTest(fixture.agentOwner, testAuthorActivityContext(), fixture.store, fixture.authority, event)
 }
 
 func newProviderDrainSiblingFixture(t *testing.T, fixture completionSettlementFixture) completionSettlementFixture {
@@ -1161,11 +1211,12 @@ func newProviderDrainSiblingFixture(t *testing.T, fixture completionSettlementFi
 	}
 	now := time.Now().UTC()
 	if err := agentfixture.UpsertStatic(fixture.agentOwner, testAuthorActivityContext(), fixture.store, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+		Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: fields.AgentID, Identity: sibling.authority.Normal.Identity,
 			Role: "worker", Type: "managed", Model: "regular", LLMBackend: "claude_cli",
 			ResolvedLLMBackend: "claude_cli", Memory: agentmemory.Plan{Enabled: true}, FlowPath: fields.FlowInstancePath,
-		}),
+			Config: json.RawMessage(`{}`),
+		})),
 		Status: "active", StartedAt: now,
 	}); err != nil {
 		t.Fatalf("admit provider-drain sibling agent: %v", err)

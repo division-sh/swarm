@@ -2,7 +2,6 @@ package conformance
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"sync"
 	"testing"
@@ -14,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil"
 )
 
 // These are commit-boundary samples, not a census of every prepared plan.
@@ -232,24 +230,19 @@ func (turn *nestedServingTurn) BeginFanOutEvaluation(ctx context.Context, claim 
 	return input, group, err
 }
 
-func newNestedServingRuntime(t *testing.T, backend string, source semanticview.Source, gate *notifyAllChildrenAgentGate, probe *nestedServingProbe, heldChild ...*nestedChildHandlerGate) (notifyAllChildrenRuntime, *sql.DB) {
+func newNestedServingRuntime(t *testing.T, backend string, source semanticview.Source, gate *notifyAllChildrenAgentGate, probe *nestedServingProbe, heldChild ...*nestedChildHandlerGate) notifyAllChildrenRuntime {
 	t.Helper()
 	var selected notifyAllChildrenStore
-	var db *sql.DB
 	switch backend {
 	case "postgres":
-		var cleanup func()
-		_, db, cleanup = testutil.StartPostgres(t)
-		t.Cleanup(cleanup)
-		selected = storetest.AdmitPostgresRuntimeStore(t, db)
+		selected = storetest.StartPostgresRuntimeStore(t)
 	case "sqlite":
-		sqlite := storetest.StartSQLiteRuntimeStore(t)
-		selected, db = sqlite, storetest.DatabaseForTest(sqlite)
+		selected = storetest.StartSQLiteRuntimeStore(t)
 	default:
 		t.Fatalf("unsupported nested-serving backend %q", backend)
 	}
 	workers := 1
-	rt := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now, notifyAllChildrenRuntimeOptions{
+	rt := newNotifyAllChildrenRuntime(t, selected, source, time.Now, notifyAllChildrenRuntimeOptions{
 		realMockAgents: gate != nil, agentGate: gate, enableGenericSchedules: true, fanOutWorkers: &workers,
 		nestedPublications: &probe.publications,
 		fanOutExecutor: func(pc *pipeline.PipelineCoordinator) startupownership.FanOutExecutor {
@@ -267,7 +260,7 @@ func newNestedServingRuntime(t *testing.T, backend string, source semanticview.S
 		rt.pipeline.SetTestLifecycleProbe(heldChild[0])
 		t.Cleanup(heldChild[0].open)
 	}
-	return rt, db
+	return rt
 }
 
 func waitNestedServingPostCommit(t *testing.T, p *nestedServingProbe) nestedServingReceipt {
