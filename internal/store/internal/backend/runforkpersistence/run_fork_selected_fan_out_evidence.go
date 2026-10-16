@@ -80,6 +80,27 @@ func requireSelectedForkExecutionEvidenceTx(ctx context.Context, tx *sql.Tx, wan
 	return requireSelectedForkFanOutPublishedTx(ctx, tx, runfork.RunForkSelectedContractBinding{ForkRunID: stored.ForkRunID, SourceRunID: stored.SourceRunID}, stored.SourceEventID, postgres)
 }
 
+// Install lineage before initial delivery validates the persisted publication.
+// Dependent evidence is still checked after the reply/delivery side effects,
+// within the same selected publication mutation attempt.
+func (s *RunForkPostgresOwner) InstallSelectedForkExecutionLineageTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute) error {
+	if attempt == nil {
+		return fmt.Errorf("selected fork execution lineage requires its mutation attempt")
+	}
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return insertPostgresSelectedForkExecutionLineageTx(ctx, tx, lineage, publication, routes)
+	})
+}
+
+func (s *RunForkSQLiteOwner) InstallSelectedForkExecutionLineageTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute) error {
+	if attempt == nil {
+		return fmt.Errorf("selected fork execution lineage requires its mutation attempt")
+	}
+	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
+		return insertSQLiteSelectedForkExecutionLineageTx(ctx, tx, lineage, publication, routes)
+	})
+}
+
 func (s *RunForkPostgresOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.Context, attempt *mutationprotocol.Attempt, lineage runfork.RunForkSelectedContractExecutionLineage, publication events.AdmittedEvent, routes []events.DeliveryRoute, replies []pinrouting.ReplyRequestContinuation, returns []pinrouting.ReplyReturnContinuation) error {
 	if attempt == nil {
 		return fmt.Errorf("selected fork execution evidence requires its mutation attempt")
@@ -89,9 +110,6 @@ func (s *RunForkPostgresOwner) CommitSelectedForkExecutionEvidenceTx(ctx context
 			return err
 		}
 		if err := requireRunForkRequestReplyEvidenceTx(ctx, tx, lineage, routes, replies, true); err != nil {
-			return err
-		}
-		if err := insertPostgresSelectedForkExecutionLineageTx(ctx, tx, lineage, publication, routes); err != nil {
 			return err
 		}
 		if err := requireSelectedActivityResultPublicationTx(ctx, tx, lineage, routes, true); err != nil {
@@ -110,9 +128,6 @@ func (s *RunForkSQLiteOwner) CommitSelectedForkExecutionEvidenceTx(ctx context.C
 			return err
 		}
 		if err := requireRunForkRequestReplyEvidenceTx(ctx, tx, lineage, routes, replies, false); err != nil {
-			return err
-		}
-		if err := insertSQLiteSelectedForkExecutionLineageTx(ctx, tx, lineage, publication, routes); err != nil {
 			return err
 		}
 		if err := requireSelectedActivityResultPublicationTx(ctx, tx, lineage, routes, false); err != nil {
