@@ -703,34 +703,18 @@ func debtServedObservationInvocation(root string) (func(string, string, string) 
 	if err != nil {
 		return nil, nil, err
 	}
-	setup, err := debtServedSetupVerifiedPredecessors(root)
+	setup, err := debtServedSetupBoundPrevious(root)
 	if err != nil {
 		return nil, nil, err
 	}
-	observation, err := debtServedObservationLiveSources(root)
+	observation, err := debtServedObservationSourcesWithSetup(root, setup)
 	if err != nil {
 		return nil, nil, err
-	}
-	actual := map[[2]string]string{}
-	for key := range setup {
-		declarations, err := debtServedDebugDeclarations(filepath.Join(root, key[0]))
-		if err != nil || declarations[key[1]] == "" {
-			return nil, nil, fmt.Errorf("setup invocation lost actual declaration %v: %v", key, err)
-		}
-		actual[key] = declarations[key[1]]
 	}
 	previous := func(file, function, current string) (string, error) {
-		if before, found := setup[[2]string{file, function}]; found {
-			if current != actual[[2]string{file, function}] {
-				return "", fmt.Errorf("setup invocation supplied source differs from its actual endpoint: %s", function)
-			}
-			current = before
-		} else {
-			var err error
-			current, err = debtServedSetupSourcePrevious(root, file, function, current)
-			if err != nil {
-				return "", err
-			}
+		current, err := setup(file, function, current)
+		if err != nil {
+			return "", err
 		}
 		for _, pin := range observation {
 			if pin.File == file && pin.Function == function {
@@ -2430,6 +2414,9 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return fmt.Errorf("debt baseline bootstrap source changed")
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
+		return nil
+	}
+	if debtRepair2698Round2CollectorTransition(base, current, trusted, head, retirement...) {
 		return nil
 	}
 	if debtRepair2698CleanupCollectorTransition(base, current, trusted, head, retirement...) {

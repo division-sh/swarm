@@ -97,6 +97,10 @@ func debtServedObservationRetirementComparisons(actual, head, base, source map[s
 }
 
 func debtServedObservationRetirementSourcePins(root string) error {
+	image, err := debtCaptureServedSourceInvocation(root)
+	if err != nil {
+		return err
+	}
 	raw, err := os.ReadFile(filepath.Join(root, "internal/store/testdata/persistence_authority_served_observation_retirements.json"))
 	if err != nil || !bytes.Equal(raw, debtServedObservationRetirementBytes) {
 		return fmt.Errorf("served observation exact retirement declarations changed: %v", err)
@@ -114,7 +118,7 @@ func debtServedObservationRetirementSourcePins(root string) error {
 	if len(keys) != 48 {
 		return fmt.Errorf("served observation complete retirement source inventory changed")
 	}
-	verified, err := debtServedSetupVerifiedPredecessors(root)
+	previous, err := debtServedSetupBoundPrevious(root)
 	if err != nil {
 		return err
 	}
@@ -130,15 +134,15 @@ func debtServedObservationRetirementSourcePins(root string) error {
 				return err
 			}
 		}
-		current, known := verified[key]
-		if !known {
-			current, err = debtServedSetupSourcePrevious(root, key[0], key[1], files[key[0]][key[1]])
-		}
+		current, err := previous(key[0], key[1], files[key[0]][key[1]])
 		if err != nil || current != pin.After {
 			return fmt.Errorf("served observation retirement changed actual final body: %s: %v", key[1], err)
 		}
 	}
-	_, err = debtServedObservationLiveSources(root)
+	_, err = debtServedObservationSourcesWithSetup(root, previous)
+	if err == nil {
+		err = image.recheck(root)
+	}
 	return err
 }
 
@@ -249,8 +253,8 @@ func TestPersistenceAuthorityDebtServedObservationRetirementPinsAll48LiveBodies(
 	pairs := debtServedObservationRetirementPairs()
 	old, retained := debtControlSet(pairs[0][0]), debtControlSet(pairs[0][1])
 	empty := debtControlSet()
-	copy := t.TempDir()
-	debtServedObservationCopySourceEvidence(t, root, copy)
+	copy := debtCatchUpSourceCopyFrom(t, root)
+	copyRepair2698CustodySources(t, root, copy)
 	stages, err := debtServedObservationManifests(root)
 	if err != nil {
 		t.Fatal(err)
