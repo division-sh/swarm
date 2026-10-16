@@ -65,8 +65,7 @@ func TestReadOnlyPublishedAccountingAfterGenerationAdvance(t *testing.T) {
 	}))
 	defer server.Close()
 	intent, _, _, base := publishedActivityAccountingFixture(t)
-	intent.EffectClass = contracts.ActivityEffectClassReadOnly
-	bundle.Tools[intent.Tool] = contracts.MustToolSchemaEntry(contracts.WithToolHandler(contracts.MustToolHandlerKind("http")), contracts.WithToolEffect(intent.EffectClass), contracts.WithToolSchemas(contracts.MustToolInputSchema(contracts.ToolSchemaObject), contracts.MustToolInputSchema(contracts.ToolSchemaObject)), contracts.WithToolHTTP(contracts.HTTPToolSpec{Method: "GET", URL: server.URL}))
+	bundle.Tools[intent.Tool] = contracts.MustToolSchemaEntry(contracts.WithToolHandler(contracts.MustToolHandlerKind("http")), contracts.WithToolSchemas(contracts.MustToolInputSchema(contracts.ToolSchemaObject), contracts.MustToolInputSchema(contracts.ToolSchemaObject)), contracts.WithToolHTTP(contracts.HTTPToolSpec{Method: "GET", URL: server.URL}))
 	source := semanticview.Wrap(bundle)
 	parent := flowidentity.Derive(source, "outer/left/sink", "same-revision")
 	child, err := flowidentity.KeylessChild(source, parent, parent.TemplateID+"/final")
@@ -98,7 +97,7 @@ func TestReadOnlyPublishedAccountingAfterGenerationAdvance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	publication, err := activityresult.NewPublishedContinuation(activityIdentityFact(intent), uuid.NewString(), string(result.eventType), payload, intent.ExecutionMode, intent.EffectClass, activityInputHash(intent.Input), "", time.Unix(100, 0))
+	publication, err := activityresult.NewPublishedContinuation(activityIdentityFact(intent), uuid.NewString(), string(result.eventType), payload, intent.ExecutionMode, activityInputHash(intent.Input), "", time.Unix(100, 0))
 	if err != nil {
 		t.Fatal(err)
 	}

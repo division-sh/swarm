@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/activityresult"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -53,7 +52,7 @@ func VerifyReadOnlyPublishedAccountingAfterNativeLoopAdvanceAndReopenForTest(t *
     read.failed:
       guard: {id: exact_activity, check: payload.activity_id == 'read'}
 `,
-				"tools.yaml": fmt.Sprintf("read:\n  handler_type: http\n  effect_class: read_only\n  http: {method: GET, url: %q}\n", server.URL),
+				"tools.yaml": fmt.Sprintf("read:\n  handler_type: http\n  http: {method: GET, url: %q}\n", server.URL),
 			})
 			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
 			run := correlation.RunIDFromContext(ctx)
@@ -73,7 +72,7 @@ func VerifyReadOnlyPublishedAccountingAfterNativeLoopAdvanceAndReopenForTest(t *
 			intent.SourceRunID, intent.EntityID, intent.FlowInstance = run, identity.EntityID(run), run
 			intent.ExecutionFlowID, intent.Owner = identity.FlowID("."), activityidentity.MustNodeOwner(pipelineNode(t, ".", "reader"))
 			intent.ActivityID, intent.Tool, intent.HandlerEventKey = "read", "read", "read.requested"
-			intent.SuccessEvent, intent.FailureEvent, intent.EffectClass = "read.succeeded", "read.failed", contracts.ActivityEffectClassReadOnly
+			intent.SuccessEvent, intent.FailureEvent = "read.succeeded", "read.failed"
 			intent.Generation, intent.LoopStage = activation.Generation(), "review"
 			intent.RoutingSource = testWorkflowRoutingSource(".", run, run)
 			source := eventtest.ExistingRunRootIngressWithRoutingSource(intent.SourceEventID, "read.requested", "test", intent.SourceTaskID, mustJSON(map[string]any{"revision_id": activation.RevisionID}), 0, run, events.EventEnvelope{}, intent.RoutingSource, time.Now().UTC())
@@ -122,7 +121,7 @@ func VerifyReadOnlyPublishedAccountingAfterNativeLoopAdvanceAndReopenForTest(t *
 			if err := ValidateRecordedActivityPublication(retainedRequest, retainedResult, result.ID(), result.Payload()); err != nil {
 				t.Fatal(err)
 			}
-			publication, err := activityresult.NewPublishedContinuation(activityIdentityFact(intent), retainedResult.ID(), string(retainedResult.Type()), retainedResult.Payload(), intent.ExecutionMode, intent.EffectClass, activityInputHash(intent.Input), "", retainedResult.CreatedAt())
+			publication, err := activityresult.NewPublishedContinuation(activityIdentityFact(intent), retainedResult.ID(), string(retainedResult.Type()), retainedResult.Payload(), intent.ExecutionMode, activityInputHash(intent.Input), "", retainedResult.CreatedAt())
 			if err != nil {
 				t.Fatal(err)
 			}

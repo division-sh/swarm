@@ -79,6 +79,8 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 	allowed[historicalBoundaryOwner+"loadRunForkStartFirstTurn/reference:"+historicalBoundaryOwner+"appendRunForkHistoricalFact"] = historicalBoundaryAllowance{1, "real first-turn input uses canonical historical identity and payload/schema admission without becoming an already-admitted start event"}
 	allowed[historicalBoundaryOwner+"loadRequiredRunForkPlan/reference:"+historicalBoundaryOwner+"resolveRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "existing-child readback resolves its persisted source event and revision through the canonical contextual owner"}
 	allowed[historicalBoundaryOwner+"loadRequiredRunForkPlan/reference:"+historicalBoundaryOwner+"resolveSQLiteRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "SQLite existing-child readback resolves the same persisted source event and revision through its thin dialect adapter"}
+	allowed[historicalBoundaryOwner+"admitSelectedForkSource/reference:"+historicalBoundaryOwner+"resolveRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "frozen-source admission resolves the immutable successor's stored fork point through the canonical contextual owner"}
+	allowed[historicalBoundaryOwner+"admitSelectedForkSource/reference:"+historicalBoundaryOwner+"resolveSQLiteRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "SQLite frozen-source admission resolves the same stored fork point through its contextual dialect adapter"}
 	for _, caller := range []string{
 		"resolveSQLiteRunForkRevisionPoint", "lockRunForkSourceRevisionFrontier",
 		"RunForkPostgresOwner.PlanRunFork", "RunForkPostgresOwner.ReadEntityAtEventCutForTest", "RunForkPostgresOwner.LoadRunForkSelectedContractSourceEvents",
@@ -519,6 +521,7 @@ func (imports historicalBoundaryImports) Import(path string) (*types.Package, er
 func historicalBoundaryHostile(t *testing.T, imports historicalBoundaryImports) {
 	t.Helper()
 	inheritedFanOutBoundaryHostile(t, imports)
+	historicalSourceAdmissionBoundaryHostile(t)
 	const source = `package runforkpersistence
 import (
     codec "encoding/json"
@@ -539,6 +542,7 @@ func (arbitrary *unexpectedReader) stealTimerRevisionObservation() {
     alias := observe
     _ = alias
 }
+
 func (arbitrary *unexpectedReader) stealNotifyRevisionObservation() {
     observe := revision.CountNotifyFanOutRevisionStorageForTest
     alias := observe
