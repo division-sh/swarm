@@ -41,18 +41,19 @@ func activityClaimReplyLossFaultForTest(ctx context.Context, selected any, run, 
 	} else if found {
 		return nil, fmt.Errorf("claim reply-loss fault requires an absent native receipt")
 	}
-	return &activityClaimReplyLossFault{WorkflowPersistenceOwner: owner, run: run, request: request, fault: fault}, nil
+	return &activityClaimReplyLossFault{WorkflowPersistenceOwner: owner, original: owner, run: run, request: request, fault: fault}, nil
 }
 
 type activityClaimReplyLossFault struct {
 	pipeline.WorkflowPersistenceOwner
+	original     pipeline.ActivityAttemptJournal
 	run, request string
 	fault        error
 	lost         atomic.Int32
 }
 
 func (f *activityClaimReplyLossFault) ClaimActivityAttemptForLoopGeneration(ctx context.Context, request pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
-	stored, inserted, err := f.WorkflowPersistenceOwner.ClaimActivityAttemptForLoopGeneration(ctx, request)
+	stored, inserted, err := f.original.ClaimActivityAttemptForLoopGeneration(ctx, request)
 	if err != nil || !inserted || request.RunID != f.run || request.RequestEventID != f.request || !f.lost.CompareAndSwap(0, 1) {
 		return stored, inserted, err
 	}

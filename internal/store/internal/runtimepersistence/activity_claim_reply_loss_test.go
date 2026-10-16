@@ -29,6 +29,7 @@ func TestActivityClaimReplyLossUsesExactNativeCommitAndCannotRearmBothStores(t *
 			if err != nil || journal == nil || !pipeline.NewWorkflowPersistence(journal).Valid() {
 				t.Fatalf("install native claim reply loss: %v", err)
 			}
+			journal.original = activityNativeJournalForFixture(t, fixture)
 			lost := journal.lost.Load
 			probe, restore, err := InstallTransactionProbeForTest(fixture.store, transactiontest.Options{})
 			if err != nil {

@@ -444,14 +444,19 @@ func overwriteProposedEffectAttemptMode(t *testing.T, ctx context.Context, cards
 
 func proposedEffectTestJournal(t *testing.T, cards decisioncard.Store) *runtimepipeline.PipelineCoordinator {
 	t.Helper()
+	var coordinator *runtimepipeline.PipelineCoordinator
 	switch selected := cards.(type) {
 	case *SQLiteRuntimeStore:
-		return newSQLiteWorkflowTestCoordinator(t, selected.backend.ConstructionHandle(), selected)
+		coordinator = newSQLiteWorkflowTestCoordinator(t, selected.backend.ConstructionHandle(), selected)
 	case *PostgresStore:
-		return newPostgresWorkflowTestCoordinator(t, selected.backend.ConstructionHandle(), selected)
+		coordinator = newPostgresWorkflowTestCoordinator(t, selected.backend.ConstructionHandle(), selected)
 	default:
 		panic("unsupported proposed-effect test store")
 	}
+	if err := coordinator.InstallActivityJournal(captureActivityFixtureJournal(t, testAuthorActivityContext(), cards)); err != nil {
+		t.Fatal(err)
+	}
+	return coordinator
 }
 
 func isProposedEffectFailureClass(err error, class runtimefailures.Class) bool {

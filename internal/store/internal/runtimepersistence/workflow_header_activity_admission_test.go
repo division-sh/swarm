@@ -104,6 +104,7 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 						}
 						record.RequestEventID = continuation.RequestEventID
 					}
+					journal := captureActivityFixtureJournal(t, f.ctx, f.store)
 					switch cell {
 					case "stale":
 						record.Generation.RevisionID = uuid.NewString()
@@ -128,7 +129,6 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 					hints := observeChannelHints(t, f.store.(interface {
 						SubscribeChannelReconciliation(context.Context) (*render.ReconcileSubscription, error)
 					}))
-					journal := f.store.(activityStoryJournal)
 					actual, inserted, err := journal.ClaimActivityAttemptForLoopGeneration(f.ctx, record)
 					if cell != "current" {
 						if err == nil || inserted {
