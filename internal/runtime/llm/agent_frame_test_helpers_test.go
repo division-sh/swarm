@@ -43,7 +43,7 @@ func testManagedSessionSeed(t testing.TB, identity agentidentity.Identity, role 
 	if err != nil {
 		t.Fatalf("derive managed test prompt: %v", err)
 	}
-	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, []string{}, prompt, agentintent.RuntimeEnvironmentContext())
+	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, prompt, agentintent.RuntimeEnvironmentContext())
 	if err != nil {
 		t.Fatalf("assemble managed test provider prompt: %v", err)
 	}

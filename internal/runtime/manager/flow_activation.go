@@ -1194,7 +1194,7 @@ func buildFlowAgentBlueprint(
 	}
 	rendered = dedupeStrings(rendered)
 
-	prompt, err := assembleResolvedAgentPrompt(source, templateID, entry)
+	prompt, err := assembleResolvedAgentPrompt(entry)
 	if err != nil {
 		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("flow agent %s intent: %w", key, err)
 	}
@@ -1227,7 +1227,6 @@ func buildFlowAgentBlueprint(
 		Permissions:     permissions,
 		NativeTools:     nativeToolConfigFromMap(normalizedConfiguredNativeTools(entry.NativeTools)),
 		FlowDataAccess:  normalizedConfiguredToolList(entry.FlowDataAccess),
-		Criteria:        normalizedConfiguredToolList(entry.Criteria),
 		WorkspaceClass:  strings.TrimSpace(entry.WorkspaceClass),
 		ManagerFallback: strings.TrimSpace(entry.ManagerFallback),
 		FlowPath:        identity.Route.InstancePath,
@@ -1391,7 +1390,7 @@ func buildStaticFlowAgentBlueprint(
 	if err != nil {
 		return runtimeagentidentity.Plan{}, models.AgentConfig{}, err
 	}
-	prompt, err := assembleResolvedAgentPrompt(source, flowID, entry)
+	prompt, err := assembleResolvedAgentPrompt(entry)
 	if err != nil {
 		return runtimeagentidentity.Plan{}, models.AgentConfig{}, fmt.Errorf("static flow agent %s intent: %w", logicalID, err)
 	}
@@ -1422,7 +1421,6 @@ func buildStaticFlowAgentBlueprint(
 		Permissions:     permissions,
 		NativeTools:     nativeToolConfigFromMap(normalizedConfiguredNativeTools(entry.NativeTools)),
 		FlowDataAccess:  normalizedConfiguredToolList(entry.FlowDataAccess),
-		Criteria:        normalizedConfiguredToolList(entry.Criteria),
 		WorkspaceClass:  strings.TrimSpace(entry.WorkspaceClass),
 		ManagerFallback: strings.TrimSpace(entry.ManagerFallback),
 		FlowPath:        identity.Route.InstancePath,
@@ -1437,9 +1435,8 @@ func buildStaticFlowAgentBlueprint(
 	return identity, cfg, nil
 }
 
-func assembleResolvedAgentPrompt(source semanticview.Source, flowID string, entry runtimecontracts.AgentRegistryEntry) (runtimeagentintent.DerivedPrompt, error) {
-	bundle, _ := semanticview.Bundle(source)
-	return runtimecontracts.AssembleAgentPrompt(bundle, flowID, entry, nil)
+func assembleResolvedAgentPrompt(entry runtimecontracts.AgentRegistryEntry) (runtimeagentintent.DerivedPrompt, error) {
+	return runtimecontracts.AssembleAgentPrompt(entry)
 }
 
 // Emit permissions retain declaration identity. Concrete specialization belongs

@@ -239,7 +239,6 @@ func providerSchemaValidationActors(source semanticview.Source) ([]models.AgentC
 			TurnTimeout:     timeridentity.CloneTurnTimeout(entry.TurnTimeout),
 			Subscriptions:   UniqueNonEmpty(entry.Subscriptions),
 			EmitEvents:      UniqueNonEmpty(entry.EmitEvents),
-			Criteria:        UniqueNonEmpty(entry.Criteria),
 			Tools:           UniqueNonEmpty(entry.ConfiguredTools()),
 			Permissions:     UniqueNonEmpty(entry.Permissions),
 			FlowPath:        strings.Trim(strings.TrimSpace(source.FlowPath(plan.OwnerFlowID)), "/"),

@@ -4,21 +4,22 @@ import (
 	"testing"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func TestDeclarationConsumersRejectRoleOnlyActor(t *testing.T) {
 	source, _ := loadFlowDataToolSource(t)
 	exact := flowDataActor()
-	if _, flow, ok := criteriaAgentContractDeclaration(source, exact); !ok || flow != "support" {
-		t.Fatalf("exact criteria declaration missing: %q %v", flow, ok)
+	if declaration, ok := semanticview.ResolveAgentDeclaration(source, exact); !ok || declaration.OwnerFlowID != "support" {
+		t.Fatalf("exact declaration missing: %#v %v", declaration, ok)
 	}
 	if root := actorFlowOwnershipRoot(source, exact); root != "support" {
 		t.Fatalf("exact write owner = %q", root)
 	}
 	for _, id := range []string{"unknown", "", "factory-cto"} {
 		actor := models.AgentConfig{ID: id, Role: exact.Role, FlowID: exact.FlowID, FlowPath: exact.FlowPath}
-		if _, _, ok := criteriaAgentContractDeclaration(source, actor); ok {
-			t.Errorf("unknown/retired actor %q borrowed criteria declaration", id)
+		if _, ok := semanticview.ResolveAgentDeclaration(source, actor); ok {
+			t.Errorf("unknown/retired actor %q borrowed a declaration", id)
 		}
 		if root := actorFlowOwnershipRoot(source, actor); root != "" {
 			t.Errorf("unknown/retired actor %q borrowed write owner %q", id, root)

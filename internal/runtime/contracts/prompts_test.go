@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
-	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
 
 func TestResolvedAgentIntent_LocalScopedDeclarationOwner(t *testing.T) {
@@ -353,31 +352,24 @@ func TestResolvedAgentIntent_DoesNotGuessSources(t *testing.T) {
 	}
 }
 
-func TestAssembleAgentPrompt_DeliversCriteriaWithoutChangingIntentIdentity(t *testing.T) {
-	flow := FlowContractView{
-		Paths: FlowContractPaths{FlowPath: "validation"}, Rules: RulesDocument{"feasibility_exclusions": {Criteria: criteriaValidationTestSet()}},
-	}
-	root := &FlowContractView{Children: []FlowContractView{flow}}
-	bundle := &WorkflowContractBundle{FlowTree: flowmodel.Tree[FlowContractView]{Root: root, ByID: map[string]*FlowContractView{"validation": &root.Children[0]}}}
+func TestAssembleAgentPrompt_PreservesExactIntentWithoutCriteria(t *testing.T) {
 	resolved, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "validation/agents.yaml#agents.cto.intent", "Base intent.")
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := AgentRegistryEntry{ResolvedIntent: resolved, Criteria: []string{"feasibility_exclusions"}}
-	prompt, err := AssembleAgentPrompt(bundle, "validation", entry, []string{"feasibility_exclusions"})
+	entry := AgentRegistryEntry{ResolvedIntent: resolved}
+	prompt, err := AssembleAgentPrompt(entry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := prompt.Text(resolved, entry.Criteria)
+	got, err := prompt.Text(resolved)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Base intent.", "## Contract Criteria", "### feasibility_exclusions", "FX-HARD-01"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("assembled prompt missing %q:\n%s", want, got)
-		}
+	if got != resolved.Content {
+		t.Fatalf("assembled prompt differs from exact intent: %q", got)
 	}
 	if entry.ResolvedIntent != resolved {
-		t.Fatal("criteria assembly mutated resolved intent")
+		t.Fatal("assembly mutated resolved intent")
 	}
 }

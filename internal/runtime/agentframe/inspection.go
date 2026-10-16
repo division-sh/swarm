@@ -41,7 +41,6 @@ type InspectionSession struct {
 	Role           string                           `json:"role,omitempty"`
 	FlowID         string                           `json:"flow_id,omitempty"`
 	Intent         Intent                           `json:"intent"`
-	Criteria       Criteria                         `json:"criteria"`
 	Provider       Presence[Provider]               `json:"provider"`
 	ProviderPrompt string                           `json:"provider_prompt"`
 }
@@ -76,7 +75,6 @@ type PreviewSeed struct {
 	Role           string
 	FlowID         string
 	Intent         agentintent.Resolved
-	Criteria       []string
 	Provider       *Provider
 	ProviderPrompt string
 }
@@ -134,16 +132,11 @@ func inspect(scope InspectionScope, selector InspectionSelector, seed PreviewSee
 	if strings.TrimSpace(seed.AgentID) == "" || strings.TrimSpace(seed.ProviderPrompt) == "" {
 		return Inspection{}, fmt.Errorf("frame inspection session contract is incomplete")
 	}
-	criteriaIdentity, err := CriteriaIdentity(seed.BundleHash, seed.Criteria)
-	if err != nil {
-		return Inspection{}, err
-	}
 	session := InspectionSession{
 		BundleHash: seed.BundleHash, AgentID: strings.TrimSpace(seed.AgentID),
 		AuthoredFlow: strings.Trim(strings.TrimSpace(seed.AuthoredFlow), "/"), Role: strings.TrimSpace(seed.Role), FlowID: strings.Trim(strings.TrimSpace(seed.FlowID), "/"),
 		AgentIdentity: unresolved[agentidentity.Identity](),
 		Intent:        Intent{Kind: string(seed.Intent.Kind), Coordinate: seed.Intent.Coordinate, Provenance: seed.Intent.Provenance, Content: seed.Intent.Content, ContentHash: seed.Intent.ContentHash, Identity: seed.Intent.Identity},
-		Criteria:      Criteria{References: append([]string{}, seed.Criteria...), Identity: criteriaIdentity},
 		Provider:      unresolved[Provider](), ProviderPrompt: seed.ProviderPrompt,
 	}
 	if seed.AgentIdentity != nil {

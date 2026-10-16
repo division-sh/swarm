@@ -341,7 +341,7 @@ func managedHITLProviderSeed(t *testing.T, actor models.AgentConfig, runtime llm
 	if err != nil {
 		t.Fatalf("derive prompt: %v", err)
 	}
-	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, nil, prompt, agentintent.RuntimeEnvironmentContext())
+	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, prompt, agentintent.RuntimeEnvironmentContext())
 	if err != nil {
 		t.Fatalf("assemble provider prompt: %v", err)
 	}

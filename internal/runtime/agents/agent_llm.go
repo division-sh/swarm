@@ -85,7 +85,6 @@ func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor 
 		Role:           cfg.Role,
 		FlowID:         cfg.FlowID,
 		Intent:         cfg.Intent,
-		Criteria:       append([]string(nil), cfg.Criteria...),
 		ProviderPrompt: providerPrompt,
 		RuntimeMode:    providerContract.RuntimeMode,
 		Provider:       providerContract.Provider,
