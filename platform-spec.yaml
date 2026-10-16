@@ -10435,7 +10435,7 @@ engine:
           Unperformed observations and startup execution obligations remain visible; never bare ok or an unconditional
           promise of live readiness. Portable validation explicitly reports structural scope.
         stderr: Human-readable analyzer diagnostics, advisory lint evidence, warnings, and blocking failures.
-    check_count: 70 primary checks plus 2 supplemental checks; managed credentials share the primary credential observation and constructor eligibility has one source check
+    check_count: 71 primary checks plus 2 supplemental checks; managed credentials share the primary credential observation, constructor eligibility has one source check, and human-gate channel visibility has one source check
     implementation_notes:
       framework: Each check is a named function that receives the loaded contract bundle and returns a list of findings. Each
         finding has the check ID, severity, message, location (flow, node, agent, or event name), optional evidence, and
@@ -42818,6 +42818,13 @@ filesystem_source_model:
       Each decoded version and platform_version scalar is at most 256 UTF-8 bytes, including whitespace, checked before SemVer or range parsing; construction and stored decode reject oversized values with exact field and introduction/resolution evidence, never truncation.
     directory_kind: |
       One admitted membership owner governs filesystem construction, logical decoding and retained projection. A directory with trigger.yaml, connector.yaml or channel.yaml is a provider; malformed roles never cause flow fallback. A channel requires trigger.yaml and connector.yaml in that same directory. Providers cannot contain flow declarations, flow resources, child flows or nested providers; inert documents and docs remain inert. Provider directories are attached to their exact enclosing flow, not inserted as executable children. A selected provider root has no executable FlowNode. A directory with a manifest but neither body nor live flow content is refused, as is a directory mixing provider bodies and flow files. Ordinary schema-less resource/intermediate flow topology and manifest-less flows remain supported. Provider lookalikes below typed resources remain resource data, not provider declarations.
+  provider_directory_scope:
+    owner: internal/sourceartifact.AdmittedSourceArtifact.ProviderDirectoriesInScope
+    rule: |
+      Resolve the exact admitted flow and walk only its enclosing flows. For each provider directory key, select the nearest whole directory before looking up any body role. A nearer trigger-only provider therefore shadows an ancestor channel of the same key; no per-role fallback or body mixing is permitted. Sibling and descendant providers are not visible. Return deterministic directory-key order from immutable admitted membership, without host reads, imported lists or a second topology interpreter. Unknown, noncanonical and provider-directory flow selectors refuse rather than selecting the root.
+      Executable semantic projections consume the original rooted compiler input; mutable exported indexes, substituted content artifacts, optional scope interfaces and content-only programmatic bundles cannot create provider visibility. Logical decoding preserves content membership but does not create rooted execution authority.
+    human_gate_verification: |
+      The source-only stage_gate_channel_scope check requires at least one visible channel.yaml provider for each human stage gate in both structural verification and execution admission. Missing structural visibility is a hard invalidity naming the exact flow, stage and gate and the command swarm import telegram from that flow or an enclosing flow. A visible channel body is not a claim, credential, connection or readiness grant, and does not bypass body-specific admission. Nearest claimed channel selection and connection configuration are separate runtime responsibilities.
   human_source_presentation:
     owner: internal/sourceartifact.AdmittedSourceArtifact.HumanLabel and RootedSource.HumanLabel
     rule: |

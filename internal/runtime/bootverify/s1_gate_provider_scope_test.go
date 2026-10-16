@@ -2,6 +2,8 @@ package bootverify
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,8 +52,28 @@ func TestS1HumanGateRequiresScopedChannelDirectory(t *testing.T) {
 			if gates := bundle.Semantics.Gates; len(gates) != 1 || gates[0].FlowID != tc.gateFlow {
 				t.Fatalf("fixture did not compile its exact gate: %+v", gates)
 			}
+			if err := os.RemoveAll(root); err != nil {
+				t.Fatal(err)
+			}
 			for _, purpose := range []ValidationPurpose{StructuralValidation, ExecutionValidation} {
 				report := Run(context.Background(), semanticview.Wrap(bundle), Options{Purpose: purpose})
+				var observations int
+				for _, observation := range report.Observations {
+					if observation.CheckID != "stage_gate_channel_scope" {
+						continue
+					}
+					observations++
+					want := AdmissionPassed
+					if tc.wantError {
+						want = AdmissionFailed
+					}
+					if observation.Class != AdmissionSourceObservation || observation.Status != want {
+						t.Fatalf("scope check did not execute as a source observation: %+v", observation)
+					}
+				}
+				if observations != 1 {
+					t.Fatalf("scope check observation count=%d want 1", observations)
+				}
 				var scopeFindings []Finding
 				for _, finding := range report.Findings {
 					if finding.CheckID == "stage_gate_channel_scope" {
@@ -71,7 +93,11 @@ func TestS1HumanGateRequiresScopedChannelDirectory(t *testing.T) {
 					t.Fatalf("human gate without a visible channel: findings=%+v, want one structural refusal", scopeFindings)
 				}
 				finding := scopeFindings[0]
-				if finding.Severity != SeverityHardInvalidity || !strings.Contains(finding.Location, tc.gateFlow) || !strings.Contains(finding.Remediation, "swarm import telegram") {
+				locationFlow := tc.gateFlow
+				if locationFlow == "." {
+					locationFlow = "root"
+				}
+				if finding.Severity != SeverityHardInvalidity || finding.Location != fmt.Sprintf("flow %s stage review gate approve", locationFlow) || !strings.Contains(finding.Remediation, "swarm import telegram") {
 					t.Fatalf("channel-scope refusal lost severity, owning flow or next command: %+v", finding)
 				}
 			}
@@ -87,5 +113,19 @@ func writeS1ScopeProvider(t *testing.T, root, directory string, channel bool) {
 	if channel {
 		writeBootverifyFixtureFile(t, filepath.Join(root, directory, "connector.yaml"), "{}\n")
 		writeBootverifyFixtureFile(t, filepath.Join(root, directory, "channel.yaml"), "{}\n")
+	}
+}
+
+func TestS1HumanGateCannotBorrowProgrammaticProviderVisibility(t *testing.T) {
+	bundle := &contracts.WorkflowContractBundle{Semantics: contracts.WorkflowSemanticView{
+		Gates: []contracts.WorkflowGatePlan{{FlowID: ".", Stage: "review", Decision: "approve"}},
+	}}
+	findings := checkStageGateChannelScope(&checkerContext{source: semanticview.Wrap(bundle)})
+	if len(findings) != 1 || findings[0].CheckID != stageGateChannelScopeCheckID || findings[0].Severity != SeverityHardInvalidity || !strings.Contains(findings[0].Message, "cannot establish") {
+		t.Fatalf("programmatic gate bypassed rooted membership: %+v", findings)
+	}
+	bundle.Semantics.Gates = nil
+	if findings := checkStageGateChannelScope(&checkerContext{source: semanticview.Wrap(bundle)}); len(findings) != 0 {
+		t.Fatalf("gate-free source acquired a channel requirement: %+v", findings)
 	}
 }

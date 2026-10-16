@@ -230,6 +230,7 @@ var bootCheckRegistry = []Check{
 	{ID: joinValidationCheckID, Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkJoinValidation},
 	{ID: loopValidationCheckID, Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkLoopValidation},
 	{ID: stageGateValidationCheckID, Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkStageGateValidation},
+	{ID: stageGateChannelScopeCheckID, Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkStageGateChannelScope},
 	{ID: collectionItemSemanticsCheckID, Mode: CheckSource, Severity: SeverityHardInvalidity, Run: checkCollectionItemSemantics},
 	{ID: "tool_resolution", Mode: CheckMixed, Severity: SeverityHardInvalidity, Run: checkToolResolution},
 	{ID: "required_mcp_tool_availability", Mode: CheckDeployment, Severity: SeverityHardInvalidity, Run: checkRequiredMCPToolAvailability},
