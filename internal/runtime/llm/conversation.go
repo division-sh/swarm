@@ -595,7 +595,7 @@ func (c *Conversation) executeToolResponse(ctx context.Context, response *Respon
 				// committed. Keep the existing continuation unconsumed instead.
 				return "", executed, err
 			}
-			failureValue, valueErr := runtimefailures.EnvelopeValue(failure)
+			failureValue, valueErr := runtimefailures.AgentToolFailureValue(failure)
 			if valueErr != nil {
 				return "", executed, runtimefailures.Wrap(runtimefailures.ClassInternalFailure, "tool_failure_envelope_encode_failed", "llm-conversation", "deliver_tool_result", map[string]any{"tool": strings.TrimSpace(tc.Name)}, valueErr)
 			}

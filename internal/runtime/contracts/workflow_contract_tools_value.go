@@ -222,6 +222,9 @@ func projectToolHTTPValue(value yamlsource.Value) (HTTPToolSpec, error) {
 		if out.TimeoutSeconds <= 0 {
 			return out, nodeValueError(timeout, fmt.Errorf("http.timeout_seconds must be positive"))
 		}
+		if _, err := toolHTTPTimeout(out.TimeoutSeconds); err != nil {
+			return out, nodeValueError(timeout, err)
+		}
 	}
 	return out, nil
 }

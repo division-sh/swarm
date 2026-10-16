@@ -168,7 +168,7 @@ func TestHTTPToolTimeoutDefaultAndEarlierCallerDeadline(t *testing.T) {
 }
 
 func TestHTTPToolTimeoutExplicitAuthoredDeadline(t *testing.T) {
-	for _, seconds := range []int{1, 10, 120} {
+	for _, seconds := range []int{1, 10, 120, 9223372036} {
 		t.Run(fmt.Sprintf("declared_%ds", seconds), func(t *testing.T) {
 			executor := authoredHTTPTimeoutExecutor(t, "https://timeout.test", seconds)
 			harness := effecttest.New()

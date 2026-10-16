@@ -10952,6 +10952,8 @@ tool_model:
             integer — request timeout, default 30 seconds (not a maximum). The authored request budget covers response
             headers and body consumption; an earlier caller cancellation or deadline wins. The budget starts after rate
             admission, not during authentication or admission waiting, and is not an effect-settlement budget.
+            Shared HTTP admission rejects positive seconds that cannot be represented as a runtime duration before
+            preparation; it never wraps or clamps them. The largest representable whole-second budget is 9223372036.
       optional_fields:
         input_schema: object — JSON Schema for tool arguments; omission derives the object default, explicit {} is Any.
         output_schema: object — field names and types the tool returns (for documentation and LLM context)
@@ -13079,10 +13081,23 @@ tool_model:
         read_only and non_idempotent_write on the authored HTTP activity_attempts journal path. idempotent_write is reserved
         until idempotency execution ownership is specified and implemented; long_running is reserved for a later durable
         resume/cancel slice.
+        This declaration applies to handler-activity execution, not agent calls. Agent HTTP always uses
+        write_or_unknown; an interrupted launched call is outcome-uncertain and is never redispatched.
       input_schema: object — parameter names and types the tool accepts
       output_schema: object — field names and types the tool returns
     admission_rule: Only the declared tool vocabulary is admitted. Unknown fields fail strict source admission
       before tool resolution; no removed-spelling table or translator exists.
+    agent_effect_notice: >
+      Describe emits one informational notice per authored, scoped, agent-callable tool declaration carrying
+      effect_class, independent of referencing-agent count or live provider availability: effect_class is not applied
+      to agent calls; an interrupted call is outcome-uncertain and not redispatched. Omitted classes and declarations
+      callable only from activities do not acquire this notice.
+    agent_uncertainty_presentation: >
+      Agent-facing tool-result text says: result unknown: the call may or may not have reached the system; it will not
+      be retried automatically. Agent-only structured presentation preserves class, detail, retryability and identity
+      without serializing the operator-only reconciliation instruction or claiming to be platform.failure/v1.
+      Canonical persisted/operator envelopes and the typed MCP runtimeError carrier remain unchanged. Transported
+      uncertainty retains its existing continuation fence and cannot create another model turn or redispatch.
     http_fields:
       http: object — HTTP request template (see http_tool_definition.schema.http_block)
       response_mapping: object — maps response fields to output fields
