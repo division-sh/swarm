@@ -1,5 +1,17 @@
 # Issue 2700: Agent HTTP Policy And Presentation
 
+## Superseding Retirement Amendment
+
+USER6220888538 deletes authored effect_class. Reviewer-a6220928385 selects the
+same #2700 landing and requires the focused PLAN in
+`issue-2700-http-effect-retirement-plan.md` before handler cutover. The former
+ignored-declaration INFO and notice-only helpers are MOOT; their tests/receipts
+below remain historical, not retirement credit. Timeout/O04, plain agent text,
+typed machine evidence and transported-uncertainty fencing remain required.
+No production retirement implementation or permission to push is claimed.
+
+## Earlier Accepted Slice (Historical Scope)
+
 Part of #2700. Track: FULL. Local work only; no PR push before B #2698
 lands. The post-B #2592 integration retains priority.
 
