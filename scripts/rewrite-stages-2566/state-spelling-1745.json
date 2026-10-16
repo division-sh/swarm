@@ -1,0 +1,32 @@
+[
+  {
+    "File": "internal/runtime/conformance/data_text_file_journey_2456_test.go",
+    "PriorSHA256": "39785b6de6159b06c974cc36790de6067994476159b99fc4ba84f29f3b694b7f",
+    "CandidateSHA256": "ea4db8a764f65565f34ea91d93b992250e7362e1e4e59e78c0bb2da46384c4f9"
+  },
+  {
+    "File": "internal/runtime/conformance/data_text_file_support_2456_test.go",
+    "PriorSHA256": "1f0e8b070cc1c3a3340f1f3041a4433b61abd7947edb3f19f278c1ea40e42bbf",
+    "CandidateSHA256": "dc457013e53194f5dd8abf647a087080c7b539546bb88870953c8a9e9a2e60c9"
+  },
+  {
+    "File": "internal/runtime/conformance/fan_out_resource_source_proof_test.go",
+    "PriorSHA256": "7cfb6a0a913381e41536b3ffe18d2b9a40b7512227369e2e52f0657b59a0f2f4",
+    "CandidateSHA256": "6fbafc5d3d90cf3b06254e6092e6e6e416fd61058f5352d87c5d8cc44f659266"
+  },
+  {
+    "File": "internal/runtime/testfixtures/canonicalrouting/deployment_resource_feeds.go",
+    "PriorSHA256": "820a86b78782db7cb4a905c9fa218f52f13422bef7aa4895d24ec603ec9b5ab8",
+    "CandidateSHA256": "a9456ffa84b2f0532aa9fc6ce45f3cd46a5351ef2ce76457221b2050e91e9550"
+  },
+  {
+    "File": "internal/runtime/testfixtures/canonicalrouting/derived_scenario.go",
+    "PriorSHA256": "128c083f2337bf410606133a03a44e340bcd532698056d6bc56594c90ac1f23e",
+    "CandidateSHA256": "46bcb1390da265698456fe4206ce034424ddbe0b4dc5f483ff9b956b0585f93f"
+  },
+  {
+    "File": "internal/runtime/testfixtures/canonicalrouting/notify_all_children.go",
+    "PriorSHA256": "16534f83b35657cf53278d6bfe5223855ae89dd89240e370540104153312123c",
+    "CandidateSHA256": "fbe395416eae7dc0400b010b7e69f722e5d69b39bf55675c98c6af8e7fd56de7"
+  }
+]

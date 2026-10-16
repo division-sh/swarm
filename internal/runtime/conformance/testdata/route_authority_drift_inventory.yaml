@@ -1709,6 +1709,7 @@ seam_families:
     classification: separate_semantic_concept
     paths:
       - tools/fixture-codemod/pipeline-observations/recipes.json
+      - tools/fixture-codemod/pipeline-observations/state-spelling-successors-1745.json
       - tools/fixture-codemod/pipeline-observations/family144-transitions.json
       - tools/fixture-codemod/pipeline-observations/native_unstamped_delivery_test.go
     search_dimensions: [descriptor_evidence, direct_delivery_path, flow_owned_subscription_pattern_authority, live_agent_subscription_route_authority, route_plan_source_reason]
@@ -1721,6 +1722,9 @@ seam_families:
       preserves every original occurrence; finite codemod source/hostility
       controls preserve workloads and current original-owner consumption.
       No classified source string grants runtime routing or storage permission.
+      Issue #1745/6207972014 appends the exact state.yaml/event-metadata spelling
+      packet, with predecessor and current-source checks; it does not rewrite
+      the historical recipes or authorize a new delivery path.
   - id: native_selected_pipeline_route_proof_consumers
     layer: test_fixture_semantics
     classification: valid_consumer

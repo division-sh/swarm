@@ -19,7 +19,7 @@ the final A/F/B integration remain outstanding.
   fields. Existing constructors, normalized operations and selected-store commit
   owners are unchanged; no SQL, migration, scheduling or transaction redesign.
 - `sourceartifact/classify.go`, contract discovery/admission, current authored
-  corpus and fixture builders switch atomically to `state.yaml`. Old-only and
+  corpus and fixture sources switch atomically to `state.yaml`. Old-only and
   old+new layouts refuse finite source admission. Internal entity/SQL identities
   are not renamed. Historical source cannot be migrated through this change.
 - Derived field evidence names the defining type-field coordinate and the actual
@@ -102,6 +102,24 @@ Receipts are retained under
   required a new head. It supplies no unused qualification; rerun on the final
   candidate. Canonical hosted selection validation at68d45d9207 succeeded,
   including all ten new feature roots, without duplicate ownership.
+- Exactd6494ff189 preflight RED100.676s: the route-authority inventory needs
+  the newly appended spelling packet classified with its existing retained
+  fixture-migration evidence. The packet contains frozen source strings, not
+  executable delivery authority. Required-projection and preceding structural
+  owners pass. Add the one exact evidence path; no classifier/budget waiver.
+- `remaining-structural-guards-candidate12`: all remaining selected packages
+  except the serveapp documentation-reference check passed. That check
+  matched the ordinary word "builders" in this new audit, not retired product
+  code; describe those fixture inputs as sources instead, without changing
+  the guard or its exact reference counts.
+- `spelling-inventory-repairs-candidate13`: the route/evidence inventory and
+  documentation check pass, as do the original finite-stage fixture check and
+  a new exact spelling-successor control. The original finite-stage ledger
+  stays byte-identical (SHA256
+  `3da9e2f24fb5126eede32087a4fbb2131152bcf4110901fd029c3626bf173b01`);
+  six current endpoints are separately pinned, and exact inversion must
+  recover each historical whole-file output. This is archival corpus-check
+  evidence, never a state.yaml/entities.yaml runtime compatibility reader.
 
 Historical codemod `recipes.json` stays byte-identical (SHA256
 `4fd3948cf98e828528dd5681e1f93cf79102ac5a0887573a65893e27dd531c70`).

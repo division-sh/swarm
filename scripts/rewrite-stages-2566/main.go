@@ -188,6 +188,9 @@ func pendingChange(root string, c change, check bool) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if current, err := isStageSpellingEndpoint1745(c, body); current || err != nil {
+		return nil, err
+	}
 	output, err := rewrite(c, body)
 	if err != nil || bytes.Equal(output, body) {
 		return nil, err

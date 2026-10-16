@@ -169,6 +169,7 @@ func TestFlatEmbeddingRefusesInvalidReferencesAndCollisions(t *testing.T) {
 		{"repeat_type", "  _embed: [Lead, Lead]\n", "repeats named record"},
 		{"embed_embed", "  _embed: [Lead, Other]\n", "field slug is declared by"},
 		{"embed_own", "  _embed: [Lead]\n  slug: text\n", "own field"},
+		{"description_annotation", "  _embed: [Lead]\n  slug: {type: text, description: Per-use annotation}\n", "own field"},
 		{"annotate", "  _embed: [Lead]\n  slug: {type: text, indexed: true}\n", "own field"},
 		{"unknown_metadata", "  _embeds: [Lead]\n", "_embeds"},
 	} {
@@ -188,7 +189,7 @@ func TestFlatEmbeddingRefusesInvalidReferencesAndCollisions(t *testing.T) {
 				if bundle != nil || err == nil || !strings.Contains(err.Error(), want) {
 					t.Fatalf("want %q, got bundle=%t err=%v", tc.want, bundle != nil, err)
 				}
-				if strings.HasPrefix(tc.name, "embed_") || (tc.name == "annotate" && role == "state") {
+				if strings.HasPrefix(tc.name, "embed_") || tc.name == "description_annotation" || (tc.name == "annotate" && role == "state") {
 					file := "events.yaml"
 					if role == "state" {
 						file = "state.yaml"

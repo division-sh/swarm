@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"go/ast"
@@ -11,6 +12,7 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -102,4 +104,56 @@ func main() {
 		panic(err)
 	}
 	fmt.Printf("appended %d exact state/metadata spelling successors; historical ledger unchanged\n", len(pins))
+	appendStageSpellingEvidence()
+}
+
+func appendStageSpellingEvidence() {
+	const ledger = "scripts/rewrite-stages-2566/finite-fixtures.json"
+	body, err := os.ReadFile(ledger)
+	if err != nil {
+		panic(err)
+	}
+	var plan struct {
+		Changes []struct {
+			File      string
+			AfterHash string `json:"after_hash"`
+		}
+	}
+	if err := json.Unmarshal(body, &plan); err != nil {
+		panic(err)
+	}
+	type endpoint struct{ File, PriorSHA256, CandidateSHA256 string }
+	var endpoints []endpoint
+	for _, row := range plan.Changes {
+		prior, err := exec.Command("git", "show", "9beb615299e14741752ea6c92128b8e6036e9ee6:"+row.File).Output()
+		if err != nil || fmt.Sprintf("%x", sha256.Sum256(prior)) != row.AfterHash {
+			panic(fmt.Sprintf("stage spelling predecessor differs: %s %v", row.File, err))
+		}
+		next := strings.ReplaceAll(string(prior), "entities.yaml", "state.yaml")
+		next = strings.ReplaceAll(next, `\n  key:`, `\n  _key:`)
+		next = strings.ReplaceAll(next, "\n  key:", "\n  _key:")
+		candidate := []byte(next)
+		if strings.HasSuffix(row.File, ".go") {
+			candidate, err = format.Source(candidate)
+			if err != nil {
+				panic(err)
+			}
+		}
+		actual, err := os.ReadFile(row.File)
+		if err != nil || !bytes.Equal(actual, candidate) {
+			panic(fmt.Sprintf("stage source differs beyond spelling: %s %v", row.File, err))
+		}
+		if bytes.Equal(prior, candidate) {
+			continue
+		}
+		endpoints = append(endpoints, endpoint{row.File, row.AfterHash, fmt.Sprintf("%x", sha256.Sum256(candidate))})
+	}
+	output, err := json.MarshalIndent(endpoints, "", "  ")
+	if err != nil {
+		panic(err)
+	}
+	if err := os.WriteFile("scripts/rewrite-stages-2566/state-spelling-1745.json", append(output, '\n'), 0600); err != nil {
+		panic(err)
+	}
+	fmt.Printf("appended %d exact stage-fixture spelling endpoints; original stage ledger unchanged\n", len(endpoints))
 }
