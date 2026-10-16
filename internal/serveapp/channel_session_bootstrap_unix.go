@@ -427,6 +427,13 @@ func (s *serveSessionBootstrap) openSessionAttempt(ctx context.Context, op chann
 	// construction and releases it even after its requesting caller stops waiting.
 	attempt.bootstrap, attempt.incoming = bootstrap, incoming
 	go s.completeSessionAttempt(ctx, owned, op, candidate, attempt, bootstrap, incoming, processBinding, release)
+	// Only this newly selecting request waits for its original constructor.
+	// Cancellation leaves construction owned, but never launches a later dial.
+	select {
+	case <-attempt.done:
+	case <-ctx.Done():
+		return context.Cause(ctx)
+	}
 	return s.connectSessionAttempt(ctx, attempt)
 }
 
