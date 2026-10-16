@@ -648,12 +648,22 @@ func issue2564H2WaitAccounting(t *testing.T, rt issue2564H2Fixture, run string, 
 	var lastAccounting error
 	var reads int
 	var lastRead time.Duration
+	tracedCancellation := false
 	for ctx.Err() == nil {
 		started := time.Now()
 		snapshot, err := issue2564H2Read(ctx, rt, run)
 		lastRead = time.Since(started)
 		reads++
 		if err == nil {
+			if !closed && !tracedCancellation {
+				for _, timer := range snapshot.Timers {
+					if timer.Status == "cancelled" {
+						tracedCancellation = true
+						traceH2CancellationDiagnostic(t, ctx, rt, run, snapshot, timer)
+						break
+					}
+				}
+			}
 			err = issue2564H2Accounting(run, snapshot, closed, keys, 6)
 			if err == nil {
 				return snapshot
