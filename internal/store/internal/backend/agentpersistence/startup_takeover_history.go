@@ -106,7 +106,6 @@ func scanStartupTakeoverFact(rows *sql.Rows) (startupTakeoverFact, error) {
 }
 
 func (f startupTakeoverFact) matches(current runtimemanager.AgentLifecycleState, previousEpoch int64, previousGeneration uint64) bool {
-	r := f.result
 	if f.trigger != "process_takeover" || f.kind != "process_takeover" || f.operationState != "succeeded" ||
 		f.previousPhase != runtimemanager.AgentLifecycleRunning || f.phase != f.previousPhase ||
 		f.expectedEpoch != previousEpoch || f.expectedGeneration != previousGeneration ||
@@ -116,6 +115,11 @@ func (f startupTakeoverFact) matches(current runtimemanager.AgentLifecycleState,
 		f.binding.BundleHash != current.ProcessBinding.BundleHash || f.binding.Validate() != nil {
 		return false
 	}
+	return f.matchesResult(current, previousEpoch, previousGeneration)
+}
+
+func (f startupTakeoverFact) matchesResult(current runtimemanager.AgentLifecycleState, previousEpoch int64, previousGeneration uint64) bool {
+	r := f.result
 	return r.Identity == current.Identity && r.AgentID == current.AgentID && r.OperationID == f.operationID &&
 		r.TransitionID == f.transitionID && r.PreviousEpoch == previousEpoch && r.RuntimeEpoch == f.epoch &&
 		r.PreviousGeneration == previousGeneration && r.Generation == f.generation &&

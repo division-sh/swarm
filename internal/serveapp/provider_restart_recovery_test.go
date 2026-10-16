@@ -275,7 +275,9 @@ func requireProviderRestartEvidence(t *testing.T, before, after map[string]store
 	if completed {
 		for _, table := range []string{"runtime_external_effect_attempts", "runtime_external_effect_operations", "agent_turns", "spend_ledger", "runtime_provider_attempt_drains"} {
 			if !reflect.DeepEqual(before[table], after[table]) {
-				t.Fatalf("completed-attempt restart changed retained %s rows", table)
+				left, _ := json.Marshal(before[table])
+				right, _ := json.Marshal(after[table])
+				t.Fatalf("completed-attempt restart changed retained %s rows: before=%s after=%s", table, left, right)
 			}
 		}
 	}
