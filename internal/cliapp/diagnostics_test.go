@@ -291,12 +291,94 @@ func TestStatusLeadsWithOperationalStateAndExactTurnAttribution(t *testing.T) {
 				if !strings.HasPrefix(text, "Run "+runID+"  stalled\n") || strings.Index(text, "attribution") > strings.Index(text, "run status") || !strings.Contains(text, "agent reviewer, event review.requested (request-id), delivery delivery-id, logical turn logical-id; no accepted emission") {
 					t.Fatalf("headline and origin did not lead the detail: %s", text)
 				}
+				if !strings.Contains(text, "frozen emit grants: emit_review_done") {
+					t.Fatalf("text lost the frozen emit grant: %s", text)
+				}
 			} else {
 				for _, expected := range []string{`"operational_state":"stalled"`, `"delivery_id":"delivery-id"`, `"emission_evidence":"none"`, `"granted_emit_tools":["emit_review_done"]`} {
 					if !strings.Contains(text, expected) {
 						t.Fatalf("JSON lost %s: %s", expected, text)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestStatusPreservesFrozenEmitGrantEvidence(t *testing.T) {
+	runID := "11111111-1111-4111-8111-111111111111"
+	for _, tc := range []struct {
+		name       string
+		grants     []string
+		emission   string
+		reason     string
+		historical bool
+		wantText   string
+	}{
+		{name: "granted", grants: []string{"emit_review_done", "emit_review_escalated"}, emission: "none", wantText: "frozen emit grants: emit_review_done, emit_review_escalated"},
+		{name: "zero_grants", grants: []string{}, emission: "none", wantText: "frozen emit grants: none"},
+		{name: "unknown", grants: []string{}, emission: "unknown", reason: "logical_turn_evidence_incomplete", wantText: "frozen emit grants: unknown"},
+		{name: "incomplete_with_grant", grants: []string{"emit_review_done"}, emission: "unknown", reason: "logical_turn_evidence_incomplete", wantText: "frozen emit grants: emit_review_done"},
+		{name: "historical", grants: []string{"emit_review_done"}, emission: "unknown", reason: "historical_drained_completion", historical: true, wantText: "frozen emit grants: emit_review_done"},
+		{name: "historical_unknown", grants: []string{}, emission: "unknown", reason: "historical_drained_completion", historical: true, wantText: "frozen emit grants: unknown"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, mode := range []string{"human", "json"} {
+				t.Run(mode, func(t *testing.T) {
+					setCLIAPITestToken(t, "test-token")
+					calls := 0
+					server, _ := newDiagnosticSuccessServer(t, func(req jsonRPCRequest, _ int) map[string]any {
+						calls++
+						if req.Method != "run.diagnose" {
+							t.Fatalf("status performed a second interpretation or re-drive: %s", req.Method)
+						}
+						result := validDiagnosticRunDiagnosis(runID, "stalled", "", "", []any{})
+						result["attributions"] = []any{map[string]any{
+							"flow_instance": "review/one", "agent_id": "reviewer", "event_id": "request-id", "event_type": "review.requested", "delivery_id": "delivery-id", "logical_turn_id": "logical-id",
+							"provider_turns": []string{"provider-id"}, "granted_emit_tools": tc.grants, "emitted_events": []any{}, "emission_evidence": tc.emission, "evidence_reason": tc.reason, "historical": tc.historical,
+						}}
+						return result
+					})
+					defer server.Close()
+					args := []string{"run", "status", runID}
+					if mode == "json" {
+						args = append(args, "--json")
+					}
+					var stdout, stderr bytes.Buffer
+					if code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, testRootCommandOptions(server)); code != 0 || calls != 1 {
+						t.Fatalf("status code=%d calls=%d stdout=%s stderr=%s", code, calls, stdout.String(), stderr.String())
+					}
+					if mode == "json" {
+						var result DiagnosticRunDiagnosisResult
+						if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+							t.Fatal(err)
+						}
+						if len(result.Attributions) != 1 {
+							t.Fatalf("JSON attribution count = %d", len(result.Attributions))
+						}
+						got := result.Attributions[0]
+						if !reflect.DeepEqual(got.GrantedEmitTools, tc.grants) || string(got.Emission) != tc.emission || got.EvidenceReason != tc.reason || got.Historical != tc.historical {
+							t.Fatalf("JSON changed frozen evidence: %+v", got)
+						}
+						return
+					}
+					text := stdout.String()
+					for _, want := range []string{tc.wantText, "agent reviewer, event review.requested (request-id), delivery delivery-id, logical turn logical-id", tc.reason} {
+						if !strings.Contains(text, want) {
+							t.Fatalf("text lost %q: %s", want, text)
+						}
+					}
+					if tc.emission == "unknown" {
+						if !strings.Contains(text, "emission evidence unknown") || strings.Contains(text, "no accepted emission") || strings.Contains(text, "frozen emit grants: none") {
+							t.Fatalf("text presented incomplete evidence as proven silence: %s", text)
+						}
+					} else if !strings.Contains(text, "no accepted emission") {
+						t.Fatalf("text lost proven silence: %s", text)
+					}
+					if tc.historical && !strings.Contains(text, "historical ") {
+						t.Fatalf("text lost the historical label: %s", text)
+					}
+				})
 			}
 		})
 	}
