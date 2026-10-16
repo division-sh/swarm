@@ -81,11 +81,18 @@ no historical record, root or assertion is removed. Collector remainsf5da43ac.
 
 The fifth reached failure is TestAdjacent2149AuthorityFindingsClosed, whose
 blanket unclassified-row assertion conflicts with the existing exact a1
-admission. BLOCKING question6220400254 retains it unchanged pending disposition.
+admission. BLOCKING question6220400254 was resolved by6220517236.
 The actual registry root PASSED19820 exact findings with4704 admitted keys,
 strict_completion=false, digest14be09b12bd09bd915e54d6f8ce37feaaac00a3f4c1b24788774689927863f9e.
 There are0 adjacent-2149 rows; all registry hostile/effective-method controls
 passed. No unknown/stale/new key or allowance increase is proposed.
+
+Ruling6220517236 authorizes extracting the original canonical registry-root
+body unchanged into one helper used by BOTH roots. The adjacent root keeps its
+unconditional zero-adjacent-2149 assertion, then independently executes the
+complete actual scan, correspondence, strict diagnostics and exact a1 validation.
+It never relies on another test passing, and introduces no cached PASS, parser-only
+whitelist check or new exception. Positive/hostile execution receipts are pending.
 
 Tool source/imported helpers, manifests, pinned source objects and selection
 are unchanged. The sole history-fetch addition is the exact ff6905 object
