@@ -56,6 +56,7 @@ type serveNativeProtocolPeer struct {
 	clientTrust    servedNativeClientTrust
 	disconnect     func()
 	onACKTimeout   func(string)
+	replacementQR  *servedReplacementQRBatchCut
 }
 
 type servedNativeMessage struct {
@@ -161,6 +162,8 @@ func newServeNativeProtocolPeer(t *testing.T) *serveNativeProtocolPeer {
 }
 
 func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
+	var connection int
+	var replacement *servedReplacementQRBatchCut
 	defer func() {
 		p.mu.Lock()
 		p.disconnected++
@@ -168,16 +171,28 @@ func (p *serveNativeProtocolPeer) serve(wire *whatsappfixture.Transport) {
 			p.postLoginWire = nil
 		}
 		p.mu.Unlock()
+		if replacement != nil && connection == 1 {
+			close(replacement.originalJoined)
+		}
 	}()
 	payload := wire.ClientPayload()
 	p.mu.Lock()
 	p.wire = wire
 	p.connections++
+	connection, replacement = p.connections, p.replacementQR
 	if payload.DevicePairingData != nil {
 		p.registration = payload.DevicePairingData
 	}
 	p.mu.Unlock()
 	if payload.DevicePairingData != nil {
+		if replacement != nil && connection == 2 {
+			close(replacement.held)
+			select {
+			case <-replacement.release:
+			case <-p.ctx.Done():
+				return
+			}
+		}
 		if err := wire.Send(p.ctx, whatsappfixture.PairingRequest("SERVED_PAIR")); err != nil {
 			p.t.Error(err)
 			return
