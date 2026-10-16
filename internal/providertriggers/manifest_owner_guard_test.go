@@ -36,6 +36,9 @@ func TestTriggerBodyOwnerGuardRejectsDecoderAndCarrierRoundtrips(t *testing.T) {
 				t.Fatal(err)
 			}
 			source := strings.Replace(string(body), "import (", "import (\n probeYAML \"gopkg.in/yaml.v3\"", 1)
+			if owner == "compilePackAdmission" {
+				source = strings.Replace(source, "import (", "import (\n \"github.com/division-sh/swarm/internal/packartifact\"", 1)
+			}
 			files := token.NewFileSet()
 			file, err := parser.ParseFile(files, path, source, 0)
 			if err != nil {
@@ -50,13 +53,16 @@ func TestTriggerBodyOwnerGuardRejectsDecoderAndCarrierRoundtrips(t *testing.T) {
 			if position == 0 {
 				t.Fatalf("missing carrier owner: %s", owner)
 			}
-			injection := "\nvar raw []byte; _, _ = ParseManifest(raw); _ = probeYAML.Unmarshal(raw, new(any)); _, _ = probeYAML.Marshal(new(any))\n"
+			injection := "\nvar raw []byte; _, _ = ParseManifest(raw); _, _ = AdmitBody(packartifact.ProviderBody{}); _ = probeYAML.Unmarshal(raw, new(any)); _, _ = probeYAML.Marshal(new(any))\n"
 			source = source[:position] + injection + source[position:]
 			findings := strings.Join(triggerBodyOwnerFindings(t, map[string][]byte{path: []byte(source)}), "\n")
 			for _, want := range []string{owner, "competing BODY admission", "competing YAML codec"} {
 				if !strings.Contains(findings, want) {
 					t.Fatalf("guard missed %q: %s", want, findings)
 				}
+			}
+			if !strings.Contains(findings, "competing BODY admission AdmitBody") {
+				t.Fatalf("guard missed the directory BODY entrance: %s", findings)
 			}
 		})
 	}
@@ -102,7 +108,7 @@ func triggerBodyOwnerFindings(t testing.TB, overlay map[string][]byte) []string 
 					if path == "gopkg.in/yaml.v3" {
 						findings = append(findings, fmt.Sprintf("%s competing YAML codec %s", fn.Name.Name, name))
 					}
-					if path == pkg.PkgPath && (name == "ParseManifest" || name == "parseManifestStrict" || name == "parseManifestAt") && allowed[fn.Name.Name] != name {
+					if path == pkg.PkgPath && (name == "AdmitBody" || name == "ParseManifest" || name == "parseManifestStrict" || name == "parseManifestAt") && allowed[fn.Name.Name] != name {
 						findings = append(findings, fmt.Sprintf("%s competing BODY admission %s", fn.Name.Name, name))
 					}
 					if path == "github.com/division-sh/swarm/internal/yamlsource" && name == "Load" && fn.Name.Name != "parseManifestAt" {
