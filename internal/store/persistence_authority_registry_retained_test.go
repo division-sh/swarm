@@ -136,7 +136,9 @@ func registryRetainedPrevious(root, source string, origin []byte) ([]byte, error
 		return nil, err
 	}
 	if !bytes.Equal(active, origin) {
-		return nil, fmt.Errorf("first retained registry must equal the immutable origin exactly")
+		if err := registryRetainedH19Bootstrap(root, origin, active); err != nil {
+			return nil, err
+		}
 	}
 	return origin, nil
 }
