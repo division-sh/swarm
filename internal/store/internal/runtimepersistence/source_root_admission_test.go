@@ -6,7 +6,6 @@ import (
 	"database/sql/driver"
 	"errors"
 	"os"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type rootedSourceStore interface {
@@ -105,22 +105,7 @@ func selectedRootAdmissionStore(t *testing.T, backend string) rootedSourceStore 
 
 func admittedRootForStorage(t *testing.T, directory string) (sourceartifact.RootedSource, string) {
 	t.Helper()
-	root := filepath.Join(t.TempDir(), directory)
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "nodes.yaml"), []byte("worker: {type: procedure}\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	artifact, err := sourceartifact.AdmitDirectory(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rooted, err := artifact.RootedSource()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return rooted, root
+	return sourceartifactfixture.Rooted(t, directory, sourceartifactfixture.New("nodes.yaml", []byte("worker: {type: procedure}\n")))
 }
 
 func TestS1RootAdmissionRetainedOwnerBothStores(t *testing.T) {
