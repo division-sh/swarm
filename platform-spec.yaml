@@ -7653,7 +7653,7 @@ engine:
               authorization: '#2542 ruling 6112778624'
               file: internal/apiv1/operator_stage_completion_journey_test.go
               predecessor: stageCompletionRehydrate
-              successor: TestExactStageCompletionRealWriterAndRehydratedSourceBothStores
+              successor: 'declaration TestExactStageCompletionRealWriterAndRehydratedSourceBothStores (retained debt identity, not an executable-proof claim)'
               kind: selected-store-construction
               operation: 'construction:*github.com/division-sh/swarm/internal/store.SQLiteRuntimeStore'
               multiplicity: '1 -> 1; retained debt, zero deletion credit'
@@ -8551,6 +8551,17 @@ engine:
             Authored model aliases always resolve against the configured live profile and its llm.models metadata, even when
             an exact mock selects mock execution. The mock execution profile is not a second model-metadata namespace and
             cannot invalidate a configured live alias.
+          descriptor_validation:
+            persisted_owner: internal/runtime/llm.ValidatePersistedAgentExecutionDescriptor
+            configured_owner: internal/runtime/llm.ValidateAgentExecutionDescriptor
+            rule: >
+              Persisted execution validation checks the already-selected active backend, mode, provider, transport,
+              model metadata and exact performance without inventing a configured live/model profile. Native first
+              agent claim capture on SQLite and PostgreSQL consumes this operation under its existing lifecycle,
+              grant, configuration-revision and transaction fences. A persisted mock execution profile is valid
+              evidence, not a public backend selector. Configured-runtime admission reuses those same descriptor
+              checks and additionally verifies the genuine configured live profile and authored/configured/live
+              execution agreement. A valid authored live pin remains valid on a mock descriptor; no reader reselects.
           runtime_binding:
             owner: internal/runtime/llm.AgentRuntimeSet
             rule: >

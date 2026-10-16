@@ -72,6 +72,14 @@ func historicalBoundaryAllowances() map[string]historicalBoundaryAllowance {
 	allowed["store/internal/runtimepersistence::ObserveWorkflowTimerReplayStorageForTest/reference:"+historicalBoundaryWriter+"CountWorkflowTimerRevisionFactsForTest"] = historicalBoundaryAllowance{1, "exact selected read transaction delegates physical ledger observation to its canonical owner"}
 	allowed[historicalBoundaryWriter+"CountNotifyFanOutRevisionStorageForTest/ledger_sql"] = historicalBoundaryAllowance{1, "fixed physical revision cardinalities stay with the canonical ledger owner; no payload decoding or caller selector"}
 	allowed["store/internal/runtimepersistence::ReadNotifyFanOutWorkForTest/reference:"+historicalBoundaryWriter+"CountNotifyFanOutRevisionStorageForTest"] = historicalBoundaryAllowance{1, "fan-out diagnostic delegates fixed ledger counts within the original selected read snapshot"}
+	for _, name := range []string{"CountRunFactRevisionRowsForTest", "CountServingLifetimeHistoryStorageTx", "ReadLatestFanOutObligationFactStorageTx", "ReadRunRevisionFactStorageTx", "ReadFanOutObligationHistoryStorageForTestTx", "ReadSupplementalFanOutObligationHistoryTx"} {
+		allowed[historicalBoundaryWriter+name+"/ledger_sql"] = historicalBoundaryAllowance{1, "fixed physical ledger witness in the canonical revision owner; no historical decoding, admission or execution grant"}
+	}
+	for _, name := range []string{"ReadA2MapHistoryFootprintStorageForTest", "ReadA2RetainedSourceFootprintStorageForTest"} {
+		allowed["store/internal/runtimepersistence::"+name+"/reference:"+historicalBoundaryWriter+"CountNotifyFanOutRevisionStorageForTest"] = historicalBoundaryAllowance{1, "fixed read-only diagnostic delegates its exact run cardinalities within the original selected read transaction"}
+	}
+	allowed["store/internal/runtimepersistence::ReadRepeatedFanOutSnapshotForTest/reference:"+historicalBoundaryWriter+"CountRunFactRevisionRowsForTest"] = historicalBoundaryAllowance{1, "slot six of the complete physical witness consumes the canonical ledger count within the same selected snapshot"}
+	allowed["store/internal/runtimepersistence::CountRunStopFactRevisionRowsForTest/reference:"+historicalBoundaryWriter+"CountRunFactRevisionRowsForTest"] = historicalBoundaryAllowance{1, "existing stop witness delegates the same fixed physical count to its canonical owner"}
 	allowed[historicalBoundaryOwner+"validateSelectedForkBranchDivergenceTx/reference:"+historicalBoundaryOwner+"resolveRunForkRevisionPoint"] = historicalBoundaryAllowance{1, "typed branch evidence verifies its bound point through the canonical contextual resolver; it neither decodes payloads nor grants replay"}
 	for _, caller := range []string{
 		"resolveSQLiteRunForkRevisionPoint", "lockRunForkSourceRevisionFrontier",
@@ -276,7 +284,7 @@ func historicalBoundaryCollect(pkg *types.Package, info *types.Info, fset *token
 				case historicalBoundaryWriter + "FactKey", historicalBoundaryWriter + "projectionFactKey", historicalBoundaryWriter + "admitFactKeyCoordinates", historicalBoundaryOwner + "appendRunForkHistoricalFact", "runtime/deliverylifecycle::DecodeHistoricalSnapshot",
 					"runtime/runfork::NewTerminalBarrierHistory", historicalBoundaryOwner + "admitRunForkTerminalBarrierHistory",
 					historicalBoundaryOwner + "resolveRunForkRevisionPoint", historicalBoundaryOwner + "resolveSQLiteRunForkRevisionPoint",
-					historicalBoundaryWriter + "CountWorkflowTimerRevisionFactsForTest", historicalBoundaryWriter + "CountNotifyFanOutRevisionStorageForTest":
+					historicalBoundaryWriter + "CountWorkflowTimerRevisionFactsForTest", historicalBoundaryWriter + "CountNotifyFanOutRevisionStorageForTest", historicalBoundaryWriter + "CountRunFactRevisionRowsForTest":
 					add(n, "reference:"+callee)
 				case historicalBoundaryOwner + "AppendRunForkRevisionFact", historicalBoundaryOwner + "appendRunForkRevisionFact":
 					add(n, "contextless_append_reference")
@@ -533,6 +541,11 @@ func (arbitrary *unexpectedReader) stealNotifyRevisionObservation() {
     alias := observe
     _ = alias
 }
+func (arbitrary *unexpectedReader) stealRepeatedRevisionObservation() {
+    observe := revision.CountRunFactRevisionRowsForTest
+    alias := observe
+    _ = alias
+}
 func (arbitrary *unexpectedReader) mintTerminalHistory() {
     alias := history.NewTerminalBarrierHistory
     _ = alias
@@ -610,6 +623,7 @@ func ordinaryBusiness(raw []byte) error {
 	want := []string{
 		historicalBoundaryOwner + "unexpectedReader.stealTimerRevisionObservation/reference:" + historicalBoundaryWriter + "CountWorkflowTimerRevisionFactsForTest",
 		historicalBoundaryOwner + "unexpectedReader.stealNotifyRevisionObservation/reference:" + historicalBoundaryWriter + "CountNotifyFanOutRevisionStorageForTest",
+		historicalBoundaryOwner + "unexpectedReader.stealRepeatedRevisionObservation/reference:" + historicalBoundaryWriter + "CountRunFactRevisionRowsForTest",
 		historicalBoundaryOwner + "unexpectedReader.mintInitializer/reference:events::AdmitFlowReceiverInitialization",
 		historicalBoundaryOwner + "unexpectedReader.restoreInitializer/reference:events::RestoreReceiverMaterializationRecord",
 		historicalBoundaryOwner + "unexpectedReader.mintOrigin/reference:events::NewInheritedFanOutOrigin",

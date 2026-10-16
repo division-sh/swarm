@@ -10,7 +10,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -21,7 +20,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -85,41 +83,7 @@ func resolveNativeClaimFixtureActor(t testing.TB, actor actors.AgentConfig) acto
 
 func admitAgentClaimProfileAuthority(t testing.TB, ctx context.Context, selected agentfixture.Store, fact correlation.SourceArtifactFact) deliverylifecycle.ExecutionAuthority {
 	t.Helper()
-	capability, err := agentfixture.ProcessCapability(t, ctx, selected)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan, found, err := capability.CurrentSourceSet(ctx)
-	if err != nil || !found {
-		t.Fatalf("profile fixture requires its current complete source set: found=%t err=%v", found, err)
-	}
-	grant, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, agenttopology.SourceCoordinate{BundleHash: fact.BundleHash()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	evidence, err := grant.Evidence()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if evidence.State == startupownership.GrantPrepared {
-		evidence, err = grant.MarkProbesSettled(ctx, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	if evidence.State == startupownership.GrantProbeSettled {
-		evidence, err = grant.AdmitExecution(ctx)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	if evidence.State != startupownership.GrantAdmitted {
-		t.Fatalf("profile fixture grant is not admitted: %+v", evidence)
-	}
-	if err := grant.ProveCurrent(ctx); err != nil {
-		t.Fatal(err)
-	}
-	authority, err := deliverylifecycle.NewNormalExecutionAuthority(fact, evidence.GrantID, evidence.RuntimeGeneration)
+	authority, err := agentfixture.AdmitExecutionAuthority(t, ctx, selected, fact)
 	if err != nil {
 		t.Fatal(err)
 	}

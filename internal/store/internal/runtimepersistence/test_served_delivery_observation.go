@@ -13,6 +13,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 type LatestPipelineReceiptStorage = pipelinepersistence.LatestPipelineReceiptStorage
@@ -245,7 +246,15 @@ func CountRepeatedFanOutTriggerOutcomesForTest(ctx context.Context, selected any
 
 func ReadRepeatedFanOutSnapshotForTest(ctx context.Context, selected any, run string) ([8]int64, error) {
 	return readFanOutSemanticStorage(ctx, selected, []string{run}, func(ctx context.Context, tx *sql.Tx) ([8]int64, error) {
-		return delivery.ReadRepeatedFanOutSnapshotTx(ctx, tx, run)
+		components, err := delivery.ReadRepeatedFanOutSnapshotTx(ctx, tx, run)
+		if err != nil {
+			return [8]int64{}, err
+		}
+		facts, err := runforkrevision.CountRunFactRevisionRowsForTest(ctx, tx, run)
+		if err != nil {
+			return [8]int64{}, err
+		}
+		return [8]int64{components[0], components[1], components[2], components[3], components[4], components[5], int64(facts), components[6]}, nil
 	})
 }
 

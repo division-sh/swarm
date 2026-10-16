@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
@@ -128,6 +129,12 @@ func persistedEventDeliveryFixtureAuthority(ctx context.Context, tx *sql.Tx, run
 	source, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
 	if err != nil {
 		return runtimedelivery.ExecutionAuthority{}, fmt.Errorf("construct delivery fixture source: %w", err)
+	}
+	if admission, present := managedexecution.FromContext(ctx); present {
+		if admission.Kind != managedexecution.KindNormalRuntime || admission.BundleHash != source.BundleHash() {
+			return runtimedelivery.ExecutionAuthority{}, fmt.Errorf("delivery fixture admission differs from its exact normal run source")
+		}
+		return runtimedelivery.NewExecutionAuthority(source, admission)
 	}
 	authority, err := runtimedelivery.NewNormalExecutionAuthority(source, "storetest:"+runID, 1)
 	if err != nil {

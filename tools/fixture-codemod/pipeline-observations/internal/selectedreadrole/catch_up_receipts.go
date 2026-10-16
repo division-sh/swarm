@@ -22,6 +22,9 @@ import (
 //go:embed testdata/catch_up_2542.json
 var catchUp2542Bytes []byte
 
+const catchUp2542Lane = "dec6f1a009400d230b0bb92c83c0997ae35b2938"
+const catchUp2542Master = "19dc188f6d57985a3360a619ea57b890b3c148dd"
+
 type CatchUp2542Row struct {
 	Key, Disposition, BaseSHA256, MasterSHA256, LaneSHA256, ComposedSHA256, SourceSHA256 string
 }
@@ -54,6 +57,9 @@ func readCatchUp2542Packet() (CatchUp2542Packet, error) {
 			return
 		}
 		catchUp2542Error = json.Unmarshal(catchUp2542Bytes, &catchUp2542Packet)
+		if catchUp2542Error == nil && (catchUp2542Packet.Lane != catchUp2542Lane || catchUp2542Packet.Master != catchUp2542Master) {
+			catchUp2542Error = fmt.Errorf("finite catch-up history inputs differ from their signed packet")
+		}
 	})
 	return catchUp2542Packet, catchUp2542Error
 }

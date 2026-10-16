@@ -90,16 +90,25 @@ func localSpelling() { decodeReceiverInitialization := func() {}; decodeReceiver
 		},
 		{
 			pkg: "runtime/bus", callee: "runtime/bus::EventBus.admitEnginePublishEvent",
-			approved: []string{"EventBus.PrepareFanOutPublications", "EventBus.prepareEnginePublicationsWithMember"}, refused: "EventBus.prepareEnginePublications",
+			approved: []string{"EventBus.PrepareFanOutPublications", "EventBus.admitEnginePublicationOccurrence"}, refused: "EventBus.prepareEnginePublications",
 			source: `package bus
 type EventBus struct{}
 type unrelated struct{}
 func (*EventBus) admitEnginePublishEvent() {}
 func (*unrelated) admitEnginePublishEvent() {}
 func (arbitrary *EventBus) PrepareFanOutPublications() { arbitrary.admitEnginePublishEvent() }
-func (arbitrary *EventBus) prepareEnginePublicationsWithMember() { admit := arbitrary.admitEnginePublishEvent; admit() }
+func (arbitrary *EventBus) admitEnginePublicationOccurrence() { admit := arbitrary.admitEnginePublishEvent; admit() }
 func (arbitrary *EventBus) prepareEnginePublications() { arbitrary.admitEnginePublishEvent() }
 func (arbitrary *unrelated) PrepareFanOutPublications() { arbitrary.admitEnginePublishEvent() }
+`,
+		},
+		{
+			pkg: "runtime/bus", callee: "runtime/bus::EventBus.admitEnginePublishEvent",
+			refused: "EventBus.prepareEnginePublicationsWithMember",
+			source: `package bus
+type EventBus struct{}
+func (*EventBus) admitEnginePublishEvent() {}
+func (arbitrary *EventBus) prepareEnginePublicationsWithMember() { arbitrary.admitEnginePublishEvent() }
 `,
 		},
 		{

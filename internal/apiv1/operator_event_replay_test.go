@@ -302,6 +302,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					}
 				}
 				authority := admitOperatorReplayReceiverGeneration(t, ctx, f.store, runID)
+				ctx = admitAPITestAgentExecution(t, ctx, f.store.(storetest.AgentFixtureStore), runStartTestSourceArtifactFact())
 				bus, err := newScopedAPITestEventBus(t, f.store, runtimebus.EventBusOptions{
 					ContractBundle: completeOperatorReplaySource(t), DeliveryAuthority: authority,
 				})
@@ -768,15 +769,12 @@ func admitOperatorReplayReceiverGeneration(t *testing.T, ctx context.Context, se
 			t.Fatalf("replay receiver retained generation: state=%+v found=%t err=%v", state, found, err)
 		}
 	}
-	if _, err := grant.MarkProbesSettled(ctx, nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := grant.AdmitExecution(ctx); err != nil {
-		t.Fatal(err)
-	}
-	authority, err := runtimedelivery.NewNormalExecutionAuthority(runStartTestSourceArtifactFact(), binding.GenerationGrantID, binding.RuntimeGeneration)
+	authority, err := agentfixture.AdmitExecutionAuthority(t, ctx, fixture, runStartTestSourceArtifactFact())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if authority.ExecutionID() != binding.GenerationGrantID || authority.Generation() != binding.RuntimeGeneration {
+		t.Fatal("replay execution admission differs from its retained receiver binding")
 	}
 	if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
 		t.Fatal(err)
@@ -1590,6 +1588,9 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 	scope := runtimepipelineobligation.ScopeDirect
 	if len(routes) > 0 {
 		scope = runtimepipelineobligation.ScopeSubscribed
+	}
+	if len(routes) > 0 && status != runtimedelivery.StatusPending {
+		ctx = admitAPITestAgentExecution(t, ctx, pg, authorActivityTestSourceArtifactFact)
 	}
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, semanticEvent, routes, scope)
 	for _, route := range routes {

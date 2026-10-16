@@ -105,6 +105,7 @@ func TestReadRoleWarmSourceCacheDoesNotHideMissingOrChangedSiblings(t *testing.T
 	}
 	copy := t.TempDir()
 	paths := map[string]bool{Path: true}
+	addReadRoleProbeInputs(t, root, copy, paths)
 	for _, pin := range pins {
 		paths[pin.File] = true
 	}
@@ -135,5 +136,33 @@ func TestReadRoleWarmSourceCacheDoesNotHideMissingOrChangedSiblings(t *testing.T
 		if _, err := EarlierSource(copy, pins[len(pins)-1].File, pins[len(pins)-1].Function, pins[len(pins)-1].After); err == nil {
 			t.Fatal("unchanged supplied endpoint hid mutated sibling")
 		}
+	}
+}
+
+func addReadRoleProbeInputs(t *testing.T, root, copy string, paths map[string]bool) {
+	t.Helper()
+	gitdir, err := exec.Command("git", "-C", root, "rev-parse", "--absolute-git-dir").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(copy, ".git"), []byte("gitdir: "+strings.TrimSpace(string(gitdir))+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{EntityToolPath, ReadbackPath, ChannelProcessPath, StandingIngressPath, DeploymentResourcePath} {
+		paths[path] = true
+	}
+	readback, err := ReadReadbackPins(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pin := range readback {
+		paths[pin.File] = true
+	}
+	entityTools, err := ReadEntityToolPins(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pin := range entityTools {
+		paths[pin.File] = true
 	}
 }

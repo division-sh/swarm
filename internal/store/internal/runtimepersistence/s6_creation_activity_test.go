@@ -240,11 +240,10 @@ func newS6CreationActivityEvent(t *testing.T, source semanticview.Source, plan p
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, err := events.NewChildEvent(events.ChildEventInput{Facts: events.EventFacts{ID: creation.EventID, Type: events.EventType(creation.EventType), Producer: events.ProducerClaim{Type: events.EventProducerPlatform, ID: "flow-instance-activator"}, Payload: creation.Payload, Envelope: events.EnvelopeForSourceRoute(events.EventEnvelope{FlowInstance: route.FlowInstance, EntityID: route.EntityID}, route), RoutingSource: routing, CreatedAt: creation.CreatedAt, ExecutionMode: executionmode.Live}, Lineage: events.EventLineage{RunID: plan.RunID, ParentEventID: creation.ParentEventID, ExecutionMode: executionmode.Live}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return event
+	return eventtest.ChildForProducerWithRoutingSource(creation.EventID, events.EventType(creation.EventType),
+		eventtest.Producer(events.EventProducerPlatform, "flow-instance-activator"), "", creation.Payload, 0,
+		events.EventLineage{RunID: plan.RunID, ParentEventID: creation.ParentEventID, ExecutionMode: executionmode.Live},
+		events.EnvelopeForSourceRoute(events.EventEnvelope{FlowInstance: route.FlowInstance, EntityID: route.EntityID}, route), routing, creation.CreatedAt)
 }
 
 func (f s6CreationActivityFixture) commit(event events.Event) error {
@@ -330,14 +329,10 @@ func TestS6ReferenceOnlyCreationEmitsNativeActivityBothStores(t *testing.T) {
 				if after := f.activity(t, ""); !reflect.DeepEqual(after, all) {
 					t.Fatalf("exact creation replay changed activity: before=%+v after=%+v", all, after)
 				}
-				conflict, err := events.NewChildEvent(events.ChildEventInput{
-					Facts: events.EventFacts{ID: f.event.ID(), Type: f.event.Type(), Producer: events.ProducerClaim{Type: f.event.ProducerType(), ID: f.event.SourceAgent()},
-						Payload: f.event.Payload(), Envelope: f.event.Envelope(), RoutingSource: f.event.RoutingSource(), CreatedAt: f.event.CreatedAt().Add(time.Microsecond), ExecutionMode: f.event.ExecutionMode()},
-					Lineage: events.EventLineage{RunID: f.event.RunID(), ParentEventID: f.event.ParentEventID(), ExecutionMode: f.event.ExecutionMode()},
-				})
-				if err != nil {
-					t.Fatal(err)
-				}
+				conflict := eventtest.ChildForProducerWithRoutingSource(f.event.ID(), f.event.Type(),
+					eventtest.Producer(f.event.ProducerType(), f.event.SourceAgent()), "", f.event.Payload(), 0,
+					events.EventLineage{RunID: f.event.RunID(), ParentEventID: f.event.ParentEventID(), ExecutionMode: f.event.ExecutionMode()},
+					f.event.Envelope(), f.event.RoutingSource(), f.event.CreatedAt().Add(time.Microsecond))
 				if err := f.commit(conflict); !errors.Is(err, events.ErrEventIdentityConflict) {
 					t.Fatalf("conflicting creation replay did not refuse its immutable identity: %v", err)
 				}

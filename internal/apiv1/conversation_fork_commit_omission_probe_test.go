@@ -74,11 +74,12 @@ func newConversationForkCommitFixture(t *testing.T, backend string) (context.Con
 	if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{
 		Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 			Identity: identity, ID: agentID, Role: "researcher", Type: "managed", Model: "cheap",
-			ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowPath: "flow/a", Memory: agentmemory.Plan{Enabled: true},
+			ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowPath: "flow/a", Memory: agentmemory.Plan{Enabled: true}, Config: []byte(`{}`),
 		}), Status: "active", StartedAt: now.Add(-5 * time.Minute),
 	}); err != nil {
 		t.Fatal(err)
 	}
+	ctx = admitAPITestAgentExecution(t, ctx, selected, authorActivityTestSourceArtifactFact)
 	history := storetest.SeedConversationForkSource(t, ctx, selected, storetest.ConversationForkSourceFixture{
 		Identity: identity, RunID: runID, SessionID: sessionID, EntityID: uuid.NewString(),
 		Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), CreatedAt: now,

@@ -9,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/llm"
-	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/manager"
 )
 
@@ -57,11 +56,8 @@ func readReceiverClaimProfileTx(ctx context.Context, tx *sql.Tx, event events.Ev
 	if revision != state.ConfigRevision {
 		return deliverylifecycle.AgentClaimProfile{}, fmt.Errorf("captured agent descriptor differs from its immutable configuration revision")
 	}
-	profile, err := selection.ResolveActiveBackend(cfg.ResolvedLLMBackend)
+	profile, err := llm.ValidatePersistedAgentExecutionDescriptor(cfg)
 	if err != nil {
-		return deliverylifecycle.AgentClaimProfile{}, err
-	}
-	if _, err := llm.ValidateAgentExecutionDescriptor(profile, cfg); err != nil {
 		return deliverylifecycle.AgentClaimProfile{}, err
 	}
 	id, err := deliverylifecycle.DeliveryID(event.ID(), route)

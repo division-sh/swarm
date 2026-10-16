@@ -79,9 +79,16 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 	if fixture.Store == nil || fixture.Selected == nil {
 		t.Fatal("managed turn fixture requires selected store owners")
 	}
+	admitted, err := managedexecution.Require(ctx)
+	if err != nil || admitted.Kind != managedexecution.KindNormalRuntime {
+		t.Fatalf("managed turn fixture requires its explicitly admitted normal execution context: %v", err)
+	}
 	ctx, bundleSource, err := managedTurnFixtureContext(ctx)
 	if err != nil {
 		t.Fatalf("build managed turn fixture bundle source: %v", err)
+	}
+	if admitted.BundleHash != bundleSource.BundleHash() {
+		t.Fatal("managed turn fixture execution admission differs from its source")
 	}
 	identity := fixture.Identity.Normalize()
 	if err := identity.Validate(); err != nil {

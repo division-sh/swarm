@@ -117,6 +117,9 @@ func TestA2RepeatedFanOutTriggerIsolationOnBothStores(t *testing.T) {
 			callbackIDs = append(callbackIDs, completions...)
 			assertNestedServingDrained(t, probe)
 			before := a2RepeatedFanOutSnapshot(t, ctx, rt.selected, runID)
+			if before[6] <= 0 {
+				t.Fatal("repeated fan-out snapshot omitted nonzero native revision evidence")
+			}
 			beforeSummary, err := rt.selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
 			if err != nil || beforeSummary.Intents != 4 || beforeSummary.Cardinality != 7 || beforeSummary.Settled != 7 || beforeSummary.BarrierTerminal != 3 || beforeSummary.BlocksCompletion() {
 				t.Fatalf("repeated-trigger public summary = %+v err=%v", beforeSummary, err)

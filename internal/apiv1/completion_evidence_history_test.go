@@ -2,6 +2,7 @@ package apiv1
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -32,7 +33,7 @@ func TestCompletion2270PublicHistorySurvivesReopenBothStores(t *testing.T) {
 				identity := sqliteAgentUsageIdentityForRun(t, runID, "completion-history-2270")
 				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin()})
 				actor := withAPITestIntent(t, actors.AgentConfig{Identity: identity, ID: identity.AgentID(), Role: "researcher", Type: "managed", Model: "regular",
-					ExecutionMode: "live", ResolvedLLMBackend: "claude_cli", FlowPath: identity.FlowInstance(), Memory: agentmemory.Plan{Enabled: memory}})
+					ExecutionMode: "live", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli", FlowPath: identity.FlowInstance(), Config: json.RawMessage(`{}`), Memory: agentmemory.Plan{Enabled: memory}})
 				storetest.RequireStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{Config: actor, Status: "active", StartedAt: time.Now().UTC()})
 				if memory {
 					sessionID = completion2270HistorySession(t, selected.(sessions.Registry), identity)
@@ -67,7 +68,7 @@ func TestCompletion2270SubNanodollarPublicHistoryBothStores(t *testing.T) {
 			seedCompletion2270Agent(t, ctx, selected, identity)
 			want, frameHash := persistCompletion2270History(t, selected, identity, sessionID, turnID, false, 0.0000000004)
 			actor := withAPITestIntent(t, actors.AgentConfig{Identity: identity, ID: identity.AgentID(), Role: "researcher", Type: "managed", Model: "cheap",
-				ExecutionMode: "live", ResolvedLLMBackend: "claude_cli", FlowPath: identity.FlowInstance()})
+				ExecutionMode: "live", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli", FlowPath: identity.FlowInstance(), Config: json.RawMessage(`{}`)})
 			storetest.RequireStaticAgentFixture(t, ctx, selected, manager.PersistedAgent{Config: actor, Status: "active", StartedAt: time.Now().UTC()})
 			charged := 0.0000000004
 			if backend == "postgres" {
@@ -114,6 +115,7 @@ func completion2270HistorySession(t *testing.T, selected sessions.Registry, iden
 func persistCompletion2270History(t *testing.T, selected completion2270PublicStore, identity agentidentity.Identity, sessionID, turnID string, memory bool, total float64) (effects.CompletionEvidence, string) {
 	t.Helper()
 	ctx, at := context.Background(), time.Now().UTC()
+	ctx = admitAPITestAgentExecution(t, ctx, selected, authorActivityTestSourceArtifactFact)
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "completion.history", "completion-2270", "", []byte(`{}`), 0, identity.RunID, events.EventEnvelope{Scope: events.EventScopeGlobal}, at)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, nil, "subscribed")
 	input, output := int64(12), int64(3)
