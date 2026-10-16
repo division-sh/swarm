@@ -4,12 +4,16 @@
 
 The [user amendment](https://github.com/division-sh/swarm/issues/2577#issuecomment-6223240045)
 removes the human-written upstream SDK PR as a #2614 landing condition. It is
-now a user-owned acceptance follow-up; the subsequent user ruling relayed on
-2026-10-16 sets its due date to 2026-11-21. The pinned fork and its exit-condition
-comment remain until upstream contains both reviewed fixes; no vendoring is
-authorized. Do not publish an agent-written upstream PR or a placeholder URL.
-The real-device P01-P09
-sitting and next-day check remain a user hold; integrated-head machine proofs,
+now a user-owned acceptance item due 2026-11-28, a target date the user may move.
+The pinned fork, single replace line and exit-condition comment remain until
+upstream contains both reviewed fixes; no vendoring is authorized. Add the real
+upstream PR URL to that comment when the user opens it; do not publish an
+agent-written upstream PR or a placeholder URL. #2577 stays open after #2614
+merges until both acceptance items close: the upstream PR and the replace-line
+exit. Neither is a #2614 landing condition.
+
+The real-device P01-P09 sitting AND its next-day check are the only remaining
+user hold; integrated-head machine proofs,
 the quiet first-QR/expiry/replacement rehearsal and reviewer-g's readiness and
 final review are still required. Historical merge-hold wording below is
 superseded only on this upstream-PR point; it is not a readiness claim.
