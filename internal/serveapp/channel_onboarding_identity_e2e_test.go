@@ -35,12 +35,16 @@ func TestChannelOnboardingE2E07ClaimTimeoutResume(t *testing.T) {
 	for _, backend := range servedparity.RequiredBackends {
 		backend := backend
 		t.Run(string(backend), func(t *testing.T) {
+			harness := newChannelOnboardingE2EHarness(t, backend, true)
+			harness.start(t)
+			readyAt := time.Now()
 			var admittedID string
 			ctx := channelClaimDeadlineAtReadback(t, func(result channelonboarding.Result) {
 				admittedID = result.Operation.OperationID
 			})
-			harness := newChannelOnboardingE2EHarness(t, backend, true)
-			harness.start(t)
+			if deadline, ok := ctx.Deadline(); !ok || deadline.Before(readyAt.Add(15*time.Second)) {
+				t.Fatalf("claim safety clock started before runtime readiness: ready=%s deadline=%s", readyAt, deadline)
+			}
 
 			input := installChannelOnboardingCLIInput(t, "timeout-token\n")
 			defer input()
