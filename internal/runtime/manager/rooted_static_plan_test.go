@@ -4,10 +4,13 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -76,11 +79,21 @@ func TestS1ZeroAgentSourceSetRebindRequiresExactRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := newTestAgentManager(t, &recoveryTestBus{}, nil)
-	if err := manager.InstallStartupTopology(newLifecyclePersistenceProbe(), admission, plan); err != nil {
+	rowOwner := newLifecyclePersistenceProbe()
+	manager := NewAgentManagerWithOptions(&recoveryTestBus{}, nil, AgentManagerOptions{
+		WorkOwner: newTestManagerWorkOwner(t), SemanticSource: semanticview.Wrap(compiled),
+		ExecutionPosture: executionposture.Live, ReceiverExecution: eventreceiver.NormalExecution(),
+		LifecycleStore:   rowOwner,
+		PersistenceRoles: PersistenceRoles{LifecycleCensus: sourceSetLifecycleCensusProbe{}},
+	})
+	t.Cleanup(func() {
+		if err := manager.ShutdownWithOptions(ShutdownOptions{Grace: 5 * time.Second}); err != nil {
+			t.Errorf("shutdown zero-agent source-set manager: %v", err)
+		}
+	})
+	if err := manager.InstallStartupTopology(rowOwner, admission, plan); err != nil {
 		t.Fatal(err)
 	}
-	manager.roles.LifecycleCensus = sourceSetLifecycleCensusProbe{}
 	binding := lifecycleProbeProcessBinding()
 	binding.BundleHash = coordinate.BundleHash
 	gate := newSourceSetTransitionAdmissionProbe(plan.Revision)
