@@ -72,6 +72,57 @@ func requireSessionPendingResult(t *testing.T, result channelonboarding.Result, 
 	}
 }
 
+func startHeldSessionRequest(t *testing.T, service *channelonboarding.Service, adapter *serveSessionBootstrap, cut *sessionConstructionCut, key string) (channelonboarding.Operation, func()) {
+	t.Helper()
+	caller, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	finished := make(chan error, 1)
+	go func() {
+		_, err := service.Start(caller, channelonboarding.StartInput{Verb: channelonboarding.VerbConnect,
+			Selection: channelonboarding.CandidateSelection{Provider: "whatsapp"}, IdempotencyKey: key})
+		finished <- err
+	}()
+	var once sync.Once
+	stop := func() {
+		once.Do(func() {
+			cancel()
+			select {
+			case err := <-finished:
+				if !errors.Is(err, context.Canceled) {
+					t.Error("held original request lost its caller cancellation", err)
+				}
+			case <-time.After(time.Second):
+				t.Error("held original request did not return promptly after cancellation")
+			}
+		})
+	}
+	t.Cleanup(stop)
+	select {
+	case <-cut.entered:
+	case <-caller.Done():
+		t.Fatal("original construction never entered its cut", context.Cause(caller))
+	}
+	adapter.mu.Lock()
+	var op channelonboarding.Operation
+	if len(adapter.connections) == 1 {
+		for _, attempt := range adapter.connections {
+			op = attempt.operation
+		}
+	}
+	adapter.mu.Unlock()
+	if op.OperationID == "" || op.Phase != channelonboarding.PhaseActivatingProvider || op.SessionConnectionID == "" {
+		t.Fatal("held original request lost its exact admitted responsibility")
+	}
+	readback, err := service.Get(caller, op.OperationID)
+	requireSessionPendingResult(t, readback, op, err)
+	select {
+	case err := <-finished:
+		finished <- err
+		t.Fatal("original request returned before its held constructor", err)
+	default:
+	}
+	return op, stop
+}
+
 func TestServeSessionPendingConstructionFailureRemainsARefusalBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
@@ -187,8 +238,8 @@ func requireSessionPrivateOpenFailure(t *testing.T, backend string) {
 	case <-join.Done():
 		t.Fatal("failed private open did not join", context.Cause(join))
 	}
-	if attempt.err == nil {
-		t.Fatal("invalid private directory became preparation success")
+	if attempt.err == nil || !errors.Is(startErr, attempt.err) {
+		t.Fatal("original request lost the private construction failure", startErr, attempt.err)
 	}
 	for range 2 {
 		readback, err := service.Get(join, started.Operation.OperationID)
@@ -211,34 +262,21 @@ func requireSessionPendingRequestProgress(t *testing.T, backend string, retireme
 	service, sessions := installedSessionBootstrapFixture(t, backend)
 	adapter := sessions.(*serveSessionBootstrap)
 	cut, selections, release := installSessionConstructionCut(t, adapter)
-	caller, cancel := context.WithTimeout(ctx, 5*time.Second)
-	started, err := service.Start(caller, channelonboarding.StartInput{Verb: channelonboarding.VerbConnect,
-		Selection: channelonboarding.CandidateSelection{Provider: "whatsapp"}, IdempotencyKey: "pending-private-preparation"})
-	if err != nil || started.Operation.Phase != channelonboarding.PhaseActivatingProvider || started.Operation.SessionConnectionID == "" {
-		cancel()
-		t.Fatal("Start did not retain admitted pending responsibility", started, err)
-	}
-	requireSessionPendingResult(t, started, started.Operation, err)
-	select {
-	case <-cut.entered:
-	case <-caller.Done():
-		cancel()
-		t.Fatal("owned construction never entered the barrier", context.Cause(caller))
-	}
+	op, cancel := startHeldSessionRequest(t, service, adapter, cut, "pending-private-preparation")
+	requirePendingConcurrentSessionRequests(t, service, ctx, op)
 	cancel()
-	requirePendingConcurrentSessionRequests(t, service, ctx, started.Operation)
 	adapter.mu.Lock()
-	attempt := adapter.connections[started.Operation.OperationID]
+	attempt := adapter.connections[op.OperationID]
 	adapter.mu.Unlock()
 	if attempt == nil || selections.Load() != 1 {
 		t.Fatal("pending requests substituted the original attempt", selections.Load())
 	}
-	if _, err := adapter.ChannelExecution(ctx, started.Operation); !errors.Is(err, channelonboarding.ErrSessionPending) {
+	if _, err := adapter.ChannelExecution(ctx, op); !errors.Is(err, channelonboarding.ErrSessionPending) {
 		t.Fatal("pending preparation gained or lost its precise execution refusal", err)
 	}
 	if retirement {
 		if _, err := adapter.store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
-			OperationID: started.Operation.OperationID, ExpectedRevision: started.Operation.Revision, Phase: channelonboarding.PhaseFailed,
+			OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseFailed,
 			FailureCode: "pending_preparation_retired", FailureMessage: "bounded retirement proof", Now: time.Now().UTC()}); err != nil {
 			t.Fatal(err)
 		}
@@ -263,7 +301,7 @@ func requireSessionPendingRequestProgress(t *testing.T, backend string, retireme
 		}
 		return
 	}
-	requireExplicitSessionContinuation(t, service, adapter, ctx, join, started.Operation, attempt, selections)
+	requireExplicitSessionContinuation(t, service, adapter, ctx, join, op, attempt, selections)
 }
 
 func requireSessionRetryPendingConstruction(t *testing.T, backend string) {
@@ -294,7 +332,6 @@ func requireSessionRetryPendingConstruction(t *testing.T, backend string) {
 		err    error
 	}
 	finished := make(chan retryResult, 1)
-	requested := time.Now()
 	go func() {
 		result, err := service.Retry(caller, channelonboarding.RetryInput{OperationID: started.Operation.OperationID})
 		finished <- retryResult{result: result, err: err}
@@ -306,14 +343,12 @@ func requireSessionRetryPendingConstruction(t *testing.T, backend string) {
 	case <-caller.Done():
 		t.Fatal("retry never selected its owned construction", context.Cause(caller))
 	}
-	got := <-finished
-	t.Logf("onboarding_retry call=1 phase=owned_open elapsed=%s private_open_released=false err=%v", time.Since(requested), got.err)
-	if got.err != nil || caller.Err() != nil {
-		t.Error("onboarding_retry waits for owned construction instead of projecting pending", got.err, context.Cause(caller))
+	select {
+	case got := <-finished:
+		t.Fatal("original retry returned before its held construction", got.err)
+	default:
 	}
-	if got.err == nil {
-		requireSessionPendingResult(t, got.result, started.Operation, nil)
-	}
+	requirePendingConcurrentSessionRequests(t, service, ctx, started.Operation)
 
 	adapter.mu.Lock()
 	attempt := adapter.connections[started.Operation.OperationID]
@@ -327,6 +362,14 @@ func requireSessionRetryPendingConstruction(t *testing.T, backend string) {
 	default:
 	}
 	cancel()
+	select {
+	case got := <-finished:
+		if !errors.Is(got.err, context.Canceled) {
+			t.Fatal("original retry lost its caller cancellation", got.err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("original retry did not promptly cancel its construction wait")
+	}
 	release()
 	join, stop := context.WithTimeout(ctx, 30*time.Second)
 	defer stop()
@@ -335,9 +378,5 @@ func requireSessionRetryPendingConstruction(t *testing.T, backend string) {
 	case <-join.Done():
 		t.Fatal("released construction did not join", context.Cause(join))
 	}
-	if connection := adapter.connection(started.Operation.OperationID); connection != nil {
-		if err := connection.Close(join); err != nil && !errors.Is(err, context.Canceled) {
-			t.Fatal("original attempt retained unresolved private work", err)
-		}
-	}
+	requireExplicitSessionContinuation(t, service, adapter, ctx, join, started.Operation, attempt, selections)
 }
