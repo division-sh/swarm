@@ -8380,8 +8380,10 @@ func (p *serveRuntimeTestProcess) cleanup() {
 		return
 	}
 	p.cancel()
-	if _, ok := p.waitForExit(serveRuntimeStopTimeout); !ok {
+	if code, ok := p.waitForExit(serveRuntimeStopTimeout); !ok {
 		p.t.Errorf("timed out stopping Run during cleanup\noutput:\n%s", p.outputString())
+	} else if code != 0 {
+		p.t.Errorf("Run exited during cleanup with code %d\noutput:\n%s", code, p.outputString())
 	}
 }
 
