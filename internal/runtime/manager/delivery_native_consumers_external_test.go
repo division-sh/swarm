@@ -121,6 +121,8 @@ func TestPersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *testing.
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativePersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
 				return openManagerNativeDelivery(t, backend)
+			}, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
+				return openManagerNativeSelectedDelivery(t, backend)
 			})
 		})
 	}
@@ -150,7 +152,7 @@ func TestAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBufferedDeli
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBufferedDelivery(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeFlowDelivery(t, backend)
 			})
 		})
 	}

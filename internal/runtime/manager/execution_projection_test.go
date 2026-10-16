@@ -18,10 +18,13 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -38,20 +41,21 @@ type projectionTestRoute struct {
 }
 
 type projectionTestBus struct {
-	mu            sync.Mutex
-	signals       atomic.Int64
-	routes        map[string]projectionTestRoute
-	history       map[string][]projectionTestRoute
-	removed       []runtimeeffects.LifecycleToken
-	store         runtimebus.EventStore
-	owner         worklifetime.Occurrence
-	authority     runtimedelivery.ExecutionAuthority
-	continuations runtimebus.DeliveryContinuationOwner
-	prepareErr    bool
-	publishErr    error
-	runtimeLogs   []runtimepipeline.RuntimeLogEntry
-	beforePublish func()
-	deliveryCtx   context.Context
+	mu                  sync.Mutex
+	signals             atomic.Int64
+	routes              map[string]projectionTestRoute
+	history             map[string][]projectionTestRoute
+	removed             []runtimeeffects.LifecycleToken
+	store               runtimebus.EventStore
+	owner               worklifetime.Occurrence
+	authority           runtimedelivery.ExecutionAuthority
+	continuations       runtimebus.DeliveryContinuationOwner
+	prepareErr          bool
+	publishErr          error
+	runtimeLogs         []runtimepipeline.RuntimeLogEntry
+	beforePublish       func()
+	deliveryCtx         context.Context
+	lifecycleDiagnostic func(context.Context, diaglog.LifecycleDiagnostic) error
 }
 
 func TestAgentManagerWithOptionsRejectsUnconfiguredReceiverExecution(t *testing.T) {
@@ -128,12 +132,15 @@ func newNativeProjectionTestManager(t *testing.T, bus *projectionTestBus, factor
 	am := newTestAgentManagerWithOptions(t, bus, factory, AgentManagerOptions{
 		WorkOwner: owner, DeliveryStore: native, SourceArtifactFact: native.Authority.SourceArtifact(),
 		LifecycleStore: lifecycle, BaseContext: ctx,
+		SemanticSource: native.SemanticSource, LifecycleDiagnosticOrigin: native.SelectedOrigin,
 		PersistenceRoles: PersistenceRoles{
 			LifecycleState: native.Store.(AgentLifecycleStateReader), LifecycleCensus: native.Store.(AgentLifecycleCellCensus), LifecycleOutcome: native.Store.(AgentLifecycleOutcomeReader),
 		},
 	})
-	if err := am.InstallStartupTopology(lifecycle, record.Topology, plan); err != nil {
-		t.Fatal(err)
+	if native.Authority.Kind() == runtimedelivery.ExecutionAuthorityNormalRuntime {
+		if err := am.InstallStartupTopology(lifecycle, record.Topology, plan); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// Persisted construction and issued authority precede execution, but adoption
 	// remains the caller's temporal cut; this helper never installs a projection.
@@ -1331,32 +1338,63 @@ func ProveNativeAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBuffe
 	defer releaseHandler()
 	var am *AgentManager
 	var retiring *projectionSelfRetiringAgent
-	var executionCtx context.Context
-	var rec PersistedAgent
-	const agentID = "self-retiring-buffered-agent"
-	am, executionCtx, rec = newNativeProjectionTestManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
+	retirementResult := make(chan error, 1)
+	flow := native.Flow
+	if flow == nil {
+		t.Fatal("self-retirement proof requires its native flow construction and terminal owner")
+	}
+	executionCtx := flow.Context
+	bus.owner = flow.Options.WorkOwner
+	bus.lifecycleDiagnostic = flow.ProjectDiagnostic
+	am = newTestAgentManagerWithOptions(t, bus, func(cfg models.AgentConfig) (Agent, error) {
 		retiring = &projectionSelfRetiringAgent{
-			projectionTestAgent: projectionTestAgent{id: cfg.ID, subs: []events.EventType{"test.old"}},
+			projectionTestAgent: projectionTestAgent{id: cfg.ID, subs: []events.EventType{flow.Request.TriggerEvent.Type()}},
 			identity:            cfg.Identity, started: started, release: release,
-			retire: func(ctx context.Context, identity runtimeagentidentity.Identity) error {
-				_, err := am.lifecycle.beginIdentityTermination(ctx, identity, "flow_instance_terminal", AgentLifecycleTerminated, nil, nil, terminalSelfAuthor)
+			retire: func(ctx context.Context, identity runtimeagentidentity.Identity) (retirementErr error) {
+				defer func() { retirementResult <- retirementErr }()
+				if identity.RunID != flow.Request.Instance.InstanceID {
+					return errors.New("self-retiring actor is outside its native root flow")
+				}
+				terminal, err := flow.Options.PersistenceRoles.FlowTermination.CommitFlowInstanceTermination(ctx, runtimepipeline.FlowInstanceTerminationRequest{
+					Route: flow.Request.Instance.Route(), EntityID: runtimeidentity.NormalizeEntityID(flow.Request.Instance.EntityID),
+					RunID: identity.RunID, TerminatedAt: time.Now().UTC(),
+				})
+				if err != nil {
+					return err
+				}
+				if terminal.Instance.Status != "terminated" || terminal.Instance.TerminatedAt.IsZero() || terminal.Identity.RunID != identity.RunID ||
+					terminal.Instance.StorageRef != flow.Request.Instance.InstancePath || terminal.Instance.EntityID != flow.Request.Instance.EntityID ||
+					terminal.Identity.Route != runtimeflowidentity.RouteForInstancePath(flow.Request.Instance.InstancePath) {
+					return fmt.Errorf("self-retirement lost its exact committed terminal flow: %+v", terminal)
+				}
+				_, err = am.lifecycle.beginIdentityTermination(ctx, identity, "flow_instance_terminal", AgentLifecycleTerminated, nil, nil, terminalSelfAuthor)
 				return err
 			},
 		}
 		return retiring, nil
-	}, native, managerTestAgentConfig(models.AgentConfig{
-		ExecutionMode: "live", ID: agentID,
-		Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "self-retiring-buffered-test"),
-		Subscriptions: []string{"test.old"},
-	}))
-	if err := am.MaterializeAdmittedAgentForExecution(executionCtx, rec); err != nil {
-		t.Fatalf("SpawnAgent: %v", err)
+	}, flow.Options, native.Store.(ManagerPersistence))
+	t.Cleanup(func() {
+		releaseHandler()
+		if err := am.ShutdownWithOptions(ShutdownOptions{Grace: 2 * time.Second}); err != nil {
+			t.Errorf("join native flow manager cleanup: %v", err)
+		}
+	})
+	if err := am.InstallStartupTopology(flow.Options.LifecycleStore, flow.Topology, flow.Plan); err != nil {
+		t.Fatal(err)
 	}
+	if err := am.ActivateFlowInstance(executionCtx, flow.Request); err != nil {
+		t.Fatalf("activate native flow-owned actor: %v", err)
+	}
+	if retiring == nil {
+		t.Fatal("native flow failed to construct its declared retiring actor")
+	}
+	agentID := retiring.identity.AgentID()
 	runCtx, cancelRun := context.WithCancel(executionCtx)
 	defer cancelRun()
 	if err := am.Run(runCtx); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
+	requireActiveNativeFlowRetirementRefused(t, am, flow, retiring.identity)
 	owner := &projectionResolutionOwner{resolved: make(chan projectionCarrierResolution, 4), released: make(chan struct{}, 1)}
 	bus.continuations = owner
 	route, ok := bus.current(agentID)
@@ -1364,8 +1402,8 @@ func ProveNativeAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBuffe
 		t.Fatal("self-retiring agent has no exact live route")
 	}
 	deliveryRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: route.token.Identity}
-	first := projectionRuntimeEvent("self-retiring-first", "test.old")
-	second := projectionRuntimeEvent("self-retiring-second", "test.old")
+	first := flow.Event(uuid.NewString())
+	second := flow.Event(uuid.NewString())
 	native.Publish(t, native.Context, first, []events.DeliveryRoute{deliveryRoute}, native.Authority)
 	native.Publish(t, native.Context, second, []events.DeliveryRoute{deliveryRoute}, native.Authority)
 
@@ -1388,6 +1426,15 @@ func ProveNativeAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBuffe
 		case resolution := <-owner.resolved:
 			intents[resolution.intent]++
 		case <-time.After(2 * time.Second):
+			select {
+			case err := <-retirementResult:
+				t.Logf("native self-retirement result: %v", err)
+			default:
+			}
+			bus.mu.Lock()
+			logs := append([]runtimepipeline.RuntimeLogEntry(nil), bus.runtimeLogs...)
+			bus.mu.Unlock()
+			t.Logf("native self-retirement runtime records: %+v", logs)
 			t.Fatalf("continuation dispositions = %#v, want one consume and one return", intents)
 		}
 	}
@@ -1397,10 +1444,73 @@ func ProveNativeAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBuffe
 	if got := retiring.handled.Load(); got != 1 {
 		t.Fatalf("handled deliveries = %d, want exactly 1", got)
 	}
+	select {
+	case err := <-retirementResult:
+		if err != nil {
+			t.Fatalf("self-authored terminal retirement failed: %v", err)
+		}
+	default:
+		t.Fatal("accepted handler did not finish its self-authored terminal request")
+	}
 	if got := owner.resolves.Load(); got != 2 {
 		t.Fatalf("continuation resolutions = %d, want exactly 2", got)
 	}
 	if err := am.ShutdownWithOptions(ShutdownOptions{Grace: 2 * time.Second}); err != nil {
 		t.Fatalf("shutdown: %v", err)
+	}
+	for _, expected := range []struct {
+		event   events.Event
+		status  runtimedelivery.Status
+		version int64
+	}{
+		{first, runtimedelivery.StatusDelivered, 1},
+		{second, runtimedelivery.StatusPending, 0},
+	} {
+		id, err := runtimedelivery.DeliveryID(expected.event.ID(), deliveryRoute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := native.Snapshot(executionCtx, id)
+		if err != nil || snapshot.Status != expected.status || snapshot.ClaimVersion != expected.version || snapshot.Authority != native.Authority {
+			t.Fatalf("joined native self-retirement delivery %s: status=%s version=%d authority=%+v error=%v", expected.event.ID(), snapshot.Status, snapshot.ClaimVersion, snapshot.Authority, err)
+		}
+	}
+	terminal, found, err := flow.Options.PersistenceRoles.LifecycleState.LoadAgentLifecycleState(executionCtx, retiring.identity)
+	if err != nil || !found || terminal.Phase != AgentLifecycleTerminated || terminal.Generation != route.token.Generation+1 || terminal.RunMode != AgentRunModeStopped {
+		t.Fatalf("joined self-retirement lost its exact durable terminal successor: %+v found=%t error=%v", terminal, found, err)
+	}
+	if pending, err := flow.Options.PersistenceRoles.LifecycleDiagnostics.ListPendingAgentLifecycleDiagnostics(executionCtx, 100); err != nil || len(pending) != 0 {
+		t.Fatalf("joined native retirement left unprojected lifecycle diagnostics: %+v error=%v", pending, err)
+	}
+}
+
+func requireActiveNativeFlowRetirementRefused(t *testing.T, am *AgentManager, flow *ManagerDeliveryNativeFlowFixture, identity runtimeagentidentity.Identity) {
+	t.Helper()
+	before, found := am.lifecycle.stateByIdentity(identity)
+	if !found || before.Topology.Authority.Readiness == nil || before.Phase != AgentLifecycleRunning {
+		t.Fatalf("native retirement negative lost its running flow-owned actor: %+v", before)
+	}
+	requireDesiredNativeRetirementRefused(t, am, flow.Context, identity, "readiness_agent_still_declared_on_active_instance")
+}
+
+func requireDesiredNativeRetirementRefused(t *testing.T, am *AgentManager, ctx context.Context, identity runtimeagentidentity.Identity, code string) {
+	t.Helper()
+	before, found := am.lifecycle.stateByIdentity(identity)
+	if !found || before.Phase != AgentLifecycleRunning {
+		t.Fatalf("native retirement negative lost its running actor: %+v", before)
+	}
+	_, err := am.lifecycle.store.CommitAgentLifecycleTransition(ctx, AgentLifecycleTransition{
+		OperationID: uuid.NewString(), RequestHash: uuid.NewString(), OperationKind: "teardown", Trigger: "flow_instance_terminal",
+		Identity: identity, AgentID: identity.AgentID(), ConfigRevision: before.ConfigRevision,
+		ExpectedEpoch: before.RuntimeEpoch, ExpectedGeneration: before.Generation, ExpectedPhase: before.Phase,
+		TargetEpoch: before.RuntimeEpoch, TargetGeneration: before.Generation + 1, TargetPhase: AgentLifecycleTerminated,
+		RunMode: AgentRunModeStopped, Topology: before.Topology, DiagnosticOrigin: am.lifecycle.diagnosticOrigin, Now: time.Now().UTC(),
+	})
+	if err == nil || !strings.Contains(err.Error(), code) {
+		t.Fatalf("still-declared actor must refuse direct retirement with %s: %v", code, err)
+	}
+	after, found, err := am.lifecycle.stateReader.LoadAgentLifecycleState(ctx, identity)
+	if err != nil || !found || !reflect.DeepEqual(before, after) {
+		t.Fatalf("refused active-flow retirement changed its exact lifecycle: before=%+v after=%+v found=%t error=%v", before, after, found, err)
 	}
 }

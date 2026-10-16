@@ -22,7 +22,10 @@ func (*recoveryTestBus) ProjectLifecycleDiagnostic(context.Context, diaglog.Life
 	return fmt.Errorf("lifecycle diagnostic persistence is not configured for recoveryTestBus")
 }
 
-func (*projectionTestBus) ProjectLifecycleDiagnostic(context.Context, diaglog.LifecycleDiagnostic) error {
+func (b *projectionTestBus) ProjectLifecycleDiagnostic(ctx context.Context, item diaglog.LifecycleDiagnostic) error {
+	if b.lifecycleDiagnostic != nil {
+		return b.lifecycleDiagnostic(ctx, item)
+	}
 	return fmt.Errorf("lifecycle diagnostic persistence is not configured for projectionTestBus")
 }
 

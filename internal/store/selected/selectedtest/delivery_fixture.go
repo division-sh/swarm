@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
@@ -39,6 +40,8 @@ type SelectedDeliveryFixtureStore interface {
 	sourceartifactfixture.Writer
 	startupownership.Store
 	runforkexecution.SourceArtifactSelectedContractSourceStore
+	RequireRunForkSelectedContractBinding(context.Context, string) (runfork.RunForkSelectedContractBinding, error)
+	LoadAgents(context.Context) ([]manager.PersistedAgent, error)
 }
 
 type SelectedDeliveryFixture struct {
@@ -49,6 +52,8 @@ type SelectedDeliveryFixture struct {
 	SelectedEvent     events.Event
 	SemanticSource    semanticview.Source
 	Context           context.Context
+	DiagnosticOrigin  manager.LifecycleDiagnosticOrigin
+	prepareActor      func(*testing.T) (manager.PersistedAgent, startupownership.GenerationGrant)
 }
 
 // OpenSelectedDeliveryExecution reuses the existing native manager-delivery
@@ -180,6 +185,10 @@ func OpenSelectedDeliveryExecution(t *testing.T, ctx context.Context, owner Sele
 	if err != nil {
 		t.Fatal(err)
 	}
+	fixture.prepareActor = func(t *testing.T) (manager.PersistedAgent, startupownership.GenerationGrant) {
+		return prepareSelectedDeliveryActor(t, fixture, owner, capability, claimed)
+	}
+	fixture.DiagnosticOrigin = selectedDeliveryDiagnosticOrigin(claimed)
 	return fixture
 }
 
