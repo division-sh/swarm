@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -177,7 +178,7 @@ func TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens(t *testing.T) {
 				if artifact.BundleHash() != bundle.SourceArtifact.BundleHash() || !bytes.Equal(artifact.LogicalBlob(), bundle.SourceArtifact.LogicalBlob()) {
 					t.Fatal("catalog/retained reconstruction changed exact source bytes")
 				}
-				loaded, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+				loaded, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, bundle.SourceArtifact, artifact), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
 				if err != nil {
 					t.Fatal(err)
 				}

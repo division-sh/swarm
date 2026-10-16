@@ -603,7 +603,7 @@ func stageForkContentionFixtureAt(t *testing.T, f forkContentionFixture, selecte
 	repo := canonicalrouting.RepoRoot(t)
 	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo), Store: store}
-	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(f.ctx, runforkexecution.SelectedContractSourceLoadRequest{SourceRunID: f.runID, Selection: selection})
+	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(f.ctx, runforkexecution.SelectedContractSourceLoadRequest{Responsibility: runforkexecution.OriginalRunSource(f.runID), Selection: selection})
 	if err != nil {
 		t.Fatal(err)
 	}

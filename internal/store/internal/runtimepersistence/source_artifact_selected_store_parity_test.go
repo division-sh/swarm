@@ -19,6 +19,8 @@ import (
 type selectedSourceArtifactStore interface {
 	EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
 	GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
+	EnsureRootedSource(context.Context, sourceartifact.RootedSource) (sourceartifact.RootedEnsureResult, error)
+	GetRootedSource(context.Context, sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error)
 }
 
 func TestPayloadlessEventSourceArtifactBytesBothStores(t *testing.T) {

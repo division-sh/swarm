@@ -197,7 +197,7 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 				runID, eventID := uuid.NewString(), uuid.NewString()
 				seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, runID, eventID)
 				base := SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)}
-				sibling, err := base.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{SourceRunID: runID, Selection: runforkadmission.SelectedContractSelection(loaded.Source)})
+				sibling, err := base.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: OriginalRunSource(runID), Selection: runforkadmission.SelectedContractSelection(loaded.Source)})
 				if err != nil {
 					t.Fatal(err)
 				}

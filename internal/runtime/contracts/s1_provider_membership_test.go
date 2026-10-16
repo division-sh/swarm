@@ -53,7 +53,7 @@ func TestS1FlowSourcesExcludeProviderDirectories(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bundle, err := LoadWorkflowContractBundleFromArtifact(root, provider, "", WorkflowContractLoadOptions{}); err == nil || bundle != nil {
+	if bundle, err := LoadWorkflowContractBundleFromRootedSource(root, capturedCompilerSource(t, provider), "", WorkflowContractLoadOptions{}); err == nil || bundle != nil {
 		t.Fatalf("provider-only source acquired execution: bundle=%+v err=%v", bundle, err)
 	}
 }

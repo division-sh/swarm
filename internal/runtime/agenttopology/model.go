@@ -11,6 +11,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -237,7 +238,15 @@ func (a Authority) Validate() error {
 }
 
 type SourceCoordinate struct {
-	BundleHash string `json:"bundle_hash"`
+	BundleHash    string `json:"bundle_hash"`
+	RootDirectory string `json:"root_directory"`
+}
+
+func NewSourceCoordinate(admission sourceartifact.RootAdmission) (SourceCoordinate, error) {
+	if err := admission.Validate(); err != nil {
+		return SourceCoordinate{}, err
+	}
+	return SourceCoordinate{BundleHash: admission.BundleHash(), RootDirectory: admission.RootDirectory()}, nil
 }
 
 func (c SourceCoordinate) Normalize() SourceCoordinate {
@@ -247,7 +256,11 @@ func (c SourceCoordinate) Normalize() SourceCoordinate {
 
 func (c SourceCoordinate) Validate() error {
 	c = c.Normalize()
-	return validateSourceCoordinate(c.BundleHash)
+	return c.RootReference().Validate()
+}
+
+func (c SourceCoordinate) RootReference() sourceartifact.RootAdmissionReference {
+	return sourceartifact.RootAdmissionReference{BundleHash: c.BundleHash, RootDirectory: c.RootDirectory}
 }
 
 func (c SourceCoordinate) Key() string {
@@ -339,6 +352,16 @@ func (p *SourceSetPlan) normalizeAndValidate(requireRevision bool) error {
 		p.Agents[i].ConfigRevision = strings.TrimSpace(p.Agents[i].ConfigRevision)
 		if err := p.Agents[i].Validate(); err != nil {
 			return fmt.Errorf("source set agent %d: %w", i, err)
+		}
+		found := false
+		for _, source := range p.Sources {
+			if source == p.Agents[i].Source {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("source set agent %d differs from the exact rooted source set", i)
 		}
 	}
 	var keyErr error

@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestDeriveStandingTargets_OrdinaryRootInputCreatesNoStandingTarget(t *testing.T) {
@@ -73,7 +74,7 @@ func TestResolveStandingTargetDeclarationsConsumesRootConstructor(t *testing.T) 
 			source := loadWorkflowValidationSourceAt(t, root)
 			bundle, _ := semanticview.Bundle(source)
 			repo := canonicalrouting.RepoRoot(t)
-			rebuilt, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, bundle.SourceArtifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+			rebuilt, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, bundle.SourceArtifact), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -120,7 +121,7 @@ func TestA9DeclarationAncestryMayBeKeyed(t *testing.T) {
 			source := loadWorkflowValidationSourceAt(t, root)
 			bundle, _ := semanticview.Bundle(source)
 			repo := canonicalrouting.RepoRoot(t)
-			rebuilt, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, bundle.SourceArtifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+			rebuilt, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, bundle.SourceArtifact), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}

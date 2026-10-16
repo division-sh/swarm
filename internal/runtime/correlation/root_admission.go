@@ -18,16 +18,22 @@ func WithRootAdmission(ctx context.Context, admission sourceartifact.RootAdmissi
 	return context.WithValue(ctx, rootAdmissionContextKey{}, admission)
 }
 
-func RootAdmissionFromContext(ctx context.Context) (sourceartifact.RootAdmission, bool) {
+func RootAdmissionFromContext(ctx context.Context) (sourceartifact.RootAdmission, bool, error) {
 	if ctx == nil {
-		return sourceartifact.RootAdmission{}, false
+		return sourceartifact.RootAdmission{}, false, nil
 	}
 	admission, ok := ctx.Value(rootAdmissionContextKey{}).(sourceartifact.RootAdmission)
-	fact, hasFact := SourceArtifactFactFromContext(ctx)
-	if !ok || admission.Validate() != nil || !hasFact || admission.BundleHash() != fact.BundleHash() {
-		return sourceartifact.RootAdmission{}, false
+	if !ok {
+		return sourceartifact.RootAdmission{}, false, nil
 	}
-	return admission, true
+	if err := admission.Validate(); err != nil {
+		return sourceartifact.RootAdmission{}, false, err
+	}
+	fact, hasFact := SourceArtifactFactFromContext(ctx)
+	if !hasFact || admission.BundleHash() != fact.BundleHash() {
+		return sourceartifact.RootAdmission{}, false, fmt.Errorf("rooted context does not match its content fact")
+	}
+	return admission, true, nil
 }
 
 // CheckRootAdmissionContext never supplies missing admission. Root-independent
@@ -36,17 +42,14 @@ func CheckRootAdmissionContext(ctx context.Context, reference sourceartifact.Roo
 	if err := reference.Validate(); err != nil {
 		return err
 	}
-	if ctx == nil {
-		return nil
+	admission, supplied, err := RootAdmissionFromContext(ctx)
+	if err != nil {
+		return err
 	}
-	admission, supplied := ctx.Value(rootAdmissionContextKey{}).(sourceartifact.RootAdmission)
 	if !supplied {
 		return nil
 	}
-	if err := admission.Validate(); err != nil {
-		return err
-	}
-	if _, valid := RootAdmissionFromContext(ctx); !valid || admission.Reference() != reference {
+	if admission.Reference() != reference {
 		return fmt.Errorf("rooted execution context does not match the exact run source root")
 	}
 	return nil

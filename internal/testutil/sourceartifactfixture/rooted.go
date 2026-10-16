@@ -2,12 +2,33 @@ package sourceartifactfixture
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/sourceartifact"
 )
+
+type RootedWriter interface {
+	EnsureRootedSource(context.Context, sourceartifact.RootedSource) (sourceartifact.RootedEnsureResult, error)
+}
+
+// CapturedRoot retains an existing filesystem admission for in-memory compiler
+// controls. Decoded copies establish byte parity, never rooted authority.
+func CapturedRoot(t testing.TB, captured *sourceartifact.AdmittedSourceArtifact, copies ...*sourceartifact.AdmittedSourceArtifact) sourceartifact.RootedSource {
+	t.Helper()
+	rooted, err := captured.RootedSource()
+	if err != nil {
+		t.Fatalf("captured filesystem root is required: %v", err)
+	}
+	for _, copy := range copies {
+		if copy == nil || copy.BundleHash() != captured.BundleHash() || !bytes.Equal(copy.LogicalBlob(), captured.LogicalBlob()) {
+			t.Fatal("decoded compiler copy differs from its captured source")
+		}
+	}
+	return rooted
+}
 
 // Rooted admits an exact fixture copy through the real filesystem owner.
 // The returned path is only for fixture mutation/removal, never reconstruction.

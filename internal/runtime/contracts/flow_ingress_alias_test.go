@@ -31,7 +31,7 @@ func TestA9RootedAliasCompilation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rebuilt, err := LoadWorkflowContractBundleFromArtifact(repo, retained, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+	rebuilt, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, disk.SourceArtifact, retained), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

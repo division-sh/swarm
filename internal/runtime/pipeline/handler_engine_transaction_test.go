@@ -26,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -431,7 +432,7 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 	if err != nil {
 		t.Fatal(err)
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact("../../..", artifact, "", runtimecontracts.WorkflowContractLoadOptions{})
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource("../../..", sourceartifactfixture.CapturedRoot(t, artifact), "", runtimecontracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

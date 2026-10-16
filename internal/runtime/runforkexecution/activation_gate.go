@@ -113,7 +113,7 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, expectedSourceFact)
 
 	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
-		SourceRunID:        binding.SourceRunID,
+		Responsibility:     RetainedForkSource(forkRunID),
 		BundleHash:         expectedBundleHash,
 		SourceArtifactFact: expectedSourceFact,
 		Selection:          binding.ContractSelection,
@@ -136,6 +136,8 @@ func ActivateSelectedContractRunFork(ctx context.Context, req SelectedContractAc
 	ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	operation.preparing = ctx
 	operation.owned = runtimeauthoractivity.WithScope(runtimecorrelation.WithSourceArtifactFact(operation.owned, loadedSource.SourceArtifactFact), scope)
+	operation.owned = runtimecorrelation.WithRootAdmission(operation.owned, loadedSource.RootedSource.Admission())
+	operation.preparing = runtimecorrelation.WithRootAdmission(operation.preparing, loadedSource.RootedSource.Admission())
 	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(loadedSource.Source)
 	if err != nil {
 		return SelectedContractActivationGateResult{}, fmt.Errorf("project selected-contract activation descriptors: %w", err)

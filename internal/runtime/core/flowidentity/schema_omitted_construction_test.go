@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestA9SchemaOmittedConstructionUsesAdmittedTreeAndRetainedSource(t *testing.T) {
@@ -24,7 +25,7 @@ func TestA9SchemaOmittedConstructionUsesAdmittedTreeAndRetainedSource(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	reloaded, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, retained, "", contracts.WorkflowContractLoadOptions{})
+	reloaded, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, disk.SourceArtifact, retained), "", contracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

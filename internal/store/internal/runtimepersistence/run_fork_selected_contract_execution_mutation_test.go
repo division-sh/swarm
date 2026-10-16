@@ -1728,7 +1728,7 @@ func captureSelectedStoreActivationRequest(t *testing.T, ctx context.Context, pg
 	repo := canonicalrouting.RepoRoot(t)
 	loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo), Store: pg}
 	loaded, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
-		SourceRunID: request.SourceRunID, BundleHash: request.SourceArtifactFact.BundleHash(), SourceArtifactFact: request.SourceArtifactFact, Selection: request.ContractSelection,
+		Responsibility: runforkexecution.RetainedForkSource(materialized.ForkRunID), BundleHash: request.SourceArtifactFact.BundleHash(), SourceArtifactFact: request.SourceArtifactFact, Selection: request.ContractSelection,
 	})
 	if err != nil {
 		t.Fatalf("inspect captured selected activation source: %v", err)

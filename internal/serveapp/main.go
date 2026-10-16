@@ -207,7 +207,14 @@ func compileServeSourceSetPlan(contexts []serveRuntimeBundleContext) (runtimeage
 	agents := []runtimeagenttopology.DesiredAgent{}
 	for _, contextDef := range contexts {
 		bundleHash := contextDef.sourceArtifactFact.BundleHash()
-		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash}
+		rooted, err := contextDef.loaded.bundle.RootedSource()
+		if err != nil {
+			return runtimeagenttopology.SourceSetPlan{}, err
+		}
+		if rooted.Admission().BundleHash() != bundleHash {
+			return runtimeagenttopology.SourceSetPlan{}, fmt.Errorf("source topology differs from its compiled root")
+		}
+		coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, RootDirectory: rooted.Admission().RootDirectory()}
 		if contextDef.runtime == nil || contextDef.runtime.Manager == nil {
 			return runtimeagenttopology.SourceSetPlan{}, fmt.Errorf("compile source topology %s: runtime manager is required", bundleHash)
 		}
@@ -274,6 +281,7 @@ func servePreCatalogPlatformSpecPath(resolvedPaths cliapp.CLISourcePlatformSpecP
 
 type sourceArtifactReader interface {
 	GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
+	GetRootedSource(context.Context, sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error)
 }
 
 func loadServeRuntimeBundles(ctx context.Context, repo string, artifacts sourceArtifactReader, resolvedPaths cliapp.CLISourcePlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) ([]serveRuntimeBundle, error) {
@@ -322,22 +330,24 @@ func materializeRuntimeBundle(module runtimepipeline.WorkflowModule, bundle *run
 	}, nil
 }
 
-func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactReader, repoRoot, runningSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner, bundleHash string) (semanticview.Source, error) {
+func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactReader, repoRoot, runningSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
 	if reader == nil {
 		return nil, fmt.Errorf("budget recovery source artifact reader is required")
 	}
-	record, err := reader.GetSourceArtifact(ctx, bundleHash)
+	if err := reference.Validate(); err != nil {
+		return nil, err
+	}
+	rooted, err := reader.GetRootedSource(ctx, reference)
 	if err != nil {
 		return nil, err
 	}
-	if record.BundleHash != bundleHash {
-		return nil, fmt.Errorf("budget source artifact does not match selected bundle_hash %q", bundleHash)
-	}
-	artifact, err := record.Decode()
-	if err != nil {
+	if err := rooted.Validate(); err != nil {
 		return nil, err
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repoRoot, artifact, runningSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+	if rooted.Admission().Reference() != reference {
+		return nil, fmt.Errorf("budget source does not match the selected root reference")
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repoRoot, rooted, runningSpecPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBases: packBases, AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {
@@ -346,25 +356,29 @@ func loadBudgetRecoveryStageSource(ctx context.Context, reader sourceArtifactRea
 	return semanticview.Wrap(bundle), nil
 }
 
-func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifacts sourceArtifactReader, bundleHash, runningPlatformSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner, materialize func(*sourceartifact.AdmittedSourceArtifact, semanticview.Source) (*sourceartifact.RuntimeProjection, error)) (serveRuntimeBundle, error) {
+func loadServeRuntimeBundleFromArtifact(ctx context.Context, repo string, artifacts sourceArtifactReader, reference sourceartifact.RootAdmissionReference, runningPlatformSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner, materialize func(*sourceartifact.AdmittedSourceArtifact, semanticview.Source) (*sourceartifact.RuntimeProjection, error)) (serveRuntimeBundle, error) {
 	if artifacts == nil {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: exact source reconstruction requires selected source artifact store")
 	}
-	if err := runtimecontracts.ValidateBundleHash(bundleHash); err != nil {
+	if err := reference.Validate(); err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	record, err := artifacts.GetSourceArtifact(ctx, bundleHash)
+	bundleHash := reference.BundleHash
+	rooted, err := artifacts.GetRootedSource(ctx, reference)
 	if errors.Is(err, sourceartifact.ErrNotFound) {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: bundle_hash %s is not present in source_artifacts", bundleHash)
 	}
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	artifact, err := record.Decode()
-	if err != nil {
-		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_DATA_INTEGRITY_ERROR: decode source artifact %s: %w", bundleHash, err)
+	if err := rooted.Validate(); err != nil {
+		return serveRuntimeBundle{}, err
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, strings.TrimSpace(runningPlatformSpecPath), runtimecontracts.WorkflowContractLoadOptions{
+	if rooted.Admission().Reference() != reference {
+		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_DATA_INTEGRITY_ERROR: reset source differs from the frozen root reference")
+	}
+	artifact := rooted.Artifact()
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, strings.TrimSpace(runningPlatformSpecPath), runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBases:  packBases,
 		AdmitPackInventory: packadmission.AdmitInventory,
 	})
@@ -520,8 +534,8 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (resul
 	runtimeDeps := req.Stores.runtimeDeps()
 	runtimeDeps.Config = req.Config
 	if req.Stores.sourceReader != nil {
-		runtimeDeps.BudgetStageSourceLoader = func(ctx context.Context, bundleHash string) (semanticview.Source, error) {
-			return loadBudgetRecoveryStageSource(ctx, req.Stores.sourceReader, req.RepoRoot, req.Loaded.runningSpecPath, req.PlatformPackBases, bundleHash)
+		runtimeDeps.BudgetStageSourceLoader = func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+			return loadBudgetRecoveryStageSource(ctx, req.Stores.sourceReader, req.RepoRoot, req.Loaded.runningSpecPath, req.PlatformPackBases, reference)
 		}
 	}
 	locatedScenarios, err := scenarioderivation.LoadDeclarations(loaded.bundle.SourceArtifact)

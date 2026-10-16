@@ -89,6 +89,15 @@ func EnsureArtifact(ctx context.Context, writer Writer, artifact *sourceartifact
 	if artifact == nil {
 		return errors.New("admitted source artifact fixture is required")
 	}
+	if rooted, err := artifact.RootedSource(); err == nil {
+		owner, ok := writer.(RootedWriter)
+		if !ok {
+			return errors.New("rooted source fixture requires its selected-store rooted writer")
+		}
+		if _, err := owner.EnsureRootedSource(ctx, rooted); err != nil {
+			return err
+		}
+	}
 	if reader, ok := writer.(Reader); ok {
 		persisted, err := reader.GetSourceArtifact(ctx, artifact.BundleHash())
 		switch {

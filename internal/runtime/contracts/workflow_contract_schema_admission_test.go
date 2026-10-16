@@ -107,7 +107,7 @@ func TestSchemaAdmissionDiskCatalogRetainedParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, artifact := range map[string]*sourceartifact.AdmittedSourceArtifact{"catalog": catalog, "retained": retained} {
-		loaded, err := LoadWorkflowContractBundleFromArtifact(repo, artifact, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+		loaded, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, disk.SourceArtifact, artifact), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -203,7 +203,7 @@ func TestA9StandingCorpusMigrationCoverage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rebuilt, err := LoadWorkflowContractBundleFromArtifact(repo, retained, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+			rebuilt, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, bundle.SourceArtifact, retained), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -246,7 +246,7 @@ func assertSchemaAdmissionInvalidSourceParity(t *testing.T, dir string) error {
 		t.Fatal(err)
 	}
 	for _, candidate := range []*sourceartifact.AdmittedSourceArtifact{catalog, retained} {
-		_, err := LoadWorkflowContractBundleFromArtifact(repo, candidate, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+		_, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, candidate), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 		if err == nil || err.Error() != diskErr.Error() || !bytes.Equal(candidate.LogicalBlob(), artifact.LogicalBlob()) || candidate.BundleHash() != artifact.BundleHash() {
 			t.Fatalf("source or refusal changed: disk=%v retained=%v", diskErr, err)
 		}

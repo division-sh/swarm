@@ -16,12 +16,14 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
 type verifyPackGenerationArtifactReader struct {
 	availability runbundle.Availability
 	record       sourceartifact.Persisted
+	rooted       sourceartifact.RootedSource
 }
 
 func (r verifyPackGenerationArtifactReader) LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error) {
@@ -30,6 +32,28 @@ func (r verifyPackGenerationArtifactReader) LoadRunBundleAvailability(context.Co
 
 func (r verifyPackGenerationArtifactReader) GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error) {
 	return r.record, nil
+}
+
+func (r verifyPackGenerationArtifactReader) LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error) {
+	return r.rooted, r.rooted.Validate()
+}
+
+func (r verifyPackGenerationArtifactReader) LoadSelectedForkRootedSource(context.Context, string) (sourceartifact.RootedSource, error) {
+	return sourceartifact.RootedSource{}, sourceartifact.ErrRootAdmissionMissing
+}
+
+func (r verifyPackGenerationArtifactReader) GetRootedSource(_ context.Context, ref sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error) {
+	if r.rooted.Admission().Reference() != ref {
+		return sourceartifact.RootedSource{}, sourceartifact.ErrRootAdmissionMissing
+	}
+	return r.rooted, r.rooted.Validate()
+}
+
+func (r verifyPackGenerationArtifactReader) ResolveUnboundRootedSource(_ context.Context, hash string) (sourceartifact.RootedSource, error) {
+	if r.rooted.Admission().BundleHash() != hash {
+		return sourceartifact.RootedSource{}, sourceartifact.ErrRootAdmissionMissing
+	}
+	return r.rooted, r.rooted.Validate()
 }
 
 func TestVerifyRetainedSourceConsumerSharesFrozenConfiguredPackGeneration(t *testing.T) {
@@ -76,12 +100,13 @@ func TestVerifyRetainedSourceConsumerSharesFrozenConfiguredPackGeneration(t *tes
 	sourceID := uuid.NewString()
 	reader := verifyPackGenerationArtifactReader{
 		record: record, availability: runbundle.Availability{RunID: sourceID, Status: "running", BundleHash: record.BundleHash, SourceArtifactPresent: true},
+		rooted: sourceartifactfixture.CapturedRoot(t, bundle.SourceArtifact),
 	}
 	verify.Store = reader
 	boot := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: root, PlatformSpecPath: paths.PlatformSpecPath, PlatformPackBases: bases, Store: reader}
 	for _, request := range []runforkexecution.SelectedContractSourceLoadRequest{
-		{SourceRunID: sourceID, BundleHash: record.BundleHash, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash}},
-		{SourceRunID: sourceID, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}},
+		{Responsibility: runforkexecution.FreshSelectedSource(record.BundleHash), BundleHash: record.BundleHash, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash}},
+		{Responsibility: runforkexecution.OriginalRunSource(sourceID), Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}},
 	} {
 		for _, loader := range []runforkexecution.SourceArtifactSelectedContractSourceLoader{verify, boot} {
 			loaded, err := loader.InspectRunForkSelectedContractSourceForRequest(context.Background(), request)

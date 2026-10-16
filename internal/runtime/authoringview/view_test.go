@@ -38,7 +38,7 @@ func TestA9DeclaredBindingProjectionParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rebuilt, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, retained, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+	rebuilt, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, disk.SourceArtifact, retained), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

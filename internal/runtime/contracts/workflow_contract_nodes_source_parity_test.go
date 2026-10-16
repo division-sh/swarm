@@ -32,7 +32,7 @@ func TestNodeAdmissionDiskCatalogAndRetainedSourceParity(t *testing.T) {
 				t.Fatal(err)
 			}
 			for name, artifact := range map[string]*sourceartifact.AdmittedSourceArtifact{"catalog": catalog, "retained": retained} {
-				loaded, err := LoadWorkflowContractBundleFromArtifact(repo, artifact, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+				loaded, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, disk.SourceArtifact, artifact), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 				if err != nil {
 					t.Fatalf("%s: %v", name, err)
 				}

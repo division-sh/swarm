@@ -47,7 +47,11 @@ func (l admittedFixtureSelectedContractSourceLoader) LoadRunForkSelectedContract
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(l.RepoRoot, artifact, l.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+	rooted, err := artifact.RootedSource()
+	if err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(l.RepoRoot, rooted, l.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBase: l.PlatformPackBase, AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {
@@ -79,6 +83,7 @@ func (l admittedFixtureSelectedContractSourceLoader) LoadRunForkSelectedContract
 		guardRegistry: runtimepipeline.NewContractGuardRegistry(source),
 	}
 	return LoadedSelectedContractSource{
+		RootedSource:            rooted,
 		Selection:               selection,
 		Source:                  source,
 		Module:                  module,

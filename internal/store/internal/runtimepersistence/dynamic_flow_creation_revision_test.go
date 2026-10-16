@@ -116,7 +116,7 @@ func TestDynamicFlowCreationSourceRevisionPublicationBothStores(t *testing.T) {
 					t.Fatal(err)
 				}
 				repo := runtimepipeline.WorkflowRepoRoot()
-				revisedBundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+				revisedBundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, artifact), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 				if err != nil {
 					t.Fatalf("compile exact revised source: %v", err)
 				}

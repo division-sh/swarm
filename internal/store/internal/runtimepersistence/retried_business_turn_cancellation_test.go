@@ -36,7 +36,8 @@ func TestRetriedBusinessTurnTerminationAndTimeoutRecoveryBothStores(t *testing.T
 				}
 				owner := flowidentity.RunScopedFlowInstance{RunID: fixture.authority.Target.RunID, Route: flowidentity.StoredRoute(scope, instance, path)}
 				repo := pipeline.WorkflowRepoRoot()
-				bundle, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, sourceartifactfixture.Artifact(), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+				rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+				bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
 				if err != nil {
 					t.Fatal(err)
 				}

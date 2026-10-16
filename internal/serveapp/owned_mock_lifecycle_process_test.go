@@ -152,18 +152,14 @@ func runOwnedLifecycle(ctx context.Context, root, retainedRoot string, opts clia
 		if err != nil {
 			return 1, errors.Join(err, reader.CloseUnactivated())
 		}
-		record, readErr := reader.SourceArtifactStore().GetSourceArtifact(ctx, storedHash)
+		rooted, readErr := reader.SourceArtifactStore().ResolveUnboundRootedSource(ctx, storedHash)
 		if err := errors.Join(readErr, reader.CloseUnactivated()); err != nil {
 			return 1, err
 		}
-		if record.BundleHash != storedHash {
+		if rooted.Admission().BundleHash() != storedHash {
 			return 1, errors.New("retained artifact proof read a different source")
 		}
-		artifact, err := record.Decode()
-		if err != nil {
-			return 1, err
-		}
-		admitted, err = runtimecontracts.LoadWorkflowContractBundleFromArtifact(root, artifact, paths.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+		admitted, err = runtimecontracts.LoadWorkflowContractBundleFromRootedSource(root, rooted, paths.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
 			PlatformPackBases: bases, AdmitPackInventory: packadmission.AdmitInventory,
 		})
 		if err != nil {

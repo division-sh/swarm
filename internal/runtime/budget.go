@@ -18,6 +18,7 @@ import (
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -52,8 +53,7 @@ type budgetThresholds struct {
 }
 
 type BudgetRecoveryStageSources struct {
-	CurrentBundleHash string
-	Load              func(context.Context, string) (semanticview.Source, error)
+	Load func(context.Context, sourceartifact.RootAdmissionReference) (semanticview.Source, error)
 }
 
 func NewBudgetTracker(store budgetspend.Store, bus *runtimebus.EventBus, cfg *config.Config, mailbox runtimetools.MailboxPersistence, logger *RuntimeLogger, source semanticview.Source, posture executionposture.Posture, stageSources BudgetRecoveryStageSources) *BudgetTracker {
@@ -162,33 +162,22 @@ func (t *BudgetTracker) ProjectRecoveryBudgetState(ctx context.Context) error {
 		return fmt.Errorf("list recovered budget projection targets: %w", err)
 	}
 	projected := make(map[string]struct{}, len(targets))
-	classifiers := make(map[string]runtimecontracts.WorkflowStageClassifier)
+	classifiers := make(map[sourceartifact.RootAdmissionReference]runtimecontracts.WorkflowStageClassifier)
 	for _, target := range targets {
 		if err := target.RootReference.Validate(); err != nil {
 			return fmt.Errorf("budget recovery target for run %q requires its exact source root reference: %w", target.RunID, err)
 		}
-		bundleHash := target.RootReference.BundleHash
-		classifier, ok := classifiers[bundleHash]
+		classifier, ok := classifiers[target.RootReference]
 		if !ok {
-			selected := t.source
-			if bundleHash != t.stageSources.CurrentBundleHash {
-				if t.stageSources.Load == nil {
-					return fmt.Errorf("budget recovery has no selected source loader for bundle_hash %q", bundleHash)
-				}
-				selected, err = t.stageSources.Load(ctx, bundleHash)
-				if err != nil {
-					return fmt.Errorf("load budget recovery source %q: %w", bundleHash, err)
-				}
-			}
-			bundle, bound := semanticview.Bundle(selected)
-			if !bound || bundle == nil || bundle.SourceArtifact == nil || bundle.SourceArtifact.BundleHash() != bundleHash {
-				return fmt.Errorf("budget recovery source %q does not match selected bundle_hash", bundleHash)
+			selected, err := t.recoveryStageSource(ctx, target.RootReference)
+			if err != nil {
+				return err
 			}
 			classifier, err = selectedWorkflowStageClassifier(selected)
 			if err != nil {
-				return fmt.Errorf("compile budget recovery stages for %q: %w", bundleHash, err)
+				return fmt.Errorf("compile budget recovery stages for %+v: %w", target.RootReference, err)
 			}
-			classifiers[bundleHash] = classifier
+			classifiers[target.RootReference] = classifier
 		}
 		terminal, known := classifier.Final(target.FlowTemplate, target.FlowInstance, target.Stage)
 		if !known {
@@ -210,6 +199,42 @@ func (t *BudgetTracker) ProjectRecoveryBudgetState(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (t *BudgetTracker) recoveryStageSource(ctx context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
+	current, err := budgetSourceRoot(t.source)
+	if err != nil {
+		return nil, err
+	}
+	selected := t.source
+	if current.Admission().Reference() != reference {
+		if t.stageSources.Load == nil {
+			return nil, fmt.Errorf("budget recovery has no selected source loader for %+v", reference)
+		}
+		selected, err = t.stageSources.Load(ctx, reference)
+		if err != nil {
+			return nil, fmt.Errorf("load budget recovery source %+v: %w", reference, err)
+		}
+	}
+	rooted, err := budgetSourceRoot(selected)
+	if err != nil {
+		return nil, err
+	}
+	if rooted.Admission().Reference() != reference {
+		return nil, fmt.Errorf("budget recovery source does not match the selected root reference %+v", reference)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return selected, nil
+}
+
+func budgetSourceRoot(source semanticview.Source) (sourceartifact.RootedSource, error) {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return sourceartifact.RootedSource{}, fmt.Errorf("budget recovery requires its compiled rooted source")
+	}
+	return bundle.RootedSource()
 }
 
 func (t *BudgetTracker) RecordSpend(ctx context.Context, rec SpendRecord) error {

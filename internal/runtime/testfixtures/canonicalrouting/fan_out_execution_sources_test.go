@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runstart"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestFanOutExecutionSourcesLoadExactOverlays(t *testing.T) {
@@ -61,7 +62,7 @@ func TestFanOutExecutionSourcesLoadExactOverlays(t *testing.T) {
 				t.Fatal(err)
 			}
 			repo := RepoRoot(t)
-			if _, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{}); err != nil {
+			if _, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, artifact), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{}); err != nil {
 				t.Fatal(err)
 			}
 		})

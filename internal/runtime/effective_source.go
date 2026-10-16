@@ -110,6 +110,17 @@ func packProjectionsForEffectiveSource(source semanticview.Source, suppliedTrigg
 
 func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtimecorrelation.SourceArtifactFact, channelPlans []packs.SatisfactionPlan) (map[string]any, error) {
 	bundleHash := sourceFact.BundleHash()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return nil, fmt.Errorf("effective source identity requires its compiled rooted source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return nil, err
+	}
+	if rooted.Admission().BundleHash() != bundleHash {
+		return nil, fmt.Errorf("effective source identity differs from its compiled content fact")
+	}
 	inputs := semanticview.BuildAuthoredEventEndpointCensus(source).InputPins()
 	inputValues := make([]map[string]any, 0, len(inputs))
 	for _, endpoint := range inputs {
@@ -227,7 +238,7 @@ func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtime
 
 	return map[string]any{
 		"version":             admittedEffectiveSourceProjectionVersion,
-		"base_source":         map[string]any{"bundle_hash": bundleHash},
+		"base_source":         rooted.Admission().Reference(),
 		"public_inputs":       inputValues,
 		"provider_connectors": connectorValues,
 		"provider_triggers":   triggerValue,

@@ -46,6 +46,7 @@ type inboundPublicationProofStore interface {
 	storeTestDurableEventBusStore
 	workflowTestSelectedStore
 	sourceartifact.Reader
+	GetRootedSource(context.Context, sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error)
 }
 
 type inboundPublicationProofMutation interface {
@@ -142,16 +143,22 @@ func inboundPublicationProofBus(t *testing.T, store inboundPublicationProofStore
 	if !ok {
 		return nil, empty, errors.New("inbound publication proof bundle source fact is required")
 	}
-	persisted, err := store.GetSourceArtifact(ctx, fact.BundleHash())
+	root, present, err := runtimecorrelation.RootAdmissionFromContext(ctx)
 	if err != nil {
 		return nil, empty, err
 	}
-	artifact, err := persisted.Decode()
+	if !present || root.BundleHash() != fact.BundleHash() {
+		return nil, empty, errors.New("inbound publication proof requires its selected rooted context")
+	}
+	rooted, err := store.GetRootedSource(ctx, root.Reference())
 	if err != nil {
 		return nil, empty, err
+	}
+	if rooted.Admission().Reference() != root.Reference() {
+		return nil, empty, errors.New("inbound publication proof crossed its selected rooted source")
 	}
 	repo := runtimepipeline.WorkflowRepoRoot()
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		return nil, empty, err
 	}

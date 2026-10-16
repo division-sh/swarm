@@ -67,6 +67,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -152,7 +153,7 @@ type RuntimeDeps struct {
 	DataAccessStore               durabledata.ResourceAccessStore
 	HumanTaskStore                runtimetools.HumanTaskCardStore
 	BudgetSpendStore              budgetspend.Store
-	BudgetStageSourceLoader       func(context.Context, string) (semanticview.Source, error)
+	BudgetStageSourceLoader       func(context.Context, sourceartifact.RootAdmissionReference) (semanticview.Source, error)
 	InboundStore                  InboundPersistence
 	RuntimeIngressStore           runtimeingress.Store
 	ScenarioExecutionProfiles     runtimepipeline.ScenarioExecutionProfileReader
@@ -1297,7 +1298,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 
 	if runtimeDeps.BudgetSpendStore != nil {
 		rt.Budget = NewBudgetTracker(runtimeDeps.BudgetSpendStore, rt.Bus, cfg, runtimeDeps.MailboxStore, rt.Logger, source, rt.ExecutionPosture, BudgetRecoveryStageSources{
-			CurrentBundleHash: boot.SourceArtifactFact.BundleHash(), Load: runtimeDeps.BudgetStageSourceLoader,
+			Load: runtimeDeps.BudgetStageSourceLoader,
 		})
 	}
 

@@ -93,7 +93,7 @@ func TestIssue2269TurnTimeoutEventBindingDiskAndRetained(t *testing.T) {
 				t.Fatal(err)
 			}
 			disk, diskErr := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
-			loaded, loadedErr := LoadWorkflowContractBundleFromArtifact(repo, retained, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+			loaded, loadedErr := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, retained), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 			if (diskErr == nil) != row.accepted || (loadedErr == nil) != row.accepted {
 				t.Fatalf("accepted=%t disk=%v retained=%v", row.accepted, diskErr, loadedErr)
 			}

@@ -1,12 +1,9 @@
 package serveapp
 
 import (
-	"context"
-
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime"
-	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 )
@@ -15,12 +12,10 @@ import (
 // runtime construction and replacement. It deliberately excludes selected
 // ownership, backend identity, optional products, and close authority.
 type serveRuntimePersistence struct {
-	deps         runtime.RuntimeDeps
-	schema       store.SchemaBootstrapper
-	sourceWriter sourceArtifactDataWriter
-	sourceReader interface {
-		GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
-	}
+	deps              runtime.RuntimeDeps
+	schema            store.SchemaBootstrapper
+	sourceWriter      sourceArtifactDataWriter
+	sourceReader      sourceArtifactReader
 	data              durabledata.ResourceAccessStore
 	channelOnboarding channelonboarding.Store
 }

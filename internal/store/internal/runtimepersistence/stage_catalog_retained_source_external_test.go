@@ -71,7 +71,14 @@ func TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			loaded, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, logical, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+			rooted, err := reloaded.LoadRunRootedSource(ctx, runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rooted.Artifact().BundleHash() != logical.BundleHash() {
+				t.Fatal("retained run root changed exact member identity")
+			}
+			loaded, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -88,7 +95,7 @@ func TestStageCatalogRetainedStoreReloadAndSelectedForkSourceBothStores(t *testi
 			}
 			assertEntry(semanticview.Wrap(loaded))
 			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: reloaded}
-			forkSource, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{SourceRunID: runID, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}})
+			forkSource, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{Responsibility: runforkexecution.OriginalRunSource(runID), Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}})
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -43,6 +43,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/testutil/stagecatalogfixture"
 	"github.com/google/uuid"
 )
@@ -576,8 +577,8 @@ func fanOutMixedRouteSource(t *testing.T) (*sourceartifact.AdmittedSourceArtifac
 		t.Fatalf("admit mixed-route source: %v", err)
 	}
 	repoRoot := pipeline.WorkflowRepoRoot()
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(
-		repoRoot, artifact, runtimecontracts.DefaultPlatformSpecFile(repoRoot), runtimecontracts.WorkflowContractLoadOptions{},
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(
+		repoRoot, sourceartifactfixture.CapturedRoot(t, artifact), runtimecontracts.DefaultPlatformSpecFile(repoRoot), runtimecontracts.WorkflowContractLoadOptions{},
 	)
 	if err != nil {
 		t.Fatalf("compile mixed-route source: %v", err)

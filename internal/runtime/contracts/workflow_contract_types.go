@@ -25,6 +25,7 @@ type ContractPaths struct {
 	PlatformSpecFile string
 }
 type WorkflowContractBundle struct {
+	rootedSource          sourceartifact.RootedSource
 	SourceArtifact        *sourceartifact.AdmittedSourceArtifact
 	FlowSources           map[string]FlowSource
 	Paths                 ContractPaths
@@ -78,6 +79,22 @@ type WorkflowContractBundle struct {
 	fanOutPlanFailures    []FanOutPlanFailure
 	fanOutPlansPrepared   bool
 }
+
+// RootedSource returns the original compiler input only while its public content
+// view still names those exact owned bytes. Content replacement cannot retarget it.
+func (b *WorkflowContractBundle) RootedSource() (sourceartifact.RootedSource, error) {
+	if b == nil {
+		return sourceartifact.RootedSource{}, fmt.Errorf("workflow contract bundle is required")
+	}
+	if err := b.rootedSource.Validate(); err != nil {
+		return sourceartifact.RootedSource{}, err
+	}
+	if b.SourceArtifact != b.rootedSource.Artifact() {
+		return sourceartifact.RootedSource{}, fmt.Errorf("compiled rooted source differs from its exposed content")
+	}
+	return b.rootedSource, nil
+}
+
 type WorkflowSemanticView struct {
 	Name                   string
 	Version                string

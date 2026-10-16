@@ -10,6 +10,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestSelectedRootPinBoundaryArtifactParity(t *testing.T) {
@@ -31,7 +32,7 @@ func TestSelectedRootPinBoundaryArtifactParity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, artifact), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -67,7 +68,7 @@ func TestSelectedRootPinBoundaryArtifactParity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, decoded, runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, original.artifact, decoded), runtimecontracts.DefaultPlatformSpecFile(repo), runtimecontracts.WorkflowContractLoadOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}

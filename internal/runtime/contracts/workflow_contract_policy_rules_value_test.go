@@ -310,7 +310,7 @@ func TestR3PolicyRulesProvenanceComposition(t *testing.T) {
 		if mode == "disk" {
 			bundle, err = LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 		} else {
-			bundle, err = LoadWorkflowContractBundleFromArtifact(repo, artifact, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+			bundle, err = LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 		}
 		if err != nil {
 			t.Fatal(err)

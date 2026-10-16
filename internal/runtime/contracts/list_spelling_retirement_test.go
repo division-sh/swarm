@@ -178,7 +178,7 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 						t.Fatal(err)
 					}
 					for _, source := range []*sourceartifact.AdmittedSourceArtifact{artifact, catalog, retained} {
-						if _, err := LoadWorkflowContractBundleFromArtifact(repo, source, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{}); err == nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), surface+".yaml") {
+						if _, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, source), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{}); err == nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), surface+".yaml") {
 							t.Fatalf("retained source bypassed shape/style admission: %v", err)
 						}
 					}
@@ -200,7 +200,7 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, artifact := range []*sourceartifact.AdmittedSourceArtifact{catalog, retained} {
-					loaded, err := LoadWorkflowContractBundleFromArtifact(repo, artifact, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+					loaded, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, bundle.SourceArtifact, artifact), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 					if err != nil {
 						t.Fatal(err)
 					}

@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"gopkg.in/yaml.v3"
 )
 
@@ -109,7 +110,7 @@ func TestPackPlatformAdmissionDiskLogicalRetainedParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, source := range map[string]*sourceartifact.AdmittedSourceArtifact{"logical": logical, "retained": retained} {
-		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(repo, source, runtimecontracts.DefaultPlatformSpecFile(repo), options)
+		bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, disk.SourceArtifact, source), runtimecontracts.DefaultPlatformSpecFile(repo), options)
 		if err != nil {
 			t.Fatal(err)
 		}

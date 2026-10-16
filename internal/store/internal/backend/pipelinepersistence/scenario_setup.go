@@ -46,7 +46,10 @@ func (s *PipelinePostgresOwner) CommitScenarioSetup(ctx context.Context, command
 			if !ok {
 				return fmt.Errorf("postgres scenario setup requires executable bundle source fact")
 			}
-			root, ok := runtimecorrelation.RootAdmissionFromContext(txctx)
+			root, ok, rootErr := runtimecorrelation.RootAdmissionFromContext(txctx)
+			if rootErr != nil {
+				return rootErr
+			}
 			if !ok {
 				return fmt.Errorf("postgres scenario setup requires exact rooted source admission")
 			}
@@ -151,7 +154,10 @@ func (s *PipelineSQLiteOwner) CommitScenarioSetup(ctx context.Context, command r
 			if !ok {
 				return fmt.Errorf("sqlite scenario setup requires executable bundle source fact")
 			}
-			root, ok := runtimecorrelation.RootAdmissionFromContext(txctx)
+			root, ok, rootErr := runtimecorrelation.RootAdmissionFromContext(txctx)
+			if rootErr != nil {
+				return rootErr
+			}
 			if !ok {
 				return fmt.Errorf("sqlite scenario setup requires exact rooted source admission")
 			}

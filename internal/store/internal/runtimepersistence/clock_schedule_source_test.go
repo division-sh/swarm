@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestClockScheduleSourceRoundTripOnBothStores(t *testing.T) {
@@ -40,7 +41,8 @@ func TestClockScheduleSourceRoundTripOnBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			catalogStore := store.(selectedSourceArtifactStore)
-			if _, err := catalogStore.EnsureSourceArtifact(ctx, disk.SourceArtifact); err != nil {
+			captured := sourceartifactfixture.CapturedRoot(t, disk.SourceArtifact)
+			if _, err := catalogStore.EnsureRootedSource(ctx, captured); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.RemoveAll(root); err != nil {
@@ -63,7 +65,14 @@ func TestClockScheduleSourceRoundTripOnBothStores(t *testing.T) {
 					t.Fatalf("clock member %s changed", name)
 				}
 			}
-			retained, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+			rooted, err := catalogStore.GetRootedSource(ctx, captured.Admission().Reference())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rooted.Admission().Reference() != captured.Admission().Reference() || !bytes.Equal(rooted.Artifact().LogicalBlob(), artifact.LogicalBlob()) {
+				t.Fatal("retained clock source changed frozen root or member bytes")
+			}
+			retained, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}

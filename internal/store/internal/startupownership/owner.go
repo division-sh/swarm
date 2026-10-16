@@ -979,9 +979,9 @@ func loadSourceSetModeTx(ctx context.Context, tx *sql.Tx, sqlite, lock bool) (ru
 	return plan, true, nil
 }
 
-func sourceSetContains(plan runtimeagenttopology.SourceSetPlan, source runtimeagenttopology.SourceCoordinate) bool {
+func sourceSetContainsBundle(plan runtimeagenttopology.SourceSetPlan, hash string) bool {
 	for _, candidate := range plan.Sources {
-		if candidate.Normalize() == source {
+		if candidate.BundleHash == hash {
 			return true
 		}
 	}

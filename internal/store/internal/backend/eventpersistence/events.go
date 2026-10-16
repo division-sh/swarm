@@ -343,7 +343,10 @@ func (s *EventPostgresOwner) ensureRunRow(ctx context.Context, tx *sql.Tx, attem
 	if !ok {
 		return fmt.Errorf("ensure run row: executable bundle source fact is required")
 	}
-	root, ok := runtimecorrelation.RootAdmissionFromContext(ctx)
+	root, ok, rootErr := runtimecorrelation.RootAdmissionFromContext(ctx)
+	if rootErr != nil {
+		return rootErr
+	}
 	if !ok {
 		return fmt.Errorf("ensure run row: exact rooted source admission is required")
 	}

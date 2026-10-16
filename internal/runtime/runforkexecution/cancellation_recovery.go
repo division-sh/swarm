@@ -118,7 +118,7 @@ func (o SelectedContractExecutionOwner) beginSelectedCancellationInspection(ctx 
 		return p, errors.New("selected cancellation inspection lacks exact source fact")
 	}
 	sourceRequest := SelectedContractSourceLoadRequest{
-		SourceRunID: request.Entry.Binding.ForkRunID, BundleHash: request.Entry.BundleHash,
+		Responsibility: RetainedForkSource(request.Entry.Binding.ForkRunID), BundleHash: request.Entry.BundleHash,
 		SourceArtifactFact: fact, Selection: request.Entry.Binding.ContractSelection,
 	}
 	p.loadedSource, err = inspector.InspectRunForkSelectedContractSourceForRequest(op.PreparationContext(), sourceRequest)

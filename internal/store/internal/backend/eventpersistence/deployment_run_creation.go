@@ -97,7 +97,10 @@ func commitDeploymentRunCreationTx(
 			// recovered by its durable readiness attempt, never a fresh plan.
 			return runtimedata.ValidateRunCreationReceiptForCommand(result.Record, command)
 		}
-		rootAdmission, ok := runtimecorrelation.RootAdmissionFromContext(ctx)
+		rootAdmission, ok, rootErr := runtimecorrelation.RootAdmissionFromContext(ctx)
+		if rootErr != nil {
+			return rootErr
+		}
 		if !ok {
 			return fmt.Errorf("deployment run creation requires exact rooted source admission")
 		}

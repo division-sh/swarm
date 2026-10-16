@@ -27,11 +27,33 @@ func (am *AgentManager) CompileStaticTopologyDesiredAgents(source semanticview.S
 	if err := coordinate.Validate(); err != nil {
 		return nil, err
 	}
+	expected, err := staticSourceCoordinate(source, coordinate.BundleHash)
+	if err != nil {
+		return nil, err
+	}
+	if expected != coordinate {
+		return nil, errors.New("static topology source differs from its compiled rooted source")
+	}
 	blueprints, err := am.resolvedStaticTopologyBlueprints(source)
 	if err != nil {
 		return nil, err
 	}
 	return desiredAgentsFromBlueprints(blueprints, coordinate)
+}
+
+func staticSourceCoordinate(source semanticview.Source, hash string) (runtimeagenttopology.SourceCoordinate, error) {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return runtimeagenttopology.SourceCoordinate{}, errors.New("static topology requires its compiled rooted source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return runtimeagenttopology.SourceCoordinate{}, err
+	}
+	if rooted.Admission().BundleHash() != hash {
+		return runtimeagenttopology.SourceCoordinate{}, errors.New("static topology source differs from its admitted content fact")
+	}
+	return runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
 }
 
 // FinalizeCommittedAgentReadiness makes every committed agent delivery's exact
@@ -159,7 +181,10 @@ func (am *AgentManager) PrepareStaticTopologyForStartup(ctx context.Context, sou
 	if err != nil {
 		return err
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: static.BundleHash}
+	coordinate, err := staticSourceCoordinate(source, static.BundleHash)
+	if err != nil {
+		return err
+	}
 	blueprints, err := am.resolvedStaticTopologyBlueprints(source)
 	if err != nil {
 		return err
@@ -206,8 +231,7 @@ func (am *AgentManager) PrepareStaticTopologyForStartup(ctx context.Context, sou
 			continue
 		}
 		owner := current.Topology.Authority.Static
-		ownerSource := runtimeagenttopology.SourceCoordinate{BundleHash: owner.BundleHash}
-		if !sourceSetContainsCoordinate(completePlan, ownerSource) {
+		if !sourceSetContainsBundle(completePlan, owner.BundleHash) {
 			if err := am.retireRemovedStaticTopology(ctx, current, admission); err != nil {
 				return err
 			}
@@ -467,7 +491,10 @@ func (am *AgentManager) PrepareDurableTopologySourceSetRebind(
 	if transitionAdmission.SourceSetRevision() != plan.Revision {
 		return nil, errors.New("durable topology source-set rebind admission targets another complete source set")
 	}
-	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: static.BundleHash}.Normalize()
+	coordinate, err := staticSourceCoordinate(source, static.BundleHash)
+	if err != nil {
+		return nil, err
+	}
 	if err := currentBinding.Validate(); err != nil {
 		return nil, fmt.Errorf("durable topology source-set rebind current process binding: %w", err)
 	}
@@ -967,10 +994,9 @@ func (am *AgentManager) hydratePersistedAgentExecutions(ctx context.Context) err
 	return nil
 }
 
-func sourceSetContainsCoordinate(plan runtimeagenttopology.SourceSetPlan, coordinate runtimeagenttopology.SourceCoordinate) bool {
-	coordinate = coordinate.Normalize()
+func sourceSetContainsBundle(plan runtimeagenttopology.SourceSetPlan, hash string) bool {
 	for _, candidate := range plan.Sources {
-		if candidate.Normalize() == coordinate {
+		if candidate.BundleHash == hash {
 			return true
 		}
 	}

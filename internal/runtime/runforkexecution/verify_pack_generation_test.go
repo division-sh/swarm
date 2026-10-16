@@ -52,8 +52,8 @@ func TestRetainedSelectedAndOriginalSourceUseConfiguredPackGeneration(t *testing
 	}
 	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: reader, PlatformPackBases: bases}
 	for _, request := range []SelectedContractSourceLoadRequest{
-		{SourceRunID: sourceID, BundleHash: record.BundleHash, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash}},
-		{SourceRunID: sourceID, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}},
+		{Responsibility: FreshSelectedSource(record.BundleHash), BundleHash: record.BundleHash, Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash}},
+		{Responsibility: OriginalRunSource(sourceID), Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}},
 	} {
 		loaded, err := loader.InspectRunForkSelectedContractSourceForRequest(context.Background(), request)
 		if err != nil {

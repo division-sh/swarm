@@ -13,11 +13,14 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type eventAdmissionRetainedStore interface {
 	EnsureSourceArtifact(context.Context, *sourceartifact.AdmittedSourceArtifact) (sourceartifact.EnsureResult, error)
 	GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
+	EnsureRootedSource(context.Context, sourceartifact.RootedSource) (sourceartifact.RootedEnsureResult, error)
+	GetRootedSource(context.Context, sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error)
 	Close() error
 }
 
@@ -48,7 +51,8 @@ func TestEventCatalogFactoringRetainedArtifactBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := selected.EnsureSourceArtifact(ctx, initial.SourceArtifact); err != nil {
+			captured := sourceartifactfixture.CapturedRoot(t, initial.SourceArtifact)
+			if _, err := selected.EnsureRootedSource(ctx, captured); err != nil {
 				t.Fatal(err)
 			}
 			if err := selected.Close(); err != nil {
@@ -74,7 +78,14 @@ func TestEventCatalogFactoringRetainedArtifactBothStores(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			rebuilt, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, artifact, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+			rooted, err := selected.GetRootedSource(ctx, captured.Admission().Reference())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rooted.Admission().Reference() != captured.Admission().Reference() || !bytes.Equal(rooted.Artifact().LogicalBlob(), artifact.LogicalBlob()) {
+				t.Fatal("retained root differs from exact content or captured selection")
+			}
+			rebuilt, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, rooted, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}

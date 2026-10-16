@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func VerifyNativeGuardTerminationVerifiedExecutionAndRestartBothStoresForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
@@ -70,7 +71,7 @@ func VerifyNativeGuardTerminationVerifiedExecutionAndRestartBothStoresForTest(t 
 		if err != nil {
 			t.Fatal(err)
 		}
-		rebuilt, err := contracts.LoadWorkflowContractBundleFromArtifact(WorkflowRepoRoot(), retained, bundle.Paths.PlatformSpecFile, contracts.WorkflowContractLoadOptions{})
+		rebuilt, err := contracts.LoadWorkflowContractBundleFromRootedSource(WorkflowRepoRoot(), sourceartifactfixture.CapturedRoot(t, bundle.SourceArtifact, retained), bundle.Paths.PlatformSpecFile, contracts.WorkflowContractLoadOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -83,7 +84,7 @@ func VerifyNativeGuardTerminationVerifiedExecutionAndRestartBothStoresForTest(t 
 		if err != nil {
 			t.Fatal(err)
 		}
-		logicalBundle, err := contracts.LoadWorkflowContractBundleFromArtifact(WorkflowRepoRoot(), logical, bundle.Paths.PlatformSpecFile, contracts.WorkflowContractLoadOptions{})
+		logicalBundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(WorkflowRepoRoot(), sourceartifactfixture.CapturedRoot(t, bundle.SourceArtifact, logical), bundle.Paths.PlatformSpecFile, contracts.WorkflowContractLoadOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}

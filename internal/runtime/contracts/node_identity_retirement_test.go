@@ -130,7 +130,7 @@ func TestNodeIdentityAdmissionAndArtifactReconstruction(t *testing.T) {
 				if err := os.RemoveAll(root); err != nil {
 					t.Fatal(err)
 				}
-				if bundle, err := LoadWorkflowContractBundleFromArtifact(repo, decoded, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{}); bundle != nil || err == nil || !strings.Contains(err.Error(), retiredNodeID) {
+				if bundle, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, decoded), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{}); bundle != nil || err == nil || !strings.Contains(err.Error(), retiredNodeID) {
 					t.Fatalf("reconstructed retired artifact: bundle=%v error=%v", bundle, err)
 				}
 			})
@@ -146,7 +146,7 @@ func TestNodeIdentityAdmissionAndArtifactReconstruction(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		baseline, err := LoadWorkflowContractBundleFromArtifact(repo, artifact, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+		baseline, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -157,7 +157,7 @@ func TestNodeIdentityAdmissionAndArtifactReconstruction(t *testing.T) {
 		if err := os.RemoveAll(root); err != nil {
 			t.Fatal(err)
 		}
-		loaded, err := LoadWorkflowContractBundleFromArtifact(repo, decoded, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+		loaded, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, decoded), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}

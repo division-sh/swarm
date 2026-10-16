@@ -27,14 +27,15 @@ type RunFixtureStore interface {
 }
 
 type RunFixture struct {
-	RunID      string
-	State      runtimerunlifecycle.State
-	Origin     runtimerunlifecycle.RunOrigin
-	Artifact   *sourceartifact.AdmittedSourceArtifact
-	BundleHash string
-	StartedAt  time.Time
-	EndedAt    time.Time
-	Failure    *runtimefailures.Envelope
+	RunID         string
+	State         runtimerunlifecycle.State
+	Origin        runtimerunlifecycle.RunOrigin
+	Artifact      *sourceartifact.AdmittedSourceArtifact
+	RootAdmission sourceartifact.RootAdmission
+	BundleHash    string
+	StartedAt     time.Time
+	EndedAt       time.Time
+	Failure       *runtimefailures.Envelope
 }
 
 func ScenarioSetupOrigin() runtimerunlifecycle.RunOrigin {
@@ -57,6 +58,22 @@ func RequireRun(
 	fixture RunFixture,
 ) {
 	t.Helper()
+	if fixture.Artifact == nil && fixture.RootAdmission == (sourceartifact.RootAdmission{}) {
+		source, err := semanticFixtureSource(ctx, fixture.BundleHash)
+		if err != nil {
+			t.Fatal(err)
+		}
+		root, present, err := runtimecorrelation.RootAdmissionFromContext(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if present {
+			fixture.RootAdmission = root
+		} else if source.BundleHash() == SemanticFixtureBundleHash {
+			rooted, _ := sourceartifactfixture.Rooted(t, "fixture", sourceartifactfixture.Artifact())
+			fixture.Artifact, fixture.RootAdmission = rooted.Artifact(), rooted.Admission()
+		}
+	}
 	if err := MaterializeRun(ctx, runner, fixture); err != nil {
 		t.Fatalf("materialize semantic run fixture %s: %v", strings.TrimSpace(fixture.RunID), err)
 	}
@@ -123,6 +140,28 @@ func MaterializeRun(
 	if err != nil {
 		return err
 	}
+	root := fixture.RootAdmission
+	if captured, present := fixture.Artifact.RootAdmission(); present {
+		if root != (sourceartifact.RootAdmission{}) && !root.Equal(captured) {
+			return fmt.Errorf("semantic run fixture has competing rooted inputs")
+		}
+		root = captured
+	}
+	if root == (sourceartifact.RootAdmission{}) {
+		root, _, err = runtimecorrelation.RootAdmissionFromContext(ctx)
+		if err != nil {
+			return err
+		}
+	}
+	if err := root.Validate(); err != nil {
+		return fmt.Errorf("semantic run fixture requires its explicit admitted root: %w", err)
+	}
+	if root.BundleHash() != source.BundleHash() {
+		return fmt.Errorf("semantic run fixture root differs from its content fact")
+	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, root.Reference()); err != nil {
+		return err
+	}
 	if err := ensureSemanticFixtureSourceArtifact(ctx, runner, source.BundleHash(), fixture.Artifact); err != nil {
 		return err
 	}
@@ -133,11 +172,13 @@ func MaterializeRun(
 		fixture.EndedAt = fixture.StartedAt
 	}
 	ctx = semanticFixtureContext(ctx, source)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, root)
 	if _, err = runner.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
-		RunID:     fixture.RunID,
-		Origin:    fixture.Origin,
-		Source:    source,
-		StartedAt: fixture.StartedAt.UTC(),
+		RunID:         fixture.RunID,
+		Origin:        fixture.Origin,
+		Source:        source,
+		RootAdmission: root,
+		StartedAt:     fixture.StartedAt.UTC(),
 	}); err != nil {
 		return err
 	}

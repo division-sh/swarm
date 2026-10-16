@@ -32,7 +32,7 @@ func loadServeRecoveredResetSources(ctx context.Context, repo string, artifacts 
 	}
 	var loaded []serveRuntimeBundle
 	for _, source := range plan.Sources {
-		bundle, err := loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, source.BundleHash, spec, packBases, materialize)
+		bundle, err := loadServeRuntimeBundleFromArtifact(ctx, repo, artifacts, source.RootReference(), spec, packBases, materialize)
 		if err != nil {
 			for _, prior := range loaded {
 				err = errors.Join(err, prior.cleanup())

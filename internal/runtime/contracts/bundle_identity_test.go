@@ -19,7 +19,7 @@ func TestBootBundleIdentityStableAcrossRootsAndFileOrder(t *testing.T) {
 
 	writeBundleIdentityFile(t, filepath.Join(rootB, "prompts", "b.md"), "beta\r\n")
 	writeBundleIdentityFile(t, filepath.Join(rootB, "prompts", "a.md"), "alpha\r\n")
-	writeBundleIdentityFile(t, filepath.Join(rootB, "manifest.yaml"), "version: 1.0.0\r\nname: identity-test\nplatform_version: '*'\n")
+	writeBundleIdentityFile(t, filepath.Join(rootB, "manifest.yaml"), "version: 1.0.0\r\nplatform_version: '*'\n")
 	writeBundleIdentityFile(t, filepath.Join(rootB, "agents.yaml"), "guide:\r\n  role: guide\r\n  intent: prompts/a.md\r\n  model: regular\r\n  subscriptions: [guide.requested]\r\n")
 
 	bundleA, err := LoadWorkflowContractBundleWithOverrides(repo, rootA, platformSpec)

@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func TestStandingFlowConstructorEligibility(t *testing.T) {
@@ -30,7 +31,7 @@ func TestStandingFlowConstructorEligibility(t *testing.T) {
 			}
 			repo := repoRootForBootverifyTest(t)
 			bundle := loadFixtureBundleAt(t, repo, root, contracts.DefaultPlatformSpecFile(repo))
-			rebuilt, err := contracts.LoadWorkflowContractBundleFromArtifact(repo, bundle.SourceArtifact, contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
+			rebuilt, err := contracts.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, bundle.SourceArtifact), contracts.DefaultPlatformSpecFile(repo), contracts.WorkflowContractLoadOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}

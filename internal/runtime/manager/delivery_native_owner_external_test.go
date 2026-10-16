@@ -173,8 +173,9 @@ func TestManagerDeliveryStorageOnlySourceRefusesSelectedExecutionBothStores(t *t
 			loader := runforkexecution.SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected}
 			ctx := manager.TerminalPanicFixtureContext()
 			admitted, err := loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
-				BundleHash: sourceartifactfixture.BundleHash,
-				Selection:  runfork.RunForkContractSelection{Mode: "bundle_hash", BundleHash: sourceartifactfixture.BundleHash},
+				Responsibility: runforkexecution.FreshSelectedSource(sourceartifactfixture.BundleHash),
+				BundleHash:     sourceartifactfixture.BundleHash,
+				Selection:      runfork.RunForkContractSelection{Mode: "bundle_hash", BundleHash: sourceartifactfixture.BundleHash},
 			})
 			if err != nil || admitted.Source == nil || admitted.Module == nil || admitted.SourceArtifactFact.BundleHash() != sourceartifactfixture.BundleHash || admitted.RuntimeProjection != nil || admitted.Cleanup != nil {
 				t.Fatalf("admitted source inspection changed authority or materialized execution: %+v,error=%v", admitted, err)
@@ -195,8 +196,9 @@ func TestManagerDeliveryStorageOnlySourceRefusesSelectedExecutionBothStores(t *t
 			}
 			probe := storetest.CollectTransactions(t, fixture.Store, storetest.TransactionProbeOptions{})
 			_, err = loader.InspectRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{
-				BundleHash: storageOnly.BundleHash(),
-				Selection:  runfork.RunForkContractSelection{Mode: "bundle_hash", BundleHash: storageOnly.BundleHash()},
+				Responsibility: runforkexecution.FreshSelectedSource(storageOnly.BundleHash()),
+				BundleHash:     storageOnly.BundleHash(),
+				Selection:      runfork.RunForkContractSelection{Mode: "bundle_hash", BundleHash: storageOnly.BundleHash()},
 			})
 			if err == nil || !strings.Contains(err.Error(), "BUNDLE_DATA_INTEGRITY_ERROR") || !strings.Contains(err.Error(), "agent intent source is required") {
 				t.Fatalf("storage-only artifact must not mint executable selected authority: %v", err)

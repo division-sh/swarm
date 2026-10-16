@@ -53,7 +53,7 @@ func Test2376NestedManifestPreservesSemanticScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := LoadWorkflowContractBundleFromArtifact(repo, stored, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{}); err != nil {
+	if _, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, after.SourceArtifact, stored), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{}); err != nil {
 		t.Fatalf("stored compile enforced nested range: %v", err)
 	}
 	if _, err := LoadWorkflowContractBundleWithOverrides(repo, filepath.Join(root, "producer"), DefaultPlatformSpecFile(repo)); err == nil || !strings.Contains(err.Error(), "platform_version") {

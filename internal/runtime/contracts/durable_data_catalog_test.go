@@ -65,7 +65,7 @@ func TestStaticDataArtifactReconstructionIgnoresOriginalRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	baseline, err := LoadWorkflowContractBundleFromArtifact(repo, artifact, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+	baseline, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestStaticDataArtifactReconstructionIgnoresOriginalRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, owned := range []*sourceartifact.AdmittedSourceArtifact{artifact, decoded} {
-		bundle, err := LoadWorkflowContractBundleFromArtifact(repo, owned, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+		bundle, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, owned), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}

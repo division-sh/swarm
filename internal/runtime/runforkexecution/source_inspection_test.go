@@ -19,14 +19,15 @@ type countedSourceInspectionStore struct {
 	artifactReads, availabilityReads int
 }
 
-func (s *countedSourceInspectionStore) GetSourceArtifact(ctx context.Context, hash string) (sourceartifact.Persisted, error) {
+func (s *countedSourceInspectionStore) ResolveUnboundRootedSource(ctx context.Context, hash string) (sourceartifact.RootedSource, error) {
 	s.artifactReads++
-	return s.fakeSourceArtifactSelectedContractSourceStore.GetSourceArtifact(ctx, hash)
+	return s.fakeSourceArtifactSelectedContractSourceStore.ResolveUnboundRootedSource(ctx, hash)
 }
 
-func (s *countedSourceInspectionStore) LoadRunBundleAvailability(ctx context.Context, runID string) (runbundle.Availability, error) {
+func (s *countedSourceInspectionStore) LoadRunRootedSource(ctx context.Context, runID string) (sourceartifact.RootedSource, error) {
 	s.availabilityReads++
-	return s.fakeSourceArtifactSelectedContractSourceStore.LoadRunBundleAvailability(ctx, runID)
+	s.artifactReads++
+	return s.fakeSourceArtifactSelectedContractSourceStore.LoadRunRootedSource(ctx, runID)
 }
 
 func TestSelectedSourceInspectionSharesBootCompilerWithoutMaterialization(t *testing.T) {
@@ -41,8 +42,9 @@ func TestSelectedSourceInspectionSharesBootCompilerWithoutMaterialization(t *tes
 				availability: runbundle.Availability{RunID: runID, Status: "running", BundleHash: record.BundleHash, SourceArtifactPresent: true}, record: record,
 			}}
 			loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: reader}
-			request := SelectedContractSourceLoadRequest{SourceRunID: runID, BundleHash: record.BundleHash, Selection: runfork.RunForkContractSelection{Mode: mode}}
+			request := SelectedContractSourceLoadRequest{Responsibility: OriginalRunSource(runID), BundleHash: record.BundleHash, Selection: runfork.RunForkContractSelection{Mode: mode}}
 			if mode == runfork.RunForkContractSelectionModeBundleHash {
+				request.Responsibility = FreshSelectedSource(record.BundleHash)
 				request.Selection.BundleHash = record.BundleHash
 			}
 			missing := filepath.Join(root, mode, "not-created")
@@ -102,7 +104,7 @@ func TestSelectedSourceInspectionRejectsMissingCorruptCrossedAndCanceledEvidence
 			store := &fakeSourceArtifactSelectedContractSourceStore{record: record}
 			tc.mutate(store)
 			loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: store}
-			request := SelectedContractSourceLoadRequest{BundleHash: record.BundleHash,
+			request := SelectedContractSourceLoadRequest{Responsibility: FreshSelectedSource(record.BundleHash), BundleHash: record.BundleHash,
 				Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash}}
 			for _, load := range []func(context.Context, SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error){loader.InspectRunForkSelectedContractSourceForRequest, loader.LoadRunForkSelectedContractSourceForRequest} {
 				loaded, err := load(context.Background(), request)

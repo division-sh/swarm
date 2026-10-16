@@ -249,7 +249,7 @@ type forkHistoricalSelectedStore interface {
 func admitForkHistoricalSelectedRequest(t *testing.T, ctx context.Context, owner selected.RunFork, loader runforkexecution.SourceArtifactSelectedContractSourceLoader, plan runfork.RunForkPlan, hash string, options runforkexecution.SelectedContractAgentRuntimeOptions) (runforkreadiness.MaterializeRequest, runforkexecution.LoadedSelectedContractSource) {
 	t.Helper()
 	selection := runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts}
-	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{SourceRunID: plan.SourceRunID, BundleHash: hash, Selection: selection})
+	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, runforkexecution.SelectedContractSourceLoadRequest{Responsibility: runforkexecution.FreshSelectedSource(hash), BundleHash: hash, Selection: selection})
 	if err != nil {
 		t.Fatal(err)
 	}

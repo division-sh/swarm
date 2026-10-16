@@ -32,13 +32,14 @@ type SelectedContractSourceLoader interface {
 }
 
 type SelectedContractSourceLoadRequest struct {
-	SourceRunID        string
+	Responsibility     SelectedSourceResponsibility
 	BundleHash         string
 	SourceArtifactFact runtimecorrelation.SourceArtifactFact
 	Selection          runfork.RunForkContractSelection
 }
 
 type LoadedSelectedContractSource struct {
+	RootedSource            sourceartifact.RootedSource
 	Selection               runfork.RunForkContractSelection
 	Source                  semanticview.Source
 	Module                  runtimepipeline.WorkflowModule
@@ -54,8 +55,8 @@ type LoadedSelectedContractSource struct {
 // when validation or carriage compilation fails.
 func loadOriginalLoopCarriage(ctx context.Context, loader SelectedContractSourceLoader, sourceRunID string, owner *PreparedSelectedFork) (semanticview.OriginalLoopCarriage, error) {
 	loaded, err := loadRunForkSelectedContractSource(ctx, loader, SelectedContractSourceLoadRequest{
-		SourceRunID: sourceRunID,
-		Selection:   runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+		Responsibility: OriginalRunSource(sourceRunID),
+		Selection:      runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
 	}, &owner.originalSource)
 	if err != nil {
 		return semanticview.OriginalLoopCarriage{}, fmt.Errorf("load original fork source: %w", err)
@@ -91,6 +92,10 @@ func (m selectedContractWorkflowModule) GuardRegistry() runtimepipeline.GuardReg
 type SourceArtifactSelectedContractSourceStore interface {
 	LoadRunBundleAvailability(context.Context, string) (runbundle.Availability, error)
 	GetSourceArtifact(context.Context, string) (sourceartifact.Persisted, error)
+	LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+	LoadSelectedForkRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+	GetRootedSource(context.Context, sourceartifact.RootAdmissionReference) (sourceartifact.RootedSource, error)
+	ResolveUnboundRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
 }
 
 type SourceArtifactSelectedContractSourceLoader struct {
@@ -101,7 +106,7 @@ type SourceArtifactSelectedContractSourceLoader struct {
 }
 
 func (l SourceArtifactSelectedContractSourceLoader) LoadRunForkSelectedContractSource(ctx context.Context, selection runfork.RunForkContractSelection) (LoadedSelectedContractSource, error) {
-	return l.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Selection: selection})
+	return l.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{Responsibility: FreshSelectedSource(selection.BundleHash), Selection: selection})
 }
 
 func (l SourceArtifactSelectedContractSourceLoader) LoadRunForkSelectedContractSourceForRequest(ctx context.Context, req SelectedContractSourceLoadRequest) (LoadedSelectedContractSource, error) {
@@ -118,6 +123,9 @@ func (l SourceArtifactSelectedContractSourceLoader) LoadRunForkSelectedContractS
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: materialize DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, loaded.SourceArtifactFact.BundleHash(), err)
 	}
 	loaded.RuntimeProjection, loaded.Cleanup = runtimeProjection, runtimeProjection.Release
+	if err := ctx.Err(); err != nil {
+		return loaded, err
+	}
 	return loaded, nil
 }
 
@@ -134,56 +142,32 @@ func (l SourceArtifactSelectedContractSourceLoader) InspectRunForkSelectedContra
 	if l.Store == nil {
 		return LoadedSelectedContractSource{}, fmt.Errorf("DB-loaded selected-contract source loader requires source artifact store")
 	}
-	sourceRunID := strings.TrimSpace(req.SourceRunID)
-	requestedHash := strings.TrimSpace(req.BundleHash)
-	bundleHash := strings.TrimSpace(selection.BundleHash)
-	if selection.Mode == runfork.RunForkContractSelectionModeSelectedContracts {
-		if sourceRunID == "" {
-			return LoadedSelectedContractSource{}, fmt.Errorf("DB-loaded selected-contract source loader requires source run_id")
-		}
-		availability, err := l.Store.LoadRunBundleAvailability(ctx, sourceRunID)
-		if err != nil {
+	if req.SourceArtifactFact.BundleHash() != "" {
+		if err := req.SourceArtifactFact.Validate(); err != nil {
 			return LoadedSelectedContractSource{}, err
 		}
-		if availability.DataIntegrityError() {
-			return LoadedSelectedContractSource{}, fmt.Errorf("%s: %s", runbundle.CodeBundleDataIntegrityError, availability.DetailString())
-		}
-		if !availability.Available() {
-			return LoadedSelectedContractSource{}, fmt.Errorf("%s: %s", runbundle.CodeBundleUnavailable, availability.DetailString())
-		}
-		bundleHash = requestedHash
-		if bundleHash == "" {
-			bundleHash = strings.TrimSpace(availability.BundleHash)
-		}
-		if bundleHash == "" {
-			return LoadedSelectedContractSource{}, fmt.Errorf("%s: source run %s has no canonical bundle_hash", runbundle.CodeBundleDataIntegrityError, sourceRunID)
-		}
-		if bundleHash != strings.TrimSpace(availability.BundleHash) {
-			return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected_contracts source hash mismatch: request %s source %s", runbundle.CodeBundleDataIntegrityError, bundleHash, availability.BundleHash)
-		}
-	} else {
-		if requestedHash != "" && requestedHash != bundleHash {
-			return LoadedSelectedContractSource{}, fmt.Errorf("%s: target bundle_hash selection %s does not match request %s", runbundle.CodeBundleDataIntegrityError, bundleHash, requestedHash)
-		}
 	}
-	record, err := l.Store.GetSourceArtifact(ctx, bundleHash)
-	if errors.Is(err, sourceartifact.ErrNotFound) {
-		if selection.Mode == runfork.RunForkContractSelectionModeBundleHash {
-			return LoadedSelectedContractSource{}, fmt.Errorf("%s: target source is not available; serve this directory first", runbundle.CodeBundleUnavailable)
-		}
-		return LoadedSelectedContractSource{}, fmt.Errorf("%s: source run %s source artifact missing for %s", runbundle.CodeBundleDataIntegrityError, sourceRunID, bundleHash)
+	if req.BundleHash != "" && selection.BundleHash != "" && req.BundleHash != selection.BundleHash {
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected target differs from requested content", runbundle.CodeBundleDataIntegrityError)
 	}
+	rooted, err := req.Responsibility.load(ctx, l.Store)
 	if err != nil {
+		code := runbundle.CodeBundleDataIntegrityError
+		if req.Responsibility.kind == freshSelectedSource && (errors.Is(err, sourceartifact.ErrNotFound) || errors.Is(err, sourceartifact.ErrRootAdmissionMissing)) {
+			code = runbundle.CodeBundleUnavailable
+		}
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: load exact rooted selected source: %w", code, err)
+	}
+	if err := rooted.Validate(); err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
-	if record.BundleHash != bundleHash {
-		return LoadedSelectedContractSource{}, fmt.Errorf("%s: requested selected source %s, reader returned %s", runbundle.CodeBundleDataIntegrityError, bundleHash, record.BundleHash)
+	bundleHash := rooted.Admission().BundleHash()
+	if req.BundleHash != "" && req.BundleHash != bundleHash ||
+		selection.BundleHash != "" && selection.BundleHash != bundleHash ||
+		req.SourceArtifactFact.BundleHash() != "" && req.SourceArtifactFact.BundleHash() != bundleHash {
+		return LoadedSelectedContractSource{}, fmt.Errorf("%s: selected rooted responsibility differs from requested content", runbundle.CodeBundleDataIntegrityError)
 	}
-	artifact, err := record.Decode()
-	if err != nil {
-		return LoadedSelectedContractSource{}, fmt.Errorf("%s: decode DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, bundleHash, err)
-	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromArtifact(strings.TrimSpace(l.RepoRoot), artifact, strings.TrimSpace(l.PlatformSpecPath), runtimecontracts.WorkflowContractLoadOptions{
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(strings.TrimSpace(l.RepoRoot), rooted, strings.TrimSpace(l.PlatformSpecPath), runtimecontracts.WorkflowContractLoadOptions{
 		PlatformPackBases: l.PlatformPackBases, AdmitPackInventory: packadmission.AdmitInventory,
 	})
 	if err != nil {
@@ -205,6 +189,7 @@ func (l SourceArtifactSelectedContractSourceLoader) InspectRunForkSelectedContra
 		return LoadedSelectedContractSource{}, err
 	}
 	loaded := LoadedSelectedContractSource{
+		RootedSource:            rooted,
 		Selection:               selection,
 		Source:                  source,
 		SourceArtifactFact:      sourceFact,
@@ -217,6 +202,9 @@ func (l SourceArtifactSelectedContractSourceLoader) InspectRunForkSelectedContra
 		},
 	}
 	if err := validateLoadedSelectedContractSource(req, loaded); err != nil {
+		return LoadedSelectedContractSource{}, err
+	}
+	if err := ctx.Err(); err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
 	return loaded, nil
@@ -255,9 +243,26 @@ func loadRunForkSelectedContractSource(ctx context.Context, loader SelectedContr
 }
 
 func validateLoadedSelectedContractSource(req SelectedContractSourceLoadRequest, loaded LoadedSelectedContractSource) error {
+	if err := loaded.RootedSource.Validate(); err != nil {
+		return fmt.Errorf("%s: selected-contract loader returned no rooted source: %w", runbundle.CodeBundleDataIntegrityError, err)
+	}
+	bundle, ok := semanticview.Bundle(loaded.Source)
+	if !ok || bundle == nil {
+		return fmt.Errorf("%s: selected-contract loader returned no compiled source", runbundle.CodeBundleDataIntegrityError)
+	}
+	compiled, err := bundle.RootedSource()
+	if err != nil {
+		return err
+	}
+	if compiled.Admission().Reference() != loaded.RootedSource.Admission().Reference() || compiled.Artifact() != loaded.RootedSource.Artifact() {
+		return fmt.Errorf("%s: selected-contract loader crossed its compiled rooted source", runbundle.CodeBundleDataIntegrityError)
+	}
 	loadedFact := loaded.SourceArtifactFact
 	if err := loadedFact.Validate(); err != nil {
 		return fmt.Errorf("%s: selected-contract loader returned invalid bundle source fact: %w", runbundle.CodeBundleDataIntegrityError, err)
+	}
+	if loadedFact.BundleHash() != compiled.Admission().BundleHash() {
+		return fmt.Errorf("%s: selected-contract loader crossed its compiled content fact", runbundle.CodeBundleDataIntegrityError)
 	}
 	if expectedHash := strings.TrimSpace(req.BundleHash); expectedHash != "" && expectedHash != loadedFact.BundleHash() {
 		return fmt.Errorf(
@@ -402,6 +407,12 @@ func validateSelectedContractExecutionBinding(forkRunID string, binding runfork.
 func validateSelectedContractExecutionSource(binding runfork.RunForkSelectedContractBinding, loaded LoadedSelectedContractSource) error {
 	if err := validateSelectionMatches("selected source", binding.ContractSelection, loaded.Selection); err != nil {
 		return err
+	}
+	if err := validateLoadedSelectedContractSource(SelectedContractSourceLoadRequest{}, loaded); err != nil {
+		return err
+	}
+	if binding.TargetRootReference != loaded.RootedSource.Admission().Reference() {
+		return fmt.Errorf("selected-contract execution source differs from the durable target root")
 	}
 	source := loaded.Source
 	if source == nil {

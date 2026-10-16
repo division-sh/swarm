@@ -183,6 +183,45 @@ func TestS1SelectedForkSourceRefusesUnacknowledgedReadBothStores(t *testing.T) {
 	}
 }
 
+func TestS1RetainedForkSourceReachesRootedCompilerBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			fixture := newSelectedRootedSourceFixture(t, backend)
+			reader := fixture.owner.(selectedRootedSourceReader)
+			for _, responsibility := range []struct {
+				name, runID string
+				load        func(context.Context, string) (sourceartifact.RootedSource, error)
+				want        sourceartifact.RootAdmission
+			}{
+				{"original", fixture.parentID, reader.LoadRunRootedSource, fixture.parent.Admission()},
+				{"selected", fixture.childID, reader.LoadSelectedForkRootedSource, fixture.target.Admission()},
+			} {
+				t.Run(responsibility.name, func(t *testing.T) {
+					source, err := responsibility.load(context.Background(), responsibility.runID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if _, present := source.Artifact().RootAdmission(); present {
+						t.Fatal("stored content invented a filesystem admission")
+					}
+					bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(filepath.Join("..", "..", "..", "..", ".."), source, "", contracts.WorkflowContractLoadOptions{})
+					if err != nil {
+						t.Fatal(err)
+					}
+					compiled, err := bundle.RootedSource()
+					if err != nil || !compiled.Admission().Equal(responsibility.want) {
+						t.Fatalf("native responsibility lost at compiler: %+v, %v", compiled.Admission().Reference(), err)
+					}
+					identity, err := contracts.BootBundleIdentity(bundle)
+					if err != nil || identity.BundleHash != source.Artifact().BundleHash() || identity.WorkflowName != "." || identity.WorkflowVersion != identity.BundleHash {
+						t.Fatalf("retained rooted compiler changed machine identity: %+v, %v", identity, err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func newSelectedRootedSourceFixture(t *testing.T, backend string) selectedRootedSourceFixture {
 	t.Helper()
 	f := selectedRootedSourceFixture{parentID: uuid.NewString(), childID: uuid.NewString(), operationID: uuid.NewString()}

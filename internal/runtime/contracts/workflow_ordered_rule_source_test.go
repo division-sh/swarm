@@ -53,7 +53,7 @@ func TestOrderedRuleRetirementReachesDiskCatalogAndRetainedChildren(t *testing.T
 					if source.BundleHash() != artifact.BundleHash() || string(source.LogicalBlob()) != string(artifact.LogicalBlob()) {
 						t.Fatalf("%s changed the exact refused source bytes/hash", name)
 					}
-					bundle, err := LoadWorkflowContractBundleFromArtifact(repo, source, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
+					bundle, err := LoadWorkflowContractBundleFromRootedSource(repo, capturedCompilerSource(t, artifact, source), DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{})
 					if bundle != nil || err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "nodes.yaml") {
 						t.Fatalf("%s bypassed the exact rule refusal: bundle=%v err=%v", name, bundle, err)
 					}

@@ -179,7 +179,7 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 		expectedBundleHash = req.SourceArtifactFact.BundleHash()
 	}
 	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
-		SourceRunID:        req.SourceRunID,
+		Responsibility:     FreshSelectedSource(expectedBundleHash),
 		BundleHash:         expectedBundleHash,
 		SourceArtifactFact: req.SourceArtifactFact,
 		Selection:          selection,
@@ -205,6 +205,7 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 		return nil, fmt.Errorf("selected-contract effective source identity does not match loaded effective source")
 	}
 	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, loadedSource.SourceArtifactFact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, loadedSource.RootedSource.Admission())
 	materializationBundleHash := loadedSource.SourceArtifactFact.BundleHash()
 	selectedScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, materializationBundleHash)
 	if err != nil {
@@ -213,6 +214,7 @@ func (o SelectedContractExecutionOwner) Prepare(ctx context.Context, req Selecte
 	ctx = runtimeauthoractivity.WithScope(ctx, selectedScope)
 	operation.preparing = ctx
 	operation.owned = runtimeauthoractivity.WithScope(runtimecorrelation.WithSourceArtifactFact(operation.owned, loadedSource.SourceArtifactFact), selectedScope)
+	operation.owned = runtimecorrelation.WithRootAdmission(operation.owned, loadedSource.RootedSource.Admission())
 	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(loadedSource.Source)
 	if err != nil {
 		return nil, fmt.Errorf("project selected-contract author activity descriptors: %w", err)
@@ -349,6 +351,7 @@ func (p *PreparedSelectedFork) MaterializationRequest() (runforkreadiness.Materi
 		return runforkreadiness.MaterializeRequest{}, err
 	}
 	return runforkreadiness.MaterializeRequest{
+		RootAdmission:        p.loadedSource.RootedSource.Admission(),
 		ForkOperation:        forkOperation,
 		OriginalLoopCarriage: p.originalLoopCarriage,
 		Preparation:          p.evidence(), SourceRunID: p.plan.SourceRunID, At: p.plan.ForkPoint.Input,

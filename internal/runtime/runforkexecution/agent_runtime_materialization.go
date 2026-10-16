@@ -389,6 +389,13 @@ func prepareSelectedContractAgentRuntimeMaterialization(ctx context.Context, loa
 }
 
 func prepareSelectedContractDeclarations(loaded LoadedSelectedContractSource, blueprints []runtimemanager.AgentMaterializationBlueprint) (runtimeagenttopology.SelectedDeclarationPlan, error) {
+	if err := loaded.RootedSource.Validate(); err != nil {
+		return runtimeagenttopology.SelectedDeclarationPlan{}, err
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(loaded.RootedSource.Admission())
+	if err != nil {
+		return runtimeagenttopology.SelectedDeclarationPlan{}, err
+	}
 	static, err := runforkreadiness.StaticAgentBlueprints(loaded.Source)
 	if err != nil {
 		return runtimeagenttopology.SelectedDeclarationPlan{}, err
@@ -417,7 +424,7 @@ func prepareSelectedContractDeclarations(loaded LoadedSelectedContractSource, bl
 			return runtimeagenttopology.SelectedDeclarationPlan{}, err
 		}
 		desired = append(desired, runtimeagenttopology.DesiredAgent{Identity: blueprint.Identity, ConfigRevision: revision,
-			Source: runtimeagenttopology.SourceCoordinate{BundleHash: loaded.SourceArtifactFact.BundleHash()}})
+			Source: coordinate})
 	}
 	return runtimeagenttopology.NewSelectedDeclarationPlan(loaded.SourceArtifactFact.BundleHash(), desired)
 }
@@ -746,9 +753,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 	if managerOptions.Workspaces == nil {
 		managerOptions.Workspaces = options.Workspace
 	}
-	budget := swaruntime.NewBudgetTracker(ports.budget, bus, options.Config, options.MailboxStore, nil, source, options.ExecutionPosture, swaruntime.BudgetRecoveryStageSources{
-		CurrentBundleHash: req.LoadedSource.SourceArtifactFact.BundleHash(),
-	})
+	budget := swaruntime.NewBudgetTracker(ports.budget, bus, options.Config, options.MailboxStore, nil, source, options.ExecutionPosture, swaruntime.BudgetRecoveryStageSources{})
 	managerOptions.Budget = budget
 	if options.AgentFactory != nil {
 		return selectedContractAgentRuntimeFactory{factory: options.AgentFactory, options: managerOptions}, nil

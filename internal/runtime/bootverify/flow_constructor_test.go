@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 func constructorFixture(t *testing.T, fields, payload string) semanticview.Source {
@@ -250,7 +251,7 @@ func TestFlowConstructorCreationEdgesConsumeConnectionPolicy(t *testing.T) {
 			root := canonicalrouting.CopyFlowConstructorCandidates(t, tc.policy, false)
 			repo := repoRootForBootverifyTest(t)
 			bundle := loadFixtureBundleAt(t, repo, root, c.DefaultPlatformSpecFile(repo))
-			rebuilt, err := c.LoadWorkflowContractBundleFromArtifact(repo, bundle.SourceArtifact, c.DefaultPlatformSpecFile(repo), c.WorkflowContractLoadOptions{})
+			rebuilt, err := c.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, bundle.SourceArtifact), c.DefaultPlatformSpecFile(repo), c.WorkflowContractLoadOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -283,7 +284,7 @@ func TestFlowConstructorReconstructedSourceParity(t *testing.T) {
 				t.Fatal(err)
 			}
 			repo := repoRootForBootverifyTest(t)
-			rebuilt, err := c.LoadWorkflowContractBundleFromArtifact(repo, artifact, c.DefaultPlatformSpecFile(repo), c.WorkflowContractLoadOptions{})
+			rebuilt, err := c.LoadWorkflowContractBundleFromRootedSource(repo, sourceartifactfixture.CapturedRoot(t, bundle.SourceArtifact, artifact), c.DefaultPlatformSpecFile(repo), c.WorkflowContractLoadOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}

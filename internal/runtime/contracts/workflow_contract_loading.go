@@ -51,15 +51,20 @@ func loadWorkflowContractBundleFromSource(repoRoot, sourceRoot, platformSpecFile
 	if err != nil {
 		return nil, err
 	}
-	return LoadWorkflowContractBundleFromArtifact(repoRoot, artifact, platformSpecFile, options)
+	rooted, err := artifact.RootedSource()
+	if err != nil {
+		return nil, err
+	}
+	return LoadWorkflowContractBundleFromRootedSource(repoRoot, rooted, platformSpecFile, options)
 }
 
-// LoadWorkflowContractBundleFromArtifact compiles an already-admitted source
-// snapshot. It never receives or reconstructs the source's ambient host path.
-func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceartifact.AdmittedSourceArtifact, platformSpecFile string, options WorkflowContractLoadOptions) (*WorkflowContractBundle, error) {
-	if artifact == nil {
-		return nil, fmt.Errorf("admitted source artifact is required")
+// LoadWorkflowContractBundleFromRootedSource consumes the selected responsibility's
+// frozen root and member bytes, never an ambient host path or content-only decode.
+func LoadWorkflowContractBundleFromRootedSource(repoRoot string, rooted sourceartifact.RootedSource, platformSpecFile string, options WorkflowContractLoadOptions) (*WorkflowContractBundle, error) {
+	if err := rooted.Validate(); err != nil {
+		return nil, fmt.Errorf("rooted source is required for executable compilation: %w", err)
 	}
+	artifact := rooted.Artifact()
 	if strings.TrimSpace(platformSpecFile) == "" {
 		platformSpecFile = DefaultPlatformSpecFile(repoRoot)
 	}
@@ -69,6 +74,7 @@ func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceart
 	}
 	paths := ContractPaths{PlatformSpecFile: platformSpecFile}
 	bundle := &WorkflowContractBundle{
+		rootedSource:          rooted,
 		SourceArtifact:        artifact,
 		FlowSources:           flowSources,
 		Paths:                 paths,

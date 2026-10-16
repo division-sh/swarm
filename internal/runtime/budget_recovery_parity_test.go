@@ -24,6 +24,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -139,10 +140,9 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 					"per_entity_monthly_cap": 10,
 				},
 			}}, selected, nil, source, executionposture.Live, runtimepkg.BudgetRecoveryStageSources{
-				CurrentBundleHash: authorActivityTestSourceArtifactFact.BundleHash(),
-				Load: func(ctx context.Context, hash string) (semanticview.Source, error) {
+				Load: func(ctx context.Context, reference sourceartifact.RootAdmissionReference) (semanticview.Source, error) {
 					loads++
-					persisted, err := selected.GetSourceArtifact(ctx, hash)
+					persisted, err := selected.GetSourceArtifact(ctx, reference.BundleHash)
 					if err != nil {
 						return nil, err
 					}
