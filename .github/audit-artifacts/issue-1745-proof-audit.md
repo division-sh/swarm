@@ -109,7 +109,7 @@ Receipts are retained under
   owners pass. Add the one exact evidence path; no classifier/budget waiver.
 - `remaining-structural-guards-candidate12`: all remaining selected packages
   except the serveapp documentation-reference check passed. That check
-  matched the ordinary word "builders" in this new audit, not retired product
+  matched an ordinary fixture-construction noun in this new audit, not retired product
   code; describe those fixture inputs as sources instead, without changing
   the guard or its exact reference counts.
 - `spelling-inventory-repairs-candidate13`: the route/evidence inventory and
