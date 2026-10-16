@@ -96,12 +96,20 @@ func servedObservationToolOwnerPrevious(path string, current []byte) ([]byte, er
 			return nil, err
 		}
 	}
+	current, err = deliveryStatusEarlierScenarioBridges(path, current)
+	if err != nil {
+		return nil, err
+	}
 	var pin struct {
 		current, previous string
 		names             []string
 	}
 	switch path {
 	case "internal/store/internal/backend/delivery/read_projections.go":
+		current, err = deliveryStatusEarlierInterveningReaders(path, current)
+		if err != nil {
+			return nil, err
+		}
 		pin.current, pin.previous = "77456d1d968d550b5d11590bc6d4cddf3ac95aaba42318913c18cbff1da545ee", "f3102e2e31e761dd80917959af16b8e151471fa32c70378677ccf88e51ef4a63"
 		pin.names = []string{"CountExactRunNodeEventDeliveryStorageTx", "CountCurrentEventDeliveryOutcomeStorageTx"}
 	case "internal/store/internal/runtimepersistence/test_served_delivery_observation.go":
@@ -134,6 +142,119 @@ func servedObservationToolOwnerPrevious(path string, current []byte) ([]byte, er
 		return nil, fmt.Errorf("reviewed additive native reader changed retained bytes: %s: %v", path, err)
 	}
 	return previous, nil
+}
+
+func deliveryStatusEarlierScenarioBridges(path string, current []byte) ([]byte, error) {
+	var names []string
+	switch path {
+	case "internal/store/internal/runtimepersistence/test_served_delivery_observation.go":
+		names = []string{"CountGlobalDeliveredNodeRowsStorageForTest", "ReadCanonicalRoutingSQLiteDiagnosticForTest"}
+	case "internal/store/storetest/served_delivery_observation.go":
+		names = []string{"CountGlobalDeliveredNodeRowsStorage", "ReadCanonicalRoutingSQLiteDiagnostic"}
+	default:
+		return current, nil
+	}
+	current, err := selectedreadrole.CatchUp2542HistoricalSource("../../..", path, current)
+	if err != nil {
+		return nil, err
+	}
+	packet, err := selectedreadrole.CatchUp2542Receipts()
+	if err != nil {
+		return nil, err
+	}
+	signed, err := exec.Command("git", "-C", "../../..", "show", packet.Lane+":"+path).Output()
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range names {
+		body, _, _, err := deliveryStatusSourceDeclaration(signed, name)
+		if err != nil {
+			return nil, err
+		}
+		current, err = removePublicRollbackDeclaration(current, name, body)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return format.Source(current)
+}
+
+func deliveryStatusEarlierInterveningReaders(path string, current []byte) ([]byte, error) {
+	// The existing whole-file inverses authenticate the live scenario/recovery,
+	// selected-fork and standing edges before this earlier additive reader cut.
+	current, err := earlierStandingIngressOwnerFile("../../..", path, current)
+	if err != nil {
+		return nil, err
+	}
+	if fmt.Sprintf("%x", sha256.Sum256(current)) != standingIngressOwnerAdditions[1].before {
+		return nil, fmt.Errorf("delivery polling comparison lost its complete standing predecessor")
+	}
+	for _, name := range strings.Fields(`
+ForkReceiverSettlementStorage ReadForkReceiverSettlementStorageTx ReadForkReceiverBusinessSettlementStorageTx
+CountForkReceiverSettledAttemptsStorageTx ReadForkReceiverRuleSelectionStorageTx
+PublicationRuleSelectionStorage ReadPublicationRuleSelectionStorageTx ReadDeliveryPayloadProjectionTextStorageTx
+CountSuccessfulDirectivePipelineReceiptsStorageTx ReadDirectivePipelineFailureStorageTx
+CountUnfinishedMockAgentDeliveriesStorageTx MockAgentDeliveryDiagnosticStorage MockAgentDeliveryDiagnosticsStorage
+ReadMockAgentDeliveryDiagnosticsStorageTx ReadMockConnectorDeliveryDiagnosticsStorageTx CountUnfinishedMemoryAgentDeliveriesStorageTx
+ServedDeliveryRouteEvidenceStorage ServedTemplateCompletionDiagnosticStorage scanServedPhysicalDiagnosticRows
+ReadTemplateCompletionDeliveryDiagnosticsStorageTx ReadServedDeliveryRouteEvidenceStorageTx
+DeliveryRecoveryIdentityStorage ReadDeliveryRecoveryIdentityStorageTx DeliveryRecoveryAttemptStorage ReadDeliveryRecoveryAttemptsStorageTx
+CountSourceRunDeliveryStorageTx OrderedFanOutOutcomeStorage ReadOrderedRunFanOutOutcomesStorageTx
+CommittedFanOutOrdinalStorage ReadCommittedRunFanOutOrdinalsStorageTx
+CountRunDeliveredRowsStorageTx DeploymentEventDeliveryCutStorage ReadDeploymentPreReceiptDeliveryCutStorageTx
+ReadDeploymentPendingReceiverCutStorageTx DeploymentRunEventDeliveryCutStorage ReadDeploymentRunEventDeliveryCutStorageTx
+CountDeploymentRunDeliveryAttemptsStorageTx SelectedDeploymentClaimStorage ReadSelectedDeploymentClaimStorageTx
+SelectedDeliveryExecutionStorage ReadSelectedDeliveryExecutionStorageTx CountDeliveredClaimVersionStorageTx
+CountDeliveredSuccessorClaimVersionsStorageTx CountPinnedPortfolioSettledDeliveriesStorageTx
+PinnedPortfolioDeliveryDiagnosticStorage ReadPinnedPortfolioDeliveryDiagnosticsStorageTx
+scanChannelBudgetDiagnosticRows LoopReceiverSettlementStorage ReadLoopReceiverSettlementStorageTx
+CountReceiverFirstClaimAgentDeliveriesStorageTx ReadChannelBudgetDeliveriesDiagnosticsStorageTx`) {
+		body, _, _, err := deliveryStatusSourceDeclaration(current, name)
+		if err != nil {
+			return nil, err
+		}
+		current, err = removePublicRollbackDeclaration(current, name, body)
+		if err != nil {
+			return nil, err
+		}
+	}
+	const comment = "// Fixed channel budget failure evidence; no executable-delivery interpretation.\n"
+	if bytes.Count(current, []byte(comment)) != 1 {
+		return nil, fmt.Errorf("delivery polling comparison lost the exact diagnostic declaration comment")
+	}
+	return format.Source(bytes.Replace(current, []byte(comment), nil, 1))
+}
+
+func TestFamily145DeliveryStatusInterveningOwnersRejectAddedRetainedAndUnlistedChanges(t *testing.T) {
+	for _, pin := range []struct {
+		path, added, retained string
+	}{
+		{deliveryRecoveryReadOwner, "CountGlobalDeliveredNodeRowsStorageTx", "ReadServedDeliveryStatusCount"},
+		{"internal/store/internal/runtimepersistence/test_served_delivery_observation.go", "ReadCanonicalRoutingSQLiteDiagnosticForTest", "ReadServedDeliveryStatusCountForTest"},
+		{"internal/store/storetest/served_delivery_observation.go", "ReadCanonicalRoutingSQLiteDiagnostic", "ReadServedDeliveryStatusCount"},
+	} {
+		t.Run(pin.path, func(t *testing.T) {
+			current, err := os.ReadFile(filepath.Join("../../..", pin.path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := servedObservationToolOwnerPrevious(pin.path, current); err != nil {
+				t.Fatal(err)
+			}
+			for _, cut := range []string{pin.added, pin.retained} {
+				changed := bytes.Replace(current, []byte(cut), []byte("foreignPollingOwner"), 1)
+				if bytes.Equal(current, changed) {
+					t.Fatal("counterexample did not change its declared cut:", cut)
+				}
+				if _, err := servedObservationToolOwnerPrevious(pin.path, changed); err == nil {
+					t.Fatal("changed additive/retained owner entered a historical view:", cut)
+				}
+			}
+			if _, err := servedObservationToolOwnerPrevious(pin.path, append(bytes.Clone(current), []byte("\nfunc unlistedPollingOwner(){}\n")...)); err == nil {
+				t.Fatal("an unlisted declaration entered a historical view")
+			}
+		})
+	}
 }
 
 func TestFamily145ServedObservationEventOwnerIsNonWorseningFromSignedPreBatch(t *testing.T) {

@@ -141,6 +141,7 @@ func TestFamily145EventNameTransformRefusesForeignCarriersAndShadowedCalls(t *te
 }
 
 func TestFamily145EventNameWholeChainPreservesEveryPollAndRefusalCut(t *testing.T) {
+	proof := sourceBlobDeclarationsForInvocation(t)
 	calls := 0
 	seen := map[string]bool{}
 	for _, pin := range eventNamePins(t) {
@@ -154,7 +155,7 @@ func TestFamily145EventNameWholeChainPreservesEveryPollAndRefusalCut(t *testing.
 			t.Fatal("event name source is not its signed predecessor:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || sourceBlobPreviousDeclaration(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
+		if err != nil || proof.previous(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("event name current source escaped its whole rule:", key, err)
 		}
 		after, count, err := eventname.Transform(pin.Before)
@@ -188,6 +189,7 @@ func eventNameHostiles(t *testing.T, pin eventname.Pin) {
 }
 
 func TestFamily145EventNameOwnedInventoryHasNoRawCallerOrAlias(t *testing.T) {
+	proof := sourceBlobDeclarationsForInvocation(t)
 	root := "../../.."
 	calls, definitions := 0, 0
 	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
@@ -202,7 +204,7 @@ func TestFamily145EventNameOwnedInventoryHasNoRawCallerOrAlias(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		n, d := eventNameOwnedFile(t, filepath.ToSlash(rel), file)
+		n, d := eventNameOwnedFile(t, filepath.ToSlash(rel), file, proof)
 		calls += n
 		definitions += d
 		return nil
@@ -212,7 +214,7 @@ func TestFamily145EventNameOwnedInventoryHasNoRawCallerOrAlias(t *testing.T) {
 	}
 }
 
-func eventNameOwnedFile(t *testing.T, path string, file *ast.File) (int, int) {
+func eventNameOwnedFile(t *testing.T, path string, file *ast.File, proof sourceBlobDeclarationInvocation) (int, int) {
 	t.Helper()
 	calls, definitions := 0, 0
 	allowed := map[token.Pos]bool{}
@@ -234,7 +236,7 @@ func eventNameOwnedFile(t *testing.T, path string, file *ast.File) (int, int) {
 			if ok && eventname.Helpers[id.Name] {
 				calls++
 				allowed[id.Pos()] = true
-				current := sourceBlobPreviousDeclaration(t, path, fn.Name.Name, requestkey.Node(fn))
+				current := proof.previous(t, path, fn.Name.Name, requestkey.Node(fn))
 				if eventname.Previous(eventNamePins(t), path, fn.Name.Name, current) == current {
 					t.Error("event name caller escaped exact chain:", path, fn.Name.Name)
 				}

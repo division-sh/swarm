@@ -16,6 +16,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 //go:embed family145-request-key-preimages.json
@@ -59,6 +60,7 @@ func family145CheckRequestKeyWholeRule(t *testing.T, file, function, current str
 }
 
 func TestFamily145RequestKeyWholeChainRetainsPredicatesAssertionsAndCuts(t *testing.T) {
+	proof := sourceBlobDeclarationsForInvocation(t)
 	calls := 0
 	seen := map[string]bool{}
 	for _, pin := range requestKeyPins(t) {
@@ -72,7 +74,7 @@ func TestFamily145RequestKeyWholeChainRetainsPredicatesAssertionsAndCuts(t *test
 			t.Fatal("request-key source is not its signed predecessor:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || family145RequestKeyCurrentPrevious(pin.File, pin.Function, sourceBlobPreviousDeclaration(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))) != pin.After {
+		if err != nil || family145RequestKeyCurrentPrevious(pin.File, pin.Function, proof.previous(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))) != pin.After {
 			t.Fatal("request-key current source escaped its whole rule:", key, err)
 		}
 		after, count, err := requestkey.Transform(pin.Before)
@@ -135,13 +137,18 @@ func TestFamily145RequestKeyRollbackLiftPreservesSevenRawCountsAndImmediateCut(t
 }
 
 func TestFamily145RequestKeyOwnedInventoryRetiresEveryRawCountCaller(t *testing.T) {
+	proof := sourceBlobDeclarationsForInvocation(t)
 	root := "../../.."
 	pins := requestKeyPins(t)
+	repairSource, err := os.ReadFile(filepath.Join(root, requestKeyRepairCallerPath))
+	if err != nil || !requestKeyRepairCaller(t, requestKeyRepairCallerPath, requestKeyRepairCallerName, requestKeyDeclaration(t, repairSource, requestKeyRepairCallerName)) {
+		t.Fatal("exact new wrong-template rollback counterexample disappeared:", err)
+	}
 	helpers := map[string]bool{"servedEventPublishAPIIdempotencyCount": true, "servedEventPublishEventCountByIdempotencyKey": true,
 		"servedEventPublishSourcedEventCount": true, "requireServedControlAPIIdempotencyRows": true,
 		"requireServedReplayNoDeliveryHistoryNoMutation": true, "requirePublicInputRollbackNoResidue": true}
 	calls, definitions := 0, 0
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
+	err = checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
 			return err
 		}
@@ -153,17 +160,17 @@ func TestFamily145RequestKeyOwnedInventoryRetiresEveryRawCountCaller(t *testing.
 		if err != nil {
 			return err
 		}
-		fileCalls, fileDefinitions := requestKeyOwnedFile(t, pins, helpers, filepath.ToSlash(relative), file)
+		fileCalls, fileDefinitions := requestKeyOwnedFile(t, pins, helpers, filepath.ToSlash(relative), file, proof)
 		calls += fileCalls
 		definitions += fileDefinitions
 		return nil
 	})
-	if err != nil || calls != 40 || definitions != 6 {
-		t.Fatalf("request-key complete owned inventory=%d/%d want40/6 err=%v", calls, definitions, err)
+	if err != nil || calls != 40+2 || definitions != 6 {
+		t.Fatalf("request-key complete owned inventory=%d/%d want40 historical + 2 exact new rollback calls / 6 owners err=%v", calls, definitions, err)
 	}
 }
 
-func requestKeyOwnedFile(t *testing.T, pins []requestkey.Pin, helpers map[string]bool, path string, file *ast.File) (int, int) {
+func requestKeyOwnedFile(t *testing.T, pins []requestkey.Pin, helpers map[string]bool, path string, file *ast.File, proof sourceBlobDeclarationInvocation) (int, int) {
 	t.Helper()
 	calls, definitions := 0, 0
 	allowed := map[token.Pos]bool{}
@@ -185,7 +192,10 @@ func requestKeyOwnedFile(t *testing.T, pins []requestkey.Pin, helpers map[string
 			if ok && helpers[id.Name] {
 				calls++
 				allowed[id.Pos()] = true
-				current := family145RequestKeyCurrentPrevious(path, fn.Name.Name, sourceBlobPreviousDeclaration(t, path, fn.Name.Name, requestkey.Node(fn)))
+				if requestKeyRepairCaller(t, path, fn.Name.Name, requestkey.Node(fn)) {
+					return true
+				}
+				current := family145RequestKeyCurrentPrevious(path, fn.Name.Name, proof.previous(t, path, fn.Name.Name, requestkey.Node(fn)))
 				if requestkey.Previous(pins, path, fn.Name.Name, current) == current {
 					t.Error("request-key caller escaped complete source-pinned owner chain:", path, fn.Name.Name)
 				}
@@ -200,6 +210,44 @@ func requestKeyOwnedFile(t *testing.T, pins []requestkey.Pin, helpers map[string
 		return true
 	})
 	return calls, definitions
+}
+
+const requestKeyRepairCallerPath = "internal/serveapp/scenario_selected_fixture_test.go"
+const requestKeyRepairCallerName = "TestPublicInputPublicationFaultRefusesWrongTemplateBothStores"
+
+func requestKeyRepairCaller(t *testing.T, path, name, current string) bool {
+	t.Helper()
+	if path != requestKeyRepairCallerPath || name != requestKeyRepairCallerName {
+		return false
+	}
+	signed, err := exec.Command("git", "show", selectedreadrole.Repair2698After+":"+path).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return current != "" && current == requestKeyDeclaration(t, signed, name)
+}
+
+func TestFamily145RequestKeyNewRollbackCounterexampleCannotHideAnExtraOrChangedCaller(t *testing.T) {
+	raw, err := os.ReadFile("../../../" + requestKeyRepairCallerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := requestKeyDeclaration(t, raw, requestKeyRepairCallerName)
+	if !requestKeyRepairCaller(t, requestKeyRepairCallerPath, requestKeyRepairCallerName, current) {
+		t.Fatal("named physical rollback counterexample lost its complete signed source")
+	}
+	for _, cut := range []string{"requirePublicInputRollbackNoResidue", "servedEventPublishAPIIdempotencyCount", "wrong-template-proof", "count != 0", "stage.marker"} {
+		mutant := strings.Replace(current, cut, "unreviewedRollbackCut", 1)
+		if mutant == current || requestKeyRepairCaller(t, requestKeyRepairCallerPath, requestKeyRepairCallerName, mutant) {
+			t.Fatal("changed native rollback owner/oracle accepted:", cut)
+		}
+	}
+	extra := strings.Replace(current, "{", "{ servedEventPublishAPIIdempotencyCount(nil,nil,\"\",\"\",\"\");", 1)
+	if requestKeyRepairCaller(t, requestKeyRepairCallerPath, requestKeyRepairCallerName, extra) ||
+		requestKeyRepairCaller(t, "foreign.go", requestKeyRepairCallerName, current) ||
+		requestKeyRepairCaller(t, requestKeyRepairCallerPath, "foreignFunction", current) {
+		t.Fatal("extra or foreign canonical helper call hid behind the new counterexample")
+	}
 }
 
 func verifyRequestKeyRollbackAdjacency(t *testing.T, source string) {

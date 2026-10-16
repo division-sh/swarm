@@ -5,9 +5,12 @@ import (
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 func assertFamily145DiagnosticHistoryProofs(t testing.TB, name, before, after string) {
@@ -95,7 +98,38 @@ func TestFamily145DiagnosticHistoryConstructorRetiredAndAllCallersUseOriginalOwn
 			return true
 		})
 	}
-	if calls != 3 {
-		t.Fatalf("diagnostic history caller inventory=%d, want three", calls)
+	if calls != 2 {
+		t.Fatalf("diagnostic history caller inventory=%d, want two diagnostic callers and one native business replacement", calls)
+	}
+	assertDiagnosticHistoryBusinessReplacement(t)
+}
+
+func assertDiagnosticHistoryBusinessReplacement(t *testing.T) {
+	t.Helper()
+	const path = "internal/runtime/runforkexecution/execution_test.go"
+	const name = "TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedAfterForkPoint"
+	raw, err := os.ReadFile("../../../" + path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signed, err := exec.Command("git", "show", selectedreadrole.Repair2698Before+":"+path).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, prior := requestKeyDeclaration(t, raw, name), requestKeyDeclaration(t, signed, name)
+	if current == "" || current != prior {
+		t.Fatal("native source-advance replacement changed its complete settled tuple/cuts/assertions")
+	}
+	for _, cut := range []string{
+		"storetest.InsertRevisionedExistingRunRootEventRecord(t, ctx, pg, afterEventID, sourceRunID",
+		"at.Add(time.Second)", "pg.PipelineObligations()",
+		"pipeline.ClaimEvent(ctx, sourceEventID, runtimepipelineobligation.PurposeRecovery)",
+		`pipeline.Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("source_outcome_must_not_suppress_fork"))`,
+		"!result.Activation.SourceAdvancedAfterFork", "source_events_advanced_after_fork_point",
+		"source_receipts_advanced_after_fork_point", "source_run_terminal_at_activation",
+	} {
+		if !strings.Contains(current, cut) {
+			t.Fatal("native business-event/settlement owner or original source-advance oracle disappeared:", cut)
+		}
 	}
 }

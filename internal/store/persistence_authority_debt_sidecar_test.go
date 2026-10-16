@@ -269,6 +269,53 @@ func debtRepair2698UnrefreshedBaseline(root string, metadata, data []byte, basel
 	return baseline, nil
 }
 
+// Decision 10 changes proof cost, not the collector's authority vocabulary.
+// Keep the first repair's fingerprint and signed source cut as a distinct edge.
+func debtRepair2698ProofCostCollectorTransition(base, current string, trusted, head authorityDebtBaseline, proofs ...debtDeliveryRetirementProof) bool {
+	if current != debtRepair2698ProofCostCollectorTo || head.Collector != current || trusted.Collector != base ||
+		trusted.BootstrapSource != debtBootstrapSource || head.BootstrapSource != debtBootstrapSource || len(proofs) != 1 {
+		return false
+	}
+	root := proofs[0].Root
+	if debtCatchUpCollectorSource(root) != nil {
+		return false
+	}
+	original, _, err := debtCatchUpSignedBaseline(root, debtRepair2698ProofCostBefore, debtRepair2698CollectorTo)
+	if err != nil {
+		return false
+	}
+	if base == debtRepair2698CollectorTo {
+		if !debtSitesEqual(trusted.Sites, original.Sites) {
+			return false
+		}
+	} else {
+		intermediate := head
+		intermediate.Collector = debtRepair2698CollectorTo
+		if !debtRepair2698CollectorTransition(base, intermediate.Collector, trusted, intermediate, proofs...) {
+			return false
+		}
+	}
+	return len(authorityDebtRatchet(proofs[0].Actual, head.Sites, original.Sites, original.Sites, proofs[0])) == 0
+}
+
+func debtRepair2698ProofCostUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, historical bool, prior error) (authorityDebtBaseline, error) {
+	if historical || os.Getenv(debtRefreshEnv) != "downward" || os.Getenv("CI") != "" || os.Getenv("GITHUB_ACTIONS") != "" {
+		return baseline, prior
+	}
+	if _, err := debtParseCollectorMetadata(metadata, data, debtRepair2698CollectorTo); err != nil {
+		return baseline, err
+	}
+	original, _, err := debtCatchUpSignedBaseline(root, debtRepair2698ProofCostBefore, debtRepair2698CollectorTo)
+	if err != nil || baseline.Collector != debtCacheCollectorFrom || baseline.BootstrapSource != debtBootstrapSource || !debtSitesEqual(baseline.Sites, original.Sites) {
+		return baseline, fmt.Errorf("proof-cost metadata lost its exact signed predecessor: %v", err)
+	}
+	if err := debtCatchUpCollectorSource(root); err != nil {
+		return baseline, err
+	}
+	baseline.Collector = debtRepair2698ProofCostCollectorTo
+	return baseline, nil
+}
+
 type debtCatchUpSourcePacket struct {
 	Base, Master, Lane string
 	Files              []debtCatchUpSourceFile
@@ -411,7 +458,7 @@ func debtCatchUpSignedBaseline(root, ref, collector string) (authorityDebtBaseli
 
 func debtCatchUpCollectorSource(root string) error {
 	actual, err := debtCollectorDigest(root)
-	if err != nil || (actual != debtCatchUpCollectorTo && actual != debtCatchUpFreshnessCollectorTo && actual != debtCatchUpNativeEntryCollectorTo && actual != debtRepair2698CollectorTo) {
+	if err != nil || (actual != debtCatchUpCollectorTo && actual != debtCatchUpFreshnessCollectorTo && actual != debtCatchUpNativeEntryCollectorTo && actual != debtRepair2698CollectorTo && actual != debtRepair2698ProofCostCollectorTo) {
 		return fmt.Errorf("joined collector is not its exact enumerated source: %s: %v", actual, err)
 	}
 	if actual == debtCatchUpFreshnessCollectorTo {
@@ -419,7 +466,7 @@ func debtCatchUpCollectorSource(root string) error {
 			return err
 		}
 	}
-	if actual == debtCatchUpNativeEntryCollectorTo || actual == debtRepair2698CollectorTo {
+	if actual == debtCatchUpNativeEntryCollectorTo || actual == debtRepair2698CollectorTo || actual == debtRepair2698ProofCostCollectorTo {
 		if err := debtCatchUpNativeEntryOwnerSource(root); err != nil {
 			return err
 		}
@@ -428,7 +475,7 @@ func debtCatchUpCollectorSource(root string) error {
 	if err != nil {
 		return err
 	}
-	if actual == debtRepair2698CollectorTo {
+	if actual == debtRepair2698CollectorTo || actual == debtRepair2698ProofCostCollectorTo {
 		if err := debtRepair2698SourcePolicy(root, packet); err != nil {
 			return err
 		}
@@ -438,7 +485,7 @@ func debtCatchUpCollectorSource(root string) error {
 		if file.ComposedSHA256 == "absent" && os.IsNotExist(err) {
 			continue
 		}
-		if err == nil && actual == debtRepair2698CollectorTo {
+		if err == nil && (actual == debtRepair2698CollectorTo || actual == debtRepair2698ProofCostCollectorTo) {
 			raw, err = debtRepair2698HistoricalSource(root, file.File, raw)
 		}
 		if err != nil || debtBaselineChecksum(raw) != file.ComposedSHA256 {
@@ -750,6 +797,8 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 func debtSourceUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, collector string, historical bool, prior error) (authorityDebtBaseline, error, bool) {
 	var owner func(string, []byte, []byte, authorityDebtBaseline, bool, error) (authorityDebtBaseline, error)
 	switch collector {
+	case debtRepair2698ProofCostCollectorTo:
+		owner = debtRepair2698ProofCostUnrefreshedBaseline
 	case debtRepair2698CollectorTo:
 		owner = debtRepair2698UnrefreshedBaseline
 	case debtCatchUpNativeEntryCollectorTo:

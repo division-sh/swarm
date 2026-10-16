@@ -59,6 +59,7 @@ func family145CheckReceiverPublicReadbackWholeRule(t *testing.T, file, function,
 }
 
 func TestFamily145ReceiverPublicReadbackWholeRulePreservesExistingNativeOwnerAnd15Calls(t *testing.T) {
+	proof := sourceBlobDeclarationsForInvocation(t)
 	pins := receiverReadbackPins(t)
 	seen, calls := map[string]bool{}, 0
 	var rawBefore, nativeBefore, nativeAfter string
@@ -73,7 +74,7 @@ func TestFamily145ReceiverPublicReadbackWholeRulePreservesExistingNativeOwnerAnd
 		if err != nil {
 			t.Fatal(err)
 		}
-		current := sourceBlobPreviousDeclaration(t, pin.File, pin.Function, family145PublicA2CurrentDeclaration(t, source, pin.Function))
+		current := proof.previous(t, pin.File, pin.Function, family145PublicA2CurrentDeclaration(t, source, pin.Function))
 		current = runphysical.Previous(runPhysicalPins(t), pin.File, pin.Function, current)
 		current = family145PublicJoinCallerInverse(pin.Function, current)
 		current = family145PublicA2EndpointCallerInverse(pin.Function, current)

@@ -8,9 +8,49 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
+
+type preparationSnapshotTransition struct{ File, Function, Before, After string }
+
+func composedPreparationSnapshotRows(rows []preparationSnapshotTransition) ([]preparationSnapshotTransition, error) {
+	const prefix = "internal/runtime/runforkexecution/"
+	keys := map[string]bool{
+		prefix + "recovery_process_test.go/TestSelectedForkCommittedProcessDeathBothStores":                true,
+		prefix + "source_cleanup_test.go/TestSelectedSourceCleanupBothStores":                              true,
+		prefix + "preparation_process_parity_test.go/TestSelectedForkPreparationProcessBoundaryBothStores": true,
+		prefix + "preparation_process_parity_test.go/selectedPreparationDatabaseSnapshot":                  true,
+		prefix + "constructed_agent_input_execution_test.go/proveSelectedConstructedAgentInput":            true,
+		prefix + "workspace_preparation_test.go/proveSelectedWorkspacePreparation":                         true,
+		prefix + "execution_test.go/proveSelectedForkClaudeOAuth":                                          true,
+	}
+	var out []preparationSnapshotTransition
+	positions := map[string]int{}
+	for _, row := range rows {
+		if !strings.Contains(row.Before, "selectedPreparationDatabaseSnapshot(") && !strings.Contains(row.After, "selectedPreparationDatabaseSnapshot(") {
+			continue
+		}
+		key := row.File + "/" + row.Function
+		if !keys[key] {
+			return nil, fmt.Errorf("unlisted snapshot transition: %s", key)
+		}
+		if index, found := positions[key]; found {
+			if out[index].After != row.Before {
+				return nil, fmt.Errorf("snapshot continuation lost its exact intermediate source: %s", key)
+			}
+			out[index].After = row.After
+		} else {
+			positions[key] = len(out)
+			out = append(out, row)
+		}
+	}
+	if len(out) != len(keys) {
+		return nil, fmt.Errorf("snapshot finite owner/caller transition inventory=%d want%d", len(out), len(keys))
+	}
+	return out, nil
+}
 
 func family145PreparationSnapshotOwnerError(source string) error {
 	want := `func selectedPreparationDatabaseSnapshot(t testing.TB, selected any) map[string]storetest.SelectedForkStorageTableSnapshot {
@@ -54,8 +94,12 @@ func family145PreparationSnapshotCalls(source string, native bool, owner string)
 }
 
 func TestFamily145PreparationSnapshotRetiresInterpreterAndAllFifteenPoolCallers(t *testing.T) {
-	var transitions []struct{ File, Function, Before, After string }
+	var transitions []preparationSnapshotTransition
 	if err := json.Unmarshal(family145TransitionBytes, &transitions); err != nil {
+		t.Fatal(err)
+	}
+	transitions, err := composedPreparationSnapshotRows(transitions)
+	if err != nil {
 		t.Fatal(err)
 	}
 	var owners, callers int
@@ -142,4 +186,32 @@ func TestFamily145PreparationSnapshotRetiresInterpreterAndAllFifteenPoolCallers(
 			}
 		}
 	}
+}
+
+func TestFamily145PreparationSnapshotCompositionRejectsChangedLaterRows(t *testing.T) {
+	var rows []preparationSnapshotTransition
+	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
+		t.Fatal(err)
+	}
+	for index, row := range rows {
+		if row.Function != "proveSelectedForkClaudeOAuth" || !strings.Contains(row.Before, "selectedPreparationDatabaseSnapshot(t, selected)") {
+			continue
+		}
+		for _, field := range []string{"file", "function", "before"} {
+			mutant := slices.Clone(rows)
+			switch field {
+			case "file":
+				mutant[index].File += ".foreign"
+			case "function":
+				mutant[index].Function += "Foreign"
+			case "before":
+				mutant[index].Before += "\n"
+			}
+			if _, err := composedPreparationSnapshotRows(mutant); err == nil {
+				t.Fatal("changed/foreign later snapshot transition accepted:", field)
+			}
+		}
+		return
+	}
+	t.Fatal("the exact later snapshot continuation is missing")
 }

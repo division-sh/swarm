@@ -97,6 +97,7 @@ func TestFamily145ChannelDecisionTransformRefusesForeignCarriersAndShadowedCalls
 }
 
 func TestFamily145ChannelDecisionWholeChainPreservesEveryPollAndRefusalCut(t *testing.T) {
+	proof := sourceBlobDeclarationsForInvocation(t)
 	calls := 0
 	seen := map[string]bool{}
 	for _, pin := range channelDecisionPins(t) {
@@ -110,7 +111,7 @@ func TestFamily145ChannelDecisionWholeChainPreservesEveryPollAndRefusalCut(t *te
 			t.Fatal("channel decision source is not its signed predecessor:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || family145ChannelEventCountPrevious(t, pin.File, pin.Function, sourceBlobPreviousDeclaration(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))) != pin.After {
+		if err != nil || family145ChannelEventCountPrevious(t, pin.File, pin.Function, proof.previous(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))) != pin.After {
 			t.Fatal("channel decision current source escaped its whole rule:", key, err)
 		}
 		after, count, err := channeldecision.Transform(pin.Before)
@@ -144,6 +145,7 @@ func channelDecisionHostiles(t *testing.T, pin channeldecision.Pin) {
 }
 
 func TestFamily145ChannelDecisionOwnedInventoryHasNoRawCallerOrAlias(t *testing.T) {
+	proof := sourceBlobDeclarationsForInvocation(t)
 	root := "../../.."
 	calls, definitions := 0, 0
 	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
@@ -158,7 +160,7 @@ func TestFamily145ChannelDecisionOwnedInventoryHasNoRawCallerOrAlias(t *testing.
 		if err != nil {
 			return err
 		}
-		n, d := channelDecisionOwnedFile(t, filepath.ToSlash(rel), file)
+		n, d := channelDecisionOwnedFile(t, filepath.ToSlash(rel), file, proof)
 		calls += n
 		definitions += d
 		return nil
@@ -168,7 +170,7 @@ func TestFamily145ChannelDecisionOwnedInventoryHasNoRawCallerOrAlias(t *testing.
 	}
 }
 
-func channelDecisionOwnedFile(t *testing.T, path string, file *ast.File) (int, int) {
+func channelDecisionOwnedFile(t *testing.T, path string, file *ast.File, proof sourceBlobDeclarationInvocation) (int, int) {
 	t.Helper()
 	calls, definitions := 0, 0
 	allowed := map[token.Pos]bool{}
@@ -190,7 +192,7 @@ func channelDecisionOwnedFile(t *testing.T, path string, file *ast.File) (int, i
 			if ok && channeldecision.Helpers[id.Name] != 0 {
 				calls++
 				allowed[id.Pos()] = true
-				current := sourceBlobPreviousDeclaration(t, path, fn.Name.Name, requestkey.Node(fn))
+				current := proof.previous(t, path, fn.Name.Name, requestkey.Node(fn))
 				if family145ChannelDecisionPrevious(t, path, fn.Name.Name, current) == current {
 					t.Error("channel decision caller escaped exact chain:", path, fn.Name.Name)
 				}

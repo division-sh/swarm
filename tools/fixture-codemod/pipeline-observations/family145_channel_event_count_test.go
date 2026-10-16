@@ -63,6 +63,7 @@ func family145CheckChannelEventCountWholeRule(t *testing.T, file, function, curr
 }
 
 func TestFamily145ChannelEventCountWholeRuleRetainsEveryScopeAndAssertion(t *testing.T) {
+	proof := sourceBlobDeclarationsForInvocation(t)
 	calls, seen := 0, map[string]bool{}
 	for _, pin := range channelEventCountPins(t) {
 		key := pin.File + "/" + pin.Function
@@ -75,7 +76,7 @@ func TestFamily145ChannelEventCountWholeRuleRetainsEveryScopeAndAssertion(t *tes
 			t.Fatal("channel event count predecessor is not exact:", key, err)
 		}
 		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || sourceBlobPreviousDeclaration(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
+		if err != nil || proof.previous(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
 			t.Fatal("channel event count current source escaped its rule:", key, err)
 		}
 		after, count, err := channeleventcount.Transform(pin.Before)

@@ -188,11 +188,16 @@ func CatchUp2542HistoricalFunction(root, path, name, current string) (string, er
 		return current, nil
 	}
 	fn, ok := file.Decls[0].(*ast.FuncDecl)
-	if !ok {
+	if !ok || fn.Recv != nil {
 		return current, nil
 	}
 	actual, err := Body(raw, fn.Name.Name)
-	if err != nil || actual != current {
+	if err != nil {
+		// A caller may already hold an authenticated lane-era declaration
+		// retired by master. It receives no new inverse or live-source credit.
+		return catchUpRetiredHistoricalInput(root, path, name, current, raw, err)
+	}
+	if actual != current {
 		return current, nil
 	}
 	prior, err := CatchUp2542HistoricalSource(root, path, raw)
@@ -202,9 +207,47 @@ func CatchUp2542HistoricalFunction(root, path, name, current string) (string, er
 	if string(prior) == string(raw) {
 		return current, nil
 	}
-	previous, err := Body(prior, name)
+	previous, err := catchUpHistoricalDeclaration(prior, name, current)
 	if err == nil {
 		sourceCache.Store(key, previous)
 	}
 	return previous, err
+}
+
+func catchUpRetiredHistoricalInput(root, path, name, current string, actual []byte, missing error) (string, error) {
+	file, err := parser.ParseFile(token.NewFileSet(), path, actual, parser.AllErrors)
+	if err != nil {
+		return "", err
+	}
+	for _, declaration := range file.Decls {
+		if fn, ok := declaration.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Name.Name == name {
+			return "", missing // Present but ambiguous is not a retired declaration.
+		}
+	}
+	prior, err := CatchUp2542HistoricalSource(root, path, actual)
+	if err != nil || string(prior) == string(actual) {
+		return "", fmt.Errorf("missing live declaration has no authenticated predecessor: %s: %w", name, missing)
+	}
+	previous, err := Body(prior, name)
+	if err != nil || previous != current {
+		return "", fmt.Errorf("retired declaration is not its exact supplied historical input: %s: %w", name, err)
+	}
+	return current, nil
+}
+
+func catchUpHistoricalDeclaration(prior []byte, name, current string) (string, error) {
+	previous, err := Body(prior, name)
+	if err == nil {
+		return previous, nil
+	}
+	file, parseErr := parser.ParseFile(token.NewFileSet(), "predecessor.go", prior, parser.AllErrors)
+	if parseErr != nil {
+		return "", parseErr
+	}
+	for _, declaration := range file.Decls {
+		if fn, ok := declaration.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Name.Name == name {
+			return "", err // Ambiguous historical declarations still fail closed.
+		}
+	}
+	return current, nil // A new master declaration has no lane recipe to invert.
 }

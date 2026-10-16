@@ -5,6 +5,9 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -141,7 +144,7 @@ func TestFamily145PublicRollbackWholeRuleKeepsAllSevenCutsAndBothCallers(t *test
 
 func TestFamily145PublicRollbackNewOwnersHaveExactPhysicalPredicates(t *testing.T) {
 	for _, owner := range [][3]string{
-		{"internal/store/internal/backend/pipelinepersistence/template_storage_observation.go", "CountTemplateEventReplayScopesTx", "func CountTemplateEventReplayScopesTx(ctx context.Context, tx *sql.Tx, event string) (int,error) { var count int;err:=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id=$1`,event).Scan(&count);return count,err }"},
+		{"internal/store/internal/backend/pipelinepersistence/owner_operations.go", "CountTemplateEventReplayScopesTx", "func CountTemplateEventReplayScopesTx(ctx context.Context, tx *sql.Tx, event string) (int,error) { var count int;err:=tx.QueryRowContext(ctx,`SELECT COUNT(*) FROM committed_replay_scopes WHERE event_id=$1`,event).Scan(&count);return count,err }"},
 		{"internal/store/internal/runtimepersistence/test_served_delivery_observation.go", "CountTemplateEventReplayScopesForTest", `func CountTemplateEventReplayScopesForTest(ctx context.Context, selected any, event string)(int,error){return readFanOutSemanticStorage(ctx,selected,[]string{event},func(ctx context.Context,tx *sql.Tx)(int,error){return pipelinepersistence.CountTemplateEventReplayScopesTx(ctx,tx,event)})}`},
 	} {
 		raw, err := os.ReadFile(filepath.Join("../../..", owner[0]))
@@ -151,8 +154,21 @@ func TestFamily145PublicRollbackNewOwnersHaveExactPhysicalPredicates(t *testing.
 	}
 	path := "internal/store/internal/backend/pipelinepersistence/template_storage_observation.go"
 	old, err := exec.Command("git", "show", publicrollback.Predecessor+":"+path).Output()
-	current, readErr := os.ReadFile(filepath.Join("../../..", path))
+	current, readErr := os.ReadFile("../../../internal/store/internal/backend/pipelinepersistence/owner_operations.go")
 	if err != nil || readErr != nil || requestKeyDeclaration(t, old, "CountTemplateSubscribedReplayScopeTx") != requestKeyDeclaration(t, current, "CountTemplateSubscribedReplayScopeTx") {
 		t.Fatal("subscribed-only owner was silently broadened:", err, readErr)
+	}
+	oldLocation, err := os.ReadFile(filepath.Join("../../..", path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, oldLocation, parser.AllErrors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, declaration := range parsed.Decls {
+		if fn, ok := declaration.(*ast.FuncDecl); ok && (fn.Name.Name == "CountTemplateEventReplayScopesTx" || fn.Name.Name == "CountTemplateSubscribedReplayScopeTx") {
+			t.Fatal("moved replay-scope reader survived at the old owner location:", fn.Name.Name)
+		}
 	}
 }

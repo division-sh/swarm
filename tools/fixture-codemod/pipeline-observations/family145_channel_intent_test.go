@@ -59,6 +59,7 @@ func family145CheckChannelIntentWholeRule(t *testing.T, file, function, current 
 }
 
 func TestFamily145ChannelIntentOriginal34CallsAndCompleteSiblingRepairsAreSourcePinned(t *testing.T) {
+	proof := sourceBlobDeclarationsForInvocation(t)
 	calls, original, repaired, retired, bridges := 0, 0, 0, 0, 0
 	seen := map[string]bool{}
 	for _, pin := range channelIntentPins(t) {
@@ -71,7 +72,7 @@ func TestFamily145ChannelIntentOriginal34CallsAndCompleteSiblingRepairsAreSource
 		if err != nil {
 			t.Fatal(err)
 		}
-		if family145ChannelAnchorPrevious(t, pin.File, pin.Function, sourceBlobPreviousDeclaration(t, pin.File, pin.Function, intentDeclaration(t, raw, pin.Function))) != pin.After {
+		if family145ChannelAnchorPrevious(t, pin.File, pin.Function, proof.previous(t, pin.File, pin.Function, intentDeclaration(t, raw, pin.Function))) != pin.After {
 			t.Fatal("intent current body escaped finite rule:", key)
 		}
 		verifyIntentPredecessor(t, pin)
