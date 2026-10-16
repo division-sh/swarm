@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -112,7 +113,7 @@ func TestReconfigureAgentRejectsForeignSubscriptionWithoutReplacingCurrentAdmiss
 
 func TestS1AgentSubscriptionWrapperPreservesRawFlowSelector(t *testing.T) {
 	rooted, _ := sourceartifactfixture.Rooted(t, "selected", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource("", rooted, "", runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(filepath.Clean("../../.."), rooted, "", runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
 	if err != nil {
 		t.Fatal(err)
 	}
