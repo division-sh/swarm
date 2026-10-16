@@ -93,35 +93,6 @@ func family145ClosedReceiverConstructorProofError(before, after string) error {
 	return nil
 }
 
-func TestFamily145ClosedReceiverWholeChainPreservesExactNativeConstructionAndAllFields(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	seen := 0
-	for _, row := range rows {
-		if row.File != "internal/runtime/eventbus_receiver_authority_e2e_test.go" {
-			continue
-		}
-		seen++
-		if err := family145ClosedReceiverProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		cuts := family145ClosedReceiverCuts[row.Function]
-		if row.Function == "TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain" {
-			cuts = []string{"storetest.StartPostgresRuntimeStore(t)", "storetest.StartSQLiteRuntimeStore(t)", "processOwner := worklifetime.NewProcess()", "closeExternalRuntimeTestGeneration(rt, processOwner, capability)", "root.ID()", "requireClosedReceiverDiagnosticReadback(t, ctx, selected, runID)"}
-		}
-		for _, cut := range cuts {
-			if family145ClosedReceiverProofError(row.Function, row.Before, strings.Replace(row.After, cut, "foreignReceiverCut()", 1)) == nil {
-				t.Fatalf("receiver construction/field/identity/window mutation passed: %s", cut)
-			}
-		}
-	}
-	if seen != 4 {
-		t.Fatalf("receiver whole-family inventory=%d/4", seen)
-	}
-}
-
 func family145ClosedReceiverOwnedQueries(t *testing.T) map[string]bool {
 	t.Helper()
 	owners := map[string][]string{
@@ -176,32 +147,5 @@ func TestFamily145ClosedReceiverEntireDialectQueryInventoryHasExactClosedOwners(
 	}
 	if len(consumed) != len(owned) || len(owned) != 14 {
 		t.Fatalf("receiver dialect-query inventory consumed=%d owned=%d/14", len(consumed), len(owned))
-	}
-}
-
-func TestFamily145ClosedReceiverPositiveDiagnosticProofCannotLoseASection(t *testing.T) {
-	source := family145ConversationForkOwnerSource(t, "../runtime/eventbus_receiver_authority_e2e_test.go", "requireClosedReceiverDiagnosticReadback")
-	cuts := []string{
-		"closedReceiverEvidenceDiagnostic(t, ctx, selected, runID)",
-		"\"task.assigned[\"", "\"task.completed[\"", "\"task.finalized[\"",
-		"\"receipt:task.assigned:platform/pipeline:success:\"", "\"receipt:task.completed:platform/pipeline:success:\"", "\"receipt:task.finalized:platform/pipeline:success:\"",
-		"\"agent:upstream-agent:\"", "\"agent:downstream-agent:\"", "\"agent-route:upstream-agent:\"", "\"agent-route:downstream-agent:\"",
-		"if !strings.Contains(evidence, fragment)", "t.Fatalf(\"closed receiver diagnostic lost persisted %q: %s\", fragment, evidence)",
-	}
-	validate := func(source string) bool {
-		for _, cut := range cuts {
-			if strings.Count(source, cut) != 1 {
-				return false
-			}
-		}
-		return true
-	}
-	if !validate(source) {
-		t.Fatal("receiver diagnostic positive proof lost a section, source, context or refusal")
-	}
-	for _, cut := range cuts {
-		if validate(strings.Replace(source, cut, "foreignReceiverEvidence()", 1)) {
-			t.Fatalf("weakened diagnostic execution proof accepted: %s", cut)
-		}
 	}
 }

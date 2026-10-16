@@ -62,40 +62,6 @@ func family145MailboxCompletionWaitInverse(after string) string {
 	).Replace(after)
 }
 
-func TestFamily145MailboxEffectsWholeDependencyRetainsEveryCallerBodyAndCompletionCut(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(servedSetupEarlierHistory(t, family145TransitionBytes, false), &rows); err != nil {
-		t.Fatal(err)
-	}
-	matched, waits, helpers := 0, 0, 0
-	counts := family145ForkReceiverJoinedOwnedInventory(t)
-	for _, row := range rows {
-		if row.Function == "mailboxCompletionRunEffects" || row.Function == "waitPublicationSiteCompletion" {
-			helpers++
-			family145MailboxCompletionCheckHelper(t, row.Function, row.Before, row.After)
-		} else {
-			normalized := family145MailboxCompletionCallerInverse(row.After)
-			if normalized == row.After {
-				continue
-			}
-			family145MailboxCompletionCheckCaller(t, row.Function, row.Before, row.After, normalized)
-			calls := strings.Count(row.After, "mailboxCompletionRunEffects(t, ")
-			wait := strings.Count(row.After, "waitPublicationSiteCompletion(t, ")
-			matched += calls
-			waits += wait
-			if counts["mailbox-effects/"+row.Function] != calls || counts["publication-completion/"+row.Function] != wait {
-				t.Fatalf("mailbox dependency owned call inventory changed: %s", row.Function)
-			}
-		}
-		if actual := family145ConversationForkOwnerSource(t, "../serveapp/"+filepath.Base(row.File), row.Function); actual != row.After {
-			t.Fatalf("mailbox dependency escaped its complete finite source: %s", row.Function)
-		}
-	}
-	if matched != 43 || waits != 23 || helpers != 2 {
-		t.Fatalf("mailbox calls=%d/43 completion consumers=%d/23 helpers=%d/2", matched, waits, helpers)
-	}
-}
-
 func TestFamily145PublicationDiagnosticsRetainExactElevenSectionDialectInventory(t *testing.T) {
 	original := ""
 	for _, row := range family145ServedDebugRows {

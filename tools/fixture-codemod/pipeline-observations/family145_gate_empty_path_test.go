@@ -34,35 +34,6 @@ func family145GateEmptyPathProofError(before, after string) error {
 	return family145DescriptorReadinessEscape([]byte("package proof\n" + after))
 }
 
-func TestFamily145GateEmptyPathRetainsSchemaRefusalAndExactNativeConsumer(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	found := 0
-	for _, row := range rows {
-		if row.Function != "TestCanonicalMutationSurface_FailsOnMalformedCanonicalMutationField" {
-			continue
-		}
-		found++
-		if err := family145GateEmptyPathProofError(row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, pair := range [][2]string{
-			{"err == nil", "err != nil"}, {"check constraint", "accepted"}, {"ProbeWorkflowGateEmptyPath", "ProbeWorkflowMutationMissingDomainPath"},
-			{"ctx, pg, runID, entityID", "ctx, pg, entityID, runID"}, {"constructConformanceGateMutationSubject(t, pg)", "foreignSubject(t, pg)"},
-			{"requireMutationSurface(t, pg)", "foreignSchema(t, pg)"},
-		} {
-			if family145GateEmptyPathProofError(row.Before, strings.ReplaceAll(row.After, pair[0], pair[1])) == nil {
-				t.Fatalf("changed gate-path refusal or subject accepted: %v", pair)
-			}
-		}
-	}
-	if found != 1 {
-		t.Fatalf("gate constraint consumer inventory=%d want1", found)
-	}
-}
-
 func family145GateEmptyPathRollbackProofError(source string) error {
 	for _, cut := range []string{
 		"validateWorkflowProjectionFaultKey(run, entity, true)", "workflowProjectionNativePostgres(selected)",

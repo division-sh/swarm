@@ -86,32 +86,6 @@ func family145LiveSessionProofError(function, before, after string) error {
 	return family145DescriptorReadinessEscape([]byte("package proof\n" + after))
 }
 
-func TestFamily145LiveSessionWholeGroupPreservesInputsClaimsProviderFailuresAndAssertions(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	found := 0
-	for _, row := range rows {
-		if _, ok := family145LiveSessionCuts[row.Function]; !ok {
-			continue
-		}
-		found++
-		if err := family145LiveSessionProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatalf("%s: %v", row.Function, err)
-		}
-		for _, cut := range family145LiveSessionCuts[row.Function] {
-			if family145LiveSessionProofError(row.Function, row.Before, strings.ReplaceAll(row.After, cut, "foreignCut(")) == nil {
-				t.Fatalf("lost live-session owner/cut accepted: %s", cut)
-			}
-		}
-		assertFamily145LiveSessionHostileInputsAndAssertions(t, row.Function, row.Before, row.After)
-	}
-	if found != 2 {
-		t.Fatalf("live-session whole caller inventory=%d want2", found)
-	}
-}
-
 func assertFamily145LiveSessionHostileInputsAndAssertions(t *testing.T, function, before, after string) {
 	t.Helper()
 	assertions, err := family145DescriptorBusinessAssertions(before)

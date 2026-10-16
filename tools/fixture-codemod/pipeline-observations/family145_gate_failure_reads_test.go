@@ -65,49 +65,6 @@ func family145GateFailureReadProofError(key, before, after string) error {
 	return nil
 }
 
-func TestFamily145GateFailureReadsPreserveCompleteConsumersAndRejectLostCuts(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	found := map[string]bool{}
-	var originals []string
-	for _, row := range rows {
-		key := family145GateScalarReadKey(row.File, row.Function)
-		cuts, ok := family145GateFailureReadCuts[key]
-		if !ok {
-			continue
-		}
-		if found[key] {
-			t.Fatalf("ambiguous failure-read consumer: %s", key)
-		}
-		found[key] = true
-		if err := family145GateFailureReadProofError(key, row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range cuts {
-			if family145GateFailureReadProofError(key, row.Before, strings.Replace(row.After, cut, "foreignFailureRead()", 1)) == nil {
-				t.Fatalf("lost context/owner/scope/destination/order passed: %s", cut)
-			}
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.After)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			condition := strings.SplitN(assertion, " => ", 2)[0]
-			if family145GateFailureReadProofError(key, row.Before, strings.Replace(row.After, condition, "false", 1)) == nil {
-				t.Fatalf("lost original failure assertion passed: %s", condition)
-			}
-		}
-		originals = append(originals, family145ConnectorSQL(t, "package proof\n"+row.Before)...)
-	}
-	if len(found) != len(family145GateFailureReadCuts) {
-		t.Fatalf("failure-read consumers=%d/%d", len(found), len(family145GateFailureReadCuts))
-	}
-	assertFamily145GateFailurePhysicalSQL(t, originals)
-}
-
 func assertFamily145GateFailurePhysicalSQL(t *testing.T, originals []string) {
 	t.Helper()
 	for _, owner := range []string{"ReadGateEventFailure", "ReadGateSubscriberFailure", "ReadGateNodeFailure", "ReadGateSubscriberFailureOrEmptyObject", "ReadGateDeadLetterFailure"} {

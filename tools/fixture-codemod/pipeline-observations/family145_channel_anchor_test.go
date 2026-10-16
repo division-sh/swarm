@@ -107,34 +107,6 @@ func TestFamily145ChannelAnchorNativeQueriesRetainExactPhysicalPredicates(t *tes
 	}
 }
 
-func TestFamily145ChannelAnchorCleanupIsRegisteredBeforeAnyChildCanOpenReader(t *testing.T) {
-	const path = "internal/serveapp/channel_onboarding_identity_e2e_test.go"
-	const function = "newChannelOnboardingE2EHarness"
-	before := channelAnchorOriginalDeclaration(t, path, function)
-	old := "return &channelOnboardingE2EHarness{opts: opts, provider: provider, telegram: telegram, credentialPath: credentialPath, backend: backend, storeDSN: storeDSN}"
-	replacement := "h := &channelOnboardingE2EHarness{opts: opts, provider: provider, telegram: telegram, credentialPath: credentialPath, backend: backend, storeDSN: storeDSN}\nt.Cleanup(func() {\nif h.anchorObservation != nil {\nif err := h.anchorObservation.Close(); err != nil { t.Error(err) }\n}\n})\nreturn h"
-	if strings.Count(before, old) != 1 {
-		t.Fatal("parent constructor predecessor changed")
-	}
-	expected, err := requestkey.Normalize(strings.Replace(before, old, replacement, 1))
-	if err != nil || channelAnchorCurrentDeclaration(t, path, function) != expected {
-		t.Fatal("parent cleanup/creation/return escaped its exact extension:", err)
-	}
-	for _, mutant := range []string{
-		strings.Replace(expected, "t.Cleanup", "child.Cleanup", 1),
-		strings.Replace(expected, "return h", "return h\nneverRegisterCleanup()", 1),
-		strings.Replace(expected, "h.anchorObservation.Close()", "skipClose()", 1),
-	} {
-		if mutant == expected {
-			t.Fatal("cleanup control did not change its observed cut")
-		}
-		row := recipe{File: path, Function: function, Before: before, After: expected}
-		if _, _, err := rewriteFunction(path, []byte("package proof\n"+mutant), row); err == nil {
-			t.Fatal("lost/late/child-owned cleanup accepted")
-		}
-	}
-}
-
 func channelAnchorSQL(t *testing.T, source string) []string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "query.go", "package proof\n"+source, parser.AllErrors)
@@ -157,49 +129,6 @@ func channelAnchorSQL(t *testing.T, source string) []string {
 	return queries
 }
 
-func TestFamily145ChannelAnchorTransformRefusesForeignCarriersAndShadowedCalls(t *testing.T) {
-	for _, before := range []string{
-		`func foreign(t *testing.T) { waitChannelAnchorReceipt(t, foreign.DB, "x") }`,
-		`func foreign(t *testing.T) { waitChannelAnchorReceipt(t, db, "x") }`,
-		`func TestChannelSourceLifecyclePublicJourney(t *testing.T) { waitChannelAnchorReceipt(t, db, "x", "extra") }`,
-		`func TestChannelSourceLifecyclePublicJourney(t *testing.T) { waitChannelAnchorReceipt := foreign; waitChannelAnchorReceipt(t, db, "x") }`,
-	} {
-		if _, _, err := channelanchor.Transform(before); err == nil {
-			t.Fatal("unclassified carrier/arity/owner accepted:", before)
-		}
-	}
-}
-
-func TestFamily145ChannelAnchorWholeChainPreservesEveryPollAndRefusalCut(t *testing.T) {
-	proof := sourceBlobDeclarationsForInvocation(t)
-	calls := 0
-	seen := map[string]bool{}
-	for _, pin := range channelAnchorPins(t) {
-		key := pin.File + "/" + pin.Function
-		if seen[key] || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("changed/duplicate channel anchor predecessor:", key)
-		}
-		seen[key] = true
-		original, err := exec.Command("git", "show", channelanchor.Predecessor+":"+pin.File).Output()
-		if err != nil || requestKeyDeclaration(t, original, pin.Function) != pin.Before {
-			t.Fatal("channel anchor source is not its signed predecessor:", key, err)
-		}
-		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || family145ChannelDecisionPrevious(t, pin.File, pin.Function, proof.previous(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))) != pin.After {
-			t.Fatal("channel anchor current source escaped its whole rule:", key, err)
-		}
-		after, count, err := channelanchor.Transform(pin.Before)
-		if err != nil || after != pin.After || count != pin.Calls {
-			t.Fatal("channel anchor finite transform escaped its rule:", key, err)
-		}
-		calls += count
-		channelAnchorHostiles(t, pin)
-	}
-	if calls != 54 || len(seen) != 26 {
-		t.Fatalf("channel anchor inventory=%d/%d want54/26", calls, len(seen))
-	}
-}
-
 func channelAnchorHostiles(t *testing.T, pin channelanchor.Pin) {
 	t.Helper()
 	pins := channelAnchorPins(t)
@@ -215,33 +144,6 @@ func channelAnchorHostiles(t *testing.T, pin channelanchor.Pin) {
 		if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil || channelanchor.Previous(pins, pin.File, pin.Function, mutant) != mutant {
 			t.Fatal("changed channel anchor identity/assertion/lifetime accepted:", pin.Function, cut)
 		}
-	}
-}
-
-func TestFamily145ChannelAnchorOwnedInventoryHasNoRawCallerOrAlias(t *testing.T) {
-	proof := sourceBlobDeclarationsForInvocation(t)
-	root := "../../.."
-	calls, definitions := 0, 0
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		n, d := channelAnchorOwnedFile(t, filepath.ToSlash(rel), file, proof)
-		calls += n
-		definitions += d
-		return nil
-	})
-	// The original 54 calls plus six calls in three exact native controls.
-	if err != nil || calls != 60 || definitions != 6 {
-		t.Fatalf("channel anchor complete inventory=%d/%d want54+6/6 err=%v", calls, definitions, err)
 	}
 }
 

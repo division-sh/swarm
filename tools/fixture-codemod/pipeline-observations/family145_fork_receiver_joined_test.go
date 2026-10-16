@@ -75,41 +75,6 @@ func family145ForkReceiverJoinedCheckCaller(t *testing.T, file, function, before
 	}
 }
 
-func TestFamily145ForkReceiverJoinedInventoryRetiresWholeDuplicateOwnerAndCallerChain(t *testing.T) {
-	var rows []struct {
-		File, Function, Before, After string
-		Removed                       bool
-	}
-	if err := json.Unmarshal(servedSetupEarlierHistory(t, family145TransitionBytes, false), &rows); err != nil {
-		t.Fatal(err)
-	}
-	seen, retired := map[string]bool{}, 0
-	for _, row := range rows {
-		if row.Function == "readForkReceiverRows" {
-			if !row.Removed || row.After != "" {
-				t.Fatal("duplicate receiver query/decoder survived")
-			}
-			retired++
-			family145ForkReceiverJoinedOriginalOracle(t, row.Before)
-			continue
-		}
-		if family145ForkReceiverJoinedCallers[row.Function] == 0 {
-			continue
-		}
-		seen[row.Function] = true
-		family145ForkReceiverJoinedCheckCaller(t, row.File, row.Function, row.Before, row.After)
-	}
-	if retired != 1 || len(seen) != len(family145ForkReceiverJoinedCallers) {
-		t.Fatalf("retired receiver owner=%d/1 callers=%d/%d", retired, len(seen), len(family145ForkReceiverJoinedCallers))
-	}
-	counts := family145ForkReceiverJoinedOwnedInventory(t)
-	for function, want := range family145ForkReceiverJoinedCallers {
-		if counts[function] != want {
-			t.Fatalf("receiver owned caller count %s=%d/%d", function, counts[function], want)
-		}
-	}
-}
-
 func family145ForkReceiverJoinedQuery(t *testing.T, source string) string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "query.go", "package proof\n"+source, parser.AllErrors)

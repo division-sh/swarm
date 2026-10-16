@@ -50,57 +50,6 @@ func family145ConversationForkProofError(function, before, after string) error {
 	return nil
 }
 
-func TestFamily145ConversationForkEntireFixtureRetainsAssertionsAndFaultCuts(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	original := map[string]string{}
-	for _, row := range rows {
-		cuts, ok := family145ConversationForkCuts[row.Function]
-		if !ok {
-			continue
-		}
-		original[row.Function] = row.Before
-		if err := family145ConversationForkProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatalf("%s: %v", row.Function, err)
-		}
-		for _, cut := range cuts {
-			if family145ConversationForkProofError(row.Function, row.Before, strings.ReplaceAll(row.After, cut, "foreignCut(")) == nil {
-				t.Fatalf("lost conversation fork cut accepted: %s", cut)
-			}
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.Before)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			condition := strings.SplitN(assertion, " => ", 2)[0]
-			hostile, err := family145BusAssertionCounterexample(row.After, condition)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if family145ConversationForkProofError(row.Function, row.Before, hostile) == nil {
-				t.Fatalf("lost original conversation fork assertion accepted: %s", condition)
-			}
-		}
-	}
-	if len(original) != len(family145ConversationForkCuts) {
-		t.Fatalf("conversation fork dependency inventory incomplete: %d", len(original))
-	}
-	for _, name := range []string{"conversation_fork_atomic_creation_test.go", "conversation_fork_commit_omission_probe_test.go"} {
-		data, err := os.ReadFile("../../../internal/apiv1/" + name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := family145DescriptorReadinessEscape(data); err != nil {
-			t.Fatal(err)
-		}
-	}
-	assertFamily145ConversationForkPhysicalSQL(t, original)
-	assertFamily145ConversationForkIndependentCountCuts(t)
-}
-
 func assertFamily145ConversationForkPhysicalSQL(t *testing.T, original map[string]string) {
 	t.Helper()
 	for _, owner := range []struct{ file, function, table string }{

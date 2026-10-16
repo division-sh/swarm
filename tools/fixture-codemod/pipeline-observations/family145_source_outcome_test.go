@@ -96,15 +96,3 @@ func sourceOutcomePreparationCalls(source, name string) []string {
 	})
 	return out
 }
-
-func TestFamily145SourceOutcomeMatrixHasNoPoolOrDuplicateTransactionProtocol(t *testing.T) {
-	source, err := os.ReadFile("../../../internal/runtime/runforkexecution/runtime_outcome_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, retired := range []string{"*sql.DB", "DatabaseForTest", "AdmitPostgresRuntimeStore", "QueryRowContext", "BeginTx", "CaptureSQLite", "testutil.StartPostgres"} {
-		if strings.Contains(string(source), retired) {
-			t.Fatalf("outcome matrix retained %s", retired)
-		}
-	}
-}

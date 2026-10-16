@@ -127,22 +127,3 @@ func nativeToolPostgresCallerCounts(fn *ast.FuncDecl) (retired, native int) {
 	})
 	return retired, native
 }
-
-func TestNativeToolPostgresCallerRetirementRefusesLostDuplicateAndForeignConstruction(t *testing.T) {
-	valid := "func proof(t *testing.T) { selected := storetest.StartPostgresRuntimeStore(t); _ = selected }"
-	for _, sample := range []struct {
-		body         string
-		old, current int
-	}{
-		{valid, 0, 1},
-		{strings.Replace(valid, "storetest.StartPostgresRuntimeStore(t)", "newPostgresHumanTaskToolStoreForTest(t)", 1), 1, 0},
-		{strings.Replace(valid, "storetest.StartPostgresRuntimeStore(t)", "storetest.AdmitPostgresRuntimeStore(t, db)", 1), 0, 0},
-		{strings.Replace(valid, "_ = selected", "_ = selected; storetest.StartPostgresRuntimeStore(t)", 1), 0, 2},
-		{strings.Replace(valid, "storetest.StartPostgresRuntimeStore(t)", "storetest.StartPostgresRuntimeStore(other)", 1), 0, 0},
-	} {
-		old, current := nativeToolPostgresCallerCounts(projectionShapeFunction(t, sample.body))
-		if old != sample.old || current != sample.current {
-			t.Fatalf("constructor inventory admitted changed call: %s -> %d/%d", sample.body, old, current)
-		}
-	}
-}

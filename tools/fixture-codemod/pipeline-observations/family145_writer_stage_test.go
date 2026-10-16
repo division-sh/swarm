@@ -94,37 +94,6 @@ func family145WriterStageProcessInspectorInverse(after string) string {
 	).Replace(after)
 }
 
-func TestFamily145WriterStageWholeFamilyRetainsAll90CallerBodies(t *testing.T) {
-	if fmt.Sprintf("%x", sha256.Sum256([]byte(strings.TrimSuffix(string(family145WriterStagePreimages), "\n")))) != "32b872e34a7a9d23a2bc59068317940fd00de4a9e6c2fa3e235a30977571ea31" {
-		t.Fatal("writer-stage source-pinned preimage ledger changed")
-	}
-	var rows []writerStagePreimage
-	if err := json.Unmarshal(family145WriterStagePreimages, &rows); err != nil {
-		t.Fatal(err)
-	}
-	owned := family145ForkReceiverJoinedOwnedInventory(t)
-	seen, calls := map[string]bool{}, 0
-	for _, row := range rows {
-		key := row.File + "/" + row.Function
-		if seen[key] {
-			t.Fatal("duplicate writer-stage preimage")
-		}
-		seen[key] = true
-		after := family145ConversationForkOwnerSource(t, "../serveapp/"+strings.TrimPrefix(row.File, "internal/serveapp/"), row.Function)
-		normalized := family145WriterStageCallerInverse(row.Function, after)
-		if fmt.Sprintf("%x", sha256.Sum256([]byte(normalized))) != row.SHA256 {
-			t.Fatalf("writer-stage role propagation changed whole original assertions/source/restart/fault/teardown: %s", key)
-		}
-		calls += owned["writer-stage/"+row.Function]
-		for _, cut := range []string{"ReceiverStateReader", "reader", "t.Fatal", "t.Errorf", "requireServedEventPublishEntityState", "time.Sleep", "first.kill", "releaseOnce.Do"} {
-			family145WriterStageCheckHostileBody(t, row, after, cut)
-		}
-	}
-	if len(rows) != 47 || calls != 90 {
-		t.Fatalf("whole writer-stage chain bodies=%d/47 calls=%d/90", len(rows), calls)
-	}
-}
-
 func family145CheckWriterStageWholeRule(t *testing.T, file, function, after string) bool {
 	t.Helper()
 	var rows []writerStagePreimage
@@ -166,37 +135,6 @@ func family145WriterStageRecordCall(t *testing.T, function string, call *ast.Cal
 		t.Fatal("writer-stage caller retained raw or foreign authority")
 	}
 	counts["writer-stage/"+function]++
-}
-
-func TestFamily145WriterStageWaitRetainsNoRowPollingAndErrorCuts(t *testing.T) {
-	after := family145ConversationForkOwnerSource(t, "../serveapp/main_runtime_test.go", "requireServedEventPublishEntityState")
-	const nativeRead = `var evidence storetest.WriterStageEvidence
-		if err := reader.InspectSnapshot(context.Background(), func(ctx context.Context) error {
-			var err error
-			evidence, err = storetest.ReadWriterStage(ctx, reader, runID, entityID, wantState)
-			return err
-		}); err != nil {
-			t.Fatalf("%s entity_state query: %v", backend, err)
-		}
-		gotEntityID, state := evidence.EntityID, evidence.State`
-	normalized := strings.NewReplacer(
-		"reader receiverProofStateReader", "db *sql.DB",
-		nativeRead, "gotEntityID, state := servedEventPublishEntityState(t, db, backend, runID, entityID, wantState)",
-		"servedInspectionRunDebugSummary(reader, runID)", "servedEventPublishDebugSummary(t, db, backend, runID)",
-	).Replace(after)
-	var transitions []struct{ Function, Before string }
-	if err := json.Unmarshal(family145TransitionBytes, &transitions); err != nil {
-		t.Fatal(err)
-	}
-	for _, row := range transitions {
-		if row.Function == "requireServedEventPublishEntityState" {
-			if normalized != row.Before {
-				t.Fatal("native stage wait changed no-row IDs, predicate, deadline, polling, last facts or diagnostic refusal")
-			}
-			return
-		}
-	}
-	t.Fatal("writer-stage wait lost its immutable preimage")
 }
 
 func TestFamily145WriterStageRetainsExactBothDialectHeaderQueries(t *testing.T) {

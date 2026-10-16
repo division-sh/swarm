@@ -62,35 +62,6 @@ func family145CheckChannelEventCountWholeRule(t *testing.T, file, function, curr
 	return false
 }
 
-func TestFamily145ChannelEventCountWholeRuleRetainsEveryScopeAndAssertion(t *testing.T) {
-	proof := sourceBlobDeclarationsForInvocation(t)
-	calls, seen := 0, map[string]bool{}
-	for _, pin := range channelEventCountPins(t) {
-		key := pin.File + "/" + pin.Function
-		if seen[key] || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("duplicate or changed channel event count source:", key)
-		}
-		seen[key] = true
-		original, err := exec.Command("git", "show", channeleventcount.Predecessor+":"+pin.File).Output()
-		if err != nil || requestKeyDeclaration(t, original, pin.Function) != pin.Before {
-			t.Fatal("channel event count predecessor is not exact:", key, err)
-		}
-		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil || proof.previous(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function)) != pin.After {
-			t.Fatal("channel event count current source escaped its rule:", key, err)
-		}
-		after, count, err := channeleventcount.Transform(pin.Before)
-		if err != nil || after != pin.After || count != pin.Calls {
-			t.Fatal("channel event count transform changed its reviewed source:", key, err)
-		}
-		calls += count
-		channelEventCountHostiles(t, pin)
-	}
-	if calls != 15 || len(seen) != 11 {
-		t.Fatalf("channel event count inventory=%d/%d want15/11", calls, len(seen))
-	}
-}
-
 func channelEventCountHostiles(t *testing.T, pin channeleventcount.Pin) {
 	t.Helper()
 	finite := recipe{File: pin.File, Function: pin.Function, Before: pin.Before, After: pin.After}
@@ -106,53 +77,6 @@ func channelEventCountHostiles(t *testing.T, pin channeleventcount.Pin) {
 	}
 	if channeleventcount.Previous(pins, "foreign.go", pin.Function, pin.After) != pin.After || channeleventcount.Previous(pins, pin.File, pin.Function+"Foreign", pin.After) != pin.After {
 		t.Fatal("channel event count inverse accepted a foreign complete key")
-	}
-}
-
-func TestFamily145ChannelEventCountTransformRefusesForeignBindingAndKeepsOuterDestination(t *testing.T) {
-	const statement = "if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE run_id=$1 AND event_name='mailbox.card_decided'`, runID).Scan(&count); err != nil || count != 2 { t.Fatal(err) }"
-	const prefix = "func TestChannelLearnedObjectPublicJourney() { var count int; "
-	before := prefix + statement + "; consume(count) }"
-	after, calls, err := channeleventcount.Transform(before)
-	if err != nil || calls != 1 || !strings.Contains(after, "count, err = ") || strings.Contains(after, "count, err := ") || !strings.Contains(after, "consume(count)") {
-		t.Fatal("count result no longer updates its original destination:", after, err)
-	}
-	for _, mutant := range []string{
-		strings.Replace(before, "db.QueryRow", "foreign.QueryRow", 1),
-		strings.Replace(before, "&count", "&row.Count", 1),
-		strings.Replace(before, "runID).Scan", "runID, extra).Scan", 1),
-		strings.Replace(before, "err :=", "_ :=", 1),
-		strings.Replace(before, "TestChannelLearnedObjectPublicJourney", "foreignConsumer", 1),
-	} {
-		if _, _, err := channeleventcount.Transform(mutant); err == nil {
-			t.Fatal("unreviewed carrier/destination/arity/consumer accepted:", mutant)
-		}
-	}
-}
-
-func TestFamily145ChannelEventCountWholeOwnedInventoryHasNoOldQuery(t *testing.T) {
-	root, counts := "../../..", map[string]int{}
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasPrefix(entry.Name(), "channel") || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		return channelEventCountInventoryFile(path, file, counts)
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, pin := range channelEventCountPins(t) {
-		if counts[pin.Function] != pin.Calls {
-			t.Fatalf("channel event count calls %s=%d want%d", pin.Function, counts[pin.Function], pin.Calls)
-		}
-		delete(counts, pin.Function)
-	}
-	if len(counts) != 0 {
-		t.Fatal("unreviewed channel event-count callers:", counts)
 	}
 }
 

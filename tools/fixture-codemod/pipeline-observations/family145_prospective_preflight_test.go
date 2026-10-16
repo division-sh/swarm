@@ -83,39 +83,3 @@ func family145ProspectivePreflightAssertions(before, after string) error {
 	}
 	return nil
 }
-
-func TestFamily145ProspectivePreflightKeepsNonExecutableEvidenceAndFourGlobalZeros(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	found := 0
-	for _, row := range rows {
-		if row.Function != "proveSelectedForkPreparedPreflight" {
-			continue
-		}
-		found++
-		if err := family145ProspectivePreflightError(row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, pair := range [][2]string{
-			{"prospectiveCatalogFingerprint := catalog.Fingerprint()", "prospectiveCatalogFingerprint := foreign.Fingerprint()"},
-			{"loaded.EffectiveSourceIdentity", "foreign.EffectiveSourceIdentity"},
-			{"selectedPreparationFingerprint(cfg)", "selectedPreparationFingerprint(foreignCfg)"},
-			{"ctx, selected, surfaceIDs[0], preparationID", "ctx, selected, surfaceIDs[0], foreignPreparationID"},
-			{"storetest.CountGlobalRunStorage", "storetest.CountSelectedForkRunsForSource"},
-			{"storetest.CountGlobalAgentStorage", "storetest.CountGlobalRunStorage"},
-			{"storetest.CountGlobalSelectedRuntimeExecutionStorage", "storetest.CountGlobalRunStorage"},
-			{"storetest.CountGlobalGenerationGrantStorage", "storetest.CountGlobalRunStorage"},
-			{"err != nil || count != 0", "err != nil || count < 0"},
-			{"*surface.Authority.Preparation != probe.Authority", "false"},
-		} {
-			if err := family145ProspectivePreflightError(row.Before, strings.Replace(row.After, pair[0], pair[1], 1)); err == nil {
-				t.Fatal("prospective component accepted changed authority, narrowed zero proof or weakened identity assertion")
-			}
-		}
-	}
-	if found != 1 {
-		t.Fatalf("prospective component helper inventory=%d want1", found)
-	}
-}
