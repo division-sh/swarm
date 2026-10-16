@@ -12,11 +12,6 @@ import (
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/sourcefork"
 )
 
-func sourceForkLivePins(t *testing.T) []sourcefork.Pin {
-	t.Helper()
-	return sourceForkInvocationPins(t, sourceBlobDeclarationsForInvocation(t))
-}
-
 func sourceForkInvocationPins(t *testing.T, proof sourceBlobDeclarationInvocation) []sourcefork.Pin {
 	t.Helper()
 	pins := sourceForkPins(t)
