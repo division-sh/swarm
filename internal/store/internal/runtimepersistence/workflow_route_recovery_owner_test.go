@@ -143,16 +143,26 @@ func TestEntityStateSchemaRequiresExplicitNonblankEntityContractOnBothStores(t *
 func constructWorkflowRecoveryComponent(t *testing.T, ctx context.Context, selected bus.FlowInstanceActivationCommitOwner, run, entity, path string) {
 	t.Helper()
 	at := time.Now().UTC()
+	ctx = correlation.WithRunID(ctx, run)
+	root, err := flowactivationfixture.Command(ctx, pipeline.WorkflowInstance{
+		WorkflowName: ".", WorkflowVersion: "1", Mode: "static",
+		StorageRef: run, InstanceID: run, EntityID: run,
+		CurrentState: "active", CreatedAt: at, EnteredStageAt: at, UpdatedAt: at,
+	}, pipeline.WorkflowLifecycleMutationPlan{}, at)
+	if err != nil {
+		t.Fatal(err)
+	}
 	command, err := flowactivationfixture.Command(correlation.WithRunID(ctx, run), pipeline.WorkflowInstance{
 		WorkflowName: "review", WorkflowVersion: "1", Mode: "template", EntityType: "review_entity",
-		StorageRef: path, InstanceID: runtimeflowidentity.LogicalInstanceID(path), EntityID: entity,
+		StorageRef: path, InstanceID: runtimeflowidentity.LogicalInstanceID(path), InstanceKey: runtimeflowidentity.LogicalInstanceID(path), EntityID: entity,
 		ParentFlowID: ".", ParentFlowInstance: run, ParentEntityID: run,
 		CurrentState: "active", StageDefined: true, CreatedAt: at, EnteredStageAt: at, UpdatedAt: at,
 	}, pipeline.WorkflowLifecycleMutationPlan{}, at)
 	if err != nil {
 		t.Fatal(err)
 	}
-	committed, err := selected.CommitFlowInstanceActivation(correlation.WithRunID(ctx, run), command)
+	root.Plan.Children = []pipeline.FlowInstanceActivationPlan{command.Plan}
+	committed, err := selected.CommitFlowInstanceActivation(ctx, root)
 	if err != nil || !committed.Acknowledged || !committed.Created {
 		t.Fatalf("construct exact recovery component: result=%+v err=%v", committed, err)
 	}

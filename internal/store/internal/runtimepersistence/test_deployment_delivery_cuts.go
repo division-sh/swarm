@@ -6,9 +6,10 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 )
 
-type DeploymentEventDeliveryCutStorage = delivery.DeploymentEventDeliveryCutStorage
+type DeploymentEventDeliveryCutStorage = pipelinepersistence.DeploymentEventDeliveryCutStorage
 type DeploymentRunEventDeliveryCutStorage = delivery.DeploymentRunEventDeliveryCutStorage
 type SelectedDeploymentClaimStorage = delivery.SelectedDeploymentClaimStorage
 type SelectedDeliveryExecutionStorage = delivery.SelectedDeliveryExecutionStorage
@@ -18,7 +19,7 @@ func ReadDeploymentPreReceiptDeliveryCutStorageForTest(ctx context.Context, sele
 		return DeploymentEventDeliveryCutStorage{}, err
 	}
 	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (DeploymentEventDeliveryCutStorage, error) {
-		return delivery.ReadDeploymentPreReceiptDeliveryCutStorageTx(ctx, tx, event)
+		return pipelinepersistence.ReadDeploymentPreReceiptDeliveryCutStorageTx(ctx, tx, event)
 	})
 }
 
@@ -30,7 +31,7 @@ func ReadDeploymentPendingReceiverCutStorageForTest(ctx context.Context, selecte
 		return DeploymentEventDeliveryCutStorage{}, err
 	}
 	return readServedReadRole(ctx, selected, func(ctx context.Context, tx *sql.Tx) (DeploymentEventDeliveryCutStorage, error) {
-		return delivery.ReadDeploymentPendingReceiverCutStorageTx(ctx, tx, run, event)
+		return pipelinepersistence.ReadDeploymentPendingReceiverCutStorageTx(ctx, tx, run, event)
 	})
 }
 

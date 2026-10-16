@@ -27,6 +27,7 @@ func TestS6PreAttemptCapturedBucketJoinDiagnosticBothStores(t *testing.T) {
 			ctx := fixture.Context
 			record := manager.ReconfigureMemoryNativeFixture(t, false)
 			storetest.RequireStaticAgentFixture(t, ctx, selected, record)
+			ctx, _ = admitPreparedManagerNativeExecution(t, ctx, selected, fixture)
 			before, found, err := selected.LoadAgentLifecycleState(ctx, record.Config.Identity)
 			if err != nil || !found || before.Phase != manager.AgentLifecycleRunning {
 				t.Fatalf("running predecessor: row=%+v found=%t err=%v", before, found, err)
@@ -96,6 +97,7 @@ func TestS6PreAttemptProfileEvidenceDiagnosticBothStores(t *testing.T) {
 			ctx := fixture.Context
 			record := manager.ReconfigureMemoryNativeFixture(t, false)
 			storetest.RequireStaticAgentFixture(t, ctx, selected, record)
+			ctx, _ = admitPreparedManagerNativeExecution(t, ctx, selected, fixture)
 			rows, err := selected.LoadAgents(ctx)
 			if err != nil || len(rows) != 1 {
 				t.Fatalf("persisted descriptor: rows=%+v err=%v", rows, err)
