@@ -10,6 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 func Test2293Q1HandlerSelectionSeesUnconditionalWrites(t *testing.T) {
@@ -102,7 +104,7 @@ func Test2293Q1SelectedRuleWriteWinsOverHandlerWrite(t *testing.T) {
 
 func Test2293Q1HandlerOrderContract(t *testing.T) {
 	for _, pair := range [][2]Step{
-		{StepGuard, StepJoin}, {StepJoin, StepAccumulate}, {StepAccumulate, StepCompute},
+		{StepGuard, StepJoin}, {StepJoin, StepAccumulate}, {StepAccumulate, StepQuery}, {StepQuery, StepCompute},
 		{StepCompute, StepDataWrites}, {StepDataWrites, StepFanOut},
 		{StepFanOut, StepRules}, {StepFanOut, StepOnComplete},
 		{StepRules, StepAdvancesTo}, {StepOnComplete, StepAdvancesTo},
@@ -113,4 +115,59 @@ func Test2293Q1HandlerOrderContract(t *testing.T) {
 			t.Errorf("%s must precede %s: %v", pair[0], pair[1], OrderedSteps)
 		}
 	}
+}
+
+func Test2293Q1AssignmentFollowsHandlerOrder(t *testing.T) {
+	source := rootHandlerOrderSource(map[string]runtimecontracts.EntityFieldDecl{
+		"written": {Type: "boolean"}, "derived": {Type: "[text]"}, "selected": {Type: "boolean"},
+	}, runtimecontracts.EventCatalogEntry{})
+	entity, err := semanticview.ResolveEntityStructuralType(source, ".")
+	if err != nil || entity == nil {
+		t.Fatalf("fixture entity type: %v", err)
+	}
+	analysis := &EntityAssignmentAnalysis{source: source, entity: *entity}
+	node := testRootExecutableNode(t, "node-1")
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Query: &runtimecontracts.QuerySpec{StoreAs: "entity.derived"},
+		DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
+			{TargetField: "written", Value: runtimecontracts.LiteralExpression(true)},
+		}},
+		Rules: []runtimecontracts.HandlerRuleEntry{{
+			Condition: "entity.written",
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
+				{TargetField: "selected", Value: runtimecontracts.RefExpression("entity.written")},
+			}},
+		}},
+	}
+	outcomes := entityAssignmentOutcomes(handler)
+	if len(outcomes) == 0 || outcomes[0].rule == nil || outcomes[0].kind != runtimecontracts.HandlerAdvanceCarrierRules {
+		t.Fatal("fixture has no selected-rule outcome")
+	}
+	outcome := outcomes[0]
+	t.Run("guard_precedes_query_writes", func(t *testing.T) {
+		facts := analysis.transfer(node, "task.completed", handler, outcome, entityruntime.AssignmentFacts{}, &EntityAssignmentPoint{Step: StepGuard})
+		if _, assigned := facts["derived"]; assigned {
+			t.Fatal("guard borrowed a later query write")
+		}
+	})
+	t.Run("condition_sees_handler_writes", func(t *testing.T) {
+		facts := analysis.transfer(node, "task.completed", handler, outcome, entityruntime.AssignmentFacts{}, &EntityAssignmentPoint{Step: StepRules, Condition: true})
+		if _, assigned := facts["written"]; !assigned {
+			t.Fatal("condition lost the preceding handler write")
+		}
+		if _, assigned := facts["selected"]; assigned {
+			t.Fatal("condition borrowed the selected rule's later write")
+		}
+	})
+	t.Run("rule_write_sees_handler_not_future_rule_write", func(t *testing.T) {
+		facts := analysis.transfer(node, "task.completed", handler, outcome, entityruntime.AssignmentFacts{}, &EntityAssignmentPoint{
+			Step: StepDataWrites, HasWriteIndex: true, WriteIndex: 0, RuleKind: runtimecontracts.HandlerAdvanceCarrierRules,
+		})
+		if _, assigned := facts["written"]; !assigned {
+			t.Fatal("rule write lost the preceding handler assignment")
+		}
+		if _, assigned := facts["selected"]; assigned {
+			t.Fatal("rule write borrowed its own future assignment")
+		}
+	})
 }

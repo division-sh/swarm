@@ -425,16 +425,11 @@ func appendCompiledFanOutExecutableReaders(out *[]WorkflowExecutableReader, ctx 
 	if !ok {
 		return
 	}
-	beforeSource := len(*out)
 	appendExecutableReader(out, kind+".items_from", plan.ItemsFrom, phase)
-	for i := beforeSource; i < len(*out); i++ {
-		(*out)[i].FanOutAfterWrites = plan.SourceAfterWrites
-	}
 	before := len(*out)
 	appendExecutableReader(out, kind+".identity", plan.Identity, phase)
 	if len(*out) > before {
 		ref := &(*out)[len(*out)-1]
-		ref.FanOutAfterWrites = true
 		ref.ItemAlias = plan.ItemAlias
 		ref.ItemType = plan.ItemType.Clone()
 		ref.HasItemType = true
@@ -512,7 +507,6 @@ type WorkflowExecutableReader struct {
 	HasWriteIndex             bool
 	EmitSite                  *runtimecontracts.HandlerDeclarativeEmitSite
 	EmitField                 string
-	FanOutAfterWrites         bool
 	Kind                      string
 	SourceSlot                string
 	Expression                string

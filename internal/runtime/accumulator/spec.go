@@ -2,11 +2,9 @@ package accumulator
 
 import (
 	"fmt"
-	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
-	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -29,12 +27,4 @@ func ValidateSpecForHandler(source semanticview.Source, node runtimeidentity.Exe
 	default:
 		return fmt.Errorf("accumulate.key %q must name a required scalar item field on %s, not %s", spec.Key, handlerEvent, runtimecontracts.StructuralCatalogTypeSyntax(field.Type))
 	}
-}
-
-func keyPath(key string) (paths.Path, error) {
-	path := paths.Parse(key)
-	if path.Root != paths.RootPayload || len(path.Segments) == 0 || key != "payload."+strings.Join(path.Segments, ".") {
-		return paths.Path{}, fmt.Errorf("accumulate.key %q must be an exact payload field path", key)
-	}
-	return path, nil
 }

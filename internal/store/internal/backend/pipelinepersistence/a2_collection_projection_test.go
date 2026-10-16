@@ -198,15 +198,6 @@ func TestA2PersistedCollectionProjectionOnBothStores(t *testing.T) {
 					t.Run(tc.name+"/"+string(kind), func(t *testing.T) {
 						ref := rc.CatalogTypeReference{Type: tc.typ, Catalog: rc.TypeCatalogDocument{Types: map[string]rc.NamedTypeDecl{"Record": {Fields: map[string]rc.TypeFieldSpec{"values": {Type: "[integer]"}}}}}}
 						r := a2CollectionRequest(t, kind, ref, len(tc.want))
-						if kind == fanoutobligation.SourceEntityField {
-							r.Capsule.SourceProjection.SourceAfterWrites = true
-							var err error
-							r.PlanRef.SemanticDigest, err = canonicaljson.Hash(r.Capsule.SourceProjection)
-							if err != nil {
-								t.Fatal(err)
-							}
-							r.Capsule.SourcePlanRef = r.PlanRef
-						}
 						field := []byte(`{"items":` + tc.raw + `}`)
 						a2CollectionTrigger(t, db, r, field)
 						intent := a2PersistCollection(t, db, backend, r, field)

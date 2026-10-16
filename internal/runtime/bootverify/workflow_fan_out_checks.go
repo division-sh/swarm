@@ -56,12 +56,10 @@ func (c *checkerContext) validateFanOutPlan(plan runtimecontracts.FanOutCompiled
 	if !fanOutEmitCarriesIdentity(plan.Emit, plan.Identity) {
 		add(fmt.Sprintf("fan_out.emit.fields must carry identity expression %q", plan.Identity))
 	}
-	if plan.SourceAfterWrites {
-		for _, write := range plan.Writes {
-			if fanOutWriteReferencesCount(write) {
-				add(fmt.Sprintf("%s mutates fan_out.items_from and a same-handler data write references fan_out.count; remove the cycle or source the count outside this handler", plan.ItemsFrom))
-				break
-			}
+	for _, write := range plan.Writes {
+		if fanOutWriteReferencesCount(write) {
+			add("unconditional handler writes run before fan_out and cannot read its count; read fan_out.count in a selected rule write instead")
+			break
 		}
 	}
 	return out

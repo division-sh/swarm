@@ -143,7 +143,7 @@ func TestA2M14UnkeyedAccumulatorUsesDurableDeliveryNotEventIdentity(t *testing.T
 		t.Fatalf("delivery retry = %#v, %v", result, err)
 	}
 	acc, _ := loadAccumulator(repo.snapshot, request.Node, "item.received")
-	if len(acc.Items) != 2 || len(acc.Received) != 0 || len(acc.Deliveries) != 2 {
+	if len(acc.Items) != 2 {
 		t.Fatalf("unkeyed multiplicity = %#v", acc)
 	}
 	result, err = executor.ExecuteSemanticFixture(context.Background(), request)
@@ -176,7 +176,7 @@ func TestA2M15AccumulatorBucketIsolationAndCapturedGeneration(t *testing.T) {
 			t.Fatalf("bucket = %#v, %v", bucket, err)
 		}
 		acc := &Accumulator{}
-		if _, err := acc.Admit(&runtimecontracts.AccumulateSpec{Key: "payload.id"}, map[string]any{"id": "same-key"}, ""); err != nil {
+		if _, err := acc.Admit(&runtimecontracts.AccumulateSpec{Key: "id"}, map[string]any{"id": "same-key"}); err != nil {
 			t.Fatal(err)
 		}
 		storeAccumulatorForBucket(tc.state, bucket, acc)
@@ -245,7 +245,7 @@ func TestA2M15AccumulatorFilterReduceCountAndComputeUseBusinessItems(t *testing.
 		{"id": "a", "score": int64(8), "payload": map[string]any{"score": int64(0)}},
 		{"id": "b", "score": int64(2), "payload": map[string]any{"score": int64(100)}},
 	} {
-		if _, err := acc.Admit(spec, item, ""); err != nil {
+		if _, err := acc.Admit(spec, item); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -248,7 +248,7 @@ func TestAccumulatorStoreLoad_PreservesHandlerAccumulatorBucketPath(t *testing.T
 	state := &StateSnapshot{}
 	node := testRootExecutableNode(t, "node-1")
 	acc := &Accumulator{}
-	if _, err := acc.Admit(nil, map[string]any{"payload": map[string]any{"score": int64(8)}}, "a"); err != nil {
+	if _, err := acc.Admit(&runtimecontracts.AccumulateSpec{Key: "id"}, map[string]any{"id": "a", "payload": map[string]any{"score": int64(8)}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -270,7 +270,7 @@ func TestAccumulatorStoreLoad_PreservesHandlerAccumulatorBucketPath(t *testing.T
 	if !ok {
 		t.Fatal("expected accumulator to load")
 	}
-	if len(loaded.Items) != 1 || loaded.Deliveries["a"] == "" || loaded.Err() != nil {
+	if len(loaded.Items) != 1 || loaded.Items[0]["id"] != "a" || loaded.Err() != nil {
 		t.Fatalf("loaded accumulator mismatch: %#v", loaded)
 	}
 }
