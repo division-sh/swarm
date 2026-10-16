@@ -918,6 +918,16 @@ func (p *PreparedDurableTopologySourceSetRebind) Commit(ctx context.Context, sto
 
 func verifySourceSetDesiredAgents(completePlan runtimeagenttopology.SourceSetPlan, coordinate runtimeagenttopology.SourceCoordinate, actual []runtimeagenttopology.DesiredAgent) error {
 	coordinate = coordinate.Normalize()
+	sourcePresent := false
+	for _, source := range completePlan.Sources {
+		if source.Normalize() == coordinate {
+			sourcePresent = true
+			break
+		}
+	}
+	if !sourcePresent {
+		return fmt.Errorf("static topology rooted source %+v is absent from the complete source-set plan", coordinate.RootReference())
+	}
 	expectedByKey := make(map[string]runtimeagenttopology.DesiredAgent)
 	for _, desired := range completePlan.Agents {
 		if desired.Source.Normalize() != coordinate {
