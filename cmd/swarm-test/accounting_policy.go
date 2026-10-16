@@ -140,7 +140,7 @@ func requireAccountingPolicy(ctx context.Context, remote accountingRemote, expec
 }
 
 func accountingGit(ctx context.Context, root string, args ...string) ([]byte, error) {
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", root, "--no-optional-locks"}, args...)...)
+	command := exec.CommandContext(ctx, "git", append([]string{"-C", root, "--no-optional-locks", "--literal-pathspecs", "--no-replace-objects"}, args...)...)
 	return command.Output()
 }
 

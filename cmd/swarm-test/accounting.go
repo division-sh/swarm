@@ -113,6 +113,9 @@ func superviseAccounting(ctx context.Context, args []string, out, stderr io.Writ
 	if err = requireAccountingPolicy(ctx, accountingGitHub, policy); err != nil {
 		return err
 	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
 	_, err = io.Copy(out, &completed)
 	return err
 }
@@ -343,7 +346,14 @@ func accountingSourceTree(ctx context.Context, root, head string) (string, error
 	}
 	var retained []byte
 	for _, entry := range bytes.Split(raw, []byte{0}) {
-		if len(entry) == 0 || bytes.HasSuffix(entry, []byte("\t"+formatproof.Successors)) {
+		if len(entry) == 0 {
+			continue
+		}
+		_, name, ok := bytes.Cut(entry, []byte{'\t'})
+		if !ok {
+			return "", fmt.Errorf("invalid accounting tree entry")
+		}
+		if string(name) == formatproof.Successors {
 			continue
 		}
 		retained = append(retained, entry...)

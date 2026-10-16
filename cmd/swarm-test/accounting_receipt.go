@@ -380,6 +380,9 @@ func publishAccountingCertificate(ctx context.Context, out io.Writer, remote acc
 	if _, err := completionSource(".", receipt.Head, true); err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	manifest, _ := json.Marshal(receipt.Plan.Output)
 	_, err := fmt.Fprintf(out, "regenerated, no raise: head=%s base=%s rows=%d manifest=%s guards=pass sample=%s human-audit=pending\n", receipt.Head, receipt.Plan.Base, receipt.Plan.Rows, formatproof.Digest(manifest), strings.Join(receipt.Sample, ","))
 	return err
