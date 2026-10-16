@@ -92,7 +92,23 @@ body unchanged into one helper used by BOTH roots. The adjacent root keeps its
 unconditional zero-adjacent-2149 assertion, then independently executes the
 complete actual scan, correspondence, strict diagnostics and exact a1 validation.
 It never relies on another test passing, and introduces no cached PASS, parser-only
-whitelist check or new exception. Positive/hostile execution receipts are pending.
+whitelist check or new exception.
+
+Qualification at signed674cdcb861d4babe407eded78fa1bf469705cf48:
+the adjacent root alone PASS7.296s; together with the registry root and all7
+retained-registry controls,9/9 PASS45.044s. Original strict diagnostics and
+strict_completion=false/provenance logging remain present for both entrypoints.
+In the stable scratch tree at that exact candidate, mutate only the original
+typed activityresult.Reader/LoadRecordedActivityResult registry disposition:
+adjacent-2149 causes the unconditional assertion to FAIL while canonical a1
+validation otherwise PASSes19820/4704; unclassified causes exact admission
+refusal for a non-admitted key. Both standalone root processes exit1 as expected.
+The row is restored exactly afterward; no artifact or retained key is changed.
+Receipts: pr2698-round2-adjacent-alone, pr2698-round2-registry-combined,
+pr2698-round2-adjacent-hostile-row and pr2698-round2-adjacent-hostile-unclassified
+(.jsonl/.stderr). These are bounded counterexamples, not qualifying failures.
+Final exact-snapshot complexity PASS; direct file-only complexity also identifies
+two unchanged inherited registry scanner hotspots, not new repair regressions.
 
 Tool source/imported helpers, manifests, pinned source objects and selection
 are unchanged. The sole history-fetch addition is the exact ff6905 object
