@@ -164,7 +164,7 @@ func (t *BudgetTracker) ProjectRecoveryBudgetState(ctx context.Context) error {
 	projected := make(map[string]struct{}, len(targets))
 	classifiers := make(map[string]runtimecontracts.WorkflowStageClassifier)
 	for _, target := range targets {
-		bundleHash := target.BundleHash
+		bundleHash := target.RootReference.BundleHash
 		if bundleHash == "" {
 			return fmt.Errorf("budget recovery projection target for run %q has no selected bundle_hash", target.RunID)
 		}

@@ -158,7 +158,7 @@ func TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores(t *
 						continue
 					}
 					found = true
-					if target.BundleHash != artifacts[i].BundleHash() || target.FlowTemplate != "child" || target.FlowInstance != "child" || target.Stage != wantStage {
+					if target.RootReference.BundleHash != artifacts[i].BundleHash() || target.FlowTemplate != "child" || target.FlowInstance != "child" || target.Stage != wantStage {
 						t.Fatalf("run %d target evidence = %#v", i, target)
 					}
 				}

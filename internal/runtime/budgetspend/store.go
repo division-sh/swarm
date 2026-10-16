@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 type Scope string
@@ -30,12 +31,12 @@ type Store interface {
 // ProjectionTarget identifies one active run-scoped entity whose retained
 // spend must be reflected in runtime budget state during startup recovery.
 type ProjectionTarget struct {
-	RunID        string
-	EntityID     string
-	BundleHash   string
-	FlowTemplate string
-	FlowInstance string
-	Stage        string
+	RunID         string
+	EntityID      string
+	RootReference sourceartifact.RootAdmissionReference
+	FlowTemplate  string
+	FlowInstance  string
+	Stage         string
 }
 
 type SpendRecord struct {

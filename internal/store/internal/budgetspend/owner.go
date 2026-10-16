@@ -371,7 +371,7 @@ func scanBudgetProjectionTargets(rows *sql.Rows) ([]budgetspend.ProjectionTarget
 	out := make([]budgetspend.ProjectionTarget, 0)
 	for rows.Next() {
 		var target budgetspend.ProjectionTarget
-		if err := rows.Scan(&target.RunID, &target.EntityID, &target.BundleHash, &target.FlowTemplate, &target.FlowInstance, &target.Stage); err != nil {
+		if err := rows.Scan(&target.RunID, &target.EntityID, &target.RootReference.BundleHash, &target.FlowTemplate, &target.FlowInstance, &target.Stage); err != nil {
 			return nil, fmt.Errorf("scan budget projection target: %w", err)
 		}
 		target.RunID = strings.TrimSpace(target.RunID)

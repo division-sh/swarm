@@ -50,6 +50,8 @@ func TestBudgetRecoveryUsesEachRunsSelectedStageSource(t *testing.T) {
 	hashA := artifactA.BundleHash()
 	artifactB := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# selected-budget-source-b\n"))
 	hashB := artifactB.BundleHash()
+	rootA, _ := sourceartifactfixture.Rooted(t, "budget-a", artifactA)
+	rootB, _ := sourceartifactfixture.Rooted(t, "budget-b", artifactB)
 	makeSource := func(hash string, terminal string) semanticview.Source {
 		return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 			Semantics: runtimecontracts.WorkflowSemanticView{Version: hash, StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{
@@ -67,10 +69,10 @@ func TestBudgetRecoveryUsesEachRunsSelectedStageSource(t *testing.T) {
 	bundleB.SourceArtifact = artifactB
 	const entityA, entityB, terminalB = "entity-a", "entity-b", "terminal-b"
 	store := &budgetSpendStoreCapture{sum: 0.95, targets: []budgetspend.ProjectionTarget{
-		{RunID: "run-a", EntityID: entityA, BundleHash: hashA, Stage: "shared"},
-		{RunID: "run-b", EntityID: terminalB, BundleHash: hashB, Stage: "shared"},
-		{RunID: "run-b", EntityID: entityB, BundleHash: hashB, Stage: "fresh"},
-		{RunID: "run-b", EntityID: entityA, BundleHash: hashB, Stage: "fresh"},
+		{RunID: "run-a", EntityID: entityA, RootReference: rootA.Admission().Reference(), Stage: "shared"},
+		{RunID: "run-b", EntityID: terminalB, RootReference: rootB.Admission().Reference(), Stage: "shared"},
+		{RunID: "run-b", EntityID: entityB, RootReference: rootB.Admission().Reference(), Stage: "fresh"},
+		{RunID: "run-b", EntityID: entityA, RootReference: rootB.Admission().Reference(), Stage: "fresh"},
 	}}
 	eventStore := &bootSelfCheckDescriptorStore{}
 	bus, err := newRuntimeTestEventBus(t, eventStore)
@@ -238,13 +240,14 @@ func TestBudgetTrackerActiveWorkThresholdPreservesInboundLineage(t *testing.T) {
 func TestBudgetTrackerProjectsRecoveryScopesBeforeAllRunTargetsWithoutRunContext(t *testing.T) {
 	artifact := sourceartifactfixture.New("agents.yaml", []byte("agents: {}\n# recovery-scopes\n"))
 	bundleHash := artifact.BundleHash()
+	root, _ := sourceartifactfixture.Rooted(t, "budget-scopes", artifact)
 	entityA := "10000000-0000-4000-8000-000000000001"
 	entityB := "20000000-0000-4000-8000-000000000002"
 	store := &budgetSpendStoreCapture{
 		sum: 0.95,
 		targets: []budgetspend.ProjectionTarget{
-			{RunID: "10000000-0000-4000-8000-000000000010", EntityID: entityA, BundleHash: bundleHash, Stage: "active"},
-			{RunID: "20000000-0000-4000-8000-000000000020", EntityID: entityB, BundleHash: bundleHash, Stage: "active"},
+			{RunID: "10000000-0000-4000-8000-000000000010", EntityID: entityA, RootReference: root.Admission().Reference(), Stage: "active"},
+			{RunID: "20000000-0000-4000-8000-000000000020", EntityID: entityB, RootReference: root.Admission().Reference(), Stage: "active"},
 		},
 	}
 	eventStore := &bootSelfCheckDescriptorStore{}
