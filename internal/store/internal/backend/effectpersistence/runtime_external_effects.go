@@ -2528,7 +2528,7 @@ func externalEffectRecoveryFailure(class runtimefailures.Class, code string, now
 
 func reconcileExternalEffectAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, candidates []externalEffectRecoveryCandidate, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	allowed := externalEffectRecoveryAttemptSet(candidates)
-	completionSummary, err := reconcileCompletionAttemptsPostgres(ctx, tx, llm, delivery, directives, mutation, allowed, now, "")
+	completionSummary, err := reconcileCompletionAttemptsPostgres(ctx, tx, llm, delivery, directives, mutation, allowed, now, "", nil)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
@@ -2546,7 +2546,7 @@ func reconcileExternalEffectAttemptsPostgres(ctx context.Context, tx *sql.Tx, ll
 
 func reconcileExternalEffectAttemptsSQLiteTx(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, candidates []externalEffectRecoveryCandidate, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	allowed := externalEffectRecoveryAttemptSet(candidates)
-	completionSummary, err := reconcileCompletionAttemptsSQLite(ctx, tx, llm, delivery, directives, mutation, allowed, now, "")
+	completionSummary, err := reconcileCompletionAttemptsSQLite(ctx, tx, llm, delivery, directives, mutation, allowed, now, "", nil)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
