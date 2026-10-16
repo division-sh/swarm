@@ -46,7 +46,11 @@ func (f authorityFinding) registryLine() string {
 }
 
 func TestPersistenceAuthorityFindingRegistry(t *testing.T) {
-	root := persistenceAuthorityRepoRoot(t)
+	verifyPersistenceAuthorityFindingRegistry(t, persistenceAuthorityRepoRoot(t))
+}
+
+func verifyPersistenceAuthorityFindingRegistry(t *testing.T, root string) {
+	t.Helper()
 	findings := loadPersistenceAuthorityFindings(t, root)
 	if violations := compoundEventFixtureAuthorityViolations(findings); len(violations) != 0 {
 		t.Fatalf("compound event fixtures regained raw authority:\n%s", strings.Join(violations, "\n"))
