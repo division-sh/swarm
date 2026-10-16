@@ -65,6 +65,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	"github.com/division-sh/swarm/internal/runtime/lifecycleprobe/lifecycletest"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -143,13 +144,25 @@ func servedRuntimeRootIdentityForRun(t testing.TB, runID, agentID string) runtim
 	return agentidentitytest.RootRuntimeForRun(t, runID, agentID, "serveapp-test")
 }
 
-func requireServeTestAgentFixtureForSource(t testing.TB, selected storetest.AgentFixtureStore, cfg runtimeactors.AgentConfig, source runtimecorrelation.SourceArtifactFact) {
+func requireServeTestAgentFixtureForSource(t testing.TB, selected storetest.AgentFixtureStore, cfg runtimeactors.AgentConfig, source runtimecorrelation.SourceArtifactFact) context.Context {
 	t.Helper()
 	cfg = serveTestAgentConfig(cfg)
 	cfg.FlowPath = cfg.Identity.FlowInstance()
 	if cfg.ExecutionMode == "" {
 		cfg.ExecutionMode = runtimeeffects.ExecutionModeLive
 	}
+	if len(cfg.Config) == 0 {
+		cfg.Config = json.RawMessage(`{}`)
+	}
+	profile, err := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, nil, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg = resolved.Actor
 	identity, err := cfg.ConcreteIdentity()
 	if err != nil {
 		t.Fatalf("resolve serve test agent identity: %v", err)
@@ -162,6 +175,38 @@ func requireServeTestAgentFixtureForSource(t testing.TB, selected storetest.Agen
 	}, source); err != nil {
 		t.Fatalf("admit agent fixture %s: %v", cfg.ID, err)
 	}
+	return admitServeTestAgentFixtureContext(t, ctx, selected, source)
+}
+
+func admitServeTestAgentFixtureContext(t testing.TB, ctx context.Context, selected storetest.AgentFixtureStore, source runtimecorrelation.SourceArtifactFact) context.Context {
+	t.Helper()
+	authority, err := agentfixture.AdmitExecutionAuthority(t, ctx, selected, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability, err := agentfixture.ProcessCapability(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, found, err := capability.CurrentSourceSet(ctx)
+	if err != nil || !found {
+		t.Fatalf("prepared serve fixture source set: found=%t err=%v", found, err)
+	}
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, authority.ExecutionID(), authority.Generation(), "", plan.Revision, source.BundleHash(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = managedexecution.WithAdmission(ctx, admission)
+	owner, ok := selected.(interface {
+		ActivateDeliveryAuthority(context.Context, runtimedelivery.ExecutionAuthority) error
+	})
+	if !ok {
+		t.Fatal("serve fixture requires its native delivery activation owner")
+	}
+	if err := owner.ActivateDeliveryAuthority(ctx, authority); err != nil {
+		t.Fatal(err)
+	}
+	return ctx
 }
 
 func releaseServeTestAgentFixtureCapability(t testing.TB, selected storetest.AgentFixtureStore) {
@@ -2248,6 +2293,15 @@ func seedServedConversationForkSource(t *testing.T, rt servedConversationForkPro
 	now := time.Now().UTC().Truncate(time.Second)
 	fixture := servedConversationForkSource{RunID: runID, AgentID: "fork-source-agent", SessionID: uuid.NewString(), Turn1ID: uuid.NewString(), Turn2ID: uuid.NewString(), Event1ID: uuid.NewString(), Event2ID: uuid.NewString(), EntityID: uuid.NewString(), Turn1At: now.Add(-2 * time.Minute), Turn2At: now.Add(-time.Minute)}
 	ctx := servedControlProofAuthorActivityContext(t, rt.servedControlProofRuntime.BundleHash, rt.servedControlProofRuntime.Runtime)
+	grant, err := rt.Runtime.CurrentStartupGrantEvidence()
+	if err != nil || grant.State != runtimestartupownership.GrantAdmitted || grant.SelectedFork != nil || grant.BundleHash != rt.BundleHash || grant.RuntimeInstanceID != rt.Runtime.Options.RuntimeInstanceID {
+		t.Fatalf("conversation fixture requires its already admitted served generation: %+v err=%v", grant, err)
+	}
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, grant.GrantID, grant.RuntimeGeneration, "", grant.SourceSetRevision, grant.BundleHash, grant.ProbeSurfaceIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = managedexecution.WithAdmission(ctx, admission)
 	lease, err := rt.Runtime.WorkOccurrence().Begin(ctx)
 	if err != nil {
 		t.Fatalf("admit conversation fixture work: %v", err)
@@ -6884,7 +6938,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, bundle *
 	activeSessionID := uuid.NewString()
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now.Add(-time.Hour), BundleHash: bundleHash})
 	identity := servedRuntimeFlowIdentityFieldsForRun(t, runID, "agent-a", "serve-abandon", "agent-a")
-	requireServeTestAgentFixtureForSource(t, sqliteStore, runtimeactors.AgentConfig{
+	ctx = requireServeTestAgentFixtureForSource(t, sqliteStore, runtimeactors.AgentConfig{
 		ID: identity.AgentID, Identity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a"),
 		Type: "default", Role: "operator", Model: "regular", LLMBackend: "anthropic",
 		Memory: runtimeagentmemory.Plan{Enabled: true},
@@ -6894,7 +6948,7 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, bundle *
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, now)
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a")}
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, sqliteStore, event, []events.DeliveryRoute{route})
-	claimCtx := serveDeliveryLifecycleFixtureContext()
+	claimCtx := ctx
 	claimed, err := storetest.ClaimDelivery(claimCtx, sqliteStore, event, route)
 	if err != nil {
 		_ = sqliteStore.Close()
@@ -6920,13 +6974,6 @@ func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath string, bundle *
 		t.Fatalf("close seeded sqlite store: %v", err)
 	}
 	return runID, eventID
-}
-
-func serveDeliveryLifecycleFixtureContext() context.Context {
-	return runtimeauthoractivity.WithScope(context.Background(), runtimeauthoractivity.BundleScope(
-		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-		"bundle-v2:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-	))
 }
 
 func stubServeRuntimeWorkspaceLifecycle(t *testing.T) {
@@ -8011,7 +8058,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		t.Fatalf("persist postgres abandon source artifact: %v", err)
 	}
 	storetest.RequireRun(t, ctx, runtimePG, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash})
-	requireServeTestAgentFixtureForSource(t, runtimePG, runtimeactors.AgentConfig{
+	ctx = requireServeTestAgentFixtureForSource(t, runtimePG, runtimeactors.AgentConfig{
 		ID: identity.AgentID, Identity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a"),
 		Type: "default", Role: "operator", Model: "regular", LLMBackend: "anthropic",
 		Memory: runtimeagentmemory.Plan{Enabled: true},
@@ -8021,7 +8068,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 		[]byte(`{}`), events.EventEnvelope{Scope: events.EventScopeGlobal}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: servedRuntimeFlowIdentityForRun(t, runID, "agent-a", "serve-abandon", "agent-a")}
 	storetest.CommitDeliveryObligationsForPersistedEvent(t, ctx, runtimePG, event, []events.DeliveryRoute{route})
-	claimCtx := serveDeliveryLifecycleFixtureContext()
+	claimCtx := ctx
 	claimed, err := storetest.ClaimDelivery(claimCtx, runtimePG, event, route)
 	if err != nil {
 		t.Fatalf("claim active delivery: %v", err)
