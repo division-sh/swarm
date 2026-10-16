@@ -75,8 +75,19 @@ imports; final native U1000 is PASS, zero findings. This is affected-package
 Linux evidence, not a Linux/Darwin-union claim. Original and final reports are
 pr2698-decision1b-unused{,-final}.jsonl; the original453 findings remain evidence.
 
-Pending the complete retained selection and store unit measured sequentially
-at their original settings, and the live ratchet in canonical preflight.
+The first complete selections ran SEQUENTIALLY on signed3ef958f75c after the
+clean master0b7f1188a6 absorb: count1, p1, GOMAXPROCS2, timeout600s, no overlay.
+Both are RED, not qualification: codemod-owner-guards executed all410 roots
+(390 PASS/20 FAIL), finishing160.751s; internal/store hit600.825s with21
+completed failing roots and the current-source ReconcilesLiveCensus root still
+running (6m5s). The other two started-but-not-passed roots were skipped;
+internal/testpostgres separately PASS52.584s. Combined completed-root accounting
+is219 PASS/21 FAIL/2 SKIP/1 interrupted. No unchanged repeat was started.
+issue-2698-decision1ab-retained-unit-failures.tsv records all41 completed root
+failures and their actual diagnostics. The timeout is additional, not a missing
+row hidden by the completed-failure ledger. Source, command, load, full JSON,
+stderr and hashes remain in pr2698-decision1b-3ef958f75c*-{unit}.{jsonl,meta,stderr}.
+The real ratchet and canonical preflight remain pending; no GREEN is implied.
 The frozen-head runtime diagnostics are independent and close no hold unless
 their cause/disposition is explicitly reviewed. Final canonical preflight and
 HumanTask both-store receipts must bind the final integrated head, including
