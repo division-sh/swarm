@@ -26,10 +26,33 @@ type startupTakeoverFact struct {
 // ReadStartupProviderTakeoverChainTx proves an already captured running drain
 // crossed only recorded startup takeovers. It grants no late-provider authority.
 func ReadStartupProviderTakeoverChainTx(ctx context.Context, tx *sql.Tx, request runtimemanager.AgentLifecycleTransition, current runtimemanager.AgentLifecycleState, predecessor runtimeeffects.LifecycleToken, operationID, transitionID string, epoch int64, generation uint64, sqlite bool) (bool, error) {
+	if generation >= current.Generation {
+		return false, nil
+	}
+	return readStartupProviderTakeoverChainTx(ctx, tx, request, current, predecessor, operationID, transitionID, epoch, generation, sqlite)
+}
+
+// ReadProviderResumeTakeoverChainTx uses the same immutable takeover facts as
+// startup catch-up, including the direct successor. It grants no provider launch.
+func ReadProviderResumeTakeoverChainTx(ctx context.Context, tx *sql.Tx, successor, predecessor runtimeeffects.LifecycleToken, operationID, transitionID string, epoch int64, generation uint64, sqlite bool) (bool, error) {
+	observation, err := LockAgentExecutionTx(ctx, tx, successor.Identity, successor, sqlite)
+	if err != nil || !observation.Found || !observation.Current {
+		return false, err
+	}
+	current := observation.State
+	request := runtimemanager.AgentLifecycleTransition{
+		OperationKind: "process_takeover", Identity: current.Identity, AgentID: current.AgentID,
+		TargetEpoch: current.RuntimeEpoch, TargetGeneration: current.Generation,
+		TargetPhase: current.Phase, ProcessBinding: current.ProcessBinding,
+	}
+	return readStartupProviderTakeoverChainTx(ctx, tx, request, current, predecessor, operationID, transitionID, epoch, generation, sqlite)
+}
+
+func readStartupProviderTakeoverChainTx(ctx context.Context, tx *sql.Tx, request runtimemanager.AgentLifecycleTransition, current runtimemanager.AgentLifecycleState, predecessor runtimeeffects.LifecycleToken, operationID, transitionID string, epoch int64, generation uint64, sqlite bool) (bool, error) {
 	if tx == nil || request.OperationKind != "process_takeover" || request.Identity != predecessor.Identity ||
 		current.Identity != predecessor.Identity || current.Phase != runtimemanager.AgentLifecycleRunning ||
 		!current.ProcessBinding.Equal(request.ProcessBinding) || current.RuntimeEpoch != request.TargetEpoch ||
-		current.Generation != request.TargetGeneration || generation == 0 || generation >= current.Generation {
+		current.Generation != request.TargetGeneration || generation == 0 || generation > current.Generation {
 		return false, nil
 	}
 	if err := AuthorizeGenerationMutationTx(ctx, tx, request, sqlite); err != nil {

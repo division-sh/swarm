@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
@@ -17,6 +18,7 @@ import (
 func queueCompletionResume(ctx context.Context, mutation *mutationprotocol.Attempt, delivery providerDrainDeliveryOwner, recovered completionRecoveryAttempt, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement, resolution providerDrainRecoveryResolution, takeover *startupProviderTakeover) (bool, error) {
 	if takeover == nil || resolution.Kind != completionSettlementDrained || resolution.Expired ||
 		resolution.Drain.Target != runtimeeffects.ProviderDrainTargetRunning || attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent ||
+		attempt.Authority.ExecutionMode != executionmode.Live ||
 		attempt.Origin.Kind != runtimeeffects.CompletionOriginDelivery || settlement.Settlement.State != runtimeeffects.StateOutcomeUncertain {
 		return false, nil
 	}

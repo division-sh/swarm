@@ -343,12 +343,20 @@ func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 }
 
 func loadProviderDrainForRecovery(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, postgres bool) (providerDrainPermit, bool, error) {
+	return loadProviderRecoveryDrain(ctx, tx, attempt, postgres, false)
+}
+
+func loadProviderRecoveryDrain(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, postgres, settled bool) (providerDrainPermit, bool, error) {
 	var permit providerDrainPermit
 	var expires conversationForkTimeValue
 	var generation int64
 	var target, originKind, deliveryID, runID, routeIdentity, claimToken, subscriber, directiveID, directiveOwner string
 	var claimVersion int64
 	var err error
+	state := "state='pending'"
+	if settled {
+		state = "state='settled' AND settled_at IS NOT NULL"
+	}
 	if postgres {
 		err = tx.QueryRowContext(ctx, `
 			SELECT drain_id::text,lifecycle_operation_id::text,lifecycle_transition_id::text,target_phase,successor_runtime_epoch,successor_generation,
@@ -356,7 +364,7 @@ func loadProviderDrainForRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 				       COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_id,''),COALESCE(origin_directive_operation_id::text,''),COALESCE(origin_directive_owner_id,''),expires_at
 			FROM runtime_provider_attempt_drains
 			WHERE attempt_id=$1::uuid AND operation_id=$2::uuid
-			  AND predecessor_runtime_epoch=$3 AND predecessor_generation=$4 AND state='pending'
+			  AND predecessor_runtime_epoch=$3 AND predecessor_generation=$4 AND `+state+`
 			FOR UPDATE
 		`, attempt.AttemptID, attempt.OperationID, attempt.Authority.Normal.RuntimeEpoch, attempt.Authority.Normal.Generation).Scan(
 			&permit.DrainID, &permit.LifecycleOperationID, &permit.LifecycleTransitionID, &target, &permit.SuccessorEpoch, &generation,
@@ -369,7 +377,7 @@ func loadProviderDrainForRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 				       COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_id,''),COALESCE(origin_directive_operation_id,''),COALESCE(origin_directive_owner_id,''),expires_at
 			FROM runtime_provider_attempt_drains
 			WHERE attempt_id=? AND operation_id=?
-			  AND predecessor_runtime_epoch=? AND predecessor_generation=? AND state='pending'
+			  AND predecessor_runtime_epoch=? AND predecessor_generation=? AND `+state+`
 		`, attempt.AttemptID, attempt.OperationID, attempt.Authority.Normal.RuntimeEpoch, attempt.Authority.Normal.Generation).Scan(
 			&permit.DrainID, &permit.LifecycleOperationID, &permit.LifecycleTransitionID, &target, &permit.SuccessorEpoch, &generation,
 			&originKind, &deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriber, &directiveID, &directiveOwner, &expires,
@@ -677,7 +685,7 @@ func (s *EffectPostgresOwner) CaptureProviderAttemptDrainsPostgresTx(
 		  AND o.agent_id=$1 AND o.agent_name_owner=$2 AND o.agent_name_source=$3
 		  AND o.agent_route_presence=$4 AND o.flow_scope_key=$5
 		  AND o.flow_instance_id=$6 AND o.flow_instance=$7
-		  AND o.runtime_epoch=$8 AND o.generation=$9 AND o.agent_run_id=$10::uuid
+		  AND a.runtime_epoch=$8 AND a.generation=$9 AND o.agent_run_id=$10::uuid
 		  AND a.state IN ('authorized','launched','response_observed')
 		ORDER BY a.attempt_id
 		FOR UPDATE OF a,o
@@ -723,7 +731,7 @@ func (s *EffectSQLiteOwner) CaptureProviderAttemptDrainsSQLiteTx(
 		  AND o.agent_id=? AND o.agent_name_owner=? AND o.agent_name_source=?
 		  AND o.agent_route_presence=? AND o.flow_scope_key=?
 		  AND o.flow_instance_id=? AND o.flow_instance=?
-		  AND o.runtime_epoch=? AND o.generation=? AND o.agent_run_id=?
+		  AND a.runtime_epoch=? AND a.generation=? AND o.agent_run_id=?
 		  AND a.state IN ('authorized','launched','response_observed')
 		ORDER BY a.attempt_id
 	`, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,

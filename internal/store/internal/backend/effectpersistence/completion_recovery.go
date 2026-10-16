@@ -74,6 +74,7 @@ type completionRecoveryAuthorityEvidence struct {
 	ExecutionID                string                           `json:"execution_id"`
 	ForkRunID                  string                           `json:"fork_run_id"`
 	Generation                 uint64                           `json:"generation"`
+	RuntimeEpoch               int64                            `json:"runtime_epoch"`
 	AdmissionFingerprint       string                           `json:"admission_fingerprint"`
 	ContainerPlanFingerprint   string                           `json:"container_plan_fingerprint"`
 	ActorCensusFingerprint     string                           `json:"actor_census_fingerprint"`
@@ -111,7 +112,7 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 		       COALESCE(o.agent_run_id::text,''),COALESCE(o.lineage->>'run_id',''),
 		       COALESCE(o.agent_id,''),COALESCE(o.agent_name_owner,''),COALESCE(o.agent_name_source,''),
 		       COALESCE(o.agent_route_presence,''),COALESCE(o.flow_scope_key,''),COALESCE(o.flow_instance_id,''),COALESCE(o.flow_instance,''),
-		       COALESCE(o.runtime_epoch,0),COALESCE(o.generation,0),
+		       COALESCE(a.runtime_epoch,0),COALESCE(a.generation,0),
 		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id::text,''),COALESCE(a.origin_run_id::text,''),COALESCE(a.origin_route_identity,''),
 		       COALESCE(a.origin_claim_token::text,''),COALESCE(a.origin_claim_version,0),COALESCE(a.origin_subscriber_id,''),
 		       COALESCE(a.origin_directive_operation_id::text,''),COALESCE(a.origin_directive_owner_id,''),
@@ -167,7 +168,7 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 		       COALESCE(o.agent_run_id,''),COALESCE(json_extract(o.lineage,'$.run_id'),''),
 		       COALESCE(o.agent_id,''),COALESCE(o.agent_name_owner,''),COALESCE(o.agent_name_source,''),
 		       COALESCE(o.agent_route_presence,''),COALESCE(o.flow_scope_key,''),COALESCE(o.flow_instance_id,''),COALESCE(o.flow_instance,''),
-		       COALESCE(o.runtime_epoch,0),COALESCE(o.generation,0),
+		       COALESCE(a.runtime_epoch,0),COALESCE(a.generation,0),
 		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id,''),COALESCE(a.origin_run_id,''),COALESCE(a.origin_route_identity,''),
 		       COALESCE(a.origin_claim_token,''),COALESCE(a.origin_claim_version,0),COALESCE(a.origin_subscriber_id,''),
 		       COALESCE(a.origin_directive_operation_id,''),COALESCE(a.origin_directive_owner_id,''),
@@ -414,6 +415,9 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 	}
 	authority := runtimeeffects.Authority{Kind: runtimeeffects.AuthorityKind(recovered.AuthorityKind), ID: recovered.AuthorityID, Target: target, ExecutionMode: mode, CompletionRequest: evidence.ProviderRequest}
 	if authority.Kind == runtimeeffects.AuthorityNormalAgent {
+		if evidence.RuntimeEpoch != recovered.RuntimeEpoch || evidence.Generation != uint64(recovered.Generation) {
+			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery physical authority conflicts for attempt %s", recovered.AttemptID)
+		}
 		runID := strings.TrimSpace(target.RunID)
 		for _, axis := range []struct {
 			name  string

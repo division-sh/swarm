@@ -549,7 +549,10 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 					return nil
 				}
 				var retry bool
-				attempt, retry, err = authorizePrelaunchRetryPostgres(ctx, tx, authority, req, existing)
+				attempt, retry, err = authorizeProviderResumeTx(ctx, tx, true, s.delivery, authority, req, existing)
+				if err == nil && !retry {
+					attempt, retry, err = authorizePrelaunchRetryPostgres(ctx, tx, authority, req, existing)
+				}
 				if err != nil {
 					return err
 				}
@@ -716,7 +719,7 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 			if existing, found, err := loadExistingExternalAttemptSQLite(txctx, tx, req.OperationID); err != nil {
 				return err
 			} else if found {
-				attempt, err = authorizeExistingExternalAttemptSQLiteTx(txctx, tx, authority, req, existing)
+				attempt, err = authorizeExistingExternalAttemptSQLiteTx(txctx, tx, s.delivery, authority, req, existing)
 				return err
 			}
 			reservations, err := prepareCompletionBudgetReservationsSQLite(txctx, tx, authority, req.Now.UTC())
@@ -785,11 +788,14 @@ func bindExternalEffectRunLineage(ctx context.Context, authority runtimeeffects.
 	return out, nil
 }
 
-func authorizeExistingExternalAttemptSQLiteTx(txctx context.Context, tx *sql.Tx, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) (runtimeeffects.Attempt, error) {
+func authorizeExistingExternalAttemptSQLiteTx(txctx context.Context, tx *sql.Tx, delivery providerDrainDeliveryOwner, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) (runtimeeffects.Attempt, error) {
 	if resumed, ok := resumeProviderRegistrationAuthorization(authority, req, existing); ok {
 		return resumed, nil
 	}
-	attempt, retry, err := authorizePrelaunchRetrySQLite(txctx, tx, authority, req, existing)
+	attempt, retry, err := authorizeProviderResumeTx(txctx, tx, false, delivery, authority, req, existing)
+	if err == nil && !retry {
+		attempt, retry, err = authorizePrelaunchRetrySQLite(txctx, tx, authority, req, existing)
+	}
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
