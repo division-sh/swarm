@@ -1,5 +1,17 @@
 # WhatsApp Physical Qualification Runbook
 
+## Upstream Follow-Up (2026-10-16)
+
+The [user amendment](https://github.com/division-sh/swarm/issues/2577#issuecomment-6223240045)
+removes the human-written upstream SDK PR as a #2614 landing condition. It is
+now a user-owned acceptance follow-up due 2026-11-28, together with the exit
+from the pinned fork once upstream contains both reviewed fixes. Do not publish
+an agent-written upstream PR or a placeholder URL. The real-device P01-P09
+sitting and next-day check remain a user hold; integrated-head machine proofs,
+the quiet first-QR/expiry/replacement rehearsal and reviewer-g's readiness and
+final review are still required. Historical merge-hold wording below is
+superseded only on this upstream-PR point; it is not a readiness claim.
+
 ## Current Packet And Replacement-QR Hold
 
 The historical preparation narrative below is retained, not the current
