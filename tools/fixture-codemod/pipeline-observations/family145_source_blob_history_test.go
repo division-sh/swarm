@@ -313,16 +313,6 @@ func sourceBlobPriorHistory(t *testing.T, recipes bool) []byte {
 	return raw
 }
 
-func sourceBlobEarlierHistory(t *testing.T, current []byte, recipes bool) []byte {
-	t.Helper()
-	current = servedObservationEarlierHistory(t, current, recipes)
-	raw, err := sourceblob.RestoreHistory(current, sourceBlobPriorHistory(t, recipes), sourceBlobLivePins(t), recipes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
-}
-
 func sourceBlobPreviousDeclaration(t *testing.T, file, function, current string) string {
 	t.Helper()
 	current = servedObservationEarlierSource(t, file, function, current)

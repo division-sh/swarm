@@ -81,10 +81,10 @@ func runDeliveryPriorHistory(t *testing.T, recipes bool) []byte {
 	return raw
 }
 
-func runDeliveryEarlierHistory(t *testing.T, current []byte, recipes bool) []byte {
+func (proof sourceBlobDeclarationInvocation) deliveryHistory(t *testing.T, current []byte, recipes bool) []byte {
 	t.Helper()
-	current = sourceBlobEarlierHistory(t, current, recipes)
-	raw, err := rundelivery.RestoreHistory(current, runDeliveryPriorHistory(t, recipes), runDeliveryLivePins(t), recipes)
+	current = proof.blobHistory(t, current, recipes)
+	raw, err := rundelivery.RestoreHistory(current, runDeliveryPriorHistory(t, recipes), runDeliveryInvocationPins(t, proof), recipes)
 	if err != nil {
 		t.Fatal(err)
 	}

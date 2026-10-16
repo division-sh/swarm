@@ -47,12 +47,13 @@ func sourceForkPriorHistory(t *testing.T, recipes bool) []byte {
 
 func restoreSourceForkHistory(t *testing.T, rows []map[string]any, recipes bool) []map[string]any {
 	t.Helper()
+	proof := sourceBlobDeclarationsForInvocation(t)
 	raw, err := json.Marshal(rows)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw = runDeliveryEarlierHistory(t, raw, recipes)
-	raw, err = sourcefork.RestoreHistory(raw, sourceForkPriorHistory(t, recipes), sourceForkLivePins(t), recipes)
+	raw = proof.deliveryHistory(t, raw, recipes)
+	raw, err = sourcefork.RestoreHistory(raw, sourceForkPriorHistory(t, recipes), sourceForkInvocationPins(t, proof), recipes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +65,8 @@ func restoreSourceForkHistory(t *testing.T, rows []map[string]any, recipes bool)
 }
 
 func TestFamily145SourceForkHistoryRestoresCompletePriorLedgersAndTimerSuccessor(t *testing.T) {
-	pins := sourceForkLivePins(t)
+	proof := sourceBlobDeclarationsForInvocation(t)
+	pins := sourceForkInvocationPins(t, proof)
 	for _, recipes := range []bool{true, false} {
 		prior := sourceForkPriorHistory(t, recipes)
 		expected, err := sourcefork.ComposeHistory(prior, pins, recipes)
@@ -76,7 +78,7 @@ func TestFamily145SourceForkHistoryRestoresCompletePriorLedgersAndTimerSuccessor
 		if recipes {
 			current, wantCount = recipeBytes, 1517
 		}
-		current = runDeliveryEarlierHistory(t, current, recipes)
+		current = proof.deliveryHistory(t, current, recipes)
 		var before, after, composed []map[string]any
 		for _, input := range []struct {
 			raw  []byte
