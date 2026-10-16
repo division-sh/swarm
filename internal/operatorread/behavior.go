@@ -84,18 +84,25 @@ func EnrichOperatorDeliveryFailureEvidence(deliveries []OperatorEventDelivery, d
 }
 
 func ProjectRunOperationalStatus(report RunDebugReport) RunOperationalStatus {
-	out := RunOperationalStatus{Heuristics: runOperationalStatusHeuristics(report)}
+	out := RunOperationalStatus{
+		Heuristics: runOperationalStatusHeuristics(report),
+		Instances:  []RunInstanceOperationalStatus{}, Attributions: []RunTurnAttribution{},
+	}
 	status := strings.ToLower(strings.TrimSpace(report.RunTableStatus))
 	if status == "" {
 		return out
 	}
 	if status != "running" {
 		out.State = status
+		out.Instances, _, _ = projectRunInstances(report.OperationalFacts)
+		if report.OperationalFacts != nil {
+			for _, attribution := range report.OperationalFacts.HistoricalTurns {
+				if attribution.Historical {
+					out.Attributions = append(out.Attributions, detachedRunAttribution(attribution))
+				}
+			}
+		}
 		return out
-	}
-	eventCounts := map[string]int{}
-	for _, item := range report.EventCounts {
-		eventCounts[strings.TrimSpace(item.EventName)] = item.Count
 	}
 	activeDeliveries := 0
 	for _, item := range report.Deliveries {
@@ -104,12 +111,16 @@ func ProjectRunOperationalStatus(report RunDebugReport) RunOperationalStatus {
 			activeDeliveries += item.Count
 		}
 	}
-	terminalScoring := eventCounts["scoring/vertical.marginal"] + eventCounts["scoring/vertical.rejected"] + eventCounts["scoring/vertical.shortlisted"]
-	if activeDeliveries == 0 && eventCounts["scoring/scoring.requested"] > 0 && terminalScoring == 0 {
-		out.State, out.BlockingLayer, out.BlockingReason = "stalled", "scoring_terminal_outcome", "terminal_scoring_outcome_missing"
-		return out
+	var busy bool
+	out.Instances, out.Attributions, busy = projectRunInstances(report.OperationalFacts)
+	work := report.TestQuiescence
+	busy = busy || activeDeliveries != 0 || work.ActiveDeliveries != 0 || work.UnsettledPipelineEvents != 0 ||
+		work.FanOutOwed != 0 || work.FanOutUnsettled != 0 || work.FanOutBarriers != 0 || work.DueTimers != 0 || work.ActiveSessionLeases != 0
+	stalled := false
+	for _, instance := range out.Instances {
+		stalled = stalled || instance.Disposition == "stalled"
 	}
-	if activeDeliveries == 0 && !report.LastEventAt.IsZero() {
+	if !busy && stalled {
 		out.State, out.BlockingLayer, out.BlockingReason = "stalled", "delivery_lifecycle", "no_active_deliveries"
 		return out
 	}
