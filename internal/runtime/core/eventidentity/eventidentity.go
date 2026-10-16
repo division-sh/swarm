@@ -4,6 +4,8 @@ import (
 	"path"
 	"regexp"
 	"strings"
+
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 )
 
 var eventTypeTokenPattern = regexp.MustCompile("^[a-z0-9_]+$")
@@ -36,9 +38,10 @@ func IsValidName(raw string) bool {
 			return false
 		}
 		if strings.Contains(segment, ".") {
-			for _, part := range strings.Split(segment, ".") {
+			parts := strings.Split(segment, ".")
+			for index, part := range parts {
 				part = strings.TrimSpace(part)
-				if part == "" || !eventTypeTokenPattern.MatchString(part) {
+				if part == "" || !eventTypeTokenPattern.MatchString(part) && !isProviderDirectoryEventToken(parts, index, part) {
 					return false
 				}
 			}
@@ -76,13 +79,20 @@ func IsCanonicalPattern(raw string) bool {
 			}
 			continue
 		}
-		for _, part := range strings.Split(segment, ".") {
-			if part != "*" && !eventTypeTokenPattern.MatchString(part) {
+		parts := strings.Split(segment, ".")
+		for index, part := range parts {
+			if part != "*" && !eventTypeTokenPattern.MatchString(part) && !isProviderDirectoryEventToken(parts, index, part) {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+// Only the provider-key position inherits directory spelling. Local event
+// tokens and ordinary business names retain their existing grammar.
+func isProviderDirectoryEventToken(parts []string, index int, token string) bool {
+	return len(parts) >= 3 && parts[0] == "inbound" && index == 1 && parts[index] == token && runtimepaths.ValidateFlowSegment(token) == nil
 }
 
 func IsCanonicalDeclaration(raw string) bool {
