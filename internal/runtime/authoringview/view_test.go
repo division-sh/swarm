@@ -495,7 +495,7 @@ func TestBuildDiagnosticsPreservesRemediationAndEvidence(t *testing.T) {
 		Evidence:    []string{" timer: reminder ", "", "cancel_on: state:done"},
 	})
 
-	diagnostics := buildDiagnostics(nil, &report)
+	diagnostics := buildDiagnostics(nil, nil, &report)
 	if len(diagnostics) != 1 {
 		t.Fatalf("diagnostics = %#v, want one", diagnostics)
 	}

@@ -393,6 +393,13 @@ func (e ToolSchemaEntry) Effect() ActivityEffectClass {
 	}
 	return e.value.effect
 }
+
+// EffectClassProvenance distinguishes an authored declaration from an omitted
+// class without inferring presence from its effective value.
+func (e ToolSchemaEntry) EffectClassProvenance() (EffectiveValueProvenance, bool) {
+	provenance, ok := e.admissionProvenance["effect_class"]
+	return cloneEffectiveValueProvenance(provenance), ok
+}
 func (e ToolSchemaEntry) Permission() ToolPermission {
 	if e.value == nil {
 		return ToolPermission{}

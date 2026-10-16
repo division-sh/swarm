@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 type View struct {
@@ -377,7 +378,7 @@ func Build(_ context.Context, source semanticview.Source, opts BuildOptions) (Vi
 		ApprovalPoints:      approvalPoints,
 		ClockSchedules:      semanticview.ClockSchedules(source),
 		RoutingTopology:     BuildRoutingTopologyWithReport(source, bundle, opts.BootReport),
-		Diagnostics:         buildDiagnostics(bundle, opts.BootReport),
+		Diagnostics:         buildDiagnostics(source, bundle, opts.BootReport),
 		EffectiveProvenance: bundle.EffectiveProvenance().Entries(),
 		Equivalence: EquivalenceView{
 			ProjectionOnly: true,
@@ -1232,11 +1233,11 @@ func writeRefs(flowID, nodeID, eventType, scope string, writes []runtimecontract
 	return out
 }
 
-func buildDiagnostics(bundle *runtimecontracts.WorkflowContractBundle, report *runtimebootverify.Report) []DiagnosticView {
-	if report == nil {
-		return nil
+func buildDiagnostics(source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, report *runtimebootverify.Report) []DiagnosticView {
+	var findings []runtimebootverify.Finding
+	if report != nil {
+		findings = report.Findings
 	}
-	findings := append([]runtimebootverify.Finding{}, report.Findings...)
 	out := make([]DiagnosticView, 0, len(findings))
 	for _, finding := range findings {
 		out = append(out, DiagnosticView{
@@ -1248,6 +1249,18 @@ func buildDiagnostics(bundle *runtimecontracts.WorkflowContractBundle, report *r
 			Remediation:      strings.TrimSpace(finding.Remediation),
 			Evidence:         trimDiagnosticEvidence(finding.Evidence),
 		})
+	}
+	for _, declaration := range tools.AgentCallableEffectDeclarations(source) {
+		out = append(out, DiagnosticView{
+			CheckID:          "agent_tool_effect_class_not_applied",
+			Severity:         "info",
+			Location:         declaration.Identity,
+			AuthoredLocation: declaration.Provenance.SourceFile,
+			Message:          fmt.Sprintf("tool %s: effect_class is not applied to agent calls; an interrupted call is outcome-uncertain and not redispatched", declaration.ToolName),
+		})
+	}
+	if report == nil && len(out) == 0 {
+		return nil
 	}
 	return out
 }

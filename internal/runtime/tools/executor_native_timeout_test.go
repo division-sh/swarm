@@ -90,7 +90,7 @@ func requireNativeTimeoutAttempt(t *testing.T, executor *Executor, ctx context.C
 }
 
 func TestNativeWebSearchCustomTimeoutDeadlineIdentity(t *testing.T) {
-	for _, seconds := range []int{1, 10, 120, 0} {
+	for _, seconds := range []int{1, 10, 120, 9223372036, 0} {
 		t.Run(fmt.Sprintf("declared_%d", seconds), func(t *testing.T) {
 			executor := nativeTimeoutExecutor("https://search.test/", seconds)
 			harness := effecttest.New()
