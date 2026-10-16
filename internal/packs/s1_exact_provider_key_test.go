@@ -27,3 +27,23 @@ func TestS1TriggerSubjectRetainsExactPortableProviderKey(t *testing.T) {
 		}
 	}
 }
+
+func TestS1ConnectorSubjectRetainsExactPortableProviderKey(t *testing.T) {
+	for _, key := range []string{"team-bot", "team_bot", "9-team", "_team", "con", "TEAM", "team.bot", " team", "team ", strings.Repeat("a", 101)} {
+		subject := Subject{
+			ID: key + ".send", Kind: SubjectProviderConnector, Provider: key, Source: "connector_pack", Applicability: "installed",
+			Requirements: []Requirement{RequirementWithStatus(RequirementImport, key+".send", "package", "NOT_IMPORTED", "connector_pack_registry")},
+		}
+		got, err := NormalizeSubjects([]Subject{subject})
+		valid := key == "team-bot" || key == "team_bot" || key == "9-team"
+		if !valid {
+			if err == nil {
+				t.Errorf("invalid connector subject provider %q admitted: %+v", key, got)
+			}
+			continue
+		}
+		if err != nil || len(got) != 1 || got[0].Provider != key {
+			t.Fatalf("connector subject key changed: %+v err=%v", got, err)
+		}
+	}
+}
