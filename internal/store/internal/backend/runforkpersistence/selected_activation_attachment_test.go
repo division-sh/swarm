@@ -93,7 +93,7 @@ func newSelectedAttachmentFixture(t *testing.T, kind runfork.RunForkPointKind) s
 			lineage: runForkActivationLineage{
 				ForkRunID: child, SourceRunID: source, ForkPoint: point, ForkEventID: point.EventID,
 				ForkEventRevision: 1, ForkBundleHash: bundle, ForkStatus: runfork.RunForkMaterializedStatus,
-				SourceRunStatus: "running", EntityIDs: []string{child},
+				SourceRunStatus: "running", SourceBundleHash: bundle, EntityIDs: []string{child},
 			},
 			binding: binding,
 			plan: runfork.RunForkPlan{SourceRunID: source, ForkPoint: point,
@@ -397,6 +397,26 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 		t.Run(test.name, func(t *testing.T) {
 			attachmentErr := test.attachmentErr
 			f := newSelectedAttachmentFixture(t, runfork.RunForkPointEvent)
+			f.evidence.plan = f.evidence.plan.WithHistoricalEvents(f.evidence.plan.ForkPoint.Revision, nil)
+			f.evidence.request.FrontierAdmission = runfork.RunForkContractFrontierAdmission{Owner: runfork.RunForkContractFrontierAdmissionOwner, NonMutating: true, ContractSelection: f.evidence.binding.ContractSelection}
+			count, ids, fingerprint, err := runfork.RunForkContractFrontierEvidenceBinding(f.evidence.request.FrontierAdmission)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f.evidence.request.RouteTopology = runfork.RunForkSelectedContractRouteTopology{
+				Owner: runfork.RunForkSelectedContractRouteTopologyOwner, NonMutating: true,
+				ContractSelection: f.evidence.binding.ContractSelection, StaticTopologySupported: true, DynamicTopologySupported: true,
+				FrontierEventCount: count, FrontierSourceEventIDs: ids, FrontierEvidenceFingerprint: fingerprint,
+			}
+			f.evidence.request.RecipientPlanning = runfork.RunForkSelectedContractRecipientPlanning{
+				Owner: runfork.RunForkSelectedContractRecipientPlanningOwner, NonMutating: true, RecipientPlanningSupported: true,
+				ContractSelection: f.evidence.binding.ContractSelection, RouteTopologyOwner: f.evidence.request.RouteTopology.Owner,
+				FrontierEventCount: count, FrontierSourceEventIDs: ids, FrontierEvidenceFingerprint: fingerprint,
+			}
+			routes, err := prepareRunForkSelectedContractRouteResolution(f.evidence.plan, f.evidence.lineage.ForkRunID, f.evidence.binding.ContractSelection, f.evidence.request.FrontierAdmission, f.evidence.request.RouteTopology, f.evidence.request.RecipientPlanning)
+			if err != nil {
+				t.Fatal(err)
+			}
 			db, mock, err := sqlmock.New()
 			if err != nil {
 				t.Fatal(err)
@@ -408,6 +428,12 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 			}
 			mock.ExpectBegin()
 			expectSelectedAttachmentBinding(mock, f.evidence.binding)
+			mock.ExpectQuery(`FROM run_fork_selected_contract_route_recoveries`).WithArgs(f.evidence.lineage.ForkRunID).
+				WillReturnRows(sqlmock.NewRows([]string{"owner", "runtime", "child", "source", "kind", "revision", "event", "mode", "bundle", "topology_owner", "dynamic_owner", "planning_owner", "frontier", "topology_hash", "planning_hash", "static_count", "dynamic_count", "planning_count", "topology", "planning", "created_at"}).
+					AddRow(routes.Owner, routes.RuntimeRecoveryOwner, routes.ForkRunID, routes.SourceRunID, string(routes.ForkPoint.Kind), routes.ForkPoint.Revision, routes.ForkEventID,
+						routes.ContractSelection.Mode, routes.ContractSelection.BundleHash, routes.RouteTopologyOwner, routes.DynamicTopologyOwner, routes.RecipientPlanningOwner,
+						routes.FrontierEvidenceFingerprint, routes.RouteTopologyFingerprint, routes.RecipientPlanningFingerprint, routes.StaticRouteEventCount, routes.DynamicTopologyProofCount,
+						routes.RecipientPlanEventCount, []byte(routes.RouteTopology), []byte(routes.RecipientPlanning), routes.CreatedAt))
 			if test.arrivalErr == nil {
 				mock.ExpectQuery(`SELECT COUNT\(\*\) FROM reply_contexts WHERE run_id`).WithArgs(f.evidence.lineage.ForkRunID).
 					WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
@@ -449,9 +475,17 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 					steps = append(steps, "plan")
 					return f.evidence.plan, nil
 				},
-				loadSnapshot: func(context.Context, *sql.Tx, string) (runlifecycle.Snapshot, error) {
+				loadSnapshot: func(_ context.Context, _ *sql.Tx, runID string) (runlifecycle.Snapshot, error) {
+					if runID == f.evidence.lineage.SourceRunID {
+						steps = append(steps, "source_snapshot")
+						return runlifecycle.Snapshot{RunID: runID, State: runlifecycle.StateRunning, Origin: runlifecycle.ScenarioSetupRunOrigin(), BundleHash: f.snapshot.BundleHash, StartedAt: f.snapshot.StartedAt}, nil
+					}
 					steps = append(steps, "timer_readback")
 					return f.snapshot, nil
+				},
+				readHistoricalSnapshot: func(context.Context, *sql.Tx, string) (runlifecycle.Snapshot, error) {
+					t.Fatal("unfrozen source must not inspect a freeze successor")
+					return runlifecycle.Snapshot{}, nil
 				},
 				workflowTimers:   &workflowTimerMaterializerOwner{},
 				arrivalSchedules: arrivals,
@@ -477,9 +511,9 @@ func TestSelectedActivationAttachmentPrecedesDurableAcknowledgment(t *testing.T)
 			}
 			ctx := correlation.WithRunID(context.Background(), f.evidence.lineage.ForkRunID)
 			result, err := activateRunForkForSelectedContractExecution(ctx, f.evidence.request, port)
-			wantSteps := []string{"lineage", "heads", "plan", "timer_readback", "attachment"}
+			wantSteps := []string{"lineage", "heads", "source_snapshot", "plan", "timer_readback", "attachment"}
 			if test.arrivalErr != nil {
-				wantSteps = wantSteps[:4]
+				wantSteps = wantSteps[:5]
 				if result.Activated || !errors.Is(err, test.arrivalErr) {
 					t.Fatalf("arrival refusal did not stop activation: result=%+v err=%v", result, err)
 				}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -144,6 +146,135 @@ func TestEventNamedOperationAtomicityParity(t *testing.T) {
 				assertSelectedForkOperationCounts(t, ctx, fixture, req.Commit.Event.ID(), want)
 			})
 		})
+	}
+}
+
+func TestSelectedForkPublicationLineagePhasesRollbackBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		for _, phase := range []string{"after_lineage", "after_side_effects"} {
+			t.Run(backend.name+"/"+phase, func(t *testing.T) {
+				fixture := backend.open(t)
+				ctx := testAuthorActivityContext()
+				foreignRunID, foreignEventID := uuid.NewString(), uuid.NewString()
+				if phase == "after_side_effects" {
+					foreign := eventtest.RunCreatingRootIngress(foreignEventID, "atomic.source", "gateway", "foreign-task", []byte(`{"source":true}`), 0, foreignRunID, "", events.EventEnvelope{}, time.Date(2026, 7, 18, 18, 0, 0, 0, time.UTC))
+					if err := commitSemanticEventFixture(ctx, fixture.store.(eventRecordContractStore), foreign); err != nil {
+						t.Fatal(err)
+					}
+				}
+				req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
+				req.Commit.DeliveryRoutes = []events.DeliveryRoute{testAgentDeliveryRoute(t, req.Lineage.ForkRunID, "worker", "fixture/worker")}
+				wantError := "committed pipeline scope"
+				if phase == "after_lineage" {
+					req.Commit.ReplayScope = "unsupported"
+				} else {
+					event := req.Commit.Event.Event()
+					lineage, err := events.NewSelectedForkLineage(req.Lineage.ForkRunID, foreignRunID, foreignEventID, req.Lineage.SelectionAuthority, event.TaskID(), event.ExecutionMode())
+					if err != nil {
+						t.Fatal(err)
+					}
+					crossed := eventtest.SelectedForkReplay(event.ID(), event.Type(), event.Producer(), event.TaskID(), event.Payload(), event.ChainDepth(), lineage, event.Envelope(), event.CreatedAt())
+					crossed, err = bindSemanticEventFixturePayload(crossed)
+					if err != nil {
+						t.Fatal(err)
+					}
+					req.Commit.Event, err = events.AdmitForPersistence(crossed, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+					if err != nil {
+						t.Fatal(err)
+					}
+					req.Lineage.SourceRunID, req.Lineage.SourceEventID = foreignRunID, foreignEventID
+					wantError = "retained return has foreign source binding"
+				}
+				setSelectedForkAtomicitySettlement(&req)
+				before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
+				if err != nil {
+					t.Fatal(err)
+				}
+				committed, err := fixture.store.(eventRecordContractStore).CommitSelectedForkEvent(ctx, req)
+				if err == nil || !strings.Contains(err.Error(), wantError) || len(committed.DeliveryHandoffs) != 0 {
+					t.Fatalf("phase=%s committed=%+v err=%v want=%q", phase, committed, err, wantError)
+				}
+				after, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatalf("phase %s escaped atomic rollback of publication, lineage, side effects or history: %v", phase, err)
+				}
+				assertSelectedForkOperationCounts(t, ctx, fixture, req.Commit.Event.ID(), selectedForkOperationCounts{})
+			})
+		}
+	}
+}
+
+func TestSelectedForkPublicationRejectsCrossedLineageBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		for _, coordinate := range []string{"source", "destination", "event", "selection"} {
+			t.Run(backend.name+"/"+coordinate, func(t *testing.T) {
+				fixture := backend.open(t)
+				ctx := testAuthorActivityContext()
+				req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
+				switch coordinate {
+				case "source":
+					req.Lineage.SourceRunID = uuid.NewString()
+				case "destination":
+					req.Lineage.ForkRunID = uuid.NewString()
+				case "event":
+					req.Lineage.ForkEventID = uuid.NewString()
+				case "selection":
+					req.Lineage.SelectionAuthority += ":foreign"
+				}
+				before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if committed, err := fixture.store.(eventRecordContractStore).CommitSelectedForkEvent(ctx, req); err == nil || !strings.Contains(err.Error(), "lineage does not exactly match") || len(committed.DeliveryHandoffs) != 0 {
+					t.Fatalf("crossed %s accepted or escaped a handoff: %+v %v", coordinate, committed, err)
+				}
+				after, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatalf("crossed %s mutated durable evidence: %v", coordinate, err)
+				}
+			})
+		}
+	}
+}
+
+func TestSelectedForkDuplicateNeverBackfillsLineageBothStores(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		for _, fault := range []string{"missing", "contradictory"} {
+			t.Run(backend.name+"/"+fault, func(t *testing.T) {
+				fixture := backend.open(t)
+				ctx := testAuthorActivityContext()
+				store := fixture.store.(eventRecordContractStore)
+				req := newSelectedForkAtomicityRequest(t, ctx, fixture, true)
+				if _, err := store.CommitSelectedForkEvent(ctx, req); err != nil {
+					t.Fatal(err)
+				}
+				// Corrupt only this isolated fixture's physical lineage. Retained
+				// revision evidence remains intact and cannot repair live readback.
+				query := `DELETE FROM run_fork_selected_contract_executions WHERE fork_event_id=$1`
+				if fault == "contradictory" {
+					query = `UPDATE run_fork_selected_contract_executions SET selection_authority='selection:foreign' WHERE fork_event_id=$1`
+				}
+				result, err := fixture.db.ExecContext(ctx, query, req.Commit.Event.ID())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+					t.Fatalf("fixture lineage fault changed %d rows: %v", rows, err)
+				}
+				before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
+				if err != nil {
+					t.Fatal(err)
+				}
+				committed, err := store.CommitSelectedForkEvent(ctx, req)
+				if err == nil || len(committed.DeliveryHandoffs) != 0 {
+					t.Fatalf("%s duplicate lineage was repaired or accepted: %+v %v", fault, committed, err)
+				}
+				after, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
+				if err != nil || !reflect.DeepEqual(before, after) {
+					t.Fatalf("%s duplicate repaired or changed durable evidence: %v", fault, err)
+				}
+			})
+		}
 	}
 }
 

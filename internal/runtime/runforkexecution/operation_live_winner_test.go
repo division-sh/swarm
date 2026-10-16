@@ -260,6 +260,7 @@ func TestSelectedForkSameKeyJoinsBoundOwnerBeforeExecutionBothStores(t *testing.
 }
 
 func TestSelectedForkSameKeyRecoversOwnerlessMaterializationBothStores(t *testing.T) {
+	t.Run("historical_source", proveSelectedQ1FrozenOwnerlessRecoveryBothStores)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			ctx, request := ownerlessSelectedOperationFixture(t, backend)
