@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -33,98 +32,6 @@ func family145ForkReceiverJoinedCallerInverse(function, after string) (string, e
 		return "", fmt.Errorf("receiver inventory lost its original live bus owner/call count: %s", function)
 	}
 	return strings.ReplaceAll(after, native, "readForkReceiverRows(t, rt, "), nil
-}
-
-func family145ForkReceiverJoinedCallerProofError(function, before, after string) error {
-	after = family145ForkCompletionInverse(function, after)
-	if family145ForkProducerCallers[function] != 0 {
-		return family145ForkProducerCallerProofError(function, before, after)
-	}
-	var err error
-	after, err = family145ForkSourceDomainCallerInverse(function, after)
-	if err != nil {
-		return err
-	}
-	normalized, err := family145ForkReceiverJoinedCallerInverse(function, after)
-	if err != nil {
-		return err
-	}
-	if family145ServedSnapshotCallers[function] != 0 {
-		normalized = strings.ReplaceAll(normalized, "snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)", "snapshotForkReceiverApplication(t, rt)")
-	}
-	if normalized != before {
-		return fmt.Errorf("receiver caller changed a run/path/field/identity/assertion/cleanup cut: %s", function)
-	}
-	return nil
-}
-
-func family145ForkReceiverJoinedCheckCaller(t *testing.T, file, function, before, after string) {
-	t.Helper()
-	if err := family145ForkReceiverJoinedCallerProofError(function, before, after); err != nil {
-		t.Fatal(err)
-	}
-	actual := family145ConversationForkOwnerSource(t, "../serveapp/"+filepath.Base(file), function)
-	if actual != after {
-		t.Fatalf("receiver caller escaped its source-pinned rewrite: %s", function)
-	}
-	for _, cut := range []string{"rt.Runtime.Bus.Store()", "readWorkspaceProofReceiverRows(t,", "t.Fatal"} {
-		if !strings.Contains(after, cut) || family145ForkReceiverJoinedCallerProofError(function, before, strings.Replace(after, cut, "foreignReceiverOwner()", 1)) == nil {
-			t.Fatalf("receiver owner/call/assertion mutation survived: %s/%s", function, cut)
-		}
-	}
-}
-
-func family145ForkReceiverJoinedQuery(t *testing.T, source string) string {
-	t.Helper()
-	file, err := parser.ParseFile(token.NewFileSet(), "query.go", "package proof\n"+source, parser.AllErrors)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var queries []string
-	ast.Inspect(file, func(node ast.Node) bool {
-		literal, ok := node.(*ast.BasicLit)
-		if !ok || literal.Kind != token.STRING {
-			return true
-		}
-		value, err := strconv.Unquote(literal.Value)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.HasPrefix(value, "SELECT ") {
-			queries = append(queries, strings.ReplaceAll(strings.Join(strings.Fields(value), " "), ", ", ","))
-		}
-		return true
-	})
-	if len(queries) != 1 {
-		t.Fatalf("exact receiver query count=%d/1", len(queries))
-	}
-	return queries[0]
-}
-
-func family145ForkReceiverJoinedOriginalOracle(t *testing.T, before string) {
-	t.Helper()
-	query := family145ConversationForkOwnerSource(t, "../store/internal/backend/pipelinepersistence/workflow_instance_read.go", "ReadReceiverJoinedInventoryStorageTx")
-	if family145ForkReceiverJoinedQuery(t, before) != family145ForkReceiverJoinedQuery(t, query) {
-		t.Fatal("existing joined physical owner changed columns/join/run predicate/order")
-	}
-	decoder := family145ConversationForkOwnerSource(t, "../serveapp/served_workspace_proof_test.go", "workspaceProofReceiverRowsByFlow")
-	const expected = `func workspaceProofReceiverRowsByFlow(rows []storetest.ReceiverJoinedInventoryStorageRow) (map[string]forkReceiverRow, error) {
-	out := map[string]forkReceiverRow{}
-	for _, stored := range rows {
-		row := forkReceiverRow{ID: stored.EntityID, Flow: stored.FlowInstance, Type: stored.EntityType, State: stored.CurrentState}
-		if err := json.Unmarshal([]byte(stored.Fields), &row.Fields); err != nil {
-			return nil, err
-		}
-		if _, duplicate := out[row.Flow]; duplicate {
-			return nil, fmt.Errorf("fixture has duplicate owner rows for %s", row.Flow)
-		}
-		out[row.Flow] = row
-	}
-	return out, nil
-}`
-	if decoder != expected {
-		t.Fatal("receiver decoder changed full fields, JSON number/null semantics or duplicate refusal")
-	}
 }
 
 func family145ForkReceiverJoinedOwnedInventory(t *testing.T) map[string]int {

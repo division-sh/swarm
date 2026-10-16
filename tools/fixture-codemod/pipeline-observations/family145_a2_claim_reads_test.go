@@ -2,57 +2,13 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 )
-
-var family145A2ClaimReadCuts = map[string][]string{
-	"TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothStores": {
-		"storage, err := storetest.ReadA2WorkerOutputs(ctx, selected.events, runID, triggerID)",
-		"return storage.Count, storage.EventID",
-	},
-	"a2KnownTargetEarlyRefusal": {
-		"storage, err := storetest.ReadA2EarlyRefusal(ctx, selected.events, eventID, nodeKey)",
-		"status, raw, outcome := storage.Status, storage.Failure, storage.Outcome",
-		"attempts := storage.SettledAttempts",
-	},
-	"TestA2SameBusinessCommitTransitionArmAndPublicationOnBothStores": {
-		"storage, err := storetest.ReadA2WorkerOutputs(ctx, selected.events, runID, trigger.ID())",
-		"return storage.Count, storage.EventID",
-		"id, err := storetest.ReadGateNodeDeliveryIdentity(ctx, selected.events, eventID, nodeKey)",
-		"return id",
-		"attempts, err := storetest.CountGateNodeSettledAttempts(ctx, selected.events, delivery.eventID, delivery.nodeKey)",
-	},
-}
-
-func family145A2ClaimReadProofError(function, before, after string) error {
-	want, err := family145DescriptorBusinessAssertions(before)
-	if err != nil {
-		return err
-	}
-	got, err := family145DescriptorBusinessAssertions(after)
-	if err != nil || !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("A2 publication/claim read changed original business, receipt, refusal or replay assertions: %s: %v", function, err)
-	}
-	cursor := -1
-	for _, cut := range family145A2ClaimReadCuts[function] {
-		at := strings.Index(after, cut)
-		if at < 0 || at <= cursor || strings.Count(after, cut) != 1 {
-			return fmt.Errorf("A2 publication/claim read changed exact scope, destination or cut order: %s", cut)
-		}
-		cursor = at
-	}
-	if strings.Contains(after, "selected.db") || strings.Contains(after, "selected.postgres") || strings.Contains(after, "QueryRowContext") {
-		return fmt.Errorf("A2 publication/claim retained a second SQL/dialect owner: %s", function)
-	}
-	return nil
-}
 
 func TestFamily145A2ClaimReadPhysicalOwnersPreserveEveryOriginalDialectQuery(t *testing.T) {
 	for _, tc := range []struct{ file, function, caller string }{

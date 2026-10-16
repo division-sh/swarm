@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -126,56 +125,6 @@ func sourceBlobDeclarationsForInvocation(t *testing.T) sourceBlobDeclarationInvo
 	return sourceBlobDeclarationInvocation{setup: setup, batch: batch, pins: pins}
 }
 
-func (proof sourceBlobDeclarationInvocation) previous(t *testing.T, file, function, current string) string {
-	t.Helper()
-	current = proof.observationPrevious(t, file, function, current)
-	for _, pin := range proof.pins {
-		if pin.File == file && pin.Function == function {
-			if current != pin.After {
-				t.Fatal("invocation source escaped its exact source-blob endpoint:", function)
-			}
-			return pin.Before
-		}
-	}
-	return current
-}
-
-func (proof sourceBlobDeclarationInvocation) observationPrevious(t *testing.T, file, function, current string) string {
-	t.Helper()
-	current = proof.setupPrevious(t, file, function, current)
-	previous, err := servedsettlement.EarlierSource(proof.batch, file, function, current)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return previous
-}
-
-func (proof sourceBlobDeclarationInvocation) setupPrevious(t *testing.T, file, function, current string) string {
-	t.Helper()
-	current = servedSetupPredecessorSource(t, file, function, current)
-	previous, err := servedsettlement.EarlierSource(proof.setup, file, function, current)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return previous
-}
-
-func (proof sourceBlobDeclarationInvocation) beforeBlobHistory(t *testing.T, current []byte, recipes bool) []byte {
-	t.Helper()
-	current = servedSetupEarlierHistory(t, current, recipes)
-	return restoreServedObservationHistory(t, current, servedObservationPriorHistory(t, recipes), proof.batch, recipes)
-}
-
-func (proof sourceBlobDeclarationInvocation) blobHistory(t *testing.T, current []byte, recipes bool) []byte {
-	t.Helper()
-	current = proof.beforeBlobHistory(t, current, recipes)
-	raw, err := sourceblob.RestoreHistory(current, sourceBlobPriorHistory(t, recipes), proof.pins, recipes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
-}
-
 func captureSourceBlobInvocation(root string, paths []string) (sourceBlobInvocation, error) {
 	image := sourceBlobInvocation{files: map[string][]byte{}}
 	var err error
@@ -271,19 +220,6 @@ func TestFamily145SourceBlobInvocationRejectsChangesBeforeItsEndCheck(t *testing
 	}
 }
 
-func sourceBlobPriorHistory(t *testing.T, recipes bool) []byte {
-	t.Helper()
-	path := "tools/fixture-codemod/pipeline-observations/family145-transitions.json"
-	if recipes {
-		path = "tools/fixture-codemod/pipeline-observations/recipes.json"
-	}
-	raw, err := exec.Command("git", "show", sourceblob.Predecessor+":"+path).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
-}
-
 func sourceBlobPreviousDeclaration(t *testing.T, file, function, current string) string {
 	t.Helper()
 	current = servedObservationEarlierSource(t, file, function, current)
@@ -317,64 +253,4 @@ func servedObservationPinnedInventory() []runphysical.Pin {
 		panic(err)
 	}
 	return pins
-}
-
-func sourceBlobEarlierInventoryEndpoint(file, function, current string) string {
-	var err error
-	current, err = servedsettlement.EarlierSource(servedObservationInventoryPins, file, function, current)
-	if err != nil {
-		panic(err)
-	}
-	for _, pin := range sourceBlobInventoryPins {
-		if pin.File == file && pin.Function == function && pin.After == current {
-			return pin.Before
-		}
-	}
-	return current
-}
-
-func sourceBlobHistoryHostility(t *testing.T, current, prior []byte, pins []sourceblob.Pin, recipes bool) {
-	t.Helper()
-	rows := sourceBlobHistoryRecords(t, current, pins)
-	prior, err := json.Marshal(sourceBlobHistoryRecords(t, prior, pins))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for index := range rows {
-		for _, field := range []string{"File", "Function", "Before", "After", "Successor", "Mechanical", "Family", "Removed"} {
-			mutant := cloneRollbackHistory(t, rows)
-			mutant[index][field] = "unreviewedSourceBlobHistory"
-			sourceBlobRefuseHistory(t, mutant, prior, pins, recipes)
-		}
-		sourceBlobRefuseHistory(t, append(cloneRollbackHistory(t, rows), rows[index]), prior, pins, recipes)
-		missing := append(cloneRollbackHistory(t, rows[:index]), rows[index+1:]...)
-		sourceBlobRefuseHistory(t, missing, prior, pins, recipes)
-	}
-}
-
-func sourceBlobHistoryRecords(t *testing.T, raw []byte, pins []sourceblob.Pin) []map[string]any {
-	t.Helper()
-	var rows, result []map[string]any
-	if err := json.Unmarshal(raw, &rows); err != nil {
-		t.Fatal(err)
-	}
-	for _, row := range rows {
-		for _, pin := range pins {
-			if row["File"] == pin.File && row["Function"] == pin.Function {
-				result = append(result, row)
-			}
-		}
-	}
-	return result
-}
-
-func sourceBlobRefuseHistory(t *testing.T, rows []map[string]any, prior []byte, pins []sourceblob.Pin, recipes bool) {
-	t.Helper()
-	raw, err := json.Marshal(rows)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sourceblob.RestoreHistory(raw, prior, pins, recipes); err == nil {
-		t.Fatal("changed/missing/duplicate/foreign source blob history accepted")
-	}
 }

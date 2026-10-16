@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"strings"
-	"testing"
 )
 
 var family145ServedRestartConstructors = map[string]string{
@@ -70,22 +69,4 @@ func family145ServedRestartConstructionProofError(function, before, after string
 		return fmt.Errorf("serving rewrite changed source/options/assertions/faults/receipts/identity/restart or joined cleanup: %s", function)
 	}
 	return nil
-}
-
-func family145ServedRestartAssertions(t *testing.T, function, before, after string) {
-	t.Helper()
-	assertions, err := family145DescriptorBusinessAssertions(before)
-	if err != nil {
-		t.Fatal(err)
-	}
-	current, err := family145DescriptorBusinessAssertions(after)
-	if err != nil || strings.Join(assertions, "\n") != strings.Join(current, "\n") {
-		t.Fatalf("serving behavioral assertions changed: %s/%v", function, err)
-	}
-	for _, assertion := range assertions {
-		_, call, ok := strings.Cut(assertion, " => ")
-		if !ok || !strings.Contains(after, call) || family145ServedRestartConstructionProofError(function, before, strings.Replace(after, call, "weakenedServingAssertion()", 1)) == nil {
-			t.Fatalf("serving assertion mutation passed: %s/%s", function, assertion)
-		}
-	}
 }

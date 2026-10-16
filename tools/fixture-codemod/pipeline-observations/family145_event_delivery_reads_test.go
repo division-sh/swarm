@@ -1,32 +1,9 @@
 package main
 
 import (
-	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 )
-
-var family145EventDeliveryReadCuts = map[string]string{
-	"testA2BoundReplyJourney": "deliveries, err := storetest.CountGateEventNodeDeliveries(ctx, selected.events, replyID)",
-	"TestA2AccumulatorUnkeyedDurableMultiplicityAndOrderOnBothStores": "deliveryID, err := storetest.ReadGateEventNodeDeliveryIdentity(proof.ctx, proof.selected.events, publication.event.ID())",
-	"TestA2AccumulatorPublicationFailureRollsBackOnBothStores":        "delivered, err := storetest.CountGateEventDeliveredRows(proof.ctx, proof.selected.events, publication.event.ID())",
-}
-
-func family145EventDeliveryReadProofError(function, before, after string) error {
-	want, err := family145DescriptorBusinessAssertions(before)
-	if err != nil {
-		return err
-	}
-	got, err := family145DescriptorBusinessAssertions(after)
-	if err != nil || !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("event-level delivery observation changed original receipt, order, identity or rollback assertions: %s: %v", function, err)
-	}
-	if cut := family145EventDeliveryReadCuts[function]; strings.Count(after, cut) != 1 {
-		return fmt.Errorf("event-level delivery observation changed exact selected owner/context/event/destination: %s", cut)
-	}
-	return nil
-}
 
 func TestFamily145EventDeliveryOwnersKeepExactOriginalPredicatesAndDestinations(t *testing.T) {
 	for _, tc := range []struct{ function, query, scan string }{

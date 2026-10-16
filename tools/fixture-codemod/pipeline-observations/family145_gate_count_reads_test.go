@@ -1,12 +1,8 @@
 package main
 
 import (
-	"fmt"
-	"go/ast"
-	"go/parser"
 	"go/scanner"
 	"go/token"
-	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,10 +14,6 @@ var family145GateCountFunctions = map[string]bool{
 	"TestA2JoinCloseLostOwnerResultRecoversOnBothStores":                  true,
 	"TestA2JoinCloseSQLFailureRollsBackAndRecoversOnBothStores":           true,
 	"footprint": true,
-}
-
-func family145GateCountRow(file, function string) bool {
-	return family145GateCountFunctions[function] && (function != "footprint" || file == "internal/runtime/pipeline/a2_membership_snapshot_admission_external_test.go")
 }
 
 var family145GateCountPorts = []struct{ table, port string }{
@@ -53,87 +45,6 @@ func family145NormalizeGateCountAssertions(key, source string) string {
 		source = strings.ReplaceAll(source, "count(observation.read())", "count(\"SELECT COUNT(*) FROM \" + table + \" WHERE run_id=$1\")")
 	}
 	return strings.ReplaceAll(source, "observation.table", "table")
-}
-
-func family145GateCountCalls(source string) ([]string, error) {
-	file, err := parser.ParseFile(token.NewFileSet(), "proof.go", "package proof\n"+source, parser.AllErrors)
-	if err != nil {
-		return nil, err
-	}
-	var calls []string
-	ast.Inspect(file, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok || len(call.Args) != 1 {
-			return true
-		}
-		if name, ok := call.Fun.(*ast.Ident); ok && name.Name == "count" {
-			calls = append(calls, family145NodeString(call))
-		}
-		return true
-	})
-	return calls, nil
-}
-
-func family145GateCountProofError(key, before, after string) error {
-	normalized := family145NormalizeGateCountAssertions(key, after)
-	want, err := family145DescriptorBusinessAssertions(before)
-	if err != nil {
-		return err
-	}
-	got, err := family145DescriptorBusinessAssertions(normalized)
-	if err != nil || !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("run count changed original cardinality, rollback, replay or identity assertions: %s: %v", key, err)
-	}
-	wantCalls, err := family145GateCountCalls(before)
-	if err != nil {
-		return err
-	}
-	gotCalls, err := family145GateCountCalls(normalized)
-	if err != nil || !reflect.DeepEqual(wantCalls, gotCalls) {
-		return fmt.Errorf("run count changed independent call multiplicity or temporal order: %s: %v/%v", key, wantCalls, gotCalls)
-	}
-	return family145GateCountReaderBindings(key, after)
-}
-
-func family145GateCountReaderBindings(key, source string) error {
-	function := strings.SplitN(key, "|", 2)[1]
-	var cuts []string
-	switch function {
-	case "TestA2ActivationCarriesInitialJoinAtomicallyOnBothStores":
-		cuts = []string{
-			`{"entity_state", func() (int, error) { return storetest.CountWorkflowRunFieldRows(ctx, selected.events, runID) }}`,
-			`{"flow_instances", func() (int, error) { return storetest.CountRunFlowInstanceStorage(ctx, selected.events, runID) }}`,
-			`accounting, err := storetest.ObserveH2ConstructionAccounting(ctx, selected.events, runID)`,
-			`return accounting.Constructions, err`,
-			`{"flow_instance_runtime_readiness", func() (int, error) { return storetest.CountRunFlowRuntimeReadinessStorage(ctx, selected.events, runID) }}`,
-			`{"timers", func() (int, error) { return storetest.CountRunTimerStorage(ctx, selected.events, runID) }}`,
-			`{"entity_mutations", func() (int, error) { return storetest.CountRunMutationStorage(ctx, selected.events, runID) }}`,
-		}
-	case "TestA2FieldlessPairedReplyPreservesConstructedExecutionOnBothStores":
-		cuts = []string{
-			"constructions := func() int {\n\t\t\t\tt.Helper()\n\t\t\t\taccounting, err := storetest.ObserveH2ConstructionAccounting(ctx, selected.events, runID)\n\t\t\t\treturn count(accounting.Constructions, err)\n\t\t\t}",
-			`{"entity_state", func() (int, error) { return storetest.CountWorkflowRunFieldRows(ctx, selected.events, runID) }}`,
-			`{"timers", func() (int, error) { return storetest.CountRunTimerStorage(ctx, selected.events, runID) }}`,
-		}
-	case "footprint":
-		for _, port := range []string{"CountRunMutationStorage", "CountRunTimerStorage", "CountRunFanOutIntentStorage", "CountRunFanOutBarrierStorage", "CountNestedRunFanOutOutcomes", "CountA2MembershipRefusalEvents"} {
-			cuts = append(cuts, "func() (int, error) { return storetest."+port+"(f.ctx, f.selected.events, f.owner.RunID) }")
-		}
-		cuts = append(cuts, `for index, table := range []string{"entity_mutations", "timers", "fan_out_intents", "fan_out_obligation_barriers", "fan_out_outcomes", "events"}`, "count, err := reads[index]()", "counts[index] = count", "return counts")
-	default:
-		cuts = []string{"count := func(n int, err error) int {"}
-	}
-	source = family145GateCountTokens(source)
-	cursor := -1
-	for _, cut := range cuts {
-		cut = family145GateCountTokens(cut)
-		at := strings.Index(source, cut)
-		if at < 0 || at <= cursor || strings.Count(source, cut) != 1 {
-			return fmt.Errorf("run count lost exact original-owner binding, scope, order or per-call destination: %s", cut)
-		}
-		cursor = at
-	}
-	return nil
 }
 
 func family145GateCountTokens(source string) string {

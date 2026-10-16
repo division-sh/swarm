@@ -4,10 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicrollback"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
@@ -49,40 +45,4 @@ func requestKeySuccessorPins() []runphysical.Pin {
 		panic("request-key successor inventory changed")
 	}
 	return pins
-}
-
-func proveRequestKeySuccessorComposition(t *testing.T, pin runphysical.Pin) {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("../../..", pin.File))
-	if err != nil || servedSetupEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, raw, pin.Function)) != pin.After {
-		t.Fatal("successor source changed:", err)
-	}
-	if family145RequestKeyCurrentPrevious(pin.File, pin.Function, pin.After) != pin.Before {
-		t.Fatal("exact successor inverse refused")
-	}
-	matches := 0
-	for _, historical := range requestKeyPins(t) {
-		if historical.File == pin.File && historical.Function == pin.Function {
-			matches++
-			if historical.After != pin.Before {
-				t.Fatal("successor lost frozen request-key endpoint")
-			}
-		}
-	}
-	if matches != 1 {
-		t.Fatal("missing/duplicate historical row:", matches)
-	}
-	for _, key := range [][2]string{{"foreign.go", pin.Function}, {pin.File, "foreignFunction"}} {
-		if family145RequestKeyCurrentPrevious(key[0], key[1], pin.After) != pin.After {
-			t.Fatal("foreign key received inverse")
-		}
-	}
-	for _, cut := range []string{"reader", "ReceiverStateReader", "InspectSnapshot", "eventID", "runID", "pending", "t.Fatal", " != ", "context.Background()"} {
-		if strings.Contains(pin.After, cut) {
-			mutant := strings.Replace(pin.After, cut, "unreviewedSourceCut", 1)
-			if family145RequestKeyCurrentPrevious(pin.File, pin.Function, mutant) != mutant {
-				t.Fatal("changed successor received historical credit:", cut)
-			}
-		}
-	}
 }

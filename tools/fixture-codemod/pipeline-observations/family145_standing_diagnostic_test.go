@@ -2,14 +2,8 @@ package main
 
 import (
 	_ "embed"
-	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
-	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -25,56 +19,6 @@ var standingDiagnosticManifest = func() standingdiagnostic.Manifest {
 	}
 	return manifest
 }()
-
-func family145CheckStandingDiagnosticWholeRule(t *testing.T, file, function, current string) bool {
-	t.Helper()
-	for _, pin := range standingDiagnosticManifest.Pins {
-		if pin.File == file && pin.Function == function && pin.Before != pin.After {
-			if current != pin.After {
-				t.Fatal("standing diagnostic amendment escaped its exact owner/retirement:", function)
-			}
-			return true
-		}
-	}
-	return false
-}
-
-func standingDiagnosticRewriteControls(t *testing.T, pin standingdiagnostic.Pin) {
-	t.Helper()
-	if standingdiagnostic.Previous(standingDiagnosticManifest, pin.File, pin.Function, pin.After) != pin.Before || standingdiagnostic.Previous(standingDiagnosticManifest, "foreign.go", pin.Function, pin.After) != pin.After {
-		t.Fatal("diagnostic source amendment lost its exact complete identity")
-	}
-	finite := recipe{File: pin.File, Function: pin.Function, Before: pin.Before, After: pin.After}
-	out, changed, err := rewriteFunction(pin.File, []byte("package proof\n"+pin.Before), finite)
-	if err != nil || !changed {
-		t.Fatalf("diagnostic finite rewrite: %s %v", pin.Function, err)
-	}
-	if _, changed, err := rewriteFunction(pin.File, out, finite); err != nil || changed {
-		t.Fatalf("diagnostic replay is not inert: %v", err)
-	}
-	for _, token := range []string{"standingStoreDiagnostics", "\"sqlite\"", "\"postgres\"", "dsn", "path"} {
-		if !strings.Contains(pin.After, token) {
-			continue
-		}
-		mutant := strings.Replace(pin.After, token, "unreviewedDiagnosticAuthority", 1)
-		if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil {
-			t.Fatal("foreign diagnostic endpoint accepted:", token)
-		}
-	}
-}
-
-func isExactStandingDiagnosticNewRecipe(row recipe) bool {
-	for _, pin := range standingDiagnosticManifest.Pins {
-		if pin.Before == pin.After {
-			continue
-		}
-		want := recipe{Family: "native-postgres-admission-family145", File: pin.File, Function: pin.Function, Before: pin.Before, After: pin.After}
-		if reflect.DeepEqual(row, want) {
-			return true
-		}
-	}
-	return false
-}
 
 func TestFamily145StandingDiagnosticOwnersKeepThreeCutsAndDisplayFailurePolicies(t *testing.T) {
 	for _, endpoint := range standingDiagnosticManifest.Endpoints {
@@ -101,98 +45,4 @@ func diagnosticEndpointMatches(file, function, current string) bool {
 		}
 	}
 	return false
-}
-
-func standingDiagnosticRetirementError(raw []byte) error {
-	file, err := parser.ParseFile(token.NewFileSet(), "diagnostic.go", raw, parser.AllErrors)
-	if err != nil {
-		return err
-	}
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || !(strings.HasPrefix(fn.Name.Name, "standing") || strings.HasPrefix(fn.Name.Name, "renderStanding") || strings.HasPrefix(fn.Name.Name, "ReadStanding")) {
-			continue
-		}
-		ast.Inspect(fn, func(node ast.Node) bool {
-			if err != nil {
-				return false
-			}
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			err = standingDiagnosticCallRetirementError(call)
-			return err == nil
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func standingDiagnosticCallRetirementError(call *ast.CallExpr) error {
-	selector, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return nil
-	}
-	if strings.HasPrefix(selector.Sel.Name, "ReadStandingReceipt") {
-		return fmt.Errorf("diagnostic constructs a replacement receipt owner")
-	}
-	if selector.Sel.Name != "Query" && selector.Sel.Name != "QueryContext" {
-		return nil
-	}
-	for _, arg := range call.Args {
-		literal, ok := arg.(*ast.BasicLit)
-		if !ok || literal.Kind != token.STRING {
-			continue
-		}
-		text, _ := strconv.Unquote(literal.Value)
-		if strings.Contains(text, "pipeline_receipts") {
-			return fmt.Errorf("obsolete receipt query remains executable")
-		}
-	}
-	return nil
-}
-
-func standingDiagnosticFileInventory(t *testing.T, path string, file *ast.File, allowed map[string]map[string]bool) int {
-	t.Helper()
-	count := 0
-	owned := map[token.Pos]bool{}
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok {
-			continue
-		}
-		ast.Inspect(fn.Body, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			id, ok := call.Fun.(*ast.Ident)
-			if !ok || !standingDiagnosticHelper(id.Name) {
-				return true
-			}
-			if !allowed[path][fn.Name.Name] {
-				t.Fatal("unmanifested standing diagnostic consumer:", path, fn.Name.Name)
-			}
-			owned[id.Pos()] = true
-			count++
-			return true
-		})
-		if standingDiagnosticHelper(fn.Name.Name) {
-			owned[fn.Name.Pos()] = true
-		}
-	}
-	ast.Inspect(file, func(node ast.Node) bool {
-		if id, ok := node.(*ast.Ident); ok && standingDiagnosticHelper(id.Name) && !owned[id.Pos()] {
-			t.Fatal("standing diagnostic alias/initializer escaped the finite chain:", path, id.Name)
-		}
-		return true
-	})
-	return count
-}
-
-func standingDiagnosticHelper(name string) bool {
-	return name == "standingPostgresDiagnostics" || name == "standingSQLiteDiagnostics" || name == "standingMemoryStoreDiagnostics"
 }

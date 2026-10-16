@@ -2,7 +2,6 @@ package main
 
 import (
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -10,10 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runidentity"
-	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
-	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedsettlement"
 )
 
 //go:embed family145-run-identity-preimages.json
@@ -26,84 +22,6 @@ var runIdentityPins = func() []runidentity.Pin {
 	}
 	return pins
 }()
-
-func family145CheckRunIdentityWholeRule(t *testing.T, file, function, current string) bool {
-	t.Helper()
-	for _, pin := range runIdentityPins {
-		if pin.File == file && pin.Function == function {
-			if current != pin.After {
-				t.Fatal("run identity escaped its exact scope, cuts or assertions:", file, function)
-			}
-			return true
-		}
-	}
-	return false
-}
-
-func runIdentityHostile(t *testing.T, pin runidentity.Pin, finite recipe, cut string) {
-	t.Helper()
-	if strings.Contains(pin.After, cut) {
-		mutant := strings.Replace(pin.After, cut, "unreviewedRunIdentityCut", 1)
-		if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil {
-			t.Fatal("changed run identity owner/key/assertion/cut accepted:", pin.Function, cut)
-		}
-	}
-	for _, edit := range runidentity.Rules {
-		if edit.File != pin.File || edit.Function != pin.Function {
-			continue
-		}
-		mutant := strings.Replace(pin.Before, edit.Edits[len(edit.Edits)-1].Before, "unreviewedRunPredicate()", 1)
-		if _, err := runphysical.Transform(edit, mutant); err == nil {
-			t.Fatal("unknown predecessor predicate accepted:", pin.Function)
-		}
-	}
-}
-
-func runIdentityOwnedFile(t *testing.T, path string, file *ast.File) (int, int) {
-	t.Helper()
-	if err := runIdentityFileError(path, file); err != nil {
-		t.Fatal(err)
-	}
-	calls, definitions := 0, 0
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok {
-			continue
-		}
-		if fn.Name.Name == "readServedRunPhysicalIdentity" {
-			definitions++
-		}
-		if fn.Name.Name == "TestServedRunIdentityRefusesMissingSnapshotOwner" {
-			continue
-		}
-		ast.Inspect(fn, func(n ast.Node) bool {
-			if call, ok := n.(*ast.CallExpr); ok && requestkey.Node(call.Fun) == "readServedRunPhysicalIdentity" {
-				calls++
-			}
-			return true
-		})
-	}
-	return calls, definitions
-}
-
-func runIdentityFileError(path string, file *ast.File) error {
-	normalized := map[token.Pos]string{}
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok {
-			continue
-		}
-		if !runIdentityContainsReference(fn) {
-			continue
-		}
-		current, err := servedsettlement.SetupEarlierSource("../../..", path, fn.Name.Name, requestkey.Node(fn))
-		if err != nil {
-			return err
-		}
-		normalized[fn.Pos()] = sourceBlobEarlierInventoryEndpoint(path, fn.Name.Name, current)
-	}
-	return runIdentityReferenceError(path, file, normalized)
-}
 
 func runIdentityReferenceError(path string, file *ast.File, normalized map[token.Pos]string) error {
 	allowed := map[token.Pos]bool{}
@@ -201,45 +119,4 @@ func recordRunIdentityReferences(allowed map[token.Pos]bool, fn *ast.FuncDecl) {
 		}
 		return true
 	})
-}
-
-func runIdentityEarlierHistory(t *testing.T, raw []byte, recipes bool) []byte {
-	t.Helper()
-	var rows []map[string]any
-	if err := json.Unmarshal(raw, &rows); err != nil {
-		t.Fatal(err)
-	}
-	prior, _ := restoreRunIdentityHistory(t, rows, recipes)
-	result, err := json.Marshal(prior)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return result
-}
-
-func restoreRunIdentityHistory(t *testing.T, rows []map[string]any, recipes bool) ([]map[string]any, int) {
-	rows = restoreSourceForkHistory(t, rows, recipes)
-	rows = restorePublicRollbackHistory(t, rows, recipes)
-	retained, additions := []map[string]any{}, 0
-	for _, row := range rows {
-		for _, pin := range runIdentityPins {
-			if row["File"] != pin.File || row["Function"] != pin.Function {
-				continue
-			}
-			if pin.Function == "TestServedResetPendingStartupUsesAdmittedSourcesBothStores" && row["Before"] == pin.Before && row["After"] == pin.After {
-				additions++
-				row = nil
-				break
-			}
-			if recipes && row["Successor"] == pin.After {
-				delete(row, "Successor")
-			} else if !recipes && row["After"] == pin.After {
-				row["After"] = pin.Before
-			}
-		}
-		if row != nil {
-			retained = append(retained, row)
-		}
-	}
-	return retained, additions
 }

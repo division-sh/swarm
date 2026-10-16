@@ -3,16 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 func family145ServedSnapshotCaptureInverse(after string, results int) (string, error) {
@@ -24,10 +17,6 @@ func family145ServedSnapshotCaptureInverse(after string, results int) (string, e
 	normalized := strings.Replace(after, capture, oldCapture, 1)
 	normalized = strings.ReplaceAll(normalized, "ReadApplicationSnapshot: snapshotReader, ", "")
 	return normalized, nil
-}
-
-func family145ServedSnapshotProjection(function string) bool {
-	return function == "startServedControlProofRuntimeWithFixture" || function == "startServedTestSetupEntitiesProofRuntimeConfigured" || function == "newRetainedMailboxCompletionRuntimeConfigured"
 }
 
 func family145ServedProjectionProofError(function, before, after string) error {
@@ -66,55 +55,6 @@ func family145ServedForkSnapshotProofError(before, after string) error {
 	return nil
 }
 
-func family145ServedSnapshotConsumerProofError(function, before, after string) error {
-	after = family145ServedDebugCallerInverse(function, after)
-	normalized := after
-	normalized = strings.ReplaceAll(normalized, "snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)", "snapshotForkReceiverApplication(t, rt)")
-	switch function {
-	case "forkReceiverChangedTables":
-		normalized = strings.Replace(normalized, "func forkReceiverChangedTables[T any](before, after map[string]T)", "func forkReceiverChangedTables(before, after map[string][]string)", 1)
-	case "TestSelectedForkPendingInputMixedCompletionBothStores":
-		normalized = strings.Replace(normalized, "before[\"runs\"].Columns", "before[\"runs/columns\"]", 1)
-		normalized = strings.Replace(normalized, "range before[\"runs\"].Rows", "range before[\"runs\"]", 1)
-		normalized = strings.Replace(normalized, "range after[\"runs\"].Rows", "range after[\"runs\"]", 1)
-	default:
-		return fmt.Errorf("unreviewed snapshot consumer: %s", function)
-	}
-	if normalized != before {
-		return fmt.Errorf("snapshot consumer lost a key/row/column/history/identity assertion: %s", function)
-	}
-	return nil
-}
-
-func family145RetainedJoinReaderProofError(before, after string) error {
-	const prefix = "func readRetainedRootJoins(t *testing.T, rt servedControlProofRuntime, runID string) (loopruntime.Activation, []joinruntime.Activation) {\n\tt.Helper()\n\tdeadline := time.Now().Add(servedProofPollDeadline)\n\tfor {\n"
-	const suffix = "\n\t\tsettled := len(joins) > 0\n\t\tfor _, join := range joins {\n\t\t\tsettled = settled && join.TimerCancelled && !join.OutcomePending && join.OutcomeFired\n\t\t}\n\t\tif settled {\n\t\t\treturn loop, joins\n\t\t}\n\t\tif !time.Now().Before(deadline) {\n\t\t\tfor _, join := range joins {\n\t\t\t\tt.Logf(\"JOIN_COMPLETION_PENDING status=%s close_reason=%s outputs=%d timer_cancelled=%t outcome_pending=%t outcome_fired=%t\", join.Status, join.CloseReason, len(join.Outputs), join.TimerCancelled, join.OutcomePending, join.OutcomeFired)\n\t\t\t}\n\t\t\tt.Fatal(\"retained join outcome/cancellation did not settle before the existing proof deadline\")\n\t\t}\n\t\ttime.Sleep(10 * time.Millisecond)\n\t}\n}"
-	if !strings.HasPrefix(after, prefix) || !strings.HasSuffix(after, suffix) {
-		return fmt.Errorf("retained completion wait lost cancellation/publication/empty/read-error/deadline refusal")
-	}
-	body := after[len(prefix) : len(after)-len(suffix)]
-	lines := strings.Split(body, "\n")
-	for i := range lines {
-		lines[i] = strings.TrimPrefix(lines[i], "\t")
-	}
-	normalized := strings.Replace(prefix[:strings.Index(prefix, "\n\tdeadline")], "\n\tt.Helper()", "", 1) + "\n\tt.Helper()\n" + strings.Join(lines, "\n") + "\n\treturn loop, joins\n}"
-	if normalized != before {
-		return fmt.Errorf("retained completion read/decode/scope changed")
-	}
-	return nil
-}
-
-func family145RetainedJoinConsumerProofError(before, after string) error {
-	after = family145ForkCompletionInverse("testServedJoinWriterCompletedHistoryRefusal", after)
-	const diagnostic = "\n\t\t\t\tt.Logf(\"JOIN_COMPLETION_CUT status=%s close_reason=%s outputs=%d timer_cancelled=%t outcome_pending=%t outcome_fired=%t\", join.Status, join.CloseReason, len(join.Outputs), join.TimerCancelled, join.OutcomePending, join.OutcomeFired)"
-	normalized := strings.Replace(after, diagnostic, "", 1)
-	normalized = strings.ReplaceAll(normalized, "snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)", "snapshotForkReceiverApplication(t, rt)")
-	if normalized != before {
-		return fmt.Errorf("retained join consumers lost original generation/repeat/history/fork-refusal/cleanup assertions")
-	}
-	return nil
-}
-
 var family145ServedSnapshotCallers = map[string]int{
 	"runServedRunForkBackendProof":                                                 2,
 	"TestSelectedForkReceiverAcquisitionCapabilityRefusalBothStores":               2,
@@ -129,39 +69,6 @@ var family145ServedSnapshotCallers = map[string]int{
 	"TestRunForkHistoricalIdentityPublicExecutionBothStores":                       5,
 	"TestSelectedForkMailboxControlRefusalsBothStores":                             2,
 	"TestSelectedForkPendingInputEvidenceBothStores":                               2,
-}
-
-func family145ServedSnapshotCallerProofError(function, before, after string) error {
-	after = family145WriterStageCallerInverse(function, after)
-	var err error
-	after, err = family145ForkSourceDomainCallerInverse(function, after)
-	if err != nil {
-		return err
-	}
-	if family145ForkProducerCallers[function] != 0 {
-		var err error
-		after, err = family145ForkProducerCallerInverse(function, after)
-		if err != nil {
-			return err
-		}
-	}
-	if family145ForkReceiverJoinedCallers[function] != 0 {
-		var err error
-		after, err = family145ForkReceiverJoinedCallerInverse(function, after)
-		if err != nil {
-			return err
-		}
-	}
-	const native = "snapshotForkReceiverApplication(t, rt.ReadApplicationSnapshot)"
-	want := family145ServedSnapshotCallers[function]
-	if want == 0 || strings.Count(after, native) != want {
-		return fmt.Errorf("served snapshot caller cardinality changed: %s", function)
-	}
-	normalized := strings.ReplaceAll(after, native, "snapshotForkReceiverApplication(t, rt)")
-	if normalized != before {
-		return fmt.Errorf("served snapshot caller lost original assertions/cuts/cleanup: %s", function)
-	}
-	return nil
 }
 
 func TestFamily145ServedForkSnapshotsUseExactProjectionAndClosedReadOwner(t *testing.T) {
@@ -206,45 +113,4 @@ func TestFamily145ServedForkSnapshotsUseExactProjectionAndClosedReadOwner(t *tes
 	if len(seen) != 5 {
 		t.Fatalf("whole projection/snapshot dependency=%d/5", len(seen))
 	}
-}
-
-func family145ServedSnapshotCallerInventory(t *testing.T) map[string]int {
-	t.Helper()
-	root := filepath.Join("..", "..", "..")
-	counts := map[string]int{}
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal", "serveapp"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		source, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, source, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		for _, declaration := range file.Decls {
-			function, ok := declaration.(*ast.FuncDecl)
-			if !ok {
-				continue
-			}
-			ast.Inspect(function.Body, func(node ast.Node) bool {
-				call, ok := node.(*ast.CallExpr)
-				if !ok || family145NodeString(call.Fun) != "snapshotForkReceiverApplication" {
-					return true
-				}
-				if len(call.Args) != 2 || family145NodeString(call.Args[1]) != "rt.ReadApplicationSnapshot" {
-					t.Fatalf("snapshot transports a raw or foreign owner: %s/%s", path, function.Name.Name)
-				}
-				counts[function.Name.Name]++
-				return true
-			})
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return counts
 }
