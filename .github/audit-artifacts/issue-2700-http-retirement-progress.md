@@ -200,9 +200,15 @@ request plus original bundle identity beside each native terminal candidate.
 The consumer rereads the original configured journal and requires exact durable
 terminal readback before entering the existing result publisher, with no HTTP,
 claim, handler replay or new queue. Its focused candidate is
-amendment2-recovery-publication-race3-candidate1.log, outcome pending. E owns the
-startup call after ACK, before dispatch release; no native integration GREEN is
-implied. The exact engineering handoff is6225201942.
+amendment2-recovery-publication-race3-candidate1.log: race x3 PASS,
+contracts2.434s/pipeline1.201s/activityjournal1.056s. The three publication roots
+cover succeeded/failed/uncertain exact replay, absent/uncommitted/changed journal
+readback, cancellation and source mismatch; they are component readback checks.
+The native-frame refusal roots use SQLmock, not genuine takeover. The current
+platform catalog producer-payload root also passes x3 with retired keys removed.
+Receipt SHA2563391669badacd30009e53415523b53eebe0f3b99f09988ce60836f5a7c135d61.
+E owns the startup call after ACK, before dispatch release; no native integration
+GREEN is implied. The exact engineering handoff is6225201942.
 
 ## Still Open
 
