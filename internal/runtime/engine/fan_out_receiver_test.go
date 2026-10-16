@@ -46,10 +46,10 @@ func TestExecutorFanOutCapturesReceiverWithoutPublicationAuthority(t *testing.T)
 				Handler: runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "payload.items", As: "fan_item", Identity: "fan_item", Emit: runtimecontracts.EmitSpec{Event: "item.process"}}},
 				State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
 			})
-			if err != nil || result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 2 || len(result.EmitIntents) != 0 {
+			if err != nil || len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != 2 || len(result.EmitIntents) != 0 {
 				t.Fatalf("real handler did not capture deferred work: %+v %v", result, err)
 			}
-			capsule := result.FanOutIntent.Capsule
+			capsule := result.FanOutIntents[0].Capsule
 			if capsule.Receiver == nil || capsule.Receiver.Node != node || capsule.Receiver.Target != route.Target || capsule.Validate() != nil || capsule.Lineage.ParentEventID != event.ID() {
 				t.Fatalf("receiver capture changed ownership or lineage: %+v", capsule)
 			}

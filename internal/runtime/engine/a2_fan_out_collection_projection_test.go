@@ -58,10 +58,10 @@ func TestA2FanOutMapProjectionAndTypedOrdinalAlias(t *testing.T) {
 		t.Run(source, func(t *testing.T) {
 			value := map[string]any{"z": []any{4}, " a ": []any{1, 1}, "a": []any{2}}
 			exec, trigger, result, err := a2FanOutCollectionFixture(t, source, "map[text][integer]", map[string]any{"items": value}, map[string]any{"items": value}, nil, 0)
-			if err != nil || result.FanOutIntent == nil {
+			if err != nil || len(result.FanOutIntents) == 0 {
 				t.Fatalf("capture: %v", err)
 			}
-			request := *result.FanOutIntent
+			request := result.FanOutIntents[0]
 			if request.Cardinality != 3 || request.Capsule.SourceProjection.ItemType.Kind != rc.CatalogTypeText {
 				t.Fatalf("wrong projection: %#v", request)
 			}
@@ -109,10 +109,10 @@ func TestA2FanOutMapProjectionAndTypedOrdinalAlias(t *testing.T) {
 func TestA2FanOutSelectedPostWriteMapAndFailClosedSources(t *testing.T) {
 	replacement := map[string]any{"b": 2, "a": 1}
 	_, _, result, err := a2FanOutCollectionFixture(t, "entity.items", "map[text]integer", map[string]any{"items": replacement}, map[string]any{"items": map[string]any{"old": 9}}, []rc.WorkflowDataWrite{{TargetRef: "entity.items", Value: rc.LiteralExpression(replacement)}}, 0)
-	if err != nil || result.FanOutIntent == nil {
+	if err != nil || len(result.FanOutIntents) == 0 {
 		t.Fatalf("postwrite capture: %v", err)
 	}
-	if result.FanOutIntent.Cardinality != 2 || result.FanOutIntent.Capsule.SourceProjection.ItemsFrom != "entity.items" {
+	if result.FanOutIntents[0].Cardinality != 2 || result.FanOutIntents[0].Capsule.SourceProjection.ItemsFrom != "entity.items" {
 		t.Fatal("captured prewrite map")
 	}
 	actual, marshalErr := json.Marshal(result.StateMutation.StateCarrier.Fields["items"])
@@ -122,12 +122,12 @@ func TestA2FanOutSelectedPostWriteMapAndFailClosedSources(t *testing.T) {
 	}
 	for _, payload := range []map[string]any{{}, {"items": nil}, {"items": []any{"not-map"}}, {"items": 7}} {
 		_, _, got, err := a2FanOutCollectionFixture(t, "payload.items", "map[text]integer", payload, nil, nil, 0)
-		if err == nil || got.FanOutIntent != nil {
+		if err == nil || len(got.FanOutIntents) != 0 {
 			t.Fatalf("accepted missing/null/wrong-kind source %#v: %v", payload, err)
 		}
 	}
 	_, _, got, err := a2FanOutCollectionFixture(t, "payload.items", "map[text]integer", map[string]any{"items": replacement}, nil, nil, 1)
-	if err == nil || got.FanOutIntent != nil {
+	if err == nil || len(got.FanOutIntents) != 0 {
 		t.Fatal("bound violation retained an intent")
 	}
 }
@@ -144,13 +144,13 @@ func TestA2FanOutListMultiplicityAndEmptyCollections(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			exec, trigger, result, err := a2FanOutCollectionFixture(t, "payload.items", tc.typ, map[string]any{"items": tc.value}, nil, nil, 0)
-			if err != nil || result.FanOutIntent == nil || result.FanOutIntent.Cardinality != tc.count {
-				t.Fatalf("capture count = %#v, %v", result.FanOutIntent, err)
+			if err != nil || len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != tc.count {
+				t.Fatalf("capture count = %#v, %v", result.FanOutIntents, err)
 			}
 			if tc.count == 0 {
 				return
 			}
-			request := *result.FanOutIntent
+			request := result.FanOutIntents[0]
 			now := time.Now().UTC()
 			intent := fanoutobligation.Intent{Request: request, Source: request.Source, Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize, CreatedAt: now, UpdatedAt: now}
 			prepared, err := exec.PrepareFanOutEvaluation(context.Background(), intent, trigger)

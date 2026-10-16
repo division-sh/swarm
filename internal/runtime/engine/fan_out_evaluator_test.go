@@ -129,11 +129,11 @@ func preparedFanOutFixtureWithContext(t testing.TB, incoming events.DeliveryCont
 		ctx = events.WithDeliveryContext(deliverylifecycle.WithRoute(deliverylifecycle.WithClaim(ctx, claim), route), incoming)
 	}
 	result, err := exec.ExecuteSemanticFixture(ctx, ExecutionRequest{EntityID: identity.NormalizeEntityID("entity-1"), Node: node, Event: trigger, Handler: handler, State: testStateSnapshot("pending", map[string]any{"offset": int64(5)}, nil, nil)})
-	if err != nil || result.FanOutIntent == nil {
-		t.Fatalf("capture: %v %#v", err, result.FanOutIntent)
+	if err != nil || len(result.FanOutIntents) == 0 {
+		t.Fatalf("capture: %v %#v", err, result.FanOutIntents)
 	}
 	now := time.Now().UTC()
-	intent := fanoutobligation.Intent{Request: *result.FanOutIntent, Source: result.FanOutIntent.Source, Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize, CreatedAt: now, UpdatedAt: now}
+	intent := fanoutobligation.Intent{Request: result.FanOutIntents[0], Source: result.FanOutIntents[0].Source, Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize, CreatedAt: now, UpdatedAt: now}
 	return exec, intent, trigger, source
 }
 

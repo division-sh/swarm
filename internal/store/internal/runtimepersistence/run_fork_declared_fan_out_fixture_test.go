@@ -228,7 +228,7 @@ func seedDeclaredForkFanOutGenerationFromSource(t *testing.T, backend string, fi
 			Route: request.Capsule.Route, EntityID: runID, RoutingSource: trigger.RoutingSource(), ExecutionMode: trigger.ExecutionMode(), CreatedAt: at}
 	}
 	if _, err := fixture.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{
-		State: record, FanOutIntent: &request, FanOutBarrier: barrier,
+		State: record, FanOutIntents: []fanoutobligation.IntentRequest{request}, FanOutBarrier: barrier,
 		DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claim.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},
 	}); err != nil {
 		t.Fatal(err)
