@@ -13,11 +13,14 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
+	"github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventpersistence"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
@@ -33,6 +36,174 @@ import (
 )
 
 type PublicationResultSourceStorage = eventrecord.PublicationResultSourceStorage
+
+type UnretainedCleanupHistoryObservation = deliveryadapter.UnretainedCleanupHistoryObservation
+
+// Only the physical unretained cleanup proof consumes this operation. Its
+// historical attempts are not provider-ready and expose no claim capability.
+func InstallUnretainedSelectedForkCleanupHistoryForTest(ctx context.Context, selected any, fork, source, frontier string, history [2]events.Event, route events.DeliveryRoute) ([2]string, error) {
+	if ctx == nil {
+		return [2]string{}, fmt.Errorf("unretained cleanup requires its caller context")
+	}
+	if err := validateUnretainedCleanupHistoryInputs(selected, fork, source, frontier, history, route); err != nil {
+		return [2]string{}, err
+	}
+	records, err := unretainedCleanupHistoryRecords(history)
+	if err != nil {
+		return [2]string{}, err
+	}
+	_, postgres := selected.(*PostgresStore)
+	dialect := deliveryadapter.DialectSQLite
+	if postgres {
+		dialect = deliveryadapter.DialectPostgres
+	}
+	var ids [2]string
+	err = runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		hash, err := runforkpersistence.ValidateUnretainedCleanupHistoryTargetTx(ctx, tx, !postgres, fork, source, frontier)
+		if err != nil {
+			return err
+		}
+		fact, err := runtimecorrelation.DecodeSourceArtifactFact(hash)
+		if err != nil {
+			return err
+		}
+		actor, err := unretainedCleanupActorIdentity(fork, "selected-test", "selected-test", "selected-test")
+		if err != nil {
+			return err
+		}
+		if err := agentpersistence.RequireUnretainedCleanupActorTx(ctx, tx, actor); err != nil {
+			return err
+		}
+		if err := deliveryadapter.RequireEmptyUnretainedCleanupHistoryTx(ctx, tx, fork); err != nil {
+			return err
+		}
+		count, err := eventrecord.CountRunEventStorageTx(ctx, tx, fork)
+		if err != nil || count != 0 {
+			return fmt.Errorf("unretained cleanup requires empty target event history: count=%d err=%v", count, err)
+		}
+		for _, record := range records {
+			if _, found, err := loadCanonicalFixtureRecordTx(ctx, tx, postgres, record.EventID); err != nil || found {
+				return fmt.Errorf("unretained history requires absent event %s: found=%t err=%v", record.EventID, found, err)
+			}
+		}
+		for _, record := range records {
+			inserted, err := insertUnretainedCleanupEventTx(ctx, tx, postgres, record)
+			if err != nil || !inserted {
+				return fmt.Errorf("insert unretained cleanup event: inserted=%t err=%w", inserted, err)
+			}
+		}
+		ids, err = deliveryadapter.InstallUnretainedCleanupHistoryTx(ctx, tx, dialect, fact, history, route)
+		return err
+	})
+	if err != nil {
+		return [2]string{}, err
+	}
+	return ids, nil
+}
+
+func validateUnretainedCleanupHistoryInputs(selected any, fork, source, frontier string, history [2]events.Event, route events.DeliveryRoute) error {
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return err
+	}
+	for _, id := range []string{fork, source, frontier, history[0].ID(), history[1].ID()} {
+		if err := validateStandaloneStorageEvent(selected, id); err != nil {
+			return err
+		}
+	}
+	identity, err := unretainedCleanupActorIdentity(fork, "fixture", "selected-agent", "fixture/selected-agent")
+	if err != nil {
+		return err
+	}
+	expectedRoute, err := json.Marshal(events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("selected-agent"), AgentIdentity: identity})
+	if err != nil {
+		return err
+	}
+	actualRoute, err := json.Marshal(route)
+	if err != nil {
+		return err
+	}
+	if fork == source || history[0].ID() == history[1].ID() || route.AgentIdentity.Validate() != nil ||
+		!bytes.Equal(actualRoute, expectedRoute) {
+		return fmt.Errorf("unretained cleanup refuses foreign or expanded history identities")
+	}
+	for i, event := range history {
+		if event.RunID() != fork || event.Type() != []events.EventType{"selected.claimed", "selected.settled"}[i] ||
+			event.SourceAgent() != "selected-test" || event.ProducerType() != events.EventProducerExternal || event.CreatedAt().IsZero() || !bytes.Equal(event.Payload(), []byte(`{}`)) {
+			return fmt.Errorf("unretained cleanup history differs from its fixed original event footprint")
+		}
+	}
+	return nil
+}
+
+func unretainedCleanupActorIdentity(run, scope, instance, path string) (agentidentity.Identity, error) {
+	name, err := agentidentity.RuntimeName("selected-agent", "store-test-fixture")
+	if err != nil {
+		return agentidentity.Identity{}, err
+	}
+	route, err := agentidentity.PresentRoute(scope, instance, path)
+	if err != nil {
+		return agentidentity.Identity{}, err
+	}
+	return agentidentity.New(run, name, route)
+}
+
+func unretainedCleanupHistoryRecords(history [2]events.Event) ([2]eventrecord.Record, error) {
+	var records [2]eventrecord.Record
+	ledger, err := events.NewConnectEvaluationLedger(nil)
+	if err != nil {
+		return records, err
+	}
+	settlement, err := events.NewDeliverySettlement(events.EventWriteNormalPublication, ledger)
+	if err != nil {
+		return records, err
+	}
+	for i, event := range history {
+		admitted, err := events.AdmitForPublish(event, events.AdmissionOptions{RequirePersistentUUIDIdentity: true})
+		if err != nil {
+			return [2]eventrecord.Record{}, err
+		}
+		records[i], err = eventrecord.FromAdmitted(admitted, settlement)
+		if err != nil {
+			return [2]eventrecord.Record{}, err
+		}
+	}
+	return records, nil
+}
+
+func insertUnretainedCleanupEventTx(ctx context.Context, tx *sql.Tx, postgres bool, record eventrecord.Record) (bool, error) {
+	if postgres {
+		return eventrecordpostgres.InsertUnrevisionedFixtureRecord(ctx, tx, record)
+	}
+	return eventrecordsqlite.InsertUnrevisionedFixtureRecord(ctx, tx, record)
+}
+
+func ReadUnretainedSelectedForkCleanupHistoryForTest(ctx context.Context, selected any, fork, source, frontier string) (UnretainedCleanupHistoryObservation, error) {
+	if ctx == nil {
+		return UnretainedCleanupHistoryObservation{}, fmt.Errorf("unretained cleanup observation requires its caller context")
+	}
+	if _, err := eventFixtureDialectForTest(selected); err != nil {
+		return UnretainedCleanupHistoryObservation{}, err
+	}
+	for _, id := range []string{fork, source, frontier} {
+		if err := validateStandaloneStorageEvent(selected, id); err != nil {
+			return UnretainedCleanupHistoryObservation{}, err
+		}
+	}
+	_, postgres := selected.(*PostgresStore)
+	var out UnretainedCleanupHistoryObservation
+	err := runUnrevisionedEventFixtureTransactionForTest(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		if _, err := runforkpersistence.ValidateUnretainedCleanupHistoryTargetTx(ctx, tx, !postgres, fork, source, frontier); err != nil {
+			return err
+		}
+		var err error
+		out, err = deliveryadapter.ReadUnretainedCleanupHistoryTx(ctx, tx, fork)
+		return err
+	})
+	if err != nil {
+		return UnretainedCleanupHistoryObservation{}, err
+	}
+	return out, nil
+}
 
 func SetOutboxDeadLetterInsertFaultForTest(ctx context.Context, selected any, eventID string, enabled bool) error {
 	if err := validateChannelObservationOwner(selected); err != nil {

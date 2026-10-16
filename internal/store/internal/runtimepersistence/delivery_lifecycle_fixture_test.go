@@ -242,8 +242,8 @@ func deliveryFixtureAuthorityForRun(ctx context.Context, queryer interface {
 		return runtimedelivery.ExecutionAuthority{}, err
 	}
 	if admission, found := managedexecution.FromContext(ctx); found {
-		if admission.Kind != managedexecution.KindNormalRuntime || admission.BundleHash != source.BundleHash() {
-			return runtimedelivery.ExecutionAuthority{}, fmt.Errorf("delivery fixture admission differs from its exact normal run source")
+		if admission.BundleHash != source.BundleHash() || (admission.Kind == managedexecution.KindSelectedContractFork && admission.RunID != runID) {
+			return runtimedelivery.ExecutionAuthority{}, fmt.Errorf("delivery fixture admission differs from its exact run source or selected fork")
 		}
 		return runtimedelivery.NewExecutionAuthority(source, admission)
 	}

@@ -1349,14 +1349,13 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	}
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
 	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-	finishHistory := beginForkDeliveryHistoryFixture(t, ctx, pg, materialized.ForkRunID)
 	sessionID := uuid.NewString()
 	identity := mustTestAgentIdentityForRun(materialized.ForkRunID, "agent-a", "flow-a/1")
 	fields := testAgentIdentityStorageFields(t, identity)
-	seedTestAgentRow(t, ctx, db, true, identity, "active")
+	ctx, authority, deliveryAuthority := admitMaterializedSelectedForkActor(t, ctx, pg, materialized, activationRequest.ExecutionSource, identity)
 	forkRoute := testAgentDeliveryRoute(t, materialized.ForkRunID, "agent-a", "flow-a/1")
-	forkEvent := commitPostgresDeliveryFixture(t, ctx, db, forkEventID, forkRoute)
-	forkClaim := claimPostgresDeliveryFixture(t, ctx, db, forkEvent, forkRoute)
+	forkEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, forkEventID)
+	forkClaim := claimNativeSelectedForkFixtureEvent(t, ctx, pg, forkEvent, forkRoute, deliveryAuthority)
 	if _, err := pg.SettleSuccess(ctx, forkClaim.Claim, nil, time.Second, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle selected agent delivery: %v", err)
 	}
@@ -1415,14 +1414,15 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	turnID := uuid.NewString()
 	turnEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, followUp.ID())
 	turnRoute := testAgentDeliveryRoute(t, materialized.ForkRunID, identity.AgentID(), identity.FlowInstance())
-	if err := commitDeliveryObligationFixture(ctx, pg, turnEvent, turnRoute); err != nil {
-		t.Fatalf("commit fork turn origin: %v", err)
+	turnClaim := claimNativeSelectedForkFixtureEvent(t, ctx, pg, turnEvent, turnRoute, deliveryAuthority)
+	authority.Target = runtimeeffects.UsageTarget{
+		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: materialized.ForkRunID,
+		AgentID: identity.AgentID(), AgentIdentity: identity, SessionID: sessionID,
+		Memory: agentmemory.Plan{Enabled: true}, FlowInstance: identity.FlowInstance(), EntityID: entityID,
 	}
-	turnClaim, err := claimDeliveryFixture(ctx, pg, turnEvent, turnRoute)
-	if err != nil {
-		t.Fatalf("claim fork turn origin: %v", err)
-	}
-	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, turnClaim.Claim), pg, runtimellm.AgentTurnRecord{
+	turnCtx := runtimeeffects.WithAuthority(runtimedelivery.WithClaim(ctx, turnClaim.Claim), authority)
+	proveNativeSelectedTurnReadbackCoordinates(t, turnCtx, authority)
+	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, turnCtx, pg, runtimellm.AgentTurnRecord{
 		AgentID: identity.AgentID(), Identity: identity,
 		RunID: materialized.ForkRunID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Plan{Enabled: true}, SessionID: sessionID,
 		EntityID: entityID, TriggerEventID: turnEvent.ID(), TriggerEventType: string(turnEvent.Type()), ParseOK: true, Latency: time.Millisecond,
@@ -1432,7 +1432,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	if _, err := pg.SettleSuccess(ctx, turnClaim.Claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle fork turn origin: %v", err)
 	}
-	finishHistory()
+	closeNativeSelectedForkFixture(t, ctx, pg, authority)
 
 	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
@@ -1462,16 +1462,17 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 	}
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
 	forkEventID := seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-	finishHistory := beginForkDeliveryHistoryFixture(t, ctx, pg, materialized.ForkRunID)
-	forkRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a")}
-	forkEvent := commitPostgresDeliveryFixture(t, ctx, db, forkEventID, forkRoute)
-	forkClaim := claimPostgresDeliveryFixture(t, ctx, db, forkEvent, forkRoute)
+	identity := mustTestAgentIdentityForRun(materialized.ForkRunID, "agent-a", "flow-a/1")
+	ctx, authority, deliveryAuthority := admitMaterializedSelectedForkActor(t, ctx, pg, materialized, activationRequest.ExecutionSource, identity)
+	forkRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity}
+	forkEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, forkEventID)
+	forkClaim := claimNativeSelectedForkFixtureEvent(t, ctx, pg, forkEvent, forkRoute, deliveryAuthority)
 	if _, err := pg.SettleSuccess(ctx, forkClaim.Claim, nil, time.Second, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle selected agent delivery: %v", err)
 	}
 	seedPostgresChildEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, forkEventID,
 		"platform.auth_required", events.EventProducerPlatform, "runtime", entityID, "flow-a/1", []byte(`{}`), at.Add(3*time.Second))
-	finishHistory()
+	closeNativeSelectedForkFixture(t, ctx, pg, authority)
 
 	activationRequest.AllowSourceFreeze = true
 	activationRequest.AllowedSourceEventIDs = []string{eventID}

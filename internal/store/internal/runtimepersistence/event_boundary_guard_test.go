@@ -47,6 +47,8 @@ var admittedEventCallsites = map[eventBoundaryCallsite]int{
 	{path: "internal/store/storetest/event.go", scope: "InsertNativeCanonicalEventRecord", name: "AdmitForPersistence"}:                                                   1,
 	{path: "internal/store/storetest/event.go", scope: "commitSemanticEventWithInitialFacts", name: "AdmitForPublish"}:                                                    1,
 	{path: "internal/store/storetest/event.go", scope: "AdmitNativeDeliveryEvent", name: "AdmitForPublish"}:                                                               1,
+	// #2698/6210011010: fixed non-executable historical cleanup evidence only.
+	{path: "internal/store/internal/runtimepersistence/test_event_support.go", scope: "unretainedCleanupHistoryRecords", name: "AdmitForPublish"}: 1,
 }
 
 var eventRecordImportFiles = map[string]struct{}{

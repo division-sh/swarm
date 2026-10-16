@@ -79,6 +79,27 @@ func selectedProviderTarget(f selectedCompletionFixture) effects.UsageTarget {
 
 func admitSelectedProviderFixture(t *testing.T, ctx context.Context, f selectedCompletionFixture, issued runfork.SelectedContractRuntimeExecution, authority effects.Authority) pipeline.FlowInstanceActivationPlan {
 	t.Helper()
+	admitSelectedProviderActor(t, ctx, f, issued, authority)
+	ctx = testAuthorActivityContextForBundle(f.request.DeclarationPlan.BundleHash)
+	actor := f.providerActor.Config.Identity
+	bundle, _ := semanticview.Bundle(f.providerSource)
+	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.grant_receiver", "operator", "", []byte(`{}`), 0, actor.RunID, events.EventEnvelope{}, time.Now().UTC())
+	req := sqliteFlowActivationRequest(bundle, ".", actor.RunID, "", actor.RunID)
+	root := flowidentity.Stored(f.providerSource, ".", actor.RunID, actor.RunID, actor.RunID, "")
+	req.Instance = root
+	req.TriggerEvent, req.OccurredAt = event, event.CreatedAt()
+	constructed := constructHistoricalSourceFixture(t, ctx, f.store.(agentFixtureFlowStore), req)
+	for _, child := range constructed.ConstructionPlans() {
+		if child.Identity.TemplateID == "global" && child.Identity.InstancePath == actor.FlowInstance() {
+			return child
+		}
+	}
+	t.Fatal("selected provider construction omitted its declared keyless receiver")
+	return pipeline.FlowInstanceActivationPlan{}
+}
+
+func admitSelectedProviderActor(t *testing.T, ctx context.Context, f selectedCompletionFixture, issued runfork.SelectedContractRuntimeExecution, authority effects.Authority) {
+	t.Helper()
 	grant := selectedFixtureGrantForAuthority(t, ctx, f, issued, authority)
 	ctx = testAuthorActivityContextForBundle(f.request.DeclarationPlan.BundleHash)
 	actor := f.providerActor.Config.Identity
@@ -107,20 +128,6 @@ func admitSelectedProviderFixture(t *testing.T, ctx context.Context, f selectedC
 	}); err != nil {
 		t.Fatal(err)
 	}
-	bundle, _ := semanticview.Bundle(f.providerSource)
-	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.grant_receiver", "operator", "", []byte(`{}`), 0, actor.RunID, events.EventEnvelope{}, time.Now().UTC())
-	req := sqliteFlowActivationRequest(bundle, ".", actor.RunID, "", actor.RunID)
-	root := flowidentity.Stored(f.providerSource, ".", actor.RunID, actor.RunID, actor.RunID, "")
-	req.Instance = root
-	req.TriggerEvent, req.OccurredAt = event, event.CreatedAt()
-	constructed := constructHistoricalSourceFixture(t, ctx, f.store.(agentFixtureFlowStore), req)
-	for _, child := range constructed.ConstructionPlans() {
-		if child.Identity.TemplateID == "global" && child.Identity.InstancePath == actor.FlowInstance() {
-			return child
-		}
-	}
-	t.Fatal("selected provider construction omitted its declared keyless receiver")
-	return pipeline.FlowInstanceActivationPlan{}
 }
 
 func selectedProviderClaimContext(t *testing.T, ctx context.Context, f selectedCompletionFixture, authority effects.Authority) context.Context {
