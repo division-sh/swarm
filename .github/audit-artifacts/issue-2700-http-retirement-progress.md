@@ -57,6 +57,8 @@ affected checks or the unresolved R04 integration.
 | effect-retirement-connectors-native-roles-race3-candidate2.log | PASS providerconnectors19.460s / packs3.459s. Generated deterministic/closed output, provider-neutral native inbox operations, all7 native capability controls and differential registration compiler x3. No native acknowledgment rerun. |
 | effect-retirement-activity-reference-race3-candidate1.log | PASS1.009s: exact versioned grant/state reference, canonical UUID/positive signed range, no missing/invalid attribution fallback. DTO only, not authority or R04 qualification. |
 | effect-retirement-keyfree-agent-race3-candidate1.log | PASS24/24 executions, tools43.544s: GET/POST x transport/read_response x both stores x3. Existing native write_unknown accounting, one physical call, exact uncertainty result, reopen and replay assertions retained. |
+| effect-retirement-lineage-oracle-original-red.log | RED0.009s: two current-source lineage fixtures still authored the retired selector, so shared admission refused before their assertions. |
+| effect-retirement-lineage-oracle-race3-candidate1.log | PASS pipeline3.214s: both existing lineage roots x3. Key-free GET planning uses the fixed policy; source/run/parent/entity/flow/instance/handler/activity/tool/result/retry/fork-policy and generation negatives, plus exact/nonterminal parent controls, remain active. No historical packet changed. |
 
 Earlier declaration-positive/notice receipts are superseded, not silently
 counted for retirement. Agent credit above does not qualify handler takeover
