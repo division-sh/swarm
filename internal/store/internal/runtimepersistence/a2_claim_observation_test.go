@@ -20,6 +20,9 @@ func TestA2ClaimObserversKeepExactNodeIdentityAndSettledAggregateBothStores(t *t
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f, state := newCompetingRevisionPairFixture(t, backend)
+			f.ctx = preparePositiveAgentClaimFixture(t, f.ctx, f.store.(agentFixtureFlowStore),
+				mustTestAgentIdentityForRun(state.Identity.RunID, "a2-observer-agent", "a2-observer/agent"),
+				mustTestAgentIdentityForRun(state.Identity.RunID, "a2-delivered-agent", "a2-delivered/agent"))
 			node := mustPersistenceNode("review", "progress")
 			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "review/finish.requested", "fixture", "", []byte(`{}`), 0, state.Identity.RunID, events.EventEnvelope{}, time.Now().UTC())
 			route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "review", FlowInstance: state.Identity.Route.InstancePath, EntityID: state.EntityID})}

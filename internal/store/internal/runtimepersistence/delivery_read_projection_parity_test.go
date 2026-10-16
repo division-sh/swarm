@@ -34,6 +34,7 @@ func TestPendingAgentDeliveryRetryEligibilityPreservesSubsecondStoreParity(t *te
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 
 			identity := mustTestAgentIdentityForRun(runID, "retry-agent", "delivery-projection/retry")
+			ctx = preparePositiveAgentClaimFixture(t, ctx, fixture.store.(agentFixtureFlowStore), identity)
 			event := eventtest.PersistedProjection(
 				uuid.NewString(), "projection.retry", "gateway", "", json.RawMessage(`{}`), 0,
 				runID, "", events.EventEnvelope{}, time.Now().UTC(),
@@ -100,6 +101,9 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 			runID := uuid.NewString()
 			base := time.Date(2026, 7, 14, 11, 0, 0, 0, time.UTC)
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			currentAgent := "current-agent"
+			currentIdentity := mustTestAgentIdentityForRun(runID, currentAgent, "delivery-projection/current")
+			ctx = preparePositiveAgentClaimFixture(t, ctx, fixture.store.(agentFixtureFlowStore), currentIdentity)
 
 			siblingEvent := eventtest.PersistedProjection(
 				uuid.NewString(), "projection.siblings", "gateway", "", json.RawMessage(`{"kind":"siblings"}`), 0,
@@ -177,8 +181,6 @@ func TestDeliveryReadProjectionBoundsAndExactIdentityParity(t *testing.T) {
 			if _, err := fixture.db.ExecContext(ctx, `UPDATE event_deliveries SET delivery_target_route=$1 WHERE delivery_id=$2`, string(originalTailTarget), tailSnapshot.DeliveryID); err != nil {
 				t.Fatal(err)
 			}
-			currentAgent := "current-agent"
-			currentIdentity := mustTestAgentIdentityForRun(runID, currentAgent, "delivery-projection/current")
 			currentEvent := eventtest.PersistedProjection(
 				uuid.NewString(), "projection.current", "gateway", "", json.RawMessage(`{"kind":"current"}`), 0,
 				runID, "", events.EventEnvelope{}, base.Add(2*time.Minute),

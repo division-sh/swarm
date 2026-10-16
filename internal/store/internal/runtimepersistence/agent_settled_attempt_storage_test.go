@@ -25,6 +25,7 @@ func TestAgentSettledAttemptStoragePreservesEventRoleSubscriberAndOriginalReadBo
 				{Recipient: events.MustAgentDeliveryRecipient("agent-b"), AgentIdentity: mustTestAgentIdentityForRun(run, "agent-b", "storage/agent-b")},
 				testEntitylessNodeDeliveryRoute("storage-node"),
 			}
+			ctx = preparePositiveAgentClaimFixture(t, ctx, fixture.store.(agentFixtureFlowStore), routes[0].AgentIdentity, routes[1].AgentIdentity)
 			if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, routes); err != nil {
 				t.Fatal(err)
 			}
