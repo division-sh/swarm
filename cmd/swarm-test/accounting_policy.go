@@ -188,6 +188,7 @@ func archiveAccountingExecutor(ctx context.Context, root, source string) (string
 		}
 	}()
 	archive := tar.NewReader(bytes.NewReader(body))
+	headerSeen := false
 	for {
 		header, err := archive.Next()
 		if err == io.EOF {
@@ -196,35 +197,56 @@ func archiveAccountingExecutor(ctx context.Context, root, source string) (string
 		if err != nil {
 			return "", err
 		}
-		name := strings.TrimSuffix(header.Name, "/")
-		if !filepath.IsLocal(name) || filepath.ToSlash(filepath.Clean(name)) != name {
-			return "", fmt.Errorf("nonlocal executor archive entry")
-		}
-		path := filepath.Join(directory, name)
-		switch header.Typeflag {
-		case tar.TypeDir:
-			err = os.MkdirAll(path, 0700)
-		case tar.TypeReg:
-			if header.Size < 0 || header.Size > 64<<20 {
-				return "", fmt.Errorf("unsupported executor archive size")
+		if header.Typeflag == tar.TypeXGlobalHeader {
+			if headerSeen || header.Name != "pax_global_header" || len(header.PAXRecords) != 1 || header.PAXRecords["comment"] != source {
+				return "", fmt.Errorf("executor archive lacks its exact Git commit header")
 			}
-			if err = os.MkdirAll(filepath.Dir(path), 0700); err == nil {
-				var output *os.File
-				output, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-				if err == nil {
-					_, copyErr := io.CopyN(output, archive, header.Size)
-					err = errors.Join(copyErr, output.Close())
-				}
-			}
-		default:
-			return "", fmt.Errorf("unsupported executor archive member %s", name)
+			headerSeen = true
+			continue
 		}
-		if err != nil {
+		if !headerSeen {
+			return "", fmt.Errorf("executor archive precedes its Git commit header")
+		}
+		if err = writeAccountingArchiveEntry(directory, archive, header); err != nil {
 			return "", err
 		}
 	}
+	if !headerSeen {
+		return "", fmt.Errorf("executor archive has no Git commit identity")
+	}
 	failed = false
 	return directory, nil
+}
+
+func writeAccountingArchiveEntry(directory string, archive *tar.Reader, header *tar.Header) error {
+	name := strings.TrimSuffix(header.Name, "/")
+	if !filepath.IsLocal(name) || filepath.ToSlash(filepath.Clean(name)) != name {
+		return fmt.Errorf("nonlocal executor archive entry")
+	}
+	path := filepath.Join(directory, name)
+	switch header.Typeflag {
+	case tar.TypeDir:
+		return os.MkdirAll(path, 0700)
+	case tar.TypeReg:
+		if header.Size < 0 || header.Size > 64<<20 {
+			return fmt.Errorf("unsupported executor archive size")
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			return err
+		}
+		mode := os.FileMode(0600)
+		if header.Mode&0100 != 0 {
+			mode |= 0100
+		}
+		output, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+		if err != nil {
+			return err
+		}
+		_, copyErr := io.CopyN(output, archive, header.Size)
+		return errors.Join(copyErr, output.Close())
+	default:
+		return fmt.Errorf("unsupported executor archive member %s", name)
+	}
 }
 
 func accountingBuildEnv(goos, goarch string) []string {
