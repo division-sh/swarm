@@ -1,0 +1,67 @@
+{
+  "qualification": false,
+  "generated_at": "2026-10-16T17:27:35.273Z",
+  "head": "f7e82ed4c3c91366e6d825df584a4050af3d4411",
+  "tree": "dbb14e6dfbd7bfee7762b6da334d8c3f44d8b203",
+  "status": "",
+  "policy_sha256": "3ff176a2206ed74d38d13a561a7b4edf728db1bbf1d3aa7e4071b73435b218c3",
+  "inventory_file": "/home/youmew/.cache/swarm-2542-family145/pr2698-ff6905-store-selected-root-inventory.jsonl",
+  "inventory_sha256": "89b8ee865cee2abbd9c4bb9a621ebba58358c3fb3e79cf40714db30b36b0ea8f",
+  "receipts": [
+    {
+      "id": "F",
+      "file": "pr2698-decision1b-ff690517b59af2456c8c9a30c42ca216fb5ae9c1-store-admission-full.jsonl",
+      "sha256": "ec13b73e3ebeb01faa40c4757ee090b732fd09465ee87e3e09b5386d3eefb57d",
+      "source": "ff690517b59af2456c8c9a30c42ca216fb5ae9c1; partial complete unit"
+    },
+    {
+      "id": "S",
+      "file": "pr2698-round2-six-and-hostiles.jsonl",
+      "sha256": "319ef8c81b6ada846b80da51740ccba2558cfdb4ceb23a5487eae267bcf333e9",
+      "source": "round2 focused repaired source; original new-hostile RED retained"
+    },
+    {
+      "id": "B",
+      "file": "pr2698-round2-bound-protected-inputs.jsonl",
+      "sha256": "c7a9b5cb5876f74e0cc066c0703a9032b5345415b78cddf15862dc45535496e2",
+      "source": "round2 protected-fallback correction"
+    },
+    {
+      "id": "T",
+      "file": "pr2698-round2-9f8140fc6df45745843979d0d098f3a587b2d60f-diagnostic-tail.jsonl",
+      "sha256": "82bfb8d521d0232b60dfb4e69266cb400b99a6f3de6734acbe9c36bd0f330eb2",
+      "source": "9f8140fc6df45745843979d0d098f3a587b2d60f; exact85 diagnostic"
+    },
+    {
+      "id": "C",
+      "file": "pr2698-round2-tail-composition-repair.jsonl",
+      "sha256": "d2687d9aacebe5ae14286fa913dd27d4d59b14aebb8661af2c4599e5d36effc5",
+      "source": "9f8140fc6d + authorized four-copy/comparator repair; focused9"
+    },
+    {
+      "id": "W",
+      "file": "pr2698-round2-standing-complete-boundary.jsonl",
+      "sha256": "79501805cf1786c404e844e81b6b2ef11c5de0c5f5ff6ad59e02f0b745345ad8",
+      "source": "same repair + whole-current-image standing control"
+    },
+    {
+      "id": "A",
+      "file": "pr2698-round2-adjacent-alone.jsonl",
+      "sha256": "51dd48db30d756af273a9cd5aef53fbb201769231533c206efd7c05c2c1571c3",
+      "source": "674cdcb861d4babe407eded78fa1bf469705cf48; positive standalone"
+    },
+    {
+      "id": "R",
+      "file": "pr2698-round2-registry-combined.jsonl",
+      "sha256": "18e9ac684f920794792f0d80de54c1b87e02539314b6946f30cb6a019d496739",
+      "source": "674cdcb861d4babe407eded78fa1bf469705cf48; positive9-root combined"
+    },
+    {
+      "id": "U",
+      "file": "pr2698-round2-0615b8e22c15ab1daf164437f14d58b154b31ce4-store-admission-full.jsonl",
+      "sha256": "73029585f1e20ed636b247993fa75455424f2db59dd5a62a25908d6647cdc98f",
+      "source": "0615b8e22c15ab1daf164437f14d58b154b31ce4; partial complete unit"
+    }
+  ],
+  "excluded": "Deliberate scratch mutation/counterexample receipts; interrupted roots have no terminal observation and never replace a prior terminal duration."
+}

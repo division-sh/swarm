@@ -51,6 +51,12 @@ profiles:
     - catalog-runtime-scatter-safety
     - conformance-2394-pressure
     - store-admission-full
+    - store-admission-debt-01
+    - store-admission-debt-02
+    - store-admission-debt-03
+    - store-admission-debt-04
+    - store-admission-debt-05
+    - store-admission-debt-06
     - persistence-authority-debt-census
     - parity-served-source-artifact
     - parity-connected-channel-onboarding-surface
@@ -111,6 +117,12 @@ profiles:
     - serveapp-selected-rest
     - serveapp-standing
     - store-admission-full
+    - store-admission-debt-01
+    - store-admission-debt-02
+    - store-admission-debt-03
+    - store-admission-debt-04
+    - store-admission-debt-05
+    - store-admission-debt-06
     - persistence-authority-debt-census
     - store-runtime-full-01
     - store-runtime-full-02
@@ -197,6 +209,12 @@ profiles:
     - serveapp-selected-rest
     - serveapp-standing
     - store-admission-full
+    - store-admission-debt-01
+    - store-admission-debt-02
+    - store-admission-debt-03
+    - store-admission-debt-04
+    - store-admission-debt-05
+    - store-admission-debt-06
     - persistence-authority-debt-census
     - store-runtime-full-01
     - store-runtime-full-02
@@ -1114,8 +1132,50 @@ units:
     packages:
       - github.com/division-sh/swarm/internal/store
       - github.com/division-sh/swarm/internal/testpostgres
-    # Positive RE2 complement: the census unit owns the two exact scan roots.
-    run: '^($|[^T].*|T($|[^e].*|e($|[^s].*|s($|[^t].*|t($|[^NP].*|N($|[^a].*|a($|[^t].*|t($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^F].*|F($|[^i].*|i($|[^x].*|x($|[^t].*|t($|[^u].*|u($|[^r].*|r($|[^e].*|e($|[^F].*|F($|[^a].*|a($|[^m].*|m($|[^i].*|i($|[^l].*|l($|[^i].*|i($|[^e].*|e($|[^s].*|s($|[^D].*|D($|[^o].*|o($|[^N].*|N($|[^o].*|o($|[^t].*|t($|[^R].*|R($|[^e].*|e($|[^c].*|c($|[^e].*|e($|[^i].*|i($|[^v].*|v($|[^e].*|e($|[^R].*|R($|[^a].*|a($|[^w].*|w($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y.+))))))))))))))))))))))))))))))))))))))))))))|P($|[^e].*|e($|[^r].*|r($|[^s].*|s($|[^i].*|i($|[^s].*|s($|[^t].*|t($|[^e].*|e($|[^n].*|n($|[^c].*|c($|[^e].*|e($|[^A].*|A($|[^u].*|u($|[^t].*|t($|[^h].*|h($|[^o].*|o($|[^r].*|r($|[^i].*|i($|[^t].*|t($|[^y].*|y($|[^D].*|D($|[^e].*|e($|[^b].*|b($|[^t].*|t($|[^R].*|R($|[^a].*|a($|[^t].*|t($|[^c].*|c($|[^h].*|h($|[^e].*|e($|[^t].*|t.+)))))))))))))))))))))))))))))))))))$'
+    # #2698: ordinary admission/testpostgres plus B's 17 finite base debt roots.
+    run: '^((?:|[^T].*|T(?:|[^e].*|e(?:|[^s].*|s(?:|[^t].*|t(?:|[^NP].*|N(?:|[^a].*|a(?:|[^t].*|t(?:|[^i].*|i(?:|[^v].*|v(?:|[^e].*|e(?:|[^F].*|F(?:|[^i].*|i(?:|[^x].*|x(?:|[^t].*|t(?:|[^u].*|u(?:|[^r].*|r(?:|[^e].*|e(?:|[^F].*|F(?:|[^a].*|a(?:|[^m].*|m(?:|[^i].*|i(?:|[^l].*|l(?:|[^i].*|i(?:|[^e].*|e(?:|[^s].*|s(?:|[^D].*|D(?:|[^o].*|o(?:|[^N].*|N(?:|[^o].*|o(?:|[^t].*|t(?:|[^R].*|R(?:|[^e].*|e(?:|[^c].*|c(?:|[^e].*|e(?:|[^i].*|i(?:|[^v].*|v(?:|[^e].*|e(?:|[^R].*|R(?:|[^a].*|a(?:|[^w].*|w(?:|[^A].*|A(?:|[^u].*|u(?:|[^t].*|t(?:|[^h].*|h(?:|[^o].*|o(?:|[^r].*|r(?:|[^i].*|i(?:|[^t].*|t(?:|[^y].*|y.+))))))))))))))))))))))))))))))))))))))))))))|P(?:|[^e].*|e(?:|[^r].*|r(?:|[^s].*|s(?:|[^i].*|i(?:|[^s].*|s(?:|[^t].*|t(?:|[^e].*|e(?:|[^n].*|n(?:|[^c].*|c(?:|[^e].*|e(?:|[^A].*|A(?:|[^u].*|u(?:|[^t].*|t(?:|[^h].*|h(?:|[^o].*|o(?:|[^r].*|r(?:|[^i].*|i(?:|[^t].*|t(?:|[^y].*|y(?:|[^D].*|D(?:|[^e].*|e(?:|[^b].*|b(?:|[^t].*))))))))))))))))))))))))))))|TestPersistenceAuthorityDebt(CatchUpForkRenameRetainsAlreadyAcceptedRemovals|CatchUpSourceReadsRemainFresh|CensusInactiveLocalOperations|FixtureRoleTransitionIsExactAndMetadataOnly|ForkProofCollectorIsPinned|ForkProofRequiresConservedSource|FreshnessCatchUpRefusesChangedCurrentSource|NativeEntryCatchUpSourceIsExact|ProcessLeaseCustodyUsesCollectorMember|ProcessLeaseRelocationsAreOneWay|ReadbackWarmSourceAndManifestControls|Repair2698CopiedWarmSourceRefusesEscapes|RunFixtureSignatureTransitionIsExact|SelectedReadRoleCacheRequiresActualImmutableEvidence|ServedDebugTransfersConserveAll71Occurrences|ServedDebugUnrefreshedMetadataRemainsLocalAndReadOnly|ServedObservationNativeComparisonPreservesAddedAndRetainedCode))$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  store-admission-debt-01:
+    packages:
+      - github.com/division-sh/swarm/internal/store
+    run: '^TestPersistenceAuthorityDebt(AnalysisCacheIdentity|AnalysisCacheKeepsFreshSourcesAndResurrection|DeliveryRetirementIsFiniteSourceVerifiedAndOneWay|ExcludedTypedRefusalForwarder|ExcludedUncertaintyRatchet|ForkProofTransferIsExact|NativeEntryCatchUpForwardAndForeignProvenance|ProcessLeaseCollectorTransitionIsBounded|ProcessLeaseCustodyIsSourceBound|PublicA2UnrefreshedMetadataIsLocalAndSourceBound|PublicRollbackRetirementCollectorUsesExactHistoricalCopies|RatchetRejectsPaymentDuplicationReseedAndResurrection|ReadbackRetirementRequiresFreshCompleteNativeSources|ReadbackSourceIsSignedFiniteAndCurrent|ReceiverReadbackMetadataIsLocalAndSourceBound|Repair2698FixtureNameCopiedWarmBoundary|RequestKeyExactPairsRetainTwoOccurrences|SourceInvocationRejectsEveryChangedImage)$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  store-admission-debt-02:
+    packages:
+      - github.com/division-sh/swarm/internal/store
+    run: '^TestPersistenceAuthorityDebt(AnalysisCacheFingerprintsOwnersAndBuildContext|AnalysisCacheRejectsInvalidEntries|CatchUpForwardAndForeignProvenance|CensusPackageInitializers|CensusRepeatedOccurrences|CensusRetainsAliasesCallbacksAndOpaqueConstruction|DeliveryRetirementKeepsLaterServedAuthorizationSeparate|EventNameMetadataIsLocalAndSourceBound|G01TransitionIsExactAndMetadataOnly|NativeEntryCatchUpRefusesChangedCurrentSource|ProcessLeaseReviewedSourcePins|PublicA2CollectorIsPinnedAndConservesDebt|ServedDebugCollectorComposesOnlyExactPredecessors|ServedDebugModelMatchesExactReviewedManifest|ServedDebugSourcePinsRejectProvenanceAndNearMatches|WorkflowStateCollectorPreservesOldChainAndDebt|WorkflowStateComposesExactlyOneHistoricalBody|WriterStageUnrefreshedMetadataIsScopedAndFailClosed)$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  store-admission-debt-03:
+    packages:
+      - github.com/division-sh/swarm/internal/store
+    run: '^TestPersistenceAuthorityDebt(AnalysisCacheKeepsIgnoredHeadInputOutOfBase|AnalysisCacheRecomputesCorruptAndUnavailableEntries|BootstrapOriginSurvivesRebase|CatchUpPendingMetadataRequiresExactDownwardProvenance|DeliveryRetirementCollectorPreservesExactChain|DeliveryRetirementRefusesChangedNativeSource|DeliveryStatusSourcePinsAndCompositionFailClosed|EventNameSourceCompositionIsExact|IdentityIgnoresLinesAndEarlierOrdinalRemoval|ReadbackRetirementIsExactAndRejectsResurrection|RequestKeySourceAndCollectorPins|RunIdentityCollectorAddsNoCredit|SelectedReadRoleSourceRefusesHistoricalForeignAndStaleEvidence|ServedObservationRetirementIsFiniteAndRejectsResurrection|ServedObservationRetirementPinsAll48LiveBodies|SourceForkCompositionPreservesExactHistory|StageCompletionSourceAndFactoryPins|WriterStageCollectorTransferAndPriorCompositionAreExact|WriterStageModelMatchesReviewedManifestAndBodies)$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  store-admission-debt-04:
+    packages:
+      - github.com/division-sh/swarm/internal/store
+    run: '^TestPersistenceAuthorityDebt(CensusRetainsNonSQLConstructionAcrossOrdinaryPackages|DeliveryRetirementFingerprint|EventNameCollectorPreservesOldChainAndAllDebt|ExcludedPlatformIdentity|FixtureRoleFingerprintIsRequired|FreshnessCatchUpForwardAndForeignProvenance|FreshnessCatchUpSourceIsExact|PublicRollbackRetirementIsFiniteAndOneWay|RatchetIsSelectedInEveryTier|Repair2698ProofCostForwardEdgeKeepsOriginalFingerprintAndRefusesReverse|RunFixtureCollectorTransitionIsPinned|RunFixturePolicyDestinationMatchesSource|RunIdentitySourceCompositionIsFinite|ServedObservationBatchReportsEveryOlderSourceIntersection|ServedObservationCollectorRetainsTrustedPredecessorCeiling|ServedScenarioCompositionIsExactAndSourceOnly|ServedSetupSourceInverseRejectsStaleAndForeignCuts|StageCompletionRelocationIsExact)$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  store-admission-debt-05:
+    packages:
+      - github.com/division-sh/swarm/internal/store
+    run: '^TestPersistenceAuthorityDebt(AnalysisCachePRCannotPublish|AnalysisCachePublicationAdmission|AnalysisCachePublishMaster|AnalysisCacheRoundTripAndIsolation|BaselineRejectsCorruptionAndDuplicateRows|CatchUpCollectorPreservesBothPolicyOwners|CensusClearsAmbientSelectionFlags|CensusOwnedSourceBeforeLoading|ChannelProcessCachesKeepActualEvidence|ChannelProcessSourceInverseIsExactAndAccountingNeutral|CollectorSidecarRejectsForeignMetadata|CollectorSidecarRequiresCurrentMetadata|ConstructionDistinguishesNativeOwnerFromRecovery|DeliveryStatusCollectorPreservesEveryOccurrenceAndDirection|EventNameSourceManifestAndNativeBodyFailClosed|ExcludedInheritedReceiver|ExcludedReadCloserFileRefusal|ExcludedWindowsAndUnknownDeclarations|FixtureRoleDoesNotAuthorizeProductionConsumption|PublicA2SourceAndManifestRejectUnknownBodies|PublicRollbackCollectorAddsNoInverseCredit|QuiescenceCollectorTransitionIsPinnedAndDownward|ReadbackRetirementPreservesHistoricalInventories|ReceiverReadbackCollectorIsExactAndAddsNoCredit|ReceiverReadbackCompositionPreservesOriginalSource|Repair2698DeclarationCacheUsesActualBytes|RequestKeyCollectorTransitionKeepsExactDonorsAndDirection|RoleLabelsCannotGrantPermission|RunScalarCollectorPreservesEveryOccurrenceAndDirection|SelectedScopeIncludesAliasesAndInactiveSource|ServedDebugFourWriterStageCompositionsRemainExact|ServedObservationCollectorFingerprintIsExact|ServedObservationSourceInversesAreExactAndActualSourceBound|SourceForkDeploymentInversePinsBothCompleteFiles|StageCompletionCollectorTransitionIsPinned|StandingControlCollectorDependenciesStayExact|StandingControlFiveInversesAndHostileEvidence|TrustedBaseDistinguishesBootstrapFromLandedMerge|UnsupportedProcessWaitsUseTypedRefusal|WorkflowStateRejectsForeignCutsAndKeys)$'
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: broad
+  store-admission-debt-06:
+    packages:
+      - github.com/division-sh/swarm/internal/store
+    run: '^TestPersistenceAuthorityDebt(CatchUpCollectorFingerprintIsExact|CensusFailsClosedOnMissingAndTypeFailedSource|CensusPlatformIndependentSource|CensusPreservesAugmentedVariantEvidence|ChannelSettlementSourceInverseRefusesForeignEvidence|CollectorMetadataIdentity|DeliveryRetirementMetadataIsLocalAndSourceBound|ProcessLeaseRelocationRejectsSourceDrift|PublicA2AccountingConservesAncestorIntermediateAndCurrent|PublicRollbackSourceCompositionIsFinite|QuiescenceTransitionPreservesExactDebtAndDirection|Repair2698ExactSourceAndForwardPolicy|Repair2698ReconcilesLiveCensus|RunScalarSourcePinsAndCompositionFailClosed|ServedObservationCollectorTransitionIsOneWayAndAddsNoCredit|SourceBlobResetInverseChecksLiveSourceAndChangesNoAccounting|WorkflowStateManifestAndOwnersFailClosed|WorkflowStateMetadataIsLocalAndSourceBound|WriterStageSourcePinsRejectBodyAndManifestTampering|WriterStageTransfersPreserveSevenExactOccurrences)$'
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: broad
