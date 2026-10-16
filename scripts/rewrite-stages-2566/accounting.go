@@ -12,6 +12,9 @@ import (
 func validateFiniteAccounting(root string) error {
 	raw, err := os.ReadFile(filepath.Join(root, formatproof.Successors))
 	if os.IsNotExist(err) {
+		if _, sourceErr := os.Stat(filepath.Join(root, formatproof.Source)); sourceErr == nil || !os.IsNotExist(sourceErr) {
+			return fmt.Errorf("finite copied source is missing its successor history")
+		}
 		return nil
 	}
 	if err != nil {
@@ -35,6 +38,9 @@ func validateFiniteAccounting(root string) error {
 func finiteCurrentOutput(root string, c change, historical []byte) ([]byte, error) {
 	raw, err := os.ReadFile(filepath.Join(root, formatproof.Successors))
 	if os.IsNotExist(err) {
+		if c.File == formatproof.Source {
+			return nil, fmt.Errorf("finite source is missing its successor history")
+		}
 		return historical, nil
 	}
 	if err != nil {
@@ -69,7 +75,7 @@ func finiteCurrentSource(root string, c change, body []byte) ([]byte, error) {
 	}
 	raw, err := os.ReadFile(filepath.Join(root, formatproof.Successors))
 	if os.IsNotExist(err) {
-		return rewrite(c, body)
+		return nil, fmt.Errorf("finite source is missing its successor history")
 	}
 	if err != nil {
 		return nil, err
