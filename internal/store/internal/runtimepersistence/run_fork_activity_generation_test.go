@@ -9,7 +9,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -51,11 +50,9 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 	accumulator, _ := json.Marshal(buckets)
 	requestPayload := map[string]any{
 		"activity_id": "commit", "tool": "provider.write", "input": map[string]any{"value": "x"},
-		"effect_class":  string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		"success_event": "write.succeeded", "failure_event": "write.failed",
-		"fork_policy": "reuse_recorded_result",
-		"entity_id":   entityID, "node_id": writerOwner.Key(), "flow_id": "flow-a", "flow_instance": "flow-a", "handler_event_key": "review.accepted",
-		"source_event_id": sourceEventID, "source_run_id": sourceRunID, "attempt": 1,
+		"entity_id": entityID, "node_id": writerOwner.Key(), "flow_id": "flow-a", "flow_instance": "flow-a", "handler_event_key": "review.accepted",
+		"source_event_id": sourceEventID, "source_run_id": sourceRunID,
 		"loop_generation": sourceGeneration, "loop_stage": "review",
 	}
 	requestJSON, _ := json.Marshal(requestPayload)
@@ -73,7 +70,7 @@ func TestSelectedContractForkRemintsActivityRequestAndReusesRecordedWriteEvidenc
 		t.Fatal(err)
 	}
 	resultPayload, _ := json.Marshal(map[string]any{
-		"activity_id": "commit", "tool": "provider.write", "effect_class": "non_idempotent_write", "attempt": 1,
+		"activity_id": "commit", "tool": "provider.write",
 		"result": map[string]any{"ok": true}, "revision_id": sourceGeneration.RevisionID,
 	})
 	resultEventID := activityidentity.ResultEventID(fact, "write.succeeded")
@@ -162,11 +159,9 @@ func TestSelectedContractForkRemintsReadOnlyActivityForReexecution(t *testing.T)
 	handlerLoops, _ := json.Marshal(buckets[loopruntime.BucketKey])
 	payload, _ := json.Marshal(map[string]any{
 		"activity_id": "inspect", "tool": "provider.read", "input": map[string]any{"id": "x"},
-		"effect_class":  string(runtimecontracts.ActivityEffectClassReadOnly),
 		"success_event": "read.succeeded", "failure_event": "read.failed",
-		"fork_policy": "reexecute_read",
-		"entity_id":   entityID, "node_id": readerOwner.Key(), "flow_id": "flow-a", "flow_instance": "flow-a", "handler_event_key": "review.inspect",
-		"source_event_id": sourceEventID, "source_run_id": sourceRunID, "attempt": 1,
+		"entity_id": entityID, "node_id": readerOwner.Key(), "flow_id": "flow-a", "flow_instance": "flow-a", "handler_event_key": "review.inspect",
+		"source_event_id": sourceEventID, "source_run_id": sourceRunID,
 		"loop_generation": sourceGeneration, "loop_stage": "review",
 	})
 	seedDeclaredActivityRequestExecutionSource(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "reader", at, selectedActivityProducerSourceWithLoops(t, false, true), payload)
@@ -233,11 +228,9 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	handlerLoops, _ := json.Marshal(buckets[loopruntime.BucketKey])
 	requestPayload, _ := json.Marshal(map[string]any{
 		"activity_id": "commit", "tool": "provider.write", "input": map[string]any{"value": "x"},
-		"effect_class":  string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		"success_event": "write.succeeded", "failure_event": "write.failed",
-		"fork_policy": "reuse_recorded_result",
-		"entity_id":   entityID, "node_id": writerOwner.Key(), "flow_id": "flow-a", "flow_instance": "flow-a", "handler_event_key": "review.accepted",
-		"source_event_id": sourceEventID, "source_run_id": sourceRunID, "attempt": 1,
+		"entity_id": entityID, "node_id": writerOwner.Key(), "flow_id": "flow-a", "flow_instance": "flow-a", "handler_event_key": "review.accepted",
+		"source_event_id": sourceEventID, "source_run_id": sourceRunID,
 		"loop_generation": generation, "loop_stage": "review",
 	})
 	seedDeclaredActivityRequestExecutionSource(t, db, sourceRunID, entityID, requestEventID, sourceEventID, "writer", at, selectedActivityProducerSourceWithLoops(t, false, true), requestPayload)
@@ -266,7 +259,7 @@ func TestSelectedContractForkPreservesTypedFailedWriteEvidence(t *testing.T) {
 	}
 	failure := string(failureJSON)
 	resultPayload, _ := json.Marshal(map[string]any{
-		"activity_id": "commit", "tool": "provider.write", "effect_class": "non_idempotent_write", "attempt": 1,
+		"activity_id": "commit", "tool": "provider.write",
 		"failure": map[string]any{"code": "provider_unavailable"}, "revision_id": generation.RevisionID,
 	})
 	resultEventID := activityidentity.ResultEventID(fact, "write.failed")

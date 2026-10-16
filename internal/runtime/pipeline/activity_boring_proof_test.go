@@ -20,6 +20,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -365,11 +366,15 @@ func VerifyNativeActivityBoringProofRetryIsBoundedAndTracedForTest(t *testing.T,
 			if !handled {
 				t.Fatal("handleEventResult handled = false, want true")
 			}
-			if got := calls.Load(); got != 3 {
-				t.Fatalf("server calls = %d, want bounded retry success on third attempt", got)
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("server calls = %d, want one HTTP attempt without transient-response retry", got)
 			}
-			assertActivityBoringRuntimeLogActionCount(t, fixture.bus, "attempt_started", 3)
+			assertActivityBoringRuntimeLogActionCount(t, fixture.bus, "attempt_started", 1)
 			assertActivityBoringRuntimeLogAction(t, fixture.bus, "result_published")
+			journal, found, err := fixture.pc.workflowStore.LoadActivityAttempt(ctx, request.Event.ID())
+			if err != nil || !found || journal.Status != ActivityAttemptStatusFailed || journal.Attempt != 1 || journal.Failure == nil || journal.Failure.Class != runtimefailures.ClassConnectorFailure || journal.Failure.Detail.Code != "provider_http_status" {
+				t.Fatalf("transient HTTP response did not retain its exact known failure: %+v found=%t err=%v", journal, found, err)
+			}
 		})
 	}
 }
@@ -383,7 +388,7 @@ func TestActivityBoringProofRuntimeLogFailureDoesNotBlockReadOnlyActivity(t *tes
 	defer server.Close()
 
 	bus := &recordingPipelineBus{runtimeLogErr: errors.New("runtime log unavailable")}
-	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
+	pc := newJournaledActivityHTTPComponentForTest(t, bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: activityBoringSource(server.URL)},
 	})
 	intent := newActivityBoringIntent("https://example.com/source", testPipelineRunID)

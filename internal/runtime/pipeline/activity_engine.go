@@ -297,6 +297,9 @@ func (d pipelineActivityDispatcher) reuseExistingNonIdempotentActivityAttempt(ct
 	if err := validateActivityAttemptClaimIdentity(existing, expected); err != nil {
 		return true, err
 	}
+	if existing.Status != ActivityAttemptStatusStarted {
+		d.logActivityRuntime(ctx, intent, "result_reused", map[string]any{"result_event_id": existing.ResultEventID})
+	}
 	return true, d.publishExistingActivityAttempt(ctx, intent, existing)
 }
 
@@ -417,6 +420,7 @@ func (d pipelineActivityDispatcher) executeNonIdempotentActivityIntent(ctx conte
 	if !inserted {
 		return d.publishExistingActivityAttempt(ctx, intent, started)
 	}
+	d.logActivityRuntime(ctx, intent, "attempt_started", nil)
 	if mockResponse != nil {
 		result, err := mockResponse.Materialize()
 		if err != nil {

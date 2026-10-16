@@ -829,7 +829,7 @@ func TestPipelineActivityRequestEventExecutesHTTPToolAndPublishesGeneratedSucces
 		},
 	})
 	bus := &recordingPipelineBus{}
-	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
+	pc := newJournaledActivityHTTPComponentForTest(t, bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	intent := testActivityIntent(inputURL)
@@ -880,7 +880,7 @@ func TestPipelineActivityRequestEventExecutesHTTPToolAndPublishesGeneratedSucces
 	}
 }
 
-func TestPipelineActivityRequestRetriesReadOnlyHTTPTool(t *testing.T) {
+func TestPipelineActivityRequestDoesNotRetryHTTPFailure(t *testing.T) {
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -901,7 +901,7 @@ func TestPipelineActivityRequestRetriesReadOnlyHTTPTool(t *testing.T) {
 		},
 	})
 	bus := &recordingPipelineBus{}
-	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
+	pc := newJournaledActivityHTTPComponentForTest(t, bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	intent := testActivityIntent("https://example.com/source")
@@ -916,8 +916,8 @@ func TestPipelineActivityRequestRetriesReadOnlyHTTPTool(t *testing.T) {
 	if !handled {
 		t.Fatal("handleEventResult handled = false, want true")
 	}
-	if calls != 2 {
-		t.Fatalf("server calls = %d, want retry then success", calls)
+	if calls != 1 {
+		t.Fatalf("server calls = %d, want exactly one request despite a transient 5xx", calls)
 	}
 	if len(bus.publishes) != 1 {
 		t.Fatalf("published events = %d, want 1", len(bus.publishes))
@@ -926,8 +926,21 @@ func TestPipelineActivityRequestRetriesReadOnlyHTTPTool(t *testing.T) {
 	if err := json.Unmarshal(bus.publishes[0].Payload(), &payload); err != nil {
 		t.Fatalf("payload unmarshal: %v", err)
 	}
-	if got := payload["attempt"]; got != float64(2) {
-		t.Fatalf("payload attempt = %#v, want 2", got)
+	if _, present := payload["attempt"]; present {
+		t.Fatalf("result exposed a retired retry field: %#v", payload)
+	}
+	var result struct {
+		Failure runtimefailures.Envelope `json:"failure"`
+	}
+	if err := json.Unmarshal(bus.publishes[0].Payload(), &result); err != nil || result.Failure.Class != runtimefailures.ClassConnectorFailure || result.Failure.Detail.Code != "provider_http_status" {
+		t.Fatalf("complete 5xx lost its known failure: %+v %v", result, err)
+	}
+	first := bus.publishes[0]
+	if _, _, err := pc.handleEventResult(testAuthorActivityContext(t, context.Background()), request.Event); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || len(bus.publishes) != 2 || bus.publishes[1].ID() != first.ID() || !bus.publishes[1].CreatedAt().Equal(first.CreatedAt()) {
+		t.Fatalf("terminal result replay reissued or reminted: calls=%d publications=%+v", calls, bus.publishes)
 	}
 }
 
