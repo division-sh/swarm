@@ -126,6 +126,7 @@ func VerifyFanOutEntitySourceRevisionWriterPreservesNumberKindsForTest(t *testin
 			}
 			runID := uuid.NewString()
 			var raw []byte
+			var domain string
 			rollback := errors.New("rollback isolated encoding test")
 			write := func(ctx context.Context, attempt *mutationprotocol.Attempt) (struct{}, error) {
 				err := attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
@@ -138,7 +139,7 @@ func VerifyFanOutEntitySourceRevisionWriterPreservesNumberKindsForTest(t *testin
 					if err != nil {
 						return err
 					}
-					if err := tx.QueryRowContext(ctx, `SELECT new_value FROM entity_mutations WHERE mutation_id=$1`, mutationID).Scan(&raw); err != nil {
+					if err := tx.QueryRowContext(ctx, `SELECT domain,new_value FROM entity_mutations WHERE mutation_id=$1`, mutationID).Scan(&domain, &raw); err != nil {
 						return err
 					}
 					return rollback
@@ -161,6 +162,9 @@ func VerifyFanOutEntitySourceRevisionWriterPreservesNumberKindsForTest(t *testin
 			}
 			if !errors.Is(result.Err(), rollback) {
 				t.Fatalf("source revision attempt = %v, want isolated rollback", result.Err())
+			}
+			if domain != "fan_out_source" {
+				t.Fatalf("source observation persisted as a business mutation: %q", domain)
 			}
 			var items []map[string]any
 			if err := canonicaljson.DecodePreservingNumberLexemes(raw, &items); err != nil {

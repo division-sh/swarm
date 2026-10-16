@@ -437,7 +437,7 @@ func loadFanOutEvaluation(ctx context.Context, db *sql.DB, postgres bool, resour
 			if !inLineage {
 				return input, fmt.Errorf("fan-out entity source run %s is outside intent run %s fork lineage", intent.Source.RunID, intent.Request.Key.RunID)
 			}
-			if err := db.QueryRowContext(ctx, `SELECT new_value FROM entity_mutations WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='authored_field' AND path=$4`, intent.Source.MutationID, intent.Source.RunID, intent.Source.EntityID, intent.Source.Field).Scan(&raw); err != nil {
+			if err := db.QueryRowContext(ctx, `SELECT new_value FROM entity_mutations WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain IN ('authored_field','fan_out_source') AND path=$4`, intent.Source.MutationID, intent.Source.RunID, intent.Source.EntityID, intent.Source.Field).Scan(&raw); err != nil {
 				return input, err
 			}
 			input.Items, err = collectionRangeFromJSON(raw, intent.Request, intent.Cursor, endOrdinal)
