@@ -2022,11 +2022,24 @@ func (a *Adapter) SnapshotsForEvent(ctx context.Context, q queryer, eventID stri
 	return snapshots[eventID], nil
 }
 
-// SnapshotsForRun keeps diagnostic instance accounting on the same canonical
-// delivery decoder as execution, without granting claim or settlement authority.
-func (a *Adapter) SnapshotsForRun(ctx context.Context, q queryer, runID string) ([]Snapshot, error) {
+// RunOperationalFact is detached diagnostic evidence, not a claim, execution
+// authority or generic snapshot with executable route/initialization custody.
+type RunOperationalFact struct {
+	DeliveryID, EventID, RunID, SubscriberID string
+	RouteIdentity                            string
+	AgentIdentity                            agentidentity.Identity
+	FlowInstance                             string
+	SubscriberClass                          SubscriberClass
+	Status                                   Status
+	ReasonCode                               string
+	KnownCompletionAttempts                  map[string]bool
+}
+
+// RunOperationalEvidence uses the caller's retained snapshot and keeps native
+// claim-token matching within the canonical delivery owner.
+func (a *Adapter) RunOperationalEvidence(ctx context.Context, q queryer, runID string) ([]RunOperationalFact, error) {
 	if id, err := uuid.Parse(runID); err != nil || id.String() != runID {
-		return nil, fmt.Errorf("delivery run snapshots require exact run identity")
+		return nil, fmt.Errorf("delivery operational evidence requires exact run identity")
 	}
 	rows, err := q.QueryContext(ctx, `SELECT CAST(delivery_id AS TEXT) FROM event_deliveries WHERE run_id=$1 ORDER BY delivery_id`, runID)
 	if err != nil {
@@ -2047,13 +2060,47 @@ func (a *Adapter) SnapshotsForRun(ctx context.Context, q queryer, runID string) 
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Snapshot, 0, len(ids))
+	out := make([]RunOperationalFact, 0, len(ids))
+	byID := make(map[string]int, len(ids))
 	for _, id := range ids {
 		record, err := a.loadByID(ctx, q, id, false)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, snapshotAt(record, now))
+		snapshot := snapshotAt(record, now)
+		path := snapshot.Route.Target.Route().FlowInstance
+		if snapshot.SubscriberClass == SubscriberAgent {
+			_, _, path, err = snapshot.Route.AgentIdentity.ExecutionCoordinates()
+			if err != nil {
+				return nil, err
+			}
+		}
+		byID[id] = len(out)
+		out = append(out, RunOperationalFact{
+			DeliveryID: id, EventID: snapshot.EventID, RunID: snapshot.RunID, SubscriberID: snapshot.SubscriberID,
+			RouteIdentity: events.EncodeDeliveryRouteIdentity(snapshot.RouteIdentity), AgentIdentity: snapshot.Route.AgentIdentity,
+			FlowInstance: path, SubscriberClass: snapshot.SubscriberClass, Status: snapshot.Status, ReasonCode: snapshot.ReasonCode,
+			KnownCompletionAttempts: make(map[string]bool),
+		})
+	}
+	rows, err = q.QueryContext(ctx, `SELECT CAST(d.delivery_id AS TEXT),CAST(a.attempt_id AS TEXT)
+		FROM event_delivery_attempts d JOIN runtime_external_effect_attempts a
+		ON d.delivery_id=a.origin_delivery_id AND d.claim_version=a.origin_claim_version AND d.claim_token=a.origin_claim_token
+		WHERE a.origin_kind='delivery' AND a.origin_run_id=$1`, runID)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var deliveryID, attemptID string
+		if err := rows.Scan(&deliveryID, &attemptID); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		if index, found := byID[deliveryID]; found {
+			out[index].KnownCompletionAttempts[attemptID] = true
+		}
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
 	}
 	return out, nil
 }
