@@ -88,7 +88,7 @@ func TestA2CollectionProjectionCatalogAndDigestWitness(t *testing.T) {
 		func(s *FanOutPlanSemantics) { s.CollectionProjection.Kind = CollectionListItems },
 		func(s *FanOutPlanSemantics) { s.ItemsFrom = "entity.items" },
 		func(s *FanOutPlanSemantics) { s.MaxItems++ },
-		func(s *FanOutPlanSemantics) { s.SourceAfterWrites = true },
+		func(s *FanOutPlanSemantics) { s.IdentityDerived = false },
 		func(s *FanOutPlanSemantics) { s.ItemAlias = "other" },
 		func(s *FanOutPlanSemantics) { s.Emit.Event = "other.ready" },
 	} {

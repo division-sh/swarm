@@ -1283,7 +1283,7 @@ func TestExecutor_StepOrderIsStable(t *testing.T) {
 	if len(steps) != 22 {
 		t.Fatalf("step count = %d, want 22", len(steps))
 	}
-	if steps[0] != StepLoop || steps[1] != StepQuery || steps[len(steps)-1] != StepClear {
+	if steps[0] != StepLoop || steps[1] != StepClearGates || steps[len(steps)-1] != StepClear {
 		t.Fatalf("unexpected step order: %v", steps)
 	}
 	if steps[6] != StepFilter {
@@ -1916,9 +1916,8 @@ func TestExecutor_AccumulatorProjectionBindsEntityFanOutSourceAfterProjection(t 
 	if len(plans) != 1 {
 		t.Fatalf("compiled fan-out plans = %d, want 1", len(plans))
 	}
-	plan := plans[0]
-	if !plan.SourceAfterWrites {
-		t.Fatal("compiled fan-out plan did not classify accumulator projection as a source mutation")
+	if plans[0].ItemsFrom != "entity.scores" {
+		t.Fatal("compiled fan-out plan lost its exact state-list source")
 	}
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		ExecutionFlowID: identity.NormalizeFlowID("."),
@@ -2448,7 +2447,7 @@ func TestExecutor_ComputeReadsAccumulatorByMatchedHandlerEventKey(t *testing.T) 
 	lifecycleNode := testFlowExecutableNode(t, "operating", "lifecycle-orchestrator")
 	accumulator := &Accumulator{}
 	for _, key := range []string{"a", "b"} {
-		if _, err := accumulator.Admit(&runtimecontracts.AccumulateSpec{Key: "payload.component_id"}, map[string]any{"component_id": key}, ""); err != nil {
+		if _, err := accumulator.Admit(&runtimecontracts.AccumulateSpec{Key: "component_id"}, map[string]any{"component_id": key}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -3703,7 +3702,7 @@ func TestExecutor_ListPrimitivesMutateState(t *testing.T) {
 	}
 	node := testRootExecutableNode(t, "node-1")
 	seedAccumulator := &Accumulator{}
-	if _, err := seedAccumulator.Admit(nil, map[string]any{"seed": true}, "seed"); err != nil {
+	if _, err := seedAccumulator.Admit(nil, map[string]any{"seed": true}); err != nil {
 		t.Fatal(err)
 	}
 	storeAccumulator(&initial, node, "items.submitted", seedAccumulator)

@@ -57,7 +57,7 @@ func projectAgentValue(key string, value yamlsource.Value) (AgentRegistryEntry, 
 	}
 	lists := map[string]*[]string{
 		"subscriptions": &out.Subscriptions, "tools": &out.Tools, "permissions": &out.Permissions,
-		"flow_data_access": &out.FlowDataAccess, "criteria": &out.Criteria, "emit_events": &out.EmitEvents,
+		"flow_data_access": &out.FlowDataAccess, "emit_events": &out.EmitEvents,
 	}
 	for _, name := range sortedContractKeys(fields) {
 		field := fields[name]

@@ -403,61 +403,49 @@ func fanOutPlanRegistryTestBundle(t *testing.T, handler SystemNodeEventHandler) 
 	return bundle
 }
 
-func TestFanOutSourceAfterWritesClassifiesEveryEntityMutationForm(t *testing.T) {
+func Test2293Q1FanOutPlansCarryOnlyPrecedingHandlerWrites(t *testing.T) {
 	node, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "dispatcher")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	tests := []struct {
-		name       string
-		write      WorkflowDataWrite
-		projection bool
-		want       bool
+		name  string
+		write WorkflowDataWrite
 	}{
-		{name: "explicit direct", write: WorkflowDataWrite{TargetRef: "entity.items", Value: LiteralExpression([]any{"next"})}, want: true},
-		{name: "implicit direct", write: WorkflowDataWrite{TargetField: "items", Value: LiteralExpression([]any{"next"})}, want: true},
-		{name: "mapped path", write: WorkflowDataWrite{TargetPathRef: "entity.items", SourceField: "replacement"}, want: true},
-		{name: "computed value", write: WorkflowDataWrite{TargetRef: "entity.items", Value: CELExpression("payload.replacement")}, want: true},
-		{name: "contained append", write: WorkflowDataWrite{Operation: WorkflowDataOperationAppend, TargetRef: "entity.items", Value: LiteralExpression("next")}, want: true},
-		{name: "nested source field", write: WorkflowDataWrite{TargetRef: "entity.items.0", Value: LiteralExpression("next")}, want: true},
-		{name: "different field", write: WorkflowDataWrite{TargetRef: "entity.other", Value: LiteralExpression([]any{"next"})}, want: false},
-		{name: "accumulator projection", projection: true, want: true},
+		{name: "explicit direct", write: WorkflowDataWrite{TargetRef: "entity.items", Value: LiteralExpression([]any{"next"})}},
+		{name: "implicit direct", write: WorkflowDataWrite{TargetField: "items", Value: LiteralExpression([]any{"next"})}},
+		{name: "mapped path", write: WorkflowDataWrite{TargetPathRef: "entity.items", SourceField: "replacement"}},
+		{name: "computed value", write: WorkflowDataWrite{TargetRef: "entity.items", Value: CELExpression("payload.replacement")}},
+		{name: "contained append", write: WorkflowDataWrite{Operation: WorkflowDataOperationAppend, TargetRef: "entity.items", Value: LiteralExpression("next")}},
+		{name: "nested source field", write: WorkflowDataWrite{TargetRef: "entity.items.0", Value: LiteralExpression("next")}},
+		{name: "different field", write: WorkflowDataWrite{TargetRef: "entity.other", Value: LiteralExpression([]any{"next"})}},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			bundle := &WorkflowContractBundle{
-				RootEntities: EntityContractsDocument{
-					"subject": {Fields: map[string]EntityFieldDecl{
-						"items": {Type: "[text]"},
-						"other": {Type: "[text]"},
-					}},
-				},
+			fanOut := func() *FanOutSpec {
+				return &FanOutSpec{ItemsFrom: "entity.items", As: "item", Identity: "item", Emit: EmitSpec{Event: "item.requested"}}
 			}
+			selectedWrites := WorkflowDataAccumulation{Writes: []WorkflowDataWrite{{TargetField: "later", Value: CELExpression("fan_out.count")}}}
 			handler := SystemNodeEventHandler{
-				FanOut: &FanOutSpec{ItemsFrom: "entity.items", As: "item", Identity: "item", Emit: EmitSpec{Event: "item.requested"}},
-			}
-			if tc.projection {
-				handler.Accumulate = &AccumulateSpec{Into: "collected"}
-				decl := bundle.RootEntities["subject"]
-				field := decl.Fields["items"]
-				field.MaterializeFrom = "dispatcher.collected"
-				decl.Fields["items"] = field
-				bundle.RootEntities["subject"] = decl
-			} else {
-				handler.DataAccumulation.Writes = []WorkflowDataWrite{tc.write}
+				FanOut:           fanOut(),
+				DataAccumulation: WorkflowDataAccumulation{Writes: []WorkflowDataWrite{tc.write}},
+				Rules:            []HandlerRuleEntry{{Condition: "true", FanOut: fanOut(), DataAccumulation: selectedWrites}},
+				OnComplete:       []HandlerRuleEntry{{Condition: "true", FanOut: fanOut(), DataAccumulation: selectedWrites}},
 			}
 			qualified, err := completeFanOutSemanticsTestIdentity(node, handler)
 			if err != nil {
 				t.Fatal(err)
 			}
-			path, err := ValidateFanOutItemsSource(*qualified.FanOut)
-			if err != nil {
-				t.Fatal(err)
+			sites := HandlerFanOutSites(qualified)
+			if len(sites) != 3 {
+				t.Fatalf("fan-out sites = %d, want 3", len(sites))
 			}
-			if got := bundle.fanOutSourceAfterWrites(node, qualified, *qualified.FanOut, path); got != tc.want {
-				t.Fatalf("fanOutSourceAfterWrites = %v, want %v", got, tc.want)
+			for _, site := range sites {
+				if len(site.Writes) != 1 || site.Writes[0].Target() != tc.write.Target() {
+					t.Fatalf("%s must carry the handler write, not a later selected write: %#v", site.Source, site.Writes)
+				}
 			}
 		})
 	}

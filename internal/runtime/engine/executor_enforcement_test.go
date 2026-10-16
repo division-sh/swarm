@@ -520,8 +520,8 @@ func TestExecutor_AccumulationDuplicateStopsBeforeDownstreamEffects(t *testing.T
 	if !ok {
 		t.Fatal("expected accumulator state")
 	}
-	if got := len(acc.Received); got != 1 {
-		t.Fatalf("received count = %d, want 1", got)
+	if _, exists := repo.snapshot.StateCarrier.StateBuckets[first.Node.Key()][handlerAccumulatorBucketKey]; exists {
+		t.Fatal("keyed collection wrote a private receipt bucket")
 	}
 	if got := len(acc.Items); got != 1 {
 		t.Fatalf("item count = %d, want 1", got)

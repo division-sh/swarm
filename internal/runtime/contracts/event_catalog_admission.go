@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -180,7 +179,7 @@ func admitEventCatalogFields(name string, value yamlsource.Value, bare bool) ([]
 func populateEventCatalogPayload(entry *EventCatalogEntry, fields []yamlsource.MappingField) error {
 	payloadFieldNames := make([]string, 0, len(fields))
 	for _, field := range fields {
-		if field.Name == "key" || field.Name == "description" {
+		if field.Name == "key" {
 			continue
 		}
 		payloadField, optional, typeSource, err := admitEventPayloadField(field.Value)
@@ -207,9 +206,6 @@ func populateEventCatalogPayload(entry *EventCatalogEntry, fields []yamlsource.M
 				SourceLine:   location.Line,
 				SourceColumn: location.Column,
 			}
-		}
-		if err := populateEventPayloadFieldAdmissionProvenance(entry, field.Name, field.Value); err != nil {
-			return err
 		}
 	}
 	sort.Strings(entry.Payload.Required)
@@ -277,64 +273,6 @@ func admitEventDeclarationShape(name string, value yamlsource.Value) (bool, erro
 	default:
 		return false, fmt.Errorf("declaration at %s is %s, want mapping", value.Location(), value.Presence())
 	}
-}
-
-func populateEventPayloadFieldAdmissionProvenance(entry *EventCatalogEntry, fieldName string, value yamlsource.Value) error {
-	if entry == nil || value.Presence() != yamlsource.PresenceMapping {
-		return nil
-	}
-	fields, err := uniqueYAMLMappingFields(value, "event payload field provenance")
-	if err != nil {
-		return err
-	}
-	byName := make(map[string]yamlsource.MappingField, len(fields))
-	for _, field := range fields {
-		byName[field.Name] = field
-	}
-	prefix := "fields." + strings.TrimSpace(fieldName) + "."
-	for _, name := range []string{"description", "pattern", "equal_to"} {
-		if field, ok := byName[name]; ok {
-			path := name
-			if name != "description" {
-				path = "refinements." + name
-			}
-			entry.admissionProvenance[prefix+path] = authoredSourceProvenance(field.Value)
-		}
-	}
-	for _, nested := range []struct {
-		prefix string
-		field  yamlsource.MappingField
-		names  []string
-	}{
-		{prefix: prefix + "refinements.length.", field: byName["length"], names: []string{"min", "max"}},
-		{prefix: prefix + "refinements.range.", field: byName["range"], names: []string{"min", "max"}},
-		{prefix: prefix + "citation.", field: byName["citation"], names: []string{"criteria", "allowed_classes"}},
-	} {
-		if err := populateEventNestedAdmissionProvenance(entry, nested.prefix, nested.field, nested.names); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func populateEventNestedAdmissionProvenance(entry *EventCatalogEntry, prefix string, parent yamlsource.MappingField, names []string) error {
-	if entry == nil || parent.Value.Presence() != yamlsource.PresenceMapping {
-		return nil
-	}
-	fields, err := uniqueYAMLMappingFields(parent.Value, "event nested provenance")
-	if err != nil {
-		return err
-	}
-	allowed := make(map[string]struct{}, len(names))
-	for _, name := range names {
-		allowed[name] = struct{}{}
-	}
-	for _, field := range fields {
-		if _, ok := allowed[field.Name]; ok {
-			entry.admissionProvenance[prefix+field.Name] = authoredSourceProvenance(field.Value)
-		}
-	}
-	return nil
 }
 
 func admitEventPayloadField(value yamlsource.Value) (EventFieldSpec, bool, yamlsource.Value, error) {
@@ -409,53 +347,7 @@ func admitEventPayloadMapping(value yamlsource.Value) (EventFieldSpec, bool, yam
 	if err := validateWave1TypeRef(typeName, context); err != nil {
 		return EventFieldSpec{}, false, yamlsource.Value{}, err
 	}
-	out := EventFieldSpec{Type: typeName}
-	if err := populateEventPayloadRefinements(&out, byName); err != nil {
-		return EventFieldSpec{}, false, yamlsource.Value{}, err
-	}
-	return out, optional, typeField.Value, nil
-}
-
-func populateEventPayloadRefinements(out *EventFieldSpec, byName map[string]yamlsource.MappingField) error {
-	const context = "event payload field"
-	var err error
-	if field, ok := byName["description"]; ok {
-		out.Description, err = optionalScalarString(field.Value, context+" description")
-		if err != nil {
-			return err
-		}
-	}
-	if field, ok := byName["pattern"]; ok {
-		out.Refinements.Pattern, err = admitEventPattern(field.Value)
-		if err != nil {
-			return fmt.Errorf("%s pattern: %w", context, err)
-		}
-	}
-	if field, ok := byName["length"]; ok {
-		out.Refinements.Length, err = decodeSchemaLengthRefinementValue(field.Value)
-		if err != nil {
-			return fmt.Errorf("%s length: %w", context, err)
-		}
-	}
-	if field, ok := byName["range"]; ok {
-		out.Refinements.Range, err = decodeSchemaRangeRefinementValue(field.Value)
-		if err != nil {
-			return fmt.Errorf("%s range: %w", context, err)
-		}
-	}
-	if field, ok := byName["equal_to"]; ok {
-		out.Refinements.EqualTo, err = requiredLiteralString(field.Value, context+" equal_to field")
-		if err != nil {
-			return err
-		}
-	}
-	if field, ok := byName["citation"]; ok {
-		out.Citation, err = admitEventCitation(field.Value)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return EventFieldSpec{Type: typeName}, optional, typeField.Value, nil
 }
 
 func admitEventFieldTypeMarker(raw, context string) (string, bool, error) {
@@ -481,42 +373,7 @@ func rejectEventTypeOptionalMarker(typeName, context string) error {
 }
 
 var eventPayloadFieldMappingKeys = map[string]struct{}{
-	"type": {}, "description": {}, "pattern": {}, "length": {}, "range": {}, "equal_to": {}, "citation": {},
-}
-
-func admitEventPattern(value yamlsource.Value) (string, error) {
-	pattern, err := requiredLiteralString(value, "pattern")
-	if err != nil {
-		return "", err
-	}
-	pattern = strings.TrimSpace(pattern)
-	if _, err := regexp.Compile(pattern); err != nil {
-		return "", fmt.Errorf("must compile as a regular expression: %w", err)
-	}
-	return pattern, nil
-}
-
-func admitEventCitation(value yamlsource.Value) (CriteriaCitation, error) {
-	fields, err := uniqueYAMLMappingFields(value, "event citation")
-	if err != nil {
-		return CriteriaCitation{}, err
-	}
-	var out CriteriaCitation
-	for _, field := range fields {
-		switch field.Name {
-		case "criteria":
-			out.Criteria, err = optionalScalarString(field.Value, "citation.criteria")
-		case "allowed_classes":
-			out.AllowedClasses, err = optionalStrictStringSequence(field.Value, "citation.allowed_classes")
-		default:
-			return CriteriaCitation{}, fmt.Errorf("event citation field %q is not supported", field.Name)
-		}
-		if err != nil {
-			return CriteriaCitation{}, err
-		}
-	}
-	out.AllowedClasses = normalizeStrings(out.AllowedClasses)
-	return out, nil
+	"type": {},
 }
 
 func eventPayloadValueIsRetiredNestedBlock(value yamlsource.Value) bool {

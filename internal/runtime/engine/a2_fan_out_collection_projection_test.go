@@ -112,7 +112,7 @@ func TestA2FanOutSelectedPostWriteMapAndFailClosedSources(t *testing.T) {
 	if err != nil || result.FanOutIntent == nil {
 		t.Fatalf("postwrite capture: %v", err)
 	}
-	if !result.FanOutIntent.Capsule.SourceProjection.SourceAfterWrites || result.FanOutIntent.Cardinality != 2 {
+	if result.FanOutIntent.Cardinality != 2 || result.FanOutIntent.Capsule.SourceProjection.ItemsFrom != "entity.items" {
 		t.Fatal("captured prewrite map")
 	}
 	actual, marshalErr := json.Marshal(result.StateMutation.StateCarrier.Fields["items"])

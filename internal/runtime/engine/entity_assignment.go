@@ -25,7 +25,6 @@ type EntityAssignmentPoint struct {
 	WriteIndex         int
 	HasWriteIndex      bool
 	FanOut             bool
-	FanOutAfterWrites  bool
 	RuleCompute        bool
 	GuardCheckIndex    int
 	HasGuardCheckIndex bool
@@ -362,11 +361,14 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 	}
 	topWritten, ruleWritten, projected := false, false, false
 	applyWrites := func(selected bool) bool {
-		if selected && outcome.rule != nil && !ruleWritten {
-			if !writes(outcome.rule.DataAccumulation, true) {
-				return false
+		if selected {
+			if outcome.rule != nil && !ruleWritten {
+				if !writes(outcome.rule.DataAccumulation, true) {
+					return false
+				}
+				ruleWritten = true
 			}
-			ruleWritten = true
+			return true
 		}
 		if !topWritten {
 			if !writes(handler.DataAccumulation, false) {
@@ -406,17 +408,13 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 		if _, found := a.source.FanOutPlanForSite(site); !found {
 			return true
 		}
-		if point != nil && point.Step == step && point.FanOut && !point.FanOutAfterWrites {
-			return false
-		}
-		if !applyWrites(selected) {
-			return false
-		}
-		applyProjection()
 		return point == nil || point.Step != step || !point.FanOut
 	}
 	for _, step := range OrderedSteps {
 		if point != nil && point.Step == step && !point.HasWriteIndex && !point.FanOut && !point.RuleCompute && !point.HasGuardCheckIndex && !point.PolicyCompute {
+			if step == StepGuard {
+				return before.Clone()
+			}
 			if outcome.rule != nil && entityAssignmentSelectionStep(outcome.kind) == step {
 				if point.Condition {
 					for _, condition := range outcome.conditions[:len(outcome.conditions)-1] {
@@ -436,9 +434,21 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 		case StepGuard:
 			for index, check := range handler.Guard.EffectiveChecks() {
 				if point != nil && point.HasGuardCheckIndex && point.GuardCheckIndex == index {
-					return facts
+					guardFacts := before.Clone()
+					for _, prior := range handler.Guard.EffectiveChecks()[:index] {
+						for _, path := range workflowexpr.ConditionPresenceFacts(prior.Check, true) {
+							if strings.HasPrefix(path, "entity.") {
+								guardFacts[strings.TrimPrefix(path, "entity.")] = struct{}{}
+							}
+						}
+					}
+					return guardFacts
 				}
 				assume(check.Check, true)
+			}
+		case StepAccumulate:
+			if handler.Accumulate != nil {
+				assign("entity." + handler.Accumulate.Target)
 			}
 		case StepFilter:
 			if handler.Filter != nil {
@@ -457,14 +467,7 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 				assign(handler.Count.StoreAs)
 			}
 		case StepCompute:
-			var selected *c.HandlerRuleEntry
-			if outcome.rule != nil && entityAssignmentSelectionStep(outcome.kind) == StepJoin {
-				if point != nil && point.Step == step && point.RuleCompute {
-					return facts
-				}
-				selected = outcome.rule
-			}
-			for _, site := range handlerComputations(handler, selected) {
+			for _, site := range handlerComputations(handler, nil) {
 				if point != nil && point.PolicyCompute && site.ruleIndex == point.RuleIndex {
 					return facts
 				}
@@ -479,20 +482,21 @@ func (a *EntityAssignmentAnalysis) transfer(node identity.ExecutableNode, event 
 		case StepJoin, StepOnComplete, StepRules:
 			if outcome.rule != nil && entityAssignmentSelectionStep(outcome.kind) == step {
 				assumeOutcome()
-				if step != StepJoin {
-					if !fanOut(step, true) {
-						return facts
-					}
-					if point != nil && point.Step == step && point.RuleCompute {
-						return facts
-					}
+			}
+			joinSelected := outcome.rule != nil && entityAssignmentSelectionStep(outcome.kind) == StepJoin
+			if outcome.rule != nil && (entityAssignmentSelectionStep(outcome.kind) == step && step != StepJoin || joinSelected && step == StepRules) {
+				if point != nil && point.Step == step && point.RuleCompute {
+					return facts
 				}
-				if step != StepJoin && outcome.rule.Compute != nil {
-					assign(outcome.rule.Compute.StoreAs)
+				for _, site := range handlerComputations(handler, outcome.rule) {
+					assign(site.spec.StoreAs)
+				}
+				if !fanOut(step, true) || !applyWrites(true) {
+					return facts
 				}
 			}
 		case StepDataWrites:
-			if !applyWrites(true) {
+			if !applyWrites(false) {
 				return facts
 			}
 		case StepProjection:

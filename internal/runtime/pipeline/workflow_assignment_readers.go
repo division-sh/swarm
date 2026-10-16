@@ -93,13 +93,13 @@ func entityAssignmentReaderPoint(handler c.SystemNodeEventHandler, reader Workfl
 			point.RuleKind = c.HandlerAdvanceCarrierJoinOnDeadline
 		case "handler.fan_out.emit":
 			point.Step = engine.StepFanOut
-			point.FanOut, point.FanOutAfterWrites = true, true
+			point.FanOut = true
 		case "handler.rules.fan_out.emit":
 			point.Step, point.RuleKind = engine.StepRules, c.HandlerAdvanceCarrierRules
-			point.FanOut, point.FanOutAfterWrites = true, true
+			point.FanOut = true
 		case "handler.on_complete.fan_out.emit":
 			point.Step, point.RuleKind = engine.StepOnComplete, c.HandlerAdvanceCarrierOnComplete
-			point.FanOut, point.FanOutAfterWrites = true, true
+			point.FanOut = true
 		default:
 			return point, fmt.Errorf("emit site %s has no assignment program point", site.Source)
 		}
@@ -167,7 +167,7 @@ func entityAssignmentReaderPoint(handler c.SystemNodeEventHandler, reader Workfl
 		point.Step = engine.StepCompute
 	case "FanOut":
 		point.Step = engine.StepFanOut
-		point.FanOut, point.FanOutAfterWrites = true, reader.FanOutAfterWrites
+		point.FanOut = true
 	case "Condition", "Logic":
 		point.Step, point.Condition = engine.StepRules, true
 	case "DataAccumulation":
@@ -187,7 +187,7 @@ func entityAssignmentReaderPoint(handler c.SystemNodeEventHandler, reader Workfl
 		default:
 			point.Step = engine.StepJoin
 			if field == "Compute" {
-				point.Step = engine.StepCompute
+				point.Step = engine.StepRules
 			}
 		}
 	}

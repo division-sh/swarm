@@ -566,11 +566,27 @@ func (s AccumulateSpec) ItemKeyPath() (paths.Path, error) {
 	if strings.HasPrefix(s.Key, "payload.") {
 		return paths.Path{}, fmt.Errorf("key: %s: key names an item field; write key: %s", s.Key, strings.TrimPrefix(s.Key, "payload."))
 	}
-	path, err := paths.ParseStrictRelative("item." + s.Key)
-	if err != nil || strings.TrimSpace(s.Key) != s.Key || len(path.Segments) != 2 {
+	if !bareAccumulateField(s.Key) {
 		return paths.Path{}, fmt.Errorf("accumulate.key %q must name one bare item field", s.Key)
 	}
 	return paths.Parse("payload." + s.Key), nil
+}
+
+// Accumulate names one field, without interpreting its spelling as a root.
+func bareAccumulateField(name string) bool {
+	if name == "" {
+		return false
+	}
+	for index, char := range name {
+		if char >= 'A' && char <= 'Z' || char >= 'a' && char <= 'z' || char == '_' {
+			continue
+		}
+		if index > 0 && (char >= '0' && char <= '9' || char == '-') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 type ComputeSpec struct {
@@ -1569,7 +1585,6 @@ var agentRegistryEntryFieldOptions = map[string]struct{}{
 	"native_tools":       {},
 	"flow_data_access":   {},
 	"data_access":        {},
-	"criteria":           {},
 	"emit_events":        {},
 	"implementation":     {},
 }

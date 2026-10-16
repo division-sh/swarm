@@ -59,6 +59,14 @@ func Test2293Q1AccumulateStateListSourceShape(t *testing.T) {
 			}
 		})
 	}
+	for _, name := range []string{"state", "item", "entity", "payload", "event", "policy", "fan_out", "computed", "_name", "arrival-id2"} {
+		t.Run("field_named_"+name, func(t *testing.T) {
+			out, err := projectNodeAccumulateValue(accumulateQ1Source(t, "accumulate: {target: "+name+", key: "+name+"}\n"))
+			if err != nil || out == nil || out.Target != name || out.Key != name {
+				t.Fatalf("bare business field was interpreted as a namespace: %#v error=%v", out, err)
+			}
+		})
+	}
 }
 
 func Test2293Q1AccumulateStateListSourceRefusals(t *testing.T) {

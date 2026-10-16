@@ -63,7 +63,6 @@ type FanOutCompiledPlan struct {
 	MaxItems             int                  `json:"max_items"`
 	AuthoredMaxItems     int                  `json:"authored_max_items"`
 	MaxItemsSet          bool                 `json:"max_items_set"`
-	SourceAfterWrites    bool                 `json:"source_after_writes"`
 	Writes               []WorkflowDataWrite  `json:"-"`
 	Emit                 EmitSpec             `json:"emit"`
 }
@@ -84,7 +83,6 @@ type FanOutPlanSemantics struct {
 	Identity             string               `json:"identity"`
 	IdentityDerived      bool                 `json:"identity_derived"`
 	MaxItems             int                  `json:"max_items"`
-	SourceAfterWrites    bool                 `json:"source_after_writes"`
 	Emit                 EmitSpec             `json:"emit"`
 }
 
@@ -114,7 +112,7 @@ func (p FanOutCompiledPlan) SemanticEvidence() FanOutPlanSemantics {
 		CollectionType:       CatalogTypeReference{Type: p.CollectionType.Type, Catalog: cloneTypeCatalogDocument(p.CollectionType.Catalog)},
 		CollectionProjection: p.CollectionProjection.Clone(), ItemType: p.ItemType.Clone(),
 		ItemAlias: p.ItemAlias, Identity: p.Identity, IdentityDerived: p.IdentityDerived,
-		MaxItems: p.MaxItems, SourceAfterWrites: p.SourceAfterWrites, Emit: cloneEmitSpec(p.Emit),
+		MaxItems: p.MaxItems, Emit: cloneEmitSpec(p.Emit),
 	}
 }
 
@@ -140,9 +138,6 @@ func (s FanOutPlanSemantics) Validate(ref FanOutPlanRef) error {
 	}
 	if err := ValidateFanOutAlias(s.ItemAlias); err != nil {
 		return err
-	}
-	if s.SourceAfterWrites && !strings.HasPrefix(s.ItemsFrom, "entity.") {
-		return fmt.Errorf("fan-out payload projection cannot select post-write state")
 	}
 	digest, err := canonicaljson.Hash(s)
 	if err != nil {
@@ -250,9 +245,8 @@ func (b *WorkflowContractBundle) CompileFanOutPlan(node runtimeidentity.Executab
 		ItemAlias:            effective.ItemAlias, Identity: effective.Identity,
 		IdentityDerived: effective.IdentityDerived, MaxItems: effective.MaxItems,
 		AuthoredMaxItems: effective.AuthoredMaxItems, MaxItemsSet: effective.MaxItemsSet,
-		SourceAfterWrites: b.fanOutSourceAfterWrites(node, handler, spec, effective.ItemsPath),
-		Writes:            cloneFanOutWrites(site.Writes),
-		Emit:              emit,
+		Writes: cloneFanOutWrites(site.Writes),
+		Emit:   emit,
 	}
 	plan.Ref.ElementRef = FanOutElementRefFrom(ref)
 	digest, err := canonicaljson.Hash(plan.SemanticEvidence())
@@ -442,60 +436,12 @@ func HandlerFanOutSites(handler SystemNodeEventHandler) []WorkflowFanOutSite {
 	}
 	add("handler.fan_out", FanOutSiteHandler, -1, handler.FanOut, topLevelWrites)
 	for idx := range handler.Rules {
-		writes := append([]WorkflowDataWrite(nil), handler.Rules[idx].DataAccumulation.Writes...)
-		writes = append(writes, topLevelWrites...)
-		add("handler."+handler.Rules[idx].DisplayLabel("rules", idx)+".fan_out", FanOutSiteRule, idx, handler.Rules[idx].FanOut, writes)
+		add("handler."+handler.Rules[idx].DisplayLabel("rules", idx)+".fan_out", FanOutSiteRule, idx, handler.Rules[idx].FanOut, topLevelWrites)
 	}
 	for idx := range handler.OnComplete {
-		writes := append([]WorkflowDataWrite(nil), handler.OnComplete[idx].DataAccumulation.Writes...)
-		writes = append(writes, topLevelWrites...)
-		add("handler."+handler.OnComplete[idx].DisplayLabel("on_complete", idx)+".fan_out", FanOutSiteOnComplete, idx, handler.OnComplete[idx].FanOut, writes)
+		add("handler."+handler.OnComplete[idx].DisplayLabel("on_complete", idx)+".fan_out", FanOutSiteOnComplete, idx, handler.OnComplete[idx].FanOut, topLevelWrites)
 	}
 	return out
-}
-
-func (b *WorkflowContractBundle) fanOutSourceAfterWrites(node runtimeidentity.ExecutableNode, handler SystemNodeEventHandler, spec FanOutSpec, source paths.Path) bool {
-	if source.Root != paths.RootEntity || len(source.Segments) == 0 {
-		return false
-	}
-	sourceField := strings.TrimSpace(source.Segments[0])
-	writes := fanOutSiteWrites(handler, spec)
-	for _, write := range writes {
-		target := paths.Parse(write.Target())
-		if target.Root == paths.RootEntity && len(target.Segments) > 0 && strings.TrimSpace(target.Segments[0]) == sourceField {
-			return true
-		}
-		if !target.HasExplicitRoot() && len(target.Segments) > 0 && strings.TrimSpace(target.Segments[0]) == sourceField {
-			return true
-		}
-	}
-	if handler.Accumulate == nil || strings.TrimSpace(handler.Accumulate.Into) == "" {
-		return false
-	}
-	primary, err := b.ResolveFlowPrimaryEntity(node.FlowPath())
-	if err != nil {
-		return false
-	}
-	decl, ok := primary.Contract.Fields[sourceField]
-	if !ok {
-		return false
-	}
-	want := strings.TrimSpace(node.NodeID()) + "." + strings.TrimSpace(handler.Accumulate.Into)
-	return strings.TrimSpace(decl.MaterializeFrom) == want
-}
-
-func fanOutSiteWrites(handler SystemNodeEventHandler, spec FanOutSpec) []WorkflowDataWrite {
-	want, ok := spec.DeclarationIdentity()
-	if !ok {
-		return nil
-	}
-	for _, site := range HandlerFanOutSites(handler) {
-		got, present := site.Spec.DeclarationIdentity()
-		if present && got == want {
-			return append([]WorkflowDataWrite(nil), site.Writes...)
-		}
-	}
-	return nil
 }
 
 func (b *WorkflowContractBundle) ResolveFanOutEffectiveSemantics(node runtimeidentity.ExecutableNode, eventType string, spec FanOutSpec) (FanOutEffectiveSemantics, error) {

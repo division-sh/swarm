@@ -134,6 +134,20 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 			}
 		}
 	}
+	if context == "agent" && key == "criteria" {
+		remediation = "criteria is not an agent key; put agent instructions in intent, and use a validate row for machine-checked rules."
+	}
+	if context == "event payload field" && key == "citation" {
+		remediation = "citation is not an event field key; declare ordinary payload data and use a validate row for machine-checked rules."
+	}
+	if context == "event payload field" {
+		switch key {
+		case "description", "pattern", "length", "range", "equal_to", "immutable":
+			remediation = "An event field is its type or {type: <type>}; put prose in a YAML comment. Authored refinements are not supported."
+		case "indexed":
+			remediation = "indexed is a state-field option, not an event-field option."
+		}
+	}
 	diagnostic := &LoaderDiagnostic{
 		Code:         "contract_loader.undefined_field",
 		Problem:      fmt.Sprintf("%s field %q is not supported.", context, key),

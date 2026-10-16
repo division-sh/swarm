@@ -1,20 +1,18 @@
 package accumulator
 
 import (
-	"encoding/hex"
 	"fmt"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 )
 
+// State is a detached candidate for the declared state list, not a receipt ledger.
 type State struct {
-	Received   map[string]string `json:"received,omitempty"`
-	Deliveries map[string]string `json:"deliveries,omitempty"`
-	Items      []map[string]any  `json:"items,omitempty"`
-	loadError  error
+	Items     []map[string]any `json:"items"`
+	loadError error
 }
 
 func (s *State) Err() error {
@@ -24,209 +22,146 @@ func (s *State) Err() error {
 	return s.loadError
 }
 
-// Admit checks every refusal before changing either receipts or business items.
-// Delivery receipts are transport idempotency, not implicit business dedup keys.
-func (s *State) Admit(spec *runtimecontracts.AccumulateSpec, payload map[string]any, deliveryID string) (duplicate bool, err error) {
-	return s.admit(spec, payload, deliveryID, false)
-}
-
-// Preview evaluates a hypothetical arrival without minting transport evidence.
-// The caller owns a private snapshot; this state must never be persisted.
-func (s *State) Preview(spec *runtimecontracts.AccumulateSpec, payload map[string]any) (duplicate bool, err error) {
-	return s.admit(spec, payload, "", true)
-}
-
-func (s *State) admit(spec *runtimecontracts.AccumulateSpec, payload map[string]any, deliveryID string, preview bool) (duplicate bool, err error) {
+// Admit compares typed keys and complete items before changing the candidate.
+func (s *State) Admit(spec *runtimecontracts.AccumulateSpec, payload map[string]any) (duplicate bool, err error) {
 	if s.loadError != nil {
 		return false, s.loadError
 	}
-	var key string
-	keyed := spec != nil && spec.Key != ""
-	if keyed {
-		var err error
-		key, err = s.admitBusinessKey(spec.Key, payload)
-		if err != nil {
-			return false, err
-		}
-	} else {
-		if len(s.Received) != 0 {
-			return false, invalidState("unkeyed receipt mode")
-		}
-		if deliveryID == "" && !preview {
-			return false, failures.New(failures.ClassLifecycleConflict, "accumulator_delivery_required", "accumulator", "admit", nil)
-		}
+	if spec == nil {
+		return false, failures.Wrap(failures.ClassSchemaInvalid, "accumulator_key_invalid", "accumulator", "admit", nil, fmt.Errorf("accumulate requires key: <item field>; use op: append to collect every arrival"))
 	}
-	if payload == nil {
-		return false, failures.New(failures.ClassSchemaInvalid, "accumulator_payload_invalid", "accumulator", "admit", nil)
+	if _, err := spec.ItemKeyPath(); err != nil {
+		return false, failures.Wrap(failures.ClassSchemaInvalid, "accumulator_key_invalid", "accumulator", "admit", nil, err)
 	}
-	canonical, err := canonicaljson.Bytes(payload)
+	detached, item, err := admitItem(payload)
 	if err != nil {
 		return false, failures.Wrap(failures.ClassSchemaInvalid, "accumulator_payload_invalid", "accumulator", "admit", nil, err)
 	}
-	if preview && !keyed {
-		s.Items = append(s.Items, cloneObject(payload))
-		return false, nil
+	key, err := itemKey(detached, spec.Key)
+	if err != nil {
+		return false, err
 	}
-	hash := canonicaljson.HashBytes(canonical)
-	identity, receipts := key, s.Received
-	if !keyed {
-		identity, receipts = deliveryID, s.Deliveries
+	existing := make(map[scalarKey]semanticvalue.Value, len(s.Items))
+	for _, stored := range s.Items {
+		_, value, err := admitItem(stored)
+		if err != nil {
+			return false, invalidState("item payload")
+		}
+		storedKey, err := itemKey(stored, spec.Key)
+		if err != nil {
+			return false, invalidState("required scalar key")
+		}
+		if _, duplicate := existing[storedKey]; duplicate {
+			return false, invalidState("duplicate item key")
+		}
+		existing[storedKey] = value
 	}
-	if previous, exists := receipts[identity]; exists {
-		if previous != hash {
+	if previous, found := existing[key]; found {
+		if !previous.Equal(item) {
 			return false, failures.New(failures.ClassConflictingDuplicate, "accumulator_payload_conflict", "accumulator", "admit", nil)
 		}
 		return true, nil
 	}
-	if receipts == nil {
-		receipts = map[string]string{}
-		if keyed {
-			s.Received = receipts
-		} else {
-			s.Deliveries = receipts
-		}
-	}
-	receipts[identity] = hash
-	s.Items = append(s.Items, cloneObject(payload))
+	items := make([]map[string]any, len(s.Items)+1)
+	copy(items, s.Items)
+	items[len(s.Items)] = detached
+	s.Items = items
 	return false, nil
 }
 
-func (s *State) admitBusinessKey(selector string, payload map[string]any) (string, error) {
-	path, err := keyPath(selector)
-	if err != nil {
-		return "", err
+// Preview uses the same list semantics on a caller-owned detached candidate.
+func (s *State) Preview(spec *runtimecontracts.AccumulateSpec, payload map[string]any) (bool, error) {
+	return s.Admit(spec, payload)
+}
+
+// The kind remains part of identity: false, "false", zero and "0" differ.
+type scalarKey struct {
+	kind    semanticvalue.Kind
+	text    string
+	number  float64
+	boolean bool
+}
+
+func itemKey(item map[string]any, name string) (scalarKey, error) {
+	raw, present := item[name]
+	value, err := canonicaljson.FromGo(raw)
+	if !present || err != nil {
+		return scalarKey{}, invalidItemKey(name)
 	}
-	if len(s.Deliveries) != 0 {
-		return "", invalidState("keyed receipt mode")
-	}
-	storedKeys := make(map[string]bool, len(s.Items))
-	for _, item := range s.Items {
-		storedKey, ok := payloadKey(item, path.Segments)
-		if !ok || storedKeys[storedKey] || s.Received[storedKey] == "" {
-			return "", invalidState("business key receipt")
-		}
-		canonical, err := canonicaljson.Bytes(item)
-		if err != nil || s.Received[storedKey] != canonicaljson.HashBytes(canonical) {
-			return "", invalidState("business key payload hash")
-		}
-		storedKeys[storedKey] = true
-	}
-	if len(storedKeys) != len(s.Received) {
-		return "", invalidState("business key receipt count")
-	}
-	key, ok := payloadKey(payload, path.Segments)
-	if !ok {
-		return "", failures.New(failures.ClassSchemaInvalid, "accumulator_key_invalid", "accumulator", "admit", map[string]any{"key": selector})
+	key := scalarKey{kind: value.Kind()}
+	switch value.Kind() {
+	case semanticvalue.KindString:
+		key.text, _ = value.String()
+	case semanticvalue.KindNumber:
+		key.number, _ = value.Number()
+	case semanticvalue.KindBool:
+		key.boolean, _ = value.Bool()
+	default:
+		return scalarKey{}, invalidItemKey(name)
 	}
 	return key, nil
 }
 
-func payloadKey(payload map[string]any, segments []string) (string, bool) {
-	var value any = payload
-	for _, segment := range segments {
-		object, ok := value.(map[string]any)
-		if !ok {
-			return "", false
-		}
-		value = object[segment]
-	}
-	key, ok := value.(string)
-	return key, ok && key != ""
+func invalidItemKey(name string) error {
+	return failures.New(failures.ClassSchemaInvalid, "accumulator_key_invalid", "accumulator", "admit", map[string]any{"key": name})
 }
 
-// Load refuses old boolean receipts rather than inventing payload equality.
-func Load(raw map[string]any) *State {
-	s := &State{Received: map[string]string{}, Deliveries: map[string]string{}}
-	for name, target := range map[string]map[string]string{"received": s.Received, "deliveries": s.Deliveries} {
-		value, present := raw[name]
-		if !present {
-			continue
-		}
-		object, ok := value.(map[string]any)
-		if !ok {
-			s.loadError = invalidState(name)
+func admitItem(item map[string]any) (map[string]any, semanticvalue.Value, error) {
+	if item == nil {
+		return nil, semanticvalue.Value{}, fmt.Errorf("a collected item must be an object")
+	}
+	detached, err := canonicaljson.CloneRuntimeValue(item)
+	if err != nil {
+		return nil, semanticvalue.Value{}, err
+	}
+	value, err := canonicaljson.FromGo(detached)
+	if err != nil {
+		return nil, semanticvalue.Value{}, err
+	}
+	return detached.(map[string]any), value, nil
+}
+
+// Load accepts the state list itself. Retired receipt/bucket objects are not data.
+func Load(raw any) *State {
+	s := &State{}
+	var items []any
+	switch list := raw.(type) {
+	case []map[string]any:
+		if list == nil {
+			s.loadError = invalidState("null list")
 			return s
 		}
-		for key, value := range object {
-			hash, ok := value.(string)
-			decoded, err := hex.DecodeString(strings.TrimPrefix(hash, "sha256:"))
-			if !ok || key == "" || err != nil || len(decoded) != 32 || "sha256:"+hex.EncodeToString(decoded) != hash {
-				s.loadError = invalidState(name)
-				return s
-			}
-			target[key] = hash
-		}
-	}
-	switch items := raw["items"].(type) {
-	case nil:
-	case []map[string]any:
-		for _, item := range items {
-			s.Items = append(s.Items, cloneObject(item))
+		items = make([]any, len(list))
+		for index, item := range list {
+			items[index] = item
 		}
 	case []any:
-		for _, item := range items {
-			object, ok := item.(map[string]any)
-			if !ok {
-				s.loadError = invalidState("items")
-				return s
-			}
-			s.Items = append(s.Items, cloneObject(object))
+		if list == nil {
+			s.loadError = invalidState("null list")
+			return s
 		}
+		items = list
 	default:
-		s.loadError = invalidState("items")
+		s.loadError = invalidState("list value")
+		return s
 	}
-	if s.loadError == nil {
-		s.loadError = s.validateEvidence()
+	s.Items = make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		object, ok := item.(map[string]any)
+		if !ok {
+			s.loadError = invalidState("item object")
+			return s
+		}
+		detached, _, err := admitItem(object)
+		if err != nil {
+			s.loadError = invalidState("item payload")
+			return s
+		}
+		s.Items = append(s.Items, detached)
 	}
 	return s
 }
 
-func (s *State) validateEvidence() error {
-	if len(s.Received)+len(s.Deliveries) != len(s.Items) {
-		return invalidState("receipt count")
-	}
-	hashes := map[string]int{}
-	for _, item := range s.Items {
-		canonical, err := canonicaljson.Bytes(item)
-		if err != nil {
-			return invalidState("item payload")
-		}
-		hashes[canonicaljson.HashBytes(canonical)]++
-	}
-	for _, receipts := range []map[string]string{s.Received, s.Deliveries} {
-		for _, hash := range receipts {
-			if hashes[hash] == 0 {
-				return invalidState("payload hash")
-			}
-			hashes[hash]--
-		}
-	}
-	return nil
-}
-
 func invalidState(field string) error {
-	return failures.Wrap(failures.ClassSchemaInvalid, "accumulator_state_invalid", "accumulator", "load", nil, fmt.Errorf("accumulator %s has no canonical payload evidence", field))
-}
-
-func cloneObject(object map[string]any) map[string]any {
-	result := make(map[string]any, len(object))
-	for key, value := range object {
-		result[key] = cloneValue(value)
-	}
-	return result
-}
-
-func cloneValue(value any) any {
-	switch value := value.(type) {
-	case map[string]any:
-		return cloneObject(value)
-	case []any:
-		result := make([]any, len(value))
-		for index, item := range value {
-			result[index] = cloneValue(item)
-		}
-		return result
-	default:
-		return value
-	}
+	return failures.Wrap(failures.ClassSchemaInvalid, "accumulator_state_invalid", "accumulator", "load", nil, fmt.Errorf("collected state list has invalid %s", field))
 }

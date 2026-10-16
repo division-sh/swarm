@@ -30,13 +30,13 @@ func Test2293Q1StateListCarriesItsOwnItemIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			duplicate, err := state.Admit(spec, cloneObject(first), "new-publication")
+			duplicate, err := state.Admit(spec, cloneObject(first))
 			if err != nil || !duplicate {
 				t.Fatalf("list-only restored identity not recognized: duplicate=%v error=%v", duplicate, err)
 			}
 			changed := cloneObject(first)
 			changed["details"].(map[string]any)["value"] = "changed"
-			_, err = state.Admit(spec, changed, "different-publication")
+			_, err = state.Admit(spec, changed)
 			requireClass(t, err, failures.ClassConflictingDuplicate)
 			after, err := canonicaljson.Bytes(state)
 			if err != nil || !bytes.Equal(before, after) {
@@ -57,7 +57,7 @@ func Test2293Q1StateListKeyIdentityDoesNotStringify(t *testing.T) {
 	spec := &runtimecontracts.AccumulateSpec{Key: "reviewer_id"}
 	for index, key := range []any{false, "false", int64(0), "0", ""} {
 		item := map[string]any{"reviewer_id": key, "sequence": int64(index)}
-		if duplicate, err := state.Admit(spec, item, ""); err != nil || duplicate {
+		if duplicate, err := state.Admit(spec, item); err != nil || duplicate {
 			t.Fatalf("distinct typed key %T(%v) conflated: duplicate=%v error=%v", key, key, duplicate, err)
 		}
 		item["sequence"] = "changed by caller"

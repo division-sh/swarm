@@ -96,7 +96,7 @@ func TestA2SourceProjectionStrictCodecAndPlanAgreement(t *testing.T) {
 		func(r *IntentRequest) { r.Capsule.SourceProjection = rc.FanOutPlanSemantics{} },
 		func(r *IntentRequest) { r.Capsule.SourceProjection.CollectionProjection.Kind = rc.CollectionListItems },
 		func(r *IntentRequest) { r.Capsule.SourceProjection.MaxItems = 2 },
-		func(r *IntentRequest) { r.Capsule.SourceProjection.SourceAfterWrites = true },
+		func(r *IntentRequest) { r.Capsule.SourceProjection.IdentityDerived = false },
 		func(r *IntentRequest) { r.Source.Field = "different" },
 		func(r *IntentRequest) { r.PlanRef.SemanticDigest = "wrong" },
 		func(r *IntentRequest) { r.Cardinality = 6 },
@@ -120,6 +120,15 @@ func TestA2SourceProjectionStrictCodecAndPlanAgreement(t *testing.T) {
 	if err := json.Unmarshal(badRaw, &capsule); err == nil {
 		t.Fatal("unknown source witness field accepted")
 	}
+	delete(wire["source_projection"].(map[string]any), "unexpected")
+	wire["source_projection"].(map[string]any)["source_after_writes"] = true
+	badRaw, err = json.Marshal(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(badRaw, &capsule); err == nil {
+		t.Fatal("retired ordering flag accepted in durable source evidence")
+	}
 }
 
 func TestA2SourceProjectionRetainsExactRevisionAndRangeFences(t *testing.T) {
@@ -127,7 +136,6 @@ func TestA2SourceProjectionRetainsExactRevisionAndRangeFences(t *testing.T) {
 	r.Source = SourceRef{Kind: SourceEntityField, RunID: r.Key.RunID, EntityID: r.Key.RunID, Field: "items"}
 	r.Capsule.EntityID = r.Key.RunID
 	r.Capsule.SourceProjection.ItemsFrom = "entity.items"
-	r.Capsule.SourceProjection.SourceAfterWrites = true
 	var err error
 	r.PlanRef.SemanticDigest, err = canonicaljson.Hash(r.Capsule.SourceProjection)
 	if err != nil {

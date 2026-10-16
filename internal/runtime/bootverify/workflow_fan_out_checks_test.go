@@ -131,7 +131,7 @@ func TestRun_ValidatesFanOutCollectionContract(t *testing.T) {
 	}
 }
 
-func TestRun_RejectsFanOutCountDependencyWhenEntitySourceIsMutated(t *testing.T) {
+func TestRun_RejectsFanOutCountDependencyInPrecedingHandlerWrites(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		mutate func(*runtimecontracts.SystemNodeEventHandler, *runtimecontracts.WorkflowContractBundle)
@@ -155,18 +155,16 @@ func TestRun_RejectsFanOutCountDependencyWhenEntitySourceIsMutated(t *testing.T)
 			},
 		},
 		{
-			name: "accumulator projection",
-			mutate: func(handler *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
-				handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "collected"}
+			name: "unchanged source",
+			mutate: func(handler *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
 				handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{{TargetRef: "metadata.observed_count", Value: runtimecontracts.CELExpression("fan_out.count")}}
-				node := bundle.Nodes["dispatcher"]
-				node.StateSchema.Fields = []runtimecontracts.NodeStateField{{Name: "collected", Type: "[LineItem]"}}
-				bundle.Nodes["dispatcher"] = node
-				entity := bundle.RootEntities["subject"]
-				field := entity.Fields["line_items"]
-				field.MaterializeFrom = "dispatcher.collected"
-				entity.Fields["line_items"] = field
-				bundle.RootEntities["subject"] = entity
+			},
+		},
+		{
+			name: "state list collection",
+			mutate: func(handler *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
+				handler.Accumulate = &runtimecontracts.AccumulateSpec{Target: "line_items", Key: "id"}
+				handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{{TargetRef: "metadata.observed_count", Value: runtimecontracts.CELExpression("fan_out.count")}}
 			},
 		},
 	} {
@@ -194,7 +192,7 @@ func TestRun_RejectsFanOutCountDependencyWhenEntitySourceIsMutated(t *testing.T)
 			completeBootverifyFanOutFixture(t, bundle, "dispatcher", "order.accepted")
 
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-			if !reportContains(report.HardInvalidities(), fanOutValidationCheckID, "mutates fan_out.items_from and a same-handler data write references fan_out.count") {
+			if !reportContains(report.HardInvalidities(), fanOutValidationCheckID, "unconditional handler writes run before fan_out") {
 				t.Fatalf("missing source/count cycle invalidity: %#v", report.HardInvalidities())
 			}
 		})
