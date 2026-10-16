@@ -1,4 +1,4 @@
-package runtime
+package canonicalrouting
 
 import (
 	"crypto/sha256"
@@ -11,16 +11,16 @@ import (
 
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	platformpacks "github.com/division-sh/swarm/packs"
 )
 
 func TestSchemaImportCanonicalProviderSpellings2287(t *testing.T) {
-	repo := canonicalrouting.RepoRoot(t)
+	repo := RepoRoot(t)
 	connectors := packfixture.ConnectorRegistry(t)
 	triggerBody, err := fs.ReadFile(platformpacks.FS(), "provider-triggers/telegram/trigger.yaml")
 	if err != nil {
@@ -63,7 +63,7 @@ func TestSchemaImportCanonicalProviderSpellings2287(t *testing.T) {
 			name: "provider_trigger_events", provider: "telegram_test", member: "event", imported: "inbound.telegram_test.text_message",
 			diagnostic: "provider trigger import must use exact canonical tokens",
 			resolve: func(bundle *runtimecontracts.WorkflowContractBundle) error {
-				source, err := SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), triggers)
+				source, err := runtimepkg.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), triggers)
 				if err != nil {
 					return err
 				}
