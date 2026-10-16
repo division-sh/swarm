@@ -296,7 +296,7 @@ func loadDeliveryAcceptedEmissions(ctx context.Context, q eventReadQueryer, post
 		}
 		source := admitted.Event().RoutingSource()
 		if identity.Route.Presence == agentidentity.RouteRoot {
-			if source.Kind() != events.RoutingSourceRoot {
+			if source.Kind() != events.RoutingSourceStaticFlow || source.Route().FlowID != "." || source.Route().FlowInstance != identity.RunID {
 				continue
 			}
 		} else if source.Route().FlowInstance != path || source.Route().FlowID != identity.Route.ScopeKey {
@@ -332,7 +332,9 @@ func loadDeliveryAcceptedEmissions(ctx context.Context, q eventReadQueryer, post
 		if err := receipt.Validate(); err != nil {
 			return nil, false, err
 		}
-		if receipt.Acceptance.EventID() != id || receipt.Acceptance.Stage().Instance != instance || receipt.Acceptance.Stage().EntityID != request.EntityID {
+		// Entityless agents still publish from a constructed header. As in the
+		// publication owner, only an authored entity binding constrains its ID.
+		if receipt.Acceptance.EventID() != id || receipt.Acceptance.Stage().Instance != instance || request.EntityID != "" && receipt.Acceptance.Stage().EntityID != request.EntityID {
 			return nil, false, fmt.Errorf("accepted emission contradicts its immutable publication receipt")
 		}
 		out = append(out, operatorread.RunAcceptedEmission{EventID: id, EventType: record.EventName})
