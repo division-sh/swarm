@@ -105,13 +105,12 @@ func ResolveDevScratch(state LocalRuntimeStateResolution) (DevScratchResolution,
 }
 
 func resolveLocalRuntimeStateProject(RepoRoot string, resolvedPaths CLISourcePlatformSpecPaths) localRuntimeStateProject {
-	selectedRoot := strings.TrimSpace(resolvedPaths.SourceRoot)
+	selectedRoot := resolvedPaths.SourceRoot
 	if selectedRoot == "" {
 		return localRuntimeStateProject{Status: "no_project", Detail: "no selected source root"}
 	}
 	projectRoot := filepath.Clean(selectedRoot)
 	canonicalProjectRoot, projectDetail := canonicalizeDoctorTargetPath(projectRoot)
-	canonicalProjectRoot = strings.TrimSpace(canonicalProjectRoot)
 	if canonicalProjectRoot == "" {
 		return localRuntimeStateProject{
 			ProjectRoot: projectRoot,

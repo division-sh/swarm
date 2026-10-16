@@ -41,9 +41,8 @@ func LoadWorkflowContractBundleWithOptions(repoRoot, workflowDirOverride, platfo
 	return loadWorkflowContractBundleFromSource(repoRoot, workflowDirOverride, platformSpecFileOverride, options)
 }
 func loadWorkflowContractBundleFromSource(repoRoot, sourceRoot, platformSpecFile string, options WorkflowContractLoadOptions) (*WorkflowContractBundle, error) {
-	sourceRoot = strings.TrimSpace(sourceRoot)
 	if sourceRoot == "" {
-		sourceRoot = strings.TrimSpace(repoRoot)
+		sourceRoot = repoRoot
 	}
 	if strings.TrimSpace(platformSpecFile) == "" {
 		platformSpecFile = DefaultPlatformSpecFile(repoRoot)
