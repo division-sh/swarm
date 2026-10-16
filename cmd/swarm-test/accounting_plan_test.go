@@ -18,7 +18,7 @@ import (
 
 func TestAccountingFinitePlanBindsEveryChangedRowToTrustedSource(t *testing.T) {
 	ctx := context.Background()
-	repo := t.TempDir()
+	repo, base, policy, original := accountingClosureRepo(t)
 	git := func(args ...string) string {
 		t.Helper()
 		command := exec.Command("git", append([]string{"-C", repo}, args...)...)
@@ -44,41 +44,6 @@ func TestAccountingFinitePlanBindsEveryChangedRowToTrustedSource(t *testing.T) {
 		git("-c", "commit.gpgsign=false", "commit", "-qm", "fixture")
 		return git("rev-parse", "HEAD")
 	}
-	git("init", "-q")
-	original, err := os.ReadFile(filepath.Join("..", "..", formatproof.Source))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if formatproof.Digest(original) != formatproof.Origin {
-		raw, err := os.ReadFile(filepath.Join("..", "..", formatproof.Successors))
-		if err != nil {
-			t.Fatal(err)
-		}
-		history, err := formatproof.Read(raw)
-		if err != nil || len(history.Records) == 0 {
-			t.Fatalf("immutable source unavailable: %v", err)
-		}
-		original = []byte(history.Records[0].Before)
-		if formatproof.Digest(original) != formatproof.Origin {
-			t.Fatal("immutable source changed")
-		}
-	}
-	ledger, err := os.ReadFile(filepath.Join("..", "..", formatproof.Ledger))
-	if err != nil {
-		t.Fatal(err)
-	}
-	put(formatproof.Source, original)
-	put(formatproof.Ledger, ledger)
-	put(formatproof.Successors, []byte(`{"version":1,"records":[]}`))
-	put("go.mod", []byte("module fixture\n"))
-	base := commit()
-	policy := approvedAccountingPolicy(t)
-	policy.Inputs = []accountingInput{{Path: "go.mod", SHA256: formatproof.Digest([]byte("module fixture\n"))}}
-	raw, err := json.Marshal(policy.Inputs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	policy.DependencyDigest = formatproof.Digest(raw)
 	observation := accountingPolicyObservation{Commit: base, Policy: policy}
 	first := bytes.Replace(original, []byte("OmitOutputPin               bool"), []byte("OmitOutputPin                bool"), 1)
 	put(formatproof.Source, first)
@@ -111,12 +76,16 @@ func TestAccountingFinitePlanBindsEveryChangedRowToTrustedSource(t *testing.T) {
 	if _, err := deriveFiniteAccountingPlan(ctx, repo, base, final, observation); err == nil {
 		t.Fatal("prewritten successor accepted as author-approved evidence")
 	}
-	put("go.mod", []byte("module other\n"))
+	module, err := os.ReadFile(filepath.Join(repo, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	put("go.mod", append(append([]byte{}, module...), []byte("\n// changed dependency\n")...))
 	foreign := commit()
 	if _, err := deriveFiniteAccountingPlan(ctx, repo, final, foreign, observation); err == nil {
 		t.Fatal("changed guard dependency accepted")
 	}
-	put("go.mod", []byte("module fixture\n"))
+	put("go.mod", module)
 	commit()
 	put(formatproof.Source, bytes.Replace(first, []byte("bool"), []byte("int "), 1))
 	semantic := commit()

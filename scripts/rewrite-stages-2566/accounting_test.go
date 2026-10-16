@@ -117,6 +117,24 @@ func TestFiniteAccountingCopiedSourceAndHistoricalReplayAtBothCuts(t *testing.T)
 	put(formatproof.Ledger, ledgerBytes)
 	history := formatproof.History{Version: 1, Records: []formatproof.Record{}}
 	put(formatproof.Successors, []byte(`{"version":1,"records":[]}`))
+	if err := validateFiniteAccounting(root); err == nil {
+		t.Fatal("historical preimage impersonated current source")
+	}
+	if err := apply(root, formatproof.Ledger, false, false); err != nil {
+		t.Fatalf("explicit historical application preview refused: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, formatproof.Source)); err != nil || !bytes.Equal(got, before) {
+		t.Fatal("historical preview changed the original input")
+	}
+	if err := apply(root, formatproof.Ledger, true, false); err != nil {
+		t.Fatalf("explicit historical application refused: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, formatproof.Source)); err != nil || !bytes.Equal(got, original) {
+		t.Fatal("historical application did not produce the exact origin")
+	}
+	if err := provePlan(root, formatproof.Ledger); err != nil {
+		t.Fatalf("origin historical replay refused: %v", err)
+	}
 	previous := original
 	for index, spaces := range []int{16, 17} {
 		current := bytes.Replace(original, []byte("OmitOutputPin               bool"), []byte("OmitOutputPin"+strings.Repeat(" ", spaces)+"bool"), 1)
@@ -194,6 +212,95 @@ func TestFiniteAccountingCopiedSourceAndHistoricalReplayAtBothCuts(t *testing.T)
 	}
 	if !reflect.DeepEqual(history.Records[0].Before, string(original)) {
 		t.Fatal("copied origin is not self-contained")
+	}
+}
+
+func TestFiniteAccountingEmptyHistoryCannotEraseCurrentEndpoint(t *testing.T) {
+	before, err := os.ReadFile("formatproof/testdata/original.go.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledgerBytes, err := os.ReadFile("finite-fixtures.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ledger plan
+	if err := json.Unmarshal(ledgerBytes, &ledger); err != nil {
+		t.Fatal(err)
+	}
+	var approved change
+	for _, c := range ledger.Changes {
+		if c.File == formatproof.Source {
+			approved = c
+		}
+	}
+	original, err := rewrite(approved, before)
+	if err != nil || digest(original) != formatproof.Origin {
+		t.Fatalf("immutable origin unavailable: %v", err)
+	}
+	current := bytes.Replace(original, []byte("OmitOutputPin               bool"), []byte("OmitOutputPin                bool"), 1)
+	history, err := (formatproof.History{Version: 1, Records: []formatproof.Record{}}).Append(original, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete, err := json.Marshal(history)
+	if err != nil {
+		t.Fatal(err)
+	}
+	literals, err := goLiteralSites(formatproof.Source, original)
+	if err != nil || len(literals) == 0 {
+		t.Fatalf("reviewed generated source lost its literals: %v", err)
+	}
+	root := t.TempDir()
+	put := func(path string, raw []byte) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, path)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, path), raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("scripts/rewrite-stages-2566/entries.json", []byte(`[]`))
+	for _, test := range []struct {
+		name          string
+		source, chain []byte
+		allowed       bool
+	}{
+		{"empty_origin", original, []byte(`{"version":1,"records":[]}`), true},
+		{"complete_endpoint", current, complete, true},
+		{"erased_history", current, []byte(`{"version":1,"records":[]}`), false},
+		{"stale_endpoint", original, complete, false},
+		{"preimage_is_not_current", before, []byte(`{"version":1,"records":[]}`), false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			put(formatproof.Source, test.source)
+			put(formatproof.Successors, test.chain)
+			for name, invoke := range map[string]func() error{
+				"copied_source": func() error { return validateFiniteAccounting(root) },
+				"current_literal": func() error {
+					_, err := readEntryLiteral(root, formatproof.Source, literals[0].Function, literals[0].Ordinal)
+					return err
+				},
+				"retained_entries": func() error { _, err := readCurrentEntryGoldens(root); return err },
+				"disk_entries":     func() error { _, err := baselineEntryGoldens(root, plan{}); return err },
+				"embedded_generated": func() error {
+					_, err := embeddedEntryGoldens(root, change{File: "platform-spec.yaml", Equivalence: []equivalence{{Site: `$["contract_formats"]["hello_world_example"]["schema_yaml"]`}}})
+					return err
+				},
+			} {
+				t.Run(name, func(t *testing.T) {
+					err := invoke()
+					if test.allowed {
+						if err != nil {
+							t.Fatalf("bound current source refused: %v", err)
+						}
+					} else if err == nil || !strings.Contains(err.Error(), "actual resolved endpoint") {
+						t.Fatalf("current consumer accepted unbound source or failed for another reason: %v", err)
+					}
+				})
+			}
+		})
 	}
 }
 

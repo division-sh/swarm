@@ -513,14 +513,53 @@ func checkFiniteAccountingDiff(ctx context.Context, root, base, head string, inp
 			return fmt.Errorf("F1 refuses noncanonical source mode or inclusion")
 		}
 	}
-	for _, input := range inputs {
+	return checkCandidateAccountingClosure(ctx, root, head, inputs)
+}
+
+func checkCandidateAccountingClosure(ctx context.Context, root, head string, approved []accountingInput) (result error) {
+	// Preserve frozen-tree byte checks, then close membership over the checkout
+	// that the guards actually compile, including ignored executable additions.
+	directory, err := archiveAccountingExecutor(ctx, root, head)
+	if err != nil {
+		return err
+	}
+	defer func() { result = errors.Join(result, os.RemoveAll(directory)) }()
+	for _, input := range approved {
 		if input.Path == formatproof.Source || input.Path == formatproof.Successors {
 			continue
 		}
-		raw, err := gitAccountingBlob(ctx, root, head, input.Path)
+		raw, err := os.ReadFile(filepath.Join(directory, input.Path))
 		if err != nil || formatproof.Digest(raw) != input.SHA256 {
 			return fmt.Errorf("candidate changed approved owner/guard dependency %s", input.Path)
 		}
+	}
+	source, err := os.ReadFile(filepath.Join(directory, formatproof.Source))
+	if err != nil {
+		return err
+	}
+	current, err := accountingClosure(ctx, root)
+	if err != nil {
+		return fmt.Errorf("candidate executable closure: %w", err)
+	}
+	expected := make(map[string]string, len(approved))
+	for _, input := range approved {
+		expected[input.Path] = input.SHA256
+	}
+	for _, input := range current {
+		digest, found := expected[input.Path]
+		if !found {
+			return fmt.Errorf("candidate executable closure gained unapproved member %s", input.Path)
+		}
+		if input.Path == formatproof.Source && input.SHA256 != formatproof.Digest(source) {
+			return fmt.Errorf("candidate executable closure differs from frozen F1 source")
+		}
+		if input.Path != formatproof.Source && input.Path != formatproof.Successors && input.SHA256 != digest {
+			return fmt.Errorf("candidate executable closure changed approved bytes %s", input.Path)
+		}
+		delete(expected, input.Path)
+	}
+	if len(expected) != 0 {
+		return fmt.Errorf("candidate executable closure lost %d approved members", len(expected))
 	}
 	return nil
 }
