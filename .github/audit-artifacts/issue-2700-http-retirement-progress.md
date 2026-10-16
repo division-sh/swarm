@@ -34,9 +34,12 @@ remains provisional lifecycle / local focused, no hosted run or local tier.
   expected request, response, assertion or source digest. Frozen packets and
   user jobflow/twitter-gen files are untouched.
 - The earlier constant-carrier/result-column preservation is SUPERSEDED by
-  amendment2 and gate6223417528. Authored activity policy carriers and the
-  activity_attempts class column must be deleted together; that connected
-  deletion is still open. Internal managed-effect accounting and exact
+  amendment2 and gate6223417528. Signed fe20b2dc0e removes the authored activity
+  policy carriers and activity_attempts class column together. Current request,
+  result, approval, card/digest, authoring-view, native INSERT/SELECT/copy and
+  schema projections are key-free. Original native attempt1, execution_binding,
+  source/input/reply/loop/mode identity and result-time fences remain. Its focused
+  execution qualification is still open. Internal managed-effect accounting and exact
   platform-operation policy remain, not caller-authored policy.
 
 ## Amended Platform Slot And Teaching Cut
@@ -128,16 +131,54 @@ Earlier declaration-positive/notice receipts are superseded, not silently
 counted for retirement. Agent credit above does not qualify handler takeover
 or R04 recovery.
 
+## Current Carrier And R04 Candidate
+
+Original carrier/schema RED is retained in
+amendment2-activity-carriers-original-red.log at signed253df7f075. The later
+carrier candidate1 invocation compiled, then was cancelled while queued before
+ANY test started; amendment2-activity-carriers-race3-candidate1.log is explicitly
+incomplete and supplies no pass credit. The separate adapter-compile1 invocation
+compiled pipeline, runtime/startupownership, activityjournal and
+runtimepersistence with /bin/true as the execution target; this is build-only,
+not native execution or a focused proof.
+
+Signed6a9934d6ac adds the finite four-file recovery component consumed by E's
+exact6224471327 port: DisplacedHTTPActivityResult and its content controls,
+plus the genuine ActivityPostgresOwner/ActivitySQLiteOwner recovery adapter and
+its native-frame refusal controls. It consumes only the lent attempt and E's
+opaque cut. The original global mutation fence precedes domain locking; each
+eligible live row needs a positively proved displaced exact historical grant,
+active run/source admission and exact original request/input/reply/loop identity.
+Current and selected grants are not settled. Copied/legacy terminal history is
+non-executing, while a started row without its original binding refuses. Known
+terminal outcomes are preserved, not replaced with uncertainty. New settlement
+uses the existing native uncertain/result/story owner in the same transaction.
+No HTTP, event publication, new queue or independent commit is inside the adapter.
+Returned values are still pre-ACK candidates. E owns retained-session assembly
+and its pre-normal/pre-selected startup hook; post-ACK publication must consume
+the existing durable journal/readback obligation, not treat the summary as ACK.
+
+The same candidate includes sealed retained-generation journal capture and
+per-dispatch retention. Replacement cannot redirect a callback to the successor
+journal; original native currentness fences still refuse late writes. Runtime
+installation hunks and actual native takeover remain open until E's concrete
+bind-once assembly is composed. Model/SQLmock controls are not substituted for
+the required genuine both-store takeover, rollback, ACK-loss and late-writer
+proofs. The race3 candidate log is
+amendment2-activity-carriers-and-r04-race3-candidate1.log; its outcome must be
+recorded after completion, not assumed here.
+
 ## Still Open
 
 R04 now has the nullable native execution_binding column and strict codec,
 exact pre-mutation identity checks and explicit non-executing fork-copy NULL.
 The original-role process/grant/selected fences are now called by each native
-owner writer, but runtime installation/per-dispatch capture and E's fixed-session
-recovery integration remain unimplemented. Joint gate6221888821/6221925281 is approved;
+owner writer. Per-dispatch capture and A's private native adapter now exist as
+staging above, but runtime installation and E's fixed-session recovery integration
+are not yet composed. Joint gate6221888821/6221925281 is approved;
 the exact port and historical/non-executing writer map are in
 issue-2700-r04-activity-port.md. The native staging boundary and all original
-REDs are accounted in issue-2700-r04-native-progress.md. No recovery sweep has
+REDs are accounted in issue-2700-r04-native-progress.md. No startup recovery sweep has
 been enabled, no reference-only claim supplies permission, and the original
 component reopen RED remains visible. Original writers refuse unbound roles;
 the currently uninstalled runtime journal must be connected before native HTTP
