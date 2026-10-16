@@ -40,9 +40,9 @@ var unretainedCleanupFixtureChain = map[operatorSnapshotFixtureDeclaration]map[s
 		"insertUnretainedCleanupEventTx": 1, "InstallUnretainedCleanupHistoryTx": 1,
 	},
 	{unretainedEventFixturePath, "", "validateUnretainedCleanupHistoryInputsForTest"}: {"unretainedCleanupActorIdentity": 1},
-	{unretainedEventFixturePath, "", "unretainedCleanupActorIdentity"}:         {},
-	{unretainedEventFixturePath, "", "unretainedCleanupHistoryRecords"}:        {},
-	{unretainedEventFixturePath, "", "insertUnretainedCleanupEventTx"}:         {},
+	{unretainedEventFixturePath, "", "unretainedCleanupActorIdentity"}:                {},
+	{unretainedEventFixturePath, "", "unretainedCleanupHistoryRecords"}:               {},
+	{unretainedEventFixturePath, "", "insertUnretainedCleanupEventTx"}:                {},
 	{unretainedEventFixturePath, "", "ReadUnretainedSelectedForkCleanupHistoryForTest"}: {
 		"ValidateUnretainedCleanupHistoryTargetTx": 1, "ReadUnretainedCleanupHistoryTx": 1,
 	},
