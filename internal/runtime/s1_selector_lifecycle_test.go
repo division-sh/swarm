@@ -148,3 +148,26 @@ func TestS1NodeAndInputProducerProofsPreserveRawSelectors(t *testing.T) {
 		}
 	}
 }
+
+func TestS1InputProducerCacheSeparatesConcurrentRawSelectors(t *testing.T) {
+	source := s1TriggerConsumerSource(t)
+	_, resolver := pinrouting.CompileConnectGraphWithInputProducerResolver(source)
+	options := runtimecontracts.FlowInputProducerResolutionOptions{AllowNonInputEvent: true}
+	for _, exact := range []string{".", "sibling"} {
+		for _, raw := range []string{exact, " " + exact + " ", "\t" + exact + "\n", "/" + exact + "/"} {
+			t.Run(raw, func(t *testing.T) {
+				t.Parallel()
+				for attempt := 0; attempt < 3; attempt++ {
+					proof := resolver.ResolveWithOptions(raw, "platform.runtime_log", options)
+					if proof.FlowID != raw || proof.HasEvidence() != (raw == exact) {
+						t.Errorf("attempt %d repaired or cross-filled %q: %+v", attempt, raw, proof)
+					}
+					canonical := resolver.ResolveWithOptions(exact, "platform.runtime_log", options)
+					if canonical.FlowID != exact || !canonical.HasEvidence() {
+						t.Fatalf("malformed query poisoned %q: %+v", exact, canonical)
+					}
+				}
+			})
+		}
+	}
+}

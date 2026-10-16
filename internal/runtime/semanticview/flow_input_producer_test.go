@@ -1,11 +1,14 @@
 package semanticview
 
 import (
+	"path/filepath"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"gopkg.in/yaml.v3"
 )
 
@@ -26,15 +29,7 @@ func TestResolveFlowInputProducer_ClassifiesAdmittedProviderIngress(t *testing.T
 }
 
 func TestResolveFlowInputProducer_ClassifiesRootBoundaryExternalIngress(t *testing.T) {
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "work.requested"}}},
-			},
-		},
-	}
-
-	source := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{".": {{Event: "work.requested"}}}, nil)
+	source := Wrap(rootInputProducerFixture(t))
 	resolution := ResolveNonConnectFlowInputProducer(source, ".", "work.requested")
 
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) {
@@ -43,22 +38,10 @@ func TestResolveFlowInputProducer_ClassifiesRootBoundaryExternalIngress(t *testi
 }
 
 func TestResolveNonConnectFlowInputProducer_DoesNotInterpretRootConnect(t *testing.T) {
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "work.requested"}}},
-			},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			CompositionConnects: []runtimecontracts.FlowConnect{{
-				Event: "work.requested",
-				From:  "worker",
-				To:    ".",
-			}},
-		},
-	}
-
-	source := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{".": {{Event: "work.requested"}}}, nil)
+	bundle := rootInputProducerFixture(t)
+	// Authored readback is not compiled parent-connect authority.
+	bundle.Semantics.CompositionConnects = []runtimecontracts.FlowConnect{{Event: "work.requested", From: "worker", To: "."}}
+	source := Wrap(bundle)
 	resolution := ResolveNonConnectFlowInputProducer(source, ".", "work.requested")
 
 	if resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
@@ -67,6 +50,23 @@ func TestResolveNonConnectFlowInputProducer_DoesNotInterpretRootConnect(t *testi
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) {
 		t.Fatalf("evidence = %#v, want repository-root ingress before compiled graph projection", resolution.Evidence)
 	}
+}
+
+func rootInputProducerFixture(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	artifact, err := sourceartifact.AdmitMembers(map[string][]byte{
+		"schema.yaml": []byte("stages: []\npins: {inputs: [work.requested]}\n"),
+		"events.yaml": []byte("work.requested: {}\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rooted, _ := sourceartifactfixture.Rooted(t, "root-input-producer", artifact)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(filepath.Clean("../../.."), rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bundle
 }
 
 func TestResolveFlowInputProducer_NestedFlowRootConnectDoesNotSuppressRepositoryRootIngress(t *testing.T) {
