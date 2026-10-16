@@ -15,6 +15,14 @@ type ActivityJournalGrantBinder interface {
 	BindActivityGrant(GrantEvidence) (pipeline.ActivityAttemptJournal, error)
 }
 
+func InstallActivityJournal(ctx context.Context, grant GenerationGrant, evidence GrantEvidence, coordinator *pipeline.PipelineCoordinator) error {
+	journal, err := CaptureActivityJournal(ctx, grant, evidence)
+	if err != nil {
+		return err
+	}
+	return coordinator.InstallActivityJournal(journal)
+}
+
 // CaptureActivityJournal binds one installed generation to its own retained
 // session. Dispatch keeps this value; callbacks never look up a newer role.
 func CaptureActivityJournal(ctx context.Context, grant GenerationGrant, expected GrantEvidence) (pipeline.ActivityAttemptJournal, error) {

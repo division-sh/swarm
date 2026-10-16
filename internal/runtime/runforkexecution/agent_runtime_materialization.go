@@ -560,8 +560,12 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 		if _, err := generationGrant.MarkProbesSettled(ctx, nil); err != nil {
 			return nil, managedexecution.Admission{}, err
 		}
-		if _, err := generationGrant.AdmitExecution(ctx); err != nil {
+		admitted, err := generationGrant.AdmitExecution(ctx)
+		if err != nil {
 			return nil, managedexecution.Admission{}, err
+		}
+		if err := runtimestartupownership.InstallActivityJournal(ctx, generationGrant, admitted, pipeline); err != nil {
+			return nil, managedexecution.Admission{}, fmt.Errorf("install selected activity journal: %w", err)
 		}
 		if err := admitActivations(); err != nil {
 			return nil, managedexecution.Admission{}, err
@@ -600,8 +604,12 @@ func startSelectedContractAgentRuntime(ctx context.Context, req publishSelectedC
 	if _, err := generationGrant.MarkProbesSettled(ctx, admission.CapabilitySurfaceIDs); err != nil {
 		return nil, managedexecution.Admission{}, fmt.Errorf("settle selected-contract runtime generation probes: %w", err)
 	}
-	if _, err := generationGrant.AdmitExecution(ctx); err != nil {
+	admitted, err := generationGrant.AdmitExecution(ctx)
+	if err != nil {
 		return nil, managedexecution.Admission{}, fmt.Errorf("admit selected-contract runtime generation: %w", err)
+	}
+	if err := runtimestartupownership.InstallActivityJournal(ctx, generationGrant, admitted, pipeline); err != nil {
+		return nil, managedexecution.Admission{}, fmt.Errorf("install selected activity journal: %w", err)
 	}
 	if err := admitActivations(); err != nil {
 		return nil, managedexecution.Admission{}, err

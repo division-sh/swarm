@@ -78,6 +78,14 @@ func (rt *Runtime) settleManagedStartupPreflight(ctx context.Context, surfaceIDs
 }
 
 func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimestartupownership.GrantEvidence) (managedExecutionActivation, error) {
+	if rt.Pipeline != nil {
+		rt.lifecycleMu.Lock()
+		grant := rt.startupGrant
+		rt.lifecycleMu.Unlock()
+		if err := runtimestartupownership.InstallActivityJournal(ctx, grant, authority, rt.Pipeline); err != nil {
+			return managedExecutionActivation{}, fmt.Errorf("install normal activity journal: %w", err)
+		}
+	}
 	actorFingerprint, err := rt.managedActorCensusFingerprint()
 	if err != nil {
 		return managedExecutionActivation{}, err

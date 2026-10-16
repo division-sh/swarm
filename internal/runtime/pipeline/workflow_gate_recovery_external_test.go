@@ -1581,7 +1581,6 @@ func proposedEffectProofBundle(t *testing.T, serverURL string, queueAfterProposa
 		"tools.yaml": fmt.Sprintf(`provider_write:
   description: Send the approved support reply.
   handler_type: http
-  effect_class: non_idempotent_write
   credentials: [provider_token]
   input_schema:
     type: object
