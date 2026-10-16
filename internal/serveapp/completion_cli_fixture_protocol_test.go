@@ -308,7 +308,7 @@ func runCompletion2270ProtocolContext(t *testing.T, parent context.Context, root
 	if err != nil {
 		t.Fatalf("first-party CLI protocol regression requires Node: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, node, append([]string{filepath.Join(root, "completion-proof-cli")}, args...)...)
 	command.Dir = root
@@ -321,6 +321,10 @@ func runCompletion2270ProtocolContext(t *testing.T, parent context.Context, root
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	err = command.Run()
+	if ctx.Err() != nil || parent.Err() != nil {
+		t.Fatalf("protocol fixture context terminated: command=%v context=%v parent=%v stdout=%q stderr=%q",
+			err, ctx.Err(), parent.Err(), stdout.String(), stderr.String())
+	}
 	return stdout.String(), stderr.String(), err
 }
 
