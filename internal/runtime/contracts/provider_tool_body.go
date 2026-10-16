@@ -44,7 +44,11 @@ func AdmitProviderToolDeclarations(body packartifact.ProviderBody) (map[string]T
 
 func providerBodyLocalName(value yamlsource.Value, key, local, kind string) (string, error) {
 	if !toolPathNamePattern.MatchString(local) {
-		return "", nodeValueError(value, fmt.Errorf("provider %s %q must use a short local name; directory %q supplies the namespace", kind, local, key))
+		example := "bot_token"
+		if kind == "tool" {
+			example = "send_message"
+		}
+		return "", nodeValueError(value, fmt.Errorf("provider %s %q must use a short local name such as %q; directory %q supplies the namespace", kind, local, example, key))
 	}
 	return key + "." + local, nil
 }
