@@ -10,6 +10,9 @@ import (
 func TestEventSchemaRequiredProjectionHasNoBehavioralConsumers(t *testing.T) {
 	want := []string{
 		"internal/providertriggers/normalized_events.go",
+		// The declaring-catalog expansion derives the required field set once,
+		// before effective/compiled consumers are published (#1745/6207972014).
+		"internal/runtime/contracts/catalog_embedding.go",
 		"internal/runtime/contracts/compiled_event_schema.go",
 		"internal/runtime/contracts/event_catalog_admission.go",
 		"internal/runtime/contracts/platform_event_value.go",

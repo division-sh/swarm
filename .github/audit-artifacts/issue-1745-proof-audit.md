@@ -87,6 +87,21 @@ Receipts are retained under
   immutability. That sink takes an already-admitted candidate. The corrected
   fixture uses the existing normalized operation owner; it does not change
   production semantics or relax the unchanged-storage check.
+- `flat-current-oracles-candidate11`: corrected contract/source cases
+  GREEN0.608s and both-store construction/write/emit/refusal proof GREEN2.235s.
+- Exact68d45d9207 preflight RED109.865s: the closed required-field projection
+  census omitted `contracts/catalog_embedding.go`. Add that one declaration
+  projection owner with no behavioral consumer permission. Format, OpenRPC,
+  early structural owners and complexity passed before this stop.
+- The extra Native codemod guard selection exhausted its180s outer package
+  budget after earlier controls. Its last nested execution control had only13s
+  before the outer timeout, versus its unchanged4m local context. This is
+  incomplete evidence, not regression/pass credit; no broad retry or budget
+  change. The named finite spelling/history controls remain separately GREEN.
+- The old-head unused invocation was interrupted when the census correction
+  required a new head. It supplies no unused qualification; rerun on the final
+  candidate. Canonical hosted selection validation at68d45d9207 succeeded,
+  including all ten new feature roots, without duplicate ownership.
 
 Historical codemod `recipes.json` stays byte-identical (SHA256
 `4fd3948cf98e828528dd5681e1f93cf79102ac5a0887573a65893e27dd531c70`).
