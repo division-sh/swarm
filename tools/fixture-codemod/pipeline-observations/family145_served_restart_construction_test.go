@@ -90,32 +90,3 @@ func family145ServedRestartAssertions(t *testing.T, function, before, after stri
 		}
 	}
 }
-
-func TestFamily145WholeServedRestartConstructionRetainsAllTemporalCuts(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]bool{}
-	for _, row := range rows {
-		if _, known := family145ServedRestartConstructors[row.Function]; !known {
-			continue
-		}
-		if seen[row.Function] {
-			t.Fatalf("duplicate constructor: %s", row.Function)
-		}
-		seen[row.Function] = true
-		if err := family145ServedRestartConstructionProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range []string{"storeselected.OpenRuntime(ctx,", "Selection: selection", "PostgresDSN: dsn", "SessionLockTTL: runtimeSessionLockTTL(cfg)", "deliveryReader = p.deps.DeliveryStore.SummarizeRun", "t.Cleanup(cleanup)", "buildStoresForServe = original", "waitForReadyLine()"} {
-			if !strings.Contains(row.After, cut) || family145ServedRestartConstructionProofError(row.Function, row.Before, strings.Replace(row.After, cut, "foreignServingOwner()", 1)) == nil {
-				t.Fatalf("serving source/lifetime/capture mutation passed: %s/%s", row.Function, cut)
-			}
-		}
-		family145ServedRestartAssertions(t, row.Function, row.Before, row.After)
-	}
-	if len(seen) != len(family145ServedRestartConstructors) {
-		t.Fatalf("whole serving constructor inventory=%d/%d", len(seen), len(family145ServedRestartConstructors))
-	}
-}

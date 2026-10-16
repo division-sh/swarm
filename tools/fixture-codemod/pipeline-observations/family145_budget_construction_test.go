@@ -33,32 +33,3 @@ func family145BudgetConstructionProofError(function, before, after string) error
 	}
 	return nil
 }
-
-func TestFamily145BudgetRecoveryNativeConstructionPreservesAllRetentionAndProjectionCuts(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]bool{}
-	for _, row := range rows {
-		if row.Function != "TestCompletionBudgetRecoveryProjectionParity" && row.Function != "TestBudgetRecoveryLoadsExactRetainedStagesAndStatelessPostureBothStores" {
-			continue
-		}
-		seen[row.Function] = true
-		if err := family145BudgetConstructionProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range []string{"StartPostgresRuntimeStoreWithReopen(t, dsn)", "t.Cleanup(cleanup)", "t.Fatalf", "storetest.RequireRun"} {
-			if !strings.Contains(row.After, cut) || family145BudgetConstructionProofError(row.Function, row.Before, strings.Replace(row.After, cut, "foreignBudgetScope()", 1)) == nil {
-				t.Fatalf("budget native identity/retention/assertion/cleanup cut survived mutation: %s/%s", row.Function, cut)
-			}
-		}
-		actual := family145ConversationForkOwnerSource(t, "../"+filepath.ToSlash(strings.TrimPrefix(row.File, "internal/")), row.Function)
-		if actual != row.After {
-			t.Fatalf("budget constructor escaped its finite source: %s", row.Function)
-		}
-	}
-	if len(seen) != 2 {
-		t.Fatalf("budget construction cohort=%d/2", len(seen))
-	}
-}

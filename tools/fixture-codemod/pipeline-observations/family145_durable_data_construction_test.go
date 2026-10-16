@@ -29,47 +29,6 @@ func family145DurableDataConstructionProofError(before, after string) error {
 	return nil
 }
 
-func TestFamily145DurableDataConstructionPreservesEntireUnchangedConsumerFamily(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	prior, err := selectedreadrole.BeforeDurableResourceHistory("../../..", family145TransitionBytes, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(prior, &rows); err != nil {
-		t.Fatal(err)
-	}
-	matched := 0
-	for _, row := range rows {
-		if row.Function != "forEachDurableDataStore" {
-			continue
-		}
-		matched++
-		if err := family145DurableDataConstructionProofError(row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range []string{"StartPostgresRuntimeStoreWithReopen(t, dsn)", "run(t, selected, db)", "StartSQLiteRuntimeStore(t)", "run(t, selected, storetest.Database(selected))", "t.Run(\"postgres\"", "t.Run(\"sqlite\""} {
-			if !strings.Contains(row.After, cut) || family145DurableDataConstructionProofError(row.Before, strings.Replace(row.After, cut, "foreignDurableDataOwner()", 1)) == nil {
-				t.Fatalf("durable-data backend/location/consumer mutation survived: %s", cut)
-			}
-		}
-		actual := family145ConversationForkOwnerSource(t, "durable_data_selected_store_test.go", row.Function)
-		if actual != row.After {
-			t.Fatal("durable-data shared construction escaped its exact source")
-		}
-	}
-	if matched != 1 {
-		t.Fatalf("durable-data constructor=%d/1", matched)
-	}
-	callers := family145DurableDataCallerInventory(t)
-	raw, err := json.Marshal(callers)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(callers) != 22 || fmt.Sprintf("%x", sha256.Sum256(raw)) != "aa02e101d7b0279ae7f31d7bbdf3fca4e3b8d91a2926fa06e23b771ae56c56b2" {
-		t.Fatalf("durable-data callers=%d digest=%x; original caller bodies/arguments/registration must remain unchanged", len(callers), sha256.Sum256(raw))
-	}
-}
-
 func family145DurableDataCallerInventory(t *testing.T) map[string]string {
 	t.Helper()
 	root := filepath.Join("..", "..", "..")

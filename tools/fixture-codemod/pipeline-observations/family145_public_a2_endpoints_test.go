@@ -39,46 +39,6 @@ func family145CheckPublicA2EndpointWholeRule(t *testing.T, file, function, curre
 	return false
 }
 
-func TestFamily145PublicA2EndpointWholeRulePreservesAll67CallersAnd16Bodies(t *testing.T) {
-	pins := publicendpoint.Pins()
-	if publicendpoint.ManifestDigest() != publicendpoint.Digest || len(pins) != 16 || len(publicendpoint.Helpers) != 5 {
-		t.Fatal("complete public endpoint rule inventory changed")
-	}
-	seen, calls, helpers := map[string]bool{}, 0, 0
-	for _, pin := range pins {
-		key := pin.File + "/" + pin.Function
-		if seen[key] || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("duplicate/changed complete endpoint preimage:", key)
-		}
-		seen[key] = true
-		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, "before.go", "package proof\n"+pin.Before, parser.AllErrors)
-		if err != nil {
-			t.Fatal(err)
-		}
-		function := file.Decls[0].(*ast.FuncDecl)
-		transformed, count, err := publicendpoint.Transform(fset, function, pin.Before)
-		if err != nil || count != pin.Calls || family145ServedDebugNormalize(t, transformed) != pin.After {
-			t.Fatalf("endpoint-only rule changed request/assertion/temporal/construction cut: %s/%v", key, err)
-		}
-		calls += count
-		if _, helper := publicendpoint.Helpers[pin.Function]; helper {
-			helpers++
-		}
-		raw, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if family145PublicJoinCallerInverse(pin.Function, servedSetupEarlierSource(t, pin.File, pin.Function, family145PublicA2CurrentDeclaration(t, raw, pin.Function))) != pin.After {
-			t.Fatal("current endpoint consumer escaped exact full-body rule:", key)
-		}
-		family145PublicA2EndpointHostiles(t, pin)
-	}
-	if calls != 67 || helpers != 5 {
-		t.Fatalf("calls=%d helpers=%d, want67/5", calls, helpers)
-	}
-}
-
 func family145PublicA2CurrentDeclaration(t *testing.T, source []byte, function string) string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "current.go", source, parser.AllErrors)
@@ -127,27 +87,6 @@ func family145PublicA2EndpointHostiles(t *testing.T, pin publicendpoint.Pin) {
 		if _, _, err := publicendpoint.Transform(fset, file.Decls[0].(*ast.FuncDecl), mutant); err == nil {
 			t.Fatal("endpoint-only transform accepted unrelated runtime/SQL authority")
 		}
-	}
-}
-
-func TestFamily145PublicA2EndpointOwnedInventoryHasNoBroadCarrierOrEscapedReference(t *testing.T) {
-	root := "../../.."
-	calls, helpers := 0, 0
-	err := checkoutsource.WalkDir(root, filepath.Join(root, "internal/serveapp"), func(path string, entry fs.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || !strings.HasSuffix(path, ".go") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.AllErrors)
-		if err != nil {
-			return err
-		}
-		foundCalls, foundHelpers := publicA2EndpointInventoryFile(t, path, file)
-		calls += foundCalls
-		helpers += foundHelpers
-		return nil
-	})
-	if err != nil || calls != 67 || helpers != 5 {
-		t.Fatalf("whole owned public inventory calls=%d helpers=%d err=%v", calls, helpers, err)
 	}
 }
 

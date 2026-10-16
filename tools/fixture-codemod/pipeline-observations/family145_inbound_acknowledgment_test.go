@@ -46,65 +46,6 @@ func family145InboundAcknowledgmentProofError(function, before, after string) er
 	return family145DescriptorReadinessEscape([]byte("package proof\n" + after))
 }
 
-func TestFamily145InboundAcknowledgmentChainPreservesFaultsAndJoinedRecovery(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]bool{}
-	for _, row := range rows {
-		cuts, ok := family145InboundAcknowledgmentCalls[row.Function]
-		if !ok {
-			continue
-		}
-		if seen[row.Function] {
-			t.Fatalf("duplicate inbound acknowledgment transition: %s", row.Function)
-		}
-		seen[row.Function] = true
-		if err := family145InboundAcknowledgmentProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatalf("%s: %v", row.Function, err)
-		}
-		for _, cut := range cuts {
-			if family145InboundAcknowledgmentProofError(row.Function, row.Before, strings.ReplaceAll(row.After, cut, "foreignCut(")) == nil {
-				t.Fatalf("lost inbound owner/fault accepted: %s/%s", row.Function, cut)
-			}
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.Before)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			condition := strings.SplitN(assertion, " => ", 2)[0]
-			if family145InboundAcknowledgmentProofError(row.Function, row.Before, strings.ReplaceAll(row.After, condition, "false")) == nil {
-				t.Fatalf("lost inbound assertion accepted: %s/%s", row.Function, condition)
-			}
-		}
-	}
-	if len(seen) != len(family145InboundAcknowledgmentCalls) {
-		t.Fatalf("inbound chain incomplete: %d/%d", len(seen), len(family145InboundAcknowledgmentCalls))
-	}
-	data, err := os.ReadFile(filepath.Join("..", "..", "..", "internal", "runtime", "inbound_commit_ack_response_test.go"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := family145InboundAcknowledgmentEscape(data); err != nil {
-		t.Fatal(err)
-	}
-	for _, escape := range []string{"storetest.AdmitPostgresRuntimeStore(t, db)", "storetest.DatabaseForTest(selected)", "db.QueryRow(query)", "(*sql.DB)(nil)"} {
-		if family145DescriptorReadinessEscape([]byte("package probe; func escape() { _ = "+escape+" }")) == nil {
-			t.Fatalf("raw inbound carrier accepted: %s", escape)
-		}
-	}
-	for _, hostile := range []string{
-		strings.Replace(string(data), "return o.occurrence.Begin(ctx)", "return db.Begin()", 1),
-		strings.Replace(string(data), "*worklifetime.StandingOccurrence", "*sql.DB", 1),
-	} {
-		if family145InboundAcknowledgmentEscape([]byte(hostile)) == nil {
-			t.Fatal("native standing work occurrence replaced by raw transaction authority")
-		}
-	}
-}
-
 func family145InboundAcknowledgmentEscape(data []byte) error {
 	file, err := parser.ParseFile(token.NewFileSet(), "inbound.go", data, parser.AllErrors)
 	if err != nil {

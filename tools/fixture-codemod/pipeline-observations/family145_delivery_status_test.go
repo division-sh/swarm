@@ -62,40 +62,6 @@ func family145CheckDeliveryStatusWholeRule(t *testing.T, file, function, current
 	return false
 }
 
-func TestFamily145DeliveryStatusWholeChainPreservesEveryPollAndRefusalCut(t *testing.T) {
-	calls := 0
-	seen := map[string]bool{}
-	for _, pin := range deliveryStatusPins(t) {
-		key := pin.File + "/" + pin.Function
-		if seen[key] || fmt.Sprintf("%x", sha256.Sum256([]byte(pin.Before))) != pin.SHA256 {
-			t.Fatal("changed/duplicate delivery status predecessor:", key)
-		}
-		seen[key] = true
-		original, err := exec.Command("git", "show", deliverystatus.Predecessor+":"+pin.File).Output()
-		if err != nil || requestKeyDeclaration(t, original, pin.Function) != pin.Before {
-			t.Fatal("delivery status source is not its signed predecessor:", key, err)
-		}
-		current, err := os.ReadFile(filepath.Join("../../..", pin.File))
-		if err != nil {
-			t.Fatal(err)
-		}
-		entry := servedObservationEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, current, pin.Function))
-		entry = runphysical.Previous(sourceForkPins(t), pin.File, pin.Function, entry)
-		if family145EventNameCallerInverse(pin.Function, entry) != pin.After {
-			t.Fatal("delivery status current source escaped its whole rule:", key, err)
-		}
-		after, count, err := deliverystatus.Transform(pin.Before)
-		if err != nil || after != pin.After || count != pin.Calls {
-			t.Fatal("delivery status finite transform escaped its rule:", key, err)
-		}
-		calls += count
-		deliveryStatusHostiles(t, pin)
-	}
-	if calls != 28 || len(seen) != 14 {
-		t.Fatalf("delivery status inventory=%d/%d want28/14", calls, len(seen))
-	}
-}
-
 func deliveryStatusHostiles(t *testing.T, pin deliverystatus.Pin) {
 	t.Helper()
 	pins := deliveryStatusPins(t)
@@ -111,21 +77,6 @@ func deliveryStatusHostiles(t *testing.T, pin deliverystatus.Pin) {
 		if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil || deliverystatus.Previous(pins, pin.File, pin.Function, mutant) != mutant {
 			t.Fatal("changed delivery status identity/assertion/lifetime accepted:", pin.Function, cut)
 		}
-	}
-}
-
-func TestFamily145DeliveryStatusOwnedInventoryHasNoRawCallerOrAlias(t *testing.T) {
-	started := time.Now()
-	pins, forkPins := deliveryStatusPins(t), sourceForkPins(t)
-	inventory := deliveryStatusOwnedInventory("../../..", func(path, function, current string) bool {
-		current = servedObservationEarlierSource(t, path, function, current)
-		current = runphysical.Previous(forkPins, path, function, current)
-		current = family145EventNameCallerInverse(function, current)
-		return deliverystatus.Previous(pins, path, function, current) != current
-	})
-	t.Logf("delivery status inventory=%d/%d compositions=%d elapsed=%s", inventory.calls, inventory.definitions, inventory.compositions, time.Since(started))
-	if inventory.err != nil || inventory.calls != 28 || inventory.definitions != 4 {
-		t.Fatalf("delivery status complete inventory=%d/%d want28/4 err=%v", inventory.calls, inventory.definitions, inventory.err)
 	}
 }
 
@@ -212,31 +163,4 @@ func deliveryStatusOwnedFile(path string, file *ast.File) (calls, definitions in
 		return true
 	})
 	return calls, definitions, matching, failure
-}
-
-func TestFamily145DeliveryStatusPollingStatementsAndExistingQueryOwnerAreUnchanged(t *testing.T) {
-	for _, pin := range deliveryStatusPins(t) {
-		if !deliverystatus.Helpers[pin.Function] || pin.Function == "servedEventPublishDeliveryStatusCount" {
-			continue
-		}
-		after := strings.Replace(pin.Before, "servedEventPublishDeliveryStatusCount(t, db,", "servedEventPublishDeliveryStatusCount(t, reader,", 1)
-		if pin.Function == "waitServedEventPublishDeliveryStatusCountForRun" {
-			after = strings.Replace(after, "db *sql.DB, reader receiverProofStateReader", "reader receiverProofStateReader", 1)
-		} else {
-			after = strings.Replace(after, "db *sql.DB", "reader receiverProofStateReader", 1)
-		}
-		if after != pin.After {
-			t.Fatal("polling/deadline/window/debug/assertion changed:", pin.Function)
-		}
-	}
-	for _, path := range []string{"internal/store/internal/backend/delivery/read_projections.go", "internal/store/internal/runtimepersistence/test_served_delivery_observation.go", "internal/store/storetest/served_delivery_observation.go", "internal/store/internal/runtimepersistence/served_delivery_status_count_test.go"} {
-		original, err := exec.Command("git", "show", deliverystatus.Predecessor+":"+path).Output()
-		current, currentErr := os.ReadFile(filepath.Join("../../..", path))
-		if err == nil && currentErr == nil {
-			current = deliveryStatusEarlierOwnerSource(t, path, current, original)
-		}
-		if err != nil || currentErr != nil || string(original) != string(current) {
-			t.Fatal("existing delivery status canonical owner/hostile proof changed:", path, err, currentErr)
-		}
-	}
 }

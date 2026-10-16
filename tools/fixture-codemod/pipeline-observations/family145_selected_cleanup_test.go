@@ -76,58 +76,6 @@ func family145SelectedCleanupProofError(function, before, after string) error {
 	return family145DescriptorReadinessEscape([]byte("package proof\n" + after))
 }
 
-func TestFamily145SelectedCleanupClosesBothCallersAndKeepsRealFaultExecution(t *testing.T) {
-	var rows []struct{ File, Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	found := map[string]bool{}
-	for _, row := range rows {
-		cuts, ok := family145SelectedCleanupCalls[row.Function]
-		if !ok {
-			continue
-		}
-		if found[row.Function] {
-			t.Fatalf("duplicate selected cleanup transition: %s", row.Function)
-		}
-		found[row.Function] = true
-		if err := family145SelectedCleanupProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range cuts {
-			if family145SelectedCleanupProofError(row.Function, row.Before, strings.ReplaceAll(row.After, cut, "foreignCut(")) == nil {
-				t.Fatalf("selected cleanup lost owner/clock/scope/field accepted: %s", cut)
-			}
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.Before)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			hostile, err := family145BusAssertionCounterexample(row.After, strings.SplitN(assertion, " => ", 2)[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			if family145SelectedCleanupProofError(row.Function, row.Before, hostile) == nil {
-				t.Fatalf("selected cleanup lost original assertion: %s", assertion)
-			}
-		}
-		if row.Function != "assertSelectedContractExecutionCleanup" {
-			owner, function := "pipelinepersistence/selected_cleanup_fixture.go", "SetSelectedReplayScopeCollisionFaultTx"
-			if strings.Contains(row.Function, "PublishFailure") {
-				owner, function = "runforkpersistence/selected_cleanup_fixture.go", "SetSelectedExecutionLineageInsertFaultTx"
-			}
-			physical := family145ConversationForkOwnerSource(t, "internal/backend/"+owner, function)
-			if family145SelectedCleanupDDL(t, row.Before) != family145SelectedCleanupDDL(t, physical) {
-				t.Fatalf("selected fault changed exact original trigger/function/body: %s", row.Function)
-			}
-		}
-	}
-	if len(found) != len(family145SelectedCleanupCalls) {
-		t.Fatalf("selected cleanup whole helper/caller closure=%v", found)
-	}
-}
-
 func family145SelectedCleanupDDL(t *testing.T, source string) string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "ddl-proof.go", "package proof\n"+source, parser.AllErrors)

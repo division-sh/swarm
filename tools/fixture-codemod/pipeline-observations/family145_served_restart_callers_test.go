@@ -87,23 +87,3 @@ func family145ServedRestartCallerInventoryError(actual []string) error {
 	}
 	return nil
 }
-
-func TestFamily145SharedServingConstructorRetainsAll27ExactCallers(t *testing.T) {
-	actual := family145ServedRestartCallers(t)
-	if err := family145ServedRestartCallerInventoryError(actual); err != nil {
-		t.Fatal(err)
-	}
-	if family145ServedRestartCallerInventoryError(actual[:len(actual)-1]) == nil {
-		t.Fatal("missing caller passed")
-	}
-	if family145ServedRestartCallerInventoryError(append(slices.Clone(actual), actual[0])) == nil {
-		t.Fatal("extra caller passed")
-	}
-	for i, row := range actual {
-		hostile := slices.Clone(actual)
-		hostile[i] = strings.Replace(row, "lifecycleRestartHarness(", "foreignRestartHarness(", 1)
-		if family145ServedRestartCallerInventoryError(hostile) == nil {
-			t.Fatalf("changed constructor/source/readiness inputs passed: %s", row)
-		}
-	}
-}

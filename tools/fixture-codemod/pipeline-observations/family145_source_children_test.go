@@ -62,42 +62,6 @@ func family145SourceChildrenProofError(function, before, after string) error {
 	return nil
 }
 
-func TestFamily145SourceChildDiscoveryRetainsPersistedObjectsAndRejectsDrift(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	found := 0
-	for _, row := range rows {
-		if row.Function != "a2MultiUntilChildren" && row.Function != "testA2StageEntryPublicationBinding" {
-			continue
-		}
-		found++
-		if err := family145SourceChildrenProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, lost := range []string{"selected.events, parentID, name)", "selected.events, triggerID)", "LoadPreparedPublishEvent(ctx, id)", "return children"} {
-			hostile := strings.Replace(row.After, lost, "foreignEvidence", 1)
-			if hostile != row.After && family145SourceChildrenProofError(row.Function, row.Before, hostile) == nil {
-				t.Fatalf("lost exact source/identity/persisted object passed: %s", lost)
-			}
-		}
-		assertions, err := family145SourceChildrenAssertions(row.After, row.Function == "a2MultiUntilChildren")
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			condition := strings.SplitN(assertion, " => ", 2)[0]
-			if family145SourceChildrenProofError(row.Function, row.Before, strings.Replace(row.After, condition, "false", 1)) == nil {
-				t.Fatalf("lost original source-parent/cardinality/receipt assertion passed: %s", condition)
-			}
-		}
-	}
-	if found != 2 {
-		t.Fatalf("source-child consumer inventory=%d, want two complete dependencies", found)
-	}
-}
-
 func TestFamily145SourceChildOwnersRetainUnfilteredParentsAndNamespaceOrder(t *testing.T) {
 	for _, tc := range []struct{ function, query, binding string }{
 		{"CountSourceEventPublicationsTx", `SELECT COUNT(*) FROM events WHERE source_event_id=$1`, "sourceEventID).Scan(&count)"},

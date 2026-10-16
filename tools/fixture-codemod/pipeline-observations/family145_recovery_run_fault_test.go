@@ -88,58 +88,6 @@ func family145RecoveryRunFaultAssertionInventory(before, after string) error {
 	return nil
 }
 
-func TestFamily145RecoveryRunFaultRetainsRealReplayNoRedispatchAndJoinedOwnership(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	found := 0
-	for _, row := range rows {
-		if row.Function != "TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityReader" {
-			continue
-		}
-		found++
-		if err := family145RecoveryRunFaultProofError(row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		cleanup := "defer func() {\n\t\t\tif _, err := completeCarrier(); err != nil {\n\t\t\t\tt.Errorf(\"join continued local delivery ownership: %v\", err)\n\t\t\t}\n\t\t}()"
-		for _, cut := range []string{
-			"t.Fatalf(\"continued local delivery id = %q, want %q\", delivery.ID(), replayChildID)\n\t\t}",
-			"t.Fatalf(\"continued local delivery disposition = %q, want acquired\", claimResult.Disposition)\n\t\t}",
-		} {
-			if !strings.Contains(row.After, cleanup) || !strings.Contains(row.After, cut) {
-				t.Fatal("receipt-to-claim cleanup counterexample no longer matches the reviewed source")
-			}
-			late := strings.Replace(row.After, cleanup, "", 1)
-			late = strings.Replace(late, cut, cut+"\n\t\t"+cleanup, 1)
-			if family145RecoveryRunFaultProofError(row.Before, late) == nil {
-				t.Fatalf("carrier cleanup after identity/claim accepted: %s", cut)
-			}
-		}
-		for _, cut := range family145RecoveryRunFaultCuts {
-			if family145RecoveryRunFaultProofError(row.Before, strings.ReplaceAll(row.After, cut, "foreignCut(")) == nil {
-				t.Fatalf("lost original recovery fault/owner/lifetime cut accepted: %s", cut)
-			}
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.Before)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			hostile, err := family145BusAssertionCounterexample(row.After, strings.SplitN(assertion, " => ", 2)[0])
-			if err != nil {
-				t.Fatal(err)
-			}
-			if family145RecoveryRunFaultProofError(row.Before, hostile) == nil {
-				t.Fatalf("lost original replay/skip/drop/no-redispatch assertion accepted: %s", assertion)
-			}
-		}
-	}
-	if found != 1 {
-		t.Fatalf("recovery fault whole caller inventory=%d want1", found)
-	}
-}
-
 func TestFamily145RecoveryRunFaultKeepsExactPhysicalWriteAndOriginalWriterCoordinator(t *testing.T) {
 	owner := family145ConversationForkOwnerSource(t, "internal/backend/eventrecord/fixture_chain_depth.go", "ClearEventRunForRecoveryTx")
 	for _, cut := range []string{

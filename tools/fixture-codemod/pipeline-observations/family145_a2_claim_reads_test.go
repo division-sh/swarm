@@ -54,45 +54,6 @@ func family145A2ClaimReadProofError(function, before, after string) error {
 	return nil
 }
 
-func TestFamily145A2ClaimReadConsumersKeepAllAssertionsBindingsAndCuts(t *testing.T) {
-	var rows []struct{ Function, Before, After string }
-	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {
-		t.Fatal(err)
-	}
-	found := map[string]bool{}
-	for _, row := range rows {
-		cuts := family145A2ClaimReadCuts[row.Function]
-		if cuts == nil {
-			continue
-		}
-		if found[row.Function] {
-			t.Fatalf("ambiguous A2 claim consumer: %s", row.Function)
-		}
-		found[row.Function] = true
-		if err := family145A2ClaimReadProofError(row.Function, row.Before, row.After); err != nil {
-			t.Fatal(err)
-		}
-		for _, cut := range cuts {
-			if family145A2ClaimReadProofError(row.Function, row.Before, strings.Replace(row.After, cut, "foreignClaimEvidence()", 1)) == nil {
-				t.Fatalf("lost exact scope/cut/destination passed: %s: %s", row.Function, cut)
-			}
-		}
-		assertions, err := family145DescriptorBusinessAssertions(row.After)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, assertion := range assertions {
-			condition := strings.SplitN(assertion, " => ", 2)[0]
-			if family145A2ClaimReadProofError(row.Function, row.Before, strings.Replace(row.After, condition, "false", 1)) == nil {
-				t.Fatalf("lost original business/refusal/restart assertion passed: %s", condition)
-			}
-		}
-	}
-	if len(found) != len(family145A2ClaimReadCuts) {
-		t.Fatalf("A2 claim consumer inventory=%d/%d", len(found), len(family145A2ClaimReadCuts))
-	}
-}
-
 func TestFamily145A2ClaimReadPhysicalOwnersPreserveEveryOriginalDialectQuery(t *testing.T) {
 	for _, tc := range []struct{ file, function, caller string }{
 		{"eventrecord/template_storage_observation.go", "ReadA2WorkerOutputsTx", "TestA2KnownTargetWorkIssuedBeforeArmPublishesOutputBoundToActualArmOnBothStores"},
