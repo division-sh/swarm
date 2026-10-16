@@ -7,7 +7,6 @@ import (
 	"net/http"
 
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -15,13 +14,12 @@ import (
 )
 
 type providerRequestRendering struct {
-	Version      string            `json:"version"`
-	Memory       *agentmemory.Plan `json:"memory"`
-	Model        string            `json:"model"`
-	SystemPrompt string            `json:"system_prompt"`
-	Messages     []Message         `json:"messages"`
-	Tools        []ToolDefinition  `json:"tools"`
-	Input        Message           `json:"input"`
+	Version      string           `json:"version"`
+	Model        string           `json:"model"`
+	SystemPrompt string           `json:"system_prompt"`
+	Messages     []Message        `json:"messages"`
+	Tools        []ToolDefinition `json:"tools"`
+	Input        Message          `json:"input"`
 }
 
 func newProviderRequestJournal(adapter string, frame agentframe.Frame, surface managedcapabilities.Surface, session *Session, input Message, logicalOperation string, request *http.Request, body []byte) (runtimeeffects.ProviderRequestJournal, error) {
@@ -36,8 +34,8 @@ func newProviderRequestJournal(adapter string, frame agentframe.Frame, surface m
 		tools[index].Usage = ""
 	}
 	rendering, err := json.Marshal(providerRequestRendering{
-		Version: runtimeeffects.ProviderRequestJournalVersion, Memory: &session.Memory,
-		Model: frame.Session.Provider.Model, SystemPrompt: session.SystemPrompt,
+		Version: runtimeeffects.ProviderRequestJournalVersion,
+		Model:   frame.Session.Provider.Model, SystemPrompt: session.SystemPrompt,
 		Messages: session.Messages, Tools: tools, Input: input,
 	})
 	if err != nil {
@@ -62,6 +60,7 @@ func newProviderRequestJournal(adapter string, frame agentframe.Frame, surface m
 		FrameID: frame.FrameID, FrameContentHash: frame.ContentHash,
 		SurfaceID: surface.ID, SurfaceFingerprint: fingerprint,
 		SessionID: session.ID, TurnOrdinal: session.TurnCount + 1, LogicalOperationIdentity: logicalOperation,
+		Memory: &session.Memory,
 		Method: request.Method, Destination: request.URL.String(), SemanticHeaders: headers, Rendering: rendering,
 	}, body)
 	if err != nil {
@@ -99,7 +98,7 @@ func RebuildProviderRequestJournal(journal runtimeeffects.ProviderRequestJournal
 	if err != nil {
 		return nil, err
 	}
-	if rendering.Version != runtimeeffects.ProviderRequestJournalVersion || rendering.Memory == nil ||
+	if rendering.Version != runtimeeffects.ProviderRequestJournalVersion || journal.Memory == nil ||
 		rendering.SystemPrompt != frame.Session.ProviderPrompt || rendering.Model != frame.Session.Provider.Model ||
 		rendering.Input.Role != role || rendering.Input.Content != content || len(rendering.Input.ToolCalls) != 0 {
 		return nil, fmt.Errorf("provider request journal rendering differs from its execution frame")
@@ -120,7 +119,7 @@ func RebuildProviderRequestJournal(journal runtimeeffects.ProviderRequestJournal
 		return nil, fmt.Errorf("provider request journal adapter differs from its frame")
 	}
 	session := &Session{
-		ID: journal.SessionID, AgentID: frame.Session.AgentIdentity.AgentID(), Memory: *rendering.Memory,
+		ID: journal.SessionID, AgentID: frame.Session.AgentIdentity.AgentID(), Memory: *journal.Memory,
 		SystemPrompt: rendering.SystemPrompt, Messages: rendering.Messages, Tools: rendering.Tools,
 		TurnCount: journal.TurnOrdinal - 1,
 	}

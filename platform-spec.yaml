@@ -17954,6 +17954,9 @@ platform_tables:
         exact durable delivery after a crash between completion settlement and delivery settlement.
         Each attempt freezes its own exact admitted authority; a permitted proven-unlaunched retry cannot rewrite the
         operation's original authority or borrow that first attempt's execution owner for settlement.
+        A managed HTTP provider request journal freezes the credential-free physical request and its rendering inputs
+        in the same authorization commit. It is evidence, not retry permission. A separately admitted resume retains
+        the original logical operation and uniquely references its interrupted predecessor attempt.
       ddl: |
         CREATE TABLE runtime_external_effect_attempts (
             attempt_id         UUID PRIMARY KEY,
@@ -17968,6 +17971,8 @@ platform_tables:
             lease_expires_at   TIMESTAMPTZ NOT NULL,
             fence_generation   BIGINT NOT NULL CHECK (fence_generation > 0),
             authority_evidence JSONB NOT NULL DEFAULT '{}',
+            provider_request_journal JSONB,
+            resume_from_attempt_id UUID UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
             usage_target_kind  TEXT CHECK (usage_target_kind IN ('agent_turn', 'conversation_fork_turn_completion')),
             usage_target_id    UUID,
             target_ordinal     INTEGER CHECK (target_ordinal IS NULL OR target_ordinal > 0),
@@ -17996,6 +18001,8 @@ platform_tables:
             completed_at       TIMESTAMPTZ,
             updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE (operation_id, attempt_ordinal),
+            CHECK (provider_request_journal IS NULL OR (transport = 'http' AND adapter IN ('anthropic_api','openai_compatible','openai_responses') AND COALESCE(usage_target_kind,'') = 'agent_turn')),
+            CHECK (resume_from_attempt_id IS NULL OR (resume_from_attempt_id <> attempt_id AND provider_request_journal IS NOT NULL)),
             CHECK ((usage_target_kind IS NULL AND usage_target_id IS NULL AND target_ordinal IS NULL) OR (usage_target_kind = 'agent_turn' AND usage_target_id IS NOT NULL AND target_ordinal IS NULL) OR (usage_target_kind = 'conversation_fork_turn_completion' AND usage_target_id IS NOT NULL AND target_ordinal > 0)),
             CHECK ((usage_target_kind = 'conversation_fork_turn_completion' AND capability_surface_id IS NULL) OR (COALESCE(usage_target_kind, '') <> 'conversation_fork_turn_completion' AND capability_surface_id IS NOT NULL)),
             CHECK ((origin_kind IS NULL AND origin_delivery_id IS NULL AND origin_run_id IS NULL AND origin_route_identity IS NULL AND origin_claim_token IS NULL AND origin_claim_version IS NULL AND origin_subscriber_type IS NULL AND origin_subscriber_id IS NULL AND origin_directive_operation_id IS NULL AND origin_directive_owner_id IS NULL) OR (origin_kind = 'delivery' AND origin_delivery_id IS NOT NULL AND origin_run_id IS NOT NULL AND NULLIF(TRIM(origin_route_identity), '') IS NOT NULL AND origin_claim_token IS NOT NULL AND origin_claim_version > 0 AND origin_subscriber_type = 'agent' AND NULLIF(TRIM(origin_subscriber_id), '') IS NOT NULL AND origin_directive_operation_id IS NULL AND origin_directive_owner_id IS NULL) OR (origin_kind = 'directive' AND origin_delivery_id IS NULL AND origin_run_id IS NULL AND origin_route_identity IS NULL AND origin_claim_token IS NULL AND origin_claim_version IS NULL AND origin_subscriber_type IS NULL AND origin_subscriber_id IS NULL AND origin_directive_operation_id IS NOT NULL AND NULLIF(TRIM(origin_directive_owner_id), '') IS NOT NULL)),

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 )
 
 func TestProviderRequestJournalBindsPhysicalRequest(t *testing.T) {
@@ -28,7 +30,8 @@ func TestProviderRequestJournalBindsPhysicalRequest(t *testing.T) {
 	}
 	input.SemanticHeaders["content-type"] = "changed"
 	input.Rendering[0] = '['
-	if decoded.SemanticHeaders["content-type"] != "application/json" || journal.Rendering[0] != '{' {
+	input.Memory.Enabled = true
+	if decoded.SemanticHeaders["content-type"] != "application/json" || journal.Rendering[0] != '{' || journal.Memory.Enabled {
 		t.Fatal("journal retained caller-owned mutable inputs")
 	}
 	for _, scenario := range []string{"body", "operation", "destination", "method", "version_header", "body_pin", "request_pin", "missing_rendering", "unknown_version"} {
@@ -67,7 +70,7 @@ func TestProviderRequestJournalBindsPhysicalRequest(t *testing.T) {
 }
 
 func TestProviderRequestJournalRefusesCredentialCarriersAndMalformedEvidence(t *testing.T) {
-	for _, scenario := range []string{"userinfo", "query", "fragment", "non_http", "relative", "authorization", "cookie", "api_key", "unknown_header", "missing_version_header", "foreign_adapter", "caller_hash", "duplicate_rendering_key", "missing_session", "missing_frame", "missing_surface", "missing_logical_operation", "zero_turn"} {
+	for _, scenario := range []string{"userinfo", "query", "fragment", "non_http", "relative", "authorization", "cookie", "api_key", "unknown_header", "missing_version_header", "foreign_adapter", "caller_hash", "duplicate_rendering_key", "missing_session", "missing_frame", "missing_surface", "missing_memory", "missing_logical_operation", "zero_turn"} {
 		t.Run(scenario, func(t *testing.T) {
 			input := providerRequestJournalTestInput()
 			switch scenario {
@@ -99,6 +102,8 @@ func TestProviderRequestJournalRefusesCredentialCarriersAndMalformedEvidence(t *
 				input.FrameID = ""
 			case "missing_surface":
 				input.SurfaceID = ""
+			case "missing_memory":
+				input.Memory = nil
 			case "missing_logical_operation":
 				input.LogicalOperationIdentity = ""
 			case "zero_turn":
@@ -131,6 +136,7 @@ func providerRequestJournalTestInput() ProviderRequestJournal {
 		FrameID: "agent-frame:fixed", FrameContentHash: "frame-content-hash",
 		SurfaceID: "frozen-surface", SurfaceFingerprint: "frozen-plan",
 		SessionID: "frozen-session", TurnOrdinal: 2, LogicalOperationIdentity: "exact-provider-call",
+		Memory: &agentmemory.Plan{},
 		Method: http.MethodPost, Destination: "https://provider.example/v1/messages",
 		SemanticHeaders: map[string]string{"content-type": "application/json", "anthropic-version": "2023-06-01"},
 		Rendering:       []byte(`{"ordered_input":[1.0,1e0,{"byte_exact":"retained"}]}`),

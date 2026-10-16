@@ -2,6 +2,7 @@ package effects
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 )
 
@@ -27,6 +29,7 @@ type ProviderRequestJournal struct {
 	SessionID                string            `json:"session_id"`
 	TurnOrdinal              int               `json:"turn_ordinal"`
 	LogicalOperationIdentity string            `json:"logical_operation_identity"`
+	Memory                   *agentmemory.Plan `json:"memory"`
 	Method                   string            `json:"method"`
 	Destination              string            `json:"destination"`
 	SemanticHeaders          map[string]string `json:"semantic_headers"`
@@ -42,6 +45,10 @@ func NewProviderRequestJournal(input ProviderRequestJournal, body []byte) (Provi
 	}
 	input.Rendering = bytes.Clone(input.Rendering)
 	input.SemanticHeaders = maps.Clone(input.SemanticHeaders)
+	if input.Memory != nil {
+		memory := *input.Memory
+		input.Memory = &memory
+	}
 	input.BodyFingerprint = Fingerprint(body)
 	if err := input.validate(); err != nil {
 		return ProviderRequestJournal{}, err
@@ -119,8 +126,8 @@ func (j ProviderRequestJournal) validate() error {
 			return fmt.Errorf("provider request journal requires exact frame, surface, session and logical operation coordinates")
 		}
 	}
-	if j.TurnOrdinal < 1 || j.Method != http.MethodPost {
-		return fmt.Errorf("provider request journal requires a positive turn and POST request")
+	if j.TurnOrdinal < 1 || j.Method != http.MethodPost || j.Memory == nil {
+		return fmt.Errorf("provider request journal requires a positive turn, memory plan and POST request")
 	}
 	// These adapters have no credential-free query contract. Never persist a
 	// URL component that could carry credentials or silently strip it on replay.
@@ -169,4 +176,44 @@ func (j ProviderRequestJournal) physicalRequestFingerprint() (string, error) {
 		return "", err
 	}
 	return Fingerprint(raw), nil
+}
+
+// ValidateProviderRequestJournalAdmission binds a journal to this original
+// admission. The store must independently render and persist it before ACK.
+func ValidateProviderRequestJournalAdmission(ctx context.Context, authority Authority, request AuthorizeRequest) error {
+	if request.ProviderRequestJournal == nil {
+		return nil
+	}
+	journal := request.ProviderRequestJournal
+	if err := journal.validateSealed(); err != nil {
+		return err
+	}
+	registration, registered := RegistrationFor(request.Adapter)
+	if !registered || registration.Kind != KindProviderTurn || registration.Transport != "http" ||
+		request.Kind != registration.Kind || request.Class != registration.Class || request.Transport != registration.Transport ||
+		authority.Target.Kind != UsageTargetAgentTurn || request.AgentFrame == nil || request.CapabilitySurface == nil {
+		return fmt.Errorf("provider request journal requires its managed HTTP provider admission")
+	}
+	if authority.Kind != AuthorityNormalAgent && authority.Kind != AuthoritySelectedContractFork {
+		return fmt.Errorf("provider request journal has a different execution owner")
+	}
+	fingerprint, err := request.CapabilitySurface.ContinuationFingerprint()
+	if err != nil {
+		return err
+	}
+	if journal.Adapter != request.Adapter || journal.FrameID != request.AgentFrame.FrameID ||
+		journal.FrameContentHash != request.AgentFrame.ContentHash || journal.SurfaceID != request.CapabilitySurface.ID ||
+		journal.SurfaceFingerprint != fingerprint || journal.SessionID != authority.Target.SessionID ||
+		journal.TurnOrdinal != request.CapabilitySurface.Authority.TurnOrdinal || *journal.Memory != authority.Target.Memory ||
+		journal.BodyFingerprint != request.RequestFingerprint || journal.LogicalOperationIdentity != logicalOperationIdentity(ctx) {
+		return fmt.Errorf("provider request journal differs from its exact admitted request or execution coordinates")
+	}
+	operationID, err := canonicalOperationID(ctx, authority, request.Adapter, request.Lineage)
+	if err != nil {
+		return err
+	}
+	if operationID != request.OperationID {
+		return fmt.Errorf("provider request journal belongs to a different logical operation")
+	}
+	return nil
 }
