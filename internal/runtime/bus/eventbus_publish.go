@@ -2060,6 +2060,11 @@ func (eb *EventBus) admitSourceArtifactFact(ctx context.Context) (context.Contex
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	var rootErr error
+	ctx, rootErr = eb.admitRootedSourceContext(ctx)
+	if rootErr != nil {
+		return ctx, rootErr
+	}
 	eb.mu.RLock()
 	runtimeInstanceID := eb.runtimeInstanceID
 	sourceFact := eb.sourceArtifactFact
@@ -2632,6 +2637,7 @@ func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner workl
 	if fact, ok := runtimecorrelation.SourceArtifactFactFromContext(ctx); ok {
 		workCtx = runtimecorrelation.WithSourceArtifactFact(workCtx, fact)
 	}
+	workCtx = runtimecorrelation.CarryRootAdmission(workCtx, ctx)
 	if runtimeID, ok := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); ok {
 		workCtx = runtimecorrelation.WithRuntimeInstanceID(workCtx, runtimeID)
 	}

@@ -18,6 +18,19 @@ func WithRootAdmission(ctx context.Context, admission sourceartifact.RootAdmissi
 	return context.WithValue(ctx, rootAdmissionContextKey{}, admission)
 }
 
+// CarryRootAdmission copies the existing fact without interpreting it. In
+// particular, an explicit clear must remain a clear at the next authority gate.
+func CarryRootAdmission(ctx, from context.Context) context.Context {
+	if from == nil {
+		return ctx
+	}
+	admission, supplied := from.Value(rootAdmissionContextKey{}).(sourceartifact.RootAdmission)
+	if !supplied {
+		return ctx
+	}
+	return WithRootAdmission(ctx, admission)
+}
+
 func RootAdmissionFromContext(ctx context.Context) (sourceartifact.RootAdmission, bool, error) {
 	if ctx == nil {
 		return sourceartifact.RootAdmission{}, false, nil

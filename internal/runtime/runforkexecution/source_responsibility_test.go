@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
@@ -16,6 +17,34 @@ import (
 type responsibilityReader struct {
 	fakeSourceArtifactSelectedContractSourceStore
 	read func(string, string) (sourceartifact.RootedSource, error)
+}
+
+func TestS1LoadedSelectedSourceRefusesModuleFromAnotherRoot(t *testing.T) {
+	bundle := loadRunForkExecutionFixtureBundle(t, filepath.Join("tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
+	record := persistedSourceArtifactForTest(t, bundle)
+	request := SelectedContractSourceLoadRequest{
+		Responsibility: FreshSelectedSource(record.BundleHash), BundleHash: record.BundleHash,
+		Selection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: record.BundleHash},
+	}
+	loader := SourceArtifactSelectedContractSourceLoader{RepoRoot: runForkExecutionRepoRoot(t), Store: &fakeSourceArtifactSelectedContractSourceStore{record: record}}
+	first, err := loader.InspectRunForkSelectedContractSourceForRequest(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _ := sourceartifactfixture.Rooted(t, "other", record.rooted.Artifact())
+	record.rooted = other
+	loader.Store = &fakeSourceArtifactSelectedContractSourceStore{record: record}
+	second, err := loader.InspectRunForkSelectedContractSourceForRequest(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.RootedSource.Admission().Reference() == second.RootedSource.Admission().Reference() {
+		t.Fatal("module control requires distinct roots for the same content")
+	}
+	first.Module = second.Module
+	if err := validateLoadedSelectedContractSource(request, first); err == nil {
+		t.Fatal("selected source admitted an executable module compiled under another root")
+	}
 }
 
 func (s responsibilityReader) LoadRunRootedSource(_ context.Context, id string) (sourceartifact.RootedSource, error) {

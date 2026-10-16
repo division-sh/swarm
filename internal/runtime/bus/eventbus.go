@@ -23,6 +23,7 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 // EventInterceptor runs deterministic coordination in the publish path.
@@ -80,6 +81,7 @@ type EventBus struct {
 	runDispatchGate             RunDispatchGate
 	standingRunWorkOwner        StandingRunWorkOwner
 	sourceArtifactFact          runtimecorrelation.SourceArtifactFact
+	rootAdmission               sourceartifact.RootAdmission
 	runtimeInstanceID           string
 	testLifecycleProbe          runtimelifecycleprobe.Observer
 	providerOutputVerifier      ProviderOutputAuthorizationVerifier
@@ -503,6 +505,10 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		store = InMemoryEventStore{}
 	}
 	semanticSource := opts.ContractBundle
+	rootAdmission, err := compiledBusRoot(opts)
+	if err != nil {
+		return nil, err
+	}
 	filtered := make([]EventInterceptor, 0, len(opts.Interceptors))
 	for _, it := range opts.Interceptors {
 		if it != nil {
@@ -546,6 +552,7 @@ func newEventBusWithOptions(store EventStore, opts EventBusOptions) (*EventBus, 
 		runtimeIngressDispatchGate:  opts.RuntimeIngressDispatchGate,
 		runDispatchGate:             opts.RunDispatchGate,
 		sourceArtifactFact:          opts.SourceArtifactFact,
+		rootAdmission:               rootAdmission,
 		runtimeInstanceID:           strings.TrimSpace(opts.RuntimeInstanceID),
 		testLifecycleProbe:          opts.TestLifecycleProbe,
 		providerOutputVerifier:      opts.ProviderOutputVerifier,

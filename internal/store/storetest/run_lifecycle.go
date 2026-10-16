@@ -140,26 +140,8 @@ func MaterializeRun(
 	if err != nil {
 		return err
 	}
-	root := fixture.RootAdmission
-	if captured, present := fixture.Artifact.RootAdmission(); present {
-		if root != (sourceartifact.RootAdmission{}) && !root.Equal(captured) {
-			return fmt.Errorf("semantic run fixture has competing rooted inputs")
-		}
-		root = captured
-	}
-	if root == (sourceartifact.RootAdmission{}) {
-		root, _, err = runtimecorrelation.RootAdmissionFromContext(ctx)
-		if err != nil {
-			return err
-		}
-	}
-	if err := root.Validate(); err != nil {
-		return fmt.Errorf("semantic run fixture requires its explicit admitted root: %w", err)
-	}
-	if root.BundleHash() != source.BundleHash() {
-		return fmt.Errorf("semantic run fixture root differs from its content fact")
-	}
-	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, root.Reference()); err != nil {
+	root, err := semanticFixtureRootAdmission(ctx, fixture, source)
+	if err != nil {
 		return err
 	}
 	if err := ensureSemanticFixtureSourceArtifact(ctx, runner, source.BundleHash(), fixture.Artifact); err != nil {
@@ -182,6 +164,38 @@ func MaterializeRun(
 	}); err != nil {
 		return err
 	}
+	return materializeRunFixtureState(ctx, runner, fixture, source)
+}
+
+func semanticFixtureRootAdmission(ctx context.Context, fixture RunFixture, source runtimecorrelation.SourceArtifactFact) (sourceartifact.RootAdmission, error) {
+	root := fixture.RootAdmission
+	if captured, present := fixture.Artifact.RootAdmission(); present {
+		if root != (sourceartifact.RootAdmission{}) && !root.Equal(captured) {
+			return sourceartifact.RootAdmission{}, fmt.Errorf("semantic run fixture has competing rooted inputs")
+		}
+		root = captured
+	}
+	if root == (sourceartifact.RootAdmission{}) {
+		var err error
+		root, _, err = runtimecorrelation.RootAdmissionFromContext(ctx)
+		if err != nil {
+			return sourceartifact.RootAdmission{}, err
+		}
+	}
+	if err := root.Validate(); err != nil {
+		return sourceartifact.RootAdmission{}, fmt.Errorf("semantic run fixture requires its explicit admitted root: %w", err)
+	}
+	if root.BundleHash() != source.BundleHash() {
+		return sourceartifact.RootAdmission{}, fmt.Errorf("semantic run fixture root differs from its content fact")
+	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, root.Reference()); err != nil {
+		return sourceartifact.RootAdmission{}, err
+	}
+	return root, nil
+}
+
+func materializeRunFixtureState(ctx context.Context, runner RunFixtureStore, fixture RunFixture, source runtimecorrelation.SourceArtifactFact) error {
+	var err error
 	switch fixture.State {
 	case runtimerunlifecycle.StateRunning:
 	case runtimerunlifecycle.StatePaused:

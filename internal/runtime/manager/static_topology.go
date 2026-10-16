@@ -181,11 +181,7 @@ func (am *AgentManager) PrepareStaticTopologyForStartup(ctx context.Context, sou
 	if err != nil {
 		return err
 	}
-	coordinate, err := staticSourceCoordinate(source, static.BundleHash)
-	if err != nil {
-		return err
-	}
-	blueprints, err := am.resolvedStaticTopologyBlueprints(source)
+	coordinate, blueprints, err := am.resolvedRootedStaticTopologyBlueprints(source, static.BundleHash)
 	if err != nil {
 		return err
 	}
@@ -253,6 +249,15 @@ func (am *AgentManager) PrepareStaticTopologyForStartup(ctx context.Context, sou
 	}
 
 	return nil
+}
+
+func (am *AgentManager) resolvedRootedStaticTopologyBlueprints(source semanticview.Source, hash string) (runtimeagenttopology.SourceCoordinate, []staticAgentBlueprint, error) {
+	coordinate, err := staticSourceCoordinate(source, hash)
+	if err != nil {
+		return runtimeagenttopology.SourceCoordinate{}, nil, err
+	}
+	blueprints, err := am.resolvedStaticTopologyBlueprints(source)
+	return coordinate, blueprints, err
 }
 
 func projectStaticTopologyActor(current PersistedAgent, desiredByKey map[string]staticAgentBlueprint, admission runtimeagenttopology.Admission) (*PersistedAgent, bool, error) {

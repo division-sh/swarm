@@ -246,22 +246,19 @@ func validateLoadedSelectedContractSource(req SelectedContractSourceLoadRequest,
 	if err := loaded.RootedSource.Validate(); err != nil {
 		return fmt.Errorf("%s: selected-contract loader returned no rooted source: %w", runbundle.CodeBundleDataIntegrityError, err)
 	}
-	bundle, ok := semanticview.Bundle(loaded.Source)
-	if !ok || bundle == nil {
-		return fmt.Errorf("%s: selected-contract loader returned no compiled source", runbundle.CodeBundleDataIntegrityError)
-	}
-	compiled, err := bundle.RootedSource()
-	if err != nil {
+	if err := validateSelectedCompiledRoot(loaded.Source, loaded.RootedSource); err != nil {
 		return err
 	}
-	if compiled.Admission().Reference() != loaded.RootedSource.Admission().Reference() || compiled.Artifact() != loaded.RootedSource.Artifact() {
-		return fmt.Errorf("%s: selected-contract loader crossed its compiled rooted source", runbundle.CodeBundleDataIntegrityError)
+	if loaded.Module != nil {
+		if err := validateSelectedCompiledRoot(loaded.Module.SemanticSource(), loaded.RootedSource); err != nil {
+			return fmt.Errorf("selected executable module: %w", err)
+		}
 	}
 	loadedFact := loaded.SourceArtifactFact
 	if err := loadedFact.Validate(); err != nil {
 		return fmt.Errorf("%s: selected-contract loader returned invalid bundle source fact: %w", runbundle.CodeBundleDataIntegrityError, err)
 	}
-	if loadedFact.BundleHash() != compiled.Admission().BundleHash() {
+	if loadedFact.BundleHash() != loaded.RootedSource.Admission().BundleHash() {
 		return fmt.Errorf("%s: selected-contract loader crossed its compiled content fact", runbundle.CodeBundleDataIntegrityError)
 	}
 	if expectedHash := strings.TrimSpace(req.BundleHash); expectedHash != "" && expectedHash != loadedFact.BundleHash() {
@@ -280,6 +277,21 @@ func validateLoadedSelectedContractSource(req SelectedContractSourceLoadRequest,
 		if expectedFact.BundleHash() != loadedFact.BundleHash() {
 			return fmt.Errorf("%s: selected-contract bundle_hash mismatch: expected %s loaded %s", runbundle.CodeBundleDataIntegrityError, expectedFact.BundleHash(), loadedFact.BundleHash())
 		}
+	}
+	return nil
+}
+
+func validateSelectedCompiledRoot(source semanticview.Source, expected sourceartifact.RootedSource) error {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return fmt.Errorf("%s: selected-contract loader returned no compiled source", runbundle.CodeBundleDataIntegrityError)
+	}
+	compiled, err := bundle.RootedSource()
+	if err != nil {
+		return err
+	}
+	if compiled.Admission().Reference() != expected.Admission().Reference() || compiled.Artifact() != expected.Artifact() {
+		return fmt.Errorf("%s: selected-contract loader crossed its compiled rooted source", runbundle.CodeBundleDataIntegrityError)
 	}
 	return nil
 }
