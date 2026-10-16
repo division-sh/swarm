@@ -270,7 +270,11 @@ func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store agentf
 
 func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context.Context, store completionSettlementTestStore, rec runtimellm.AgentTurnRecord, options managedAgentTurnFixtureOptions) error {
 	t.Helper()
-	fixtureCtx := testAuthorActivityContext()
+	source, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		return fmt.Errorf("managed turn fixture requires its original source")
+	}
+	fixtureCtx := testAuthorActivityContextForBundle(source.BundleHash())
 	plan := rec.Memory
 	if rec.Identity == (agentmemory.Identity{}) {
 		rec.Identity = testAgentMemoryIdentity(t, rec.RunID, rec.AgentID, rec.FlowInstance)
@@ -364,7 +368,7 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 	completionCtx = runtimeeffects.WithLogicalOperationIdentity(completionCtx, "managed-turn-fixture:"+authority.Target.ID)
 	completionCtx = withManagedCompletionTestSurface(t, completionCtx, authority, adapter)
 	completionCtx = runtimecorrelation.WithInboundEvent(completionCtx, originEvent)
-	frame := managedCompletionTestFrameWithEvent(t, authority, adapter, originEvent)
+	frame := managedCompletionTestFrameForSource(t, authority, adapter, originEvent, source.BundleHash())
 	handle, err := runtimeeffects.BeginManagedCompletion(completionCtx, adapter, rec.RequestPayload, frame, nil)
 	if err != nil {
 		return err
