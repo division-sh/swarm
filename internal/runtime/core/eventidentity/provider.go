@@ -13,7 +13,8 @@ func QualifyProviderEvent(key, local string) (string, error) {
 	if err := runtimepaths.ValidateFlowSegment(key); err != nil {
 		return "", fmt.Errorf("provider event requires an exact portable directory key: %w", err)
 	}
-	if strings.HasPrefix(local, "inbound.") || strings.Contains(local, "/") || !IsCanonicalName(local) {
+	qualified := "inbound." + key + "." + local
+	if strings.HasPrefix(local, "inbound.") || strings.Contains(local, "/") || !IsCanonicalName(qualified) {
 		return "", fmt.Errorf("event %q must use a short local name such as text_message; the provider directory supplies inbound.%s.", local, key)
 	}
 	for _, token := range strings.Split(local, ".") {
@@ -21,5 +22,5 @@ func QualifyProviderEvent(key, local string) (string, error) {
 			return "", fmt.Errorf("short event names must retain exact tokens without surrounding whitespace")
 		}
 	}
-	return "inbound." + key + "." + local, nil
+	return qualified, nil
 }

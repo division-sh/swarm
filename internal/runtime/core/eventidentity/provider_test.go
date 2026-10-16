@@ -19,7 +19,7 @@ func TestS1ProviderEventProjectionRetainsExactLocalTokens(t *testing.T) {
 			t.Errorf("invalid provider key %q repaired", key)
 		}
 	}
-	for _, local := range []string{"", "inbound.team.raw", "inbound.foreign.raw", "child/raw", "text.*", "Text", "text. received", "text.\u00a0received", "text.\u2003received", "text.\treceived", "text..received", "raw "} {
+	for _, local := range []string{"", "inbound.team.raw", "inbound.foreign.raw", "child/raw", "text.*", "raw-hyphen", "Text", "text. received", "text.\u00a0received", "text.\u2003received", "text.\treceived", "text..received", "raw "} {
 		if _, err := QualifyProviderEvent("team-bot", local); err == nil {
 			t.Errorf("non-local or inexact event %q admitted", local)
 		}

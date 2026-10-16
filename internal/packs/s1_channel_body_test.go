@@ -108,6 +108,7 @@ func TestS1ChannelBodyRejectsQualifiedForeignAndNoncanonicalReferences(t *testin
 		{"foreign event", "event: text.received", "event: inbound.foreign.text.received"},
 		{"path event", "event: text.received", "event: child/text.received"},
 		{"wildcard event", "event: text.received", "event: text.*"},
+		{"path token is not dotted event token", "event: text.received", "event: raw-hyphen"},
 		{"whitespace event", "event: text.received", "event: 'text. received'"},
 		{"unicode whitespace event", "event: text.received", "event: 'text.\u00a0received'"},
 		{"qualified onboarding role", "provider_credential: bot_token", "provider_credential: team-bot.bot_token"},
