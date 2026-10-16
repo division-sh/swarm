@@ -551,6 +551,8 @@ func TestSelectedContractExecutionMaterializationKeepsUnrelatedInProgressDeliver
 	at := time.Unix(1700002428, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	seedCanonicalSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
+	ctx = prepareSelectedContractSourceActorsForTest(t, pg, sourceRunID,
+		mustTestAgentIdentityForRun(sourceRunID, "unrelated-agent", "fixture/unrelated-agent"))
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, unrelatedEventID, sourceRunID, "item.received",
 		events.EventProducerPlatform, "source-runtime", entityID, "", at.Add(10*time.Second))
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -632,6 +634,8 @@ func TestSelectedContractExecutionActivationKeepsPostFrontierActiveDeliveryFailC
 	at := time.Unix(1700002435, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	seedCanonicalSelectedContractExecutionStoreSourceWithoutDelivery(t, db, sourceRunID, entityID, sourceEventID, at)
+	ctx = prepareSelectedContractSourceActorsForTest(t, pg, sourceRunID,
+		mustTestAgentIdentityForRun(sourceRunID, "unrelated-agent", "fixture/unrelated-agent"))
 	seedPostgresChildEventRecordFixture(t, ctx, db, forkPointEventID, sourceRunID, sourceEventID,
 		"review.ready", events.EventProducerAgent, "validation-coordinator", entityID, "", []byte(`{}`), forkAt)
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -941,7 +945,8 @@ func TestPostTSourceConversationHistoryDoesNotChangeFixedEventMaterialization(t 
 	sessionID := uuid.NewString()
 	at := time.Unix(1700003608, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-	seedPostTActiveConversationCoupling(t, db, sourceRunID, entityID, eventID, sessionID, at)
+	ctx = prepareSelectedContractSourceActorsForTest(t, pg, sourceRunID, mustTestAgentIdentityForRun(sourceRunID, "active-agent", "flow-a/1"))
+	seedPostTActiveConversationCoupling(t, ctx, pg, sourceRunID, entityID, eventID, sessionID, at)
 
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t))))
 	if err != nil {
@@ -1201,7 +1206,12 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 			eventID := uuid.NewString()
 			at := time.Unix(1700003620, 0).UTC()
 			seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
-			seedTestAgentRow(t, ctx, db, true, mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1"), "active")
+			identity := mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1")
+			if tc.name == "turn" {
+				ctx = prepareSelectedContractSourceActorsForTest(t, pg, sourceRunID, identity)
+			} else {
+				seedTestAgentRow(t, ctx, db, true, identity, "active")
+			}
 
 			request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
 			materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
@@ -1299,6 +1309,7 @@ func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t
 	sessionID := uuid.NewString()
 	at := time.Unix(1700003623, 0).UTC()
 	seedCanonicalSelectedContractExecutionStoreSource(t, db, sourceRunID, entityID, eventID, at)
+	ctx = prepareSelectedContractSourceActorsForTest(t, pg, sourceRunID, mustTestAgentIdentityForRun(sourceRunID, "active-agent", "flow-a/1"))
 
 	request := canonicalSelectedContractExecutionStoreRequest(t, ctx, pg, sourceRunID, eventID, runfork.RunForkContractSelection{Mode: "selected_contracts"}, mustStoreTestSourceArtifactFact(mustCanonicalSelectedContractStoreHash(t)))
 	materialized, err := pg.MaterializeRunForkForSelectedContractExecution(ctx, request)
@@ -1306,7 +1317,7 @@ func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
-	seedPostTActiveConversationCoupling(t, db, sourceRunID, entityID, eventID, sessionID, at)
+	seedPostTActiveConversationCoupling(t, ctx, pg, sourceRunID, entityID, eventID, sessionID, at)
 
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, activationRequest)
@@ -1952,16 +1963,10 @@ func seedSelectedContractSourceConversationHistoryWithActiveDelivery(t *testing.
 func seedSelectedContractSourceConversationHistoryWithDelivery(t *testing.T, pg *PostgresStore, sourceRunID, entityID, eventID, sessionID, auditID, turnID string, at time.Time, keepDelivery bool, additional ...agentidentity.Identity) (context.Context, runtimedelivery.Claim) {
 	t.Helper()
 	db := pg.backend.ConstructionHandle()
-	header, err := pg.LoadRunHeader(testAuthorActivityContext(), sourceRunID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(header.BundleHash), sourceRunID)
 	identity := mustTestAgentIdentityForRun(sourceRunID, "agent-a", "flow-a/1")
 	fields := testAgentIdentityStorageFields(t, identity)
 	identities := append([]agentidentity.Identity{identity}, additional...)
-	ctx = preparePositiveAgentClaimFixture(t, ctx, pg, identities...)
-	bindPreparedAgentProcessToSelectedMaterialization(t, ctx, pg)
+	ctx := prepareSelectedContractSourceActorsForTest(t, pg, sourceRunID, identities...)
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -2013,6 +2018,18 @@ func seedSelectedContractSourceConversationHistoryWithDelivery(t *testing.T, pg 
 	return ctx, claimed.Claim
 }
 
+func prepareSelectedContractSourceActorsForTest(t *testing.T, pg *PostgresStore, sourceRunID string, identities ...agentidentity.Identity) context.Context {
+	t.Helper()
+	header, err := pg.LoadRunHeader(testAuthorActivityContext(), sourceRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(header.BundleHash), sourceRunID)
+	ctx = preparePositiveAgentClaimFixture(t, ctx, pg, identities...)
+	bindPreparedAgentProcessToSelectedMaterialization(t, ctx, pg)
+	return ctx
+}
+
 func seedSelectedContractSourceReplayScopeMarker(t *testing.T, db execContextDB, sourceRunID, eventID, reasonCode string, at time.Time) {
 	t.Helper()
 	scope, ok := committedReplayScopeFromReasonCode(reasonCode)
@@ -2033,12 +2050,11 @@ func seedSelectedContractPostForkSourceEvent(t *testing.T, db *sql.DB, sourceRun
 		events.EventProducerPlatform, "source-runtime", entityID, "flow-a/1", at)
 }
 
-func seedPostTActiveConversationCoupling(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID, sessionID string, at time.Time) {
+func seedPostTActiveConversationCoupling(t *testing.T, ctx context.Context, pg *PostgresStore, sourceRunID, entityID, eventID, sessionID string, at time.Time) {
 	t.Helper()
-	ctx := testAuthorActivityContext()
+	db := pg.backend.ConstructionHandle()
 	identity := mustTestAgentIdentityForRun(sourceRunID, "active-agent", "flow-a/1")
 	fields := testAgentIdentityStorageFields(t, identity)
-	seedTestAgentRow(t, ctx, db, true, identity, "active")
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -2054,9 +2070,15 @@ func seedPostTActiveConversationCoupling(t *testing.T, db *sql.DB, sourceRunID, 
 		t.Fatalf("seed post-T active source session: %v", err)
 	}
 	activeRoute := testAgentDeliveryRoute(t, sourceRunID, "active-agent", "flow-a/1")
-	event := commitPostgresDeliveryFixture(t, ctx, db, eventID, activeRoute)
-	claimed := claimPostgresDeliveryFixture(t, ctx, db, event, activeRoute)
-	if bound, err := postgresDeliveryFixtureStore(db).BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
+	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
+	if err := commitDeliveryObligationFixture(ctx, pg, event, activeRoute); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := claimDeliveryFixture(ctx, pg, event, activeRoute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bound, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("bind post-T active source delivery: %v", err)
 	} else if !bound.Acknowledged {
 		t.Fatal("bind post-T active source delivery was not acknowledged")
