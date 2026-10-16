@@ -5,19 +5,9 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"io/fs"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/division-sh/swarm/internal/checkoutsource"
 )
 
 const stopWitnessPredecessor = "bb42d634bc2810223a91ded22e26182a27bcea90"

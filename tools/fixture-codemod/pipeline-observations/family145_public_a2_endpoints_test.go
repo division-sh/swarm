@@ -1,18 +1,12 @@
 package main
 
 import (
-	"crypto/sha256"
-	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/checkoutsource"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicendpoint"
 )
 

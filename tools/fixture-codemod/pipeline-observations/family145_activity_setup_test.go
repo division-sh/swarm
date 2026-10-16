@@ -1,14 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"os"
 	"strings"
-	"testing"
 )
 
 func family145ActivitySetupOwner(name string) bool {

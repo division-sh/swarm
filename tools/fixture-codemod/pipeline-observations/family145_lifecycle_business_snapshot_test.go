@@ -1,10 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"go/ast"
-	"path/filepath"
 	"strings"
 	"testing"
 )

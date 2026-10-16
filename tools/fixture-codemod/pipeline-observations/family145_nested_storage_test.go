@@ -1,13 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"strings"
-	"testing"
 )
 
 const nestedFamilyPath = "internal/runtime/conformance/"
