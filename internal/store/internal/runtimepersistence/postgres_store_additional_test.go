@@ -2672,7 +2672,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	ceoID := "operator-" + entityID
 	ceoIdentity := mustTestAgentIdentityForRun(specEntityStateRunID, ceoID, "operating/global")
 	_ = agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: ceoID,
+		Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: ceoID,
 			Identity: ceoIdentity,
 			Role:     "operator",
 			FlowID:   "operating",
@@ -2682,7 +2682,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 			FlowPath: "operating/global",
 			EntityID: entityID,
 			Config:   json.RawMessage(`{}`),
-		}),
+		})),
 		Status:          "active",
 		HiredBy:         "test",
 		StartedAt:       time.Now().UTC(),
@@ -2700,11 +2700,15 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
 		time.Now().Add(-2*time.Hour),
 	)
+	requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
+		RunID: evt.RunID(), Origin: semanticEventRunOriginForTest(t, evt.ID(), string(evt.Type())), StartedAt: evt.CreatedAt(),
+	})
+	deliveryIdentity := mustTestAgentIdentityForRun(evt.RunID(), ceoID, "fixture/"+ceoID)
+	ctx = preparePositiveAgentClaimFixture(t, ctx, pg, deliveryIdentity)
 
 	if err := commitSemanticEventFixtureWithAgents(ctx, pg, evt, []string{ceoID}); err != nil {
 		t.Fatalf("AppendEvent with exact delivery: %v", err)
 	}
-	deliveryIdentity := mustTestAgentIdentityForRun(evt.RunID(), ceoID, "fixture/"+ceoID)
 	pending, err := pg.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{
 		AgentIdentity: deliveryIdentity,
 		Since:         time.Now().Add(-24 * time.Hour),
