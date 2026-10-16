@@ -11647,6 +11647,20 @@ tool_model:
       runtime_adapter: internal/runtime/tools channel handler consuming internal/packs.OutboundBindingPlan
       private_activity_targets: internal/runtime/pipeline.ChannelActivityTarget
       durable_execution: internal/runtime/pipeline activity attempt owner
+    directory_body_admission:
+      owner: internal/packs.AdmitChannelBody
+      rule: >
+        A channel.yaml BODY consumes its captured provider directory key and original lexical source; it does not
+        author provider, requires.packs or implements. Its operation and registration tool references use short local
+        names, qualified once as <directory>.<tool>. Its event references use short local event names, qualified by
+        the same event-identity owner as trigger declarations to inbound.<directory>.<event>. Registration and
+        onboarding credential roles use short local names qualified to <directory>.<role>, matching connector
+        requirements. Qualified, foreign, routed, wildcard or whitespace-repaired references are refused with the
+        short form named, not accepted as aliases. Opaque schemas, mapping paths, interface operation/event names,
+        native Inbox operation references, registration slot namespace, identity ceremony, confirmation and connection
+        health remain their existing owners' policy; namespace projection does not rewrite them. Provider-private
+        session material does not become a credential. Source bytes and body hashes remain unchanged, and a BODY
+        alone supplies no installed transport, connection, claim, enabled route, delivery or effect authority.
     capability_model:
       exact_fields: [card_render, reply_to_reference, actions_as_buttons, actions_as_text, edit, acknowledgment, inbox_listing]
       admission: >

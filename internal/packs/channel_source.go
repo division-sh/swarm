@@ -35,7 +35,13 @@ func AdmitChannelBody(body packartifact.ProviderBody) (ChannelManifest, error) {
 	if err != nil {
 		return ChannelManifest{}, err
 	}
-	return manifest, validateChannelManifest(body.ProviderKey(), manifest)
+	if err := validateChannelManifest(body.ProviderKey(), manifest); err != nil {
+		return ChannelManifest{}, channelError(body.SourceValue(), err.Error())
+	}
+	if err := qualifyChannelBodyReferences(body.SourceValue(), &manifest); err != nil {
+		return ChannelManifest{}, err
+	}
+	return manifest, nil
 }
 
 func admitChannelManifest(root yamlsource.Value, provider string) (ChannelManifest, error) {

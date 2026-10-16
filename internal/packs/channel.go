@@ -594,7 +594,7 @@ func validateChannelManifest(packID string, manifest ChannelManifest) error {
 		}
 	}
 	if manifest.Registration != nil {
-		if err := validateChannelRegistrationManifest(packID, *manifest.Registration); err != nil {
+		if err := validateChannelRegistrationManifest(packID, manifest.Provider, *manifest.Registration); err != nil {
 			return err
 		}
 	}

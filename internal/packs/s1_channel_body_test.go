@@ -49,8 +49,10 @@ registration:
 func s1CapturedChannelBody(t testing.TB, key, source string) packartifact.ProviderBody {
 	t.Helper()
 	provider, err := packartifact.AdmitProviderMembers(key, map[string][]byte{
-		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [send_message]}, cannot: [bypass journal]}\n"),
-		"channel.yaml":  []byte(source),
+		"manifest.yaml":  []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [send_message]}, cannot: [bypass journal]}\n"),
+		"channel.yaml":   []byte(source),
+		"trigger.yaml":   []byte("event_name: {literal: raw}\n"),
+		"connector.yaml": []byte("tools:\n  send_message:\n    category: provider_connector\n    handler_type: http\n    effect_class: non_idempotent_write\n    response_success: {kind: http_status_2xx}\n    http: {method: POST, url: 'https://example.test/send'}\n"),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -107,6 +109,7 @@ func TestS1ChannelBodyRejectsQualifiedForeignAndNoncanonicalReferences(t *testin
 		{"path event", "event: text.received", "event: child/text.received"},
 		{"wildcard event", "event: text.received", "event: text.*"},
 		{"whitespace event", "event: text.received", "event: 'text. received'"},
+		{"unicode whitespace event", "event: text.received", "event: 'text.\u00a0received'"},
 		{"qualified onboarding role", "provider_credential: bot_token", "provider_credential: team-bot.bot_token"},
 		{"foreign onboarding role", "signing_credential: webhook_signing", "signing_credential: foreign.webhook_signing"},
 		{"whitespace onboarding role", "provider_credential: bot_token", "provider_credential: ' bot_token '"},
@@ -125,12 +128,88 @@ func TestS1ChannelBodyRejectsQualifiedForeignAndNoncanonicalReferences(t *testin
 	}
 }
 
+func TestS1ChannelBodySessionAndNativeNamesRemainPolicyOwned(t *testing.T) {
+	session := strings.Split(s1ChannelDirectoryBody, "registration:")[0]
+	session = strings.Replace(session, "transport: webhook", "transport: session", 1)
+	session = strings.Replace(session, "signing_credential: webhook_signing", "connection_health: provider_connection", 1)
+	for _, optionalCredential := range []bool{true, false} {
+		bodySource := session
+		if !optionalCredential {
+			bodySource = strings.Replace(bodySource, "  provider_credential: bot_token\n", "", 1)
+		}
+		bodySource += "native_inbox:\n  kind: scoped_commands_v1\n  client_languages: [en, fr]\n  direct_launcher_read: read_inbox_launcher\n  default_launcher_read: read_default_inbox_launcher\n  commands_launcher: commands\n  inherited_launcher: default\n"
+		manifest, err := packs.AdmitChannelBody(s1CapturedChannelBody(t, "team-bot", bodySource))
+		if err != nil {
+			t.Fatal(err)
+		}
+		profile, err := packs.CompileChannelOnboardingProfile(manifest.Provider, manifest.Transport, *manifest.Onboarding, []string{"deliver"})
+		if err != nil || profile.ConnectionHealth() != "provider_connection" || profile.SigningCredential() != "" || profile.ConfirmationOperation() != "deliver" || manifest.Registration != nil {
+			t.Fatalf("session projection changed connection semantics: %+v %v", profile, err)
+		}
+		if (profile.ProviderCredential() == "team-bot.bot_token") != optionalCredential || (!optionalCredential && profile.ProviderCredential() != "") {
+			t.Fatal("session projection fabricated or lost a genuine credential")
+		}
+		native := manifest.NativeInbox
+		if native.DirectLauncherRead != "read_inbox_launcher" || native.DefaultLauncherRead != "read_default_inbox_launcher" || native.CommandsLauncher != "commands" || native.InheritedLauncher != "default" || !reflect.DeepEqual(native.ClientLanguages, []string{"en", "fr"}) {
+			t.Fatalf("native semantic operation names were provider-qualified: %+v", native)
+		}
+	}
+}
+
+func TestS1ChannelBodyAliasesAndRepeatedProjectionKeepFrozenEvidence(t *testing.T) {
+	source := strings.Replace(s1ChannelDirectoryBody, "  deliver:\n", "  deliver: &message\n", 1)
+	source = strings.Replace(source, "events:\n", "  repeated: *message\nevents:\n", 1)
+	body := s1CapturedChannelBody(t, "team-bot", source)
+	first, err := packs.AdmitChannelBody(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Operations["deliver"].Tool != "team-bot.send_message" || first.Operations["repeated"].Tool != "team-bot.send_message" {
+		t.Fatal("aliased operation lost exact local reference projection")
+	}
+	first.Operations["deliver"].Input["room"] = packs.ChannelMapping{From: "foreign.room"}
+	first.Onboarding.ProviderCredentialRole = "foreign.token"
+	copy := body.Bytes()
+	copy[0] = 'X'
+	second, err := packs.AdmitChannelBody(body)
+	if err != nil || second.Operations["deliver"].Tool != "team-bot.send_message" || second.Operations["deliver"].Input["room"].From != "context.destination" || second.Onboarding.ProviderCredentialRole != "team-bot.bot_token" || !bytes.Equal(body.Bytes(), []byte(source)) {
+		t.Fatalf("readback or repeated projection changed captured evidence: %+v %v", second, err)
+	}
+}
+
+func TestS1ChannelBodyRequiresCapturedRoleAndRejectsAuthoredProvider(t *testing.T) {
+	provider, err := packartifact.AdmitProviderMembers("team-bot", map[string][]byte{
+		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw]}, cannot: [execute code]}\n"),
+		"trigger.yaml":  []byte("event_name: {literal: raw}\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, _ := provider.Body(packmodel.BodyTrigger)
+	if _, err := packs.AdmitChannelBody(trigger); err == nil {
+		t.Fatal("trigger role became a channel")
+	}
+	for _, authored := range []string{"team-bot", "foreign", "null"} {
+		_, err := packartifact.AdmitProviderMembers("team-bot", map[string][]byte{
+			"manifest.yaml":  []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw]}, cannot: [execute code]}\n"),
+			"trigger.yaml":   []byte("event_name: {literal: raw}\n"),
+			"connector.yaml": []byte("tools: {}\n"),
+			"channel.yaml":   []byte("provider: " + authored + "\n" + s1ChannelDirectoryBody),
+		})
+		if err == nil || !strings.Contains(err.Error(), "directory") {
+			t.Fatalf("authored provider %q overrode captured channel identity: %v", authored, err)
+		}
+	}
+}
+
 func TestS1ChannelBodyLogicalReconstructionRetainsNamespace(t *testing.T) {
 	members := map[string][]byte{
-		"flows/shop/agents.yaml":            []byte("{}\n"),
-		"flows/shop/schema.yaml":            []byte("stages: []\n"),
-		"flows/shop/team-bot/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [send_message]}, cannot: [bypass journal]}\n"),
-		"flows/shop/team-bot/channel.yaml":  []byte(s1ChannelDirectoryBody),
+		"shop/agents.yaml":             []byte("{}\n"),
+		"shop/schema.yaml":             []byte("stages: []\n"),
+		"shop/team-bot/manifest.yaml":  []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [send_message]}, cannot: [bypass journal]}\n"),
+		"shop/team-bot/channel.yaml":   []byte(s1ChannelDirectoryBody),
+		"shop/team-bot/trigger.yaml":   []byte("event_name: {literal: raw}\n"),
+		"shop/team-bot/connector.yaml": []byte("tools:\n  send_message:\n    category: provider_connector\n    handler_type: http\n    effect_class: non_idempotent_write\n    response_success: {kind: http_status_2xx}\n    http: {method: POST, url: 'https://example.test/send'}\n"),
 	}
 	artifact, err := sourceartifact.AdmitMembers(members)
 	if err != nil {
@@ -141,7 +220,7 @@ func TestS1ChannelBodyLogicalReconstructionRetainsNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, source := range []*sourceartifact.AdmittedSourceArtifact{artifact, retained} {
-		provider, err := packartifact.ProviderFromArtifact(source, "flows/shop/team-bot")
+		provider, err := packartifact.ProviderFromArtifact(source, "shop/team-bot")
 		if err != nil {
 			t.Fatal(err)
 		}

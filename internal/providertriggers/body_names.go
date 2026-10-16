@@ -1,9 +1,6 @@
 package providertriggers
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -68,13 +65,9 @@ func qualifyTriggerBodyRawName(root yamlsource.Value, definition *manifestDefini
 }
 
 func qualifyTriggerBodyEvent(value yamlsource.Value, key, local string) (string, error) {
-	if strings.HasPrefix(local, "inbound.") || strings.Contains(local, "/") || !eventidentity.IsCanonicalName(local) {
-		return "", triggerSourceError(value, fmt.Sprintf("event %q must use a short local name such as text_message; the provider directory supplies inbound.%s.", local, key))
+	qualified, err := eventidentity.QualifyProviderEvent(key, local)
+	if err != nil {
+		return "", triggerSourceError(value, err.Error())
 	}
-	for _, token := range strings.Split(local, ".") {
-		if token != strings.TrimSpace(token) {
-			return "", triggerSourceError(value, "short event names must retain exact tokens without surrounding whitespace")
-		}
-	}
-	return "inbound." + key + "." + local, nil
+	return qualified, nil
 }

@@ -151,7 +151,7 @@ func (p RegistrationOperationPlan) Project(result any) (map[string]any, error) {
 	return out, nil
 }
 
-func validateChannelRegistrationManifest(packID string, profile ChannelRegistrationProfile) error {
+func validateChannelRegistrationManifest(packID, provider string, profile ChannelRegistrationProfile) error {
 	subject := "channel pack " + packID + " registration"
 	if !channelPathSegmentPattern.MatchString(strings.TrimSpace(profile.Slot.Namespace)) {
 		return fmt.Errorf("%s slot.namespace must be a stable identifier", subject)
@@ -161,18 +161,18 @@ func validateChannelRegistrationManifest(packID string, profile ChannelRegistrat
 	}
 	seen := map[string]struct{}{}
 	for _, raw := range profile.Credentials.Provider {
-		credential := strings.TrimSpace(raw)
-		if !channelPathSegmentPattern.MatchString(credential) {
-			return fmt.Errorf("%s provider credential %q is invalid", subject, raw)
+		credential := raw
+		if _, err := runtimecontracts.QualifyProviderLocalName(provider, credential); err != nil {
+			return fmt.Errorf("%s provider credential: %w", subject, err)
 		}
 		if _, duplicate := seen[credential]; duplicate {
 			return fmt.Errorf("%s provider credential %q is duplicated", subject, credential)
 		}
 		seen[credential] = struct{}{}
 	}
-	signing := strings.TrimSpace(profile.Credentials.Signing)
-	if !channelPathSegmentPattern.MatchString(signing) {
-		return fmt.Errorf("%s credentials.signing must be a stable logical credential", subject)
+	signing := profile.Credentials.Signing
+	if _, err := runtimecontracts.QualifyProviderLocalName(provider, signing); err != nil {
+		return fmt.Errorf("%s credentials.signing: %w", subject, err)
 	}
 	if _, duplicate := seen[signing]; duplicate {
 		return fmt.Errorf("%s signing credential %q must be distinct from provider credentials", subject, signing)

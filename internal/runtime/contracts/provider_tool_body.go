@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packmodel"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -42,15 +43,28 @@ func AdmitProviderToolDeclarations(body packartifact.ProviderBody) (map[string]T
 	return out, nil
 }
 
-func providerBodyLocalName(value yamlsource.Value, key, local, kind string) (string, error) {
+// QualifyProviderLocalName is a pure syntax projection for local tool and
+// credential names. The captured BODY, not this function, supplies identity.
+func QualifyProviderLocalName(key, local string) (string, error) {
+	if err := runtimepaths.ValidateFlowSegment(key); err != nil {
+		return "", fmt.Errorf("provider name requires an exact portable directory key: %w", err)
+	}
 	if !toolPathNamePattern.MatchString(local) {
+		return "", fmt.Errorf("name %q must use a short local token such as send_message or bot_token; directory %q supplies the namespace", local, key)
+	}
+	return key + "." + local, nil
+}
+
+func providerBodyLocalName(value yamlsource.Value, key, local, kind string) (string, error) {
+	qualified, err := QualifyProviderLocalName(key, local)
+	if err != nil {
 		example := "bot_token"
 		if kind == "tool" {
 			example = "send_message"
 		}
 		return "", nodeValueError(value, fmt.Errorf("provider %s %q must use a short local name such as %q; directory %q supplies the namespace", kind, local, example, key))
 	}
-	return key + "." + local, nil
+	return qualified, nil
 }
 
 func qualifyProviderToolCredentials(entry ToolSchemaEntry, source yamlsource.Value, key string) (ToolSchemaEntry, error) {
