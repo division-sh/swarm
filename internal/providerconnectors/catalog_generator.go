@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/platform"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
@@ -150,9 +151,9 @@ func (p GeneratorProfile) Validate() error {
 	if strings.TrimSpace(p.SchemaVersion) != CatalogSchemaVersion {
 		return fmt.Errorf("generator profile schema_version must be %q", CatalogSchemaVersion)
 	}
-	provider := normalizeToken(p.Provider)
-	if provider == "" || strings.TrimSpace(p.Provider) != provider || !catalogIdentityTokenPattern.MatchString(provider) {
-		return fmt.Errorf("generator profile provider must be canonical lowercase snake_case")
+	provider := p.Provider
+	if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
+		return fmt.Errorf("generator profile provider requires an exact portable directory key: %w", err)
 	}
 	if strings.TrimSpace(p.Source.Path) == "" || strings.TrimSpace(p.Source.OpenAPIVersion) == "" || strings.TrimSpace(p.Source.Server) == "" {
 		return fmt.Errorf("generator profile source path, openapi_version, and server are required")
@@ -216,7 +217,7 @@ func (p GeneratorProfile) Validate() error {
 			return err
 		}
 		operationID := strings.TrimSpace(operation.OperationID)
-		toolID := strings.TrimSpace(operation.ToolID)
+		toolID := operation.ToolID
 		fixtureID := strings.TrimSpace(operation.Fixture.ID)
 		if _, exists := seenOperations[operationID]; exists {
 			return fmt.Errorf("generator profile contains duplicate operation_id %q", operationID)
@@ -239,7 +240,7 @@ func (o GeneratorOperation) Validate(provider string) error {
 	if strings.TrimSpace(o.OperationID) == "" || strings.TrimSpace(o.Path) == "" || strings.TrimSpace(o.Method) == "" || strings.TrimSpace(o.ToolID) == "" || strings.TrimSpace(o.Description) == "" {
 		return fmt.Errorf("%s operation_id, path, method, tool_id, and description are required", context)
 	}
-	toolID := strings.TrimSpace(o.ToolID)
+	toolID := o.ToolID
 	toolProvider, action, ok := splitToolID(toolID)
 	if !ok || toolProvider != provider || action == "" || toolID != provider+"."+action || !catalogIdentityTokenPattern.MatchString(action) {
 		return fmt.Errorf("%s tool_id %q must use stable %s.<action> form", context, o.ToolID, provider)
@@ -502,7 +503,7 @@ func generateCatalogPack(fsys fs.FS, entry GeneratedPackIndexEntry) (GeneratedCa
 	if err != nil {
 		return GeneratedCatalogArtifact{}, fmt.Errorf("parse profile %q: %w", entry.Profile, err)
 	}
-	if strings.TrimSpace(profile.Pack.ID) != strings.TrimSpace(entry.ID) || normalizeToken(profile.Provider) != normalizeToken(entry.Provider) {
+	if strings.TrimSpace(profile.Pack.ID) != strings.TrimSpace(entry.ID) || profile.Provider != entry.Provider {
 		return GeneratedCatalogArtifact{}, fmt.Errorf("profile pack/provider identity does not match generated index")
 	}
 	sourceBody, err := readGeneratorSource(fsys, profile.Source)
@@ -522,10 +523,10 @@ func generateCatalogPack(fsys fs.FS, entry GeneratedPackIndexEntry) (GeneratedCa
 		if err != nil {
 			return GeneratedCatalogArtifact{}, err
 		}
-		tools[strings.TrimSpace(operation.ToolID)] = tool
+		tools[operation.ToolID] = tool
 		evidence = append(evidence, GenerationOperationEvidence{
 			OperationID:     strings.TrimSpace(operation.OperationID),
-			ToolID:          strings.TrimSpace(operation.ToolID),
+			ToolID:          operation.ToolID,
 			Permissions:     append([]GenerationPermission(nil), operation.Permissions...),
 			ResponseSuccess: operation.ResponseSuccess,
 			FixtureID:       strings.TrimSpace(operation.Fixture.ID),
@@ -535,7 +536,7 @@ func generateCatalogPack(fsys fs.FS, entry GeneratedPackIndexEntry) (GeneratedCa
 	}
 	sort.Slice(evidence, func(i, j int) bool { return evidence[i].ToolID < evidence[j].ToolID })
 	manifest := ConnectorManifest{
-		Provider: normalizeToken(profile.Provider),
+		Provider: profile.Provider,
 		Generation: &GenerationEvidence{
 			SchemaVersion:    CatalogSchemaVersion,
 			GeneratorVersion: CatalogGeneratorVersion,

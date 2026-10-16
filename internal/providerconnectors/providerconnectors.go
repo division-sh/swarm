@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
@@ -88,7 +89,7 @@ func ValidateSource(source semanticview.Source) []error {
 	tools := source.ToolEntries()
 	names := make([]string, 0, len(tools))
 	for name := range tools {
-		names = append(names, strings.TrimSpace(name))
+		names = append(names, name)
 	}
 	sort.Strings(names)
 	var errs []error
@@ -127,7 +128,7 @@ func CapabilitySubjects(ctx context.Context, source semanticview.Source, opts Ca
 	tools := source.ToolEntries()
 	names := make([]string, 0, len(tools))
 	for name := range tools {
-		names = append(names, strings.TrimSpace(name))
+		names = append(names, name)
 	}
 	sort.Strings(names)
 	out := make([]packs.Subject, 0)
@@ -267,7 +268,6 @@ func validateProviderConnectorAgentExposure(source semanticview.Source) []error 
 		}
 		entry := declaration.Entry
 		for _, toolID := range entry.ConfiguredTools() {
-			toolID = strings.TrimSpace(toolID)
 			if toolID == "" {
 				continue
 			}
@@ -506,7 +506,6 @@ func connectorToolFlowID(source semanticview.Source, toolID string, tool runtime
 	if source == nil {
 		return "", nil
 	}
-	toolID = strings.TrimSpace(toolID)
 	flowIDs := map[string]struct{}{}
 	for _, scope := range source.FlowScopes() {
 		if scopedToolMatches(scope.Tools, toolID, tool) {
@@ -533,25 +532,17 @@ func connectorToolFlowID(source semanticview.Source, toolID string, tool runtime
 }
 
 func scopedToolMatches(tools map[string]runtimecontracts.ToolSchemaEntry, toolID string, tool runtimecontracts.ToolSchemaEntry) bool {
-	scoped, ok := tools[strings.TrimSpace(toolID)]
+	scoped, ok := tools[toolID]
 	return ok && reflect.DeepEqual(scoped, tool)
 }
 
 func splitToolID(toolID string) (string, string, bool) {
-	parts := strings.Split(strings.TrimSpace(toolID), ".")
+	parts := strings.Split(toolID, ".")
 	if len(parts) != 2 {
 		return "", "", false
 	}
-	provider := normalizeToken(parts[0])
-	action := normalizeToken(parts[1])
-	return provider, action, provider != "" && action != ""
-}
-
-func normalizeToken(raw string) string {
-	raw = strings.TrimSpace(strings.ToLower(raw))
-	raw = strings.ReplaceAll(raw, "-", "_")
-	raw = strings.ReplaceAll(raw, " ", "_")
-	return strings.Trim(raw, "_")
+	provider, action := parts[0], parts[1]
+	return provider, action, runtimepaths.ValidateFlowSegment(provider) == nil && action != "" && action == strings.TrimSpace(action)
 }
 
 func connectorActionLabel(provider, action string, tool runtimecontracts.ToolSchemaEntry) string {

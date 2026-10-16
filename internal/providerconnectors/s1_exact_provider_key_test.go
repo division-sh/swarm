@@ -77,3 +77,36 @@ func TestS1ConnectorToolIDSplitRetainsExactNames(t *testing.T) {
 		}
 	}
 }
+
+func TestS1ConnectorMockResponseRequiresExactToolIdentity(t *testing.T) {
+	responses := map[string]map[string]any{
+		"team-bot.send_message": {"provider": "team-bot"},
+		"team_bot.send_message": {"provider": "team_bot"},
+	}
+	plan, err := NewMockResponsePlan(responses)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := telegramConnectorTool("https://api.telegram.org")
+	for _, key := range []string{"team-bot", "team_bot"} {
+		toolID := key + ".send_message"
+		admitted, err := plan.Admit(toolID, tool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		value, err := admitted.Materialize()
+		if err != nil || value.(map[string]any)["provider"] != key {
+			t.Fatalf("response borrowed another provider key: %+v err=%v", value, err)
+		}
+		for _, alias := range []string{" " + toolID, toolID + " ", strings.ToUpper(key) + ".send_message"} {
+			if _, err := plan.Admit(alias, tool); err == nil {
+				t.Errorf("mock responder adopted tool alias %q", alias)
+			}
+		}
+	}
+	for _, invalid := range []string{"TEAM.send", "_team.send", "con.send", strings.Repeat("a", 101) + ".send"} {
+		if _, err := NewMockResponsePlan(map[string]any{invalid: map[string]any{}}); err == nil {
+			t.Errorf("mock response plan admitted nonportable provider key in %q", invalid)
+		}
+	}
+}

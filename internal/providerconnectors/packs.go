@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -160,10 +161,7 @@ func NewPackRegistry(loaded ...LoadedPack) (*PackRegistry, error) {
 			}
 		}
 		pack = cloneLoadedPack(pack)
-		provider := normalizeToken(pack.Manifest.Provider)
-		if provider == "" {
-			return nil, fmt.Errorf("provider connector pack %q has empty provider", pack.Envelope.ID)
-		}
+		provider := pack.Manifest.Provider
 		if registry.byProvider[provider] == nil {
 			registry.byProvider[provider] = map[string]LoadedPack{}
 		}
@@ -185,9 +183,7 @@ func (r *PackRegistry) Lookup(provider, toolID string) (LoadedPack, bool) {
 	if r == nil {
 		return LoadedPack{}, false
 	}
-	provider = normalizeToken(provider)
-	toolID = strings.TrimSpace(toolID)
-	if provider == "" || toolID == "" {
+	if runtimepaths.ValidateFlowSegment(provider) != nil || toolID == "" {
 		return LoadedPack{}, false
 	}
 	byTool := r.byProvider[provider]
@@ -231,7 +227,11 @@ func GenerationSurfaceForPackTool(pack LoadedPack, toolID string) (GenerationSur
 	if pack.Manifest.Generation == nil {
 		return GenerationSurface{}, false
 	}
-	operation, ok := pack.Manifest.Generation.OperationForTool(strings.TrimSpace(toolID))
+	provider, _, valid := splitToolID(toolID)
+	if !valid || provider != pack.Manifest.Provider {
+		return GenerationSurface{}, false
+	}
+	operation, ok := pack.Manifest.Generation.OperationForTool(toolID)
 	if !ok {
 		return GenerationSurface{}, false
 	}
@@ -310,9 +310,9 @@ func ParseConnectorManifest(body []byte) (ConnectorManifest, error) {
 func (m ConnectorManifest) SourceValue() yamlsource.Value { return m.source }
 
 func (m ConnectorManifest) Validate() error {
-	provider := normalizeToken(m.Provider)
-	if provider == "" {
-		return fmt.Errorf("connector manifest provider is required")
+	provider := m.Provider
+	if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
+		return fmt.Errorf("connector manifest provider requires an exact portable directory key: %w", err)
 	}
 	names := manifestToolNames(m)
 	if len(names) == 0 {
@@ -494,8 +494,8 @@ func connectorPackImportsFromSource(source semanticview.Source) []connectorPackI
 			continue
 		}
 		for _, item := range schema.Imports.ConnectorPacks {
-			provider := normalizeToken(item.Provider)
-			toolID := strings.TrimSpace(item.Tool)
+			provider := item.Provider
+			toolID := item.Tool
 			if provider == "" && toolID == "" {
 				continue
 			}
@@ -562,14 +562,12 @@ func existingToolSources(source semanticview.Source) map[string][]string {
 	for _, scope := range source.FlowScopes() {
 		sourceName := flowScopeSourceName(scope)
 		for toolID := range scope.Tools {
-			toolID = strings.TrimSpace(toolID)
 			if toolID != "" {
 				out[toolID] = appendIfMissing(out[toolID], sourceName)
 			}
 		}
 	}
 	for toolID := range source.ToolEntries() {
-		toolID = strings.TrimSpace(toolID)
 		if toolID == "" {
 			continue
 		}
@@ -603,10 +601,7 @@ func flowPathWithin(owner, candidate string) bool {
 func manifestToolNames(manifest ConnectorManifest) []string {
 	names := make([]string, 0, len(manifest.Tools))
 	for name := range manifest.Tools {
-		name = strings.TrimSpace(name)
-		if name != "" {
-			names = append(names, name)
-		}
+		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names

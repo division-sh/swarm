@@ -47,3 +47,25 @@ func TestS1ConnectorSubjectRetainsExactPortableProviderKey(t *testing.T) {
 		}
 	}
 }
+
+func TestS1ChannelSubjectsRetainExactPortableProviderKey(t *testing.T) {
+	for _, base := range []Subject{
+		{ID: "channel.pack", Kind: SubjectChannelPack, Source: "channel_pack", Applicability: "installed"},
+		{ID: "channel.outbound", Kind: SubjectChannelOutbound, Source: "channel_binding", Applicability: "effective"},
+	} {
+		for _, key := range []string{"team-bot", "team_bot", "9-team", " team", "team ", "TEAM", "_team", "con", strings.Repeat("a", 101)} {
+			base.Provider = key
+			got, err := NormalizeSubjects([]Subject{base})
+			valid := key == "team-bot" || key == "team_bot" || key == "9-team"
+			if !valid {
+				if err == nil {
+					t.Errorf("channel subject %s repaired key %q: %+v", base.Kind, key, got)
+				}
+				continue
+			}
+			if err != nil || len(got) != 1 || got[0].Provider != key {
+				t.Fatalf("channel subject %s changed exact key %q: %+v err=%v", base.Kind, key, got, err)
+			}
+		}
+	}
+}

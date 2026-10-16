@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -61,6 +62,9 @@ type GenerationOperationEvidence struct {
 }
 
 func (g GenerationEvidence) Validate(provider string, tools map[string]runtimecontracts.ToolSchemaEntry) error {
+	if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
+		return fmt.Errorf("generation provider requires an exact portable directory key: %w", err)
+	}
 	if strings.TrimSpace(g.SchemaVersion) != CatalogSchemaVersion {
 		return fmt.Errorf("generation schema_version must be %q", CatalogSchemaVersion)
 	}
@@ -86,7 +90,7 @@ func (g GenerationEvidence) Validate(provider string, tools map[string]runtimeco
 	seenTools := map[string]struct{}{}
 	for _, operation := range g.Operations {
 		operationID := strings.TrimSpace(operation.OperationID)
-		toolID := strings.TrimSpace(operation.ToolID)
+		toolID := operation.ToolID
 		if operationID == "" || toolID == "" {
 			return fmt.Errorf("generation operation_id and tool_id are required")
 		}
@@ -103,7 +107,7 @@ func (g GenerationEvidence) Validate(provider string, tools map[string]runtimeco
 			return fmt.Errorf("generation operation %q references unknown tool_id %q", operationID, toolID)
 		}
 		toolProvider, _, ok := splitToolID(toolID)
-		if !ok || toolProvider != normalizeToken(provider) {
+		if !ok || toolProvider != provider {
 			return fmt.Errorf("generation tool_id %q does not match provider %q", toolID, provider)
 		}
 		if len(operation.Permissions) == 0 {
@@ -149,9 +153,8 @@ func (g GenerationEvidence) Validate(provider string, tools map[string]runtimeco
 }
 
 func (g GenerationEvidence) OperationForTool(toolID string) (GenerationOperationEvidence, bool) {
-	toolID = strings.TrimSpace(toolID)
 	for _, operation := range g.Operations {
-		if strings.TrimSpace(operation.ToolID) == toolID {
+		if operation.ToolID == toolID {
 			return operation, true
 		}
 	}
@@ -199,12 +202,15 @@ func (i GeneratedPackIndex) Validate(fsys fs.FS) error {
 	seenOutputs := map[string]struct{}{}
 	for _, entry := range i.Packs {
 		id := strings.TrimSpace(entry.ID)
-		provider := normalizeToken(entry.Provider)
+		provider := entry.Provider
 		profile := strings.TrimSpace(entry.Profile)
 		kind := strings.TrimSpace(entry.Kind)
 		output := strings.Trim(strings.TrimSpace(entry.Output), "/")
 		if id == "" || provider == "" || profile == "" || output == "" {
 			return fmt.Errorf("generated connector pack index id, provider, profile, and output are required")
+		}
+		if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
+			return fmt.Errorf("generated connector pack index provider requires an exact portable directory key: %w", err)
 		}
 		if kind != GeneratedPackKindBuiltin && kind != GeneratedPackKindFixture {
 			return fmt.Errorf("generated connector pack index %q has unsupported kind %q", id, entry.Kind)
@@ -271,7 +277,7 @@ func validateGeneratedPackIdentity(fsys fs.FS, pack *LoadedPack, expected Genera
 	if pack.Manifest.Generation == nil {
 		return fmt.Errorf("generated connector pack %q is indexed as generated but generation evidence is missing", pack.Envelope.ID)
 	}
-	if normalizeToken(pack.Manifest.Provider) != normalizeToken(expected.Provider) {
+	if pack.Manifest.Provider != expected.Provider {
 		return fmt.Errorf("generated connector pack %q provider %q does not match indexed provider %q", pack.Envelope.ID, pack.Manifest.Provider, expected.Provider)
 	}
 	if strings.TrimSpace(pack.Manifest.Generation.Profile.Path) != strings.TrimSpace(expected.Profile) {

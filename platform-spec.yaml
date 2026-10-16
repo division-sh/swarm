@@ -11219,6 +11219,17 @@ tool_model:
       flow-local entries in tools.yaml or explicitly imported connector-pack bodies, but both routes must produce the same
       canonical `ToolSchemaEntry` object. The category is a readback and validation profile, not a new runtime dispatcher:
       dispatch remains owned by the HTTP activity executor and non-idempotent writes remain owned by `activity_attempts`.
+    provider_directory_identity: >
+      A compiled connector provider key is the exact portable provider-directory spelling. Admission, registry lookup,
+      generated profile/index/evidence comparisons, conformance identity and capability readback retain it unchanged.
+      Never trim, lowercase or replace hyphens, underscores or spaces to select a provider or tool. team-bot and team_bot
+      are distinct keys, including in the provider prefix of compiled tool IDs. Tool-map and evidence lookup compare exact
+      identities; invalid provider keys fail through the portable-directory owner rather than a token normalizer.
+      Structural channel joins compare the raw channel, trigger and connector keys after portable key admission;
+      onboarding-profile projection and capability subjects likewise cannot repair a provider key into another identity.
+      Existing wire protocol URLs, headers, credentials, payloads, descriptions and HTTP response rules are not renamed
+      by provider-key admission. Directory-owned BODY lowering qualifies local names separately; a name cannot grant
+      installation, credential, activity or journal authority.
     canonical_owners:
       declaration: "ToolSchemaEntry with `category: provider_connector`, authored in tools.yaml or imported from a verified connector pack."
       pack_import: schema.yaml imports.connector_packs owns explicit connector tool enablement; selected-root packs/manifest.yaml owns project pack inventory.

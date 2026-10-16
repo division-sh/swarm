@@ -71,6 +71,14 @@ func TestS1ConnectorGenerationUsesExactPortableKeys(t *testing.T) {
 				if _, ok := artifact.Manifest.Generation.OperationForTool(" " + toolID); ok {
 					t.Fatal("generation readback repaired a tool identity")
 				}
+				pack := LoadedPack{Envelope: artifact.PackEnvelope, Manifest: artifact.Manifest}
+				if _, ok := GenerationSurfaceForPackTool(pack, toolID); !ok {
+					t.Fatal("exact generation readback lost its surface")
+				}
+				pack.Manifest.Provider = strings.ToUpper(key)
+				if _, ok := GenerationSurfaceForPackTool(pack, toolID); ok {
+					t.Fatal("generation surface borrowed another provider key")
+				}
 			}
 		})
 	}
@@ -108,6 +116,40 @@ func TestS1ConnectorGeneratedAndConformanceBindingsRefuseProviderAliases(t *test
 	}
 	if catalogConformanceKey("team-bot", "send", "team-bot.send") == catalogConformanceKey("team_bot", "send", "team-bot.send") {
 		t.Fatal("conformance identity collapsed distinct provider keys")
+	}
+}
+
+func TestS1ConnectorGeneratedIndexAndProfileRefuseKeyRepair(t *testing.T) {
+	files := catalogWorkingTreeFS(t)
+	index, err := loadGeneratedPackIndex(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range []string{"TEAM", " team", "team ", "team bot", "_team", "con", strings.Repeat("a", 101)} {
+		copy := index
+		copy.Packs = append([]GeneratedPackIndexEntry(nil), index.Packs...)
+		copy.Packs[0].Provider = invalid
+		if err := copy.Validate(files); err == nil || !strings.Contains(err.Error(), "portable directory key") {
+			t.Errorf("generated index repaired provider %q: %v", invalid, err)
+		}
+		entry := index.Packs[0]
+		profile, err := parseGeneratorProfileAt(files[entry.Profile].Data, entry.Profile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		profile.Provider = invalid
+		if err := profile.Validate(); err == nil || !strings.Contains(err.Error(), "portable directory key") {
+			t.Errorf("generator profile repaired provider %q: %v", invalid, err)
+		}
+	}
+	entry := index.Packs[0]
+	profile, err := parseGeneratorProfileAt(files[entry.Profile].Data, entry.Profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile.Operations[0].ToolID = " " + profile.Operations[0].ToolID
+	if err := profile.Validate(); err == nil {
+		t.Fatal("generator profile repaired a tool identity before generation")
 	}
 }
 

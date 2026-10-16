@@ -13,6 +13,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
 	"github.com/division-sh/swarm/internal/runtime/core/packidentity"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
@@ -367,6 +368,9 @@ func CompileChannelOnboardingProfile(provider string, transport ChannelTransport
 	if len(profile.LearnedDestination) == 0 {
 		return CompiledChannelOnboardingProfile{}, fmt.Errorf("channel onboarding requires an explicit learned_destination relation")
 	}
+	if err := runtimepaths.ValidateFlowSegment(provider); err != nil {
+		return CompiledChannelOnboardingProfile{}, fmt.Errorf("channel onboarding provider requires an exact portable directory key: %w", err)
+	}
 	providerID, err := admitChannelPlanIdentity("channel onboarding provider", provider)
 	if err != nil {
 		return CompiledChannelOnboardingProfile{}, err
@@ -547,8 +551,8 @@ func CompileChannelInventory(registry *InterfaceRegistry, channels []LoadedChann
 }
 
 func validateChannelManifest(packID string, manifest ChannelManifest) error {
-	if strings.TrimSpace(manifest.Provider) == "" {
-		return fmt.Errorf("channel pack %q provider is required", packID)
+	if err := runtimepaths.ValidateFlowSegment(manifest.Provider); err != nil {
+		return fmt.Errorf("channel pack %q provider requires an exact portable directory key: %w", packID, err)
 	}
 	if len(manifest.OpaqueTypes) == 0 || len(manifest.Operations) == 0 || len(manifest.Events) == 0 {
 		return fmt.Errorf("channel pack %q requires opaque_types, operations, and events", packID)
@@ -1468,11 +1472,14 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 	if err := validateAcceptedConnectorDescriptor(connector); err != nil {
 		return SatisfactionPlan{}, err
 	}
+	if err := runtimepaths.ValidateFlowSegment(channel.Manifest.Provider); err != nil {
+		return SatisfactionPlan{}, fmt.Errorf("channel provider requires an exact portable directory key: %w", err)
+	}
 	provider, err := admitChannelPlanIdentity("channel provider", channel.Manifest.Provider)
 	if err != nil {
 		return SatisfactionPlan{}, err
 	}
-	if provider.String() != strings.TrimSpace(trigger.Provider) || provider.String() != strings.TrimSpace(connector.Provider) {
+	if provider.String() != trigger.Provider || provider.String() != connector.Provider {
 		return SatisfactionPlan{}, fmt.Errorf("channel pack %q provider %q does not match trigger %q and connector %q providers", channel.Envelope.ID, provider.String(), trigger.Provider, connector.Provider)
 	}
 	if err := exactKeySet("channel opaque_types", channel.Manifest.OpaqueTypes, interfaceOpaqueSlots(definition)); err != nil {

@@ -363,11 +363,12 @@ func cloneStringMap(values map[string]string) map[string]string {
 
 func normalizeSubject(subject *Subject) error {
 	subject.ID = strings.TrimSpace(subject.ID)
-	if subject.Kind == SubjectProviderTrigger {
+	switch subject.Kind {
+	case SubjectProviderTrigger, SubjectProviderConnector, SubjectChannelPack, SubjectChannelOutbound:
 		if err := runtimepaths.ValidateFlowSegment(subject.Provider); err != nil {
-			return fmt.Errorf("provider trigger subject requires an exact portable directory key: %w", err)
+			return fmt.Errorf("provider subject requires an exact portable directory key: %w", err)
 		}
-	} else {
+	default:
 		subject.Provider = strings.TrimSpace(subject.Provider)
 	}
 	subject.Action = strings.TrimSpace(subject.Action)
