@@ -120,11 +120,15 @@ func TestPersistenceAuthorityDebtServedScenarioCompositionIsExactAndSourceOnly(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	prior, err := debtServedScenarioNativePrevious(path, raw)
+	current, err := debtCatchUpLaneSource(root, path, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prior, err := debtServedScenarioNativePrevious(path, current)
 	if err != nil || debtBaselineChecksum(prior) != "256de06dd68f2c2fe45eac7c02ae8726e022696e6d977db3ca74f981d3e865a7" {
 		t.Fatalf("native owner inverse lost complete prior bytes: %v", err)
 	}
-	if _, err := debtServedObservationNativePrevious(path, append(raw, '\n')); err == nil {
+	if _, err := debtServedObservationNativeCurrentPrevious(root, path, append(bytes.Clone(raw), '\n')); err == nil {
 		t.Fatal("native owner inverse accepted noncanonical retained bytes")
 	}
 }

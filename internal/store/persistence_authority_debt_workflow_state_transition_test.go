@@ -15,7 +15,9 @@ const debtWorkflowStatePredecessor = "b44b2ff3711b3dc8e65ce278edaeea49594153be"
 
 func debtWorkflowStateSourceCopy(t *testing.T) string {
 	t.Helper()
-	root, copy := persistenceAuthorityRepoRoot(t), t.TempDir()
+	root := persistenceAuthorityRepoRoot(t)
+	copy := debtCatchUpSourceCopyFrom(t, root)
+	copyRepair2698CustodySources(t, root, copy)
 	for _, path := range []string{
 		debtWorkflowStateFile, debtWorkflowStateManifest,
 		"internal/store/internal/backend/pipelinepersistence/workflow_state_entity_observation.go",
@@ -28,7 +30,6 @@ func debtWorkflowStateSourceCopy(t *testing.T) string {
 		}
 		debtWriteModuleSource(t, copy, path, string(raw))
 	}
-	debtServedObservationCopySourceEvidence(t, root, copy)
 	return copy
 }
 
