@@ -26,6 +26,7 @@ func TestNativeFixtureFamiliesDoNotReceiveRawAuthority(t *testing.T) {
 		{"TestNativeLookupMissFixturesDoNotReceiveRawAuthority", verifyNativeLookupMissFixturesDoNotReceiveRawAuthority},
 		{"TestNativeBookkeepingFixturesDoNotReceiveRawAuthority", verifyNativeBookkeepingFixturesDoNotReceiveRawAuthority},
 		{"TestNativeHandlerFixturesDoNotReceiveRawAuthority", verifyNativeHandlerFixturesDoNotReceiveRawAuthority},
+		{"TestBranchPointComponentsDoNotReceiveRawAuthority", verifyBranchPointComponentsDoNotReceiveRawAuthority},
 	} {
 		t.Run(family.name, func(t *testing.T) {
 			family.verify(t, findings)

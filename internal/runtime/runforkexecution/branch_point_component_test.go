@@ -1,7 +1,7 @@
 package runforkexecution
 
 import (
-	"database/sql"
+	"context"
 	"encoding/json"
 	"reflect"
 	"slices"
@@ -46,7 +46,7 @@ func proveQ1BranchPointAtomicity(t *testing.T, backend string, kind runfork.RunF
 		}
 	}
 	before := q1ComponentSnapshot(t, selected)
-	remove := q1DivergenceInsertFault(t, fixture.db.DB, backend)
+	remove := q1DivergenceInsertFault(t, ctx, selected)
 	activation, err := attachment.activate()
 	remove()
 	if err == nil || !strings.Contains(err.Error(), "typed_receiver_owner_fault") || activation.Activated {
@@ -94,33 +94,16 @@ func proveQ1BranchPointAtomicity(t *testing.T, backend string, kind runfork.RunF
 	attachment.close(t)
 }
 
-func q1DivergenceInsertFault(t *testing.T, db *sql.DB, backend string) func() {
+func q1DivergenceInsertFault(t *testing.T, ctx context.Context, selected any) func() {
 	t.Helper()
-	const name = "receiver_composed_fault"
-	statement := `CREATE TRIGGER receiver_composed_fault AFTER INSERT ON run_fork_selected_contract_branch_divergences BEGIN SELECT RAISE(ABORT,'typed_receiver_owner_fault'); END`
-	if backend == "postgres" {
-		if _, err := db.Exec(`CREATE FUNCTION receiver_composed_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'typed_receiver_owner_fault'; END $$`); err != nil {
-			t.Fatal(err)
-		}
-		statement = `CREATE TRIGGER receiver_composed_fault AFTER INSERT ON run_fork_selected_contract_branch_divergences FOR EACH ROW EXECUTE FUNCTION receiver_composed_fault()`
-	}
-	if _, err := db.Exec(statement); err != nil {
+	if err := storetest.SetSelectedBranchDivergenceInsertFault(ctx, selected, true); err != nil {
 		t.Fatal(err)
 	}
 	var once sync.Once
 	remove := func() {
 		once.Do(func() {
-			statement := "DROP TRIGGER " + name
-			if backend == "postgres" {
-				statement += " ON run_fork_selected_contract_branch_divergences"
-			}
-			if _, err := db.Exec(statement); err != nil {
+			if err := storetest.SetSelectedBranchDivergenceInsertFault(context.WithoutCancel(ctx), selected, false); err != nil {
 				t.Error(err)
-			}
-			if backend == "postgres" {
-				if _, err := db.Exec(`DROP FUNCTION receiver_composed_fault()`); err != nil {
-					t.Error(err)
-				}
 			}
 		})
 	}
@@ -180,6 +163,25 @@ func q1ComponentBranchRows(t *testing.T, snapshot map[string]storetest.SelectedF
 		}
 		if id == child {
 			matched = append(matched, row)
+		}
+	}
+	return matched
+}
+
+func q1ComponentRowsWithIdentity(t *testing.T, snapshot map[string]storetest.SelectedForkStorageTableSnapshot, table, column, identity string) []string {
+	t.Helper()
+	rows, err := storetest.DecodeSelectedForkSnapshotRows(snapshot[table])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var matched []string
+	for index, row := range rows {
+		value, err := row[column].Text()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if value == identity {
+			matched = append(matched, snapshot[table].Rows[index])
 		}
 	}
 	return matched
