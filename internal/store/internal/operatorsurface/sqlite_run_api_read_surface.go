@@ -13,6 +13,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -268,6 +269,7 @@ SELECT
 	r.run_id,
 	lower(COALESCE(r.status, '')),
 	COALESCE(r.bundle_hash, ''),
+	r.source_root_directory,
 	COALESCE(r.origin_kind, ''),
 	COALESCE(r.trigger_event_id, ''),
 	COALESCE(r.trigger_event_type, ''),
@@ -301,14 +303,15 @@ func scanSQLiteRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 	var header operatorread.RunHeader
 	var startedRaw, endedRaw any
 	var failureRaw any
-	var bundleHash string
+	var root sourceartifact.RootAdmissionReference
 	var originKind, eventID, eventType, serviceID, sourceRunID, forkPointKind, sourceEventID string
 	var generation, forkRevision int64
 	var standingRelationCount, matchingStandingRelationCount int
 	if err := row.Scan(
 		&header.RunID,
 		&header.Status,
-		&bundleHash,
+		&root.BundleHash,
+		&root.RootDirectory,
 		&originKind,
 		&eventID,
 		&eventType,
@@ -361,10 +364,10 @@ func scanSQLiteRunHeader(row runHeaderScanner) (operatorread.RunHeader, error) {
 		return operatorread.RunHeader{}, err
 	}
 	header.Failure = failure
-	if err := validateRunHeaderLifecycle(header, bundleHash); err != nil {
+	if err := validateRunHeaderLifecycle(header, root); err != nil {
 		return operatorread.RunHeader{}, err
 	}
-	header.BundleHash = bundleHash
+	header.BundleHash = root.BundleHash
 	return header, nil
 }
 

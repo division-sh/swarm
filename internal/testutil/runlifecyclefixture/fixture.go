@@ -51,6 +51,7 @@ type CorruptSnapshot struct {
 	RunID               string
 	State               string
 	BundleHash          string
+	RootDirectory       string
 	OriginKind          string
 	TriggerEventID      string
 	TriggerEventType    string
