@@ -250,8 +250,8 @@ func TestLoopReturningCarrierAdmissionRejectsPriorAndAcceptsCurrentGeneration(t 
 				t.Fatalf("current generation: %v", err)
 			}
 			if tc.name == "fan_out_result" {
-				if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 1 || len(result.EmitIntents) != 0 {
-					t.Fatalf("current generation fan-out = intent:%#v immediate:%d, want one durable item and no eager event", result.FanOutIntent, len(result.EmitIntents))
+				if len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != 1 || len(result.EmitIntents) != 0 {
+					t.Fatalf("current generation fan-out = intent:%#v immediate:%d, want one durable item and no eager event", result.FanOutIntents, len(result.EmitIntents))
 				}
 			} else {
 				if len(result.EmitIntents) != 1 {

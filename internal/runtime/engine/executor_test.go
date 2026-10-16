@@ -1869,14 +1869,14 @@ func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitField
 	if len(result.EmitIntents) != 0 {
 		t.Fatalf("trigger transaction created eager fan-out emits: %#v", result.EmitIntents)
 	}
-	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 1 {
-		t.Fatalf("durable fan-out intent = %#v, want cardinality 1", result.FanOutIntent)
+	if len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != 1 {
+		t.Fatalf("durable fan-out intent = %#v, want cardinality 1", result.FanOutIntents)
 	}
-	if got := result.FanOutIntent.Capsule.StateFields["handler_marker"]; got != "top-level" {
+	if got := result.FanOutIntents[0].Capsule.StateFields["handler_marker"]; got != "top-level" {
 		t.Fatalf("fan-out capsule handler_marker = %#v, want top-level", got)
 	}
-	if scores, ok := result.FanOutIntent.Capsule.Entity["scores"].([]any); !ok || len(scores) != 1 {
-		t.Fatalf("fan-out capsule projected scores = %#v, want one score", result.FanOutIntent.Capsule.Entity["scores"])
+	if scores, ok := result.FanOutIntents[0].Capsule.Entity["scores"].([]any); !ok || len(scores) != 1 {
+		t.Fatalf("fan-out capsule projected scores = %#v, want one score", result.FanOutIntents[0].Capsule.Entity["scores"])
 	}
 }
 
@@ -1932,14 +1932,14 @@ func TestExecutor_AccumulatorProjectionBindsEntityFanOutSourceAfterProjection(t 
 		t.Fatalf("Execute error: %v", err)
 	}
 	requireProjectedScore(t, result, "scores")
-	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 1 {
-		t.Fatalf("projected fan-out intent = %#v, want cardinality 1", result.FanOutIntent)
+	if len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != 1 {
+		t.Fatalf("projected fan-out intent = %#v, want cardinality 1", result.FanOutIntents)
 	}
-	if result.FanOutIntent.Source.Kind != "entity_field_revision" || result.FanOutIntent.Source.Field != "scores" {
-		t.Fatalf("projected fan-out source = %#v", result.FanOutIntent.Source)
+	if result.FanOutIntents[0].Source.Kind != "entity_field_revision" || result.FanOutIntents[0].Source.Field != "scores" {
+		t.Fatalf("projected fan-out source = %#v", result.FanOutIntents[0].Source)
 	}
-	if _, copied := result.FanOutIntent.Capsule.Entity["scores"]; copied {
-		t.Fatalf("projected source was redundantly copied into capsule: %#v", result.FanOutIntent.Capsule.Entity)
+	if _, copied := result.FanOutIntents[0].Capsule.Entity["scores"]; copied {
+		t.Fatalf("projected source was redundantly copied into capsule: %#v", result.FanOutIntents[0].Capsule.Entity)
 	}
 }
 
@@ -5374,8 +5374,8 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 	if result.NextState != "processing" {
 		t.Fatalf("NextState = %q", result.NextState)
 	}
-	if result.FanOutCount != 2 || result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 2 {
-		t.Fatalf("fan_out results wrong: count=%d intent=%#v", result.FanOutCount, result.FanOutIntent)
+	if result.FanOutCount != 2 || len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != 2 {
+		t.Fatalf("fan_out results wrong: count=%d intent=%#v", result.FanOutCount, result.FanOutIntents)
 	}
 	if len(result.EmitIntents) != 0 {
 		t.Fatalf("trigger transaction created eager fan-out emits: %#v", result.EmitIntents)
@@ -5383,8 +5383,8 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 	if _, found := result.StateMutation.Bookkeeping["fan_out_count"]; found {
 		t.Fatalf("retired fan_out_count metadata survived: %#v", result.StateMutation.Bookkeeping)
 	}
-	if result.FanOutIntent.Capsule.ChainDepth != 1 {
-		t.Fatalf("capsule chain depth = %d, want trigger depth 1", result.FanOutIntent.Capsule.ChainDepth)
+	if result.FanOutIntents[0].Capsule.ChainDepth != 1 {
+		t.Fatalf("capsule chain depth = %d, want trigger depth 1", result.FanOutIntents[0].Capsule.ChainDepth)
 	}
 	if got := result.ActionsExecuted; len(got) != 4 {
 		t.Fatalf("fan-out transition actions = %#v, want four lifecycle actions", got)
@@ -5473,14 +5473,14 @@ join:
 	if err != nil {
 		t.Fatalf("execute barrier trigger: %v", err)
 	}
-	if triggerResult.Status != OutcomeFannedOut || triggerResult.FanOutIntent == nil || triggerResult.FanOutBarrier == nil || triggerResult.FanOutBarrierCompletion != nil {
+	if triggerResult.Status != OutcomeFannedOut || len(triggerResult.FanOutIntents) == 0 || triggerResult.FanOutBarrier == nil || triggerResult.FanOutBarrierCompletion != nil {
 		t.Fatalf("barrier trigger result = %#v", triggerResult)
 	}
-	if triggerResult.FanOutIntent.Cardinality != 2 || triggerResult.FanOutBarrier.IntentKey != triggerResult.FanOutIntent.Key || len(triggerResult.EmitIntents) != 0 {
-		t.Fatalf("barrier trigger ownership = intent:%#v barrier:%#v emits:%#v", triggerResult.FanOutIntent, triggerResult.FanOutBarrier, triggerResult.EmitIntents)
+	if triggerResult.FanOutIntents[0].Cardinality != 2 || triggerResult.FanOutBarrier.IntentKey != triggerResult.FanOutIntents[0].Key || len(triggerResult.EmitIntents) != 0 {
+		t.Fatalf("barrier trigger ownership = intent:%#v barrier:%#v emits:%#v", triggerResult.FanOutIntents, triggerResult.FanOutBarrier, triggerResult.EmitIntents)
 	}
 
-	bound, err := declaration.BindFanOutIntent(triggerResult.FanOutIntent.Key.TriggeringDeliveryID, declaration.Generation())
+	bound, err := declaration.BindFanOutIntent(triggerResult.FanOutIntents[0].Key.TriggeringDeliveryID, declaration.Generation())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5508,7 +5508,7 @@ join:
 	if err != nil {
 		t.Fatalf("execute barrier completion: %v", err)
 	}
-	if completionResult.Status == OutcomeFannedOut || completionResult.FanOutIntent != nil || completionResult.FanOutBarrier != nil || completionResult.FanOutBarrierCompletion == nil {
+	if completionResult.Status == OutcomeFannedOut || len(completionResult.FanOutIntents) != 0 || completionResult.FanOutBarrier != nil || completionResult.FanOutBarrierCompletion == nil {
 		t.Fatalf("completion re-entered trigger path = %#v", completionResult)
 	}
 	if len(completionResult.EmitIntents) != 1 || completionResult.EmitIntents[0].Event.Type() != "batch.completed" {
@@ -5686,12 +5686,12 @@ func TestExecutor_DeferredFanOutRejectsUndeclaredBusinessPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 1 {
-		t.Fatalf("durable fan-out intent = %#v, want one item", result.FanOutIntent)
+	if len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != 1 {
+		t.Fatalf("durable fan-out intent = %#v, want one item", result.FanOutIntents)
 	}
 	now := time.Now().UTC()
 	intent := fanoutobligation.Intent{
-		Request: *result.FanOutIntent, Source: result.FanOutIntent.Source,
+		Request: result.FanOutIntents[0], Source: result.FanOutIntents[0].Source,
 		Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize,
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -5759,13 +5759,13 @@ func TestExecutorDeferredFanOutProjectsNumericTriggerAndItemFields(t *testing.T)
 		EntityID: "entity-1", Node: node, Event: trigger, Handler: qualified,
 		State: testStateSnapshot("pending", liveFields, nil, map[string]map[string]any{}),
 	})
-	if err != nil || result.FanOutIntent == nil {
+	if err != nil || len(result.FanOutIntents) == 0 {
 		t.Fatalf("create numeric fan-out intent: result=%#v err=%v", result, err)
 	}
 	liveFields["threshold"] = int64(0)
 	now := time.Now().UTC()
 	intent := fanoutobligation.Intent{
-		Request: *result.FanOutIntent, Source: result.FanOutIntent.Source,
+		Request: result.FanOutIntents[0], Source: result.FanOutIntents[0].Source,
 		Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize,
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -5875,8 +5875,8 @@ func TestExecutor_FanOutCountPreservesRuleThenTopLevelWriteSnapshots(t *testing.
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 3 {
-		t.Fatalf("fan-out intent = %#v, want cardinality 3", result.FanOutIntent)
+	if len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != 3 {
+		t.Fatalf("fan-out intent = %#v, want cardinality 3", result.FanOutIntents)
 	}
 	if got := result.StateMutation.Fields["rule_count"]; got != int64(3) && got != 3 {
 		t.Fatalf("rule_count = %#v, want 3", got)
@@ -5920,17 +5920,17 @@ func TestExecutor_FanOutEntitySourceBindsAfterSameHandlerMutation(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 3 || result.FanOutCount != 3 {
-		t.Fatalf("post-write fan-out = count:%d intent:%#v, want cardinality 3", result.FanOutCount, result.FanOutIntent)
+	if len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != 3 || result.FanOutCount != 3 {
+		t.Fatalf("post-write fan-out = count:%d intent:%#v, want cardinality 3", result.FanOutCount, result.FanOutIntents)
 	}
 	if got := result.StateMutation.Fields["items"]; !reflect.DeepEqual(got, []any{"new-a", "new-b", "new-c"}) {
 		t.Fatalf("persisted source = %#v", got)
 	}
-	if result.FanOutIntent.Source.Kind != "entity_field_revision" || result.FanOutIntent.Source.Field != "items" {
-		t.Fatalf("fan-out source = %#v", result.FanOutIntent.Source)
+	if result.FanOutIntents[0].Source.Kind != "entity_field_revision" || result.FanOutIntents[0].Source.Field != "items" {
+		t.Fatalf("fan-out source = %#v", result.FanOutIntents[0].Source)
 	}
-	if _, copied := result.FanOutIntent.Capsule.Entity["items"]; copied {
-		t.Fatalf("entity source was redundantly copied into capsule: %#v", result.FanOutIntent.Capsule.Entity)
+	if _, copied := result.FanOutIntents[0].Capsule.Entity["items"]; copied {
+		t.Fatalf("entity source was redundantly copied into capsule: %#v", result.FanOutIntents[0].Capsule.Entity)
 	}
 }
 
@@ -6082,8 +6082,8 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 			if err != nil {
 				t.Fatalf("Execute error: %v", err)
 			}
-			if result.FanOutCount != len(wantItemOrder) || result.FanOutIntent == nil || result.FanOutIntent.Cardinality != len(wantItemOrder) {
-				t.Fatalf("fan_out result count=%d intent=%#v, want cardinality %d", result.FanOutCount, result.FanOutIntent, len(wantItemOrder))
+			if result.FanOutCount != len(wantItemOrder) || len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != len(wantItemOrder) {
+				t.Fatalf("fan_out result count=%d intent=%#v, want cardinality %d", result.FanOutCount, result.FanOutIntents, len(wantItemOrder))
 			}
 			if len(result.EmitIntents) != 0 {
 				t.Fatalf("trigger transaction created eager fan-out emits: %#v", result.EmitIntents)
@@ -6619,10 +6619,10 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 	if got := len(result.EmitIntents); got != 0 {
 		t.Fatalf("trigger transaction created %d eager fan-out emits", got)
 	}
-	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 2 {
-		t.Fatalf("durable fan-out intent = %#v, want cardinality 2", result.FanOutIntent)
+	if len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != 2 {
+		t.Fatalf("durable fan-out intent = %#v, want cardinality 2", result.FanOutIntents)
 	}
-	if got := result.FanOutIntent.Capsule.ProducerSource.Route().FlowInstance; got != "component-scaffold/component-1" {
+	if got := result.FanOutIntents[0].Capsule.ProducerSource.Route().FlowInstance; got != "component-scaffold/component-1" {
 		t.Fatalf("pinned producer source flow_instance = %q, want component-scaffold/component-1", got)
 	}
 }
@@ -7430,8 +7430,8 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 	if result.NextState != "scanning" {
 		t.Fatalf("NextState = %q", result.NextState)
 	}
-	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 0 {
-		t.Fatalf("empty fan-out intent = %#v, want closed cardinality 0", result.FanOutIntent)
+	if len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != 0 {
+		t.Fatalf("empty fan-out intent = %#v, want closed cardinality 0", result.FanOutIntents)
 	}
 	if _, found := result.StateMutation.Bookkeeping["fan_out_count"]; found {
 		t.Fatalf("retired fan_out_count metadata survived: %#v", result.StateMutation.Bookkeeping)
@@ -7479,8 +7479,8 @@ func TestExecutor_FanOutDoesNotPersistHiddenCountInEntityBookkeeping(t *testing.
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 0 {
-		t.Fatalf("empty fan-out intent = %#v, want cardinality 0", result.FanOutIntent)
+	if len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != 0 {
+		t.Fatalf("empty fan-out intent = %#v, want cardinality 0", result.FanOutIntents)
 	}
 	if _, found := result.StateMutation.Bookkeeping["fan_out_count"]; found {
 		t.Fatalf("retired fan_out_count metadata survived: %#v", result.StateMutation.Bookkeeping)
@@ -7520,8 +7520,8 @@ func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 	if got := len(result.EmitIntents); got != 0 {
 		t.Fatalf("trigger transaction created %d eager fan-out emits", got)
 	}
-	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 2 || result.FanOutIntent.PlanRef.SemanticDigest == "" {
-		t.Fatalf("explicit-event fan-out intent = %#v", result.FanOutIntent)
+	if len(result.FanOutIntents) == 0 || result.FanOutIntents[0].Cardinality != 2 || result.FanOutIntents[0].PlanRef.SemanticDigest == "" {
+		t.Fatalf("explicit-event fan-out intent = %#v", result.FanOutIntents)
 	}
 }
 

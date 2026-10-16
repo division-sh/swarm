@@ -1846,9 +1846,13 @@ func specialHandlerClearTarget(target string) bool {
 }
 
 func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
-	active := selectedFanOutPlan(frame)
+	active := fanOutPlanForPhase(frame, false)
+	return false, e.executeFanOutPlan(frame, active)
+}
+
+func (e *Executor) executeFanOutPlan(frame *executionFrame, active activeFanOutPlan) error {
 	if !active.Found {
-		return false, nil
+		return nil
 	}
 	plan := active.Plan
 	resolveItems := func() ([]any, error) {
@@ -1860,14 +1864,14 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	}
 	items, err := resolveItems()
 	if err != nil {
-		return false, err
+		return err
 	}
 	frame.state.FanOut = map[string]any{}
 	frame.state.SetFanOut("count", len(items))
 	frame.result.FanOutCount = len(items)
 	limit := plan.MaxItems
 	if frame.result.FanOutCount > limit {
-		return false, failures.Wrap(
+		return failures.Wrap(
 			failures.ClassFanOutBoundExceeded,
 			"fan_out_bound",
 			"runtime.engine",
@@ -1886,25 +1890,19 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	if !frame.req.Preview {
 		intent, err := e.buildFanOutIntent(frame, plan, frame.result.FanOutCount)
 		if err != nil {
-			return false, err
+			return err
 		}
-		frame.result.FanOutIntent = &intent
+		frame.result.FanOutIntents = append(frame.result.FanOutIntents, intent)
 		if frame.req.JoinDeclaration.Mode() == timeridentity.JoinRefModeFanOutDelivery {
 			registration, err := e.buildFanOutBarrierRegistration(frame, intent)
 			if err != nil {
-				return false, err
+				return err
 			}
 			frame.result.FanOutBarrier = &registration
 		}
 	}
-	// Fan-out completes before the ordinary rule/advance steps. Preserve an
-	// actual selected rule, or resolve this completed non-rule path explicitly.
-	frame.resolveNonRuleObservation()
-	if err := e.stepAdvancesTo(frame); err != nil {
-		return false, err
-	}
 	frame.result.Status = OutcomeFannedOut
-	return true, nil
+	return nil
 }
 
 func (e *Executor) buildFanOutBarrierRegistration(frame *executionFrame, intent fanoutobligation.IntentRequest) (fanoutbarrier.Registration, error) {
@@ -2001,6 +1999,13 @@ func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontract
 	if err := request.Validate(); err != nil {
 		return fanoutobligation.IntentRequest{}, err
 	}
+	if source.Kind == fanoutobligation.SourceEntityField {
+		value, present := resolveContractPath(ctx, frame.state, plan.ItemsPath, plan.ItemsFrom)
+		if !present {
+			return fanoutobligation.IntentRequest{}, fmt.Errorf("fan_out source %s is absent", plan.ItemsFrom)
+		}
+		return request.CaptureEntitySource(value)
+	}
 	return request, nil
 }
 
@@ -2087,7 +2092,7 @@ func (e *Executor) stepSelectedRuleEffects(frame *executionFrame) error {
 			return err
 		}
 	}
-	if _, err := e.stepFanOut(frame); err != nil {
+	if err := e.executeFanOutPlan(frame, fanOutPlanForPhase(frame, true)); err != nil {
 		return err
 	}
 	if frame.rule.DataAccumulation.HasWrites() || strings.TrimSpace(frame.rule.DataAccumulation.SourceEvent) != "" {
@@ -2858,7 +2863,7 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) (Committed
 		ActivityIntents:          append([]ActivityIntent(nil), frame.result.ActivityIntents...),
 		EmitIntents:              append([]EmitIntent(nil), frame.result.EmitIntents...),
 		EmitPrerequisites:        prerequisites,
-		FanOutIntent:             frame.result.FanOutIntent,
+		FanOutIntents:            append([]fanoutobligation.IntentRequest(nil), frame.result.FanOutIntents...),
 		FanOutBarrier:            frame.result.FanOutBarrier,
 		FanOutBarrierCompletion:  frame.result.FanOutBarrierCompletion,
 	})
@@ -3279,13 +3284,25 @@ func (a activeFanOutPlan) EmitSource() string {
 }
 
 func selectedFanOutPlan(frame *executionFrame) activeFanOutPlan {
+	return fanOutPlanForPhase(frame, frame != nil && frame.rule != nil)
+}
+
+func fanOutPlanForPhase(frame *executionFrame, selected bool) activeFanOutPlan {
 	if frame == nil {
+		return activeFanOutPlan{}
+	}
+	// A join outcome owns its continuation. In particular, a delivery-barrier
+	// completion must not issue the paired trigger's fan-out a second time.
+	if !selected && (frame.ruleSource == handlerRuleSourceJoinOnComplete || frame.ruleSource == handlerRuleSourceJoinTimeout) {
 		return activeFanOutPlan{}
 	}
 	kind := runtimecontracts.FanOutSiteHandler
 	index := -1
 	source := "handler.fan_out"
-	if frame.rule != nil {
+	if selected {
+		if frame.rule == nil {
+			return activeFanOutPlan{}
+		}
 		switch frame.ruleSource {
 		case handlerRuleSourceRules:
 			kind, index, source = runtimecontracts.FanOutSiteRule, frame.ruleIndex, "handler.rules.fan_out"

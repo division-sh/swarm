@@ -185,7 +185,7 @@ func seedPublicationGroupAgentIntent(t *testing.T, backend string, fixture autho
 	record.ExpectedState = "pending"
 	record.UpdatedAt = at
 	if _, err := fixture.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{
-		State: record, FanOutIntent: &request,
+		State: record, FanOutIntents: []fanoutobligation.IntentRequest{request},
 		DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claim.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},
 	}); err != nil {
 		t.Fatal(err)

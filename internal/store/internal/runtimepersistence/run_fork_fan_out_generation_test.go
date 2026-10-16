@@ -174,7 +174,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					record.Accumulator = json.RawMessage(forkTestJSON(t, buckets))
 					beforeUnsafe := snapshotForkHistoricalExecutionTables(t, fixture.db, backend.name == "postgres")
 					_, unsafeErr := fixture.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{
-						State: record, FanOutIntent: &intent, FanOutBarrier: &barrier, DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},
+						State: record, FanOutIntents: []fanoutobligation.IntentRequest{intent}, FanOutBarrier: &barrier, DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},
 					})
 					if unsafeErr == nil || !strings.Contains(unsafeErr.Error(), "I-JSON safe range") {
 						t.Fatalf("unsafe capsule integer was not rejected: %v", unsafeErr)
@@ -184,7 +184,7 @@ func testForkFanOutGenerationWriterEvaluatorBothStores(t *testing.T, selectedExe
 					}
 					intent.Capsule.Entity["exact_integer"] = json.Number("9007199254740991")
 					committed, err := fixture.store.(pipeline.WorkflowEngineMutationOwner).CommitWorkflowEngineMutation(ctx, pipeline.WorkflowEngineMutationCommand{
-						State: record, FanOutIntent: &intent, FanOutBarrier: &barrier, DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},
+						State: record, FanOutIntents: []fanoutobligation.IntentRequest{intent}, FanOutBarrier: &barrier, DeliverySuccess: &pipeline.WorkflowEngineDeliverySuccess{Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleSelection()},
 					})
 					if err != nil || committed.DeliverySuccess == nil {
 						t.Fatalf("ordinary intent/barrier writer failed: %v", err)

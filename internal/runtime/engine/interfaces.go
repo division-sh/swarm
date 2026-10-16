@@ -92,7 +92,7 @@ type EngineMutation struct {
 	ActivityIntents          []ActivityIntent
 	EmitIntents              []EmitIntent
 	EmitPrerequisites        EmitPersistencePrerequisites
-	FanOutIntent             *fanoutobligation.IntentRequest
+	FanOutIntents            []fanoutobligation.IntentRequest
 	FanOutBarrier            *fanoutbarrier.Registration
 	FanOutBarrierCompletion  *fanoutbarrier.Completion
 }

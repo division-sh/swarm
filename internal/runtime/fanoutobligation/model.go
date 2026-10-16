@@ -310,12 +310,13 @@ func (o DeploymentOrigin) Validate() error {
 }
 
 type IntentRequest struct {
-	Key         IntentKey                      `json:"key"`
-	PlanRef     runtimecontracts.FanOutPlanRef `json:"plan_ref,omitempty"`
-	Deployment  *DeploymentOrigin              `json:"deployment,omitempty"`
-	Source      SourceRef                      `json:"source"`
-	Cardinality int                            `json:"cardinality"`
-	Capsule     Capsule                        `json:"capsule,omitempty"`
+	Key          IntentKey                      `json:"key"`
+	PlanRef      runtimecontracts.FanOutPlanRef `json:"plan_ref,omitempty"`
+	Deployment   *DeploymentOrigin              `json:"deployment,omitempty"`
+	Source       SourceRef                      `json:"source"`
+	Cardinality  int                            `json:"cardinality"`
+	Capsule      Capsule                        `json:"capsule,omitempty"`
+	entitySource []byte
 }
 
 func (r IntentRequest) OriginKind() OriginKind {

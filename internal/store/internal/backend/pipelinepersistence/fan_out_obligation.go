@@ -136,7 +136,7 @@ func bindFanOutSourceTx(
 	postgres bool,
 	facts fanOutRevisionSink,
 	request fanoutobligation.IntentRequest,
-	stateFields json.RawMessage,
+	_ json.RawMessage,
 	triggerEventID string,
 	createdAt time.Time,
 ) (fanoutobligation.SourceRef, error) {
@@ -163,19 +163,9 @@ func bindFanOutSourceTx(
 		if source.RunID != request.Key.RunID {
 			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out entity source run disagrees with originating intent")
 		}
-		if _, err := canonicaljson.Decode(stateFields); err != nil {
-			return fanoutobligation.SourceRef{}, fmt.Errorf("admit fan-out entity source state: %w", err)
-		}
-		var fields map[string]any
-		if err := canonicaljson.DecodePreservingNumberLexemes(stateFields, &fields); err != nil {
-			return fanoutobligation.SourceRef{}, fmt.Errorf("decode fan-out entity source state: %w", err)
-		}
-		value, ok := fields[source.Field]
-		if !ok {
-			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out entity source field %s is absent after handler mutation", source.Field)
-		}
-		if _, err := request.ProjectSource(value); err != nil {
-			return fanoutobligation.SourceRef{}, fmt.Errorf("fan-out entity source changed before persistence: %w", err)
+		value, err := request.CapturedEntitySource()
+		if err != nil {
+			return fanoutobligation.SourceRef{}, err
 		}
 		mutationID, err := insertFanOutEntitySourceRevisionTx(ctx, tx, postgres, facts, request.Key.RunID, source.EntityID, source.Field, value, triggerEventID, createdAt)
 		if err != nil {

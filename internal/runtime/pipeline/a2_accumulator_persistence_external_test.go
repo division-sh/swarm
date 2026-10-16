@@ -256,7 +256,7 @@ func TestA2AccumulatorKeyedExecutionPersistenceOnBothStores(t *testing.T) {
 			if err := json.Unmarshal([]byte(original), &expected); err != nil {
 				t.Fatal(err)
 			}
-			if len(state.Items) != 1 || !reflect.DeepEqual(state.Items[0], expected) || len(state.Received) != 1 || state.Received[" exact "] == "" {
+			if len(state.Items) != 1 || !reflect.DeepEqual(state.Items[0], expected) || state.Items[0]["id"] != " exact " {
 				t.Fatalf("business payload/key changed at persistence: %#v", state)
 			}
 			proof.execute(t, proof.publish(t, "item.keyed", `{"payload":{"marker":"nested-marker","id":"nested"},"received_at":"business-time","source":"business-source","event_type":"business-type","event_id":"business-event","marker":"first","id":" exact "}`), "")
@@ -321,7 +321,7 @@ func TestA2AccumulatorKeyedExecutionPersistenceOnBothStores(t *testing.T) {
 			proof.execute(t, proof.publish(t, "item.nested", original), "")
 			proof.restart()
 			nested := proof.accumulator(t, "item.nested")
-			if len(nested.Items) != 1 || len(nested.Received) != 1 || nested.Received["nested"] == "" || nested.Received[" exact "] != "" {
+			if len(nested.Items) != 1 || !reflect.DeepEqual(nested.Items[0], expected) || nested.Items[0]["payload"].(map[string]any)["id"] != "nested" {
 				t.Fatalf("nested business key borrowed another root: %#v", nested)
 			}
 			if got := proof.accumulator(t, "item.keyed"); len(got.Items) != 1 {
@@ -366,17 +366,16 @@ func TestA2AccumulatorUnkeyedDurableMultiplicityAndOrderOnBothStores(t *testing.
 			for index, item := range state.Items {
 				markers[index], _ = item["marker"].(string)
 			}
-			if !reflect.DeepEqual(markers, []string{"same", "same", "published-later", "published-earlier"}) || len(state.Received) != 0 || len(state.Deliveries) != 4 || !reflect.DeepEqual(state.Items[0], state.Items[1]) {
+			if !reflect.DeepEqual(markers, []string{"same", "same", "published-later", "published-earlier"}) || len(state.Items) != 4 || !reflect.DeepEqual(state.Items[0], state.Items[1]) {
 				t.Fatalf("unkeyed multiplicity/order changed: %#v", state)
 			}
+			claimed := make(map[string]bool, len(publications))
 			for _, publication := range publications {
-				var deliveryID string
-				if err := proof.selected.db.QueryRowContext(proof.ctx, `SELECT delivery_id FROM event_deliveries WHERE event_id=$1 AND subscriber_type='node'`, publication.event.ID()).Scan(&deliveryID); err != nil {
-					t.Fatal(err)
+				deliveryID := requireA2CanonicalAccumulatorClaim(t, proof, publication)
+				if claimed[deliveryID] {
+					t.Fatalf("append reused durable delivery: %s", deliveryID)
 				}
-				if state.Deliveries[deliveryID] == "" {
-					t.Fatalf("append lacks exact durable delivery evidence: %s", deliveryID)
-				}
+				claimed[deliveryID] = true
 			}
 			before := proof.evidence(t)
 			if before.Publications != 4 {
@@ -436,7 +435,7 @@ func TestA2AccumulatorPublicationFailureRollsBackOnBothStores(t *testing.T) {
 				t.Fatalf("publication rollback leaked state/history/effects: got=%#v before=%#v", got, before)
 			}
 			proof.restart()
-			if state := proof.accumulator(t, "item.keyed"); len(state.Items) != 1 || state.Received["refused-at-commit"] != "" {
+			if state := proof.accumulator(t, "item.keyed"); len(state.Items) != 1 || state.Items[0]["id"] == "refused-at-commit" {
 				t.Fatalf("failed transaction retained admission: %#v", state)
 			}
 			var delivered int

@@ -273,7 +273,7 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 		return o.commitPreparedEngineMutation(ctx, mutation, WorkflowEngineMutationCommand{
 			State: state, Lifecycle: lifecycle.Commit,
 			ProposedEffects: proposedEffects, Publications: publications,
-			FanOutIntent:            mutation.FanOutIntent,
+			FanOutIntents:           mutation.FanOutIntents,
 			FanOutBarrier:           mutation.FanOutBarrier,
 			FanOutBarrierCompletion: mutation.FanOutBarrierCompletion,
 		}, publications)
@@ -282,7 +282,7 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 		if mutation.PreserveConstructedState != nil {
 			return fmt.Errorf("accepted-event preservation requires selected workflow persistence")
 		}
-		if mutation.FanOutIntent != nil {
+		if len(mutation.FanOutIntents) != 0 {
 			return fmt.Errorf("durable fan-out intent requires selected workflow persistence")
 		}
 		if o.state.coordinator == nil {
@@ -388,7 +388,7 @@ func (o pipelineEngineMutationOwner) commitPreparedEngineMutation(
 	settledClaim, settlementErr := finishWorkflowEngineDeliverySuccess(deliverySuccess, settlementGuard, committed.DeliverySuccess)
 	result.SettledDeliveryClaim = settledClaim
 	resultErr = errors.Join(resultErr, settlementErr)
-	if mutation.FanOutIntent != nil {
+	if len(mutation.FanOutIntents) != 0 {
 		o.state.coordinator.signalFanOutWork()
 	}
 	if o.publication != nil {

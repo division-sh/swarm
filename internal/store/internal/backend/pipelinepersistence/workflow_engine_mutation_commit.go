@@ -466,15 +466,15 @@ func commitWorkflowEngineMutation(
 				}
 				result.Lifecycle.ChannelCardsChanged = result.Lifecycle.ChannelCardsChanged || changed
 			}
-			if command.FanOutIntent != nil {
+			for _, intent := range command.FanOutIntents {
 				runID := command.State.Identity.RunID
 				fields := command.State.Fields
-				triggerEventID := command.FanOutIntent.Capsule.Lineage.ParentEventID
+				triggerEventID := intent.Capsule.Lineage.ParentEventID
 				createdAt := command.State.UpdatedAt
-				if err := commitFanOutIntentTx(txctx, attempt, postgres, store.resourceSourceOwner(), *command.FanOutIntent, runID, fields, triggerEventID, createdAt); err != nil {
+				if err := commitFanOutIntentTx(txctx, attempt, postgres, store.resourceSourceOwner(), intent, runID, fields, triggerEventID, createdAt); err != nil {
 					return err
 				}
-				if command.FanOutBarrier != nil {
+				if command.FanOutBarrier != nil && command.FanOutBarrier.IntentKey == intent.Key {
 					if err := commitFanOutBarrierRegistrationTx(txctx, attempt, postgres, *command.FanOutBarrier); err != nil {
 						return err
 					}

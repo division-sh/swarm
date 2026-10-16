@@ -157,6 +157,22 @@ func a2CollectionTrigger(t *testing.T, db *sql.DB, r fanoutobligation.IntentRequ
 
 func a2PersistCollection(t *testing.T, db *sql.DB, backend string, request fanoutobligation.IntentRequest, state []byte) fanoutobligation.Intent {
 	t.Helper()
+	if request.Source.Kind == fanoutobligation.SourceEntityField {
+		var fields map[string]any
+		if err := canonicaljson.DecodePreservingNumberLexemes(state, &fields); err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		request, err = request.CaptureEntitySource(fields[request.Source.Field])
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return a2PersistCapturedCollection(t, db, backend, request, state)
+}
+
+func a2PersistCapturedCollection(t *testing.T, db *sql.DB, backend string, request fanoutobligation.IntentRequest, state []byte) fanoutobligation.Intent {
+	t.Helper()
 	tx, err := db.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -342,7 +358,15 @@ func TestA2CollectionProjectionEvidenceOnBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				err = insertFanOutIntentSQL(context.Background(), tx, backend == "postgres", nil, runforkrevision.NewEffects(), r, []byte(raw), r.Capsule.Lineage.ParentEventID, time.Now().UTC())
+				var fields map[string]any
+				if err := canonicaljson.DecodePreservingNumberLexemes([]byte(raw), &fields); err != nil {
+					t.Fatal(err)
+				}
+				captured, captureErr := r.CaptureEntitySource(fields[r.Source.Field])
+				err = captureErr
+				if err == nil {
+					err = insertFanOutIntentSQL(context.Background(), tx, backend == "postgres", nil, runforkrevision.NewEffects(), captured, []byte(raw), r.Capsule.Lineage.ParentEventID, time.Now().UTC())
+				}
 				if err == nil {
 					t.Fatalf("invalid state source accepted: %s", raw)
 				}
@@ -374,6 +398,10 @@ func TestA2CollectionProjectionEvidenceOnBothStores(t *testing.T) {
 			// Source revision, intent and earlier state effects share the caller's
 			// transaction; a later failure must leave none of this candidate.
 			candidate := r
+			candidate, err := candidate.CaptureEntitySource(map[string]any{"a": 1, "z": 2})
+			if err != nil {
+				t.Fatal(err)
+			}
 			candidate.Key.TriggeringDeliveryID = uuid.NewString()
 			tx, err := db.BeginTx(context.Background(), nil)
 			if err != nil {

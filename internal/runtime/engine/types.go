@@ -496,7 +496,7 @@ type ExecutionResult struct {
 	SetsGate                string
 	HandlerRuleSelection    handlerselection.Observation
 	FanOutCount             int
-	FanOutIntent            *fanoutobligation.IntentRequest
+	FanOutIntents           []fanoutobligation.IntentRequest
 	FanOutBarrier           *fanoutbarrier.Registration
 	FanOutBarrierCompletion *fanoutbarrier.Completion
 	Computed                map[string]any

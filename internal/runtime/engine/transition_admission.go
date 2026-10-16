@@ -30,7 +30,7 @@ func (m EngineMutation) ValidateTransitionEvidence() error {
 		if m.State.Transition != nil || m.State.NextState != "" || m.State.SetGate != "" || len(m.State.ClearGates) != 0 ||
 			m.State.DataAccumulation.HasWrites() || m.State.DataAccumulation.SourceEvent != "" ||
 			len(m.EmitIntents) != 0 || len(m.ActivityIntents) != 0 || len(m.EmitPrerequisites.Fields) != 0 ||
-			m.FanOutIntent != nil || m.FanOutBarrier != nil || m.FanOutBarrierCompletion != nil {
+			len(m.FanOutIntents) != 0 || m.FanOutBarrier != nil || m.FanOutBarrierCompletion != nil {
 			return fmt.Errorf("preserved constructed state rejects executable mutation intents")
 		}
 		if len(m.LifecycleEffects) != 1 {

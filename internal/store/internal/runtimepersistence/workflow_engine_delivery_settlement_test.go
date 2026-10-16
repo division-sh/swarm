@@ -318,10 +318,20 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			if err := barrier.Validate(); err != nil {
 				t.Fatalf("validate workflow engine fan-out barrier: %v", err)
 			}
+			if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{
+				State: record, FanOutIntents: []fanoutobligation.IntentRequest{intent, intent}, FanOutBarrier: &barrier,
+				DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{
+					Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+				},
+			}); err == nil || !strings.Contains(err.Error(), "duplicated") {
+				t.Fatalf("duplicate site must refuse before mutation: %v", err)
+			}
+			assertFanOutIntentCount(t, ctx, db, backend, runID, 0)
+			assertFanOutBarrierCount(t, ctx, db, runID, 0)
 			hostile := barrier
 			hostile.IntentKey.RunID = uuid.NewString()
 			if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{
-				State: record, FanOutIntent: &intent, FanOutBarrier: &hostile,
+				State: record, FanOutIntents: []fanoutobligation.IntentRequest{intent}, FanOutBarrier: &hostile,
 				DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{
 					Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, Duration: time.Second,
 					RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
@@ -357,7 +367,7 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 				t.Fatalf("hostile alternate-plan barrier should be internally self-consistent: %v", err)
 			}
 			if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{
-				State: record, FanOutIntent: &intent, FanOutBarrier: &hostile,
+				State: record, FanOutIntents: []fanoutobligation.IntentRequest{intent}, FanOutBarrier: &hostile,
 				DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{
 					Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, Duration: time.Second,
 					RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
@@ -369,7 +379,7 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			assertFanOutBarrierCount(t, ctx, db, runID, 0)
 
 			committed, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{
-				State: record, FanOutIntent: &intent, FanOutBarrier: &barrier,
+				State: record, FanOutIntents: []fanoutobligation.IntentRequest{intent}, FanOutBarrier: &barrier,
 				DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{
 					Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, Duration: time.Second,
 					RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),

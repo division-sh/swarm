@@ -373,7 +373,13 @@ func requireA2CanonicalAccumulatorItem(t *testing.T, proof *a2AccumulatorPersist
 	t.Helper()
 	state := proof.accumulator(t, "numeric.requested")
 	matches := 0
+	keys := make(map[string]bool, len(state.Items))
 	for _, item := range state.Items {
+		key, ok := item["id"].(string)
+		if !ok || keys[key] {
+			t.Fatalf("invalid or duplicate retained business key: %#v", item)
+		}
+		keys[key] = true
 		if item["id"] != expected["id"] {
 			continue
 		}
@@ -383,12 +389,13 @@ func requireA2CanonicalAccumulatorItem(t *testing.T, proof *a2AccumulatorPersist
 			t.Fatalf("hydration changed original optional/numeric/record execution evidence: got=%#v want=%#v err=%v", projected, expected, err)
 		}
 		hash, err := canonicaljson.Hash(expected)
-		if err != nil || state.Received[expected["id"].(string)] != hash {
-			t.Fatalf("hydrated item lost canonical business receipt: %#v err=%v", state.Received, err)
+		actualHash, actualErr := canonicaljson.Hash(projected)
+		if err != nil || actualErr != nil || actualHash != hash {
+			t.Fatalf("hydrated item changed canonical business content: %#v err=%v/%v", projected, err, actualErr)
 		}
 	}
-	if matches != 1 || len(state.Items) != len(state.Received) || len(state.Deliveries) != 0 {
-		t.Fatalf("canonical keyed item/receipt multiplicity changed: matches=%d state=%#v expected=%#v", matches, state, expected)
+	if matches != 1 || len(state.Items) != len(keys) {
+		t.Fatalf("canonical keyed item multiplicity changed: matches=%d state=%#v expected=%#v", matches, state, expected)
 	}
 }
 

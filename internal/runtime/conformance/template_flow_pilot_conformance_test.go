@@ -340,12 +340,12 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	if err != nil {
 		t.Fatalf("Execute fan_out: %v", err)
 	}
-	if result.Status != runtimeengine.OutcomeFannedOut || result.FanOutCount != 2 || result.FanOutIntent == nil || len(result.EmitIntents) != 0 {
-		t.Fatalf("fan_out result = status:%s count:%d obligation:%#v eager:%d", result.Status, result.FanOutCount, result.FanOutIntent, len(result.EmitIntents))
+	if result.Status != runtimeengine.OutcomeFannedOut || result.FanOutCount != 2 || len(result.FanOutIntents) == 0 || len(result.EmitIntents) != 0 {
+		t.Fatalf("fan_out result = status:%s count:%d obligation:%#v eager:%d", result.Status, result.FanOutCount, result.FanOutIntents, len(result.EmitIntents))
 	}
 	now := time.Now().UTC()
 	intent := fanoutobligation.Intent{
-		Request: *result.FanOutIntent, Source: result.FanOutIntent.Source,
+		Request: result.FanOutIntents[0], Source: result.FanOutIntents[0].Source,
 		Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize,
 		CreatedAt: now, UpdatedAt: now,
 	}

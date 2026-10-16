@@ -85,11 +85,11 @@ func preparedFanOutFixture(t testing.TB, r2Mixed ...bool) (*Executor, fanoutobli
 	}
 	trigger := eventtest.RunCreatingRootIngress(eventtest.UUID("prepared-fan-out"), "batch.ready", "", "", raw, 0, semanticExecutionFixtureRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{EntityID: identity.NormalizeEntityID("entity-1"), Node: node, Event: trigger, Handler: handler, State: testStateSnapshot("pending", map[string]any{"offset": int64(5)}, nil, nil)})
-	if err != nil || result.FanOutIntent == nil {
-		t.Fatalf("capture: %v %#v", err, result.FanOutIntent)
+	if err != nil || len(result.FanOutIntents) == 0 {
+		t.Fatalf("capture: %v %#v", err, result.FanOutIntents)
 	}
 	now := time.Now().UTC()
-	intent := fanoutobligation.Intent{Request: *result.FanOutIntent, Source: result.FanOutIntent.Source, Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize, CreatedAt: now, UpdatedAt: now}
+	intent := fanoutobligation.Intent{Request: result.FanOutIntents[0], Source: result.FanOutIntents[0].Source, Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize, CreatedAt: now, UpdatedAt: now}
 	return exec, intent, trigger, source
 }
 

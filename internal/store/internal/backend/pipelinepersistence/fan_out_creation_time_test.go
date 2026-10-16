@@ -36,6 +36,10 @@ func TestFanOutProducerFairnessIgnoresCallerAuditTimeBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			stateFields := json.RawMessage(`{"items":[{"value":1},{"value":2}]}`)
+			request, err = request.CaptureEntitySource([]any{map[string]any{"value": 1}, map[string]any{"value": 2}})
+			if err != nil {
+				t.Fatal(err)
+			}
 			for _, offset := range []time.Duration{-24 * time.Hour, 24 * time.Hour} {
 				request.Key.TriggeringDeliveryID = uuid.NewString()
 				before := time.Now().UTC().Add(-time.Millisecond)
