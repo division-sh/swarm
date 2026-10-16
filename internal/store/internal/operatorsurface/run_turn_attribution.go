@@ -129,10 +129,13 @@ func loadDeliveryTurnAttribution(ctx context.Context, q eventReadQueryer, postgr
 	}
 	out.EmittedEvents = accepted
 	switch {
-	case ambiguous:
-		out.EvidenceReason = "publication_origin_ambiguous"
 	case len(accepted) > 0:
 		out.Emission = operatorread.RunEmissionAccepted
+		if ambiguous {
+			out.EvidenceReason = "additional_publication_origin_ambiguous"
+		}
+	case ambiguous:
+		out.EvidenceReason = "publication_origin_ambiguous"
 	case complete:
 		out.Emission = operatorread.RunEmissionNone
 	default:
