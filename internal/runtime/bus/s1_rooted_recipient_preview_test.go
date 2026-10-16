@@ -10,7 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -105,5 +104,3 @@ func TestS1RecipientPreviewAdmitsFrozenRootBeforeSourceConsumers(t *testing.T) {
 		}
 	}
 }
-
-var _ pipeline.FlowInstanceIndexReader = constructionIndexTestReader{}

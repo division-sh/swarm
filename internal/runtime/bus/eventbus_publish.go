@@ -2763,6 +2763,10 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 	if !isValidEventTypeName(string(evt.Type())) {
 		return PublishRecipientPlan{}, fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
+	ctx, err := eb.admitSourceArtifactFact(ctx)
+	if err != nil {
+		return PublishRecipientPlan{}, err
+	}
 	if eb.payloadAdmitter != nil {
 		var err error
 		evt, err = eb.admitEventPayload(ctx, evt)
