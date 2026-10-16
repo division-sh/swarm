@@ -12,12 +12,14 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
 type boundedRunDebugDeliveryStore interface {
 	authorActivityReceiptStore
+	agentfixture.Store
 	LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
 }
 
@@ -30,6 +32,10 @@ func TestRunDebugReportBoundsDeliveryHydrationParity(t *testing.T) {
 			runID := uuid.NewString()
 			base := time.Date(2026, 7, 23, 5, 0, 0, 0, time.UTC)
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			for _, id := range []string{"selected-agent", "excluded-agent", "delivered-agent"} {
+				seedManagedTurnFixtureAgent(t, ctx, selected, runID, id, "fixture/"+id)
+			}
+			ctx = admitPreparedAgentClaimContext(t, ctx, selected)
 
 			selectedFailure := seedBoundedRunDebugDelivery(
 				t, ctx, fixture, selected, runID, "diagnostic.selected", "selected-agent",
