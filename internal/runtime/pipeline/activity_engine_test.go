@@ -985,9 +985,7 @@ func TestPipelineActivityRequestFailsClosedForWriteEffectClass(t *testing.T) {
 	}
 }
 
-func VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCredentialsForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
-	fixture := open(t)
-	ctx := fixture.Context
+func VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCredentialsForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowActivityNativeFixtureForTest) {
 	runID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
@@ -1000,8 +998,22 @@ func VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCre
 		_ = json.NewEncoder(w).Encode(map[string]any{"echoed_authorization": r.Header.Get("Authorization")})
 	}))
 	defer server.Close()
-	credentialStore := testActivityCredentialStore(t, "provider_token", "provider-secret")
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL, Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"}, Body: map[string]any{"url": "{{input.url}}"}}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...))}})
+	credentialStore := testActivityCredentialStore(t, "provider.token", "provider-secret")
+	source := semanticview.Wrap(loadWorkflowTempBundle(t, map[string]string{
+		"schema.yaml": "stages: []\n",
+		"tools.yaml": fmt.Sprintf(`provider_write:
+  handler_type: http
+  effect_class: non_idempotent_write
+  credentials: [provider.token]
+  http:
+    method: POST
+    url: %q
+    headers: {Authorization: 'Bearer {{credentials.provider.token}}'}
+    body: {url: '{{input.url}}'}
+`, server.URL),
+	}))
+	fixture := open(t, source)
+	ctx := fixture.Context
 	bus := &recordingPipelineBus{}
 	store := fixture.Persistence.store
 	if err := fixture.RequireRun(ctx, runID); err != nil {

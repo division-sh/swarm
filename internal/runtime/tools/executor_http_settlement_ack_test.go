@@ -82,6 +82,7 @@ func selectedHTTPSettlementContext(t *testing.T, selected httpSettlementSelected
 	fixtureCtx := runtimecorrelation.WithRuntimeInstanceID(context.Background(), runtimeID)
 	fixtureCtx = runtimeauthoractivity.WithScope(fixtureCtx, runtimeauthoractivity.BundleScope(runtimeID, sourceartifactfixture.BundleHash))
 	rooted, _ := sourceartifactfixture.Rooted(t, "http-settlement", sourceartifactfixture.Artifact())
+	fixtureCtx = runtimecorrelation.WithSourceArtifactFact(fixtureCtx, sourceartifactfixture.FactFor(rooted.Artifact()))
 	fixtureCtx = runtimecorrelation.WithRootAdmission(fixtureCtx, rooted.Admission())
 	if err := storetest.MaterializeRun(fixtureCtx, selected, storetest.RunFixture{
 		RunID: harness.Token.Identity.RunID, Artifact: rooted.Artifact(), RootAdmission: rooted.Admission(),
@@ -104,6 +105,7 @@ func selectedHTTPSettlementContext(t *testing.T, selected httpSettlementSelected
 	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(selected).WithExecutionPosture(executionposture.Live))
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(runtimeID, sourceartifactfixture.BundleHash))
+	ctx = runtimecorrelation.WithSourceArtifactFact(ctx, sourceartifactfixture.FactFor(rooted.Artifact()))
 	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	return runtimetools.WithActor(ctx, actor), actor
 }

@@ -312,7 +312,13 @@ func verifyNativeActivityBothStores(t *testing.T, verify func(*testing.T, func(*
 }
 
 func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCredentials(t *testing.T) {
-	verifyNativeActivityBothStores(t, pipeline.VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCredentialsForTest)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			pipeline.VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCredentialsForTest(t, func(t *testing.T, source semanticview.Source) pipeline.WorkflowActivityNativeFixtureForTest {
+				return workflowActivityNativeSourceFixture(t, backend, source)
+			})
+		})
+	}
 }
 
 func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *testing.T) {
