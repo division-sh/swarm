@@ -1,5 +1,10 @@
 # #2700 Focused HTTP Effect Retirement PLAN Amendment
 
+Evening USER6220888538 amendment: the activity carrier/column preservation
+boundary below is superseded by issue-2700-http-effect-retirement-amendment2.md.
+That focused widening awaits reviewer-a's PLAN disposition; the earlier gate
+and original RED receipts are retained, not rewritten into new-scope credit.
+
 Track: FULL. ONE #2700 landing, per reviewer-a6220928385. This is the required
 C1'' PLAN amendment before the new handler semantic cutover, not a request to
 ship the now-moot notice. Input is signeddd39a85e4aa0a5b15dc7c6a0d4848cc4dd8f5ef8
