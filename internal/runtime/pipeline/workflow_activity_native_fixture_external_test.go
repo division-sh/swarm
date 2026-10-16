@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -29,7 +30,8 @@ func workflowActivityNativeFixture(t *testing.T, backend string) pipeline.Workfl
 
 func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerReplaySelectedStore, reopen func() timerReplaySelectedStore) pipeline.WorkflowActivityNativeFixtureForTest {
 	t.Helper()
-	return workflowActivityNativeFixtureFromSelectedSource(t, selected, reopen, sourceartifactfixture.Artifact())
+	rooted, _ := sourceartifactfixture.Rooted(t, "workflow-activity", sourceartifactfixture.Artifact())
+	return workflowActivityNativeFixtureFromSelectedSource(t, selected, reopen, rooted.Artifact())
 }
 
 func workflowActivityNativeSourceFixture(t *testing.T, backend string, source semanticview.Source) pipeline.WorkflowActivityNativeFixtureForTest {
@@ -45,8 +47,10 @@ func workflowActivityNativeSourceFixture(t *testing.T, backend string, source se
 func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected timerReplaySelectedStore, reopen func() timerReplaySelectedStore, artifact *sourceartifact.AdmittedSourceArtifact) pipeline.WorkflowActivityNativeFixtureForTest {
 	t.Helper()
 	// Keep the first artifact write inside RequireRun's accounting boundary.
+	rooted := sourceartifactfixture.CapturedRoot(t, artifact)
 	fact := sourceartifactfixture.FactFor(artifact)
 	ctx := testAuthorActivityContextForSource(t, context.Background(), fact)
+	ctx = runtimecorrelation.WithRootAdmission(ctx, rooted.Admission())
 	persistence := pipeline.NewWorkflowPersistence(selected)
 	var buses []*runtimebus.EventBus
 	join := func() error {
@@ -106,7 +110,7 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 		Runs:        selected,
 		RequireRun: func(ctx context.Context, runID string) error {
 			return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{
-				RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(), Artifact: artifact,
+				RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(), Artifact: artifact, RootAdmission: rooted.Admission(),
 			})
 		},
 		NewCoordinator: func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions) *pipeline.PipelineCoordinator {
