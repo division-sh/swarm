@@ -26,6 +26,7 @@ import (
 )
 
 func TestEventNamedOperationAtomicityParity(t *testing.T) {
+	t.Run("initial_receiver_readback_geometries", proveSelectedForkInitialReadbackGeometries)
 	for _, backend := range eventRecordContractBackends() {
 		t.Run(backend.name, func(t *testing.T) {
 			for _, failure := range []struct {
