@@ -49,22 +49,12 @@ func compileDirectoryConnectorSource(source semanticview.Source, fact runtimecor
 	}
 	aliases := map[string]directoryConnectorBinding{}
 	ambiguous := map[string]bool{}
-	scopes := map[string]semanticview.FlowScope{}
-	for _, scope := range source.FlowScopes() {
-		if _, duplicate := scopes[scope.ID]; duplicate {
-			return nil, fmt.Errorf("directory connector source repeats flow %q", scope.ID)
-		}
-		if _, err := providers.Scope(scope.ID); err != nil {
-			return nil, err
-		}
-		scopes[scope.ID] = scope
+	scopes, err := directoryConnectorScopes(source, providers)
+	if err != nil {
+		return nil, err
 	}
-	for _, flow := range providers.FlowPaths() {
-		scope, found := scopes[flow]
-		if !found {
-			return nil, fmt.Errorf("directory connector source omits admitted flow %q", flow)
-		}
-		selected, err := providers.Scope(flow)
+	for _, scope := range scopes {
+		selected, err := providers.Scope(scope.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -92,6 +82,28 @@ func compileDirectoryConnectorSource(source semanticview.Source, fact runtimecor
 		}
 	}
 	return semanticview.CompileActivityToolBindings(out)
+}
+
+func directoryConnectorScopes(source semanticview.Source, providers packadmission.ProviderSource) ([]semanticview.FlowScope, error) {
+	byID := map[string]semanticview.FlowScope{}
+	for _, scope := range source.FlowScopes() {
+		if _, duplicate := byID[scope.ID]; duplicate {
+			return nil, fmt.Errorf("directory connector source repeats flow %q", scope.ID)
+		}
+		if _, err := providers.Scope(scope.ID); err != nil {
+			return nil, err
+		}
+		byID[scope.ID] = scope
+	}
+	var scopes []semanticview.FlowScope
+	for _, flow := range providers.FlowPaths() {
+		scope, found := byID[flow]
+		if !found {
+			return nil, fmt.Errorf("directory connector source omits admitted flow %q", flow)
+		}
+		scopes = append(scopes, scope)
+	}
+	return scopes, nil
 }
 
 func directoryConnectorBindings(scope packadmission.ProviderScope, authored map[string]runtimecontracts.ToolSchemaEntry) (map[string]directoryConnectorBinding, error) {
