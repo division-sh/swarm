@@ -429,7 +429,7 @@ func allowedTransitionBoundaryUses() map[string]int {
 		"internal/store/internal/backend/mutationlog.Insert::call internal/runtime/correlation.InboundEventFromContext":                               1,
 		"internal/store/internal/backend/mutationlog.insertSQLiteAt::call internal/runtime/correlation.InboundEventFromContext":                       1,
 		// #2720 Gate E 6221291258: pinned final-stage readback, not transition execution.
-		"internal/store/internal/operatorsurface.loadRunOperationalEvidence::call internal/runtime/semanticview.WorkflowStageTopology": 1,
+		"internal/store/internal/operatorsurface.loadRunOperationalInstances::call internal/runtime/semanticview.WorkflowStageTopology": 1,
 		"internal/store/storetest.PersistManagedAgentTurnFixture::call internal/runtime/correlation.WithInboundEvent":                  1,
 
 		// Proposed-run authentication only; the event and source must validate the proposal (2617:6162858616).
