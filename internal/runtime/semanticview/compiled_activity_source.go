@@ -2,7 +2,6 @@ package semanticview
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -103,6 +102,9 @@ func (s compiledActivitySource) EventEntry(name string) (contracts.EventCatalogE
 	return s.Source.EventEntry(name)
 }
 func (s compiledActivitySource) ResolveFlowEventCatalogEntry(flowID, event string) (contracts.EventCatalogEntry, string, bool) {
+	if !s.hasExactFlow(flowID) {
+		return contracts.EventCatalogEntry{}, "", false
+	}
 	if entry, resolved, ok := s.compiled.ResolveFlowEventCatalogEntry(flowID, event); ok {
 		return entry, resolved, true
 	}
@@ -119,6 +121,9 @@ func (s compiledActivitySource) ResolveExecutableNodeEventCatalogEntry(node iden
 	return s.ResolveFlowEventCatalogEntry(node.FlowPath(), event)
 }
 func (s compiledActivitySource) ResolveEffectiveCompiledFlowEventSchema(flowID, event string) (contracts.CompiledEventSchema, bool, error) {
+	if !s.hasExactFlow(flowID) {
+		return contracts.CompiledEventSchema{}, false, nil
+	}
 	if schema, owned, err := s.connectionInputs.ReceiverCommonEventSchema(flowID, event); err != nil || owned {
 		return schema, owned, err
 	}
@@ -140,9 +145,6 @@ func (s compiledActivitySource) ResolveFlowEventStructuralType(flowID, event str
 	return schema.StructuralType()
 }
 func (s compiledActivitySource) FlowInputEventPins(flowID string) []contracts.CompiledFlowInputPin {
-	if strings.TrimSpace(flowID) == "" {
-		flowID = "."
-	}
 	return append([]contracts.CompiledFlowInputPin(nil), s.inputPins[flowID]...)
 }
 func (s compiledActivitySource) FlowInputEventPin(flowID, event string) (contracts.CompiledFlowInputPin, bool) {
@@ -154,10 +156,12 @@ func (s compiledActivitySource) FlowInputEventPin(flowID, event string) (contrac
 	return contracts.CompiledFlowInputPin{}, false
 }
 func (s compiledActivitySource) FlowOutputEventPins(flowID string) []contracts.CompiledFlowOutputPin {
-	if strings.TrimSpace(flowID) == "" {
-		flowID = "."
-	}
 	return append([]contracts.CompiledFlowOutputPin(nil), s.outputPins[flowID]...)
+}
+
+func (s compiledActivitySource) hasExactFlow(flowID string) bool {
+	scope, found := s.compiled.FlowScopeByID(flowID)
+	return found && scope.ID == flowID
 }
 func (s compiledActivitySource) FlowOutputEventPin(flowID, event string) (contracts.CompiledFlowOutputPin, bool) {
 	for _, pin := range s.FlowOutputEventPins(flowID) {

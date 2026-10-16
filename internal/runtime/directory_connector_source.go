@@ -169,6 +169,7 @@ func (s directoryConnectorSource) ToolEntries() map[string]runtimecontracts.Tool
 func (s directoryConnectorSource) FlowScopes() []semanticview.FlowScope {
 	out := append([]semanticview.FlowScope(nil), s.scopes...)
 	for index := range out {
+		out[index].Events = cloneEventCatalog(s.scopes[index].Events)
 		out[index].Tools = make(map[string]runtimecontracts.ToolSchemaEntry, len(s.scopes[index].Tools))
 		for name, tool := range s.scopes[index].Tools {
 			out[index].Tools[name] = tool
