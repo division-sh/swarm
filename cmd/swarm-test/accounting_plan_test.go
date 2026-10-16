@@ -123,6 +123,14 @@ func TestAccountingFinitePlanBindsEveryChangedRowToTrustedSource(t *testing.T) {
 	if _, err := deriveFiniteAccountingPlan(ctx, repo, final, semantic, observation); err == nil {
 		t.Fatal("semantic source change accepted as hash refresh")
 	}
+	put(formatproof.Source, bytes.Replace(original, []byte("OmitOutputPin               bool"), []byte("OmitOutputPin                 bool"), 1))
+	if err := os.Chmod(filepath.Join(repo, formatproof.Source), 0755); err != nil {
+		t.Fatal(err)
+	}
+	modeChanged := commit()
+	if _, err := deriveFiniteAccountingPlan(ctx, repo, final, modeChanged, observation); err == nil {
+		t.Fatal("file-mode change accompanied an allegedly whitespace-only successor")
+	}
 	if _, err := formatproof.Read([]byte(`{"version":1,"records":[],"new_exception":true}`)); err == nil {
 		t.Fatal("new exception accepted")
 	}
