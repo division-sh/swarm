@@ -102,6 +102,9 @@ func publishCompletion2270BusinessEvent(t *testing.T, rt completion2270ServedPro
 			if delivery.SubscriberType != "agent" || delivery.SubscriberID != "load-agent" {
 				continue
 			}
+			if delivery.Terminal && delivery.Status != "delivered" {
+				t.Fatalf("business provider turn terminally refused: %+v", delivery)
+			}
 			if delivery.Status == "delivered" {
 				matched++
 			}

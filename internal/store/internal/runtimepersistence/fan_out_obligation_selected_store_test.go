@@ -870,6 +870,9 @@ func TestFanOutDiagnosticsAndTestQuiescenceUseDurableOwnerOnBothStores(t *testin
 			if report.TestQuiescence.Ready || report.TestQuiescence.FanOutOwed != 10 {
 				t.Fatalf("fan-out test quiescence = %#v, want sole owed blocker", report.TestQuiescence)
 			}
+			if projected := operatorread.ProjectRunOperationalStatus(report); projected.State != "running" || len(projected.Attributions) != 0 {
+				t.Fatalf("durable owed fan-out was diagnosed as a silent agent stall: %+v", projected)
+			}
 
 			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{Owner: "diagnostic-worker", BundleHash: fixture.bundleHash, Now: now, Lease: time.Minute})
 			if err != nil || !found {
@@ -895,6 +898,9 @@ func TestFanOutDiagnosticsAndTestQuiescenceUseDurableOwnerOnBothStores(t *testin
 			}
 			if report.TestQuiescence.Ready || report.TestQuiescence.FanOutOwed != 10 {
 				t.Fatalf("blocked fan-out test quiescence = %#v", report.TestQuiescence)
+			}
+			if projected := operatorread.ProjectRunOperationalStatus(report); projected.State != "running" || len(projected.Attributions) != 0 {
+				t.Fatalf("blocked durable fan-out invented agent blame: %+v", projected)
 			}
 
 			if err := owner.CancelRunFanOut(ctx, fixture.runID, "test cancellation", now.Add(2*time.Second)); err != nil {

@@ -91,7 +91,10 @@ func proveRunStallPublicationEvidence(t *testing.T, adapter, scope, phase string
 		ctx = correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.Fact())
 		ctx = effects.WithLifecycleToken(ctx, fixture.authority.Normal)
 		staticSource := constructStaticPublicationSourceFixture(t, ctx, fixture.store.(agentFixtureFlowStore), bundle, "global")
-		routing := eventtest.RootRoutingSource(fixture.origin.RunID())
+		routing, err := events.NewStaticFlowRoutingSource(events.RouteIdentity{FlowID: ".", FlowInstance: fixture.origin.RunID()})
+		if err != nil {
+			t.Fatal(err)
+		}
 		eventType := events.EventType("test.node_emitted")
 		instance := flowidentity.RunScopedFlowInstance{RunID: fixture.origin.RunID(), Route: flowidentity.StoredRoute(".", fixture.origin.RunID(), fixture.origin.RunID())}
 		if scope == "static" {
