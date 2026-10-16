@@ -335,7 +335,13 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 func seedSelectedOperationSource(t *testing.T, ctx context.Context, backend string, db *sql.DB, selected any, loaded LoadedSelectedContractSource, runID, eventID string, input ...events.Event) {
 	t.Helper()
 	at := time.Unix(1700002200, 0).UTC()
-	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(), Artifact: selectedExecutionSourceArtifact(t, loaded.SourceArtifactFact.BundleHash()), StartedAt: at.Add(-time.Minute)})
+	if err := loaded.RootedSource.Validate(); err != nil {
+		t.Fatalf("selected operation source fixture requires its loaded root: %v", err)
+	}
+	storetest.RequireRun(t, ctx, selected.(storetest.RunFixtureStore), storetest.RunFixture{
+		RunID: runID, Origin: storetest.ScenarioSetupOrigin(), BundleHash: loaded.SourceArtifactFact.BundleHash(),
+		Artifact: loaded.RootedSource.Artifact(), RootAdmission: loaded.RootedSource.Admission(), StartedAt: at.Add(-time.Minute),
+	})
 	event := eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(eventID, "item.received", "source-runtime", "", []byte(`{}`), 0, runID,
 		events.EventEnvelope{}, events.NoRoutingSource(), at, executionmode.Mock)
 	if len(input) == 1 {
