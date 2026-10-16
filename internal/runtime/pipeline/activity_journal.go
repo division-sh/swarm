@@ -17,7 +17,7 @@ type ActivityAttemptJournal interface {
 // not an ACK, work queue or execution grant. Publication consumes the durable
 // journal/readback obligation only after native transaction acknowledgement.
 type ActivityRecoverySummary struct {
-	Results []ActivityAttemptRecord
+	Results []RecoveredHTTPActivity
 }
 
 func (s *workflowInstanceStore) StartActivityAttempt(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {
