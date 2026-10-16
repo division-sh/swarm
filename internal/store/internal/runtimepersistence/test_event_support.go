@@ -42,10 +42,7 @@ type UnretainedCleanupHistoryObservation = deliveryadapter.UnretainedCleanupHist
 // Only the physical unretained cleanup proof consumes this operation. Its
 // historical attempts are not provider-ready and expose no claim capability.
 func InstallUnretainedSelectedForkCleanupHistoryForTest(ctx context.Context, selected any, fork, source, frontier string, history [2]events.Event, route events.DeliveryRoute) ([2]string, error) {
-	if ctx == nil {
-		return [2]string{}, fmt.Errorf("unretained cleanup requires its caller context")
-	}
-	if err := validateUnretainedCleanupHistoryInputs(selected, fork, source, frontier, history, route); err != nil {
+	if err := validateUnretainedCleanupHistoryInputs(ctx, selected, fork, source, frontier, history, route); err != nil {
 		return [2]string{}, err
 	}
 	records, err := unretainedCleanupHistoryRecords(history)
@@ -101,7 +98,10 @@ func InstallUnretainedSelectedForkCleanupHistoryForTest(ctx context.Context, sel
 	return ids, nil
 }
 
-func validateUnretainedCleanupHistoryInputs(selected any, fork, source, frontier string, history [2]events.Event, route events.DeliveryRoute) error {
+func validateUnretainedCleanupHistoryInputs(ctx context.Context, selected any, fork, source, frontier string, history [2]events.Event, route events.DeliveryRoute) error {
+	if ctx == nil {
+		return fmt.Errorf("unretained cleanup requires its caller context")
+	}
 	if _, err := eventFixtureDialectForTest(selected); err != nil {
 		return err
 	}
