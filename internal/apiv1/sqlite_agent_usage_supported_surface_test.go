@@ -91,6 +91,7 @@ func TestSQLiteAgentDeliveryLifecycleOwnerBacksSupportedAPISurface(t *testing.T)
 	entityID := uuid.NewString()
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	seedSQLiteAgentUsageAgentForRun(t, ctx, sqliteStore, runID, "agent-1")
+	ctx = admitAPITestAgentExecution(t, ctx, sqliteStore, authorActivityTestSourceArtifactFact)
 	evt := eventtest.ExistingRunRootIngress(
 		eventID,
 		events.EventType("task.ready"),

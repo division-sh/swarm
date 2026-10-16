@@ -25,6 +25,12 @@ func TestDeliveryAuthorityActivationPreservesRecordedFrozenSourceBothStores(t *t
 				source, child := uuid.NewString(), uuid.NewString()
 				seedAuthorActivityReceiptRun(t, fixture, ctx, source)
 				seedAuthorActivityReceiptRun(t, fixture, ctx, child)
+				selected := fixture.store.(agentFixtureFlowStore)
+				for _, state := range []deliverylifecycle.State{deliverylifecycle.StateQueued, deliverylifecycle.StateRetrying, deliverylifecycle.StateLaunching, deliverylifecycle.StateDelivered, deliverylifecycle.StateExhausted} {
+					id := "frozen-" + string(state)
+					seedManagedTurnFixtureAgent(t, ctx, selected, source, id, "fixture/"+id)
+				}
+				ctx = admitPreparedAgentClaimContext(t, ctx, selected)
 				var authority deliverylifecycle.ExecutionAuthority
 				for _, state := range []deliverylifecycle.State{
 					deliverylifecycle.StateQueued, deliverylifecycle.StateRetrying,
@@ -92,6 +98,12 @@ func TestDeliveryAuthorityActivationPreservesLiveEligibilityBothStores(t *testin
 				ctx := testAuthorActivityContext()
 				runID := uuid.NewString()
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+				selected := fixture.store.(agentFixtureFlowStore)
+				for _, deliveryState := range []deliverylifecycle.State{deliverylifecycle.StateQueued, deliverylifecycle.StateLaunching} {
+					id := "live-" + string(deliveryState)
+					seedManagedTurnFixtureAgent(t, ctx, selected, runID, id, "fixture/"+id)
+				}
+				ctx = admitPreparedAgentClaimContext(t, ctx, selected)
 				for _, deliveryState := range []deliverylifecycle.State{deliverylifecycle.StateQueued, deliverylifecycle.StateLaunching} {
 					if _, err := fixture.store.(runlifecycle.OperationOwner).TransitionActiveRun(ctx, runlifecycle.ActiveTransitionRequest{RunID: runID, State: runlifecycle.StateRunning}); err != nil {
 						t.Fatal(err)

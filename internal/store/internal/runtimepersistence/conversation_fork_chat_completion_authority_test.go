@@ -335,7 +335,7 @@ func newForkChatCompletionAuthorityFixture(t *testing.T, sqlite bool) forkChatCo
 	} else {
 		location, pgDB, _ := testutil.StartPostgres(t)
 		db = pgDB
-		source = seedConversationForkSource(t, db, now)
+		source = seedConversationForkSource(t, admitTestPostgresStore(t, db), now)
 		store = source.selected
 		reopen = func() forkChatHistoryReader {
 			reader, err := NewPostgresStore(location)

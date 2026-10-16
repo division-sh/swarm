@@ -111,6 +111,7 @@ func TestRunForkDeliveryRouteEvidenceBothStores(t *testing.T) {
 						record := agentFixtureStaticRecord(t, route.AgentIdentity)
 						record.Config.FlowID, record.Config.FlowPath = target.FlowID, target.FlowInstance
 						record.Config.EntityID = target.EntityID
+						record.Config = resolveNativeClaimFixtureActor(t, record.Config)
 						fact, found := correlation.SourceArtifactFactFromContext(ctx)
 						if !found {
 							t.Fatal("component receiver requires the exact run source")

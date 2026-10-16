@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,7 +30,7 @@ func TestPostgresStore_ConversationForkLifecycleOwnsCreateListViewDelete(t *test
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now)
+	source := seedConversationForkSource(t, s, now)
 
 	created, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
@@ -157,7 +156,7 @@ func TestPostgresStore_ConversationForkLifecycleFailsClosedForSelectors(t *testi
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now)
+	source := seedConversationForkSource(t, s, now)
 
 	_, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
@@ -202,7 +201,7 @@ func TestPostgresStore_ConversationForkChatOwnsSnapshotTranscriptAndIsolation(t 
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now)
+	source := seedConversationForkSource(t, s, now)
 	entityID := uuid.NewString()
 
 	if _, err := db.ExecContext(ctx, `
@@ -467,7 +466,7 @@ func TestPostgresStore_ConversationForkChatAllocatesConcurrentTurns(t *testing.T
 	s := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	now := activeConversationForkTestClock()
-	source := seedConversationForkSource(t, db, now)
+	source := seedConversationForkSource(t, s, now)
 	fork, err := s.CreateOperatorConversationFork(ctx, runfork.ConversationForkCreateRequest{
 		SourceSessionID: source.sessionID,
 		ForkPoint:       runfork.ConversationForkPointSelector{Kind: "turn", TurnID: source.turn1ID},
@@ -644,7 +643,7 @@ type conversationForkSourceFixture struct {
 
 const conversationForkSourceFlowInstance = "review"
 
-func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conversationForkSourceFixture {
+func seedConversationForkSource(t *testing.T, store *PostgresStore, base time.Time) conversationForkSourceFixture {
 	t.Helper()
 	source := conversationForkSourceFixture{
 		runID:      uuid.NewString(),
@@ -659,7 +658,7 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conver
 		turn2At:    base.Add(-1 * time.Minute),
 	}
 	ctx := testAuthorActivityContext()
-	store := admitTestPostgresStore(t, db)
+	db := store.backend.ConstructionHandle()
 	source.selected = store
 	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: source.runID, StartedAt: base.Add(-3 * time.Minute), BundleHash: source.bundleHash})
 	identity := mustTestAgentIdentityForRun(source.runID, source.agentID, conversationForkSourceFlowInstance)
