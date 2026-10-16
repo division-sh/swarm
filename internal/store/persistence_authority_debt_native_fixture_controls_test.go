@@ -18,6 +18,9 @@ import (
 // Excluded from the collector payload to avoid a self-referential fingerprint.
 const debtNativeFixtureCollectorTo = "0bd1ab5a0b812a4ec0868c453f4a7ac572726261f9f1b738e72d49badc6c08af"
 
+// #642/6207897765: exactly two additional native second-result reopen calls.
+const debtQ1ReopenCollectorTo = "0230d8352f400e7a606f76b00304b678f18222950d868f24b20137b5b6d563d5"
+
 func TestPersistenceAuthorityDebtNativeFixtureExactClassificationDelta(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
 	fset := token.NewFileSet()
@@ -90,10 +93,10 @@ func TestPersistenceAuthorityDebtNativeFixtureExactClassificationDelta(t *testin
 			}
 		}
 	}
-	if len(seen) != 8 || imports != 4 || constructions != 8 {
+	if len(seen) != 9 || imports != 4 || constructions != 10 {
 		t.Fatalf("exact delta: files=%d imports=%d constructions=%d", len(seen), imports, constructions)
 	}
-	t.Log("same-source delta: exactly four imports and eight native factory-closure calls; all other findings retained")
+	t.Log("same-source delta: exactly four imports and ten native factory-closure calls; the previous eight opens and all other findings retained")
 }
 
 func TestPersistenceAuthorityDebtNativeFixtureImportsRejectUnreviewedUses(t *testing.T) {
@@ -226,7 +229,6 @@ func StartSQLiteRuntimeStoreWithReopen() (*s.SQLiteRuntimeStore, func() *s.SQLit
 }
 
 func TestPersistenceAuthorityDebtNativeFixtureClosureProvenance(t *testing.T) {
-	const path = "internal/runtime/runforkexecution/one_shot_reply_execution_test.go"
 	const source = `package runforkexecution
 import (
  s "github.com/division-sh/swarm/internal/store"
@@ -241,61 +243,67 @@ func TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores() {
  { again := 1; _ = again }
 }
 `
-	for _, mutation := range []string{"exact", "renamed", "foreign-path", "foreign-function", "foreign-factory", "shadowed-factory", "wrong-slot", "reassigned", "escaped", "extra-call", "raw-reconstruction", "concrete-recovery"} {
-		t.Run(mutation, func(t *testing.T) {
-			candidate, body, want := path, source, 2
-			switch mutation {
-			case "renamed":
-				body = strings.ReplaceAll(body, "again", "openPeer")
-			case "foreign-path":
-				candidate, want = "internal/runtime/runforkexecution/unreviewed_test.go", 0
-			case "foreign-function":
-				body = strings.ReplaceAll(body, "TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores", "unreviewed")
-				want = 0
-			case "foreign-factory":
-				body = strings.Replace(body, "\"database/sql\"", "\"database/sql\"; foreign \"example.org/storetest\"", 1)
-				body = strings.Replace(body, "factory.StartSQLiteRuntimeStoreWithReopen()", "foreign.StartSQLiteRuntimeStoreWithReopen()", 1)
-				want = 0
-			case "shadowed-factory":
-				body = strings.Replace(body, "{ s, again := factory.StartSQLiteRuntimeStoreWithReopen()", "{ factory := struct { StartSQLiteRuntimeStoreWithReopen func() (*s.SQLiteRuntimeStore, func() *s.SQLiteRuntimeStore) }{factory.StartSQLiteRuntimeStoreWithReopen}; s, again := factory.StartSQLiteRuntimeStoreWithReopen()", 1)
-				want = 0
-			case "wrong-slot":
-				body = strings.Replace(body, "s, again := factory.StartSQLiteRuntimeStoreWithReopen()", "again, s := reverse(factory.StartSQLiteRuntimeStoreWithReopen())", 1)
-				want = 0
-			case "reassigned":
-				body = strings.Replace(body, "_ = s; _ = func() any { s = again()", "_ = s; again = factoryClosure(); _ = func() any { s = again()", 1)
-				body += "\nfunc factoryClosure() func() *s.SQLiteRuntimeStore { panic(0) }\n"
-				want = 1
-			case "escaped":
-				body = strings.Replace(body, "_ = s; _ = func() any { s = again()", "_ = s; escaped := again; _ = escaped; _ = func() any { s = again()", 1)
-				want = 1
-			case "extra-call":
-				body = strings.Replace(body, "_ = s; _ = func() any { s = again()", "_ = s; _ = again(); _ = func() any { s = again()", 1)
-				want = 1
-			case "raw-reconstruction":
-				body = strings.Replace(body, "{ again := 1; _ = again }", "{ again := 1; _ = again }; var db *sql.DB; _ = raw(db)", 1)
-			case "concrete-recovery":
-				body = strings.Replace(body, "{ again := 1; _ = again }", "{ again := 1; _ = again }; _ = recoverConcrete(nil)", 1)
-				body += "\nfunc recoverConcrete(owner interface{ Concrete() *s.SQLiteRuntimeStore }) *s.SQLiteRuntimeStore { return owner.Concrete() }\n"
-			}
-			file, info := debtNativeFixtureTypedControl(t, candidate, body)
-			if approved := debtReviewedNativeReopenCalls(candidate, file, info); len(approved) != want {
-				t.Fatalf("approved=%d want=%d", len(approved), want)
-			}
-			findings := debtNewAuthorityTypeScan().debtCollectFixtureStoreConstruction(candidate, file, info)
-			foreign := debtNewAuthorityTypeScan().debtCollectFixtureStoreConstruction(candidate+".unreviewed", file, info)
-			if len(foreign)-len(findings) != want {
-				t.Fatalf("construction delta=%d want=%d", len(foreign)-len(findings), want)
-			}
-			if mutation == "raw-reconstruction" {
-				if len(findings) == 0 || !findings[len(findings)-1].RawSQL {
-					t.Fatal("raw-input reconstruction disappeared")
+	for _, path := range []string{"internal/runtime/runforkexecution/one_shot_reply_execution_test.go", "internal/runtime/runforkexecution/q1_session_fork_execution_test.go"} {
+		for _, mutation := range []string{"exact", "renamed", "renamed-declaration", "foreign-path", "foreign-function", "foreign-factory", "shadowed-factory", "wrong-slot", "reassigned", "escaped", "extra-call", "raw-reconstruction", "concrete-recovery"} {
+			t.Run(filepath.Base(path)+"/"+mutation, func(t *testing.T) {
+				candidate, body, want := path, strings.ReplaceAll(source, "TestIssue642SupportedOneShotReturnsOwnChildReplyBothStores", debtReviewedNativeReopenDeclaration(path)), 2
+				switch mutation {
+				case "renamed":
+					body = strings.ReplaceAll(body, "again", "openPeer")
+				case "renamed-declaration":
+					name := debtReviewedNativeReopenDeclaration(path)
+					body = strings.ReplaceAll(body, name, name+"Renamed")
+					want = 0
+				case "foreign-path":
+					candidate, want = "internal/runtime/runforkexecution/unreviewed_test.go", 0
+				case "foreign-function":
+					body = strings.ReplaceAll(body, debtReviewedNativeReopenDeclaration(path), "unreviewed")
+					want = 0
+				case "foreign-factory":
+					body = strings.Replace(body, "\"database/sql\"", "\"database/sql\"; foreign \"example.org/storetest\"", 1)
+					body = strings.Replace(body, "factory.StartSQLiteRuntimeStoreWithReopen()", "foreign.StartSQLiteRuntimeStoreWithReopen()", 1)
+					want = 0
+				case "shadowed-factory":
+					body = strings.Replace(body, "{ s, again := factory.StartSQLiteRuntimeStoreWithReopen()", "{ factory := struct { StartSQLiteRuntimeStoreWithReopen func() (*s.SQLiteRuntimeStore, func() *s.SQLiteRuntimeStore) }{factory.StartSQLiteRuntimeStoreWithReopen}; s, again := factory.StartSQLiteRuntimeStoreWithReopen()", 1)
+					want = 0
+				case "wrong-slot":
+					body = strings.Replace(body, "s, again := factory.StartSQLiteRuntimeStoreWithReopen()", "again, s := reverse(factory.StartSQLiteRuntimeStoreWithReopen())", 1)
+					want = 0
+				case "reassigned":
+					body = strings.Replace(body, "_ = s; _ = func() any { s = again()", "_ = s; again = factoryClosure(); _ = func() any { s = again()", 1)
+					body += "\nfunc factoryClosure() func() *s.SQLiteRuntimeStore { panic(0) }\n"
+					want = 1
+				case "escaped":
+					body = strings.Replace(body, "_ = s; _ = func() any { s = again()", "_ = s; escaped := again; _ = escaped; _ = func() any { s = again()", 1)
+					want = 1
+				case "extra-call":
+					body = strings.Replace(body, "_ = s; _ = func() any { s = again()", "_ = s; _ = again(); _ = func() any { s = again()", 1)
+					want = 1
+				case "raw-reconstruction":
+					body = strings.Replace(body, "{ again := 1; _ = again }", "{ again := 1; _ = again }; var db *sql.DB; _ = raw(db)", 1)
+				case "concrete-recovery":
+					body = strings.Replace(body, "{ again := 1; _ = again }", "{ again := 1; _ = again }; _ = recoverConcrete(nil)", 1)
+					body += "\nfunc recoverConcrete(owner interface{ Concrete() *s.SQLiteRuntimeStore }) *s.SQLiteRuntimeStore { return owner.Concrete() }\n"
 				}
-			}
-			if mutation == "concrete-recovery" && len(findings) != 2 {
-				t.Fatal("concrete recovery or its caller disappeared:", findings)
-			}
-		})
+				file, info := debtNativeFixtureTypedControl(t, candidate, body)
+				if approved := debtReviewedNativeReopenCalls(candidate, file, info); len(approved) != want {
+					t.Fatalf("approved=%d want=%d", len(approved), want)
+				}
+				findings := debtNewAuthorityTypeScan().debtCollectFixtureStoreConstruction(candidate, file, info)
+				foreign := debtNewAuthorityTypeScan().debtCollectFixtureStoreConstruction(candidate+".unreviewed", file, info)
+				if len(foreign)-len(findings) != want {
+					t.Fatalf("construction delta=%d want=%d", len(foreign)-len(findings), want)
+				}
+				if mutation == "raw-reconstruction" {
+					if len(findings) == 0 || !findings[len(findings)-1].RawSQL {
+						t.Fatal("raw-input reconstruction disappeared")
+					}
+				}
+				if mutation == "concrete-recovery" && len(findings) != 2 {
+					t.Fatal("concrete recovery or its caller disappeared:", findings)
+				}
+			})
+		}
 	}
 }
 
@@ -334,7 +342,7 @@ func TestPersistenceAuthorityDebtNativeFixturePolicyIsFingerprintBound(t *testin
 		t.Fatal(err)
 	}
 	debtWriteModuleSource(t, copy, policy, strings.Replace(string(data), "uses == 1", "uses >= 1", 1))
-	if digest, err := debtCollectorDigest(copy); err != nil || digest == debtNativeFixtureCollectorTo || digest == debtExcludedFixtureCollectorTo {
+	if digest, err := debtCollectorDigest(copy); err != nil || digest == debtNativeFixtureCollectorTo || digest == debtExcludedFixtureCollectorTo || digest == debtQ1ReopenCollectorTo {
 		t.Fatalf("changed closure provenance not fingerprinted: %s %v", digest, err)
 	}
 	if err := os.Remove(filepath.Join(copy, policy)); err != nil {
@@ -351,15 +359,23 @@ func TestPersistenceAuthorityDebtNativeFixturePolicyIsFingerprintBound(t *testin
 
 func TestPersistenceAuthorityDebtNativeFixtureCollectorTransition(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
-	if digest, err := debtCollectorDigest(root); err != nil || (digest != debtNativeFixtureCollectorTo && digest != debtExcludedFixtureCollectorTo) {
+	if digest, err := debtCollectorDigest(root); err != nil || (digest != debtNativeFixtureCollectorTo && digest != debtExcludedFixtureCollectorTo && digest != debtQ1ReopenCollectorTo) {
 		t.Fatalf("collector=%q error=%v", digest, err)
 	}
+	debtProveNativeFixtureCollectorTransition(t, debtProcessLeaseCollectorTo, debtNativeFixtureCollectorTo)
+	t.Run("q1-reopen", func(t *testing.T) {
+		debtProveNativeFixtureCollectorTransition(t, debtExcludedFixtureCollectorTo, debtQ1ReopenCollectorTo)
+	})
+}
+
+func debtProveNativeFixtureCollectorTransition(t *testing.T, from, to string) {
+	t.Helper()
 	for _, mutation := range []string{"exact", "foreign-base", "foreign-head", "unrotated", "reverse", "rebootstrap", "addition", "removal", "increase", "decrease", "foreign-identity"} {
 		t.Run(mutation, func(t *testing.T) {
 			row := debtControlSite("call:QueryRow", 2)
-			trusted := authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: debtProcessLeaseCollectorTo, Sites: debtControlSet(row)}
+			trusted := authorityDebtBaseline{BootstrapSource: debtBootstrapSource, Collector: from, Sites: debtControlSet(row)}
 			head := trusted
-			head.Collector, head.Sites = debtNativeFixtureCollectorTo, maps.Clone(trusted.Sites)
+			head.Collector, head.Sites = to, maps.Clone(trusted.Sites)
 			current := head.Collector
 			switch mutation {
 			case "foreign-base":

@@ -44,6 +44,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -4492,24 +4493,110 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 		t.Fatalf("install conflicting replay-scope trigger: %v", err)
 	}
 
+	owner := selectedContractExecutionOwnerForTest(t, pg)
+	process, processFound := worklifetime.ProcessFromContext(ctx)
+	if !processFound {
+		t.Fatal("scope-conflict fixture has no process owner")
+	}
+	baselineLeases := process.ActiveCount()
+	probe := &selectedReplayScopeConflictProbe{
+		SelectedContractReplayPersistence:         owner.ports.replay,
+		SelectedContractRuntimeExecutionLifecycle: owner.ports.runtimeExecution,
+		selected: pg, publication: make(chan selectedReplayScopeConflictObservation, 1),
+	}
+	owner.ports.replay, owner.ports.runtimeExecution = probe, probe
+	selection := runforkadmission.SelectedContractSelection(loaded.Source)
+	operation := runfork.ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "scope-conflict-proof", IdempotencyKey: uuid.NewString(), TransportHash: "scope-conflict-proof",
+		SourceRunID: sourceRunID, ForkEventID: sourceEventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
+		ContractSelection: selection, AllowSourceFreeze: true,
+	}
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
+		ForkOperation:     &operation,
 		SourceRunID:       sourceRunID,
 		At:                sourceEventID,
 		AllowSourceFreeze: true,
-		Owner:             selectedContractExecutionOwnerForTest(t, pg),
+		Owner:             owner,
 		SourceLoader:      loader,
-		ContractSelection: runforkadmission.SelectedContractSelection(
-			loaded.Source,
-		),
-		AgentRuntime: SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
+		ContractSelection: selection,
+		AgentRuntime:      SelectedContractAgentRuntimeOptions{ProcessCapability: selectedContractTestProcessCapability(t, ctx, pg)},
 	})
-	if err == nil || !strings.Contains(err.Error(), "committed pipeline scope conflicts") {
-		t.Fatalf("ExecuteSelectedContractRunFork error = %v, want atomic same-event replay-scope conflict", err)
+	// #642/6207897765: retained publication follows the permanent activation
+	// ACK. The old synchronous/whole-fork rollback oracle tested the wrong phase.
+	if err != nil || !result.Activation.Activated || !result.Activation.SourceFrozen {
+		t.Fatalf("scope-conflict control did not reach retained publication: %+v err=%v", result, err)
 	}
-	if result.Activation.Activated {
-		t.Fatalf("activation = %#v, want rejection before activation", result.Activation)
+	ack, found, err := pg.LoadForkOperation(ctx, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
+	if err != nil || !found || ack.Status != runfork.ForkOperationActivated || ack.Result == nil || ack.ForkRunID != result.Materialization.ForkRunID {
+		t.Fatalf("retained publication lacks the immutable activation ACK: %+v found=%t err=%v", ack, found, err)
 	}
-	assertSelectedContractExecutionCleanup(t, db, sourceRunID, result.Materialization.ForkRunID)
+	beforeSource, err := pg.LoadRunHeader(ctx, sourceRunID)
+	if err != nil || beforeSource.Status != "forked" || beforeSource.ContinuedAsRunID != result.Materialization.ForkRunID {
+		t.Fatalf("original source freeze missing: %+v err=%v", beforeSource, err)
+	}
+	wait, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var publication selectedReplayScopeConflictObservation
+	select {
+	case publication = <-probe.publication:
+	case <-wait.Done():
+		t.Fatal("retained publication did not reach the real scope-conflict trigger: ", wait.Err())
+	}
+	if publication.err == nil || !strings.Contains(publication.err.Error(), "committed pipeline scope conflicts") {
+		t.Fatalf("actual retained publication error=%v, want exact same-event scope conflict", publication.err)
+	}
+	attempt := publication.request.Commit.Event.Event()
+	if publication.request.Lineage.SourceRunID != sourceRunID || publication.request.Lineage.SourceEventID != sourceEventID ||
+		publication.request.Lineage.ForkRunID != result.Materialization.ForkRunID || publication.request.Lineage.ForkEventID != attempt.ID() ||
+		attempt.RunID() != result.Materialization.ForkRunID || attempt.Type() != "item.received" {
+		t.Fatalf("scope conflict belongs to another selected publication: request=%+v event=%+v", publication.request.Lineage, attempt)
+	}
+	if publication.readErr != nil || !reflect.DeepEqual(publication.before, publication.after) {
+		t.Fatalf("rejected publication partially committed event/lineage/delivery/reply/scope/history: %v", publication.readErr)
+	}
+	for {
+		state, err := storetest.ReadSelectedExecutionStorage(wait, pg, result.Materialization.ForkRunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		owner.ports.contexts.mu.Lock()
+		joined := len(owner.ports.contexts.entries) == 0
+		owner.ports.contexts.mu.Unlock()
+		if state.State == "closed" && state.RunStatus == "failed" && joined && process.ActiveCount() == baselineLeases {
+			break
+		}
+		select {
+		case <-wait.Done():
+			t.Fatalf("exact publication failure did not settle and join: %+v joined=%t err=%v", state, joined, wait.Err())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	probe.mu.Lock()
+	failure, acknowledged := append([]byte(nil), probe.failure...), probe.failureAcknowledged
+	probe.mu.Unlock()
+	expectedFailure, err := json.Marshal(runtimefailures.FromError(publication.err, runfork.RunForkSelectedContractForkLocalRuntimeContainerOwner, "execute").Failure)
+	if err != nil || !acknowledged || !slices.Equal(failure, expectedFailure) {
+		t.Fatalf("native failure disposition differs from the canonical exact-error projection: acknowledged=%t failure=%s want=%s err=%v", acknowledged, failure, expectedFailure, err)
+	}
+	terminal, err := storetest.ReadRuntimeLogRunSnapshot(wait, pg, result.Materialization.ForkRunID)
+	if err != nil || terminal.Failure == nil {
+		t.Fatalf("retained scope conflict has no durable terminal failure: %+v err=%v", terminal, err)
+	}
+	durableFailure, err := json.Marshal(terminal.Failure)
+	if err != nil || !slices.Equal(durableFailure, expectedFailure) {
+		t.Fatalf("durable terminal failure differs from exact publication's canonical disposition: got=%s want=%s err=%v", durableFailure, expectedFailure, err)
+	}
+	if count, err := storetest.ReadLifecycleEventCardinality(wait, pg, result.Materialization.ForkRunID, "item.received"); err != nil || count != 0 {
+		t.Fatalf("rejected publication executed or survived rollback: count=%d err=%v", count, err)
+	}
+	afterACK, found, err := pg.LoadForkOperation(wait, operation.Actor, operation.IdempotencyKey, operation.TransportHash)
+	if err != nil || !found || !reflect.DeepEqual(ack, afterACK) {
+		t.Fatalf("publication failure rewrote its committed activation ACK: %+v err=%v", afterACK, err)
+	}
+	afterSource, err := pg.LoadRunHeader(wait, sourceRunID)
+	if err != nil || !reflect.DeepEqual(beforeSource, afterSource) {
+		t.Fatalf("publication failure rewrote the original source freeze: %+v err=%v", afterSource, err)
+	}
 }
 
 func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterialization(t *testing.T) {

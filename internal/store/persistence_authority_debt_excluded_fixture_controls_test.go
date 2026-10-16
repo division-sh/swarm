@@ -17,7 +17,10 @@ import (
 
 // Controls are outside the policy payload to avoid a self-referential digest.
 const debtExcludedFixtureCollectorTo = "261b4a7ce9d04da1c3fbe831f21379f5e6f8f49563bacfe1ff010c184cd02916"
-const debtExcludedFixturePredecessor = "823510bfd3f9cd13ba82d7d63ae0443a00e2e982"
+
+// Same seven collector payloads as backed-up 823510bfd3; retained in ancestry.
+// Reviewer-a #642/6202927132 preserves both exact policy digests.
+const debtExcludedFixturePredecessor = "c3c3b3fa4671966ba6bf8c7f3baecbfebb746dbd"
 
 func debtExcludedFixtureControlSource(t *testing.T, path, source string) *ast.File {
 	t.Helper()
@@ -180,7 +183,7 @@ func TestPersistenceAuthorityDebtReviewedExcludedPolicyIsFingerprintBound(t *tes
 		}
 		debtWriteModuleSource(t, copy, path, string(data))
 	}
-	if digest, err := debtCollectorDigest(copy); err != nil || digest != debtExcludedFixtureCollectorTo {
+	if digest, err := debtCollectorDigest(copy); err != nil || digest != debtQ1ReopenCollectorTo {
 		t.Fatalf("copied reviewed policy=%s %v", digest, err)
 	}
 	const policy = "internal/store/persistence_authority_debt_excluded_fixture_test.go"
@@ -189,7 +192,7 @@ func TestPersistenceAuthorityDebtReviewedExcludedPolicyIsFingerprintBound(t *tes
 		t.Fatal(err)
 	}
 	debtWriteModuleSource(t, copy, policy, strings.Replace(string(data), "!= 1", "< 1", 1))
-	if digest, err := debtCollectorDigest(copy); err != nil || digest == debtExcludedFixtureCollectorTo {
+	if digest, err := debtCollectorDigest(copy); err != nil || digest == debtQ1ReopenCollectorTo {
 		t.Fatalf("increased occurrence permission was not fingerprinted: %s %v", digest, err)
 	}
 	if err := os.Remove(filepath.Join(copy, policy)); err != nil {
@@ -223,7 +226,7 @@ func TestPersistenceAuthorityDebtReviewedExcludedCollectorTransition(t *testing.
 	if digest, err := debtCollectorDigest(predecessor); err != nil || digest != debtNativeFixtureCollectorTo {
 		t.Fatalf("immutable predecessor collector=%s error=%v", digest, err)
 	}
-	if digest, err := debtCollectorDigest(root); err != nil || digest != debtExcludedFixtureCollectorTo {
+	if digest, err := debtCollectorDigest(root); err != nil || digest != debtQ1ReopenCollectorTo {
 		t.Fatalf("exact successor collector=%s error=%v", digest, err)
 	}
 	// The uncertainty extraction itself is unchanged, not replaced by a trusting scanner.
