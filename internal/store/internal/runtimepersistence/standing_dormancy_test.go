@@ -40,6 +40,7 @@ func TestDormantStandingQuiescenceDoesNotReplayOnRestorationBothStores(t *testin
 				eventID, unsettledID, sessionID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 				identity := mustTestAgentIdentityForRun(created.RunID, "standing-agent", "standing/ingress")
 				fields := testAgentIdentityStorageFields(t, identity)
+				workCtx = preparePositiveAgentClaimFixture(t, workCtx, f.selected.(agentFixtureFlowStore), identity)
 				route := testAgentDeliveryRoute(t, created.RunID, "standing-agent", "standing/ingress")
 				event := eventtest.PersistedProjection(eventID, events.EventType("standing.work"), "test", "", json.RawMessage(`{}`), 0,
 					created.RunID, "", events.EventEnvelope{}, time.Now().UTC())
@@ -50,7 +51,6 @@ func TestDormantStandingQuiescenceDoesNotReplayOnRestorationBothStores(t *testin
 					created.RunID, "", events.EventEnvelope{}, time.Now().UTC())); err != nil {
 					t.Fatal(err)
 				}
-				seedTestAgentRow(t, ctx, f.db, backend == "postgres", identity, "active")
 				marks := []string{"?", "?", "?", "?", "?", "?", "?", "?", "?"}
 				if backend == "postgres" {
 					marks = []string{"$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9"}
