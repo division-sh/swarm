@@ -18,6 +18,7 @@ func TestS1RootConnectFixturesUseDirectoryIdentity(t *testing.T) {
 		flows []string
 	}{
 		{"public-template-input", WritePublicTemplateInputRoute, []string{".", "operating"}},
+		{"finite-public-template-input", WriteFinitePublicTemplateInputRoute, []string{".", "operating"}},
 		{"root-output", func(t testing.TB) string { return CopyRootOutputConnect(t, RootConnectNoEmitter) }, []string{".", "consumer"}},
 		{"root-output-emitter", func(t testing.TB) string { return CopyRootOutputConnect(t, RootConnectCanonicalEmit) }, []string{".", "consumer"}},
 		{"missing-receiver", CopyRootOutputConnectMissingReceiver, []string{".", "consumer"}},

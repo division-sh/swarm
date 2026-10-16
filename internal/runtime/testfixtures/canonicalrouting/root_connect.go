@@ -64,6 +64,28 @@ pins:
 	return root
 }
 
+// WriteFinitePublicTemplateInputRoute retains the private template while giving
+// the public root a terminal stage for the run.start preflight journey.
+func WriteFinitePublicTemplateInputRoute(t testing.TB) string {
+	t.Helper()
+	root := WritePublicTemplateInputRoute(t)
+	writeClosedVariantFile(t, root, "schema.yaml", `stages:
+  waiting: {}
+  done: {final: true}
+pins:
+  inputs:
+    - bootstrap.requested
+`)
+	writeClosedVariantFile(t, root, "nodes.yaml", `bootstrap-node:
+  execution_type: system_node
+  subscribes_to: [bootstrap.requested]
+  event_handlers:
+    bootstrap.requested:
+      advances_to: done
+`)
+	return root
+}
+
 // CopyRootOutputConnect derives the closed root-output-to-child route matrix
 // from the checked-in parent-connect artifact.
 func CopyRootOutputConnect(t testing.TB, emit RootConnectEmit) string {

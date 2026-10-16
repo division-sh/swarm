@@ -4,8 +4,10 @@ import (
 	"context"
 	"testing"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -101,7 +103,12 @@ func TestS1RootedRunStartRecipientPreviewPublicCreationAndReplayBothStores(t *te
 				_, db, _ := testutil.StartPostgres(t)
 				selected = storetest.AdmitPostgresRuntimeStore(t, db)
 			}
-			bundle := eventPublishTargetRouteTestBundle(t)
+			root := canonicalrouting.WriteFinitePublicTemplateInputRoute(t)
+			repo := runCompletionRepoRoot(t)
+			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
 			rooted, err := bundle.RootedSource()
 			if err != nil {
 				t.Fatal(err)
