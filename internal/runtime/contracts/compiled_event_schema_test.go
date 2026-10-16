@@ -140,7 +140,6 @@ scanner:
 source_scrape:
   description: Read a source.
   handler_type: http
-  effect_class: read_only
   http: {method: GET, url: https://example.test}
   input_schema:
     type: object
