@@ -11,6 +11,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -23,8 +25,10 @@ type ManagerDeliveryNativeFixture struct {
 	SelectedEvent     events.Event
 	SelectedAdmission managedexecution.Admission
 	SelectedRoute     events.DeliveryRoute
+	SelectedOrigin    LifecycleDiagnosticOrigin
 	SemanticSource    semanticview.Source
 	PrepareActor      func(*testing.T, actors.AgentConfig) (context.Context, PersistedAgent, AgentLifecyclePersistence, agenttopology.SourceSetPlan)
+	Flow              *ManagerDeliveryNativeFlowFixture
 	RequireRun        func(*testing.T, string)
 	NormalAuthority   runtimedelivery.ExecutionAuthority
 	Publish           func(*testing.T, context.Context, events.Event, []events.DeliveryRoute, runtimedelivery.ExecutionAuthority)
@@ -33,6 +37,16 @@ type ManagerDeliveryNativeFixture struct {
 	RetryReady        func(*testing.T, events.Event, events.DeliveryRoute)
 	AgeClaim          func(*testing.T, runtimedelivery.Claim, time.Time)
 	Transitions       func(*testing.T) []string
+}
+
+type ManagerDeliveryNativeFlowFixture struct {
+	Context           context.Context
+	Options           AgentManagerOptions
+	Topology          agenttopology.Admission
+	Plan              agenttopology.SourceSetPlan
+	Request           runtimepipeline.FlowInstanceActivationRequest
+	Event             func(string) events.Event
+	ProjectDiagnostic func(context.Context, diaglog.LifecycleDiagnostic) error
 }
 
 type managerDeliveryNativeFactory func(*testing.T) *ManagerDeliveryNativeFixture
