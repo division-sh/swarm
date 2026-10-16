@@ -63,10 +63,7 @@ func TestS1SelectedBindingFreezesItsChildsExactRootBothStores(t *testing.T) {
 					}
 					// Reduced binding-writer fixture: the native run writer and
 					// full materialization journeys are proved separately.
-					if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, bundle_hash, source_root_directory) VALUES ($1, $2, $3)`,
-						request.ForkRunID, a.Admission().BundleHash(), a.Admission().RootDirectory()); err != nil {
-						t.Fatal(err)
-					}
+					insertSelectedBindingChildFixture(t, ctx, tx, request.ForkRunID, a)
 					binding, err := insertRunForkSelectedContractBinding(ctx, tx, request, time.Now())
 					if cell.wantError {
 						if err == nil || binding.BindingID != "" {
@@ -87,6 +84,17 @@ func TestS1SelectedBindingFreezesItsChildsExactRootBothStores(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func insertSelectedBindingChildFixture(t *testing.T, ctx context.Context, tx *sql.Tx, runID string, source sourceartifact.RootedSource) {
+	t.Helper()
+	if err := source.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO runs (run_id, bundle_hash, source_root_directory) VALUES ($1, $2, $3)`,
+		runID, source.Admission().BundleHash(), source.Admission().RootDirectory()); err != nil {
+		t.Fatal(err)
 	}
 }
 

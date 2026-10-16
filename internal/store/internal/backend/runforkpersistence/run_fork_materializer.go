@@ -113,6 +113,15 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			if err != nil {
 				return fmt.Errorf("resolve fork bundle identity: %w", err)
 			}
+			if req.SourceArtifactFact.BundleHash() == "" {
+				snapshot, err := s.LoadSnapshotTx(ctx, tx, plan.SourceRunID, false)
+				if err != nil {
+					return err
+				}
+				if snapshot.RootReference != identity.RootAdmission.Reference() {
+					return fmt.Errorf("original fork target differs from its bound source root")
+				}
+			}
 			target, err := contracts.SourceExecutionIdentity(identity.SourceArtifactFact.BundleHash())
 			if err != nil {
 				return err
@@ -287,6 +296,15 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 			identity, err := resolveRunForkBundleInsertIdentity(txctx, runForkSourceOwnerFunc(source), plan.SourceRunID, req.SourceArtifactFact, req.RootAdmission)
 			if err != nil {
 				return fmt.Errorf("resolve fork bundle identity: %w", err)
+			}
+			if req.SourceArtifactFact.BundleHash() == "" {
+				snapshot, err := s.LoadSnapshotTx(txctx, tx, plan.SourceRunID)
+				if err != nil {
+					return err
+				}
+				if snapshot.RootReference != identity.RootAdmission.Reference() {
+					return fmt.Errorf("original fork target differs from its bound source root")
+				}
 			}
 			target, err := contracts.SourceExecutionIdentity(identity.SourceArtifactFact.BundleHash())
 			if err != nil {

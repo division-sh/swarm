@@ -2,45 +2,34 @@ package runforkpersistence
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/runfork"
-	"github.com/division-sh/swarm/internal/testutil"
+	artifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
-	_ "modernc.org/sqlite"
 )
 
 func TestSelectedBindingPersistsDisjointForkPointsBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			var db *sql.DB
-			if backend == "postgres" {
-				_, opened, cleanup := testutil.StartEmptyPostgres(t)
-				db = opened
-				t.Cleanup(cleanup)
-			} else {
-				opened, err := sql.Open("sqlite", ":memory:")
-				if err != nil {
-					t.Fatal(err)
-				}
-				db = opened
-				db.SetMaxOpenConns(1)
-				t.Cleanup(func() { _ = db.Close() })
-			}
-			if _, err := db.Exec(`CREATE TABLE run_fork_selected_contract_bindings (
-				binding_id TEXT DEFAULT '00000000-0000-0000-0000-000000000001', fork_run_id TEXT,
-				source_run_id TEXT, fork_point_kind TEXT, fork_revision BIGINT, fork_event_id TEXT,
-				mode TEXT, bundle_hash TEXT, created_at TEXT)`); err != nil {
-				t.Fatal(err)
-			}
+			db := selectedBindingRootDatabase(t, backend)
 			ctx := context.Background()
 			tx, err := db.BeginTx(ctx, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer tx.Rollback()
+			source, _ := sourceartifactfixture.Rooted(t, "point-target", sourceartifactfixture.Artifact())
+			if backend == "postgres" {
+				_, err = artifactstore.EnsurePostgresRootedSourceTx(ctx, tx, source, time.Now())
+			} else {
+				_, err = artifactstore.EnsureSQLiteRootedSourceTx(ctx, tx, source, time.Now())
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
 			eventID := uuid.NewString()
 			for _, point := range []runfork.RunForkPoint{
 				{Kind: runfork.RunForkPointEvent, Revision: 4, Input: eventID, EventID: eventID, EventName: "worker.ready", Timestamp: time.Now().UTC()},
@@ -48,8 +37,10 @@ func TestSelectedBindingPersistsDisjointForkPointsBothStores(t *testing.T) {
 			} {
 				req := runfork.RunForkSelectedContractBindingRequest{
 					ForkRunID: uuid.NewString(), SourceRunID: uuid.NewString(), ForkPoint: point,
-					ContractSelection: runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+					ContractSelection:   runfork.RunForkContractSelection{Mode: runfork.RunForkContractSelectionModeSelectedContracts},
+					TargetRootAdmission: source.Admission(),
 				}
+				insertSelectedBindingChildFixture(t, ctx, tx, req.ForkRunID, source)
 				inserted, err := insertRunForkSelectedContractBinding(ctx, tx, req, time.Now().UTC())
 				if err != nil {
 					t.Fatal(err)

@@ -366,6 +366,9 @@ func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.P
 	if path == "internal/store/internal/backend/pipelinepersistence/a2_collection_projection_test.go" {
 		return classifyA2CollectionMinimalRunLiterals(file)
 	}
+	if path == "internal/store/internal/backend/runforkpersistence/selected_binding_root_test.go" {
+		return classifySelectedBindingRootMinimalRunLiterals(file)
+	}
 	type fixtureShape struct {
 		schema string
 		writes []string
@@ -431,6 +434,71 @@ func classifyBackendMinimalRunLiterals(path string, file *ast.File) (map[token.P
 		return nil, fmt.Errorf("minimal backend runs schema is missing")
 	}
 	return approved, nil
+}
+
+func classifySelectedBindingRootMinimalRunLiterals(file *ast.File) (map[token.Pos]bool, error) {
+	const schema = "CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT, source_root_directory TEXT)"
+	const insert = "INSERT INTO runs (run_id, bundle_hash, source_root_directory) VALUES ($1, $2, $3)"
+	schemas, inserts := 0, 0
+	approved := map[token.Pos]bool{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return true
+		}
+		value, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			return true
+		}
+		scope := eventBoundaryEnclosingScope(file, literal.Pos())
+		switch compactSQLForLifecycleGuard(value) {
+		case schema:
+			if scope == "selectedBindingRootDatabase" {
+				schemas++
+			}
+		case insert:
+			if scope == "insertSelectedBindingChildFixture" {
+				inserts++
+				approved[literal.Pos()] = true
+			}
+		}
+		return true
+	})
+	if schemas != 1 || inserts != 1 {
+		return nil, fmt.Errorf("selected binding reduced root fixture requires one exact schema/insert in their named fixture operations, got %d/%d", schemas, inserts)
+	}
+	return approved, nil
+}
+
+func TestS1SelectedBindingRootFixtureDoesNotPermitLifecycleWriters(t *testing.T) {
+	const path = "internal/store/internal/backend/runforkpersistence/selected_binding_root_test.go"
+	const schema = "CREATE TABLE runs (run_id TEXT PRIMARY KEY, bundle_hash TEXT, source_root_directory TEXT)"
+	const insert = "INSERT INTO runs (run_id, bundle_hash, source_root_directory) VALUES ($1, $2, $3)"
+	for _, cell := range []struct {
+		name, path, schema, function, query string
+		want                                bool
+	}{
+		{"exact", path, schema, "insertSelectedBindingChildFixture", insert, true},
+		{"foreign-file", "internal/store/internal/backend/runforkpersistence/other_test.go", schema, "insertSelectedBindingChildFixture", insert, false},
+		{"foreign-function", path, schema, "TestUnownedInsert", insert, false},
+		{"missing-schema", path, "", "insertSelectedBindingChildFixture", insert, false},
+		{"semantic-schema", path, strings.Replace(schema, ")", ", status TEXT)", 1), "insertSelectedBindingChildFixture", insert, false},
+		{"mutable-status", path, schema, "insertSelectedBindingChildFixture", "UPDATE runs SET status='running' WHERE run_id=$1", false},
+		{"delete", path, schema, "insertSelectedBindingChildFixture", "DELETE FROM runs WHERE run_id=$1", false},
+		{"duplicate", path, schema, "insertSelectedBindingChildFixture", insert + "`); tx.ExecContext(ctx, `" + insert, false},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			source := fmt.Sprintf("package fixture\nfunc selectedBindingRootDatabase() { db.Exec(`%s`) }\nfunc %s() { tx.ExecContext(ctx, `%s`) }", cell.schema, cell.function, cell.query)
+			file, err := parser.ParseFile(token.NewFileSet(), "fixture.go", source, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			classified, err := classifyBackendMinimalRunLiterals(cell.path, file)
+			if got := err == nil && len(classified) == 1; got != cell.want {
+				t.Fatalf("reduced root fixture classified=%t want=%t err=%v", got, cell.want, err)
+			}
+		})
+	}
 }
 
 func classifyA2CollectionMinimalRunLiterals(file *ast.File) (map[token.Pos]bool, error) {
