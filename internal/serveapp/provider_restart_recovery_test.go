@@ -105,7 +105,6 @@ func proveProviderRestartRecovery(t *testing.T, backend string, completed bool) 
 	if updated == string(raw) {
 		t.Fatal("restart config has no canonical backend line")
 	}
-	updated += "\nbudget:\n  system_monthly_cap: 1\n"
 	if err := os.WriteFile(configPath, []byte(updated), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -165,6 +164,9 @@ func proveProviderRestartRecovery(t *testing.T, backend string, completed bool) 
 			time.Sleep(10 * time.Millisecond)
 		}
 		before := providerRestartSnapshot(t, observations.Reader)
+		if len(before["runtime_effect_budget_reservations"].Rows) != 0 {
+			t.Fatal("concurrent served recovery control unexpectedly has a budget reservation")
+		}
 		expected := providerRestartAttempts(t, before)
 		requestsBefore := entered.Load()
 		if err := process.kill(); err != nil {
@@ -256,10 +258,15 @@ func requireProviderRestartEvidence(t *testing.T, before, after map[string]store
 				t.Fatalf("restart %s exact terminal row count=%d want=1 state=%s", table, got, wantState)
 			}
 		}
-		for _, evidence := range [][2]string{{"agent_turns", "completion_attempt_id"}, {"spend_ledger", "external_effect_attempt_id"}} {
-			if got := count(evidence[0], evidence[1], attempt.id, nil); got != 1 {
-				t.Fatalf("restart %s count=%d want=1", evidence[0], got)
-			}
+		if got := count("agent_turns", "completion_attempt_id", attempt.id, nil); got != 1 {
+			t.Fatalf("restart turn count=%d want=1", got)
+		}
+		wantSpend := 0
+		if completed {
+			wantSpend = 1
+		}
+		if got := count("spend_ledger", "external_effect_attempt_id", attempt.id, nil); got != wantSpend {
+			t.Fatalf("restart spend count=%d want=%d", got, wantSpend)
 		}
 		if !completed {
 			if got := count("runtime_provider_attempt_drains", "attempt_id", attempt.id, stateIs("settled")); got != 1 {
