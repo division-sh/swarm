@@ -94,7 +94,12 @@ type completionRecoveryAuthorityEvidence struct {
 
 type CompletionRecoveryAuthorityEvidence = completionRecoveryAuthorityEvidence
 
-func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, allowed map[string]struct{}, now time.Time, selectedExecutionID string) (runtimeeffects.RecoverySummary, error) {
+func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, allowed map[string]struct{}, now time.Time, selectedExecutionID string, takeover *startupProviderTakeover) (runtimeeffects.RecoverySummary, error) {
+	predicate, filterArgs, err := startupCompletionFilter(takeover, true)
+	if err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	args := append([]any{now, selectedExecutionID}, filterArgs...)
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id::text,a.attempt_id::text,o.authority_kind,o.authority_id,a.authority_evidence::text,o.agent_frame_bytes,
 		       o.execution_mode,a.execution_mode,
@@ -128,9 +133,9 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 		    ))
 		  )
 		  ))
-		ORDER BY a.authorized_at,a.attempt_id
+		`+predicate+` ORDER BY a.authorized_at,a.attempt_id
 		FOR UPDATE OF o,a
-	`, now, selectedExecutionID)
+	`, args...)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, fmt.Errorf("list completion attempts for recovery: %w", err)
 	}
@@ -138,11 +143,18 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
-	attempts = filterCompletionRecoveryAttempts(attempts, allowed)
-	return reconcileCompletionAttempts(ctx, tx, llm, nil, delivery, directives, mutation, true, attempts, now)
+	if takeover == nil {
+		attempts = filterCompletionRecoveryAttempts(attempts, allowed)
+	}
+	return reconcileCompletionAttempts(ctx, tx, llm, nil, delivery, directives, mutation, true, attempts, now, takeover)
 }
 
-func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, allowed map[string]struct{}, now time.Time, selectedExecutionID string) (runtimeeffects.RecoverySummary, error) {
+func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, allowed map[string]struct{}, now time.Time, selectedExecutionID string, takeover *startupProviderTakeover) (runtimeeffects.RecoverySummary, error) {
+	predicate, filterArgs, err := startupCompletionFilter(takeover, false)
+	if err != nil {
+		return runtimeeffects.RecoverySummary{}, err
+	}
+	args := append([]any{selectedExecutionID, selectedExecutionID, now}, filterArgs...)
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id,a.attempt_id,o.authority_kind,o.authority_id,a.authority_evidence,o.agent_frame_bytes,
 		       o.execution_mode,a.execution_mode,
@@ -176,8 +188,8 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 		    ))
 		  )
 		  ))
-		ORDER BY a.authorized_at,a.attempt_id
-	`, selectedExecutionID, selectedExecutionID, now)
+		`+predicate+` ORDER BY a.authorized_at,a.attempt_id
+	`, args...)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, fmt.Errorf("list sqlite completion attempts for recovery: %w", err)
 	}
@@ -185,8 +197,10 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
-	attempts = filterCompletionRecoveryAttempts(attempts, allowed)
-	return reconcileCompletionAttempts(ctx, tx, nil, llm, delivery, directives, mutation, false, attempts, now)
+	if takeover == nil {
+		attempts = filterCompletionRecoveryAttempts(attempts, allowed)
+	}
+	return reconcileCompletionAttempts(ctx, tx, nil, llm, delivery, directives, mutation, false, attempts, now, takeover)
 }
 
 func filterCompletionRecoveryAttempts(attempts []completionRecoveryAttempt, allowed map[string]struct{}) []completionRecoveryAttempt {
@@ -231,7 +245,7 @@ func scanCompletionRecoveryAttempts(rows *sql.Rows) ([]completionRecoveryAttempt
 	return attempts, nil
 }
 
-func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *storellm.LLMPostgresOwner, sqliteLLM *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, postgres bool, attempts []completionRecoveryAttempt, now time.Time) (runtimeeffects.RecoverySummary, error) {
+func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *storellm.LLMPostgresOwner, sqliteLLM *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, mutation *mutationprotocol.Attempt, postgres bool, attempts []completionRecoveryAttempt, now time.Time, takeover *startupProviderTakeover) (runtimeeffects.RecoverySummary, error) {
 	var summary runtimeeffects.RecoverySummary
 	for _, recovered := range attempts {
 		prelaunch := recovered.State == string(runtimeeffects.StateAuthorized)
@@ -258,9 +272,9 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 		}
 		resolution := providerDrainRecoveryResolution{Kind: completionSettlementCurrent}
 		if postgres {
-			resolution, err = resolveProviderDrainRecoveryPostgres(ctx, tx, attempt, now)
+			resolution, err = resolveProviderDrainRecoveryPostgres(ctx, tx, attempt, now, takeover)
 		} else {
-			resolution, err = resolveProviderDrainRecoverySQLite(ctx, tx, attempt, now)
+			resolution, err = resolveProviderDrainRecoverySQLite(ctx, tx, attempt, now, takeover)
 		}
 		if err != nil {
 			return runtimeeffects.RecoverySummary{}, err
@@ -336,6 +350,11 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 					return runtimeeffects.RecoverySummary{}, err
 				}
 			} else if err := settleProviderDrainOriginRecovery(ctx, mutation, settlement, attempt.Origin, delivery, directives); err != nil {
+				return runtimeeffects.RecoverySummary{}, err
+			}
+		}
+		if takeover != nil {
+			if err := recordSettledExternalEffectStory(ctx, mutation, tx, settlement.Settlement, postgres); err != nil {
 				return runtimeeffects.RecoverySummary{}, err
 			}
 		}

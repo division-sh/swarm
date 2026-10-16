@@ -42,6 +42,7 @@ const (
 
 type providerDrainPermit struct {
 	DrainID               string
+	LifecycleOperationID  string
 	LifecycleTransitionID string
 	Target                runtimeeffects.ProviderDrainTarget
 	SuccessorEpoch        int64
@@ -286,15 +287,15 @@ type providerDrainRecoveryResolution struct {
 	Expired bool
 }
 
-func resolveProviderDrainRecoveryPostgres(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time) (providerDrainRecoveryResolution, error) {
-	return resolveProviderDrainRecovery(ctx, tx, attempt, now, true)
+func resolveProviderDrainRecoveryPostgres(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time, takeover *startupProviderTakeover) (providerDrainRecoveryResolution, error) {
+	return resolveProviderDrainRecovery(ctx, tx, attempt, now, true, takeover)
 }
 
-func resolveProviderDrainRecoverySQLite(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time) (providerDrainRecoveryResolution, error) {
-	return resolveProviderDrainRecovery(ctx, tx, attempt, now, false)
+func resolveProviderDrainRecoverySQLite(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time, takeover *startupProviderTakeover) (providerDrainRecoveryResolution, error) {
+	return resolveProviderDrainRecovery(ctx, tx, attempt, now, false, takeover)
 }
 
-func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time, postgres bool) (providerDrainRecoveryResolution, error) {
+func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runtimeeffects.Attempt, now time.Time, postgres bool, takeover *startupProviderTakeover) (providerDrainRecoveryResolution, error) {
 	if attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent {
 		return providerDrainRecoveryResolution{Kind: completionSettlementCurrent}, nil
 	}
@@ -321,7 +322,15 @@ func resolveProviderDrainRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 			map[string]any{"attempt_id": attempt.AttemptID},
 		)
 	}
-	if !providerDrainMatchesSuccessor(permit, observation.State) {
+	matched := providerDrainMatchesSuccessor(permit, observation.State)
+	if !matched && takeover != nil && permit.Target == runtimeeffects.ProviderDrainTargetRunning {
+		matched, err = storeagent.ReadStartupProviderTakeoverChainTx(ctx, tx, takeover.request, observation.State,
+			attempt.Authority.Normal, permit.LifecycleOperationID, permit.LifecycleTransitionID, permit.SuccessorEpoch, permit.SuccessorGeneration, !postgres)
+		if err != nil {
+			return providerDrainRecoveryResolution{}, err
+		}
+	}
+	if !matched {
 		return providerDrainRecoveryResolution{}, runtimefailures.New(
 			runtimefailures.ClassLifecycleConflict,
 			"provider_attempt_drain_successor_mismatch",
@@ -342,7 +351,7 @@ func loadProviderDrainForRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 	var err error
 	if postgres {
 		err = tx.QueryRowContext(ctx, `
-			SELECT drain_id::text,lifecycle_transition_id::text,target_phase,successor_runtime_epoch,successor_generation,
+			SELECT drain_id::text,lifecycle_operation_id::text,lifecycle_transition_id::text,target_phase,successor_runtime_epoch,successor_generation,
 				       origin_kind,COALESCE(origin_delivery_id::text,''),COALESCE(origin_run_id::text,''),COALESCE(origin_route_identity,''),COALESCE(origin_claim_token::text,''),
 				       COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_id,''),COALESCE(origin_directive_operation_id::text,''),COALESCE(origin_directive_owner_id,''),expires_at
 			FROM runtime_provider_attempt_drains
@@ -350,19 +359,19 @@ func loadProviderDrainForRecovery(ctx context.Context, tx *sql.Tx, attempt runti
 			  AND predecessor_runtime_epoch=$3 AND predecessor_generation=$4 AND state='pending'
 			FOR UPDATE
 		`, attempt.AttemptID, attempt.OperationID, attempt.Authority.Normal.RuntimeEpoch, attempt.Authority.Normal.Generation).Scan(
-			&permit.DrainID, &permit.LifecycleTransitionID, &target, &permit.SuccessorEpoch, &generation,
+			&permit.DrainID, &permit.LifecycleOperationID, &permit.LifecycleTransitionID, &target, &permit.SuccessorEpoch, &generation,
 			&originKind, &deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriber, &directiveID, &directiveOwner, &expires,
 		)
 	} else {
 		err = tx.QueryRowContext(ctx, `
-			SELECT drain_id,lifecycle_transition_id,target_phase,successor_runtime_epoch,successor_generation,
+			SELECT drain_id,lifecycle_operation_id,lifecycle_transition_id,target_phase,successor_runtime_epoch,successor_generation,
 				       origin_kind,COALESCE(origin_delivery_id,''),COALESCE(origin_run_id,''),COALESCE(origin_route_identity,''),COALESCE(origin_claim_token,''),
 				       COALESCE(origin_claim_version,0),COALESCE(origin_subscriber_id,''),COALESCE(origin_directive_operation_id,''),COALESCE(origin_directive_owner_id,''),expires_at
 			FROM runtime_provider_attempt_drains
 			WHERE attempt_id=? AND operation_id=?
 			  AND predecessor_runtime_epoch=? AND predecessor_generation=? AND state='pending'
 		`, attempt.AttemptID, attempt.OperationID, attempt.Authority.Normal.RuntimeEpoch, attempt.Authority.Normal.Generation).Scan(
-			&permit.DrainID, &permit.LifecycleTransitionID, &target, &permit.SuccessorEpoch, &generation,
+			&permit.DrainID, &permit.LifecycleOperationID, &permit.LifecycleTransitionID, &target, &permit.SuccessorEpoch, &generation,
 			&originKind, &deliveryID, &runID, &routeIdentity, &claimToken, &claimVersion, &subscriber, &directiveID, &directiveOwner, &expires,
 		)
 	}
