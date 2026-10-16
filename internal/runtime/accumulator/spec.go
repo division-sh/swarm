@@ -12,19 +12,23 @@ import (
 
 // ValidateSpecForHandler admits only the authored business key, never pin policy.
 func ValidateSpecForHandler(source semanticview.Source, node runtimeidentity.ExecutableNode, handlerEvent string, spec *runtimecontracts.AccumulateSpec) error {
-	if spec == nil || spec.Key == "" {
+	if spec == nil {
 		return nil
 	}
-	path, err := keyPath(spec.Key)
-	if err != nil {
+	if _, err := spec.ItemKeyPath(); err != nil {
 		return err
 	}
 	resolution := semanticview.ResolveEventSchema(source, node.FlowPath(), handlerEvent)
-	field, ok := resolution.StructuralType.FieldPath(strings.Join(path.Segments, "."))
-	if !resolution.HasStructural || !ok || field.Type.Kind != runtimecontracts.CatalogTypeText {
-		return fmt.Errorf("accumulate.key %q must select a catalog-admitted text payload field", spec.Key)
+	field, ok := resolution.Field(spec.Key)
+	if !ok || field.IsOptional {
+		return fmt.Errorf("accumulate.key %q must name a required scalar item field on %s", spec.Key, handlerEvent)
 	}
-	return nil
+	switch field.Type.Kind {
+	case runtimecontracts.CatalogTypeText, runtimecontracts.CatalogTypeInteger, runtimecontracts.CatalogTypeNumber, runtimecontracts.CatalogTypeBoolean:
+		return nil
+	default:
+		return fmt.Errorf("accumulate.key %q must name a required scalar item field on %s, not %s", spec.Key, handlerEvent, runtimecontracts.StructuralCatalogTypeSyntax(field.Type))
+	}
 }
 
 func keyPath(key string) (paths.Path, error) {

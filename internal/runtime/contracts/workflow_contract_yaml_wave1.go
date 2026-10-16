@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"math"
 	"regexp"
-	"slices"
-	"sort"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -61,12 +59,6 @@ var flowConnectFieldOptions = map[string]struct{}{
 	"from":            {},
 	"to":              {},
 	"rename":          {},
-}
-
-var typeCatalogFieldOptions = map[string]struct{}{
-	"scalars": {},
-	"enums":   {},
-	"types":   {},
 }
 
 var typeMetadataFieldOptions = map[string]struct{}{
@@ -129,7 +121,7 @@ func projectTypeCatalogDocument(root yamlsource.Value) (TypeCatalogDocument, err
 	if root.Presence() != yamlsource.PresenceMapping && root.Presence() != yamlsource.PresenceEmptyMapping {
 		return TypeCatalogDocument{}, fmt.Errorf("type catalog must be a mapping")
 	}
-	fields, err := uniqueYAMLMappingFields(root, "entity contracts document")
+	fields, err := uniqueYAMLMappingFields(root, "type catalog")
 	if err != nil {
 		return TypeCatalogDocument{}, err
 	}
@@ -139,43 +131,25 @@ func projectTypeCatalogDocument(root yamlsource.Value) (TypeCatalogDocument, err
 		Types:   map[string]NamedTypeDecl{},
 	}
 	for _, field := range fields {
-		key := strings.TrimSpace(field.Name)
-		switch key {
-		case "":
-			continue
-		case "scalars":
-			if err := field.Value.Project(&doc.Scalars); err != nil {
-				return TypeCatalogDocument{}, err
+		name := strings.TrimSpace(field.Name)
+		if name == "" || name != field.Name {
+			return TypeCatalogDocument{}, nodeValueError(field.Value, fmt.Errorf("type name %q must be non-empty without surrounding whitespace", field.Name))
+		}
+		switch field.Value.Presence() {
+		case yamlsource.PresenceMapping, yamlsource.PresenceEmptyMapping:
+			decl, err := projectNamedTypeDeclaration(field.Value)
+			if err != nil {
+				return TypeCatalogDocument{}, nodeValueError(field.Value, fmt.Errorf("record %s: %w", name, err))
 			}
-		case "enums":
-			if err := field.Value.Project(&doc.Enums); err != nil {
-				return TypeCatalogDocument{}, err
-			}
-		case "types":
-			types, err := projectNamedTypeDeclarations(field.Value)
+			doc.Types[name] = decl
+		case yamlsource.PresenceSequence, yamlsource.PresenceEmptySequence:
+			decl, err := projectEnumTypeDeclaration(field.Value, name)
 			if err != nil {
 				return TypeCatalogDocument{}, err
 			}
-			doc.Types = types
+			doc.Enums[name] = decl
 		default:
-			return TypeCatalogDocument{}, NewUndefinedFieldDiagnostic("type catalog", key, typeCatalogFieldOptions, field)
-		}
-	}
-	enumNames := make([]string, 0, len(doc.Enums))
-	for name := range doc.Enums {
-		enumNames = append(enumNames, name)
-	}
-	sort.Strings(enumNames)
-	for _, name := range enumNames {
-		trimmed := strings.TrimSpace(name)
-		if trimmed == "" {
-			return TypeCatalogDocument{}, fmt.Errorf("type catalog declares an enum with an empty name")
-		}
-		if trimmed != name {
-			return TypeCatalogDocument{}, fmt.Errorf("type catalog enum name %q must not have surrounding whitespace", name)
-		}
-		if err := doc.Enums[name].Validate(trimmed); err != nil {
-			return TypeCatalogDocument{}, err
+			return TypeCatalogDocument{}, nodeValueError(field.Value, fmt.Errorf("type %s must be a record mapping or enum sequence; scalar aliases are not supported; write the built-in type where %s is used", name, name))
 		}
 	}
 	return doc, nil
@@ -203,55 +177,36 @@ func (e *EnumTypeDecl) UnmarshalYAML(node *yaml.Node) error {
 	if e == nil {
 		return nil
 	}
-	values, defaultValue, err := decodeEnumDeclaration(node)
+	decl, err := projectEnumTypeDeclaration(yamlsource.ValueFromNode(node), "enum")
 	if err != nil {
 		return err
 	}
-	e.Values = values
-	e.Default = defaultValue
+	*e = decl
 	return nil
 }
 
-// Enum defaults are explicit and cannot be inferred from member order.
-func decodeEnumDeclaration(node *yaml.Node) ([]string, string, error) {
-	fields, err := nodeValueFields(yamlsource.ValueFromNode(node), "enum declaration", enumDeclarationFields)
+func projectEnumTypeDeclaration(value yamlsource.Value, name string) (EnumTypeDecl, error) {
+	items, err := value.Sequence()
 	if err != nil {
-		return nil, "", err
+		return EnumTypeDecl{}, nodeValueError(value, fmt.Errorf("enum %s is a sequence of quoted text literals; it takes no default; set the initial value in state.yaml", name))
 	}
-	var values []string
-	if field, present := fields["values"]; present {
-		values, err = decodeStringListValue(field)
-		if err != nil {
-			return nil, "", err
+	if len(items) == 0 {
+		return EnumTypeDecl{}, nodeValueError(value, fmt.Errorf("enum %s requires at least one quoted text literal", name))
+	}
+	decl := EnumTypeDecl{Values: make([]string, 0, len(items))}
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		scalar, err := item.Scalar()
+		if err != nil || scalar.Tag != "!!str" || scalar.Style&(yamlsource.SingleQuotedStyle|yamlsource.DoubleQuotedStyle) == 0 {
+			return EnumTypeDecl{}, nodeValueError(item, fmt.Errorf("enum members are literals; quote them; types.yaml declares no list types; declare the list on the field: <field>: [T]"))
 		}
-	}
-	if len(values) == 0 {
-		return nil, "", fmt.Errorf("enum declaration requires values with at least one member")
-	}
-	defaultValue := ""
-	if field, present := fields["default"]; present {
-		switch field.Presence() {
-		case yamlsource.PresenceScalar, yamlsource.PresenceEmptyScalar, yamlsource.PresenceNull:
-		default:
-			return nil, "", fmt.Errorf("enum declaration default must be a scalar member at %s", field.Location())
+		if _, duplicate := seen[scalar.Value]; duplicate {
+			return EnumTypeDecl{}, nodeValueError(item, fmt.Errorf("enum %s has duplicate member %q", name, scalar.Value))
 		}
-		defaultValue, err = optionalScalarString(field, "enum declaration default")
-		if err != nil {
-			return nil, "", err
-		}
+		seen[scalar.Value] = struct{}{}
+		decl.Values = append(decl.Values, scalar.Value)
 	}
-	if defaultValue == "" {
-		return nil, "", fmt.Errorf("enum declaration requires an explicit default member")
-	}
-	if slices.Contains(values, defaultValue) {
-		return values, defaultValue, nil
-	}
-	return nil, "", fmt.Errorf("enum declaration default %q is not a declared member; declared members: %s", defaultValue, strings.Join(values, ", "))
-}
-
-var enumDeclarationFields = map[string]struct{}{
-	"values":  {},
-	"default": {},
+	return decl, nil
 }
 
 func (n *NamedTypeDecl) UnmarshalYAML(node *yaml.Node) error {
@@ -264,36 +219,6 @@ func (n *NamedTypeDecl) UnmarshalYAML(node *yaml.Node) error {
 	}
 	*n = decl
 	return nil
-}
-
-func projectNamedTypeDeclarations(value yamlsource.Value) (map[string]NamedTypeDecl, error) {
-	switch value.Presence() {
-	case yamlsource.PresenceNull, yamlsource.PresenceEmptyMapping:
-		return map[string]NamedTypeDecl{}, nil
-	case yamlsource.PresenceMapping:
-	default:
-		return nil, fmt.Errorf("types catalog must be a mapping")
-	}
-	fields, err := uniqueYAMLMappingFields(value, "types catalog")
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]NamedTypeDecl, len(fields))
-	for _, field := range fields {
-		name := strings.TrimSpace(field.Name)
-		if name == "" {
-			return nil, fmt.Errorf("types catalog declares a named type with an empty name")
-		}
-		if name != field.Name {
-			return nil, fmt.Errorf("types catalog named type %q must not have surrounding whitespace", field.Name)
-		}
-		decl, err := projectNamedTypeDeclaration(field.Value)
-		if err != nil {
-			return nil, fmt.Errorf("named type %s: %w", name, err)
-		}
-		out[name] = decl
-	}
-	return out, nil
 }
 
 func projectNamedTypeDeclaration(value yamlsource.Value) (NamedTypeDecl, error) {
