@@ -42,7 +42,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	// Upsert agent + load agents.
 	controlPlaneIdentity := mustTestAgentIdentityForRun(runID, "control-plane", "")
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+		Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "control-plane",
 			Identity:      controlPlaneIdentity,
 			Role:          "control-plane",
@@ -51,7 +51,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 			ExecutionMode: "live",
 			EntityID:      "",
 			Config:        json.RawMessage(`{}`),
-		}),
+		})),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),
@@ -67,7 +67,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	ceoID := "operator-" + entityID
 	ceoIdentity := mustTestAgentIdentityForRun(runID, ceoID, "")
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+		Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            ceoID,
 			Identity:      ceoIdentity,
 			Role:          "operator",
@@ -76,7 +76,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 			ExecutionMode: "live",
 			EntityID:      entityID,
 			Config:        json.RawMessage(`{}`),
-		}),
+		})),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),
@@ -85,6 +85,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	}
 
 	// Events + deliveries + receipts.
+	ctx = admitPreparedAgentClaimContext(t, ctx, pg)
 	evt := eventtest.ExistingRunRootIngress(
 		uuid.NewString(),
 		events.EventType("review.requested"),
