@@ -8,6 +8,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -26,6 +28,33 @@ func workflowActivityNativeFixture(t *testing.T, backend string) pipeline.Workfl
 	t.Helper()
 	selected, _, reopen := openTimerReplayNativeStore(t, backend)
 	return workflowActivityNativeFixtureFromSelected(t, selected, reopen)
+}
+
+func TestS1DirectoryConnectorDispatchUsesExactDeclarationBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			pipeline.VerifyS1DirectoryConnectorDispatchUsesExactDeclarationForTest(t, func(t *testing.T, source semanticview.Source) pipeline.WorkflowActivityNativeFixtureForTest {
+				return workflowActivityNativeSourceFixture(t, backend, source)
+			}, func(t *testing.T, source semanticview.Source) semanticview.Source {
+				bundle, found := semanticview.Bundle(source)
+				if !found {
+					t.Fatal("directory journey requires its compiled source")
+				}
+				admitted, err := packadmission.Admit(bundle.PackInventory, bundle.Platform)
+				if err != nil {
+					t.Fatal(err)
+				}
+				bundle.PackAdmission = admitted
+				projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{
+					Source: source, SourceArtifactFact: sourceartifactfixture.FactFor(bundle.SourceArtifact),
+				})
+				if err != nil {
+					t.Fatalf("compile real directory-owned effective source: %v", err)
+				}
+				return projection.Source()
+			})
+		})
+	}
 }
 
 func workflowActivityNativeFixtureFromSelected(t *testing.T, selected timerReplaySelectedStore, reopen func() timerReplaySelectedStore) pipeline.WorkflowActivityNativeFixtureForTest {

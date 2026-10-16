@@ -17,9 +17,28 @@ import (
 )
 
 func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowActivityNativeFixtureForTest) {
+	verifyS1ScopedActivityDispatch(t, open, nil)
+}
+
+func VerifyS1DirectoryConnectorDispatchUsesExactDeclarationForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowActivityNativeFixtureForTest, compose func(*testing.T, semanticview.Source) semanticview.Source) {
 	t.Helper()
+	if compose == nil {
+		t.Fatal("directory journey requires the real effective-source compiler")
+	}
+	verifyS1ScopedActivityDispatch(t, open, compose)
+}
+
+func verifyS1ScopedActivityDispatch(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowActivityNativeFixtureForTest, compose func(*testing.T, semanticview.Source) semanticview.Source) {
+	t.Helper()
+	toolID := "provider_write"
+	if compose != nil {
+		toolID = "team-bot.send"
+	}
 	var firstCalls, secondCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if compose != nil && request.Header.Get("Authorization") != "Bearer directory-fixture-secret" {
+			t.Errorf("directory connector did not consume its exact qualified credential")
+		}
 		origin := "research"
 		switch request.URL.Path {
 		case "/research":
@@ -39,11 +58,20 @@ func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, ope
 	for _, flow := range []string{"research", "research2"} {
 		files[flow+"/schema.yaml"] = "stages: []\n"
 		files[flow+"/events.yaml"] = "request:\n"
-		files[flow+"/nodes.yaml"] = "scanner:\n  execution_type: system_node\n  subscribes_to: [request]\n  event_handlers:\n    request:\n      activity: {id: send, tool: provider_write, input: {}}\n"
-		files[flow+"/tools.yaml"] = fmt.Sprintf("provider_write:\n  handler_type: http\n  effect_class: non_idempotent_write\n  input_schema: {type: object, additionalProperties: false}\n  output_schema:\n    type: object\n    required: [origin]\n    properties: {origin: {type: string, enum: [%s]}}\n  http: {method: POST, url: %q}\n", flow, server.URL+"/"+flow)
+		files[flow+"/nodes.yaml"] = fmt.Sprintf("scanner:\n  execution_type: system_node\n  subscribes_to: [request]\n  event_handlers:\n    request:\n      activity: {id: send, tool: %s, input: {}}\n", toolID)
+		tool := fmt.Sprintf("provider_write:\n  handler_type: http\n  effect_class: non_idempotent_write\n  input_schema: {type: object, additionalProperties: false}\n  output_schema:\n    type: object\n    required: [origin]\n    properties: {origin: {type: string, enum: [%s]}}\n  http: {method: POST, url: %q}\n", flow, server.URL+"/"+flow)
+		if compose == nil {
+			files[flow+"/tools.yaml"] = tool
+		} else {
+			files[flow+"/team-bot/manifest.yaml"] = "version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [send]}, cannot: [bypass journal]}\n"
+			files[flow+"/team-bot/connector.yaml"] = fmt.Sprintf("tools:\n  send:\n    category: provider_connector\n    handler_type: http\n    effect_class: non_idempotent_write\n    credentials: [token]\n    input_schema: {type: object, additionalProperties: false}\n    output_schema:\n      type: object\n      required: [origin]\n      properties: {origin: {type: string, enum: [%s]}}\n    http:\n      method: POST\n      url: %q\n      headers: {Authorization: 'Bearer {{credentials.token}}'}\n    response_success: {kind: http_status_2xx}\n", flow, server.URL+"/"+flow)
+		}
 	}
 	source := semanticview.Wrap(loadWorkflowTempBundle(t, files))
-	if _, present := source.ToolEntries()["provider_write"]; present {
+	if compose != nil {
+		source = compose(t, source)
+	}
+	if _, present := source.ToolEntries()[toolID]; present {
 		t.Fatal("fixture did not remove the ambiguous global tool alias")
 	}
 	fixture := open(t, source)
@@ -53,12 +81,17 @@ func VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t *testing.T, ope
 		t.Fatal(err)
 	}
 	bus := &recordingPipelineBus{}
-	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}})
+	options := PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}}
+	if compose != nil {
+		options.Credentials = testActivityCredentialStore(t, "team-bot.token", "directory-fixture-secret")
+	}
+	pc := fixture.NewCoordinator(bus, options)
 	var expectedStatuses []string
 	for _, flow := range []string{"research", "research2"} {
 		intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
 		intent.Input = mustActivityInput(map[string]any{})
 		intent.ActivityID = "send"
+		intent.Tool = toolID
 		intent.Owner = runtimeactivityidentity.MustNodeOwner(mustPipelineNode(flow, "scanner"))
 		intent.ExecutionFlowID = identity.NormalizeFlowID(flow)
 		intent.FlowInstance = flow + "/entity-1"

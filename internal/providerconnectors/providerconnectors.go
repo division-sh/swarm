@@ -365,14 +365,14 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 	actionLabel := connectorActionLabel(provider, action, tool)
 	var generation *GenerationSurface
 	capabilities := source.SemanticCapabilities()
-	if evidence, exists := capabilities.ConnectorGeneration(toolID); exists {
+	if evidence, exists := capabilities.ConnectorGeneration(flowID, toolID); exists {
 		copy := evidence
 		generation = &copy
 	}
 	sourceKind := "flow_local"
 	provenance := ""
 	sourcePath := ""
-	if importSource, exists := capabilities.ConnectorImportSource(toolID); exists {
+	if importSource, exists := capabilities.ConnectorImportSource(flowID, toolID); exists {
 		sourceKind = "connector_pack_import"
 		sourcePath = importSource.URI()
 		if loaded, found := opts.Registry.Lookup(provider, toolID); found {

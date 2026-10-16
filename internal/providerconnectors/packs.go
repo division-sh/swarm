@@ -224,14 +224,20 @@ func (r *PackRegistry) Inventory() []InstalledTool {
 }
 
 func GenerationSurfaceForPackTool(pack LoadedPack, toolID string) (GenerationSurface, bool) {
-	if pack.Manifest.Generation == nil {
+	return GenerationSurfaceForConnectorTool(pack.Manifest, pack.Envelope.ManifestHash, toolID)
+}
+
+// GenerationSurfaceForConnectorTool projects admitted metadata, not tool or
+// execution authority. The admission owner supplies the exact BODY hash.
+func GenerationSurfaceForConnectorTool(manifest ConnectorManifest, bodyHash, toolID string) (GenerationSurface, bool) {
+	if manifest.Generation == nil {
 		return GenerationSurface{}, false
 	}
 	provider, _, valid := splitToolID(toolID)
-	if !valid || provider != pack.Manifest.Provider {
+	if !valid || provider != manifest.Provider {
 		return GenerationSurface{}, false
 	}
-	operation, ok := pack.Manifest.Generation.OperationForTool(toolID)
+	operation, ok := manifest.Generation.OperationForTool(toolID)
 	if !ok {
 		return GenerationSurface{}, false
 	}
@@ -244,12 +250,12 @@ func GenerationSurfaceForPackTool(pack LoadedPack, toolID string) (GenerationSur
 		permissions = append(permissions, admitted)
 	}
 	surface, err := semanticview.NewConnectorGenerationSurface(
-		pack.Manifest.Generation.GeneratorVersion,
-		pack.Manifest.Generation.Source.Path,
-		pack.Manifest.Generation.Source.SHA256,
-		pack.Manifest.Generation.Profile.Path,
-		pack.Manifest.Generation.Profile.SHA256,
-		pack.Envelope.ManifestHash,
+		manifest.Generation.GeneratorVersion,
+		manifest.Generation.Source.Path,
+		manifest.Generation.Source.SHA256,
+		manifest.Generation.Profile.Path,
+		manifest.Generation.Profile.SHA256,
+		bodyHash,
 		operation.OperationID,
 		permissions,
 		operation.FixtureID,
@@ -521,7 +527,21 @@ type connectorPackSource struct {
 }
 
 func (s connectorPackSource) SemanticCapabilities() semanticview.Capabilities {
-	return s.Source.SemanticCapabilities().WithConnectorPackImports(s.importedGeneration, s.importSources).WithConnectorPackProvenance(s.importProvenance).WithProviderTriggerRebuildBase(s.providerTriggerBase)
+	capabilities := s.Source.SemanticCapabilities()
+	for flow, tools := range s.importedByFlowScope {
+		generations := map[string]GenerationSurface{}
+		sources := map[string]semanticview.ConnectorImportSource{}
+		provenance := map[string]semanticview.ConnectorPackProvenance{}
+		for name := range tools {
+			sources[name] = s.importSources[name]
+			provenance[name] = s.importProvenance[name]
+			if generation, present := s.importedGeneration[name]; present {
+				generations[name] = generation
+			}
+		}
+		capabilities = capabilities.WithConnectorPackImports(flow, generations, sources).WithConnectorPackProvenance(flow, provenance)
+	}
+	return capabilities.WithProviderTriggerRebuildBase(s.providerTriggerBase)
 }
 
 func (s connectorPackSource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry {

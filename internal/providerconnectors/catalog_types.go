@@ -294,24 +294,56 @@ func validateGeneratedPackIdentity(fsys fs.FS, pack *LoadedPack, expected Genera
 	if strings.TrimSpace(pack.Manifest.Generation.Profile.Path) != strings.TrimSpace(expected.Profile) {
 		return fmt.Errorf("generated connector pack %q profile %q does not match indexed profile %q", pack.Envelope.ID, pack.Manifest.Generation.Profile.Path, expected.Profile)
 	}
-	profileBody, err := fs.ReadFile(fsys, strings.TrimSpace(expected.Profile))
+	source, err := validateIndexedGenerationSource(fsys, *pack.Manifest.Generation, expected.Profile)
 	if err != nil {
-		return fmt.Errorf("generated connector pack %q read indexed profile: %w", pack.Envelope.ID, err)
+		return fmt.Errorf("generated connector pack %q: %w", pack.Envelope.ID, err)
 	}
-	if got, want := sha256String(profileBody), "sha256:"+normalizeSHA(pack.Manifest.Generation.Profile.SHA256); got != want {
-		return fmt.Errorf("generated connector pack %q profile hash mismatch: got %s want %s", pack.Envelope.ID, got, want)
-	}
-	profile, err := parseGeneratorProfileAt(profileBody, expected.Profile)
-	if err != nil {
-		return fmt.Errorf("generated connector pack %q parse indexed profile: %w", pack.Envelope.ID, err)
-	}
-	if strings.TrimSpace(profile.Source.Path) != strings.TrimSpace(pack.Manifest.Generation.Source.Path) ||
-		strings.TrimSpace(profile.Source.OpenAPIVersion) != strings.TrimSpace(pack.Manifest.Generation.Source.OpenAPIVersion) ||
-		normalizeSHA(profile.Source.SHA256) != normalizeSHA(pack.Manifest.Generation.Source.SHA256) {
-		return fmt.Errorf("generated connector pack %q source evidence does not match indexed profile", pack.Envelope.ID)
-	}
-	pack.identitySource = profile.SourceValue()
+	pack.identitySource = source
 	return nil
+}
+
+// ValidateDirectoryConnectorGeneration preserves the reviewed profile/source
+// checks without treating a directory namespace as a transport or registry ID.
+func ValidateDirectoryConnectorGeneration(manifest ConnectorManifest) error {
+	if manifest.Generation == nil {
+		return nil
+	}
+	index, err := loadGeneratedPackIndex(generatedConnectorIdentityFS)
+	if err != nil {
+		return err
+	}
+	profiles := map[string]GeneratedPackIndexEntry{}
+	for _, entry := range index.Packs {
+		if entry.Kind == GeneratedPackKindBuiltin {
+			profiles[entry.Profile] = entry
+		}
+	}
+	expected, present := profiles[manifest.Generation.Profile.Path]
+	if !present {
+		return fmt.Errorf("provider connector generation profile %q is not a reviewed installed profile", manifest.Generation.Profile.Path)
+	}
+	_, err = validateIndexedGenerationSource(generatedConnectorIdentityFS, *manifest.Generation, expected.Profile)
+	return err
+}
+
+func validateIndexedGenerationSource(fsys fs.FS, generation GenerationEvidence, profilePath string) (yamlsource.Value, error) {
+	profileBody, err := fs.ReadFile(fsys, profilePath)
+	if err != nil {
+		return yamlsource.Value{}, fmt.Errorf("read indexed profile: %w", err)
+	}
+	if got, want := sha256String(profileBody), "sha256:"+normalizeSHA(generation.Profile.SHA256); got != want {
+		return yamlsource.Value{}, fmt.Errorf("profile hash mismatch: got %s want %s", got, want)
+	}
+	profile, err := parseGeneratorProfileAt(profileBody, profilePath)
+	if err != nil {
+		return yamlsource.Value{}, fmt.Errorf("parse indexed profile: %w", err)
+	}
+	if strings.TrimSpace(profile.Source.Path) != strings.TrimSpace(generation.Source.Path) ||
+		strings.TrimSpace(profile.Source.OpenAPIVersion) != strings.TrimSpace(generation.Source.OpenAPIVersion) ||
+		normalizeSHA(profile.Source.SHA256) != normalizeSHA(generation.Source.SHA256) {
+		return yamlsource.Value{}, fmt.Errorf("source evidence does not match indexed profile")
+	}
+	return profile.SourceValue(), nil
 }
 
 func validateSHA256(context, value string) error {

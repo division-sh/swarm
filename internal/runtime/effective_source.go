@@ -7,7 +7,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -59,17 +58,17 @@ func AdmitEffectiveSourceProjection(request EffectiveSourceProjectionRequest) (A
 		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("effective semantic source is required")
 	}
 
-	connectorRegistry, triggerCatalog, err := packProjectionsForEffectiveSource(source, request.ProviderTriggerCatalog)
+	triggerCatalog, err := triggerCatalogForEffectiveSource(source, request.ProviderTriggerCatalog)
 	if err != nil {
 		return AdmittedEffectiveSourceProjection{}, err
-	}
-	source, err = providerconnectors.SourceWithConnectorPackImports(source, connectorRegistry)
-	if err != nil {
-		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("provider connector pack import failed: %w", err)
 	}
 	source, err = SourceWithProviderTriggerEvents(source, triggerCatalog)
 	if err != nil {
 		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("provider trigger event import failed: %w", err)
+	}
+	source, err = compileDirectoryConnectorSource(source, request.SourceArtifactFact)
+	if err != nil {
+		return AdmittedEffectiveSourceProjection{}, err
 	}
 	identityValue, err := effectiveSourceIdentityValue(source, request.SourceArtifactFact, request.ChannelPlans)
 	if err != nil {
@@ -91,21 +90,20 @@ func AdmitEffectiveSourceProjection(request EffectiveSourceProjectionRequest) (A
 	return AdmittedEffectiveSourceProjection{source: source, module: module, identity: identity}, nil
 }
 
-func packProjectionsForEffectiveSource(source semanticview.Source, suppliedTriggers *providertriggers.CatalogSnapshot) (*providerconnectors.PackRegistry, *providertriggers.CatalogSnapshot, error) {
+func triggerCatalogForEffectiveSource(source semanticview.Source, suppliedTriggers *providertriggers.CatalogSnapshot) (*providertriggers.CatalogSnapshot, error) {
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil || bundle.PackInventory == nil {
-		return nil, suppliedTriggers, nil
+		return suppliedTriggers, nil
 	}
 	projection, err := packadmission.FromBundle(bundle)
 	if err != nil {
-		return nil, nil, fmt.Errorf("load admitted pack projection for effective source: %w", err)
+		return nil, fmt.Errorf("load admitted pack projection for effective source: %w", err)
 	}
-	connectors := projection.ProviderConnectors
 	triggers := projection.ProviderTriggers
 	if suppliedTriggers != nil && !suppliedTriggers.Generation().Equal(triggers.Generation()) {
-		return nil, nil, fmt.Errorf("supplied provider trigger catalog generation %s contradicts bundle effective inventory generation %s", suppliedTriggers.Generation().Diagnostic(), triggers.Generation().Diagnostic())
+		return nil, fmt.Errorf("supplied provider trigger catalog generation %s contradicts bundle effective inventory generation %s", suppliedTriggers.Generation().Diagnostic(), triggers.Generation().Diagnostic())
 	}
-	return connectors, triggers, nil
+	return triggers, nil
 }
 
 func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtimecorrelation.SourceArtifactFact, channelPlans []packs.SatisfactionPlan) (map[string]any, error) {
@@ -143,54 +141,9 @@ func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtime
 	})
 
 	capabilities := source.SemanticCapabilities()
-	connectorValues := make([]map[string]any, 0)
-	for _, toolID := range sortedToolIDs(source.ToolEntries()) {
-		tool := source.ToolEntries()[toolID]
-		if tool.Category() != runtimecontracts.ToolCategoryProviderConnector {
-			continue
-		}
-		toolValue, err := tool.CanonicalValue()
-		if err != nil {
-			return nil, fmt.Errorf("effective connector tool %q: %w", toolID, err)
-		}
-		value := map[string]any{"tool_id": toolID, "tool": toolValue}
-		importSource, imported := capabilities.ConnectorImportSource(toolID)
-		if imported {
-			packProvenance, ok := capabilities.ConnectorPackProvenance(toolID)
-			if !ok || !packProvenance.Valid() {
-				return nil, fmt.Errorf("effective connector tool %q is missing valid pack provenance", toolID)
-			}
-			value["import_source"] = importSource.URI()
-			value["pack"] = map[string]any{
-				"id": packProvenance.PackID, "version": packProvenance.Version,
-				"manifest_hash": packProvenance.ManifestHash, "source": packProvenance.Source,
-			}
-		}
-		if generation, generated := capabilities.ConnectorGeneration(toolID); generated {
-			if !imported {
-				return nil, fmt.Errorf("effective connector tool %q has generation provenance without an import source", toolID)
-			}
-			if !generation.Valid() {
-				return nil, fmt.Errorf("effective connector tool %q has invalid generation provenance", toolID)
-			}
-			permissions := generation.Permissions()
-			permissionValues := make([]map[string]any, 0, len(permissions))
-			for _, permission := range permissions {
-				permissionValues = append(permissionValues, map[string]any{"id": permission.ID(), "note": permission.Note()})
-			}
-			sort.Slice(permissionValues, func(left, right int) bool {
-				return permissionValues[left]["id"].(string) < permissionValues[right]["id"].(string)
-			})
-			value["generation"] = map[string]any{
-				"generator_version": generation.GeneratorVersion(), "source_path": generation.SourcePath(),
-				"source_sha256": generation.SourceSHA256(), "profile_path": generation.ProfilePath(),
-				"profile_sha256": generation.ProfileSHA256(), "manifest_sha256": generation.ManifestSHA256(),
-				"operation_id": generation.OperationID(), "permissions": permissionValues,
-				"fixture_id": generation.FixtureID(), "fixture_status": generation.FixtureStatus(),
-				"review_status": generation.ReviewStatus(),
-			}
-		}
-		connectorValues = append(connectorValues, value)
+	connectorValues, err := effectiveConnectorIdentityValues(source)
+	if err != nil {
+		return nil, err
 	}
 
 	triggerValue := any(nil)

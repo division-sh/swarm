@@ -2,6 +2,7 @@ package packadmission
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/division-sh/swarm/internal/packartifact"
 	platformcontract "github.com/division-sh/swarm/internal/platform"
@@ -78,6 +79,15 @@ func (p ProviderSource) Valid() bool {
 }
 
 func (p ProviderSource) RootedSource() sourceartifact.RootedSource { return p.rooted }
+
+func (p ProviderSource) FlowPaths() []string {
+	paths := make([]string, 0, len(p.scopes))
+	for flow := range p.scopes {
+		paths = append(paths, flow)
+	}
+	sort.Strings(paths)
+	return paths
+}
 
 // Scope accepts an exact admitted flow path, never a directory/key heuristic.
 func (p ProviderSource) Scope(flowPath string) (ProviderScope, error) {

@@ -280,11 +280,11 @@ func digestForTriggerGeneration(t *testing.T, source semanticview.Source, fact r
 func digestForConnectorGeneration(t *testing.T, source semanticview.Source, fact runtimecorrelation.SourceArtifactFact, marker string) string {
 	t.Helper()
 	const toolID = "telegram.send_message"
-	importSource, ok := source.SemanticCapabilities().ConnectorImportSource(toolID)
+	importSource, ok := source.SemanticCapabilities().ConnectorImportSource(".", toolID)
 	if !ok {
 		t.Fatalf("fixture is missing connector import source for %s", toolID)
 	}
-	provenance, ok := source.SemanticCapabilities().ConnectorPackProvenance(toolID)
+	provenance, ok := source.SemanticCapabilities().ConnectorPackProvenance(".", toolID)
 	if !ok {
 		t.Fatalf("fixture is missing connector pack provenance for %s", toolID)
 	}
@@ -294,10 +294,10 @@ func digestForConnectorGeneration(t *testing.T, source semanticview.Source, fact
 		"sendMessage", []semanticview.ConnectorGenerationPermission{semanticview.MustConnectorGenerationPermission("messages:write", "Send messages")},
 		"telegram.send-message", "passed", "approved",
 	)
-	capabilities := source.SemanticCapabilities().WithConnectorPackImports(
+	capabilities := source.SemanticCapabilities().WithConnectorPackImports(".",
 		map[string]semanticview.ConnectorGenerationSurface{toolID: generation},
 		map[string]semanticview.ConnectorImportSource{toolID: importSource},
-	).WithConnectorPackProvenance(map[string]semanticview.ConnectorPackProvenance{toolID: provenance})
+	).WithConnectorPackProvenance(".", map[string]semanticview.ConnectorPackProvenance{toolID: provenance})
 	return digestForEffectiveSourceValue(t, effectiveSourceCapabilityOverride{Source: source, capabilities: capabilities}, fact, nil)
 }
 

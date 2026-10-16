@@ -14,12 +14,13 @@ import (
 // ProviderDefinition freezes every role from one already-selected directory.
 // It is declaration evidence, not an enabled ingress or installed transport.
 type ProviderDefinition struct {
-	provider          packartifact.AdmittedProvider
-	triggers          *providertriggers.CatalogSnapshot
-	connector         providerconnectors.ConnectorManifest
-	connectorIdentity packs.PackIdentity
-	channel           packs.SatisfactionPlan
-	hasChannel        bool
+	provider            packartifact.AdmittedProvider
+	triggers            *providertriggers.CatalogSnapshot
+	connector           providerconnectors.ConnectorManifest
+	connectorIdentity   packs.PackIdentity
+	connectorGeneration map[string]providerconnectors.GenerationSurface
+	channel             packs.SatisfactionPlan
+	hasChannel          bool
 }
 
 func (p ProviderDefinition) Valid() bool                             { return p.provider.Valid() }
@@ -39,6 +40,11 @@ func (p ProviderDefinition) ConnectorDescriptor() (packs.ConnectorPackDescriptor
 }
 func (p ProviderDefinition) ChannelPlan() (packs.SatisfactionPlan, bool) {
 	return p.channel, p.hasChannel
+}
+
+func (p ProviderDefinition) ConnectorGeneration(toolID string) (providerconnectors.GenerationSurface, bool) {
+	generation, present := p.connectorGeneration[toolID]
+	return generation, present
 }
 
 func AdmitProviderDirectory(provider packartifact.AdmittedProvider, platform runtimecontracts.PlatformSpecDocument) (ProviderDefinition, error) {
@@ -65,9 +71,18 @@ func AdmitProviderDirectory(provider packartifact.AdmittedProvider, platform run
 		if err != nil {
 			return ProviderDefinition{}, err
 		}
+		if err := providerconnectors.ValidateDirectoryConnectorGeneration(out.connector); err != nil {
+			return ProviderDefinition{}, err
+		}
 		out.connectorIdentity, err = packs.NewProviderBodyIdentity(body)
 		if err != nil {
 			return ProviderDefinition{}, err
+		}
+		out.connectorGeneration = map[string]providerconnectors.GenerationSurface{}
+		for name := range out.connector.Tools {
+			if generation, present := providerconnectors.GenerationSurfaceForConnectorTool(out.connector, body.Hash(), name); present {
+				out.connectorGeneration[name] = generation
+			}
 		}
 	}
 	if _, present := provider.Body(packmodel.BodyChannel); present {

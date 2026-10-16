@@ -2,7 +2,10 @@ package runtime
 
 import (
 	"bytes"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -13,7 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
-func TestS1EffectiveProviderDirectoryScopeUsesWholeSelectedBody(t *testing.T) {
+func s1EffectiveProviderScopeMembers() map[string][]byte {
 	members := map[string][]byte{
 		"schema.yaml":            []byte("stages: []\n"),
 		"child/schema.yaml":      []byte("stages: []\n"),
@@ -29,16 +32,26 @@ func TestS1EffectiveProviderDirectoryScopeUsesWholeSelectedBody(t *testing.T) {
 	members["child/team-bot/connector.yaml"] = bytes.Replace(provider["connector.yaml"], []byte("example.test"), []byte("child.example.test"), 1)
 	members["sibling/team-bot/manifest.yaml"] = []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message]}, cannot: [bypass journal]}\n")
 	members["sibling/team-bot/trigger.yaml"] = provider["trigger.yaml"]
+	return members
+}
+
+func loadS1EffectiveProviderScope(t *testing.T, members map[string][]byte) (*runtimecontracts.WorkflowContractBundle, sourceartifact.RootedSource, string) {
+	t.Helper()
 	artifact, err := sourceartifact.AdmitMembers(members)
 	if err != nil {
 		t.Fatal(err)
 	}
-	rooted, _ := sourceartifactfixture.Rooted(t, "scoped-provider-shop", artifact)
+	rooted, directory := sourceartifactfixture.Rooted(t, "scoped-provider-shop", artifact)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", runtimecontracts.WorkflowContractLoadOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	admitRuntimeTestBundle(t, bundle)
+	return bundle, rooted, directory
+}
+
+func TestS1EffectiveProviderDirectoryScopeUsesWholeSelectedBody(t *testing.T) {
+	bundle, rooted, _ := loadS1EffectiveProviderScope(t, s1EffectiveProviderScopeMembers())
 	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{
 		Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()),
 	})
@@ -92,5 +105,115 @@ func TestS1EffectiveProviderDirectoryScopeUsesWholeSelectedBody(t *testing.T) {
 	actual, err := compiled.RootedSource()
 	if err != nil || !actual.Admission().Equal(rooted.Admission()) {
 		t.Fatalf("composition replaced the genuine selected source/root: %v", err)
+	}
+}
+
+func TestS1EffectiveProviderDirectoryScopeRetainsFrozenEvidenceAndRestart(t *testing.T) {
+	bundle, rooted, directory := loadS1EffectiveProviderScope(t, s1EffectiveProviderScopeMembers())
+	request := EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact())}
+	first, err := AdmitEffectiveSourceProjection(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cell := range []struct{ flow, label, version string }{
+		{".", "team-bot/connector.yaml", "1.0.0"},
+		{"child", "child/team-bot/connector.yaml", "2.0.0"},
+		{"child/deep", "child/team-bot/connector.yaml", "2.0.0"},
+	} {
+		capabilities := first.Source().SemanticCapabilities()
+		label, present := capabilities.ConnectorImportSource(cell.flow, "team-bot.send_message")
+		identity, hasIdentity := capabilities.ConnectorPackProvenance(cell.flow, "team-bot.send_message")
+		if !present || !hasIdentity || label.URI() != cell.label || identity.Source != cell.label || identity.Version != cell.version || identity.PackID != "team-bot" {
+			t.Fatalf("scoped connector metadata contradicts its captured BODY: %s %+v", cell.flow, identity)
+		}
+		identity.Version = "99.0.0"
+		scope, _ := first.Source().FlowScopeByID(cell.flow)
+		delete(scope.Tools, "team-bot.send_message")
+	}
+	for _, flow := range []string{"sibling", "foreign", "", " child", "child/"} {
+		if _, present := first.Source().SemanticCapabilities().ConnectorImportSource(flow, "team-bot.send_message"); present {
+			t.Fatalf("connector metadata borrowed another scope: %q", flow)
+		}
+	}
+	if err := os.WriteFile(directory+"/child/team-bot/connector.yaml", []byte("changed: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(directory); err != nil {
+		t.Fatal(err)
+	}
+	again, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: first.Source(), SourceArtifactFact: request.SourceArtifactFact})
+	if err != nil || !again.Identity().Equal(first.Identity()) {
+		t.Fatalf("repeated admission reselected the tree or consumed mutated readbacks: %v", err)
+	}
+	row, err := sourceartifact.PersistedFromArtifact(rooted.Artifact(), time.Unix(1, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := sourceartifact.RestoreRootedSource(row, rooted.Admission().Reference())
+	if err != nil {
+		t.Fatal(err)
+	}
+	retained, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), restored, "", runtimecontracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admitRuntimeTestBundle(t, retained)
+	after, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(retained), SourceArtifactFact: request.SourceArtifactFact})
+	if err != nil || !after.Identity().Equal(first.Identity()) {
+		t.Fatalf("retained reconstruction lost exact scoped identity: %v", err)
+	}
+}
+
+type callerDirectedConnectorScope struct {
+	semanticview.Source
+	scopes []semanticview.FlowScope
+}
+
+func (s callerDirectedConnectorScope) FlowScopes() []semanticview.FlowScope { return s.scopes }
+
+func TestS1EffectiveProviderDirectoryScopeRefusesMissingRepeatedAndForeignFlows(t *testing.T) {
+	bundle, rooted, _ := loadS1EffectiveProviderScope(t, s1EffectiveProviderScopeMembers())
+	source := semanticview.Wrap(bundle)
+	for _, name := range []string{"missing", "repeated", "foreign"} {
+		t.Run(name, func(t *testing.T) {
+			scopes := source.FlowScopes()
+			switch name {
+			case "missing":
+				scopes = scopes[:len(scopes)-1]
+			case "repeated":
+				scopes = append(scopes, scopes[0])
+			case "foreign":
+				scopes = append(scopes, semanticview.FlowScope{ID: "foreign"})
+			}
+			projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{
+				Source: callerDirectedConnectorScope{Source: source, scopes: scopes}, SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()),
+			})
+			if err == nil || projection.Source() != nil {
+				t.Fatalf("replacement scope inventory published a partial effective source: %v", err)
+			}
+		})
+	}
+}
+
+func TestS1EffectiveProviderDirectoryScopeRefusesPartialRoleAndAuthoredNamespace(t *testing.T) {
+	for _, name := range []string{"bad sibling role", "authored namespace"} {
+		t.Run(name, func(t *testing.T) {
+			members := s1EffectiveProviderScopeMembers()
+			if name == "bad sibling role" {
+				members["sibling/team-bot/trigger.yaml"] = []byte("unknown: true\n")
+			} else {
+				members["sibling/tools.yaml"] = []byte("team-bot.invented:\n  handler_type: http\n  effect_class: read_only\n  http: {method: GET, url: 'https://foreign.example.test'}\n")
+			}
+			bundle, rooted, _ := loadS1EffectiveProviderScope(t, members)
+			projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{
+				Source: semanticview.Wrap(bundle), SourceArtifactFact: sourceartifactfixture.FactFor(rooted.Artifact()),
+			})
+			if err == nil || projection.Source() != nil {
+				t.Fatalf("invalid directory composition published a partial source: %v", err)
+			}
+			if name == "authored namespace" && (!strings.Contains(err.Error(), "connector.yaml") || !strings.Contains(err.Error(), "sibling")) {
+				t.Fatalf("provider namespace refusal lost its exact teaching location: %v", err)
+			}
+		})
 	}
 }

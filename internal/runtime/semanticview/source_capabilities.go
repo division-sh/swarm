@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
@@ -265,9 +266,10 @@ type connectorPackCapabilities struct {
 	provenance    map[string]ConnectorPackProvenance
 }
 
-func (c Capabilities) WithConnectorPackProvenance(provenance map[string]ConnectorPackProvenance) Capabilities {
+func (c Capabilities) WithConnectorPackProvenance(flowID string, provenance map[string]ConnectorPackProvenance) Capabilities {
 	out := c
-	if out.connectorPacks == nil || len(provenance) != len(out.connectorPacks.importSources) {
+	scope := c.connectorPacks[flowID]
+	if scope == nil || len(provenance) != len(scope.importSources) {
 		out.connectorPacks = nil
 		return out
 	}
@@ -277,15 +279,16 @@ func (c Capabilities) WithConnectorPackProvenance(provenance map[string]Connecto
 			out.connectorPacks = nil
 			return out
 		}
-		if _, imported := out.connectorPacks.importSources[toolID]; !imported {
+		if _, imported := scope.importSources[toolID]; !imported {
 			out.connectorPacks = nil
 			return out
 		}
 		copyByTool[toolID] = item
 	}
-	capabilities := *out.connectorPacks
+	capabilities := *scope
 	capabilities.provenance = copyByTool
-	out.connectorPacks = &capabilities
+	out.connectorPacks = cloneConnectorScopes(c.connectorPacks)
+	out.connectorPacks[flowID] = &capabilities
 	return out
 }
 
@@ -293,7 +296,7 @@ func (c Capabilities) WithConnectorPackProvenance(provenance map[string]Connecto
 // Wrappers preserve it by embedding Source and replace only the field they own.
 type Capabilities struct {
 	providerTrigger *providerTriggerCapabilities
-	connectorPacks  *connectorPackCapabilities
+	connectorPacks  map[string]*connectorPackCapabilities
 }
 
 func (c Capabilities) WithProviderTriggerEvents(base Source, generation triggergeneration.Generation, outputs map[string][]runtimeprovideroutput.Authorization) Capabilities {
@@ -445,10 +448,15 @@ func (c Capabilities) ProviderTriggerEventProvenance() []ProviderTriggerEventPro
 	return out
 }
 
-func (c Capabilities) WithConnectorPackImports(generations map[string]ConnectorGenerationSurface, importSources map[string]ConnectorImportSource) Capabilities {
+func (c Capabilities) WithConnectorPackImports(flowID string, generations map[string]ConnectorGenerationSurface, importSources map[string]ConnectorImportSource) Capabilities {
 	out := c
-	if len(importSources) == 0 {
+	if _, err := runtimeidentity.AdmitFlowIdentity(flowID); err != nil {
 		out.connectorPacks = nil
+		return out
+	}
+	out.connectorPacks = cloneConnectorScopes(c.connectorPacks)
+	if len(importSources) == 0 {
+		delete(out.connectorPacks, flowID)
 		return out
 	}
 	sourceCopy := make(map[string]ConnectorImportSource, len(importSources))
@@ -471,40 +479,58 @@ func (c Capabilities) WithConnectorPackImports(generations map[string]ConnectorG
 		}
 		generationCopy[toolID] = generation
 	}
-	out.connectorPacks = &connectorPackCapabilities{generations: generationCopy, importSources: sourceCopy}
+	out.connectorPacks[flowID] = &connectorPackCapabilities{generations: generationCopy, importSources: sourceCopy}
 	return out
 }
 
 func (c Capabilities) ConnectorPackImportsApplied() bool {
-	return c.connectorPacks != nil
+	return len(c.connectorPacks) != 0
 }
 
-func (c Capabilities) ConnectorGeneration(toolID string) (ConnectorGenerationSurface, bool) {
-	if c.connectorPacks == nil {
+func (c Capabilities) ConnectorGeneration(flowID, toolID string) (ConnectorGenerationSurface, bool) {
+	scope := c.connectorPacks[flowID]
+	if scope == nil {
 		return ConnectorGenerationSurface{}, false
 	}
 	if toolID == "" || toolID != strings.TrimSpace(toolID) {
 		return ConnectorGenerationSurface{}, false
 	}
-	generation, ok := c.connectorPacks.generations[toolID]
+	generation, ok := scope.generations[toolID]
 	return generation, ok
 }
 
-func (c Capabilities) ConnectorImportSource(toolID string) (ConnectorImportSource, bool) {
-	if c.connectorPacks == nil {
+func (c Capabilities) ConnectorImportSource(flowID, toolID string) (ConnectorImportSource, bool) {
+	scope := c.connectorPacks[flowID]
+	if scope == nil {
 		return ConnectorImportSource{}, false
 	}
 	if toolID == "" || toolID != strings.TrimSpace(toolID) {
 		return ConnectorImportSource{}, false
 	}
-	source, ok := c.connectorPacks.importSources[toolID]
+	source, ok := scope.importSources[toolID]
 	return source, ok
 }
 
-func (c Capabilities) ConnectorPackProvenance(toolID string) (ConnectorPackProvenance, bool) {
-	if c.connectorPacks == nil || toolID == "" || toolID != strings.TrimSpace(toolID) {
+func (c Capabilities) ConnectorPackProvenance(flowID, toolID string) (ConnectorPackProvenance, bool) {
+	scope := c.connectorPacks[flowID]
+	if scope == nil || toolID == "" || toolID != strings.TrimSpace(toolID) {
 		return ConnectorPackProvenance{}, false
 	}
-	provenance, ok := c.connectorPacks.provenance[toolID]
+	provenance, ok := scope.provenance[toolID]
 	return provenance, ok && provenance.Valid()
+}
+
+func cloneConnectorScopes(scopes map[string]*connectorPackCapabilities) map[string]*connectorPackCapabilities {
+	out := make(map[string]*connectorPackCapabilities, len(scopes))
+	for flow, scope := range scopes {
+		out[flow] = scope
+	}
+	return out
+}
+
+// WithoutConnectorPackImports clears only connector declaration metadata before
+// rebuilding it from the selected captured directories. Other owners survive.
+func (c Capabilities) WithoutConnectorPackImports() Capabilities {
+	c.connectorPacks = nil
+	return c
 }
