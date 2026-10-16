@@ -18,7 +18,7 @@ func TestS1CredentialTemplatesResolveExactQualifiedStoreKeys(t *testing.T) {
 			}
 			request, err := plan.Prepare(map[string]any{"customer": map[string]any{"id": "17"}}, map[string]any{key + ".bot_token": "fixture/token"})
 			if err != nil || request.URL() != "https://provider.example/fixture%2Ftoken/17" || request.Headers().Get("X-Token") != "fixture/token" || !strings.Contains(string(request.Body()), `"token":"fixture/token"`) || !strings.Contains(string(request.Body()), "literal credentials.bot_token") {
-				t.Fatalf("qualified flat key did not use canonical template resolution: request=%+v err=%v", request, err)
+				t.Errorf("qualified flat key did not use canonical template resolution: request=%+v err=%v", request, err)
 			}
 			for _, credentials := range []map[string]any{
 				{"bot_token": "unqualified"},
