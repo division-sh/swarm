@@ -43,7 +43,7 @@ func TestPolicyCaseRepeatedSelectorWithinTupleIsRefused2287(t *testing.T) {
 					}
 					continue
 				}
-				if err == nil || !strings.Contains(err.Error(), "duplicate case pair at positions 1 and 2") || !strings.Contains(err.Error(), ":") {
+				if err == nil || !strings.Contains(err.Error(), "duplicate case pair at positions 1 and 2") || !strings.Contains(err.Error(), "nodes.yaml:") {
 					t.Fatalf("repeated-selector tuple admitted instead of duplicate refusal: %v", err)
 				}
 			}
@@ -157,7 +157,7 @@ func TestPolicyCaseTupleOrderAndSiblingLists2287(t *testing.T) {
 	if !reflect.DeepEqual(handler.Rules[1].PolicyRow.Selectors, []string{"payload.target", "payload.mode"}) ||
 		!reflect.DeepEqual(handler.Rules[1].PolicyRow.CaseValues, []string{"blue", "gold"}) ||
 		handler.Rules[1].Condition != `payload.target == "blue" && payload.mode == "gold"` ||
-		!strings.HasPrefix(handler.Rules[1].DisplayLabel(), "rules[1]: case") {
+		!strings.HasPrefix(handler.Rules[1].DisplayLabel("rules", 1), "rules[1]: case") {
 		t.Fatalf("tuple order, identity or presentation changed: %#v", handler.Rules)
 	}
 	for _, spelling := range []string{"policy.low <= policy.high", "['policy.low <= policy.high']"} {
