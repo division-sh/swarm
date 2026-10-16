@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 )
@@ -251,7 +252,7 @@ type ProviderTriggerEventProvenance struct {
 }
 
 func (p ProviderTriggerEventProvenance) Valid() bool {
-	return strings.TrimSpace(p.Provider) != "" && strings.TrimSpace(p.Event) != "" &&
+	return runtimepaths.ValidateFlowSegment(p.Provider) == nil && strings.TrimSpace(p.Event) != "" &&
 		(strings.TrimSpace(p.Kind) == "raw" || strings.TrimSpace(p.Kind) == "normalized") &&
 		strings.TrimSpace(p.PackID) != "" && strings.TrimSpace(p.PackVersion) != "" &&
 		strings.TrimSpace(p.ManifestHash) != "" && strings.TrimSpace(p.SourceProvenance) != "" &&
@@ -414,7 +415,6 @@ func (c Capabilities) WithProviderTriggerEventProvenance(provenance []ProviderTr
 	providerTrigger := *out.providerTrigger
 	items := make([]ProviderTriggerEventProvenance, len(provenance))
 	for index, item := range provenance {
-		item.Provider = strings.TrimSpace(item.Provider)
 		item.Event = strings.TrimSpace(item.Event)
 		item.Kind = strings.TrimSpace(item.Kind)
 		item.PackID = strings.TrimSpace(item.PackID)

@@ -584,7 +584,7 @@ func standingIngressProviderView(provider runtimecontracts.ProjectFlowIngressPro
 		kind = "pack-required"
 	}
 	view := StandingIngressProviderView{
-		Provider: strings.TrimSpace(provider.Provider), SigningSecret: strings.TrimSpace(provider.SigningSecret),
+		Provider: provider.Provider, SigningSecret: strings.TrimSpace(provider.SigningSecret),
 		AdmissionKind: kind, Event: strings.TrimSpace(provider.Admission.Event),
 		Acknowledgement: strings.TrimSpace(provider.Admission.Acknowledge),
 	}
