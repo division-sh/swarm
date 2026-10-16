@@ -87,8 +87,8 @@ func agentDeclarationOwner(source Source, declaration AgentDeclaration) (string,
 	for _, candidate := range AgentDeclarations(source) {
 		if candidate.Source == declaration.Source &&
 			strings.TrimSpace(candidate.ScopeKind) == strings.TrimSpace(declaration.ScopeKind) &&
-			strings.TrimSpace(candidate.ScopeID) == strings.TrimSpace(declaration.ScopeID) &&
-			strings.TrimSpace(candidate.OwnerFlowID) == strings.TrimSpace(declaration.OwnerFlowID) &&
+			candidate.ScopeID == declaration.ScopeID &&
+			candidate.OwnerFlowID == declaration.OwnerFlowID &&
 			strings.TrimSpace(candidate.LocalID) == logicalID && strings.TrimSpace(candidate.OwnerURI) == owner {
 			return owner, true
 		}

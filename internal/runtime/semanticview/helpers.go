@@ -47,11 +47,16 @@ func PolicyValueForFlow(source Source, flowID, key string) (runtimecontracts.Pol
 	if source == nil {
 		return runtimecontracts.PolicyValue{}, false
 	}
+	if flowID != "" {
+		if _, found := FlowScopeByID(source, flowID); !found {
+			return runtimecontracts.PolicyValue{}, false
+		}
+	}
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return runtimecontracts.PolicyValue{}, false
 	}
-	doc := source.ResolvedPolicyForFlow(strings.TrimSpace(flowID))
+	doc := source.ResolvedPolicyForFlow(flowID)
 	root, rest := splitPolicyKey(key)
 	value, ok := doc.Values[root]
 	if !ok {
@@ -71,7 +76,11 @@ func PolicyValueForFlowWithOwner(source Source, flowID, key string) (PolicyValue
 	if source == nil {
 		return PolicyValueResolution{}, false
 	}
-	flowID = strings.TrimSpace(flowID)
+	if flowID != "" {
+		if _, found := FlowScopeByID(source, flowID); !found {
+			return PolicyValueResolution{}, false
+		}
+	}
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return PolicyValueResolution{}, false
@@ -111,11 +120,10 @@ func policyScopesForFlow(source Source, flowID string) []FlowScope {
 	if source == nil {
 		return nil
 	}
-	flowID = strings.TrimSpace(flowID)
 	if flowID == "" {
 		return nil
 	}
-	target, ok := source.FlowScopeByID(flowID)
+	target, ok := FlowScopeByID(source, flowID)
 	if !ok {
 		return nil
 	}
