@@ -111,6 +111,7 @@ func TestActivityTerminalResultUsesDurableTimestampBothStores(t *testing.T) {
 					pc := newGateRecoveryCoordinator(publication, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
 					intent := runtimepipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString())
 					intent = seedSelectedActivitySource(t, ctx, selected, pc, intent)
+					_, releaseJournal := installActivityReplayJournal(t, ctx, selected, bus, pc)
 					beforeExecution := time.Now().UTC().Truncate(time.Microsecond)
 					err := runtimepipeline.ExecuteActivityIntentForTest(ctx, pc, nil, intent)
 					afterExecution := time.Now().UTC().Truncate(time.Microsecond)
@@ -138,6 +139,7 @@ func TestActivityTerminalResultUsesDurableTimestampBothStores(t *testing.T) {
 					if err := bus.WaitForQuiescence(ctx); err != nil {
 						t.Fatal(err)
 					}
+					releaseJournal()
 					if err := closeStore(); err != nil {
 						t.Fatal(err)
 					}
@@ -232,7 +234,8 @@ func TestActivityTerminalInvalidTimestampCannotPublishBothStores(t *testing.T) {
 			pc := newGateRecoveryCoordinator(bus, selected, runtimepipeline.PipelineCoordinatorOptions{Module: gateRecoveryModule{source: source}})
 			intent := runtimepipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString())
 			intent = seedSelectedActivitySource(t, ctx, selected, pc, intent)
-			started, inserted, err := activityReplayJournal(selected).StartActivityAttempt(ctx, runtimepipeline.ActivityAttemptStartForTest(intent))
+			journal, _ := installActivityReplayJournal(t, ctx, selected, bus, pc)
+			started, inserted, err := journal.StartActivityAttempt(ctx, runtimepipeline.ActivityAttemptStartForTest(intent))
 			if err != nil || !inserted {
 				t.Fatalf("claim real journal: inserted=%t err=%v", inserted, err)
 			}
@@ -246,7 +249,7 @@ func TestActivityTerminalInvalidTimestampCannotPublishBothStores(t *testing.T) {
 			if candidate.CompletedAt != nil {
 				t.Fatal("precommit candidate unexpectedly supplies completion authority")
 			}
-			receipt, committed, err := activityReplayJournal(selected).CompleteActivityAttempt(ctx, candidate)
+			receipt, committed, err := journal.CompleteActivityAttempt(ctx, candidate)
 			if err != nil || !committed || receipt.CompletedAt == nil || receipt.CompletedAt.IsZero() {
 				t.Fatalf("real terminal commit: committed=%t receipt=%+v err=%v", committed, receipt, err)
 			}
@@ -285,6 +288,7 @@ func TestActivityRejectedChannelTargetReplaysDurableResultBothStores(t *testing.
 			intent := runtimepipeline.NonIdempotentActivityIntentForTest(runID, uuid.NewString(), uuid.NewString())
 			intent.Tool = runtimecontracts.PrivateChannelActivityPrefix + "missing"
 			intent = seedSelectedActivitySource(t, ctx, selected, pc, intent)
+			installActivityReplayJournal(t, ctx, selected, bus, pc)
 			var calls atomic.Int32
 			client := &http.Client{Transport: activityTerminalRoundTripFunc(func(*http.Request) (*http.Response, error) {
 				calls.Add(1)
