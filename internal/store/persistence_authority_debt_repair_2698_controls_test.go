@@ -19,6 +19,8 @@ const debtRepair2698FixtureNameSource = "internal/store/internal/runtimepersiste
 const debtRepair2698FixtureNameAfter = "6a6c51b3924ff248e5a6b4c382f4631d3ff734c8"
 const debtRepair2698FixtureNameSHA = "910a0a6e02aba0d8f3245454c0505ab237c6ee0da11f18a0f78b8a305a0b6976"
 const debtRepair2698CollectorTo = "502836943c1bdeacad123044ecebba5bacb85970942ab67297a4fb4719b202e2"
+const debtRepair2698ProofCostBefore = "02886cacfda701c53551d2a06cca05955eaa1b5b"
+const debtRepair2698ProofCostCollectorTo = "7898e5f737ab7f1ab9d69439eb484f57c95c3c251737a06a4c21e64dbcc24580"
 
 func TestPersistenceAuthorityDebtRepair2698DeclarationCacheUsesActualBytes(t *testing.T) {
 	root := t.TempDir()
@@ -57,8 +59,8 @@ func TestPersistenceAuthorityDebtRepair2698DeclarationCacheUsesActualBytes(t *te
 
 func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testing.T) {
 	root := persistenceAuthorityRepoRoot(t)
-	if actual, err := debtCollectorDigest(root); err != nil || actual != debtRepair2698CollectorTo {
-		t.Fatalf("native repair collector=%s expected=%s: %v", actual, debtRepair2698CollectorTo, err)
+	if actual, err := debtCollectorDigest(root); err != nil || actual != debtRepair2698ProofCostCollectorTo {
+		t.Fatalf("native repair collector=%s expected=%s: %v", actual, debtRepair2698ProofCostCollectorTo, err)
 	}
 	if err := debtCatchUpCollectorSource(root); err != nil {
 		t.Fatal(err)
@@ -67,11 +69,37 @@ func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	head := trusted
-	head.Collector = debtRepair2698CollectorTo
+	head, _, err := debtCatchUpSignedBaseline(root, debtRepair2698ProofCostBefore, debtRepair2698CollectorTo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head.Collector = debtRepair2698ProofCostCollectorTo
 	proof := debtDeliveryRetirementProof{Root: root, Actual: maps.Clone(head.Sites)}
-	if !debtRepair2698CollectorTransition(trusted.Collector, head.Collector, trusted, head, proof) {
+	if !debtRepair2698ProofCostCollectorTransition(trusted.Collector, head.Collector, trusted, head, proof) {
 		t.Fatal("exact forward source continuation refused")
+	}
+	assertDebtCatchUpForeignProvenance(t, trusted, head, proof)
+}
+
+func TestPersistenceAuthorityDebtRepair2698ProofCostForwardEdgeKeepsOriginalFingerprintAndRefusesReverse(t *testing.T) {
+	root := persistenceAuthorityRepoRoot(t)
+	archive := debtCatchUpHistoricalArchive(t, debtRepair2698ProofCostBefore)
+	if actual, err := debtCollectorDigest(archive); err != nil || actual != debtRepair2698CollectorTo {
+		t.Fatalf("first repair source was retargeted: %s: %v", actual, err)
+	}
+	trusted, _, err := debtCatchUpSignedBaseline(root, debtRepair2698ProofCostBefore, debtRepair2698CollectorTo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := trusted
+	head.Collector = debtRepair2698ProofCostCollectorTo
+	proof := debtDeliveryRetirementProof{Root: root, Actual: maps.Clone(head.Sites)}
+	if !debtRepair2698ProofCostCollectorTransition(trusted.Collector, head.Collector, trusted, head, proof) {
+		t.Fatal("exact shrink-only proof-cost successor refused")
+	}
+	if debtRepair2698ProofCostCollectorTransition(head.Collector, trusted.Collector, head, trusted, proof) ||
+		debtRepair2698CollectorTransition(trusted.Collector, head.Collector, trusted, head, proof) {
+		t.Fatal("reverse edge or retargeting the original transition was accepted")
 	}
 	assertDebtCatchUpForeignProvenance(t, trusted, head, proof)
 }

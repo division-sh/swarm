@@ -303,16 +303,7 @@ func main() {
 	if captureRecentFamilyCommand(os.Args) {
 		return
 	}
-	if len(os.Args) == 2 && os.Args[1] == "-standing-ingress-capture" {
-		captureStandingIngress()
-		return
-	}
-	if len(os.Args) == 2 && os.Args[1] == "-deployment-resource-capture" {
-		captureDeploymentResource()
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == "-served-setup" {
-		reconcileServedSetup()
+	if captureSetupFamilyCommand(os.Args) {
 		return
 	}
 	setupPins := servedSetupHistoryPins()
@@ -405,6 +396,22 @@ func main() {
 	} else if len(os.Args) != 1 {
 		panic("usage: reconcile-family145 [-write]")
 	}
+}
+
+func captureSetupFamilyCommand(args []string) bool {
+	if len(args) == 2 && args[1] == "-standing-ingress-capture" {
+		captureStandingIngress()
+		return true
+	}
+	if len(args) == 2 && args[1] == "-deployment-resource-capture" {
+		captureDeploymentResource()
+		return true
+	}
+	if len(args) > 1 && args[1] == "-served-setup" {
+		reconcileServedSetup()
+		return true
+	}
+	return false
 }
 
 func servedBatchHistoryPins() []runphysical.Pin {

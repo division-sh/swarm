@@ -12,15 +12,9 @@ import (
 const debtEventNameCollectorTo = "88b0724a6221e16b93c92943cb9090ab9178318f906edb65cc1e02fc2dcd1b66"
 
 func TestPersistenceAuthorityDebtEventNameMetadataIsLocalAndSourceBound(t *testing.T) {
-	root, copy := persistenceAuthorityRepoRoot(t), t.TempDir()
-	for _, path := range []string{"internal/serveapp/main_runtime_test.go", "tools/fixture-codemod/pipeline-observations/family145-event-name-preimages.json"} {
-		raw, err := os.ReadFile(filepath.Join(root, path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		debtWriteModuleSource(t, copy, path, string(raw))
-	}
-	debtServedObservationCopySourceEvidence(t, root, copy)
+	root := persistenceAuthorityRepoRoot(t)
+	copy := debtCatchUpSourceCopyFrom(t, root)
+	copyRepair2698CustodySources(t, root, copy)
 	_, current := debtServedDebugTransitionStates()
 	baseline := authorityDebtBaseline{BootstrapSource: strings.Repeat("a", 40), Collector: debtCacheCollectorFrom, Sites: current}
 	data := marshalAuthorityDebtBaseline(baseline)
@@ -142,17 +136,11 @@ func TestPersistenceAuthorityDebtEventNameCollectorPreservesOldChainAndAllDebt(t
 }
 
 func TestPersistenceAuthorityDebtEventNameSourceManifestAndNativeBodyFailClosed(t *testing.T) {
-	root, copy := persistenceAuthorityRepoRoot(t), t.TempDir()
+	root := persistenceAuthorityRepoRoot(t)
+	copy := debtCatchUpSourceCopyFrom(t, root)
+	copyRepair2698CustodySources(t, root, copy)
 	const file = "internal/serveapp/main_runtime_test.go"
 	const manifest = "tools/fixture-codemod/pipeline-observations/family145-event-name-preimages.json"
-	for _, path := range []string{file, manifest} {
-		raw, err := os.ReadFile(filepath.Join(root, path))
-		if err != nil {
-			t.Fatal(err)
-		}
-		debtWriteModuleSource(t, copy, path, string(raw))
-	}
-	debtServedObservationCopySourceEvidence(t, root, copy)
 	if err := debtEventNameSourcePins(copy); err != nil {
 		t.Fatal(err)
 	}
