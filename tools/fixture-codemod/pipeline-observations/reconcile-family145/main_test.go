@@ -3,6 +3,7 @@ package main
 import "testing"
 
 func TestHelperRenamesRequireExactReviewedPathAndName(t *testing.T) {
+	t.Chdir("../../../..")
 	for _, entry := range []struct{ path, before, after string }{
 		{"internal/store/storetest/event.go", "InsertCanonicalEventRecord", "InsertNativeCanonicalEventRecord"},
 		{"internal/runtime/template_instance_delivery_test.go", "waitRuntimeDBCount", "waitRuntimeStorageCount"},
