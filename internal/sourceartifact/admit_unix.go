@@ -26,7 +26,7 @@ func AdmitDirectory(root string) (*AdmittedSourceArtifact, error) {
 	if err := validateRootDirectory(directory); err != nil {
 		return nil, err
 	}
-	fd, err := unix.Open(root, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
+	fd, err := unix.Open(selectedRoot, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open source root %q: %w", root, err)
 	}

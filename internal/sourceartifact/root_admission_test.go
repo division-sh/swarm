@@ -39,6 +39,23 @@ func TestS1RootAdmissionSeparatesEqualContent(t *testing.T) {
 	}
 }
 
+func TestS1RootAdmissionRelativeSelection(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "shop-a")
+	writeTestFile(t, root, "nodes.yaml", "worker: {type: procedure}\n")
+	t.Chdir(parent)
+	for _, selected := range []string{"shop-a", "./shop-a", "shop-a/../shop-a"} {
+		artifact, err := AdmitDirectory(selected)
+		if err != nil {
+			t.Fatalf("admit %q: %v", selected, err)
+		}
+		admission, present := artifact.RootAdmission()
+		if !present || admission.RootDirectory() != "shop-a" || admission.BundleHash() != artifact.BundleHash() {
+			t.Fatalf("relative selection lost captured root: %q, %+v", selected, admission)
+		}
+	}
+}
+
 func TestS1RootAdmissionContentDecodeCannotMintRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "shop-a")
 	writeTestFile(t, root, "nodes.yaml", "worker: {type: procedure}\n")

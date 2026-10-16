@@ -88,9 +88,19 @@ func selectedRootAdmissionStore(t *testing.T, backend string) rootedSourceStore 
 	if backend == "sqlite" {
 		return newBootstrappedSQLiteRuntimeStoreForTest(t)
 	}
-	_, db, cleanup := testutil.StartPostgres(t)
+	dsn, _, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
-	return newTestPostgresStore(t, db)
+	selected, err := NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := selected.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	bootstrapTestPostgresStore(t, selected)
+	return selected
 }
 
 func admittedRootForStorage(t *testing.T, directory string) (sourceartifact.RootedSource, string) {
