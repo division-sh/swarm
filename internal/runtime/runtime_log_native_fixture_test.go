@@ -11,10 +11,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	"github.com/division-sh/swarm/internal/runtime/bus"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -41,6 +44,7 @@ type RuntimeLogNativeFixtureForTest struct {
 	PublishDelivery func(context.Context, events.Event, []events.DeliveryRoute, deliverylifecycle.ExecutionAuthority) events.Event
 	Physical        func(context.Context) RuntimeLogPhysicalForTest
 	FanOutCapacity  startupownership.FanOutCapacity
+	PrepareActor    func(*testing.T, context.Context, runtimeactors.AgentConfig) (context.Context, runtimemanager.PersistedAgent, runtimemanager.AgentLifecyclePersistence, runtimeagenttopology.SourceSetPlan)
 }
 
 type RuntimeLogPhysicalForTest struct {

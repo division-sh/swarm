@@ -6,6 +6,9 @@ import (
 
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 )
 
 func busTestAgentConfig(t testing.TB, cfg runtimeactors.AgentConfig) runtimeactors.AgentConfig {
@@ -29,4 +32,20 @@ func busTestAgentConfig(t testing.TB, cfg runtimeactors.AgentConfig) runtimeacto
 	}
 	cfg.Prompt = prompt
 	return cfg
+}
+
+func busExecutionFixtureConfig(t testing.TB, cfg runtimeactors.AgentConfig) runtimeactors.AgentConfig {
+	t.Helper()
+	if len(cfg.Config) == 0 {
+		cfg.Config = []byte(`{}`)
+	}
+	profile, err := selection.ResolveLiveBackend(selection.BackendAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := llm.ResolveAgentExecution(executionposture.Live, profile, selection.EffectiveModelAliases(nil), busTestAgentConfig(t, cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved.Actor
 }

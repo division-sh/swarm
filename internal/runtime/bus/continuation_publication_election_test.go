@@ -13,15 +13,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
-	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
@@ -67,12 +64,11 @@ func TestPublicationAndStartupElectOneExactCarrierBothStores(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				f := newCompleteEventDispatchFixtureWithOrigin(t, backend, false, runlifecyclefixture.ScenarioSetupOrigin(), semanticview.Wrap(bundle))
+				f := newExecutableCompleteEventDispatchFixture(t, backend, semanticview.Wrap(bundle), nil)
+				if err := f.generation.manager.Run(f.ctx); err != nil {
+					t.Fatal(err)
+				}
 				identity := runtimebus.ConstructedFlowInstanceIdentityFixture(f.source, ".", "", f.event.RunID())
-				seedComponentFlowConstruction(t, correlation.WithRunID(f.ctx, f.event.RunID()), f.store.(componentFlowConstructionStore), f.source, pipeline.WorkflowInstance{
-					InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
-					WorkflowName: ".", WorkflowVersion: f.source.WorkflowVersion(), CreatedAt: time.Now().UTC(),
-				})
 				if identity.Route() != flowidentity.StoredRoute(".", f.event.RunID(), f.event.RunID()) {
 					t.Fatal("election fixture lost exact native root")
 				}

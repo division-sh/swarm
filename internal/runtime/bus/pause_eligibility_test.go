@@ -28,7 +28,11 @@ func TestPausedHandedAgentParksUntilContinueBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, state := range []string{"pending", "failed", "stale_in_progress"} {
 			t.Run(backend+"/"+state, func(t *testing.T) {
-				f := newCompleteEventDispatchFixture(t, backend, false)
+				seen := make(chan events.Event, 4)
+				f := newExecutableCompleteEventDispatchFixture(t, backend, nil, seen)
+				if err := f.generation.manager.Run(f.ctx); err != nil {
+					t.Fatal(err)
+				}
 				owner := f.store.PipelineObligations()
 				work, err := owner.ClaimEvent(f.ctx, f.event.ID(), runtimepipelineobligation.PurposeRecovery)
 				if err != nil {
@@ -75,13 +79,9 @@ func TestPausedHandedAgentParksUntilContinueBothStores(t *testing.T) {
 				if len(page.Items) != 1 {
 					t.Fatalf("paused scan items = %d", len(page.Items))
 				}
-				seen := make(chan events.Event, 4)
-				generation := f.newRecordingManager(t, seen)
+				generation := f.generation
 				managerCtx := f.managedContext(t)
 				if _, err := generation.manager.HydrateForStartup(managerCtx); err != nil {
-					t.Fatal(err)
-				}
-				if err := generation.manager.Run(managerCtx); err != nil {
 					t.Fatal(err)
 				}
 				f.startDeliveryContinuations(t, managerCtx, generation)
@@ -109,6 +109,9 @@ func TestPausedHandedAgentParksUntilContinueBothStores(t *testing.T) {
 				}
 				result, err := controller.Continue(f.ctx, runtimeruncontrol.TransitionRequest{RunID: f.event.RunID(), Reason: "release"})
 				if err != nil {
+					t.Fatal(err)
+				}
+				if err := generation.coordinator.Synchronize(context.Background()); err != nil {
 					t.Fatal(err)
 				}
 				assertCompleteEventDelivery(t, seen, f.event)
@@ -383,7 +386,10 @@ func TestPausedFutureRetryAndLiveClaimRemainOwnedBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, posture := range []string{"future_retry", "live_claim"} {
 			t.Run(backend+"/"+posture, func(t *testing.T) {
-				f := newCompleteEventDispatchFixture(t, backend, false)
+				f := newExecutableCompleteEventDispatchFixture(t, backend, nil, nil)
+				if err := f.generation.manager.Run(f.ctx); err != nil {
+					t.Fatal(err)
+				}
 				owner := f.store.PipelineObligations()
 				work, err := owner.ClaimEvent(f.ctx, f.event.ID(), runtimepipelineobligation.PurposeRecovery)
 				if err != nil {
@@ -450,7 +456,8 @@ func TestPausedFutureRetryAndLiveClaimRemainOwnedBothStores(t *testing.T) {
 func TestPauseAfterCarrierElectionFencesClaimBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			f := newCompleteEventDispatchFixture(t, backend, false)
+			seen := make(chan events.Event, 4)
+			f := newExecutableCompleteEventDispatchFixture(t, backend, nil, seen)
 			ctx, cancel := context.WithTimeout(f.managedContext(t), 10*time.Second)
 			defer cancel()
 			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(f.agentID), AgentIdentity: f.identity}
@@ -461,8 +468,7 @@ func TestPauseAfterCarrierElectionFencesClaimBothStores(t *testing.T) {
 			if _, err := f.store.PipelineObligations().Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("audit_handed")); err != nil {
 				t.Fatal(err)
 			}
-			seen := make(chan events.Event, 4)
-			generation := f.newRecordingManager(t, seen)
+			generation := f.generation
 			if _, err := generation.manager.HydrateForStartup(ctx); err != nil {
 				t.Fatal(err)
 			}

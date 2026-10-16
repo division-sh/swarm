@@ -25,7 +25,7 @@ type ExactHandoffNativeFixtureForTest struct {
 	Context       context.Context
 	SelectedEvent events.Event
 	SelectedRoute events.DeliveryRoute
-	Seed          func(*testing.T, string, string, events.DeliveryRoute) events.Event
+	Seed          func(*testing.T, string, string, events.DeliveryRoute) (events.Event, runtimedelivery.ExecutionAuthority)
 	Session       func(*testing.T, agentidentity.Identity) string
 	Load          func(*testing.T, string) events.Event
 }
@@ -71,7 +71,9 @@ func newExactHandoffProofStore(fixture ExactHandoffNativeFixtureForTest, failOnc
 
 func (s *exactHandoffProofStore) seed(t *testing.T, eventID, runID string, route events.DeliveryRoute) events.Event {
 	t.Helper()
-	return s.fixture.Seed(t, eventID, runID, route)
+	event, authority := s.fixture.Seed(t, eventID, runID, route)
+	s.authority = authority
+	return event
 }
 
 func (s *exactHandoffProofStore) claim(t *testing.T, eventID, runID string, route events.DeliveryRoute) runtimedelivery.Claim {

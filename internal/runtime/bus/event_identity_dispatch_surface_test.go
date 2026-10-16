@@ -78,6 +78,7 @@ type completeEventDispatchFixture struct {
 	identity         agentidentity.Identity
 	source           semanticview.Source
 	rootConstruction *runtimepipeline.CommittedFlowInstanceActivation
+	generation       *completeEventDispatchGeneration
 }
 
 type completeEventDispatchGeneration struct {
@@ -151,7 +152,8 @@ func TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres
 func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			fixture := newCompleteEventDispatchFixture(t, backend, false)
+			seen := make(chan events.Event, 1)
+			fixture := newExecutableCompleteEventDispatchFixture(t, backend, nil, seen)
 			work, err := fixture.store.PipelineObligations().ClaimEvent(
 				fixture.ctx,
 				fixture.event.ID(),
@@ -171,8 +173,7 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 			if err := fixture.updateChainDepth(-1); err == nil {
 				t.Fatalf("%s schema admitted negative chain_depth", backend)
 			}
-			seen := make(chan events.Event, 1)
-			generation := fixture.newRecordingManager(t, seen)
+			generation := fixture.generation
 			manager := generation.manager
 			managerCtx := fixture.managedContext(t)
 			if _, err := manager.HydrateForStartup(managerCtx); err != nil {
@@ -274,6 +275,32 @@ func newCompleteEventDispatchFixtureWithOrigin(
 	source semanticview.Source,
 	originReaders ...func(completeEventDispatchStore) runtimebus.RunOriginReader,
 ) completeEventDispatchFixture {
+	return newCompleteEventDispatchFixturePrepared(t, backend, decisionObligation, origin, source, nil, originReaders...)
+}
+
+// Executable cases prepare their real native manager before the first durable
+// delivery. Recovery/storage-only fixture construction remains unadmitted.
+func newExecutableCompleteEventDispatchFixture(t *testing.T, backend string, source semanticview.Source, seen chan<- events.Event) completeEventDispatchFixture {
+	t.Helper()
+	return newCompleteEventDispatchFixturePrepared(t, backend, false, runlifecyclefixture.ScenarioSetupOrigin(), source, func(f *completeEventDispatchFixture) {
+		f.generation = f.newRecordingManager(t, seen)
+		f.ctx = f.managedContext(t)
+		admission, _ := managedexecution.FromContext(f.ctx)
+		authority, err := runtimedelivery.NewExecutionAuthority(testSourceArtifactFact(f.source), admission)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.bus.SetDeliveryAuthority(authority); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func newCompleteEventDispatchFixturePrepared(
+	t *testing.T, backend string, decisionObligation bool, origin runtimerunlifecycle.RunOrigin,
+	source semanticview.Source, prepare func(*completeEventDispatchFixture),
+	originReaders ...func(completeEventDispatchStore) runtimebus.RunOriginReader,
+) completeEventDispatchFixture {
 	t.Helper()
 	constructSource := source == nil
 	if constructSource {
@@ -370,6 +397,11 @@ func newCompleteEventDispatchFixtureWithOrigin(
 			}
 		}
 	}
+	if !constructSource && prepare != nil {
+		identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, ".", "", runID)
+		committed := seedCompleteEventDispatchRoot(t, runtimecorrelation.WithRunID(ctx, runID), selected.(componentFlowConstructionStore), bus, source, identity, createdAt)
+		rootConstruction = &committed
+	}
 	envelope := events.EnvelopeForSourceRoute(events.EventEnvelope{}, sourceRoute)
 	eventType := events.EventType("custom.replay.checked")
 	if constructSource {
@@ -401,9 +433,17 @@ func newCompleteEventDispatchFixtureWithOrigin(
 		ownerURI = scope.AgentURIs[agentID]
 	}
 	identity := agentidentitytest.RootDeclaredForRun(t, runID, agentID, ownerURI)
-	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity}}, runtimepipelineobligation.ScopeSubscribed)
 	fixture := completeEventDispatchFixture{
 		store: selected, ctx: ctx, bus: bus, event: event, agentID: agentID, identity: identity, source: source, rootConstruction: rootConstruction,
+	}
+	if prepare != nil {
+		prepare(&fixture)
+	}
+	storetest.CommitSemanticEventWithRoutes(t, fixture.ctx, selected, event, []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity}}, runtimepipelineobligation.ScopeSubscribed)
+	if prepare != nil {
+		if err := fixture.generation.manager.FinalizeCommittedAgentReadiness(fixture.ctx, event, []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity}}); err != nil {
+			t.Fatalf("finalize native complete-event receiver readiness: %v", err)
+		}
 	}
 	if decisionObligation {
 		fixture.insertDecisionObligation(t)
@@ -584,13 +624,20 @@ func (f completeEventDispatchFixture) insertDecisionObligationFor(t *testing.T, 
 
 func (f completeEventDispatchFixture) managedContext(t *testing.T) context.Context {
 	t.Helper()
+	if f.generation == nil {
+		t.Fatal("complete-event execution requires its prepared native generation")
+	}
+	evidence, err := f.generation.grant.Evidence()
+	if err != nil {
+		t.Fatal(err)
+	}
 	admission, err := managedexecution.New(
 		managedexecution.KindNormalRuntime,
-		"complete-event-dispatch",
-		1,
+		evidence.GrantID,
+		evidence.RuntimeGeneration,
 		"",
-		"complete-event-proof",
-		"bundle-v2:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		evidence.SourceSetRevision,
+		evidence.BundleHash,
 		nil,
 	)
 	if err != nil {
@@ -599,7 +646,7 @@ func (f completeEventDispatchFixture) managedContext(t *testing.T) context.Conte
 	return managedexecution.WithAdmission(f.ctx, admission)
 }
 
-func (f completeEventDispatchFixture) newRecordingManager(
+func (f *completeEventDispatchFixture) newRecordingManager(
 	t *testing.T,
 	seen chan<- events.Event,
 ) *completeEventDispatchGeneration {
@@ -692,6 +739,7 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	if err != nil || len(records) != 1 || records[0].Config.Identity != f.identity {
 		t.Fatalf("complete-event original constructed receiver changed: records=%+v err=%v", records, err)
 	}
+	f.generation = generation
 	return generation
 }
 

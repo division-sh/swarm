@@ -38,7 +38,10 @@ func TestCommittedAgentTransitionNativePublicationBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, disposition := range []string{"live", "retired", "wrong_generation"} {
 			t.Run(backend+"/"+disposition, func(t *testing.T) {
-				f := newCompleteEventDispatchFixture(t, backend, false)
+				f := newExecutableCompleteEventDispatchFixture(t, backend, nil, nil)
+				if err := f.generation.manager.Run(f.ctx); err != nil {
+					t.Fatal(err)
+				}
 				ctx, cancel := context.WithTimeout(f.ctx, 10*time.Second)
 				defer cancel()
 				route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(f.agentID), AgentIdentity: f.identity}

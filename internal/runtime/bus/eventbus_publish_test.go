@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -54,6 +55,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -306,6 +308,8 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 	}
 	evt := exactDuplicateEventBusEvent(runID)
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-original"), AgentIdentity: runtimebustest.IdentityForRun(t, runID, "agent-original", "")}
+	seedActiveRuntimeBusAgentForSource(t, ctx, pg, runID, "agent-original", authorActivityTestSourceArtifactFact)
+	ctx = admitPreparedRuntimeBusAgentExecution(t, ctx, pg, authorActivityTestSourceArtifactFact)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, pg, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeDirect)
 	assertEventBusExactDuplicateIsOperationNoOp(t, pg, evt, func() (eventBusExactDuplicateState, error) {
 		return readEventBusExactDuplicateState(ctx, pg, runID, evt.ID())
@@ -336,6 +340,8 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 	}
 	evt := exactDuplicateEventBusEvent(runID)
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-original"), AgentIdentity: runtimebustest.IdentityForRun(t, runID, "agent-original", "")}
+	seedActiveRuntimeBusAgentForSource(t, ctx, sqliteStore, runID, "agent-original", authorActivityTestSourceArtifactFact)
+	ctx = admitPreparedRuntimeBusAgentExecution(t, ctx, sqliteStore, authorActivityTestSourceArtifactFact)
 	storetest.CommitSemanticEventWithRoutes(t, ctx, sqliteStore, evt, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeDirect)
 	assertEventBusExactDuplicateIsOperationNoOp(t, sqliteStore, evt, func() (eventBusExactDuplicateState, error) {
 		return readEventBusExactDuplicateState(ctx, sqliteStore, runID, evt.ID())
@@ -1222,7 +1228,7 @@ func seedActiveRuntimeBusAgentForSource(t *testing.T, ctx context.Context, selec
 	t.Helper()
 	identity := runtimebustest.IdentityForRun(t, runID, agentID, "")
 	if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, selected, runtimemanager.PersistedAgent{
-		Config: busTestAgentConfig(t, runtimeactors.AgentConfig{
+		Config: busExecutionFixtureConfig(t, runtimeactors.AgentConfig{
 			ID:                 agentID,
 			Identity:           identity,
 			Role:               "observer",
@@ -1240,6 +1246,27 @@ func seedActiveRuntimeBusAgentForSource(t *testing.T, ctx context.Context, selec
 		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 	}
 	return identity
+}
+
+func admitPreparedRuntimeBusAgentExecution(t testing.TB, ctx context.Context, selected agentfixture.Store, source runtimecorrelation.SourceArtifactFact) context.Context {
+	t.Helper()
+	authority, err := agentfixture.AdmitExecutionAuthority(t, ctx, selected, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability, err := agentfixture.ProcessCapability(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, found, err := capability.CurrentSourceSet(ctx)
+	if err != nil || !found {
+		t.Fatalf("prepared bus source plan: found=%t error=%v", found, err)
+	}
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, authority.ExecutionID(), authority.Generation(), "", plan.Revision, source.BundleHash(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return managedexecution.WithAdmission(ctx, admission)
 }
 
 func loadRunStateForEvent(t *testing.T, ctx context.Context, selected any, eventID string) (string, string, string) {
@@ -3318,6 +3345,15 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 				BundleHash: testSourceArtifactFact(source).BundleHash(),
 			})
 			agentIdentity := seedActiveRuntimeBusAgentForSource(t, ctx, pg, tc.runID, agentID, testSourceArtifactFact(source))
+			ctx := admitPreparedRuntimeBusAgentExecution(t, ctx, pg, testSourceArtifactFact(source))
+			managed, _ := managedexecution.FromContext(ctx)
+			authority, err := runtimedelivery.NewExecutionAuthority(testSourceArtifactFact(source), managed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := eb.SetDeliveryAuthority(authority); err != nil {
+				t.Fatal(err)
+			}
 			subscriptions := []string{string(tc.eventType)}
 			admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
 				AgentID: agentID, LocalEvents: testLocalSubscriptionEvents(subscriptions), Subscriptions: subscriptions,

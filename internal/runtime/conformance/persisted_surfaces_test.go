@@ -36,6 +36,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -49,6 +50,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -142,6 +144,7 @@ func TestCanonicalTurnSummarySurface_RoundTripsThroughConversationReader(t *test
 	runID := uuid.NewString()
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	seedConformanceAgent(t, ctx, pg, runID, "agent-1")
+	ctx = admitConformancePreparedAgentExecution(t, ctx, pg)
 	sessionID := uuid.NewString()
 	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",
@@ -290,6 +293,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 	runID := uuid.NewString()
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, runID, "agent-1")
+	ctx = admitConformancePreparedAgentExecution(t, ctx, pg)
 
 	event1 := eventtest.PersistedProjection(uuid.NewString(),
 
@@ -348,10 +352,9 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 
 	claims := map[string]runtimedelivery.Claim{}
 	newTurnContext := func(evt events.Event) context.Context {
-		base := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(context.Background()), lifecycleToken)
+		base := runtimeeffects.WithLifecycleToken(ctx, lifecycleToken)
 		base = worklifetime.WithProcess(base, conformanceTestProcessOwner(t))
 		base = worklifetime.WithOccurrence(base, workOwner)
-		base = managedConformanceExecutionContext(t, base, "reused-live-session")
 		base = agentmemory.WithExecution(base, agentmemory.Plan{Enabled: true}, lifecycleToken.Identity)
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
@@ -447,6 +450,7 @@ func TestCLISessionFailureDoesNotRotateFromStderrProse(t *testing.T) {
 	runID := uuid.NewString()
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	lifecycleToken := seedConformanceRunningAgent(t, ctx, pg, runID, "agent-1")
+	ctx = admitConformancePreparedAgentExecution(t, ctx, pg)
 
 	eventID := uuid.NewString()
 	evt := eventtest.PersistedProjection(eventID,
@@ -521,10 +525,9 @@ printf '{"result":"ok"}'
 
 	var deliveryClaim runtimedelivery.Claim
 	newTurnContext := func(evt events.Event) context.Context {
-		base := runtimeeffects.WithLifecycleToken(testAuthorActivityContext(context.Background()), lifecycleToken)
+		base := runtimeeffects.WithLifecycleToken(ctx, lifecycleToken)
 		base = worklifetime.WithProcess(base, conformanceTestProcessOwner(t))
 		base = worklifetime.WithOccurrence(base, workOwner)
-		base = managedConformanceExecutionContext(t, base, "cli-session-failure")
 		base = agentmemory.WithExecution(base, agentmemory.Plan{Enabled: true}, lifecycleToken.Identity)
 		base = runtimecorrelation.WithRunID(base, runID)
 		base = runtimebus.WithInboundEvent(base, evt)
@@ -621,6 +624,7 @@ func TestConversationPersistenceDoesNotPromoteAuditRowsIntoLiveSessions(t *testi
 	}
 
 	auditSessionID := uuid.NewString()
+	ctx = admitConformancePreparedAgentExecution(t, ctx, pg)
 	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		SessionID: auditSessionID,
 		AgentID:   "agent-1",
@@ -1412,6 +1416,16 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 	replayRecipient := "agent-replay"
 	replayDeliveries := runtimebustest.SubscribeForRun(t, bus, replayRunID, replayRecipient)
 	replayIdentity := runtimebustest.IdentityForRun(t, replayRunID, replayRecipient, "")
+	seedConformanceAgentIdentity(t, ctx, pg, replayIdentity)
+	ctx = admitConformancePreparedAgentExecution(t, ctx, pg)
+	admission, _ := managedexecution.FromContext(ctx)
+	authority, err := runtimedelivery.NewExecutionAuthority(authorActivityTestSourceArtifactFact, admission)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bus.SetDeliveryAuthority(authority); err != nil {
+		t.Fatal(err)
+	}
 	bus.SetCommittedAgentReadinessFinalizer(runtimebus.CommittedAgentReadinessFinalizerFunc(func(_ context.Context, event events.Event, routes []events.DeliveryRoute) error {
 		for _, route := range routes {
 			if route.AgentIdentity.RunID != event.RunID() {
@@ -1461,7 +1475,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		t.Fatalf("plant missing-run recovery corruption: %v", err)
 	}
 
-	authority, err := bus.DeliveryAuthority()
+	authority, err = bus.DeliveryAuthority()
 	if err != nil {
 		t.Fatalf("load delivery authority: %v", err)
 	}
@@ -1601,6 +1615,7 @@ func TestCanonicalRuntimeLogTurnBlockSurface_IsOmittedFromPublicConversationProj
 	runID := uuid.NewString()
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
 	seedConformanceAgent(t, ctx, pg, runID, "agent-1")
+	ctx = admitConformancePreparedAgentExecution(t, ctx, pg)
 	sessionID := uuid.NewString()
 	if err := persistConformanceAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:   "agent-1",
@@ -1860,6 +1875,12 @@ func requireMutationSurface(t *testing.T, selected any) {
 func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, runID, agentID string) {
 	t.Helper()
 	identity := conformanceAgentIdentity(t, runID, agentID)
+	seedConformanceAgentIdentity(t, ctx, pg, identity)
+}
+
+func seedConformanceAgentIdentity(t *testing.T, ctx context.Context, pg *store.PostgresStore, identity agentidentity.Identity) {
+	t.Helper()
+	agentID := identity.AgentID()
 	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents."+agentID+".intent", "Exercise the conformance surface.")
 	if err != nil {
 		t.Fatalf("resolve conformance agent intent: %v", err)
@@ -1868,21 +1889,30 @@ func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresS
 	if err != nil {
 		t.Fatalf("derive conformance agent prompt: %v", err)
 	}
+	config := runtimeactors.AgentConfig{
+		ID:                 agentID,
+		Identity:           identity,
+		Role:               "tester",
+		FlowID:             "global",
+		FlowPath:           identity.FlowInstance(),
+		Type:               "stub",
+		Model:              "regular",
+		ResolvedLLMBackend: "anthropic",
+		ExecutionMode:      "live",
+		Intent:             intent,
+		Prompt:             prompt,
+		Config:             []byte(`{}`),
+	}
+	profile, err := selection.ResolveLiveBackend(selection.BackendAnthropic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := runtimellm.ResolveAgentExecution(executionposture.Live, profile, selection.EffectiveModelAliases(nil), config)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := storetest.UpsertStaticAgentFixture(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config: runtimeactors.AgentConfig{
-			ID:                 agentID,
-			Identity:           identity,
-			Role:               "tester",
-			FlowID:             "global",
-			FlowPath:           identity.FlowInstance(),
-			Type:               "stub",
-			Model:              "regular",
-			ResolvedLLMBackend: "anthropic",
-			ExecutionMode:      "live",
-			Intent:             intent,
-			Prompt:             prompt,
-			Config:             []byte(`{}`),
-		},
+		Config:    resolved.Actor,
 		Status:    "active",
 		HiredBy:   "conformance-test",
 		StartedAt: time.Now().UTC(),
