@@ -40,7 +40,7 @@ func TestActivityResultEventsMaterializeIntoCatalogSchemaAndProduces(t *testing.
 		Tools: map[string]ToolSchemaEntry{
 			"source_scrape": MustToolSchemaEntry(
 				WithToolHandler(ToolHandlerHTTP),
-				WithToolEffect(ActivityEffectClassReadOnly),
+
 				WithToolSchemas(
 					MustToolInputSchema(ToolSchemaObject, ToolSchemaProperties(map[string]ToolInputSchema{
 						"url": MustToolInputSchema(ToolSchemaString),

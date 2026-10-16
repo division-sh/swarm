@@ -2663,10 +2663,10 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 	if !ok {
 		return fmt.Errorf("%w: activity tool %q is not declared", ErrInvalidConfig, toolID)
 	}
-	effectClass := tool.Effect()
-	if !runtimecontracts.SupportedActivityEffectClass(effectClass) {
-		return fmt.Errorf("%w: activity tool %q effect_class %q is not executable in Stage 1", ErrInvalidConfig, toolID, tool.Effect())
+	if _, hasHTTP := tool.HTTPExecution(); tool.Handler() != runtimecontracts.ToolHandlerHTTP || !hasHTTP {
+		return fmt.Errorf("%w: activity tool %q requires an authored HTTP contract", ErrInvalidConfig, toolID)
 	}
+	effectClass := runtimecontracts.ActivityEffectClassNonIdempotentWrite
 	input := make(map[string]any, len(activitySpec.Input))
 	base := e.currentContext(frame)
 	for field, expr := range activitySpec.Input {

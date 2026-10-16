@@ -124,7 +124,7 @@ func FreshActivityRequestLineage(request, parent events.Event, source semanticvi
 		return ActivityRequestLineage{}, fmt.Errorf("fresh activity has no completed exact parent delivery")
 	}
 	tool, ok := source.ToolEntries()[intent.Tool]
-	if !ok || tool.Effect() != intent.EffectClass || !runtimecontracts.SupportedActivityEffectClass(intent.EffectClass) {
+	if _, hasHTTP := tool.HTTPExecution(); !ok || tool.Handler() != runtimecontracts.ToolHandlerHTTP || !hasHTTP || intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
 		return ActivityRequestLineage{}, fmt.Errorf("fresh selected activity effect is not admitted")
 	}
 	if intent.BundleHash != "" {

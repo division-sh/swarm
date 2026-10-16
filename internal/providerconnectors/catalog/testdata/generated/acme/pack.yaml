@@ -2,7 +2,7 @@ id: provider.acme.connector
 version: 0.1.0
 platform_version: '>=0.7.0 <0.8.0'
 type: connector
-manifest_hash: sha256:041b366254f2e1c2d047999d7a93eadd02d53c922b9ab229b57bb03292e0576e
+manifest_hash: sha256:95fb5d61e22fd05ba0b5e0fc61ab3c276da7b34ddeedeb9b4ff05d66fffca8a2
 provenance:
     source: platform
 capabilities:

@@ -2880,7 +2880,7 @@ func TestSelectedContractForkAuthoredHTTPToolPersistsCapabilityAndRejectsHostile
 	defer target.Close()
 
 	toolEntries := map[string]runtimecontracts.ToolSchemaEntry{
-		"selected_http": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass("write_or_unknown")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: http.MethodPost, URL: target.URL, TimeoutSeconds: 5})),
+		"selected_http": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: http.MethodPost, URL: target.URL, TimeoutSeconds: 5})),
 	}
 	moduleSource, err := yamlsource.Load([]byte("compute_only:\n  handler_type: wasm\n  path: modules/pinned.wasm\n  abi: core-json-v1\n  entry: compute\n  digest: sha256:" + strings.Repeat("0", 64) + "\n  input_schema: {type: object, properties: {value: {type: integer}}}\n  output_schema: {type: object, properties: {value: {type: integer}}}\n  limits: {gas: 100, memory_pages: 16, output_bytes: 1024}\n"))
 	if err != nil {

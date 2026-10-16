@@ -311,8 +311,6 @@ func CopyLifecycleEmitterActivityOutcomes(t testing.TB, nested bool) string {
 	nodes = strings.Replace(nodes, "        tool: send\n", "        tool: send\n        approval: {decision: approve_send}\n", 1)
 	nodes += "    send.revision_requested: {}\n    send.rejected: {}\n"
 	writeClosedVariantFile(t, root, prefix+"nodes.yaml", nodes)
-	tool := lifecycleStaticRead(t, root, prefix+"tools.yaml")
-	writeClosedVariantFile(t, root, prefix+"tools.yaml", strings.Replace(tool, "effect_class: read_only", "effect_class: non_idempotent_write", 1))
 	return root
 }
 

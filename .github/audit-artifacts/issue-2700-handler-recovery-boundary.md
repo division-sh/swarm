@@ -1,8 +1,40 @@
 # #2700 R04: Exact Existing-Owner Boundary
 
+Current disposition: reviewer-a6221349165 accepts the gap and pins the missing
+handoff to E's #2701 decision-5 startup process-generation/possession owner.
+The required fact is predecessor COMMIT FENCING, not physical process/request
+death. A owns the activity adapter only; E owns the authoritative startup cut
+and boot/status integration. No claim/reopen/diagnostic marker substitutes.
+First establish whether existing writer fences cover all displaced attempts;
+any added persisted binding requires its exact A/E field/transaction map to be
+reviewed first. R04 remains open, no new coordinator or independent E-hunk edit.
+
 C1'' BLOCKING EVENT under reviewer-a6221203713 condition1, not a new product
-question or a proposed coordinator. Production remains dd39a85e4a. The retired
-key/handler cutover has not started. No push before B; #2592 priority remains.
+question or a proposed coordinator. The signed RED witness is c426cf66e9;
+independent shared-key/handler cutover is now in progress locally. No push
+before B; #2592 priority remains.
+
+E's exact semantic hook is recorded on #2701 at6221547458. The joint provenance
+sub-gate is now APPROVED by6221888821 and6221925281, with implementation handoff
+6221967140. The retained native process session's
+ReconcileDisplacedHTTPActivities step follows acknowledged generation cutover
+and precedes BOTH selected-context recovery and PreparedStartup.Start. It lends
+its original mutationprotocol.Attempt plus an opaque transaction-bound fenced
+cut to A's private activity Tx adapter. The real disposition may not be supplied
+until the joint writer/currentness/legacy-row implementation is complete. No activity
+schema or backend writer changes have been made yet; a fresh claim, open
+connection or elapsed time is not that disposition.
+
+The approved immutable reference is processbinding.ActivityExecutionBinding:
+version activity-execution.v1 plus exact grant_id AND state_version. Its shape
+validation supplies no currentness or bearer authority. E owns the opaque
+fixed-session cut and canonical historical-grant proof; A owns the row adapters
+and exact uncertainty/result publication. Historical terminal copies in B's
+runforkpersistence/run_fork_activity_generation.go and
+activityjournal/fork_history_fixture.go are explicitly non-executing paths,
+including the latter file absent from this pre-B source tree. Neither NULL nor
+a copied source reference may become a child dispatch/recovery grant. Actual B
+integration and re-census remain mandatory before landing.
 
 ## Executed Component Evidence
 

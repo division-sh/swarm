@@ -71,7 +71,6 @@ type GeneratorOperation struct {
 	Method          string                               `yaml:"method"`
 	ToolID          string                               `yaml:"tool_id"`
 	Description     string                               `yaml:"description"`
-	EffectClass     string                               `yaml:"effect_class"`
 	PathParameters  []GeneratorField                     `yaml:"path_parameters"`
 	RequestBody     GeneratorRequestBody                 `yaml:"request_body"`
 	InjectedInputs  []GeneratorInjectedInput             `yaml:"injected_inputs"`
@@ -243,9 +242,6 @@ func (o GeneratorOperation) Validate(provider string) error {
 	toolProvider, action, ok := splitToolID(toolID)
 	if !ok || toolProvider != provider || action == "" || toolID != provider+"."+action || !catalogIdentityTokenPattern.MatchString(action) {
 		return fmt.Errorf("%s tool_id %q must use stable %s.<action> form", context, o.ToolID, provider)
-	}
-	if strings.TrimSpace(o.EffectClass) != string(runtimecontracts.ActivityEffectClassNonIdempotentWrite) {
-		return fmt.Errorf("%s effect_class must be non_idempotent_write", context)
 	}
 	if o.PathParameters == nil || o.InjectedInputs == nil {
 		return fmt.Errorf("%s path_parameters and injected_inputs must be declared, including declared-empty", context)
@@ -842,7 +838,6 @@ func generateOperationTool(document openAPIDocument, profile GeneratorProfile, s
 		runtimecontracts.WithToolCategory(Category),
 		runtimecontracts.WithToolDescription(selected.Description),
 		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-		runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(selected.EffectClass)),
 		runtimecontracts.WithToolSchemas(inputSchema, outputSchema),
 		runtimecontracts.WithToolResponseSuccess(selected.ResponseSuccess),
 		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{

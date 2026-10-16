@@ -5287,10 +5287,9 @@ handler_specification:
           result event is already recorded, duplicate delivery, replay, and crash recovery MUST reuse the recorded result and
           MUST NOT call the external tool again for the same request identity.
       supported_tool_sources:
-        authored_http_tools: Required Stage 1 supported surface for read_only activity execution and for non_idempotent_write
-          activity execution when the activity_attempts journal owns provider-attempt truth. The tool must be declared in
-          tools.yaml or imported as a connector pack, resolve to handler_type http, and include an http block. read_only
-          tools may retry under the read-only retry policy. non_idempotent_write tools must check the existing
+        authored_http_tools: Supported only when the activity_attempts journal owns provider-attempt truth. The tool must be declared in
+          tools.yaml or imported as a connector pack, resolve to handler_type http, and include an http block. Every HTTP
+          method uses the same conservative execution behavior. All HTTP activities must check the existing
           activity_attempts row for the request identity and, when loop-owned, atomically compare the loop generation and
           insert/read activity_attempts.started before credential resolution or outbound preparation. It must not automatically retry or re-dispatch once an attempt
           may have reached the provider, and may consume static credentials through the existing credential-store/import-
@@ -5300,25 +5299,15 @@ handler_specification:
           is false or unresolved. HTTP tools using response_mapping, rate_limit, or rate_limit_max_wait are not admitted to
           activities in Stage 1; those subfeatures require later owner consumption before activity execution may claim them.
         platform_builtin: Not callable from activity in Stage 1; fail closed. Retired handler actions have no activity replacement.
-        mcp: Not callable from activity in Stage 1. MCP-discovered/self-described effect classes are not authoritative; an
-          authored registration-site override is required in a future slice before MCP tools can be activity-callable.
+        mcp: Not callable from activity in Stage 1. MCP-discovered/self-described effect classifications do not authorize activity execution.
         native_or_generated_tools: Not callable from activity in Stage 1; fail closed.
-        credentialed_http_tools: Static credentials are admitted only for authored HTTP non_idempotent_write activities and
+        credentialed_http_tools: Static credentials are admitted only for authored HTTP activities and
           only through the existing credential-store/import-boundary owner. Managed credentials are admitted only for
-          non_idempotent_write provider_connector HTTP activities and only through `tool_model.managed_credential_store`.
+          provider_connector HTTP activities and only through `tool_model.managed_credential_store`.
           Static and managed credential values must not appear in logs, result payloads, readback, capability output, or
           errors.
-      effect_classes:
-        read_only:
-          retry_default: max_attempts 3, exponential backoff
-          fork_default: reexecute_read
-        idempotent_write:
-          stage_1_execution: Not executable in Stage 1; split until stable activity attempt/result journaling and idempotency
-            execution ownership are specified and implemented.
-          retry_default: max_attempts 2, exponential backoff
-          fork_default: reuse_recorded_result
-        non_idempotent_write:
-          stage_1_execution: Executable only for authored HTTP tools, with optional static credentials or managed
+      http_execution:
+          rule: Executable only for authored HTTP tools, with optional static credentials or managed
             credentials for provider_connector tools, when the activity_attempts journal is available. The runtime must
             consume or atomically claim the row on duplicate/redelivered request events before credential resolution or provider preparation,
             insert the started attempt row before resolving credentials and before outbound dispatch,
@@ -5337,7 +5326,9 @@ handler_specification:
             a later caller submits a different clock value; rollback persists neither the result nor its terminal time.
           retry_default: max_attempts 1, no retry
           fork_default: explicit proposed-effect/evidence disposition under runtime.run_fork.selected_contract_execution; never infer fork authorization from source approval
-        long_running: Split to a later resume/cancel/journal slice; fail closed in Stage 1.
+          interruption: After physical launch, timeout, transport failure, interrupted response or process death has an uncertain outcome and never authorizes automatic redispatch. Preparation/admission refusal before launch and complete known provider responses remain distinct. A retained started row alone cannot prove the predecessor has lost commit authority.
+          retained_evidence: Historical request, journal and result class fields remain immutable evidence. They do not select an HTTP retry policy or authorize reexecute_read.
+          admission: The retired effect_class tool key is refused on presence with the teaching error defined by tool_model.http_interruption_rule; there is no ignored declaration or method-based safety inference.
       interactions:
         with_emit: PROHIBITED in Stage 1. Use generated activity result events instead. Immediate authored emit+activity ordering
           is intentionally not defined in this slice.
@@ -11256,7 +11247,7 @@ tool_model:
       required:
       - "tool id MUST use `<provider>.<action>` form."
       - "`handler_type` MUST resolve to `http` and include an `http` block with explicit `method` and `url`."
-      - "`effect_class` MUST be `non_idempotent_write`."
+      - "HTTP calls use the fixed conservative interruption behavior; tools must not declare effect_class."
       - "exactly one credential mode MUST be declared: either static credential keys under `credentials` or one managed credential handle under `managed_credential`."
       - "Every provider connector MUST declare exactly one closed `response_success` policy. Ordinary HTTP-status APIs declare `kind: http_status_2xx`; APIs that encode provider failure inside HTTP 2xx declare `kind: json_field_equals` with explicit path and expected scalar data. No provider/action-specific Go completeness switch is authoritative."
       forbidden:
@@ -13077,21 +13068,16 @@ tool_model:
       category: string — optional semantic profile marker. `provider_connector` means the tool must satisfy
         tool_model.provider_connector_tools.
       handler_type: string — platform_builtin | mcp | http. Default http.
-      effect_class: string — required when the tool is callable from a handler activity. Executable Stage 1 values are
-        read_only and non_idempotent_write on the authored HTTP activity_attempts journal path. idempotent_write is reserved
-        until idempotency execution ownership is specified and implemented; long_running is reserved for a later durable
-        resume/cancel slice.
-        This declaration applies to handler-activity execution, not agent calls. Agent HTTP always uses
-        write_or_unknown; an interrupted launched call is outcome-uncertain and is never redispatched.
       input_schema: object — parameter names and types the tool accepts
       output_schema: object — field names and types the tool returns
     admission_rule: Only the declared tool vocabulary is admitted. Unknown fields fail strict source admission
       before tool resolution; no removed-spelling table or translator exists.
-    agent_effect_notice: >
-      Describe emits one informational notice per authored, scoped, agent-callable tool declaration carrying
-      effect_class, independent of referencing-agent count or live provider availability: effect_class is not applied
-      to agent calls; an interrupted call is outcome-uncertain and not redispatched. Omitted classes and declarations
-      callable only from activities do not acquire this notice.
+    http_interruption_rule: >
+      Every HTTP tool call, from a handler activity or an agent, has one fixed interruption behavior.
+      Interruption after launch is outcome-uncertain and never authorizes automatic redispatch, including GET.
+      Complete known responses and prelaunch refusals remain distinct. The retired effect_class key refuses
+      through shared source admission with its source coordinate and the teaching message:
+      effect_class is not a tool key; interrupted HTTP calls are outcome-uncertain and not retried.
     agent_uncertainty_presentation: >
       Agent-facing tool-result text says: result unknown: the call may or may not have reached the system; it will not
       be retried automatically. Agent-only structured presentation preserves class, detail, retryability and identity

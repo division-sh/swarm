@@ -26,7 +26,6 @@ operations:
     method: post
     tool_id: acme.create_widget
     description: create Acme widgets
-    effect_class: non_idempotent_write
     path_parameters:
       - {source: account-id, input: account_id, type: string, required: true}
     request_body:

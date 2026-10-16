@@ -44,7 +44,7 @@ func TestAuthoredScenarioWitnessResponsePlanNeverRescansMaterializedData(t *test
 	}
 	tool, err := runtimecontracts.NewToolSchemaEntry(
 		runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-		runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+
 		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid/send"}),
 		runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), output),
 	)
@@ -313,7 +313,7 @@ func scenarioExecutionProfileTestSource(t *testing.T) (semanticview.Source, runt
 	tool, err := runtimecontracts.NewToolSchemaEntry(
 		runtimecontracts.WithToolCategory("provider_connector"),
 		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-		runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+
 		runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid/send"}),
 		runtimecontracts.WithToolSchemas(empty, output),
 	)

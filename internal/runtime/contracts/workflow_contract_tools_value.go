@@ -7,7 +7,7 @@ import (
 )
 
 var toolEntryFields = map[string]struct{}{
-	"category": {}, "description": {}, "handler_type": {}, "effect_class": {}, "permission": {},
+	"category": {}, "description": {}, "handler_type": {}, "permission": {},
 	"rate_limit": {}, "rate_limit_max_wait": {}, "input_schema": {}, "output_schema": {},
 	"http": {}, "response_mapping": {}, "response_success": {}, "credentials": {}, "managed_credential": {},
 	"path": {}, "abi": {}, "entry": {}, "digest": {}, "source_path": {}, "source_hash": {}, "runtime": {}, "limits": {},
@@ -51,14 +51,23 @@ func AdmitToolDeclarationsValue(root yamlsource.Value) (map[string]ToolSchemaEnt
 }
 
 func projectToolValue(value yamlsource.Value) (ToolSchemaEntry, error) {
+	if value.Presence() == yamlsource.PresenceMapping || value.Presence() == yamlsource.PresenceEmptyMapping {
+		retired, err := value.Lookup("effect_class")
+		if err != nil {
+			return ToolSchemaEntry{}, err
+		}
+		if retired.Presence != yamlsource.PresenceMissing {
+			return ToolSchemaEntry{}, nodeValueError(retired.Value, fmt.Errorf("effect_class is not a tool key; interrupted HTTP calls are outcome-uncertain and not retried"))
+		}
+	}
 	fields, err := nodeValueFields(value, "tool", toolEntryFields)
 	if err != nil {
 		return ToolSchemaEntry{}, err
 	}
-	var category, description, handlerText, effect, permission, rate, wait string
+	var category, description, handlerText, permission, rate, wait string
 	if err := schemaValueTexts(fields, map[string]*string{
 		"category": &category, "description": &description, "handler_type": &handlerText,
-		"effect_class": &effect, "permission": &permission, "rate_limit": &rate, "rate_limit_max_wait": &wait,
+		"permission": &permission, "rate_limit": &rate, "rate_limit_max_wait": &wait,
 	}, false); err != nil {
 		return ToolSchemaEntry{}, err
 	}
@@ -85,7 +94,7 @@ func projectToolValue(value yamlsource.Value) (ToolSchemaEntry, error) {
 	}
 	options := []ToolSchemaEntryOption{
 		WithToolCategory(category), WithToolDescription(description), WithToolHandler(handler),
-		WithToolEffect(ActivityEffectClass(effect)), WithToolPermission(permission), WithToolRateLimit(rate, wait),
+		WithToolPermission(permission), WithToolRateLimit(rate, wait),
 		WithToolSchemas(schemas["input_schema"], schemas["output_schema"]),
 	}
 	if moduleKind {
@@ -284,7 +293,7 @@ func ProjectToolManagedCredentialValue(value yamlsource.Value) (ManagedCredentia
 }
 
 func projectToolModuleValue(value yamlsource.Value, fields map[string]yamlsource.Value, handler ToolHandlerKind, schemas map[string]ToolInputSchema) (PolicyModule, error) {
-	for _, name := range []string{"http", "response_mapping", "response_success", "credentials", "managed_credential", "category", "permission", "effect_class", "rate_limit", "rate_limit_max_wait"} {
+	for _, name := range []string{"http", "response_mapping", "response_success", "credentials", "managed_credential", "category", "permission", "rate_limit", "rate_limit_max_wait"} {
 		if field, present := fields[name]; present {
 			return PolicyModule{}, nodeValueError(field, fmt.Errorf("module tools cannot declare %s", name))
 		}

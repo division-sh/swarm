@@ -528,7 +528,7 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 		FlowTree:    runtimecontracts.FlowTree{Root: &flow, ByPath: map[string]*runtimecontracts.FlowContractView{"flow_a": &flow}, ByID: map[string]*runtimecontracts.FlowContractView{"flow_a": &flow}},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"flow_a": flow.Schema},
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"provider.connector": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(effectClass))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: strings.TrimRight(serverURL, "/")})),
+			"provider.connector": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: strings.TrimRight(serverURL, "/")})),
 		},
 	}
 	return semanticview.Wrap(bundle)

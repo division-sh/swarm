@@ -30,7 +30,7 @@ func TestW5ToolFieldPresenceMatrix(t *testing.T) {
 		{"description", "business intent", "[intent]", "{intent: true}", "missing,empty,scalar", ""},
 		{"category", "provider_connector", "[provider_connector]", "{category: provider_connector}", "missing,empty,scalar", ""},
 		{"handler_type", "mcp", "[mcp]", "{handler: mcp}", "missing,empty,scalar", ""},
-		{"effect_class", "read_only", "[read_only]", "{effect: read_only}", "missing,empty,scalar", ""},
+		{"effect_class", "read_only", "[read_only]", "{effect: read_only}", "missing", ""},
 		{"permission", "execute", "[execute]", "{permission: execute}", "missing,empty,scalar", ""},
 		{"input_schema", "object", "[{type: string}]", "{type: string}", "missing,empty_mapping,mapping", ""},
 		{"output_schema", "object", "[{type: string}]", "{type: string}", "missing,empty_mapping,mapping", ""},

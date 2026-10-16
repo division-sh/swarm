@@ -13,7 +13,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/runtime/tools"
 )
 
 type View struct {
@@ -413,7 +412,6 @@ func buildApprovalPoints(bundle *runtimecontracts.WorkflowContractBundle) ([]App
 		if err != nil {
 			return nil, err
 		}
-		tool := bundle.ToolEntries()[strings.TrimSpace(site.Spec.Tool)]
 		out = append(out, ApprovalPointView{
 			FlowID:       site.Node.FlowPath(),
 			NodeID:       site.Node.Key(),
@@ -422,7 +420,7 @@ func buildApprovalPoints(bundle *runtimecontracts.WorkflowContractBundle) ([]App
 			ActivityID:   result.ActivityID,
 			Tool:         strings.TrimSpace(site.Spec.Tool),
 			Decision:     strings.TrimSpace(site.Spec.Approval.Decision),
-			EffectClass:  string(tool.Effect()),
+			EffectClass:  string(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		})
 	}
 	return out, nil
@@ -1248,15 +1246,6 @@ func buildDiagnostics(source semanticview.Source, bundle *runtimecontracts.Workf
 			Message:          strings.TrimSpace(finding.Message),
 			Remediation:      strings.TrimSpace(finding.Remediation),
 			Evidence:         trimDiagnosticEvidence(finding.Evidence),
-		})
-	}
-	for _, declaration := range tools.AgentCallableEffectDeclarations(source) {
-		out = append(out, DiagnosticView{
-			CheckID:          "agent_tool_effect_class_not_applied",
-			Severity:         "info",
-			Location:         declaration.Identity,
-			AuthoredLocation: declaration.Provenance.SourceFile,
-			Message:          fmt.Sprintf("tool %s: effect_class is not applied to agent calls; an interrupted call is outcome-uncertain and not redispatched", declaration.ToolName),
 		})
 	}
 	if report == nil && len(out) == 0 {

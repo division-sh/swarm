@@ -278,7 +278,7 @@ func TestManagedCredentialChecksRetainMixedSourceRequirement(t *testing.T) {
 
 func mockConnectorCredentialFixture(t *testing.T, credentialKind string, includeSibling, includeUnmocked bool) (semanticview.Source, *providerconnectors.MockResponsePlan) {
 	t.Helper()
-	connector := runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")),
+	connector := runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")),
 
 		runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 			"message_id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),

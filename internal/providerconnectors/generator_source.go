@@ -125,12 +125,12 @@ func admitGeneratorAuth(value yamlsource.Value) (GeneratorAuth, error) {
 }
 
 func admitGeneratorOperation(value yamlsource.Value) (GeneratorOperation, error) {
-	fields, err := connectorFields(value, "operation_id", "path", "method", "tool_id", "description", "effect_class", "path_parameters", "request_body", "injected_inputs", "permissions", "output", "response_success", "fixture", "review_status")
+	fields, err := connectorFields(value, "operation_id", "path", "method", "tool_id", "description", "path_parameters", "request_body", "injected_inputs", "permissions", "output", "response_success", "fixture", "review_status")
 	if err != nil {
 		return GeneratorOperation{}, err
 	}
 	var out GeneratorOperation
-	if err := connectorTextFields(value, fields, map[string]*string{"operation_id": &out.OperationID, "path": &out.Path, "method": &out.Method, "tool_id": &out.ToolID, "description": &out.Description, "effect_class": &out.EffectClass, "review_status": &out.ReviewStatus}); err != nil {
+	if err := connectorTextFields(value, fields, map[string]*string{"operation_id": &out.OperationID, "path": &out.Path, "method": &out.Method, "tool_id": &out.ToolID, "description": &out.Description, "review_status": &out.ReviewStatus}); err != nil {
 		return out, err
 	}
 	parameters, err := connectorRequired(value, fields, "path_parameters")

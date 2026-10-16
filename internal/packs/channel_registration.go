@@ -272,9 +272,6 @@ func compileRegistrationOperation(name string, declared ChannelRegistrationOpera
 	if tool.Category() != runtimecontracts.ToolCategoryProviderRegistration {
 		return compiledRegistrationOperation{}, fmt.Errorf("channel registration %s tool %q must use provider_registration category", name, toolID)
 	}
-	if tool.Effect() != effect {
-		return compiledRegistrationOperation{}, fmt.Errorf("channel registration %s tool %q must use %s", name, toolID, effect)
-	}
 	actualCredentials := append([]string(nil), tool.Credentials()...)
 	sort.Strings(actualCredentials)
 	if strings.Join(actualCredentials, "\x00") != strings.Join(credentials, "\x00") {

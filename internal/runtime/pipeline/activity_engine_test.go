@@ -713,7 +713,7 @@ func VerifyChannelActivityPostCommitAcknowledgmentLossStateBlocksRedispatchAcros
 func testCompiledChannelActivityTool(url string) runtimecontracts.ToolSchemaEntry {
 	allow := false
 	minimum, maximum := float64(1), float64(2147483647)
-	return runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
+	return runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject),
 
 		runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"message_id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("integer"), runtimecontracts.ToolSchemaMinimum(minimum), runtimecontracts.ToolSchemaMaximum(maximum))}), runtimecontracts.ToolSchemaRequired("message_id"), runtimecontracts.ToolSchemaAdditionalPropertiesAllowed(allow))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: http.MethodPost, URL: url}), runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{Kind: "json_field_equals", Path: "response.body.ok", Equals: true}), runtimecontracts.WithToolCompiledResult(runtimecontracts.CompiledResultProjection{
 		Fields: map[string]runtimecontracts.CompiledResultField{"delivery_reference.id": {From: "result.message_id"}},
@@ -820,7 +820,7 @@ func TestPipelineActivityRequestEventExecutesHTTPToolAndPublishesGeneratedSucces
 
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 				"title": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 			}))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
 				Method: "GET",
@@ -894,7 +894,7 @@ func TestPipelineActivityRequestRetriesReadOnlyHTTPTool(t *testing.T) {
 
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
 				Method: "GET",
 				URL:    server.URL,
 			})),
@@ -941,7 +941,7 @@ func TestPipelineActivityRequestFailsClosedForWriteEffectClass(t *testing.T) {
 
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
 				Method: "POST",
 				URL:    server.URL,
 			})),
@@ -1001,7 +1001,7 @@ func VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCre
 	}))
 	defer server.Close()
 	credentialStore := testActivityCredentialStore(t, "provider_token", "provider-secret")
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL, Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"}, Body: map[string]any{"url": "{{input.url}}"}}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...))}})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL, Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"}, Body: map[string]any{"url": "{{input.url}}"}}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...))}})
 	bus := &recordingPipelineBus{}
 	store := fixture.Persistence.store
 	if err := fixture.RequireRun(ctx, runID); err != nil {
@@ -1208,9 +1208,9 @@ func VerifyPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndH
 				wantCode  string
 			}{
 				{name: "missing response", tool: testTelegramConnectorTool("http://127.0.0.1:1"), responses: nil, wantCode: "mock_connector_response_not_admitted"},
-				{name: "non provider", tool: runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass("non_idempotent_write")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "http://127.0.0.1:1"})), responses: map[string]map[string]any{"telegram.send_message": {"ok": true}}, wantCode: "mock_connector_response_not_admitted"},
-				{name: "read only", tool: runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory(providerconnectors.Category), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass("read_only")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "http://127.0.0.1:1"})), responses: map[string]map[string]any{"telegram.send_message": {"ok": true}}, wantCode: "mock_activity_effect_class_unsupported"},
-				{name: "invalid response", tool: runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory(providerconnectors.Category), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass("non_idempotent_write")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"ok": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("boolean"))}), runtimecontracts.ToolSchemaRequired("ok"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "http://127.0.0.1:1"})), responses: map[string]map[string]any{"telegram.send_message": {"ok": "invalid"}}, wantCode: "mock_connector_response_not_admitted"},
+				{name: "non provider", tool: runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "http://127.0.0.1:1"})), responses: map[string]map[string]any{"telegram.send_message": {"ok": true}}, wantCode: "mock_connector_response_not_admitted"},
+				{name: "read only", tool: runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory(providerconnectors.Category), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "http://127.0.0.1:1"})), responses: map[string]map[string]any{"telegram.send_message": {"ok": true}}, wantCode: "mock_activity_effect_class_unsupported"},
+				{name: "invalid response", tool: runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory(providerconnectors.Category), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"ok": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("boolean"))}), runtimecontracts.ToolSchemaRequired("ok"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "http://127.0.0.1:1"})), responses: map[string]map[string]any{"telegram.send_message": {"ok": "invalid"}}, wantCode: "mock_connector_response_not_admitted"},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					runID := uuid.NewString()
@@ -1235,7 +1235,7 @@ func VerifyPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndH
 					intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
 					intent.Tool = "telegram.send_message"
 					intent.ExecutionMode = executionmode.Mock
-					intent.EffectClass = tool.Effect()
+					intent.EffectClass = runtimecontracts.ActivityEffectClassNonIdempotentWrite
 					if err := (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, intent); err != nil {
 						t.Fatalf("execute rejected mock activity: %v", err)
 					}
@@ -1287,7 +1287,7 @@ func VerifyMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTPForT
 	intent.Tool = "telegram.send_message"
 	intent.ActivityID = "telegram_send_message"
 	intent.ExecutionMode = executionmode.Live
-	intent.EffectClass = tool.Effect()
+	intent.EffectClass = runtimecontracts.ActivityEffectClassNonIdempotentWrite
 	if err := (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, intent); err == nil {
 		t.Fatal("mock_only posture admitted a live activity intent")
 	}
@@ -1522,7 +1522,7 @@ func VerifyPipelineActivityRequestNonIdempotentFailureDoesNotRetryForTest(t *tes
 		http.Error(w, "temporary", http.StatusInternalServerError)
 	}))
 	defer server.Close()
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}))}})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}))}})
 	bus := &recordingPipelineBus{}
 	store := fixture.Persistence.store
 	if err := fixture.RequireRun(ctx, runID); err != nil {
@@ -1560,7 +1560,7 @@ func VerifyPipelineActivityRequestNonIdempotentTransportErrorMarksUncertainForTe
 	sourceEventID := uuid.NewString()
 	entityID := uuid.NewString()
 	var calls int
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://provider.test/write"}))}})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://provider.test/write"}))}})
 	bus := &recordingPipelineBus{}
 	store := fixture.Persistence.store
 	if err := fixture.RequireRun(ctx, runID); err != nil {
@@ -1622,7 +1622,7 @@ func VerifyPipelineActivityRequestStartedJournalBlocksProviderRedispatchWithoutT
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}))
 	defer server.Close()
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}))}})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}))}})
 	bus := &recordingPipelineBus{}
 	store := fixture.Persistence.store
 	if err := fixture.RequireRun(ctx, runID); err != nil {
@@ -1673,7 +1673,7 @@ func VerifyLoopActivityClaimCommitAcknowledgmentLossReconcilesWithoutDispatchFor
 	}))
 	defer server.Close()
 	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
-		"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL})),
+		"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL})),
 	}})
 	bus := &recordingPipelineBus{}
 	intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), entityID)
@@ -1726,7 +1726,7 @@ func VerifyPipelineActivityRequestConcurrentDuplicatePreservesOriginalTerminalRe
 	}))
 	defer server.Close()
 	defer release()
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}))}})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}))}})
 	bus := &recordingPipelineBus{}
 	store := fixture.Persistence.store
 	if err := fixture.RequireRun(ctx, runID); err != nil {
@@ -1791,7 +1791,7 @@ func VerifyPipelineActivityRequestMissingCredentialFailsAfterClaimBeforeDispatch
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	}))
 	defer server.Close()
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL, Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"}}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...))}})
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL, Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"}}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...))}})
 	bus := &recordingPipelineBus{}
 	store := fixture.Persistence.store
 	if err := fixture.RequireRun(ctx, runID); err != nil {
@@ -1957,7 +1957,7 @@ func testActivityCredentialStore(t *testing.T, key, value string) runtimecredent
 }
 
 func testTelegramConnectorTool(baseURL string) runtimecontracts.ToolSchemaEntry {
-	return runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolDescription("send Telegram messages"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+	return runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolDescription("send Telegram messages"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 		"chat_id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 		"text":    runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 	}), runtimecontracts.ToolSchemaRequired("chat_id", "text")),

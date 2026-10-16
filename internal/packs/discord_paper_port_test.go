@@ -60,7 +60,7 @@ func discordPaperPort(t *testing.T) (packs.SatisfactionPlan, packs.TriggerPackDe
 			"discord.create_message": contracts.MustToolSchemaEntry(
 				contracts.WithToolCategory(contracts.ToolCategoryProviderConnector.String()),
 				contracts.WithToolHandler(contracts.ToolHandlerHTTP),
-				contracts.WithToolEffect(contracts.ActivityEffectClassNonIdempotentWrite),
+
 				contracts.WithToolCredentials("discord_bot_token"),
 				contracts.WithToolSchemas(mockObjectSchema(map[string]contracts.ToolInputSchema{
 					"channel_id": snowflake, "content": mockStringSchema(1, 2000, ""),
