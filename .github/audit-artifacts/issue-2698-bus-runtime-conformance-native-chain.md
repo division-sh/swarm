@@ -78,6 +78,8 @@ Logs: /home/youmew/.cache/swarm-2542-family145/.
 | pr2698-runtime-shutdown-canonical-readiness-race.log | All three shutdown orchestration roots PASS with the actual readiness finalizer, both stores under race, 17.995s. |
 | pr2698-native-constructor-closed-owners-vet.log | All three affected packages vet PASS. |
 | pr2698-runtime-bus-conformance-registry.log | Actual finding registry PASS, 7.61s: 19,764 exact rows, 4,704 retained keys with unchanged reviewed digest, zero unknown/stale. No registry edits. |
+| pr2698-bus-native-constructor-siblings-race.log | Both-store async-publication recovery and original decision-owner sibling roots PASS under race, 14.537s. |
+| pr2698-native-constructors-signed-complexity/ | PASS at7d2bf98dfe against pinned9beb615299: reviewed policy unchanged, independently measured hotspot counts do not increase. |
 
 The pause/retry repair synchronizes the existing coordinator after Continue
 before asserting delivery. Continue signals asynchronous owned work; its return
@@ -89,6 +91,13 @@ the final 12-root bus receipt, rather than selecting away the failed cell.
 Slot-capacity admission refusals and the intermediate unused-import build error
 are retained in their original logs and are not test receipts. There is no
 infrastructure attribution for behavioral failures.
+
+The focused U1000 sweep identified the now-last-consumer-free descriptive
+runtime admission helper. Its entire file is removed rather than suppressed or
+kept as compatibility. The package-local conformance wrapper is also removed;
+the separate component fixture still used by the mock-boot control is retained.
+The focused unused sweep must pass after these deletions; its first RED remains
+in pr2698-runtime-native-constructors-unused.log.
 
 ## Remaining Qualification
 
