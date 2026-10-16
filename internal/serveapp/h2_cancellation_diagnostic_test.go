@@ -19,7 +19,7 @@ func TestH2CancellationProvenanceDiagnostic(t *testing.T) {
 	probe := testpostgres.StartCapacityProbe(t, 300)
 	t.Setenv(testpostgres.SourceEnv, probe.DSN)
 	t.Cleanup(func() {
-		path := os.Getenv("SWARM_H2_DIAGNOSTIC_LOG")
+		path := os.Getenv("AGENT_E_H2_DIAGNOSTIC_LOG")
 		if path == "" {
 			t.Fatal("explicit diagnostic log destination is required")
 		}
