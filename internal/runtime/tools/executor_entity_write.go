@@ -145,7 +145,7 @@ func entityToolMutationOwner(source semanticview.Source, actor models.AgentConfi
 	if err != nil {
 		return runtimeflowidentity.RunScopedFlowInstance{}, err
 	}
-	if agent.RunID != runID || strings.TrimSpace(actor.FlowID) != flowID || asString(row["entity_id"]) != entityID ||
+	if agent.RunID != runID || actor.FlowID != flowID || asString(row["entity_id"]) != entityID ||
 		(actor.EffectiveEntityID() != "" && actor.EffectiveEntityID() != entityID) {
 		return runtimeflowidentity.RunScopedFlowInstance{}, fmt.Errorf("entity write requires its exact actor run, entity and declaring flow")
 	}

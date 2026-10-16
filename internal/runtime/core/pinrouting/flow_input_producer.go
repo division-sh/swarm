@@ -3,7 +3,6 @@ package pinrouting
 import (
 	"slices"
 	"sort"
-	"strings"
 	"sync"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -52,7 +51,6 @@ func ResolveFlowInputProducer(source semanticview.Source, flowID, eventType stri
 }
 
 func ResolveFlowInputProducerWithOptions(source semanticview.Source, flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions) runtimecontracts.FlowInputProducerResolution {
-	flowID = strings.TrimSpace(flowID)
 	eventType = eventidentity.Normalize(eventType)
 	if source == nil || eventType == "" {
 		return semanticview.ResolveNonConnectFlowInputProducerWithOptions(source, flowID, eventType, opts)
@@ -63,7 +61,6 @@ func ResolveFlowInputProducerWithOptions(source semanticview.Source, flowID, eve
 }
 
 func (r FlowInputProducerResolver) ResolveWithOptions(flowID, eventType string, opts runtimecontracts.FlowInputProducerResolutionOptions) runtimecontracts.FlowInputProducerResolution {
-	flowID = strings.TrimSpace(flowID)
 	eventType = eventidentity.Normalize(eventType)
 	if r.preparation == nil {
 		return r.resolveInputProducer(flowID, eventType, opts)

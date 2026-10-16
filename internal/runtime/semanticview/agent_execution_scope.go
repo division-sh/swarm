@@ -68,7 +68,7 @@ func ResolveAgentExecutionSemanticScope(source Source, actor models.AgentConfig,
 		return AgentExecutionSemanticScope{}, fmt.Errorf("agent execution identity name conflicts with declaration owner")
 	}
 	ownerFlowID := strings.TrimSpace(declaration.OwnerFlowID)
-	if strings.TrimSpace(actor.FlowID) != ownerFlowID {
+	if actor.FlowID != ownerFlowID {
 		return AgentExecutionSemanticScope{}, fmt.Errorf("agent execution flow_id %q conflicts with declaration owner flow %q", actor.FlowID, ownerFlowID)
 	}
 	scope := AgentExecutionSemanticScope{declaration: declaration, identity: identity}

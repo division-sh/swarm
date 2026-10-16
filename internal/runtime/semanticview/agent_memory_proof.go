@@ -59,7 +59,7 @@ func AgentMemoryProofForDeclaration(source Source, declaration AgentDeclaration)
 
 func agentMemoryDeclaration(source Source, locator AgentMemoryLocator) (AgentDeclaration, bool) {
 	agentID := strings.TrimSpace(locator.AgentID)
-	flowID := strings.TrimSpace(locator.FlowPath)
+	flowID := locator.FlowPath
 	var matched AgentDeclaration
 	for _, declaration := range AgentDeclarations(source) {
 		if flowID != "" && !agentDeclarationMatchesFlow(declaration, flowID) {

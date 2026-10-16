@@ -12,11 +12,10 @@ func admitAgentConfigSubscriptions(source semanticview.Source, cfg *runtimeactor
 	if cfg == nil {
 		return semanticview.FlowOwnedAgentSubscriptionAdmission{}, fmt.Errorf("agent config is required")
 	}
-	flowID := cfg.FlowID
 	cfg.NormalizeRuntimeDescriptor()
 	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(source, semanticview.FlowOwnedAgentSubscriptionRequest{
 		AgentID:       cfg.ID,
-		FlowID:        flowID,
+		FlowID:        cfg.FlowID,
 		FlowPath:      cfg.CanonicalFlowPath(),
 		LocalEvents:   localEvents,
 		Subscriptions: cfg.Subscriptions,

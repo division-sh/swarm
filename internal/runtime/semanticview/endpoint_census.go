@@ -416,7 +416,7 @@ func endpointAssociationResult(flowID, identity, nodeID string, candidates []Aut
 	}
 	return EndpointAssociationResult{
 		Status:     status,
-		FlowID:     strings.TrimSpace(flowID),
+		FlowID:     flowID,
 		Identity:   eventidentity.Normalize(identity),
 		NodeID:     strings.TrimSpace(nodeID),
 		Candidates: cloneEventEndpoints(candidates),

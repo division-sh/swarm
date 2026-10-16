@@ -489,7 +489,7 @@ func (e *Executor) resolveWebSearchProviderConfig(actor models.AgentConfig) (web
 }
 
 func resolveWebSearchProviderConfigForActor(source semanticview.Source, actor models.AgentConfig) (webSearchProviderConfig, error) {
-	flowID := strings.TrimSpace(actor.FlowID)
+	flowID := actor.FlowID
 	if projection, ok := semanticview.ResolveAgentContractProjection(source, actor); ok {
 		flowID = projection.OwnerFlowID
 	} else if flowID == "" && strings.TrimSpace(actor.CanonicalFlowPath()) != "" {
@@ -497,11 +497,6 @@ func resolveWebSearchProviderConfigForActor(source semanticview.Source, actor mo
 	}
 	// Native capability admission owns permission. An independently configured
 	// runtime actor may select policy by explicit flow, never by a path guess.
-	if flowID != "" && source != nil {
-		if _, ok := source.FlowScopeByID(flowID); !ok {
-			return webSearchProviderConfig{}, fmt.Errorf("web_search policy references unknown flow %q", flowID)
-		}
-	}
 	return resolveWebSearchProviderConfigFromSourceForFlow(source, flowID)
 }
 
@@ -509,7 +504,12 @@ func resolveWebSearchProviderConfigFromSourceForFlow(source semanticview.Source,
 	if source == nil {
 		return webSearchProviderConfig{}, fmt.Errorf("web_search provider is unavailable without a workflow source")
 	}
-	resolution, ok := semanticview.PolicyValueForFlowWithOwner(source, strings.TrimSpace(flowID), "web_search_provider")
+	if flowID != "" {
+		if _, ok := semanticview.FlowScopeByID(source, flowID); !ok {
+			return webSearchProviderConfig{}, fmt.Errorf("web_search policy references unknown flow %q", flowID)
+		}
+	}
+	resolution, ok := semanticview.PolicyValueForFlowWithOwner(source, flowID, "web_search_provider")
 	if !ok {
 		return webSearchProviderConfig{}, fmt.Errorf("policy.web_search_provider is not configured")
 	}

@@ -91,7 +91,7 @@ func (c RootExecutionCoordinate) RunID() string {
 }
 
 func (c RootExecutionCoordinate) Matches(flowID, runID string) bool {
-	return c.Valid() && strings.TrimSpace(flowID) == c.flowID && strings.TrimSpace(runID) == c.runID
+	return c.Valid() && flowID == c.flowID && strings.TrimSpace(runID) == c.runID
 }
 
 func flowModeFromView(view runtimecontracts.FlowContractView) string {

@@ -3,7 +3,7 @@ package actors
 import "testing"
 
 func TestS1RuntimeDescriptorPreservesRawFlowSelector(t *testing.T) {
-	for _, flow := range []string{".", " . ", "\t.\n", "sibling", " sibling ", "/sibling/", "child/../sibling", "", " "} {
+	for _, flow := range []string{".", " . ", "\t.\n", "sibling", " sibling ", "/sibling/", "child/../sibling", "team-bot", "team_bot", "SIBLING", "./sibling", "child//sibling", "sibling\\", "", " "} {
 		cfg := AgentConfig{ID: " listener ", Role: " worker ", FlowID: flow, FlowPath: " /sibling/one/ ", Model: " regular "}
 		for attempt := 0; attempt < 3; attempt++ {
 			cfg.NormalizeRuntimeDescriptor()

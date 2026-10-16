@@ -13,7 +13,6 @@ func ResolveExecutableNodeDeclaration(source Source, flowID, nodeID string) (run
 	if source == nil {
 		return runtimeidentity.ExecutableNode{}, fmt.Errorf("executable node lookup requires semantic source")
 	}
-	flowID = strings.TrimSpace(flowID)
 	nodeID = strings.TrimSpace(nodeID)
 	var found runtimeidentity.ExecutableNode
 	count := 0

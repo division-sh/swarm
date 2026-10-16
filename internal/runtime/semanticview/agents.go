@@ -24,7 +24,7 @@ func ResolveAgentDeclaration(source Source, cfg models.AgentConfig) (AgentDeclar
 		return AgentDeclaration{}, false
 	}
 	agentID := strings.TrimSpace(cfg.ID)
-	flowID := strings.TrimSpace(cfg.FlowID)
+	flowID := cfg.FlowID
 	name := cfg.Identity.Name.Normalize()
 	if name.Source == agentidentity.NameSourceDeclared {
 		if err := name.Validate(); err != nil || (agentID != "" && agentID != name.AgentID) {
@@ -42,7 +42,6 @@ func ResolveAgentDeclaration(source Source, cfg models.AgentConfig) (AgentDeclar
 }
 
 func AgentDeclarationOwner(source Source, flowID, logicalID string) (string, bool) {
-	flowID = strings.TrimSpace(flowID)
 	logicalID = strings.TrimSpace(logicalID)
 	var matched AgentDeclaration
 	for _, declaration := range AgentDeclarations(source) {
@@ -98,7 +97,6 @@ func agentDeclarationOwner(source Source, declaration AgentDeclaration) (string,
 }
 
 func resolveAgentDeclarationByName(source Source, flowID, agentID, ownerURI string) (AgentDeclaration, bool) {
-	flowID = strings.TrimSpace(flowID)
 	agentID = strings.TrimSpace(agentID)
 	ownerURI = strings.TrimSpace(ownerURI)
 	if source == nil || agentID == "" || ownerURI == "" {
@@ -125,7 +123,6 @@ func resolveAgentDeclarationByName(source Source, flowID, agentID, ownerURI stri
 }
 
 func resolveAgentDeclarationByID(source Source, flowID, agentID string) (AgentDeclaration, bool) {
-	flowID = strings.TrimSpace(flowID)
 	agentID = strings.TrimSpace(agentID)
 	if source == nil || agentID == "" {
 		return AgentDeclaration{}, false
@@ -151,7 +148,6 @@ func resolveAgentDeclarationByID(source Source, flowID, agentID string) (AgentDe
 }
 
 func agentDeclarationMatchesFlow(declaration AgentDeclaration, flowID string) bool {
-	flowID = strings.TrimSpace(flowID)
 	if flowID == "" {
 		return true
 	}
