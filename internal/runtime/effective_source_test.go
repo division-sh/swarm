@@ -170,9 +170,24 @@ func effectiveSourceConnectorFixture(t *testing.T) (*runtimecontracts.WorkflowCo
 func TestEffectiveSourceIdentityChangesWithAuthoredProviderConnectorSchema(t *testing.T) {
 	projection := func(kind string) (AdmittedEffectiveSourceProjection, string) {
 		bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
-			"schema.yaml":          []byte("stages: []\n"),
-			"local/manifest.yaml":  []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [send]}, cannot: [bypass journal]}\n"),
-			"local/connector.yaml": []byte(fmt.Sprintf("tools:\n  send:\n    category: provider_connector\n    handler_type: http\n    effect_class: read_only\n    output_schema:\n      type: object\n      required: [value]\n      properties: {value: {type: %s}}\n    http: {method: POST, url: 'https://example.invalid/send'}\n    response_success: {kind: http_status_2xx}\n", kind)),
+			"schema.yaml":         []byte("stages: []\n"),
+			"local/manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [send]}, cannot: [bypass journal]}\n"),
+			"local/connector.yaml": []byte(fmt.Sprintf(`tools:
+  send:
+    category: provider_connector
+    handler_type: http
+    effect_class: non_idempotent_write
+    credentials: [token]
+    output_schema:
+      type: object
+      required: [value]
+      properties: {value: {type: %s}}
+    http:
+      method: POST
+      url: 'https://example.invalid/send'
+      headers: {Authorization: 'Bearer {{credentials.token}}'}
+    response_success: {kind: http_status_2xx}
+`, kind)),
 		})
 		fact := sourceartifactfixture.FactFor(rooted.Artifact())
 		admitted, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{
