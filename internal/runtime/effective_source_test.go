@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -21,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -73,20 +75,7 @@ func TestAdmittedEffectiveSourceProjectionBindsBaseProvenanceAndIsStable(t *test
 
 func TestEffectiveSourceIdentityChangesWithExternalSemanticGenerations(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
-	root := filepath.Join(repoRoot, "internal", "cliapp", "archetypes", "zero-agent-automation")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatal(err)
-	}
-	admitRuntimeTestBundle(t, bundle)
-	bundleHash, err := runtimecontracts.BundleHash(bundle)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fact, err := runtimecorrelation.NewSourceArtifactFact(bundleHash)
-	if err != nil {
-		t.Fatal(err)
-	}
+	bundle, fact := effectiveSourceConnectorFixture(t)
 	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: fact})
 	if err != nil {
 		t.Fatal(err)
@@ -136,15 +125,7 @@ func TestEffectiveSourceIdentityChangesWithExternalSemanticGenerations(t *testin
 }
 
 func TestProjectedConnectorPackSourceAdmitsOneMockResponseAcrossEveryScope(t *testing.T) {
-	repoRoot := filepath.Clean(filepath.Join("..", ".."))
-	root := filepath.Join(repoRoot, "internal", "cliapp", "archetypes", "zero-agent-automation")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatal(err)
-	}
-	admitRuntimeTestBundle(t, bundle)
-	bundleHash, _ := runtimecontracts.BundleHash(bundle)
-	fact, _ := runtimecorrelation.NewSourceArtifactFact(bundleHash)
+	bundle, fact := effectiveSourceConnectorFixture(t)
 	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), SourceArtifactFact: fact})
 	if err != nil {
 		t.Fatal(err)
@@ -174,44 +155,50 @@ func TestProjectedConnectorPackSourceAdmitsOneMockResponseAcrossEveryScope(t *te
 	}
 }
 
+func effectiveSourceConnectorFixture(t *testing.T) (*runtimecontracts.WorkflowContractBundle, runtimecorrelation.SourceArtifactFact) {
+	t.Helper()
+	provider := packfixture.NeutralProviderMembers()
+	bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+		"schema.yaml":             []byte("stages: []\n"),
+		"child/schema.yaml":       []byte("stages: []\n"),
+		"telegram/manifest.yaml":  s1EffectiveProviderScopeMembers()["team-bot/manifest.yaml"],
+		"telegram/connector.yaml": provider["connector.yaml"],
+	})
+	return bundle, sourceartifactfixture.FactFor(rooted.Artifact())
+}
+
 func TestEffectiveSourceIdentityChangesWithAuthoredProviderConnectorSchema(t *testing.T) {
-	fact, err := runtimecorrelation.NewSourceArtifactFact("bundle-v2:sha256:" + strings.Repeat("7", 64))
-	if err != nil {
-		t.Fatal(err)
-	}
-	projection := func(kind runtimecontracts.ToolSchemaKind) AdmittedEffectiveSourceProjection {
-		property, err := runtimecontracts.NewToolInputSchema(kind)
-		if err != nil {
-			t.Fatal(err)
-		}
-		output, err := runtimecontracts.NewToolInputSchema(runtimecontracts.ToolSchemaObject,
-			runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"value": property}),
-			runtimecontracts.ToolSchemaRequired("value"),
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-		empty := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)
-		tool, err := runtimecontracts.NewToolSchemaEntry(
-			runtimecontracts.WithToolCategory("provider_connector"),
-			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-			runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid/send"}),
-			runtimecontracts.WithToolSchemas(empty, output),
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
+	projection := func(kind string) (AdmittedEffectiveSourceProjection, string) {
+		bundle, rooted, _ := loadS1EffectiveProviderScope(t, map[string][]byte{
+			"schema.yaml":          []byte("stages: []\n"),
+			"local/manifest.yaml":  []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {call_provider_actions: [send]}, cannot: [bypass journal]}\n"),
+			"local/connector.yaml": []byte(fmt.Sprintf("tools:\n  send:\n    category: provider_connector\n    handler_type: http\n    effect_class: read_only\n    output_schema:\n      type: object\n      required: [value]\n      properties: {value: {type: %s}}\n    http: {method: POST, url: 'https://example.invalid/send'}\n    response_success: {kind: http_status_2xx}\n", kind)),
+		})
+		fact := sourceartifactfixture.FactFor(rooted.Artifact())
 		admitted, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{
-			Source:             semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{"local.send": tool}}),
+			Source:             semanticview.Wrap(bundle),
 			SourceArtifactFact: fact,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		return admitted
+		value, err := effectiveSourceIdentityValue(admitted.Source(), fact, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		connectors, err := canonicaljson.Hash(value["provider_connectors"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return admitted, connectors
 	}
-	if projection(runtimecontracts.ToolSchemaString).Identity().Equal(projection(runtimecontracts.ToolSchemaBoolean).Identity()) {
+	text, textConnectors := projection("string")
+	boolean, booleanConnectors := projection("boolean")
+	if text.Identity().Equal(boolean.Identity()) {
 		t.Fatal("authored provider-connector schema change retained effective source identity")
+	}
+	if textConnectors == booleanConnectors {
+		t.Fatal("authored schema changed only base identity, not scoped connector evidence")
 	}
 }
 
