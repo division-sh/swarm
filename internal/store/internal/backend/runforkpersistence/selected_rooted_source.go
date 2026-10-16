@@ -3,6 +3,7 @@ package runforkpersistence
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -25,7 +26,7 @@ func (s *RunForkPostgresOwner) LoadSelectedForkRootedSource(ctx context.Context,
 		source, err = loadSelectedForkRootedSourceTx(ctx, tx, snapshot, true)
 		return err
 	})
-	if err != nil {
+	if err = errors.Join(err, ctx.Err()); err != nil {
 		return sourceartifact.RootedSource{}, err
 	}
 	return source, nil
@@ -44,7 +45,7 @@ func (s *RunForkSQLiteOwner) LoadSelectedForkRootedSource(ctx context.Context, f
 		source, err = loadSelectedForkRootedSourceTx(ctx, tx, snapshot, false)
 		return err
 	})
-	if err != nil {
+	if err = errors.Join(err, ctx.Err()); err != nil {
 		return sourceartifact.RootedSource{}, err
 	}
 	return source, nil

@@ -46,7 +46,7 @@ func (s *RunLifecyclePostgresOwner) LoadRunRootedSource(ctx context.Context, run
 		source, err = loadRunRootedSourceTx(ctx, tx, runID, true)
 		return err
 	})
-	if err != nil {
+	if err = errors.Join(err, ctx.Err()); err != nil {
 		return sourceartifact.RootedSource{}, err
 	}
 	return source, nil
@@ -58,7 +58,7 @@ func (s *RunLifecycleSQLiteOwner) LoadRunRootedSource(ctx context.Context, runID
 		source, err = loadRunRootedSourceTx(ctx, tx, runID, false)
 		return err
 	})
-	if err != nil {
+	if err = errors.Join(err, ctx.Err()); err != nil {
 		return sourceartifact.RootedSource{}, err
 	}
 	return source, nil
