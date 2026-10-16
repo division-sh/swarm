@@ -113,12 +113,32 @@ LIMIT ?
 }
 
 func (s *RunSQLite) LoadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
+	if s == nil || s.backend == nil {
+		return operatorread.RunDebugReport{}, fmt.Errorf("sqlite store is required")
+	}
+	var report operatorread.RunDebugReport
+	err := s.backend.InspectSnapshot(ctx, func(snapshot context.Context) (err error) {
+		report, err = s.loadRunDebugReport(snapshot, runID, opts)
+		return err
+	})
+	if err != nil {
+		return operatorread.RunDebugReport{}, err
+	}
+	return report, nil
+}
+
+func (s *RunSQLite) loadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
 	opts = defaultRunDebugQueryOptions(opts)
 	header, err := s.LoadRunHeader(ctx, runID)
 	if err != nil {
 		return operatorread.RunDebugReport{}, err
 	}
+	header.ClockSchedules, err = s.LoadRunClockSchedules(ctx, runID)
+	if err != nil {
+		return operatorread.RunDebugReport{}, err
+	}
 	report := operatorread.RunDebugReport{
+		Header:         header,
 		RunID:          header.RunID,
 		RunTableStatus: header.Status,
 		Failure:        runtimefailures.CloneEnvelope(header.Failure),
@@ -181,6 +201,10 @@ func (s *RunSQLite) LoadRunDebugReport(ctx context.Context, runID string, opts o
 	report.TestQuiescence.FanOutUnsettled = report.FanOut.Unsettled
 	report.TestQuiescence.FanOutBarriers = report.FanOut.BarrierArmed + report.FanOut.BarrierPending
 	report.TestQuiescence.Ready = runTestQuiescenceReady(report.TestQuiescence)
+	report.OperationalFacts, err = loadRunOperationalEvidence(ctx, s.backend, operatorSQLiteDelivery, s.sources, s.pipeline, s.timers, header, report.TestQuiescence, s.now())
+	if err != nil {
+		return operatorread.RunDebugReport{}, err
+	}
 	return report, nil
 }
 
