@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/packartifact"
+	"github.com/division-sh/swarm/internal/packmodel"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
@@ -20,6 +22,23 @@ func parseChannelManifestAt(body []byte, file string) (ChannelManifest, error) {
 	if err := root.ValidateExpansion(); err != nil {
 		return ChannelManifest{}, err
 	}
+	return admitChannelManifest(root, "")
+}
+
+// AdmitChannelBody consumes captured directory membership, not a body-supplied
+// provider or a second YAML decoder.
+func AdmitChannelBody(body packartifact.ProviderBody) (ChannelManifest, error) {
+	if !body.Valid() || body.Role() != packmodel.BodyChannel {
+		return ChannelManifest{}, fmt.Errorf("channel admission requires an admitted channel.yaml BODY")
+	}
+	manifest, err := admitChannelManifest(body.SourceValue(), body.ProviderKey())
+	if err != nil {
+		return ChannelManifest{}, err
+	}
+	return manifest, validateChannelManifest(body.ProviderKey(), manifest)
+}
+
+func admitChannelManifest(root yamlsource.Value, provider string) (ChannelManifest, error) {
 	f, err := channelFields(root, "provider", "transport", "capabilities", "opaque_types", "operations", "events", "registration", "onboarding", "native_inbox")
 	if err != nil {
 		return ChannelManifest{}, err
@@ -40,8 +59,11 @@ func parseChannelManifestAt(body []byte, file string) (ChannelManifest, error) {
 	if _, err := out.Transport.ActivationPosture(); err != nil {
 		return out, channelError(f["transport"], err.Error())
 	}
-	if out.Provider, err = channelRequiredText(root, f, "provider"); err != nil {
-		return out, err
+	out.Provider = provider
+	if provider == "" {
+		if out.Provider, err = channelRequiredText(root, f, "provider"); err != nil {
+			return out, err
+		}
 	}
 	if err := admitChannelBindings(root, f, &out); err != nil {
 		return out, err
