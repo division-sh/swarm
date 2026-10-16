@@ -10,7 +10,6 @@ import (
 	"testing"
 )
 
-const stopWitnessPredecessor = "bb42d634bc2810223a91ded22e26182a27bcea90"
 const stopWitnessDigest = "87b00ec86800b2f78e9af3947b503d9c60bee78640bef7e20d52d01966441400"
 
 //go:embed family145-stop-witness-amendment.json
@@ -53,22 +52,6 @@ func family145CheckStopWitnessAmendment(t *testing.T, file, function, current st
 		}
 	}
 	return false
-}
-
-func stopWitnessHostiles(t *testing.T, pin stopWitnessPin, finite recipe) {
-	t.Helper()
-	for _, cut := range []string{"in_progress", "failed", "reader", "selected", "owner", "raw", "runID", "fixture.runID", "pending", "updated_at", "JOIN", "ORDER BY", "reflect.DeepEqual", "before.revisions", "Commit()", "Rollback()", "t.Fatal", " != ", " == "} {
-		if !strings.Contains(pin.After, cut) {
-			continue
-		}
-		mutant := strings.Replace(pin.After, cut, "unreviewedStopCut", 1)
-		if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil || family145StopWitnessPrevious(t, pin.File, pin.Function, mutant) != mutant {
-			t.Fatal("changed stop identity, count, join, clock or assertion received acceptance:", pin.Function, cut)
-		}
-	}
-	if family145StopWitnessPrevious(t, "foreign.go", pin.Function, pin.After) != pin.After || family145StopWitnessPrevious(t, pin.File, pin.Function+"Foreign", pin.After) != pin.After {
-		t.Fatal("historical stop correspondence accepted a foreign complete key")
-	}
 }
 
 func TestFamily145StopSnapshotKeepsExactPhysicalQueriesAndNoRawCarrier(t *testing.T) {

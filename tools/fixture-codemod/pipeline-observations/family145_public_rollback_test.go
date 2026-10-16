@@ -2,7 +2,6 @@ package main
 
 import (
 	_ "embed"
-	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -16,48 +15,6 @@ import (
 
 //go:embed family145-public-rollback-preimages.json
 var publicRollbackBytes []byte
-
-func publicRollbackPins(t *testing.T) []publicrollback.Pin {
-	t.Helper()
-	pins, err := publicrollback.Decode(publicRollbackBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return pins
-}
-
-func restorePublicRollbackHistory(t *testing.T, rows []map[string]any, recipes bool) []map[string]any {
-	pins, err := publicrollback.Decode(publicRollbackBytes)
-	if err != nil {
-		panic(err)
-	}
-	for _, row := range rows {
-		for _, pin := range pins {
-			if row["File"] != pin.File || row["Function"] != pin.Function {
-				continue
-			}
-			if recipes && row["After"] == pin.Before && row["Successor"] == pin.After {
-				delete(row, "Successor")
-			} else if !recipes && row["After"] == pin.After {
-				row["After"] = pin.Before
-			}
-		}
-	}
-	return rows
-}
-
-func cloneRollbackHistory(t *testing.T, rows []map[string]any) []map[string]any {
-	t.Helper()
-	raw, err := json.Marshal(rows)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var copy []map[string]any
-	if err := json.Unmarshal(raw, &copy); err != nil {
-		t.Fatal(err)
-	}
-	return copy
-}
 
 func TestFamily145PublicRollbackNewOwnersHaveExactPhysicalPredicates(t *testing.T) {
 	for _, owner := range [][3]string{

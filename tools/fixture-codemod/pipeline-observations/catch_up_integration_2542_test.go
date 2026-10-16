@@ -4,11 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"reflect"
-	"strings"
 	"sync"
 	"testing"
 
@@ -66,10 +62,6 @@ func catchUp2542PriorMasterPair(row recipe, actual string) (recipe, string, erro
 	return catchUp2542PriorPair(row, actual, true)
 }
 
-func catchUp2542PriorLanePair(row recipe, actual string) (recipe, string, error) {
-	return catchUp2542PriorPair(row, actual, false)
-}
-
 func catchUp2542PriorPair(row recipe, actual string, master bool) (recipe, string, error) {
 	packet, err := selectedreadrole.CatchUp2542Receipts()
 	if err != nil {
@@ -116,117 +108,4 @@ func catchUp2542PriorPair(row recipe, actual string, master bool) (recipe, strin
 		return prior, endpoint, nil
 	}
 	return row, actual, nil
-}
-
-func assertCatchUp2542RowMap(t *testing.T, packet selectedreadrole.CatchUp2542Packet, current, master, lane []recipe) {
-	t.Helper()
-	base, err := catchUp2542ReadRecipes(packet.Base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	indexes := []map[string]recipe{}
-	for _, rows := range [][]recipe{base, master, lane, current} {
-		indexed := map[string]recipe{}
-		for _, row := range rows {
-			key := catchUp2542RecipeKey(row)
-			if _, exists := indexed[key]; exists {
-				t.Fatalf("duplicate signed recipe key: %s", key)
-			}
-			indexed[key] = row
-		}
-		indexes = append(indexes, indexed)
-	}
-	counts := map[string]int{}
-	seen := map[string]bool{}
-	for _, pin := range packet.Rows {
-		if seen[pin.Key] {
-			t.Fatalf("duplicate finite intersection: %s", pin.Key)
-		}
-		seen[pin.Key] = true
-		want := []string{pin.BaseSHA256, pin.MasterSHA256, pin.LaneSHA256, pin.ComposedSHA256}
-		for index, rows := range indexes {
-			if catchUp2542RecipeDigest(rows[pin.Key]) != want[index] {
-				t.Fatalf("intersection lost signed endpoint %d: %s", index, pin.Key)
-			}
-		}
-		counts[pin.Disposition]++
-	}
-	if !reflect.DeepEqual(counts, map[string]int{
-		"double-changed": 3, "double-changed/composed-source": 94, "master-retired-lane-successor": 4,
-		"lane-only": 110, "lane-only/composed-source": 2, "master-only": 110,
-		"lane-added/composed-source": 79, "lane-added/exact-retired-helper": 4, "identical/composed-source": 1,
-	}) {
-		t.Fatalf("finite intersection/retirement classes changed: %v", counts)
-	}
-}
-
-func assertCatchUp2542CurrentFiles(t *testing.T, packet selectedreadrole.CatchUp2542Packet) {
-	t.Helper()
-	seen := map[string]bool{}
-	for _, file := range packet.Files {
-		if seen[file.File] {
-			t.Fatalf("duplicate integration source: %s", file.File)
-		}
-		seen[file.File] = true
-		raw, err := os.ReadFile(filepath.Join("../../..", file.File))
-		if file.ComposedSHA256 == "absent" {
-			if !os.IsNotExist(err) {
-				t.Fatalf("retired integration source survived: %s: %v", file.File, err)
-			}
-			continue
-		}
-		if err == nil {
-			raw, err = selectedreadrole.Repair2698HistoricalSource("../../..", file.File, raw)
-		}
-		if err != nil || fmt.Sprintf("%x", sha256.Sum256(raw)) != file.ComposedSHA256 {
-			t.Fatalf("composed source differs from finite packet: %s: %v", file.File, err)
-		}
-	}
-}
-
-func assertCatchUp2542CurrentPairHostility(t *testing.T, row recipe, master bool) bool {
-	t.Helper()
-	endpoint := row.Successor
-	if endpoint == "" {
-		endpoint = row.After
-	}
-	prior, previous, err := catchUp2542PriorPair(row, endpoint, master)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reflect.DeepEqual(prior, row) {
-		return false
-	}
-	if previous == endpoint {
-		t.Fatal("changed receipt did not recover its exact predecessor")
-	}
-	for _, source := range []string{previous, strings.Replace(endpoint, "{", "{ unreviewed();", 1)} {
-		if _, _, err := catchUp2542PriorPair(row, source, master); err == nil {
-			t.Fatal("historical or mutated source gained current-pair authority")
-		}
-	}
-	for _, field := range []string{"before", "after", "endpoint", "identity", "mechanical"} {
-		mutant := mutateCatchUp2542Receipt(row, field)
-		got, source, err := catchUp2542PriorPair(mutant, endpoint, master)
-		if err != nil || !reflect.DeepEqual(got, mutant) || source != endpoint {
-			t.Fatal("finite inverse erased unreviewed receipt metadata:", field, err)
-		}
-	}
-	return true
-}
-
-func mutateCatchUp2542Receipt(row recipe, field string) recipe {
-	switch field {
-	case "before":
-		row.Before += " changed"
-	case "after":
-		row.After += " changed"
-	case "endpoint":
-		row.Successor = "changed"
-	case "identity":
-		row.Function += "Unlisted"
-	case "mechanical":
-		row.Mechanical = &mechanicalSnapshot{SourceCommit: "foreign"}
-	}
-	return row
 }

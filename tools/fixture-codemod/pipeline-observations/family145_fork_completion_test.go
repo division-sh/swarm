@@ -1,17 +1,12 @@
 package main
 
 import (
-	"crypto/sha256"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"go/ast"
 	"strings"
 	"testing"
 )
-
-//go:embed family145-fork-completion-preimages.json
-var family145ForkCompletionPreimages []byte
 
 func family145ForkCompletionInverse(function, after string) string {
 	after = family145ServedDebugCallerInverse(function, after)
@@ -29,23 +24,6 @@ func family145ForkCompletionInverse(function, after string) string {
 		native, original,
 		"servedInspectionRunDebugSummary(reader, runID)", "servedEventPublishDebugSummary(t, rt.DB, rt.Backend, runID)",
 	).Replace(after)
-}
-
-func family145CheckForkCompletionWholeRule(t *testing.T, file, function, after string) bool {
-	t.Helper()
-	var pins []writerStagePreimage
-	if err := json.Unmarshal(family145ForkCompletionPreimages, &pins); err != nil {
-		t.Fatal(err)
-	}
-	for _, pin := range pins {
-		if pin.File == file && pin.Function == function {
-			if fmt.Sprintf("%x", sha256.Sum256([]byte(family145ForkCompletionInverse(function, after)))) != pin.SHA256 {
-				t.Fatalf("completion transform changed complete signed predecessor: %s/%s", file, function)
-			}
-			return true
-		}
-	}
-	return false
 }
 
 func family145ForkCompletionCallError(call *ast.CallExpr) error {

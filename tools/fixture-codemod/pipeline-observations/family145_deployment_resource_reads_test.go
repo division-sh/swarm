@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -63,29 +61,6 @@ var family145DeploymentReadCuts = map[string][]string{
 		"count, err := check.read()", "*check.value = count", "storetest.ReadDeploymentDeliveryStatusStorage(ctx, selected, runID)", "status, count := row.Status, row.Count",
 		"storetest.ReadDeploymentRecentEventStorage(ctx, selected, runID)", "name, payload := row.Name, row.Payload", "if name == \"platform.runtime_log\"",
 	},
-}
-
-func family145DeploymentReadProofError(function, before, after string) error {
-	want, err := family145DescriptorBusinessAssertions(before)
-	if err != nil {
-		return err
-	}
-	got, err := family145DescriptorBusinessAssertions(after)
-	if err != nil || !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("deployment read lost original public rows, version, receiver, deadline, wake, lifecycle or receipt assertions: %s %v", function, err)
-	}
-	cursor := -1
-	for _, cut := range family145DeploymentReadCuts[function] {
-		at := strings.Index(after, cut)
-		if at <= cursor {
-			return fmt.Errorf("deployment read lost or reordered an independent query/field/cut: %s", cut)
-		}
-		cursor = at
-	}
-	if strings.Contains(after, "QueryContext(") || strings.Contains(after, "QueryRowContext(") || strings.Contains(after, "*sql.DB") {
-		return fmt.Errorf("deployment helper retains raw query/pool authority")
-	}
-	return nil
 }
 
 var family145DeploymentQueryFiles = map[string][]string{

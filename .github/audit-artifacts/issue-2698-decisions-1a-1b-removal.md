@@ -59,9 +59,24 @@ timing inventory or platform spec.
 
 ## Verification Status
 
-Pending actual Go discovery, dependency/unused checks, the complete retained
-selection and store unit measured sequentially at their original settings,
-and the live ratchet. Counts above are expected cross-checks, not receipts.
+Actual Go discovery at231a889bb9 matches all487 exact retained subtree
+package/root identities (415 top-level plus72 subpackage); a separate AST
+comparison against signed2db verifies every retained declaration is unchanged.
+The same AST comparison remains green after dependency cleanup. Receipts:
+pr2698-decision1b-discovery.jsonl and pr2698-verify-decision1b.go in the cache.
+
+Normal native U1000 analysis of the top-level tooling package and internal/store
+identified453 declarations exclusive to the removed roots:379 functions
+(including six methods),55 variables,12 constants and seven types across126
+tool test files. issue-2698-decision1b-unused-dependencies.tsv enumerates them
+at their pre-cleanup source lines. No store/production declaration, immutable
+packet or Before/After/Successor row is removed. goimports removed unused
+imports; final native U1000 is PASS, zero findings. This is affected-package
+Linux evidence, not a Linux/Darwin-union claim. Original and final reports are
+pr2698-decision1b-unused{,-final}.jsonl; the original453 findings remain evidence.
+
+Pending the complete retained selection and store unit measured sequentially
+at their original settings, and the live ratchet in canonical preflight.
 The frozen-head runtime diagnostics are independent and close no hold unless
 their cause/disposition is explicitly reviewed. Final canonical preflight and
 HumanTask both-store receipts must bind the final integrated head, including

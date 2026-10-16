@@ -2,32 +2,12 @@ package main
 
 import (
 	_ "embed"
-	"go/ast"
-	"go/token"
-	"strings"
-	"testing"
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/publicjoin"
 )
 
 //go:embed family145-public-join-preimages.json
 var family145PublicJoinBytes []byte
-
-var publicJoinHelpers = map[string]string{
-	"a2ReadJoinPublicObligation": "Endpoint", "a2RequireJoinPublicGraph": "BundleHash",
-	"a2ReadJoinPublicEvent": "Endpoint", "a2WaitJoinPublicRun": "Endpoint",
-	"a2RequireJoinPublicClients": "Endpoint", "a2JoinPublicCLI": "Endpoint",
-	"a2RequireJoinPublicTrace": "Endpoint",
-}
-
-func publicJoinPins(t *testing.T) []publicjoin.Pin {
-	t.Helper()
-	pins, err := publicjoin.Decode(family145PublicJoinBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return pins
-}
 
 func family145PublicJoinCallerInverse(function, current string) string {
 	pins, err := publicjoin.Decode(family145PublicJoinBytes)
@@ -40,111 +20,4 @@ func family145PublicJoinCallerInverse(function, current string) string {
 		}
 	}
 	return current
-}
-
-func family145CheckPublicJoinWholeRule(t *testing.T, file, function, current string) bool {
-	t.Helper()
-	for _, pin := range publicJoinPins(t) {
-		if pin.File == file && pin.Function == function {
-			if current != pin.After {
-				t.Fatal("public join caller escaped complete source rule:", file, function)
-			}
-			return true
-		}
-	}
-	return false
-}
-
-func publicJoinExpected(pin publicjoin.Pin) string {
-	expected := pin.Before
-	projection := publicJoinHelpers[pin.Function]
-	if projection != "" {
-		argument := "endpoint"
-		if projection == "BundleHash" {
-			argument = "bundleHash"
-		}
-		expected = strings.Replace(expected, "rt servedControlProofRuntime", argument+" string", 1)
-		expected = strings.ReplaceAll(expected, "rt."+projection, argument)
-	}
-	for helper, field := range publicJoinHelpers {
-		argument := "rt." + field
-		if projection != "" {
-			argument = "endpoint"
-		}
-		expected = strings.ReplaceAll(expected, helper+"(t, rt,", helper+"(t, "+argument+",")
-	}
-	return expected
-}
-
-func publicJoinHostiles(t *testing.T, pin publicjoin.Pin) {
-	t.Helper()
-	pins := publicJoinPins(t)
-	if publicjoin.Previous(pins, pin.File, pin.Function, pin.After) != pin.Before {
-		t.Fatal("public join complete inverse lost original source")
-	}
-	for _, location := range [][2]string{{pin.File + ".foreign", pin.Function}, {pin.File, pin.Function + "Foreign"}} {
-		if publicjoin.Previous(pins, location[0], location[1], pin.After) != pin.After {
-			t.Fatal("public join admitted foreign file or declaration")
-		}
-	}
-	finite := recipe{File: pin.File, Function: pin.Function, Before: pin.Before, After: pin.After}
-	for _, cut := range []string{"endpoint", "bundleHash", "rt.Endpoint", "rt.BundleHash", "run_id", "event_id", "entity.get", "run.diagnose", "run.trace", "JoinRef", "Generation", "DeepEqual", "DeadlineAt", "stable == 4", "25 * time.Millisecond", "stale_arrival", "join_closed", "NextCursor", "process.stop", "arm.Key()"} {
-		if !strings.Contains(pin.After, cut) {
-			continue
-		}
-		mutant := strings.Replace(pin.After, cut, "foreignJoinCut", 1)
-		if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil {
-			t.Fatal("lost public join assertion/identity/settlement cut accepted:", pin.Function, cut)
-		}
-		if publicjoin.Previous(pins, pin.File, pin.Function, mutant) != mutant {
-			t.Fatal("altered full public join body normalized")
-		}
-	}
-}
-
-func publicJoinInventory(t *testing.T, file *ast.File) (calls, helpers int) {
-	t.Helper()
-	allowed := map[token.Pos]bool{}
-	ast.Inspect(file, func(node ast.Node) bool {
-		switch n := node.(type) {
-		case *ast.FuncDecl:
-			if field := publicJoinHelpers[n.Name.Name]; field != "" {
-				helpers++
-				allowed[n.Name.Pos()] = true
-				publicJoinRequireProjection(t, n, field)
-			}
-		case *ast.CallExpr:
-			if id, ok := n.Fun.(*ast.Ident); ok && publicJoinHelpers[id.Name] != "" {
-				calls++
-				allowed[id.Pos()] = true
-				if len(n.Args) < 2 || family145NodeString(n.Args[1]) == "rt" {
-					t.Error("public join caller restored broad carrier")
-				}
-			}
-		}
-		return true
-	})
-	ast.Inspect(file, func(node ast.Node) bool {
-		if id, ok := node.(*ast.Ident); ok && publicJoinHelpers[id.Name] != "" && !allowed[id.Pos()] {
-			t.Error("public join helper escaped its finite direct call inventory")
-		}
-		return true
-	})
-	return calls, helpers
-}
-
-func publicJoinRequireProjection(t *testing.T, function *ast.FuncDecl, field string) {
-	t.Helper()
-	if len(function.Type.Params.List) < 2 {
-		t.Error("public join helper lost its declared projection")
-		return
-	}
-	parameter := function.Type.Params.List[1]
-	name := "endpoint"
-	if field == "BundleHash" {
-		name = "bundleHash"
-	}
-	if len(parameter.Names) != 1 || parameter.Names[0].Name != name || family145NodeString(parameter.Type) != "string" {
-		t.Error("public join helper restored broad authority")
-	}
 }

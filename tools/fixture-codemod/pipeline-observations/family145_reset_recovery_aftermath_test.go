@@ -12,63 +12,6 @@ import (
 	"testing"
 )
 
-var family145ResetRecoveryAftermathCuts = map[string][]string{
-	"TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWithoutPlatformReset": {
-		"storetest.StartPostgresRuntimeStore(t)", "loadConformanceRuntimeWorkflowModule(t)",
-		"conformanceSourceArtifactFact(t, module.source)", "storetest.RequireBundleDataCatalog(t, ctx, pg, bundle)",
-		"requireCanonicalRuntimeLogSurface(t, ctx, pg)", "claimErr: errors.New(\"claim failed\")",
-		"runtimepkg.NewRuntime(ctx, completeConformanceWorkflowDeps(pg,", "RecoveryOnStartup: true",
-		"installConformanceRuntimeStartupGrant(t, ctx, pg, rt)", "rt.Start(ctx)",
-		"storetest.CountEventNameStorage(ctx, pg, \"platform.reset\")",
-		"storetest.ReadPostgresRecoveryFailedPayloadStorage(ctx, pg)",
-		"json.Unmarshal(recoveryFailedPayloadRaw, &recoveryFailedPayload)",
-		"json.Marshal(recoveryFailedPayload[\"failure\"])", "runtimefailures.UnmarshalEnvelope(failureRaw)",
-	},
-	"TestResetOrphanedSessionAftermathSurface_RoundTripsThroughObservabilityReader": {
-		"storetest.StartPostgresRuntimeStore(t)", "requireCanonicalRuntimeLogSurface(t, ctx, pg)",
-		"storetest.RequireRun(t, ctx, pg,", "seedConformanceAgent(t, ctx, pg, runID, \"agent-1\")",
-		"runtimepkg.NewRuntimeLogger(pg, executionposture.Live, conformanceRuntimeLogPayloadAdmitter)",
-		"conformanceTestRuntimeOccurrence(t, authorActivityTestSourceArtifactFact.BundleHash())",
-		"newScopedTestEventBus(t, pg, durableConformanceEventBusOptions(pg,", "WorkOwner: workOwner",
-		"pg.SetSessionLockTTL(30 * time.Second)", "runtimesessions.Registry(pg)",
-		"runtimeeffects.WithDifferentOwner(ctx, runtimeeffects.OwnerBuildTestInfrastructure)",
-		"conformanceAgentIdentity(t, runID, \"agent-1\")", "registry.Acquire(leaseCtx, identity, \"conformance\")",
-		"runtimemanager.NewAgentManagerWithOptions(bus, nil,", "am.ResetRuntimeStateWithSource(\"admin_cli\")",
-		"pg.ListOperatorRuntimeLogs(ctx, operatorread.OperatorRuntimeLogListOptions{Component: \"runtime\", ActionOrEventType: \"reset_orphaned_sessions\", Limit: 10})",
-		"storetest.ReadPostgresSessionTerminationStorage(ctx, pg, lease.SessionID)",
-		"status, terminationReason, terminationDetail := termination.Status, termination.Reason, termination.Detail",
-		"storetest.ReadPostgresResetPayloadStorage(ctx, pg)", "json.Unmarshal(resetPayloadRaw, &resetPayload)",
-	},
-}
-
-func family145ResetRecoveryAftermathProofError(function, before, after string) error {
-	if err := family145ConnectorProofError(function, before, after); err != nil {
-		return err
-	}
-	for _, cut := range family145ResetRecoveryAftermathCuts[function] {
-		if !strings.Contains(after, cut) {
-			return fmt.Errorf("reset/recovery aftermath lost native owner or original execution cut: %s", cut)
-		}
-	}
-	if strings.Index(after, "rt.Start(ctx)") > strings.Index(after, "storetest.CountEventNameStorage(") && strings.Contains(after, "rt.Start(ctx)") {
-		return fmt.Errorf("startup failure observation moved before actual recovery")
-	}
-	if strings.Contains(after, "am.ResetRuntimeStateWithSource(") &&
-		(strings.Index(after, "registry.Acquire(") > strings.Index(after, "am.ResetRuntimeStateWithSource(") ||
-			strings.Index(after, "am.ResetRuntimeStateWithSource(") > strings.Index(after, "pg.ListOperatorRuntimeLogs(") ||
-			strings.Index(after, "pg.ListOperatorRuntimeLogs(") > strings.Index(after, "storetest.ReadPostgresSessionTerminationStorage(")) {
-		return fmt.Errorf("orphan-reset aftermath changed lease/reset/diagnostic/storage execution order")
-	}
-	reads := []string{"storetest.CountEventNameStorage(", "storetest.ReadPostgresRecoveryFailedPayloadStorage("}
-	if strings.Contains(after, "am.ResetRuntimeStateWithSource(") {
-		reads = []string{"storetest.ReadPostgresSessionTerminationStorage(", "storetest.ReadPostgresResetPayloadStorage("}
-	}
-	if strings.Count(after, reads[0]) != 1 || strings.Count(after, reads[1]) != 1 || strings.Index(after, reads[0]) >= strings.Index(after, reads[1]) {
-		return fmt.Errorf("aftermath lost the two separate original reads or reversed their execution order")
-	}
-	return nil
-}
-
 func TestFamily145ResetRecoveryAftermathStoragePreservesEveryPhysicalQuery(t *testing.T) {
 	var rows []struct{ Function, Before string }
 	if err := json.Unmarshal(family145TransitionBytes, &rows); err != nil {

@@ -1,10 +1,8 @@
 package main
 
 import (
-	"crypto/sha256"
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -13,16 +11,6 @@ import (
 	"strings"
 	"testing"
 )
-
-// The whole predecessor bodies are pinned at the signed mailbox-wave head,
-// including earlier native migrations. Only this finite role propagation is inverted.
-//
-//go:embed family145-writer-stage-preimages.json
-var family145WriterStagePreimages []byte
-
-type writerStagePreimage struct {
-	File, Function, SHA256 string
-}
 
 func family145WriterStageCallerInverse(function, after string) string {
 	after = family145ServedDebugCallerInverse(function, after)
@@ -92,34 +80,6 @@ func family145WriterStageProcessInspectorInverse(after string) string {
 		"\n\t\t\tinspection, err := storetest.OpenReleaseProcessReadOnlyInspection(backendName, location)\n\t\t\tif err != nil {\n\t\t\t\tt.Fatal(err)\n\t\t\t}\n\t\t\tt.Cleanup(func() { _ = inspection.Close() })\n\t\t\treader := requireReceiverProofStateReader(t, inspection)", "",
 		"\n\t\t\tinspection, err := storetest.OpenReleaseProcessReadOnlyInspection(backendName, location)\n\t\t\tif err != nil {\n\t\t\t\tt.Fatal(err)\n\t\t\t}\n\t\t\tt.Cleanup(func() {\n\t\t\t\t_ = inspection.Close()\n\t\t\t})\n\t\t\treader := requireReceiverProofStateReader(t, inspection)", "",
 	).Replace(after)
-}
-
-func family145CheckWriterStageWholeRule(t *testing.T, file, function, after string) bool {
-	t.Helper()
-	var rows []writerStagePreimage
-	if err := json.Unmarshal(family145WriterStagePreimages, &rows); err != nil {
-		t.Fatal(err)
-	}
-	for _, row := range rows {
-		if row.File == file && row.Function == function {
-			if fmt.Sprintf("%x", sha256.Sum256([]byte(family145WriterStageCallerInverse(function, after)))) != row.SHA256 {
-				t.Fatalf("finite writer-stage rule lost its signed whole predecessor: %s/%s", file, function)
-			}
-			return true
-		}
-	}
-	return false
-}
-
-func family145WriterStageCheckHostileBody(t *testing.T, row writerStagePreimage, after, cut string) {
-	t.Helper()
-	if !strings.Contains(after, cut) {
-		return
-	}
-	hostile := strings.Replace(after, cut, "foreignWriterStageCut()", 1)
-	if fmt.Sprintf("%x", sha256.Sum256([]byte(family145WriterStageCallerInverse(row.Function, hostile)))) == row.SHA256 {
-		t.Fatalf("writer-stage whole rule accepted lost owner/assertion/temporal cut: %s/%s", row.Function, cut)
-	}
 }
 
 func family145WriterStageRecordCall(t *testing.T, function string, call *ast.CallExpr, counts map[string]int) {

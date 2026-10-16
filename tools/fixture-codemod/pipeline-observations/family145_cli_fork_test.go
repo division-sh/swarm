@@ -2,92 +2,9 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 )
-
-func family145CLIForkRow(file, function string) bool {
-	if file == "internal/serveapp/run_fork_runtime_test.go" {
-		if function == "seedRunForkCLISelectedExecutionDiagnosticPlatformDeadLetter" {
-			return false
-		}
-		return strings.HasPrefix(function, "TestRunForkRuntimeOwnerHarness_") || strings.HasPrefix(function, "seedRunForkCLI") || function == "stageRunForkCLIForkPoint" || function == "registerRunForkCLIContractCatalog"
-	}
-	return file == "internal/serveapp/run_fork_constructor_fixture_test.go" || (file == "internal/serveapp/main_runtime_test.go" && function == "seedRunForkSelectedExecutionSourceEvent")
-}
-
-func family145CLIForkProofError(function, before, after string) error {
-	want, err := family145DescriptorBusinessAssertions(before)
-	if err != nil {
-		return err
-	}
-	got, err := family145DescriptorBusinessAssertions(after)
-	if err != nil {
-		return err
-	}
-	if !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("CLI fork lost original business assertions: %s", function)
-	}
-	if err := family145DescriptorReadinessEscape([]byte("package proof\n" + after)); err != nil {
-		return err
-	}
-	if err := family145CLIForkCallInputsError(function, before, after); err != nil {
-		return err
-	}
-	return family145CLIForkEventCutsError(function, before, after)
-}
-
-func family145CLIForkCallInputsError(function, before, after string) error {
-	for _, name := range []string{"runForkRuntimeOwnerHarness", "RequireRun", "CommitDeliveryObligationsForPersistedEvent", "seedRunForkCLIConstruction", "seedRunForkCLIActivationSourceWithoutRevision", "seedRunForkCLIActivationSource", "stageRunForkCLIForkPoint", "seedRunForkCLISelectedExecutionSource", "seedRunForkSelectedExecutionSourceEvent", "registerRunForkCLIContractCatalog"} {
-		calls := sourceOutcomePreparationCalls(before, name)
-		for i := range calls {
-			calls[i] = strings.ReplaceAll(calls[i], ", db,", ", pg,")
-			calls[i] = strings.ReplaceAll(calls[i], "storetest.NewPostgresStoreForTest(db)", "pg")
-			calls[i] = strings.ReplaceAll(calls[i], "storetest.AdmitPostgresRuntimeStore(t, db)", "pg")
-			if function == "seedRunForkSelectedExecutionSourceEvent" {
-				calls[i] = strings.ReplaceAll(calls[i], ", pg,", ", selected,")
-			}
-			if function == "seedRunForkCLIActivationSourceWithoutRevision" {
-				calls[i] = strings.ReplaceAll(calls[i], ", selected,", ", pg,")
-			}
-		}
-		if !reflect.DeepEqual(calls, sourceOutcomePreparationCalls(after, name)) {
-			return fmt.Errorf("CLI fork changed %s source/route/capture/CLI inputs", name)
-		}
-	}
-	return nil
-}
-
-func family145CLIForkEventCutsError(function, before, after string) error {
-	for _, pair := range []struct{ before, after string }{
-		{"InsertExistingRunRootEventRecord", "InsertNativeExistingRunRootEvent"},
-		{"captureRunForkCLIRevision", "CaptureSelectedRunForkRevision"},
-	} {
-		want := sourceOutcomePreparationCalls(before, pair.before)
-		for i := range want {
-			want[i] = strings.ReplaceAll(want[i], ", db, authoractivityfixture.DialectPostgres,", ", pg,")
-			want[i] = strings.ReplaceAll(want[i], ", db,", ", pg,")
-			want[i] = strings.ReplaceAll(want[i], pair.before, pair.after)
-			if pair.before == "captureRunForkCLIRevision" {
-				want[i] = "storetest." + strings.Replace(want[i], "(t,", "(t, context.Background(),", 1)
-			}
-		}
-		got := sourceOutcomePreparationCalls(after, pair.after)
-		// The source helper already owns one exact background context.
-		if function == "seedRunForkSelectedExecutionSourceEvent" {
-			for i := range want {
-				want[i] = strings.ReplaceAll(want[i], "pg", "selected")
-				want[i] = strings.ReplaceAll(want[i], "context.Background()", "ctx")
-			}
-		}
-		if !reflect.DeepEqual(want, got) {
-			return fmt.Errorf("CLI fork changed event-only or revision temporal cuts: %s/%v/%v", function, want, got)
-		}
-	}
-	return nil
-}
 
 func TestFamily145CLIForkEverySQLObservationMatchesItsClosedPhysicalOwner(t *testing.T) {
 	owners := map[string][]struct{ path, function string }{

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -45,17 +44,6 @@ func servedSetupComparisonDeclaration(t *testing.T, pins []runphysical.Pin, path
 		t.Fatal("setup comparison changed declaration identity")
 	}
 	return previous
-}
-
-func refuseServedSetupHistory(t *testing.T, rows []map[string]any, prior []byte, pins []runphysical.Pin, recipes bool) {
-	t.Helper()
-	raw, err := json.Marshal(rows)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := servedsettlement.RestoreSetupHistory(raw, prior, pins, recipes); err == nil {
-		t.Fatal("setup comparison erased changed/missing/duplicate/foreign history")
-	}
 }
 
 func servedSetupPins(t *testing.T) []runphysical.Pin {
