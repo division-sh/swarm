@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -119,75 +118,4 @@ func TestFamily145ConnectorSQLCorrespondencePreservesQuotedCaseAndSpaces(t *test
 			t.Fatalf("SQL correspondence hid changed quoted value: %s", hostile)
 		}
 	}
-}
-
-var family145ConnectorCalls = map[string][]string{
-	"runTelegramConnectorSupportedSurfaceRoundTrip":                                   {"normalized inbound observer borrowed foreign evidence", "!errors.Is(err, sql.ErrNoRows) || id != \"\""},
-	"startConfiguredChannelActivityNode":                                              {"func assertConfiguredChannelClaimedDispatch(", "storetest.ObserveSelectedPool(t, selected)", "if coordinator == nil || bus == nil", "len(nodes) != 0", "want claimed event dispatch only"},
-	"TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway":           {"storetest.StartPostgresRuntimeStore(t)", "storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)"},
-	"TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal":          {"storetest.StartPostgresRuntimeStore(t)", "storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)"},
-	"TestMicrosoftGraphClientCredentialsConnectorPackRoundTripThroughActivityJournal": {"storetest.StartPostgresRuntimeStore(t)", "storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)"},
-	"TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal":         {"storetest.StartPostgresRuntimeStore(t)", "storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)"},
-	"TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal":           {"storetest.StartPostgresRuntimeStore(t)", "storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)"},
-	"TestGitHubAppIssueWorkflowConnectorPackRoundTripThroughActivityJournal":          {"storetest.StartPostgresRuntimeStore(t)", "storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)"},
-	"countTelegramConnectorSupportedSurfaceFailureEventsForEvent":                     {"storetest.CountConnectorNamedSourceEvent(backend.ctx, backend.eventStore, backend.runID, failureEventType, inboundEventID)"},
-	"countSlackManagedConnectorFailureEventsForSource":                                {"storetest.CountConnectorNamedSourceEvent(backend.ctx, backend.eventStore, backend.runID, failureEventType, sourceEventID)"},
-	"countMicrosoftGraphFailureEventsForSource":                                       {"storetest.CountConnectorNamedSourceEvent(backend.ctx, backend.eventStore, backend.runID, failureEventType, sourceEventID)"},
-	"countNotionManagedConnectorFailureEventsForSource":                               {"storetest.CountConnectorNamedSourceEvent(backend.ctx, backend.eventStore, backend.runID, failureEventType, sourceEventID)"},
-	"countGitHubAppIssueCommentFailureEventsForSource":                                {"storetest.CountConnectorNamedSourceEvent(backend.ctx, backend.eventStore, backend.runID, failureEventType, sourceEventID)"},
-	"countGitHubFailureEventsForSource":                                               {"storetest.CountConnectorNamedSourceEvent(backend.ctx, backend.eventStore, backend.runID, eventName, sourceEventID)"},
-	"countTelegramConnectorSupportedSurfaceNodeDeliveries":                            {"storetest.CountTemplateNodeDelivery(backend.ctx, backend.eventStore, eventID, nodeID)"},
-	"loadTelegramConnectorSupportedSurfaceInboundEventIDByRun":                        {"storetest.ReadConnectorNormalizedProviderEventID(backend.ctx, backend.eventStore, runID, backend.entityID, \"inbound.telegram.text_message\", providerEventID)"},
-	"loadNormalizedProviderEventID":                                                   {"storetest.ReadConnectorNormalizedProviderEventID(backend.ctx, backend.eventStore, backend.runID, backend.entityID, eventName, providerEventID)"},
-	"telegramConnectorSupportedSurfaceEventExists":                                    {"storetest.CountConnectorNamedEventIdentity(backend.ctx, backend.eventStore, eventID, eventType)", "return count == 1"},
-	"slackManagedConnectorEventExists":                                                {"storetest.CountConnectorNamedEventIdentity(backend.ctx, backend.eventStore, eventID, eventType)", "return count == 1"},
-	"loadTelegramConnectorSupportedSurfaceActivityRequestEvent":                       {"storetest.ReadCanonicalEventRecord(backend.ctx, backend.eventStore, eventID)", "event.Type() != events.EventType(\"platform.activity_requested\")", "return event"},
-	"loadSlackManagedConnectorActivityRequestEvent":                                   {"storetest.ReadCanonicalEventRecord(backend.ctx, backend.eventStore, eventID)", "event.Type() != events.EventType(\"platform.activity_requested\")", "return event"},
-	"startTelegramConnectorSupportedSurfaceCoordinator":                               {"assertConfiguredChannelClaimedDispatch(t, pc, bus, backend.eventStore)"},
-	"startSlackManagedConnectorBusAndCoordinator":                                     {"assertConfiguredChannelClaimedDispatch(t, pc, bus, backend.eventStore)"},
-	"telegramConnectorSupportedSurfaceDiagnostics":                                    {"\"inbound.telegram\"", "\"platform.activity_requested\"", "storetest.CountPhysicalRunEvents(backend.ctx, backend.eventStore, backend.runID)", "storetest.CountConnectorRunNodeDeliveries(backend.ctx, backend.eventStore, backend.runID, telegramConnectorSupportedSurfaceNodeKey(t))", "storetest.CountConnectorRunActivityAttempts(backend.ctx, backend.eventStore, backend.runID)", "storetest.CountConnectorEntityDeadLetters(backend.ctx, backend.eventStore, backend.entityID)", "storetest.ReadConnectorLatestNodeDeliveryDiagnostic(backend.ctx, backend.eventStore, backend.runID, telegramConnectorSupportedSurfaceNodeKey(t))", "storetest.ReadConnectorEventChronology(backend.ctx, backend.eventStore, backend.runID)", "storetest.ReadConnectorLatestActivityReceiptDiagnostic(backend.ctx, backend.eventStore, backend.runID)", "storetest.ReadConnectorLatestEntityDeadLetterDiagnostic(backend.ctx, backend.eventStore, backend.entityID)", "backend.persistence.LoadWorkflowInstance("},
-	"telegramConnectorSupportedSurfaceScalarDiagnostic":                               {"errors.Is(err, sql.ErrNoRows)", "return \"<none>\"", "return \"ERR(\" + err.Error() + \")\""},
-}
-
-func family145ConnectorProofError(function, before, after string) error {
-	if function == "startConfiguredChannelActivityNode" {
-		// The immutable predecessor only checked zero background nodes and
-		// returned a no-op. The successor asserts its original selected owner;
-		// real coordinator/runtime teardown remains with the existing fixture.
-		if !strings.Contains(strings.Join(strings.Fields(before), ""), "returnfunc(){}") || !strings.Contains(before, "len(nodes) != 0") {
-			return fmt.Errorf("claimed-dispatch predecessor is not the reviewed no-op")
-		}
-		for _, call := range family145ConnectorCalls[function] {
-			if !strings.Contains(after, call) {
-				return fmt.Errorf("claimed-dispatch assertion lost: %s", call)
-			}
-		}
-		return family145DescriptorReadinessEscape([]byte("package proof\n" + after))
-	}
-	want, err := family145DescriptorBusinessAssertions(before)
-	if err != nil {
-		return err
-	}
-	got, err := family145DescriptorBusinessAssertions(after)
-	if err != nil {
-		return err
-	}
-	index := 0
-	for _, assertion := range got {
-		if index < len(want) && assertion == want[index] {
-			index++
-		}
-	}
-	if index != len(want) {
-		return fmt.Errorf("connector lost original assertion: %s", want[index])
-	}
-	for _, call := range family145ConnectorCalls[function] {
-		if !strings.Contains(after, call) {
-			return fmt.Errorf("connector lost exact owner/scope: %s", call)
-		}
-	}
-	if strings.Contains(after, "eventtest.PersistedProjection(") || strings.Contains(after, "created.IsZero()") {
-		return fmt.Errorf("connector replay reconstructs persisted identity or clock")
-	}
-	return family145DescriptorReadinessEscape([]byte("package proof\n" + after))
 }

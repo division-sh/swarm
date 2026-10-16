@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -11,23 +10,6 @@ import (
 	"strings"
 	"testing"
 )
-
-var family145OperatorChannelCalls = map[string][]string{
-	"TestInboundGatewaySignedTelegramOperatorChannelClaimSelectedStoreParity": {"storetest.StartPostgresRuntimeStore(t)", "storetest.StartSQLiteRuntimeStore(t)", "runOperatorChannelInboundSupportedSurface(t, selected,"},
-	"runOperatorChannelInboundSupportedSurface":                               {"seedSQLiteInboundGatewayRuntime(t, ctx, owner,", "seedPostgresInboundGatewayRuntime(t, ctx, owner,", "storetest.CountOperatorChannelActionIntentStorage(ctx, selected)", "storetest.ReadOperatorChannelTextIntentFactStorage(ctx, selected, \"7320\")", "publishOperatorChannelTelegramUpdate(t, gateway, bus, inboundTarget, ctx,", "after.Total.ReadCommits-before.Total.ReadCommits != 1", "after.Total.WriteCommits != before.Total.WriteCommits"},
-}
-
-func family145OperatorChannelProofError(function, before, after string) error {
-	if err := family145ConnectorProofError(function, before, after); err != nil {
-		return err
-	}
-	for _, call := range family145OperatorChannelCalls[function] {
-		if !strings.Contains(after, call) {
-			return fmt.Errorf("operator channel lost original owner/scope/lifetime: %s", call)
-		}
-	}
-	return nil
-}
 
 func TestFamily145OperatorChannelReadOwnersKeepExactPhysicalScope(t *testing.T) {
 	var rows []struct{ Function, Before string }

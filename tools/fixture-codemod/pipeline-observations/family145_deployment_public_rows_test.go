@@ -2,8 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -23,29 +21,6 @@ var family145DeploymentPublicRowCuts = map[string][]string{
 		"\"row events\"", "storetest.CountRunNamedEventStorage(f.ctx, f.selected, runID, \"portfolio/account.registered\")", "\"row deliveries\"", "storetest.CountPortfolioAllDeploymentRowsStorage(f.ctx, f.selected, runID)",
 		"\"receivers\"", "storetest.CountAccountDeploymentReceiversStorage(f.ctx, f.selected, runID)", "\"outcomes\"", "storetest.CountNestedRunFanOutOutcomes(f.ctx, f.selected, runID)", "count, err := check.read()", "if err != nil || count != 0",
 	},
-}
-
-func family145DeploymentPublicRowProofError(function, before, after string) error {
-	want, err := family145DescriptorBusinessAssertions(before)
-	if err != nil {
-		return err
-	}
-	got, err := family145DescriptorBusinessAssertions(after)
-	if err != nil || !reflect.DeepEqual(want, got) {
-		return fmt.Errorf("deployment public rows lost original source/version/empty/settlement/cardinality/document/pagination assertions: %s %v", function, err)
-	}
-	cursor := -1
-	for _, cut := range family145DeploymentPublicRowCuts[function] {
-		at := strings.Index(after, cut)
-		if at <= cursor {
-			return fmt.Errorf("deployment public rows lost/rebound an independent read, destination, diagnostic or lifetime cut: %s", cut)
-		}
-		cursor = at
-	}
-	if strings.Contains(after, "QueryContext(") || strings.Contains(after, "QueryRowContext(") || strings.Contains(after, "f.db") {
-		return fmt.Errorf("deployment public rows retain raw authority")
-	}
-	return nil
 }
 
 func family145DeploymentPublicRowOwnedQueries(t *testing.T) map[string]bool {

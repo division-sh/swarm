@@ -2,36 +2,9 @@ package main
 
 import (
 	"fmt"
-	"reflect"
 	"strings"
 	"testing"
 )
-
-func family145GateEmptyPathProofError(before, after string) error {
-	want, err := family145DescriptorBusinessAssertions(before)
-	if err != nil {
-		return err
-	}
-	got, err := family145DescriptorBusinessAssertions(after)
-	if err != nil {
-		return err
-	}
-	if len(want) != 1 || len(got) != 2 || !reflect.DeepEqual(want, got[:1]) ||
-		!strings.HasPrefix(got[1], `!strings.Contains(strings.ToLower(err.Error()), "check constraint") => `) {
-		return fmt.Errorf("gate probe changed its original refusal assertion or lost actual-constraint proof")
-	}
-	for _, cut := range []string{
-		"storetest.StartPostgresRuntimeStore(t)", "constructConformanceGateMutationSubject(t, pg)", "requireMutationSurface(t, pg)",
-		"err := storetest.ProbeWorkflowGateEmptyPath(ctx, pg, runID, entityID)",
-		`t.Fatal("malformed gate mutation with an empty path was accepted")`,
-		`t.Fatalf("empty gate path did not reach the database constraint: %v", err)`,
-	} {
-		if !strings.Contains(after, cut) {
-			return fmt.Errorf("gate probe lost exact subject, write or refusal input: %s", cut)
-		}
-	}
-	return family145DescriptorReadinessEscape([]byte("package proof\n" + after))
-}
 
 func family145GateEmptyPathRollbackProofError(source string) error {
 	for _, cut := range []string{
