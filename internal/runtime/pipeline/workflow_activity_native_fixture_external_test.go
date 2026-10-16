@@ -3,6 +3,7 @@ package pipeline_test
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/flowactivationfixture"
@@ -47,11 +49,10 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 	// Keep the first artifact write inside RequireRun's accounting boundary.
 	fact := sourceartifactfixture.FactFor(artifact)
 	ctx := testAuthorActivityContextForSource(t, context.Background(), fact)
-	persistence := pipeline.NewWorkflowPersistence(selected)
+	original := &nativeActivityJournalFixtureOwner{WorkflowPersistenceOwner: selected}
+	persistence := pipeline.NewWorkflowPersistence(original)
 	var buses []*runtimebus.EventBus
-	join := func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
+	join := func(ctx context.Context) error {
 		for _, bus := range buses {
 			if err := bus.WaitForQuiescence(ctx); err != nil {
 				return err
@@ -59,7 +60,28 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 		}
 		return nil
 	}
-	coordinator := func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions, workflow pipeline.WorkflowPersistence) *pipeline.PipelineCoordinator {
+	var setup sync.Once
+	var releaseJournal func()
+	admitJournal := func(ctx context.Context) {
+		setup.Do(func() {
+			journal, release := captureActivityReplayJournal(t, ctx, selected.(startupownership.Store), activityFixtureJoin(join))
+			if err := original.bind(journal); err != nil {
+				t.Fatal(err)
+			}
+			releaseJournal = release
+		})
+	}
+	journalPersistence := func(journal pipeline.ActivityAttemptJournal) pipeline.WorkflowPersistence {
+		return pipeline.NewWorkflowPersistence(&nativeActivityJournalFixtureOwner{WorkflowPersistenceOwner: selected, journal: journal})
+	}
+	cleanupFault := func(fault error) (pipeline.ActivityAttemptJournal, func() int32) {
+		journal, err := original.original(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return storetest.ActivityJournalCleanupBoundFault(t, selected, journal, fault)
+	}
+	coordinator := func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions, workflow pipeline.WorkflowPersistence, journal pipeline.ActivityAttemptJournal) *pipeline.PipelineCoordinator {
 		if options.ExecutionPosture == "" {
 			options.ExecutionPosture = executionposture.Live
 		}
@@ -89,6 +111,9 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 		if pc == nil {
 			t.Fatal("native activity coordinator rejected its selected semantic owners")
 		}
+		if err := pc.InstallActivityJournal(journal); err != nil {
+			t.Fatal(err)
+		}
 		// Register after the bus catalog lease so cleanup joins this bus
 		// before releasing its catalog, runtime occurrence or selected store.
 		t.Cleanup(func() {
@@ -105,19 +130,24 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 		Context:     ctx,
 		Runs:        selected,
 		RequireRun: func(ctx context.Context, runID string) error {
-			return storetest.MaterializeRun(ctx, selected, storetest.RunFixture{
+			if err := storetest.MaterializeRun(ctx, selected, storetest.RunFixture{
 				RunID: runID, Origin: storetest.ScenarioSetupOrigin(), StartedAt: time.Now().UTC(), Artifact: artifact,
-			})
+			}); err != nil {
+				return err
+			}
+			admitJournal(ctx)
+			return nil
 		},
 		NewCoordinator: func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions) *pipeline.PipelineCoordinator {
-			return coordinator(bus, options, persistence)
+			return coordinator(bus, options, persistence, original)
 		},
 		CleanupFault: func(fault error) (pipeline.WorkflowPersistence, func() int32) {
-			return storetest.ActivityJournalCleanupPersistenceFault(t, selected, fault)
+			journal, count := cleanupFault(fault)
+			return journalPersistence(journal), count
 		},
 		CleanupFaultCoordinator: func(bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions, fault error) (*pipeline.PipelineCoordinator, func() int32) {
-			faulted, count := storetest.ActivityJournalCleanupPersistenceFault(t, selected, fault)
-			return coordinator(bus, options, faulted), count
+			journal, count := cleanupFault(fault)
+			return coordinator(bus, options, journalPersistence(journal), journal), count
 		},
 		Construct: func(ctx context.Context, instance pipeline.WorkflowInstance) error {
 			command, err := flowactivationfixture.Command(ctx, instance, pipeline.WorkflowLifecycleMutationPlan{}, instance.CreatedAt)
@@ -134,8 +164,12 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 			return nil
 		},
 		ClaimReplyLossCoordinator: func(ctx context.Context, bus pipeline.Bus, options pipeline.PipelineCoordinatorOptions, run, request string, fault error) (*pipeline.PipelineCoordinator, func() int32) {
-			faulted, count := storetest.ActivityClaimReplyLossPersistenceFault(t, ctx, selected, run, request, fault)
-			return coordinator(bus, options, faulted), count
+			journal, err := original.original(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			faulted, count := storetest.ActivityClaimReplyLossBoundFault(t, ctx, selected, journal, run, request, fault)
+			return coordinator(bus, options, journalPersistence(faulted), faulted), count
 		},
 		ReadAttemptStatuses: func(ctx context.Context) ([]string, error) {
 			return storetest.ReadWorkflowActivityAttemptStatuses(ctx, selected)
@@ -147,8 +181,13 @@ func workflowActivityNativeFixtureFromSelectedSource(t *testing.T, selected time
 			storetest.CommitSemanticEvent(t, ctx, selected, event)
 		},
 		Reopen: func() pipeline.WorkflowActivityNativeFixtureForTest {
-			if err := join(); err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := join(ctx); err != nil {
 				t.Fatal(err)
+			}
+			if releaseJournal != nil {
+				releaseJournal()
 			}
 			if err := selected.Close(); err != nil {
 				t.Fatal(err)
@@ -294,6 +333,10 @@ func TestWorkflowActivityNativeReopenUsesFreshOwnerAndRetainsJournalBothStores(t
 			}
 		})
 	}
+}
+
+func TestWorkflowActivityNativeJournalRequiresExplicitSetupBothStores(t *testing.T) {
+	pipeline.VerifyWorkflowActivityNativeJournalRequiresExplicitSetupBothStoresForTest(t, workflowActivityNativeFixture)
 }
 
 func verifyNativeActivityBothStores(t *testing.T, verify func(*testing.T, func(*testing.T) pipeline.WorkflowActivityNativeFixtureForTest)) {

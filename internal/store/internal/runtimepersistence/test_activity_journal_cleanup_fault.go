@@ -9,16 +9,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 )
 
-// Preserve the selected journal's actual commit verdict and add the independent,
-// post-acknowledgment cleanup fault without inventing transaction authority.
-func ActivityJournalCleanupPersistenceFaultForTest(selected any, fault error) (pipeline.WorkflowPersistence, func() int32, error) {
-	journal, err := activityJournalCleanupFaultForTest(selected, fault)
-	if err != nil {
-		return pipeline.WorkflowPersistence{}, nil, err
-	}
-	return pipeline.NewWorkflowPersistence(journal), journal.acknowledgments.Load, nil
-}
-
+// Preserve the captured journal's actual commit verdict and add the independent
+// cleanup error only after acknowledgment, without inventing authority.
 func ActivityJournalCleanupBoundFaultForTest(selected any, original pipeline.ActivityAttemptJournal, fault error) (pipeline.ActivityAttemptJournal, func() int32, error) {
 	if original == nil {
 		return nil, nil, fmt.Errorf("activity journal cleanup proof requires its captured original journal")

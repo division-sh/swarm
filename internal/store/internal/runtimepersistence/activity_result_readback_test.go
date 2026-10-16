@@ -30,12 +30,15 @@ func TestActivityResultPublicationEvidenceBothStores(t *testing.T) {
 				if got, err := ObserveActivityResultPublicationStorageForTest(ctx, invalid); err == nil || got != (ActivityResultPublicationStorage{}) {
 					t.Fatalf("evidence accepted raw/nil authority %T", invalid)
 				}
-				if p, count, err := ActivityJournalCleanupPersistenceFaultForTest(invalid, fault); err == nil || p.Configured() || count != nil {
+				if p, count, err := ActivityJournalCleanupBoundFaultForTest(invalid, journal, fault); err == nil || p != nil || count != nil {
 					t.Fatalf("cleanup fault accepted raw/nil authority %T", invalid)
 				}
 			}
-			if p, count, err := ActivityJournalCleanupPersistenceFaultForTest(selected, nil); err == nil || p.Configured() || count != nil {
+			if p, count, err := ActivityJournalCleanupBoundFaultForTest(selected, journal, nil); err == nil || p != nil || count != nil {
 				t.Fatal("absent cleanup fault accepted")
+			}
+			if p, count, err := ActivityJournalCleanupBoundFaultForTest(selected, nil, fault); err == nil || p != nil || count != nil {
+				t.Fatal("absent original journal accepted")
 			}
 			start := pipeline.ActivityAttemptRecord{
 				RequestEventID: uuid.NewString(), RunID: sibling, ExecutionMode: executionmode.Live,
