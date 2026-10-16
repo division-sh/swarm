@@ -69,7 +69,10 @@ func selectedRecoveryCandidates(ctx context.Context, tx *sql.Tx, postgres bool, 
 		return nil, err
 	}
 	var fenced bool
-	if err := tx.QueryRowContext(ctx, `SELECT state IN ('failed','closed') AND lease_expires_at IS NULL FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, executionID).Scan(&fenced); err != nil {
+	// The selected recovery owner also retires control-only predecessors to
+	// quiesced before settling their admitted cancellations in this transaction.
+	// That owner, not this state predicate, proves successor process possession.
+	if err := tx.QueryRowContext(ctx, `SELECT state IN ('failed','closed','quiesced') AND lease_expires_at IS NULL FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1`, executionID).Scan(&fenced); err != nil {
 		return nil, err
 	}
 	if !fenced {

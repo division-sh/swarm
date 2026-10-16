@@ -22,8 +22,8 @@ func staticAuthorityGuardRoots(t *testing.T, repo string) []TestRoot {
 	if !slices.Contains(roots, absentCutGuard) {
 		t.Fatal("static authority census lost the DC-6 exact-origin absent-cut fault guard")
 	}
-	if len(roots) != 85 {
-		t.Fatalf("static authority source census changed: %d roots, want 85", len(roots))
+	if len(roots) != 86 {
+		t.Fatalf("static authority source census changed: %d roots, want 86", len(roots))
 	}
 	return roots
 }

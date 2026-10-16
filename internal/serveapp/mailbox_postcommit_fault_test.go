@@ -21,74 +21,79 @@ import (
 func TestMailboxPostCommitFaultsPreserveExactCompletionBothStores(t *testing.T) {
 	for _, backend := range []servedparity.Backend{servedparity.BackendDefaultSQLite, servedparity.BackendExplicitPostgres} {
 		t.Run(string(backend), func(t *testing.T) {
-			rt, owner := newMailboxCompletionRuntime(t, backend)
 			for _, kind := range []decisioncard.AnchorKind{decisioncard.AnchorKindStageGate, decisioncard.AnchorKindHumanTask, decisioncard.AnchorKindProposedEffect} {
-				for _, method := range []string{"mailbox.decide", "mailbox.defer", "mailbox.begin_input", "mailbox.cancel_input"} {
-					cuts := []string{"request_release"}
-					if method == "mailbox.decide" || method == "mailbox.defer" {
-						cuts = append(cuts, "finalize", "dispatch")
-					}
-					for _, cut := range cuts {
-						t.Run(string(kind)+"/"+method+"/"+cut, func(t *testing.T) {
-							f := mailboxCompletionFixtureInRuntime(t, rt, owner)
-							params := mailboxPrincipalMutationParams(t, f, kind, method)
-							req := mailboxPrincipalRequest(t, rt, method, params)
-							fault := &mailboxPostCommitFault{cut: cut, err: fmt.Errorf("mailbox post-commit cut: %s", cut)}
-							// Only the request coordinator is replaced. Source loading, card production,
-							// publication planning, domain persistence, and served retry remain real.
-							coordinator := mailboxFaultCoordinator(t, rt, fault)
-							mutation, err := mailboxCardMutation(req, params)
-							if err != nil {
-								t.Fatal(err)
-							}
-							_, replayed, err := coordinator.CommitDecisionCardMutation(f.ctx, req, mutation)
-							if !errors.Is(err, fault.err) || replayed || fault.hits.Load() != 1 {
-								t.Fatalf("exact post-commit cut not reached: replay=%t hits=%d err=%v", replayed, fault.hits.Load(), err)
-							}
-							var stored string
-							if err := rt.DB.QueryRow(`SELECT CAST(response AS TEXT) FROM api_idempotency WHERE idempotency_key=$1`, req.IdempotencyKey).Scan(&stored); err != nil {
-								t.Fatalf("post-commit failure lost original response: %v", err)
-							}
-							var original map[string]any
-							if err := json.Unmarshal([]byte(stored), &original); err != nil {
-								t.Fatal(err)
-							}
-							card, err := owner.GetDecisionCard(f.ctx, req.ResourceID)
-							if err != nil {
-								t.Fatal(err)
-							}
-							var changes int
-							if err := rt.DB.QueryRow(`SELECT count(*) FROM decision_card_changes WHERE card_id=$1`, req.ResourceID).Scan(&changes); err != nil {
-								t.Fatal(err)
-							}
-							for range 2 {
-								var replay map[string]any
-								requireServedJSONRPCResult(t, rt.Endpoint, method, params, &replay)
-								if replay["idempotency_replayed"] != true {
-									t.Fatalf("retry replanned committed mutation: %v", replay)
+				if !t.Run(string(kind), func(t *testing.T) {
+					rt, owner := newMailboxCompletionRuntime(t, backend)
+					t.Cleanup(rt.joinAndAssertExit)
+					for _, method := range []string{"mailbox.decide", "mailbox.defer", "mailbox.begin_input", "mailbox.cancel_input"} {
+						cuts := []string{"request_release"}
+						if method == "mailbox.decide" || method == "mailbox.defer" {
+							cuts = append(cuts, "finalize", "dispatch")
+						}
+						for _, cut := range cuts {
+							t.Run(method+"/"+cut, func(t *testing.T) {
+								f := mailboxCompletionFixtureInRuntime(t, rt, owner)
+								params := mailboxPrincipalMutationParams(t, f, kind, method)
+								req := mailboxPrincipalRequest(t, rt, method, params)
+								fault := &mailboxPostCommitFault{cut: cut, err: fmt.Errorf("mailbox post-commit cut: %s", cut)}
+								// Only the request coordinator is replaced. Source loading, card production,
+								// publication planning, domain persistence, and served retry remain real.
+								coordinator := mailboxFaultCoordinator(t, rt, fault)
+								mutation, err := mailboxCardMutation(req, params)
+								if err != nil {
+									t.Fatal(err)
 								}
-								delete(replay, "idempotency_replayed")
-								if !reflect.DeepEqual(original, replay) {
-									t.Fatalf("retry differs from stored result: %s / %v", stored, replay)
+								_, replayed, err := coordinator.CommitDecisionCardMutation(f.ctx, req, mutation)
+								if !errors.Is(err, fault.err) || replayed || fault.hits.Load() != 1 {
+									t.Fatalf("exact post-commit cut not reached: replay=%t hits=%d err=%v", replayed, fault.hits.Load(), err)
 								}
-							}
-							var count int
-							if err := rt.DB.QueryRow(`SELECT count(*) FROM api_idempotency WHERE idempotency_key=$1`, req.IdempotencyKey).Scan(&count); err != nil || count != 1 {
-								t.Fatalf("completion count=%d err=%v", count, err)
-							}
-							if fault.hits.Load() != 1 {
-								t.Fatal("retry re-entered the failed post-commit operation")
-							}
-							after, err := owner.GetDecisionCard(f.ctx, req.ResourceID)
-							if err != nil || !reflect.DeepEqual(card, after) {
-								t.Fatalf("retry mutated committed card: err=%v before=%+v after=%+v", err, card, after)
-							}
-							var afterChanges int
-							if err := rt.DB.QueryRow(`SELECT count(*) FROM decision_card_changes WHERE card_id=$1`, req.ResourceID).Scan(&afterChanges); err != nil || afterChanges != changes {
-								t.Fatalf("retry appended card changes: before=%d after=%d err=%v", changes, afterChanges, err)
-							}
-						})
+								var stored string
+								if err := rt.DB.QueryRow(`SELECT CAST(response AS TEXT) FROM api_idempotency WHERE idempotency_key=$1`, req.IdempotencyKey).Scan(&stored); err != nil {
+									t.Fatalf("post-commit failure lost original response: %v", err)
+								}
+								var original map[string]any
+								if err := json.Unmarshal([]byte(stored), &original); err != nil {
+									t.Fatal(err)
+								}
+								card, err := owner.GetDecisionCard(f.ctx, req.ResourceID)
+								if err != nil {
+									t.Fatal(err)
+								}
+								var changes int
+								if err := rt.DB.QueryRow(`SELECT count(*) FROM decision_card_changes WHERE card_id=$1`, req.ResourceID).Scan(&changes); err != nil {
+									t.Fatal(err)
+								}
+								for range 2 {
+									var replay map[string]any
+									requireServedJSONRPCResult(t, rt.Endpoint, method, params, &replay)
+									if replay["idempotency_replayed"] != true {
+										t.Fatalf("retry replanned committed mutation: %v", replay)
+									}
+									delete(replay, "idempotency_replayed")
+									if !reflect.DeepEqual(original, replay) {
+										t.Fatalf("retry differs from stored result: %s / %v", stored, replay)
+									}
+								}
+								var count int
+								if err := rt.DB.QueryRow(`SELECT count(*) FROM api_idempotency WHERE idempotency_key=$1`, req.IdempotencyKey).Scan(&count); err != nil || count != 1 {
+									t.Fatalf("completion count=%d err=%v", count, err)
+								}
+								if fault.hits.Load() != 1 {
+									t.Fatal("retry re-entered the failed post-commit operation")
+								}
+								after, err := owner.GetDecisionCard(f.ctx, req.ResourceID)
+								if err != nil || !reflect.DeepEqual(card, after) {
+									t.Fatalf("retry mutated committed card: err=%v before=%+v after=%+v", err, card, after)
+								}
+								var afterChanges int
+								if err := rt.DB.QueryRow(`SELECT count(*) FROM decision_card_changes WHERE card_id=$1`, req.ResourceID).Scan(&afterChanges); err != nil || afterChanges != changes {
+									t.Fatalf("retry appended card changes: before=%d after=%d err=%v", changes, afterChanges, err)
+								}
+							})
+						}
 					}
+				}) {
+					return
 				}
 			}
 		})
