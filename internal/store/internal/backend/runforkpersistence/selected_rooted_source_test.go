@@ -399,7 +399,7 @@ func (f selectedRootedSourceFixture) removeSourceContent(t *testing.T) {
 	if f.postgres != nil {
 		err = f.postgres.RunTransaction(context.Background(), remove)
 	} else {
-		err = f.sqlite.RunTransaction(context.Background(), remove)
+		err = f.sqlite.RunTransaction(context.Background(), "remove rooted source fixture content", remove)
 	}
 	if err != nil {
 		t.Fatal(err)
