@@ -1360,6 +1360,14 @@ func writeDiagnosticRunDiagnosis(out io.Writer, result DiagnosticRunDiagnosisRes
 		default:
 			value += "; emission evidence unknown"
 		}
+		switch {
+		case len(attribution.GrantedEmitTools) > 0:
+			value += "; frozen emit grants: " + strings.Join(attribution.GrantedEmitTools, ", ")
+		case attribution.Emission == operatorread.RunEmissionNone:
+			value += "; frozen emit grants: none"
+		default:
+			value += "; frozen emit grants: unknown"
+		}
 		label := "attribution"
 		if attribution.Historical {
 			label = "historical"
