@@ -49,6 +49,13 @@ func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
 			runID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			agentID := "normalizer"
+			ctx = preparePositiveAgentClaimFixture(t, ctx, fixture.store.(agentFixtureFlowStore), mustTestAgentIdentityForRun(runID, agentID, "fixture/"+agentID))
+			setup := listAuthorActivityForReceiptParity(t, fixture, ctx)
+			if len(setup) != 3 || setup[0].Kind != runtimeauthoractivity.KindRunLifecycle || setup[0].Transition != "started" ||
+				setup[1].Kind != runtimeauthoractivity.KindAgentLifecycle || setup[1].Transition != "registered" ||
+				setup[2].Kind != runtimeauthoractivity.KindAgentLifecycle || setup[2].Transition != "running" {
+				t.Fatalf("native setup occurrences = %#v, want run-started, agent-registered and agent-running occurrences", setup)
+			}
 			event := eventtest.PersistedProjection(
 				eventID, events.EventType("test.delivery_receipt"), "runtime", "", []byte(`{"text":"how are you","secret":"must-not-render"}`), 0,
 				runID, "", events.EventEnvelope{}, time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC),
@@ -66,10 +73,13 @@ func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
 			}
 
 			before := listAuthorActivityForReceiptParity(t, fixture, ctx)
-			if len(before) != 4 || before[0].Kind != runtimeauthoractivity.KindRunLifecycle ||
-				before[1].Kind != runtimeauthoractivity.KindEventEmitted ||
-				before[2].Kind != runtimeauthoractivity.KindDeliveryLifecycle || before[2].Transition != "in_progress" ||
-				before[3].Kind != runtimeauthoractivity.KindDeliveryLifecycle || before[3].Transition != "delivered" {
+			if len(before) != len(setup)+3 || !reflect.DeepEqual(before[:len(setup)], setup) {
+				t.Fatalf("first receipt changed setup or added unexpected occurrences: setup=%#v before=%#v", setup, before)
+			}
+			receipt := before[len(setup):]
+			if len(receipt) != 3 || receipt[0].Kind != runtimeauthoractivity.KindEventEmitted ||
+				receipt[1].Kind != runtimeauthoractivity.KindDeliveryLifecycle || receipt[1].Transition != "in_progress" ||
+				receipt[2].Kind != runtimeauthoractivity.KindDeliveryLifecycle || receipt[2].Transition != "delivered" {
 				t.Fatalf("first receipt occurrences = %#v, want run-started, emitted, in-progress, and delivered occurrences", before)
 			}
 			var rendered bytes.Buffer

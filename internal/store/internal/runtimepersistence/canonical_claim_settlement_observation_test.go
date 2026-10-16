@@ -20,6 +20,7 @@ func TestCanonicalClaimAndAppearanceObserversKeepExactAttemptCutsBothStores(t *t
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f, state := newCompetingRevisionPairFixture(t, backend)
+			f.ctx = preparePositiveAgentClaimFixture(t, f.ctx, f.store.(agentFixtureFlowStore), mustTestAgentIdentityForRun(state.Identity.RunID, "canonical-observer", "canonical/observer"))
 			owner := f.store.(deliveryFixtureStore)
 			for _, kind := range []string{"node-success", "node-refusal", "agent-success"} {
 				t.Run(kind, func(t *testing.T) {

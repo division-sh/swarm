@@ -120,6 +120,24 @@ func admitPreparedAgentClaimContext(t testing.TB, ctx context.Context, selected 
 	return ctx
 }
 
+// Positive storage proofs enumerate every executable receiver before admitting
+// their native generation. Pending-only and refusal fixtures do not call this.
+func preparePositiveAgentClaimFixture(t *testing.T, ctx context.Context, selected agentFixtureFlowStore, identities ...agentidentity.Identity) context.Context {
+	t.Helper()
+	source, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("positive claim fixture requires its original source")
+	}
+	for _, identity := range identities {
+		record := agentFixtureStaticRecord(t, identity)
+		record.Config = resolveNativeClaimFixtureActor(t, record.Config)
+		if err := agentfixture.UpsertStaticForSource(t, ctx, selected, record, source); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return admitPreparedAgentClaimContext(t, ctx, selected)
+}
+
 func (f agentClaimProfileFixture) claim(t *testing.T) (events.Event, deliverylifecycle.ClaimedObligation, deliverylifecycle.AgentClaimProfile) {
 	t.Helper()
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "test.profile_claim", "operator", "", []byte(`{}`), 0,

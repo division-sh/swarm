@@ -40,6 +40,7 @@ func TestActiveRunDeliveryQuiescenceReadbackParity(t *testing.T) {
 				runID, events.EventEnvelope{}, now,
 			)
 			identity := mustTestAgentIdentityForRun(runID, "agent-a", "quiescence/instance-a")
+			ctx = preparePositiveAgentClaimFixture(t, ctx, fixture.store.(agentFixtureFlowStore), identity)
 			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a"), AgentIdentity: identity}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
 				t.Fatalf("commit active-run delivery: %v", err)
