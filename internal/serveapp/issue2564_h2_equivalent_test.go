@@ -648,12 +648,14 @@ func issue2564H2WaitAccounting(t *testing.T, rt issue2564H2Fixture, run string, 
 	var lastAccounting error
 	var reads int
 	var lastRead time.Duration
+	var retained issue2564H2Snapshot
 	for ctx.Err() == nil {
 		started := time.Now()
 		snapshot, err := issue2564H2Read(ctx, rt, run)
 		lastRead = time.Since(started)
 		reads++
 		if err == nil {
+			retained = snapshot
 			err = issue2564H2Accounting(run, snapshot, closed, keys, 6)
 			if err == nil {
 				return snapshot
@@ -663,6 +665,7 @@ func issue2564H2WaitAccounting(t *testing.T, rt issue2564H2Fixture, run string, 
 		last = err
 		time.Sleep(20 * time.Millisecond)
 	}
+	issue2564H2CaptureCancellation(t, rt, run, closed, retained)
 	t.Fatalf("exact H2 accounting never settled: %v; accounting=%v reads=%d last_read=%s\n%s", last, lastAccounting, reads, lastRead, rt.debug(t, run))
 	return issue2564H2Snapshot{}
 }

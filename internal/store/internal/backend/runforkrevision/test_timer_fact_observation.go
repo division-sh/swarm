@@ -30,6 +30,55 @@ type H2CounterCommitEvidence struct {
 	Revision                            int64
 }
 
+type H2CommittedFactEvidence struct {
+	Family   string
+	Key      string
+	Revision int64
+	Present  bool
+	Fact     []byte
+}
+
+type H2CommittedHistoryEvidence struct {
+	RunID     string
+	Facts     []H2CommittedFactEvidence
+	Complete  bool
+	Truncated bool
+	Bytes     int
+}
+
+// Failure-only, closed-family evidence. Tombstones are retained so a later
+// deletion cannot resurrect an older header, event or timer at a selected cut.
+func ObserveH2CommittedHistoryForTest(ctx context.Context, tx *sql.Tx, runID string) (H2CommittedHistoryEvidence, error) {
+	if _, err := uuid.Parse(runID); err != nil {
+		return H2CommittedHistoryEvidence{}, err
+	}
+	out := H2CommittedHistoryEvidence{RunID: runID}
+	rows, err := tx.QueryContext(ctx, `SELECT family,fact_key,revision,present,fact
+		FROM run_fork_fact_revisions WHERE run_id=$1 AND family IN ($2,$3,$4)
+		ORDER BY revision,family,fact_key LIMIT 32769`, runID, FamilyTimers, FamilyEntityMetadata, FamilyEvents)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var row H2CommittedFactEvidence
+		if err := rows.Scan(&row.Family, &row.Key, &row.Revision, &row.Present, &row.Fact); err != nil {
+			return out, errors.Join(err, rows.Close())
+		}
+		if len(out.Facts) == 32768 || out.Bytes+len(row.Fact) > 32<<20 {
+			out.Truncated = true
+			return out, rows.Close()
+		}
+		out.Bytes += len(row.Fact)
+		out.Facts = append(out.Facts, row)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return out, err
+	}
+	out.Complete = true
+	return out, nil
+}
+
 // This physical witness binds existing counter mutations to commit order,
 // without granting historical execution or inferring order from timestamps.
 func ObserveH2CounterCommitsForTest(ctx context.Context, tx *sql.Tx, runID string) ([]H2CounterCommitEvidence, error) {
