@@ -231,7 +231,7 @@ func TestAccountingOwnedProcessBuffersSuccessUntilJoinedAndFresh(t *testing.T) {
 				policy.Status = "suspended"
 			}
 			var out bytes.Buffer
-			err := runApprovedAccountingProcess(context.Background(), binary, []string{"certify"}, &out, io.Discard, observed, remote)
+			err := runApprovedAccountingProcess(context.Background(), binary, filepath.Dir(binary), []string{"certify"}, &out, io.Discard, observed, remote)
 			if test.want {
 				if err != nil || out.String() != "regenerated, no raise\n" {
 					t.Fatalf("joined result lost: %q %v", out.String(), err)

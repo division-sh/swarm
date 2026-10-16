@@ -22,6 +22,8 @@ import (
 // These are bound by the supervisor's build from approved immutable source.
 // An internal invocation is not itself a certificate trust boundary.
 var accountingExecutorSource, accountingExecutorDigest, accountingExecutorRoot string
+var accountingProofRoot, accountingProofDigest, accountingProofOrigin, accountingProofConfig string
+var accountingEvidenceRoot, accountingWorkingRoot string
 
 type accountingPlan struct {
 	Version    int                         `json:"version"`
@@ -58,11 +60,35 @@ func superviseAccounting(ctx context.Context, args []string, out, stderr io.Writ
 		return err
 	}
 	repo := strings.TrimSpace(string(root))
-	frozen, err := completionSource(repo, "", true)
+	frozen, err := accountingSource(ctx, repo, "", true)
 	if err != nil {
 		return err
 	}
 	if err = fetchAccountingExecutor(ctx, repo, policy.Policy, accountingGitHub); err != nil {
+		return err
+	}
+	originRaw, err := accountingGit(ctx, repo, "rev-parse", "origin/master^{commit}")
+	if err != nil {
+		return err
+	}
+	origin := strings.TrimSpace(string(originRaw))
+	if err = checkAccountingBase(ctx, repo, origin, policy); err != nil {
+		return err
+	}
+	snapshot, err := freezeAccountingProof(ctx, repo, frozen, origin, policy)
+	if err != nil {
+		return err
+	}
+	defer func() { result = errors.Join(result, snapshot.Close()) }()
+	evidence, err := newAccountingEvidence(repo)
+	if err != nil {
+		return err
+	}
+	if err = saveAccountingManifest(filepath.Join(evidence, "proof-inputs.json"), snapshot.Manifest); err != nil {
+		return err
+	}
+	args, err = absoluteAccountingInputs(repo, args)
+	if err != nil {
 		return err
 	}
 	directory, err := archiveAccountingExecutor(ctx, repo, policy.Policy.ExecutorSource)
@@ -81,12 +107,21 @@ func superviseAccounting(ctx context.Context, args []string, out, stderr io.Writ
 	if !reflect.DeepEqual(inputs, policy.Policy.Inputs) {
 		return fmt.Errorf("approved accounting dependency names or bytes changed")
 	}
+	executorManifest, err := accountingTreeInputs(ctx, repo, policy.Policy.ExecutorSource, nil)
+	if err != nil {
+		return err
+	}
+	if err = saveAccountingManifest(filepath.Join(evidence, "executor-inputs.json"), executorManifest); err != nil {
+		return err
+	}
 	goVersion, err := accountingGitHubToolchain(ctx, directory)
 	if err != nil || goVersion != "go1.26.8" {
 		return fmt.Errorf("accounting requires its approved Go1.26.8 toolchain: %v", err)
 	}
 	binary := filepath.Join(directory, "accounting-executor")
 	link := "-X main.accountingExecutorSource=" + policy.Policy.ExecutorSource + " -X main.accountingExecutorDigest=" + policy.Policy.DependencyDigest + " -X main.accountingExecutorRoot=" + directory
+	link += " -X main.accountingProofRoot=" + snapshot.Root + " -X main.accountingProofDigest=" + accountingManifestDigest(snapshot.Manifest) + " -X main.accountingEvidenceRoot=" + evidence + " -X main.accountingWorkingRoot=" + repo
+	link += " -X main.accountingProofOrigin=" + snapshot.Origin + " -X main.accountingProofConfig=" + snapshot.ConfigDigest
 	build := []string{"go", "-C", directory, "build", "-mod=readonly", "-trimpath", "-ldflags", link, "-o", binary, "./cmd/swarm-test"}
 	if _, err = runPreflightProcessEnvironment(ctx, build, stderr, stderr, accountingBuildEnv(runtime.GOOS, runtime.GOARCH)); err != nil {
 		return err
@@ -95,14 +130,24 @@ func superviseAccounting(ctx context.Context, args []string, out, stderr io.Writ
 	if err != nil || !reflect.DeepEqual(inputs, after) {
 		return fmt.Errorf("accounting executor closure changed during build: %v", err)
 	}
+	if err = checkAccountingExtractedTree(directory, executorManifest, "accounting-executor"); err != nil {
+		return err
+	}
 	if err = requireAccountingPolicy(ctx, accountingGitHub, policy); err != nil {
 		return err
 	}
 	// The candidate executable is not used to evaluate candidate equivalence.
 	var completed bytes.Buffer
-	if err = runApprovedAccountingProcess(ctx, binary, args, &completed, stderr, policy, accountingGitHub); err != nil {
+	if err = runApprovedAccountingProcess(ctx, binary, snapshot.Root, args, &completed, stderr, policy, accountingGitHub); err != nil {
 		return err
 	}
+	if err = snapshot.Validate(ctx); err != nil {
+		return err
+	}
+	if err = snapshot.Close(); err != nil {
+		return err
+	}
+	snapshot.Root = ""
 	if err = os.RemoveAll(directory); err != nil {
 		return err
 	}
@@ -121,7 +166,7 @@ func superviseAccounting(ctx context.Context, args []string, out, stderr io.Writ
 }
 
 func checkAccountingWorkingSource(ctx context.Context, root, head string, applying bool) error {
-	if _, err := completionSource(root, head, !applying); err != nil {
+	if _, err := accountingSource(ctx, root, head, !applying); err != nil {
 		return err
 	}
 	if !applying {
@@ -153,9 +198,9 @@ func checkAccountingWorkingSource(ctx context.Context, root, head string, applyi
 	return nil
 }
 
-func runApprovedAccountingProcess(ctx context.Context, binary string, args []string, out, stderr io.Writer, policy accountingPolicyObservation, remote accountingRemote) error {
+func runApprovedAccountingProcess(ctx context.Context, binary, root string, args []string, out, stderr io.Writer, policy accountingPolicyObservation, remote accountingRemote) error {
 	var completed bytes.Buffer
-	_, err := runPreflightProcessEnvironment(ctx, append([]string{binary, "--internal-accounting-executor"}, args...), &completed, stderr, accountingBuildEnv(runtime.GOOS, runtime.GOARCH))
+	_, err := runPreflightProcessDirectory(ctx, root, append([]string{binary, "--internal-accounting-executor"}, args...), &completed, stderr, accountingBuildEnv(runtime.GOOS, runtime.GOARCH))
 	if err != nil {
 		return err
 	}
@@ -212,7 +257,7 @@ func executeAccounting(ctx context.Context, args []string, out io.Writer, remote
 	if flags.NArg() != 0 || (*planFile != "" && *receiptFile != "") {
 		return fmt.Errorf("accounting accepts one exact plan or receipt, not overrides")
 	}
-	head, err := completionSource(".", "", true)
+	head, err := accountingSource(ctx, ".", "", true)
 	if err != nil {
 		return err
 	}
@@ -221,6 +266,12 @@ func executeAccounting(ctx context.Context, args []string, out io.Writer, remote
 		return err
 	}
 	root := strings.TrimSpace(string(rootRaw))
+	if root != accountingProofRoot {
+		return fmt.Errorf("accounting executor requires its owned frozen proof source")
+	}
+	if err = verifyFrozenAccountingSource(ctx, root); err != nil {
+		return err
+	}
 	switch args[0] {
 	case "plan":
 		if *planFile != "" || *receiptFile != "" {
@@ -286,7 +337,21 @@ func applyApprovedAccounting(ctx context.Context, root, head, path string, out i
 	if plan.Rows == 0 {
 		return fmt.Errorf("accounting is not applicable; no rows regenerated")
 	}
-	if err = writeFiniteHistory(root, plan.Output); err != nil {
+	if accountingWorkingRoot == "" {
+		return fmt.Errorf("accounting apply has no owned working output")
+	}
+	if _, err = accountingSource(ctx, accountingWorkingRoot, head, true); err != nil {
+		return err
+	}
+	ownedSource, err := gitAccountingBlob(ctx, root, head, formatproof.Source)
+	if err != nil {
+		return err
+	}
+	workingSource, err := os.ReadFile(filepath.Join(accountingWorkingRoot, formatproof.Source))
+	if err != nil || !bytes.Equal(ownedSource, workingSource) {
+		return fmt.Errorf("accounting apply target changed from frozen source: %v", err)
+	}
+	if err = writeFiniteHistory(accountingWorkingRoot, plan.Output); err != nil {
 		return err
 	}
 	if err = requireAccountingPolicy(ctx, remote, policy); err != nil {

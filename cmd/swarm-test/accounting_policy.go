@@ -140,8 +140,14 @@ func requireAccountingPolicy(ctx context.Context, remote accountingRemote, expec
 }
 
 func accountingGit(ctx context.Context, root string, args ...string) ([]byte, error) {
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", root, "--no-optional-locks", "--literal-pathspecs", "--no-replace-objects"}, args...)...)
+	command := accountingGitCommand(ctx, root, args...)
 	return command.Output()
+}
+
+func accountingGitCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
+	command := exec.CommandContext(ctx, "git", append([]string{"-C", root, "--no-optional-locks", "--literal-pathspecs", "--no-replace-objects", "-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "core.attributesFile=" + os.DevNull}, args...)...)
+	command.Env = accountingBuildEnv(runtime.GOOS, runtime.GOARCH)
+	return command
 }
 
 func fetchAccountingExecutor(ctx context.Context, root string, p accountingPolicy, remote accountingRemote) error {
@@ -214,6 +220,13 @@ func archiveAccountingExecutor(ctx context.Context, root, source string) (string
 	if !headerSeen {
 		return "", fmt.Errorf("executor archive has no Git commit identity")
 	}
+	manifest, err := accountingTreeInputs(ctx, root, source, nil)
+	if err != nil {
+		return "", err
+	}
+	if err = checkAccountingExtractedTree(directory, manifest, ""); err != nil {
+		return "", err
+	}
 	failed = false
 	return directory, nil
 }
@@ -253,12 +266,12 @@ func accountingBuildEnv(goos, goarch string) []string {
 	var result []string
 	for _, entry := range os.Environ() {
 		key := strings.SplitN(entry, "=", 2)[0]
-		if strings.HasPrefix(key, "GO") || strings.HasPrefix(key, "CGO") || strings.HasPrefix(key, "SWARM_UPDATE") || strings.HasPrefix(key, "SWARM_REFRESH") || strings.HasPrefix(key, "SWARM_DEBT_CACHE") || key == "CC" || key == "CXX" {
+		if strings.HasPrefix(key, "GO") || strings.HasPrefix(key, "CGO") || strings.HasPrefix(key, "GIT_") || strings.HasPrefix(key, "SWARM_UPDATE") || strings.HasPrefix(key, "SWARM_REFRESH") || strings.HasPrefix(key, "SWARM_DEBT_CACHE") || key == "CC" || key == "CXX" {
 			continue
 		}
 		result = append(result, entry)
 	}
-	return append(result, "GOENV=off", "GOTOOLCHAIN=go1.26.8", "GOWORK=off", "GOFLAGS=", "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=1")
+	return append(result, "GOENV=off", "GOTOOLCHAIN=go1.26.8", "GOWORK=off", "GOFLAGS=", "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=1", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_ATTR_NOSYSTEM=1", "GIT_NO_REPLACE_OBJECTS=1", "GIT_NO_LAZY_FETCH=1", "GIT_TERMINAL_PROMPT=0")
 }
 
 func accountingClosure(ctx context.Context, root string) ([]accountingInput, error) {

@@ -23,6 +23,10 @@ func runPreflightProcess(ctx context.Context, args []string, out, stderr io.Writ
 }
 
 func runPreflightProcessEnvironment(ctx context.Context, args []string, out, stderr io.Writer, environment []string) (preflightProcessTiming, error) {
+	return runPreflightProcessDirectory(ctx, "", args, out, stderr, environment)
+}
+
+func runPreflightProcessDirectory(ctx context.Context, directory string, args []string, out, stderr io.Writer, environment []string) (preflightProcessTiming, error) {
 	var timing preflightProcessTiming
 	if preflightDescendantJoinMode != "native" {
 		return timing, fmt.Errorf("preflight descendant ownership is unsupported on this platform")
@@ -32,6 +36,7 @@ func runPreflightProcessEnvironment(ctx context.Context, args []string, out, std
 	}
 	started := time.Now()
 	command := exec.CommandContext(ctx, args[0], args[1:]...)
+	command.Dir = directory
 	command.Env = environment
 	command.Stdout, command.Stderr = out, stderr
 	if err := prepareChildProcessTree(command); err != nil {
