@@ -29,8 +29,8 @@ func ValidateFinite(source semanticview.Source, selectedFeeds []pinrouting.Sourc
 	}
 	root := semanticview.RootExecutionFlowID(source)
 	pending := []string{root}
-	// A feed publishes a declared output without constructing its producer.
-	// Its exact compiled receivers are independent activation roots.
+	// A feed enters the selected root's input boundary without constructing a
+	// producer. Its exact compiled receivers are independent activation roots.
 	for _, feed := range selectedFeeds {
 		for _, plan := range connections.MatchingSourceEvent(feed) {
 			pending = append(pending, plan.ReceiverEndpoint().FlowID())

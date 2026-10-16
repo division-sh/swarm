@@ -1942,8 +1942,8 @@ func AdmitSourceEvent(eventType events.EventType, source events.RoutingSource) (
 }
 
 // AdmitDeploymentFeedDeclaration binds a source-neutral feed to the exact
-// compiled importable event declaration. A flow coordinate alone is not
-// permission to publish an arbitrary output-pin event.
+// compiled importable event declaration and selected-root input capability.
+// Child-declared feeds retain their separately scoped output boundary.
 func AdmitDeploymentFeedDeclaration(source semanticview.Source, eventType events.EventType, routingSource events.RoutingSource) (SourceEvent, error) {
 	if source == nil || routingSource.Kind() != events.RoutingSourceDeploymentFeed {
 		return SourceEvent{}, fmt.Errorf("deployment feed requires semantic source and typed provenance")
@@ -1960,7 +1960,12 @@ func AdmitDeploymentFeedDeclaration(source semanticview.Source, eventType events
 	if !ok || declaration.OwnerFlowID != routingSource.Route().FlowID || declaration.Ref != ref {
 		return SourceEvent{}, fmt.Errorf("deployment feed event %q has no exact importable declaration in flow %q", eventType, ref.FlowPath)
 	}
-	if !PinDeclaredOutput(source, declaration.OwnerFlowID, declaration.Ref.EventName) {
+	if declaration.OwnerFlowID == "." {
+		pin, declared := semanticview.SelectedRootInputPin(source, declaration.Ref.EventName)
+		if !declared || pin.FlowID() != declaration.OwnerFlowID || pin.EventType() != declaration.Ref.EventName {
+			return SourceEvent{}, fmt.Errorf("deployment feed event %q has no exact declared root input pin in flow %q", eventType, ref.FlowPath)
+		}
+	} else if !PinDeclaredOutput(source, declaration.OwnerFlowID, declaration.Ref.EventName) {
 		return SourceEvent{}, fmt.Errorf("deployment feed event %q has no exact declared output pin in flow %q", eventType, ref.FlowPath)
 	}
 	return AdmitSourceEvent(eventType, routingSource)
