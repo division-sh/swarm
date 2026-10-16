@@ -12,6 +12,11 @@ import (
 )
 
 func sourceWithDirectoryTriggerSchemas(source semanticview.Source, providers packadmission.ProviderSource) (semanticview.Source, error) {
+	bundle, found := semanticview.Bundle(source)
+	if !found {
+		return nil, fmt.Errorf("directory trigger schemas require their compiled source")
+	}
+	schemaSource := semanticview.Wrap(bundle)
 	owners := map[providerTriggerSchemaCoordinate]providerTriggerSchemaOwner{}
 	byFlow := map[string]map[string]runtimecontracts.EventCatalogEntry{}
 	var evidence []map[string]any
@@ -26,7 +31,7 @@ func sourceWithDirectoryTriggerSchemas(source semanticview.Source, providers pac
 				continue
 			}
 			for _, entry := range catalog.Entries() {
-				if err := addDirectoryTriggerSchemas(source, flow, entry, owners, byFlow); err != nil {
+				if err := addDirectoryTriggerSchemas(schemaSource, flow, entry, owners, byFlow); err != nil {
 					return nil, err
 				}
 				evidence = append(evidence, map[string]any{
@@ -53,11 +58,11 @@ func sourceWithDirectoryTriggerSchemas(source semanticview.Source, providers pac
 	if err != nil {
 		return nil, err
 	}
-	inputs, err := bindProviderTriggerInputPins(source, compiled)
+	inputs, err := bindProviderTriggerInputPins(schemaSource, compiled)
 	if err != nil {
 		return nil, err
 	}
-	outputs, err := bindProviderTriggerOutputPins(source, compiled)
+	outputs, err := bindProviderTriggerOutputPins(schemaSource, compiled)
 	if err != nil {
 		return nil, err
 	}
@@ -69,10 +74,6 @@ func sourceWithDirectoryTriggerSchemas(source semanticview.Source, providers pac
 		Source: source, generation: generation, owners: owners, byFlow: byFlow,
 		imported: aliases, compiledCatalog: readback, compiledByFlow: compiled,
 		compiledInputPins: inputs, compiledOutputPins: outputs,
-	}
-	bundle, found := semanticview.Bundle(source)
-	if !found {
-		return nil, fmt.Errorf("directory trigger schemas require their compiled source")
 	}
 	out.connectionInputs = runtimecontracts.CompileConnectionInputs(bundle, out)
 	if err := out.connectionInputs.ValidateBindings(); err != nil {
