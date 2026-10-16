@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -116,6 +117,9 @@ func TestHTTPToolDeclaredTimeoutBeyondSharedClientCap(t *testing.T) {
 					t.Fatalf("timed out request returned %#v", out)
 				}
 				requireHTTPTimeoutUncertainty(t, err, "transport")
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("declared timeout lost its deadline cause: %v", err)
+				}
 				requireHTTPTimeoutSingleAttempt(t, executor, ctx, harness, &calls, runtimeeffects.StateOutcomeUncertain)
 			}
 			if executor.httpClient.Timeout != 30*time.Second {

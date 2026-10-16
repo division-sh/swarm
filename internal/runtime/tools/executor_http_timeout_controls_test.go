@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -162,6 +163,35 @@ func TestHTTPToolTimeoutDefaultAndEarlierCallerDeadline(t *testing.T) {
 			if executor.httpClient.Timeout != 30*time.Second {
 				t.Fatal("execution changed the original 30s client cap")
 			}
+		})
+	}
+}
+
+func TestHTTPToolTimeoutExplicitAuthoredDeadline(t *testing.T) {
+	for _, seconds := range []int{1, 10, 120} {
+		t.Run(fmt.Sprintf("declared_%ds", seconds), func(t *testing.T) {
+			executor := authoredHTTPTimeoutExecutor(t, "https://timeout.test", seconds)
+			harness := effecttest.New()
+			ctx := httpTimeoutEffectContext(harness)
+			if _, present := ctx.Deadline(); present {
+				t.Fatal("explicit authored-budget control has an earlier caller deadline")
+			}
+			var calls atomic.Int32
+			budget := time.Duration(seconds) * time.Second
+			before := time.Now()
+			executor.httpClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				calls.Add(1)
+				observed := time.Now()
+				deadline, present := req.Context().Deadline()
+				// Bound the context-creation coordinate, not request performance.
+				if !present || deadline.Before(before.Add(budget)) || deadline.After(observed.Add(budget)) {
+					t.Errorf("declared=%s outgoing deadline=%s present=%v, want [%s, %s]", budget, deadline, present, before.Add(budget), observed.Add(budget))
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"receipt":"provider-42"}`))}, nil
+			})
+			out, err := executor.Execute(ctx, "budget_probe", map[string]any{})
+			requireHTTPTimeoutReceipt(t, out, err)
+			requireHTTPTimeoutSingleAttempt(t, executor, ctx, harness, &calls, runtimeeffects.StateSettled)
 		})
 	}
 }
