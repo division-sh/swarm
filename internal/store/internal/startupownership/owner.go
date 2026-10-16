@@ -25,6 +25,7 @@ import (
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 	"github.com/google/uuid"
 )
 
@@ -42,19 +43,47 @@ type StartupPostgresOwner struct {
 	destructiveReset     *storeadmin.DestructiveResetPostgresOwner
 	fanOutPipeline       *storepipeline.PipelinePostgresOwner
 	channelChanges       *runtimechanneldelivery.ReconcileSignal
+	lifecycleCandidates  *storerunhandoff.CandidateCoordinator
 }
 
 type StartupSQLiteOwner struct {
 	processOperations
-	backend         *sqlitebackend.Backend
-	path            string
-	backendIdentity *SQLiteBackendIdentity
-	schemaGuard     func() error
-	catalogEmpty    func(context.Context) (bool, error)
-	agents          *storeagent.AgentSQLiteOwner
-	ownerMu         sync.Mutex
-	fanOutPipeline  *storepipeline.PipelineSQLiteOwner
-	channelChanges  *runtimechanneldelivery.ReconcileSignal
+	backend             *sqlitebackend.Backend
+	path                string
+	backendIdentity     *SQLiteBackendIdentity
+	schemaGuard         func() error
+	catalogEmpty        func(context.Context) (bool, error)
+	agents              *storeagent.AgentSQLiteOwner
+	ownerMu             sync.Mutex
+	fanOutPipeline      *storepipeline.PipelineSQLiteOwner
+	channelChanges      *runtimechanneldelivery.ReconcileSignal
+	lifecycleCandidates *storerunhandoff.CandidateCoordinator
+}
+
+func (s *StartupPostgresOwner) BindLifecycleCandidates(candidates *storerunhandoff.CandidateCoordinator) error {
+	if s == nil || candidates == nil || s.lifecycleCandidates != nil {
+		return errors.New("startup PostgreSQL lifecycle candidates must be bound exactly once")
+	}
+	s.lifecycleCandidates = candidates
+	return nil
+}
+
+func (s *StartupSQLiteOwner) BindLifecycleCandidates(candidates *storerunhandoff.CandidateCoordinator) error {
+	if s == nil || candidates == nil || s.lifecycleCandidates != nil {
+		return errors.New("startup SQLite lifecycle candidates must be bound exactly once")
+	}
+	s.lifecycleCandidates = candidates
+	return nil
+}
+
+func lifecycleMutationCandidates(kind string, candidates *storerunhandoff.CandidateCoordinator) (*storerunhandoff.CandidateCoordinator, error) {
+	if kind != "process_takeover" {
+		return nil, nil
+	}
+	if candidates == nil {
+		return nil, errors.New("startup process takeover requires bound lifecycle candidates")
+	}
+	return candidates, nil
 }
 
 func (s *StartupPostgresOwner) BindChannelReconciliation(signal *runtimechanneldelivery.ReconcileSignal) error {
@@ -386,7 +415,11 @@ func (s *postgresSession) ApplyDestructiveResetCleanup(ctx context.Context, req 
 }
 
 func (s *postgresSession) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	commit := mutationprotocol.RunRetainedPostgres(ctx, s.lease.Session(), mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	candidates, err := lifecycleMutationCandidates(req.OperationKind, s.owner.lifecycleCandidates)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	commit := mutationprotocol.RunRetainedPostgres(ctx, s.lease.Session(), mutationprotocol.Story, mutationprotocol.Ordinary, nil, candidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimemanager.AgentLifecycleTransitionResult, error) {
 		return s.owner.agents.CommitAgentLifecycleTransitionTx(txctx, attempt, req)
 	})
 	result, ok := commit.Value()
@@ -585,7 +618,11 @@ func (s *sqliteSession) ApplyDestructiveResetCleanup(ctx context.Context, req ru
 }
 
 func (s *sqliteSession) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	commit := mutationprotocol.RunSQLite(ctx, s.owner.backend, "commit retained agent lifecycle transition", mutationprotocol.Story, mutationprotocol.Ordinary, nil, nil, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	candidates, err := lifecycleMutationCandidates(req.OperationKind, s.owner.lifecycleCandidates)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	commit := mutationprotocol.RunSQLite(ctx, s.owner.backend, "commit retained agent lifecycle transition", mutationprotocol.Story, mutationprotocol.Ordinary, nil, candidates, func(txctx context.Context, attempt *mutationprotocol.Attempt) (runtimemanager.AgentLifecycleTransitionResult, error) {
 		return s.owner.agents.CommitAgentLifecycleTransitionTx(txctx, attempt, req)
 	})
 	result, ok := commit.Value()
