@@ -891,6 +891,13 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 	if base == current && trusted.Collector == current && head.Collector == current {
 		return nil
 	}
+	if current == debtQ1ReopenCollectorTo && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
+		prior := head
+		prior.Collector = debtExcludedFixtureCollectorTo
+		if debtValidateCollectorIdentity(base, prior.Collector, trusted, prior, "") == nil {
+			return nil // #642/6207897765: two exact reopen calls, no baseline edit.
+		}
+	}
 	if current == debtExcludedFixtureCollectorTo && head.Collector == current && debtSitesEqual(head.Sites, trusted.Sites) {
 		prior := head
 		prior.Collector = debtNativeFixtureCollectorTo

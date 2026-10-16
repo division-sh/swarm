@@ -1288,6 +1288,7 @@ func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
+	activate := selectedStoreActivationGateForTest(t, ctx, pg)
 	sourceRunID := uuid.NewString()
 	entityID := runtimeflowidentity.EntityID("flow-a/1")
 	eventID := uuid.NewString()
@@ -1301,10 +1302,11 @@ func TestPostTSourceConversationHistoryActivationKeepsActiveCouplingFailClosed(t
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
 	activationRequest := captureSelectedStoreActivationRequest(t, ctx, pg, request, materialized)
-	seedPostTActiveConversationCoupling(t, db, sourceRunID, entityID, eventID, sessionID, at)
-
 	activationRequest.AllowedSourceEventIDs = []string{eventID}
-	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, activationRequest)
+	activation, err := activate(activationRequest, materialized.ForkPoint, func(preparedCtx context.Context, prepared runfork.RunForkSelectedContractExecutionActivateRequest) (runfork.RunForkActivation, error) {
+		seedPostTActiveConversationCoupling(t, db, sourceRunID, entityID, eventID, sessionID, at)
+		return pg.ActivateRunForkForSelectedContractExecution(preparedCtx, prepared)
+	})
 	if err == nil || !strings.Contains(err.Error(), "source_active_conversation_session_coupling_after_fork_point") {
 		t.Fatalf("activation error = %v, want active post-T conversation coupling blocker", err)
 	}

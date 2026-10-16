@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,6 +30,9 @@ func TestSelectedForkControlStorageExactPredicateAndIsolationBothStores(t *testi
 				t.Fatal(err)
 			}
 			seedTestAgentRow(t, ctx, db, !sqlite, mustTestAgentIdentityForRun(f.sourceRun, "selected-agent", "selected-test"), "active")
+			if err := f.process.Release(ctx); err != nil {
+				t.Fatal(err)
+			}
 			for _, cut := range []struct {
 				name                    string
 				state                   runtimerunlifecycle.State
@@ -75,6 +79,8 @@ func TestSelectedForkControlStorageExactPredicateAndIsolationBothStores(t *testi
 					if err != nil {
 						t.Fatal(err)
 					}
+					restore = sync.OnceFunc(restore)
+					defer restore()
 					got, err := ReadSelectedForkControlStorageForTest(ctx, selected, f.forkRun, loaded, "selected-agent")
 					if counts := probe.Snapshot(); counts.Total.Begun != 1 || counts.Total.ReadCommits != 1 || counts.Total.WriteCommits != 0 || counts.Active != 0 {
 						t.Fatalf("selected control escaped its original read snapshot: %+v", counts)
