@@ -215,7 +215,7 @@ func TestEventCatalogAdmissionOwnsDeclarationIdentityBeforeMapInsertion(t *testi
 		})
 	}
 
-	snapshot, err := yamlsource.Load([]byte("item.created:\n'item.*':\n'*.completed':\n'*/order.completed':\n'**/item.processed':\n"))
+	snapshot, err := yamlsource.Load([]byte("item.created:\n'item.*':\n'completion.*':\n'*/order.completed':\n'**/item.processed':\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

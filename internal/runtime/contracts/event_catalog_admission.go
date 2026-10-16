@@ -83,6 +83,9 @@ func admitEventCatalogDocument(document yamlsource.Document) (map[string]EventCa
 		if !eventidentity.IsCanonicalDeclaration(name) {
 			return nil, fmt.Errorf("event declaration name %q at %s must be an exact canonical event identity or supported wildcard pattern", name, declaration.KeyLocation)
 		}
+		if eventDeclarationClaimsInboundNamespace(name) {
+			return nil, fmt.Errorf("event declaration %q at %s (introduced at %s, resolved at %s) claims reserved provider namespace inbound.*; declare provider events in trigger.yaml and reference them from the flow interface", name, declaration.KeyLocation, declaration.IntroductionLocation(), declaration.Value.ResolvedLocation())
+		}
 		if previous, exists := admitted[name]; exists {
 			return nil, fmt.Errorf("events.yaml has colliding admitted event declaration %q at %s and %s", name, previous, declaration.KeyLocation)
 		}
@@ -94,6 +97,14 @@ func admitEventCatalogDocument(document yamlsource.Document) (map[string]EventCa
 		out[name] = entry
 	}
 	return out, nil
+}
+
+func eventDeclarationClaimsInboundNamespace(name string) bool {
+	leaf := eventidentity.LeafName(name)
+	first, _, _ := strings.Cut(leaf, ".")
+	// Canonical whole-token stars can consume dots and therefore claim a
+	// provider event even in a pattern such as *.completed.
+	return strings.HasPrefix(leaf, "inbound.") || first == "*" || first == "**"
 }
 
 func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (EventCatalogEntry, error) {

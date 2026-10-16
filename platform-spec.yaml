@@ -14394,6 +14394,19 @@ flow_model:
       compiled declaration projection may exclude a valid pattern from exact
       importable schemas, but it must error rather than silently omit an invalid
       concrete declaration.
+    provider_namespace_admission: >-
+      Flow-authored events.yaml declarations cannot own the inbound.* provider
+      namespace, including route-qualified leaves and supported wildcard
+      declarations that match that namespace. A leading whole-token star can
+      consume dots, so patterns such as *.completed also claim provider events
+      and are refused as declarations. Admission reports the authored key,
+      introduction and resolved value coordinates and points to trigger.yaml.
+      Provider events are supplied only through admitted provider evidence;
+      spelling the namespace in a programmatic catalog or a publication does
+      not grant provider authority. References in inputs, outputs, handlers and
+      connect rows remain legal and are subject to their existing ownership and
+      routing checks. Business-only wildcard declarations and the event
+      identity/subscription grammar are otherwise unchanged.
   compiled_event_schema_projection:
     status: implemented_recursive_structural_presence
     detached_type_evidence: >-

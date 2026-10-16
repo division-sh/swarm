@@ -99,6 +99,32 @@ func TestS1ReservedInboundDeclarationPreservesYAMLIntroductions(t *testing.T) {
 	}
 }
 
+func TestS1ReservedInboundDeclarationStopsExecutableCompiler(t *testing.T) {
+	for _, flow := range []string{".", "child"} {
+		t.Run(flow, func(t *testing.T) {
+			root := t.TempDir()
+			file := filepath.Join(root, flow, "events.yaml")
+			if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(file, []byte("inbound.telegram.message:\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			artifact, err := sourceartifact.AdmitDirectory(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bundle, err := LoadWorkflowContractBundleFromRootedSource(repoRootForContractsTest(t), capturedCompilerSource(t, artifact), "", WorkflowContractLoadOptions{})
+			if err == nil || bundle != nil || !strings.Contains(err.Error(), "reserved provider namespace inbound.*") {
+				t.Fatalf("compiler admitted authored provider namespace: bundle=%v error=%v", bundle, err)
+			}
+			if !strings.Contains(filepath.ToSlash(err.Error()), filepath.ToSlash(filepath.Join(flow, "events.yaml"))) {
+				t.Fatalf("compiler lost declaring flow %q: %v", flow, err)
+			}
+		})
+	}
+}
+
 func TestS1ProviderReferencesDoNotDeclareInboundNamespace(t *testing.T) {
 	const body = "pins:\n  inputs: [inbound.telegram.message]\n  outputs: [inbound.telegram.message]\nconnect:\n  - {event: inbound.telegram.message, from: ., to: child, resolution: select}\n"
 	snapshot, err := yamlsource.Load([]byte(body))
