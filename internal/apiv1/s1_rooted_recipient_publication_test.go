@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 func TestS1RootedRecipientPreviewPublicCreationAndReplayBothStores(t *testing.T) {
@@ -80,6 +81,61 @@ func TestS1RootedRecipientPreviewPublicCreationAndReplayBothStores(t *testing.T)
 				}
 				if deliveries := countAllEventDeliveries(t, selected); deliveries != 1 {
 					t.Fatalf("%s duplicated committed delivery: %d", phase, deliveries)
+				}
+			}
+		})
+	}
+}
+
+func TestS1RootedRunStartRecipientPreviewPublicCreationAndReplayBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			var selected interface {
+				canonicalEventPublishProofStore
+				LoadRunRootedSource(context.Context, string) (sourceartifact.RootedSource, error)
+			}
+			if backend == "sqlite" {
+				selected = storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
+			} else {
+				_, db, _ := testutil.StartPostgres(t)
+				selected = storetest.AdmitPostgresRuntimeStore(t, db)
+			}
+			bundle := eventPublishTargetRouteTestBundle(t)
+			rooted, err := bundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := semanticview.Wrap(bundle)
+			runID := uuid.NewString()
+			body := runStartBody(runID, rooted.Artifact().BundleHash(), "bootstrap.requested", `{"topic":"first"}`, "s1-rooted-run-start")
+			var initialEventID string
+			for _, phase := range []string{"initial", "fresh-publisher-replay"} {
+				bus, err := newScopedAPITestEventBus(t, selected, runStartTestEventBusOptions(source))
+				if err != nil {
+					t.Fatal(err)
+				}
+				handler := eventPublishTestHandlerWithStores(t, selected, selected, selected, bus, source)
+				response := rpcCall(t, handler, body)
+				if response.Error != nil {
+					t.Fatalf("%s run.start: %#v", phase, response.Error)
+				}
+				result := asMap(t, response.Result)
+				if result["run_id"] != runID || result["status"] != "running" {
+					t.Fatalf("%s lost the created run: %#v", phase, result)
+				}
+				retained, err := selected.LoadRunRootedSource(ctx, runID)
+				if err != nil || !retained.Admission().Equal(rooted.Admission()) {
+					t.Fatalf("%s changed the frozen run source: source=%+v err=%v", phase, retained, err)
+				}
+				eventID, err := storetest.ReadLatestNamedEventIdentityStorage(ctx, selected, "bootstrap.requested", "")
+				if err != nil || eventID == "" || initialEventID != "" && initialEventID != eventID {
+					t.Fatalf("%s lost or replaced the committed event: initial=%q got=%q err=%v", phase, initialEventID, eventID, err)
+				}
+				initialEventID = eventID
+				cardinality, err := storetest.ReadAPIFlowPublicationRefusalStorage(ctx, selected)
+				if err != nil || cardinality.Runs != 1 || cardinality.Events != 1 || cardinality.APICompletions != 1 || countAllEventDeliveries(t, selected) != 1 {
+					t.Fatalf("%s duplicated committed work: counts=%+v err=%v", phase, cardinality, err)
 				}
 			}
 		})
