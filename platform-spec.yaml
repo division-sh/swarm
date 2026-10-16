@@ -6609,6 +6609,11 @@ engine:
         are not acknowledgement of a stage transition: the exact accepted occurrence remains reachable through live
         retry and restart until transition handling is acknowledged. No replacement timer event or reset of fired
         history grants new occurrence authority.
+        Accepted stage-timer handling also requires the activation's exact causal identity to match the current
+        lifecycle stage entry, not merely its stage name or loop generation. A later entry into the same stage
+        supersedes the old occurrence's transition authority, even at an equal timestamp. Field-only revisions
+        do not supersede that entry. A fired but unacknowledged occurrence remains applicable to its original
+        current entry across interruption and restart; a completed transition grants no authority over a later entry.
       interrupted_pipeline_admission: >-
         Before an acknowledged effect or explicit disposition, a pipeline check interrupted only by context
         cancellation/deadline retains its exact claimed obligation for recovery, even when the caller's outer
