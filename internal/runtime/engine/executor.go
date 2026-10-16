@@ -2666,7 +2666,6 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 	if _, hasHTTP := tool.HTTPExecution(); tool.Handler() != runtimecontracts.ToolHandlerHTTP || !hasHTTP {
 		return fmt.Errorf("%w: activity tool %q requires an authored HTTP contract", ErrInvalidConfig, toolID)
 	}
-	effectClass := runtimecontracts.ActivityEffectClassNonIdempotentWrite
 	input := make(map[string]any, len(activitySpec.Input))
 	base := e.currentContext(frame)
 	for field, expr := range activitySpec.Input {
@@ -2690,7 +2689,6 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 	if semanticInput.Kind() != semanticvalue.KindObject {
 		return fmt.Errorf("activity input must be a semantic object")
 	}
-	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(effectClass)
 	sourceRoute := emitSourceRoute(frame)
 	intentFlowID := identity.NormalizeFlowID(frame.req.ExecutionFlowID.String())
 	if sourceRoute.FlowID != "" {
@@ -2701,30 +2699,28 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 		intentEntityID = identity.NormalizeEntityID(sourceRoute.EntityID)
 	}
 	intent := ActivityIntent{
-		ActivityID:       resultEvents.ActivityID,
-		RoutingSource:    frame.req.ProducerSource,
-		Tool:             toolID,
-		Input:            semanticInput,
-		EffectClass:      effectClass,
-		SuccessEvent:     resultEvents.SuccessEvent,
-		FailureEvent:     resultEvents.FailureEvent,
-		RevisionEvent:    resultEvents.RevisionRequested,
-		RejectedEvent:    resultEvents.Rejected,
-		RetryMaxAttempts: defaults.MaxAttempts,
-		RetryBackoff:     defaults.Backoff,
-		ForkPolicy:       runtimecontracts.ActivityForkPolicyForEffectClass(effectClass),
-		EntityID:         intentEntityID,
-		Owner:            activityidentity.MustNodeOwner(frame.req.Node),
-		ExecutionFlowID:  intentFlowID,
-		FlowInstance:     sourceRoute.FlowInstance,
-		HandlerEventKey:  frame.req.HandlerEventKey,
-		SourceEventID:    frame.req.Event.ID(),
-		SourceRunID:      frame.req.Event.RunID(),
-		SourceTaskID:     frame.req.Event.TaskID(),
-		ParentEventID:    frame.req.Event.ParentEventID(),
-		ChainDepth:       frame.req.ChainDepth,
-		Attempt:          1,
-		ExecutionMode:    frame.req.Event.ExecutionMode(),
+		ActivityID:    resultEvents.ActivityID,
+		RoutingSource: frame.req.ProducerSource,
+		Tool:          toolID,
+		Input:         semanticInput,
+
+		SuccessEvent:  resultEvents.SuccessEvent,
+		FailureEvent:  resultEvents.FailureEvent,
+		RevisionEvent: resultEvents.RevisionRequested,
+		RejectedEvent: resultEvents.Rejected,
+
+		EntityID:        intentEntityID,
+		Owner:           activityidentity.MustNodeOwner(frame.req.Node),
+		ExecutionFlowID: intentFlowID,
+		FlowInstance:    sourceRoute.FlowInstance,
+		HandlerEventKey: frame.req.HandlerEventKey,
+		SourceEventID:   frame.req.Event.ID(),
+		SourceRunID:     frame.req.Event.RunID(),
+		SourceTaskID:    frame.req.Event.TaskID(),
+		ParentEventID:   frame.req.Event.ParentEventID(),
+		ChainDepth:      frame.req.ChainDepth,
+
+		ExecutionMode: frame.req.Event.ExecutionMode(),
 	}.Normalized()
 	if activitySpec.Approval != nil {
 		intent.ApprovalDecision = strings.TrimSpace(activitySpec.Approval.Decision)

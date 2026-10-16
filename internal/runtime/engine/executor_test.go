@@ -3499,8 +3499,10 @@ func TestExecutor_KeyFreeHTTPActivityFixedPolicy(t *testing.T) {
 					t.Fatalf("key-free activity lost its existing persistence boundary: order=%v written=%+v result=%+v err=%v", order, writer.intents, result, err)
 				}
 				intent := writer.intents[0]
-				if intent.EffectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite || intent.Attempt != 1 || intent.RetryMaxAttempts != 1 || intent.RetryBackoff != "none" || intent.ForkPolicy != runtimecontracts.ActivityForkRequireConfirmation {
-					t.Fatalf("method or site selected a fresh HTTP execution policy: %+v", intent)
+				for _, name := range []string{"EffectClass", "Attempt", "RetryMaxAttempts", "RetryBackoff", "ForkPolicy"} {
+					if _, present := reflect.TypeOf(intent).FieldByName(name); present {
+						t.Fatalf("method or site retained authored HTTP policy %s: %+v", name, intent)
+					}
 				}
 				if intent.ActivityID != "fixed_request" || intent.Tool != "source_scrape" || intent.SourceEventID != "evt-1" || intent.SourceRunID != "run-1" || intent.SuccessEvent != "research/fixed_request.succeeded" || intent.FailureEvent != "research/fixed_request.failed" {
 					t.Fatalf("fixed policy changed causal/result identity: %+v", intent)

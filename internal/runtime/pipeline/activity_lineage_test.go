@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,24 +42,20 @@ func TestFreshActivityLineageRejectsCanonicallyRemintedForeignFacts(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	for attempt := 1; attempt <= intent.RetryMaxAttempts; attempt++ {
-		copy := intent
-		copy.Attempt = attempt
+	for replay := 0; replay < 3; replay++ {
 		emissions := &pipelineEmissionPlan{}
 		dispatcher := pipelineActivityDispatcher{emissions: emissions}
-		if err := dispatcher.publishActivitySuccess(context.Background(), copy, map[string]any{}); err != nil {
+		if err := dispatcher.publishActivitySuccess(context.Background(), intent, map[string]any{}); err != nil {
 			t.Fatal(err)
 		}
 		if err := lineage.ValidateResult(emissions.immutableEvents()[0]); err != nil {
-			t.Fatalf("request phase restriction rejected result attempt %d: %v", attempt, err)
+			t.Fatalf("request phase restriction rejected exact result replay %d: %v", replay, err)
 		}
 	}
 	for _, test := range []struct {
 		name   string
 		mutate func(*runtimeengine.ActivityIntent)
 	}{
-		{"request_attempt_2", func(i *runtimeengine.ActivityIntent) { i.Attempt = 2 }},
-		{"request_attempt_99", func(i *runtimeengine.ActivityIntent) { i.Attempt = 99 }},
 		{"non_loop_stage", func(i *runtimeengine.ActivityIntent) { i.LoopStage = "foreign" }},
 		{"non_loop_generation", func(i *runtimeengine.ActivityIntent) {
 			i.Generation = attemptgeneration.Generation{FlowID: "foreign", LoopID: "foreign", ActivationID: "foreign", RevisionField: "revision", RevisionID: "foreign", Attempt: 1}
@@ -74,11 +72,6 @@ func TestFreshActivityLineageRejectsCanonicallyRemintedForeignFacts(t *testing.T
 		{"activity", func(i *runtimeengine.ActivityIntent) { i.ActivityID = "foreign" }},
 		{"tool", func(i *runtimeengine.ActivityIntent) { i.Tool = "foreign" }},
 		{"result", func(i *runtimeengine.ActivityIntent) { i.SuccessEvent = "foreign.succeeded" }},
-		{"effect", func(i *runtimeengine.ActivityIntent) {
-			i.EffectClass = runtimecontracts.ActivityEffectClassReadOnly
-		}},
-		{"retry", func(i *runtimeengine.ActivityIntent) { i.RetryMaxAttempts++ }},
-		{"fork_policy", func(i *runtimeengine.ActivityIntent) { i.ForkPolicy = runtimecontracts.ActivityForkReuseRecordedResult }},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			copy := intent
@@ -89,6 +82,22 @@ func TestFreshActivityLineageRejectsCanonicallyRemintedForeignFacts(t *testing.T
 			}
 			if _, err := FreshActivityRequestLineage(forged.Event, parent, source, []ActivityParentExecution{{Delivery: delivery}}, nil); err == nil {
 				t.Fatal("canonical construction alone admitted foreign activity")
+			}
+		})
+	}
+	for _, old := range []struct {
+		key   string
+		value any
+	}{{"attempt", 2}, {"attempt", 99}, {"effect_class", "read_only"}, {"retry_max_attempts", 2}, {"fork_policy", "reuse_recorded_result"}} {
+		t.Run("retired_"+old.key, func(t *testing.T) {
+			var payload map[string]any
+			if err := json.Unmarshal(request.Event.Payload(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			payload[old.key] = old.value
+			altered := activityRequestEventWithPayload(t, request.Event, payload)
+			if _, err := activityIntentFromRequestEvent(altered); err == nil || !strings.Contains(err.Error(), `unknown field "`+old.key+`"`) {
+				t.Fatalf("retired activity policy was accepted: %v", err)
 			}
 		})
 	}
@@ -118,15 +127,14 @@ func TestFreshRootActivityLineageSeparatesProducerAndReceiverCoordinates(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(runtimecontracts.ActivityEffectClassNonIdempotentWrite)
 	intent := runtimeengine.ActivityIntent{
 		RoutingSource: eventtest.StaticFlowRoutingSource(".", runID, runID), EntityID: identity.NormalizeEntityID(runID), FlowInstance: runID,
 		Owner: activityidentity.MustNodeOwner(node), ExecutionFlowID: identity.NormalizeFlowID("."),
 		ActivityID: result.ActivityID, Tool: "source_scrape", Input: mustActivityInput(map[string]any{}),
-		EffectClass: runtimecontracts.ActivityEffectClassNonIdempotentWrite, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
+
 		SuccessEvent: result.SuccessEvent, FailureEvent: result.FailureEvent, RevisionEvent: result.RevisionRequested, RejectedEvent: result.Rejected,
-		RetryMaxAttempts: defaults.MaxAttempts, RetryBackoff: defaults.Backoff, HandlerEventKey: "request",
-		SourceRunID: runID, SourceEventID: parent.ID(), Attempt: 1, ExecutionMode: parent.ExecutionMode(),
+		HandlerEventKey: "request",
+		SourceRunID:     runID, SourceEventID: parent.ID(), ExecutionMode: parent.ExecutionMode(),
 	}
 	delivery := runtimedelivery.Snapshot{EventID: parent.ID(), RunID: runID, Status: runtimedelivery.StatusDelivered,
 		Route: events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(node), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: ".", FlowInstance: runID, EntityID: runID})},

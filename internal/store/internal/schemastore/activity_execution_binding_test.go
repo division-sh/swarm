@@ -13,6 +13,22 @@ import (
 func verifyActivityExecutionBindingColumn(t *testing.T, db *sql.DB, runID string) {
 	t.Helper()
 	ctx := context.Background()
+	rows, err := db.QueryContext(ctx, `SELECT * FROM activity_attempts WHERE 1=0`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	columns, err := rows.Columns()
+	closeErr := rows.Close()
+	if err != nil || closeErr != nil {
+		t.Fatalf("read generated activity columns: %v, close: %v", err, closeErr)
+	}
+	present := map[string]bool{}
+	for _, column := range columns {
+		present[column] = true
+	}
+	if present["effect_class"] || !present["attempt"] || !present["execution_binding"] {
+		t.Fatalf("generated schema retained authored class or lost native identity: %v", columns)
+	}
 	binding := processbinding.ActivityExecutionBinding{Version: processbinding.ActivityExecutionBindingVersion, GrantID: uuid.NewString(), StateVersion: 3}
 	raw, err := canonicaljson.Bytes(binding)
 	if err != nil {
@@ -22,8 +38,8 @@ func verifyActivityExecutionBindingColumn(t *testing.T, db *sql.DB, runID string
 		requestID := uuid.NewString()
 		// Schema evidence only: this direct insert grants no runtime dispatch or recovery authority.
 		if _, err := db.ExecContext(ctx, `INSERT INTO activity_attempts
-					(request_event_id,run_id,execution_mode,node_id,handler_event_key,activity_id,tool,effect_class,status,success_event,failure_event,input_hash,execution_binding)
-					VALUES ($1,$2,'live','check','start','check:1','provider.check','non_idempotent_write','started','check.done','check.failed','exact-input',$3)`, requestID, runID, value); err != nil {
+					(request_event_id,run_id,execution_mode,node_id,handler_event_key,activity_id,tool,status,success_event,failure_event,input_hash,execution_binding)
+					VALUES ($1,$2,'live','check','start','check:1','provider.check','started','check.done','check.failed','exact-input',$3)`, requestID, runID, value); err != nil {
 			t.Fatal(err)
 		}
 		var stored []byte

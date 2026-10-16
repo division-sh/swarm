@@ -931,7 +931,7 @@ func TestPipelineActivityRequestRetriesReadOnlyHTTPTool(t *testing.T) {
 	}
 }
 
-func TestPipelineActivityRequestFailsClosedForWriteEffectClass(t *testing.T) {
+func TestPipelineActivityRequestRefusesRetiredPolicyBeforeDispatch(t *testing.T) {
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
@@ -952,36 +952,27 @@ func TestPipelineActivityRequestFailsClosedForWriteEffectClass(t *testing.T) {
 		Module: staticSemanticWorkflowModule{source: source},
 	})
 	intent := testActivityIntent("https://example.com/source")
-	intent.EffectClass = runtimecontracts.ActivityEffectClassIdempotentWrite
 	request, err := activityRequestEmitIntent(intent)
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
 	}
-	handled, _, err := pc.handleEventResult(testAuthorActivityContext(t, context.Background()), request.Event)
-	if err != nil {
-		t.Fatalf("handleEventResult: %v", err)
-	}
-	if !handled {
-		t.Fatal("handleEventResult handled = false, want true")
-	}
-	if calls != 0 {
-		t.Fatalf("server calls = %d, want no outbound write execution", calls)
-	}
-	if len(bus.publishes) != 1 {
-		t.Fatalf("published events = %d, want 1 failure event", len(bus.publishes))
-	}
-	evt := bus.publishes[0]
-	if got := evt.Type(); got != events.EventType("research/entity-1/research.scanner_source_scrape.failed") {
-		t.Fatalf("event type = %q, want failure", got)
-	}
 	var payload map[string]any
-	if err := json.Unmarshal(evt.Payload(), &payload); err != nil {
+	if err := json.Unmarshal(request.Event.Payload(), &payload); err != nil {
 		t.Fatalf("payload unmarshal: %v", err)
 	}
-	failure, _ := payload["failure"].(map[string]any)
-	detail, _ := failure["detail"].(map[string]any)
-	if failure["class"] != string(runtimefailures.ClassSchemaInvalid) || detail["code"] != "activity_effect_class_unsupported" {
-		t.Fatalf("failure = %#v, want fail-closed unsupported write effect", failure)
+	for key, value := range map[string]any{"effect_class": "idempotent_write", "fork_policy": "reexecute_read", "retry_max_attempts": 3, "retry_backoff": "exponential", "attempt": 2} {
+		t.Run(key, func(t *testing.T) {
+			payload[key] = value
+			malformed := activityRequestEventWithPayload(t, request.Event, payload)
+			handled, _, err := pc.handleActivityRequestEvent(testAuthorActivityContext(t, context.Background()), malformed)
+			delete(payload, key)
+			if !handled || err == nil || !strings.Contains(err.Error(), `unknown field "`+key+`"`) {
+				t.Fatalf("retired policy did not refuse at request admission: handled=%t err=%v", handled, err)
+			}
+			if calls != 0 || len(bus.publishes) != 0 {
+				t.Fatalf("refused policy reached execution or result publication: calls=%d events=%v", calls, bus.publishes)
+			}
+		})
 	}
 }
 
@@ -1057,6 +1048,14 @@ func VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCre
 }
 
 func VerifyPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedResponseAndJournalForTest(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest) {
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		t.Run(method, func(t *testing.T) {
+			verifyMockHTTPActivityJournal(t, open, method)
+		})
+	}
+}
+
+func verifyMockHTTPActivityJournal(t *testing.T, open func(*testing.T) WorkflowActivityNativeFixtureForTest, method string) {
 	fixture := open(t)
 	ctx := fixture.Context
 	runID := uuid.NewString()
@@ -1068,6 +1067,16 @@ func VerifyPipelineActivityRequestMockFlowLocalProviderConnectorUsesGeneratedRes
 	defer server.Close()
 
 	tool := testTelegramConnectorTool(server.URL)
+	httpSpec, ok := tool.HTTP()
+	if !ok {
+		t.Fatal("mock fixture lost its authored HTTP contract")
+	}
+	httpSpec.Method = method
+	var err error
+	tool, err = tool.WithHTTP(httpSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
 	output := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 		"ok": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("boolean")),
 	}), runtimecontracts.ToolSchemaRequired("ok"))
@@ -1209,7 +1218,6 @@ func VerifyPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndH
 			}{
 				{name: "missing response", tool: testTelegramConnectorTool("http://127.0.0.1:1"), responses: nil, wantCode: "mock_connector_response_not_admitted"},
 				{name: "non provider", tool: runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "http://127.0.0.1:1"})), responses: map[string]map[string]any{"telegram.send_message": {"ok": true}}, wantCode: "mock_connector_response_not_admitted"},
-				{name: "read only", tool: runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory(providerconnectors.Category), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "http://127.0.0.1:1"})), responses: map[string]map[string]any{"telegram.send_message": {"ok": true}}, wantCode: "mock_activity_effect_class_unsupported"},
 				{name: "invalid response", tool: runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory(providerconnectors.Category), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{"ok": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("boolean"))}), runtimecontracts.ToolSchemaRequired("ok"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "http://127.0.0.1:1"})), responses: map[string]map[string]any{"telegram.send_message": {"ok": "invalid"}}, wantCode: "mock_connector_response_not_admitted"},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
@@ -1235,7 +1243,6 @@ func VerifyPipelineActivityRequestMockAdmissionFailsBeforeJournalCredentialsAndH
 					intent := testNonIdempotentActivityIntent(runID, uuid.NewString(), uuid.NewString())
 					intent.Tool = "telegram.send_message"
 					intent.ExecutionMode = executionmode.Mock
-					intent.EffectClass = runtimecontracts.ActivityEffectClassNonIdempotentWrite
 					if err := (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, intent); err != nil {
 						t.Fatalf("execute rejected mock activity: %v", err)
 					}
@@ -1287,7 +1294,6 @@ func VerifyMockOnlyPostureRejectsLiveActivityBeforeJournalCredentialsAndHTTPForT
 	intent.Tool = "telegram.send_message"
 	intent.ActivityID = "telegram_send_message"
 	intent.ExecutionMode = executionmode.Live
-	intent.EffectClass = runtimecontracts.ActivityEffectClassNonIdempotentWrite
 	if err := (pipelineActivityDispatcher{coordinator: pc}).executeActivityIntent(ctx, intent); err == nil {
 		t.Fatal("mock_only posture admitted a live activity intent")
 	}
@@ -1530,7 +1536,6 @@ func VerifyPipelineActivityRequestNonIdempotentFailureDoesNotRetryForTest(t *tes
 	}
 	pc := fixture.NewCoordinator(bus, PipelineCoordinatorOptions{Module: staticSemanticWorkflowModule{source: source}, Persistence: workflowPersistenceForTest(store)})
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
-	intent.RetryMaxAttempts = 3
 	request, err := activityRequestEmitIntent(intent)
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
@@ -1576,7 +1581,6 @@ func VerifyPipelineActivityRequestNonIdempotentTransportErrorMarksUncertainForTe
 	})}
 	dispatcher := pipelineActivityDispatcher{coordinator: pc, client: client}
 	intent := testNonIdempotentActivityIntent(runID, sourceEventID, entityID)
-	intent.RetryMaxAttempts = 3
 	if err := dispatcher.executeActivityIntent(ctx, intent); err != nil {
 		t.Fatalf("executeActivityIntent: %v", err)
 	}
@@ -1900,10 +1904,10 @@ func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
 		panic(err)
 	}
 	return runtimeengine.ActivityIntent{
-		ActivityID:      "scanner_source_scrape",
-		Tool:            "source_scrape",
-		Input:           mustActivityInput(map[string]any{"url": inputURL}),
-		EffectClass:     runtimecontracts.ActivityEffectClassReadOnly,
+		ActivityID: "scanner_source_scrape",
+		Tool:       "source_scrape",
+		Input:      mustActivityInput(map[string]any{"url": inputURL}),
+
 		SuccessEvent:    "research.scanner_source_scrape.succeeded",
 		FailureEvent:    "research.scanner_source_scrape.failed",
 		EntityID:        identity.NormalizeEntityID("entity-1"),
@@ -1914,9 +1918,9 @@ func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
 		SourceRunID:     "run-1",
 		SourceTaskID:    "task-1",
 		ChainDepth:      4,
-		Attempt:         1,
-		ExecutionMode:   executionmode.Live,
-		RoutingSource:   routingSource,
+
+		ExecutionMode: executionmode.Live,
+		RoutingSource: routingSource,
 	}.Normalized()
 }
 
@@ -1932,7 +1936,6 @@ func testNonIdempotentActivityIntent(runID, sourceEventID, entityID string) runt
 	intent := testActivityIntent("https://example.com/source")
 	intent.Tool = "provider_write"
 	intent.ActivityID = "scanner_provider_write"
-	intent.EffectClass = runtimecontracts.ActivityEffectClassNonIdempotentWrite
 	intent.SuccessEvent = "research.scanner_provider_write.succeeded"
 	intent.FailureEvent = "research.scanner_provider_write.failed"
 	intent.SourceRunID = runID

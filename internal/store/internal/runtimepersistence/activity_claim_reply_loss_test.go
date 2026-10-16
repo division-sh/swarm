@@ -114,7 +114,7 @@ func TestWorkflowActivityAttemptStatusDiagnosticDiscardsPartialRowsBothStores(t 
 func claimReplyLossStartForTest(run string) pipeline.ActivityAttemptRecord {
 	return pipeline.ActivityAttemptRecord{
 		RequestEventID: uuid.NewString(), RunID: run, ExecutionMode: executionmode.Live,
-		ActivityID: uuid.NewString(), Tool: "provider_write", EffectClass: "non_idempotent_write",
+		ActivityID: uuid.NewString(), Tool: "provider_write",
 		Attempt: 1, SuccessEvent: "fixture.succeeded", FailureEvent: "fixture.failed", InputHash: "exact",
 		StartedAt: time.Now().UTC(),
 	}

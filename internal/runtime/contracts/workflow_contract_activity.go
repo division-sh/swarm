@@ -43,53 +43,6 @@ type ActivityResultEvents struct {
 	Rejected          string
 }
 
-type ActivityRetryDefaults struct {
-	MaxAttempts int
-	Backoff     string
-}
-
-type ActivityForkPolicy string
-
-const (
-	ActivityForkReuseRecordedResult ActivityForkPolicy = "reuse_recorded_result"
-	ActivityForkReexecuteRead       ActivityForkPolicy = "reexecute_read"
-	ActivityForkRequireConfirmation ActivityForkPolicy = "require_manual_confirmation"
-	ActivityForkForbidReexecution   ActivityForkPolicy = "forbid_reexecution"
-)
-
-func SupportedActivityEffectClass(effectClass ActivityEffectClass) bool {
-	switch effectClass {
-	case ActivityEffectClassReadOnly, ActivityEffectClassNonIdempotentWrite:
-		return true
-	default:
-		return false
-	}
-}
-
-func ActivityRetryDefaultsForEffectClass(effectClass ActivityEffectClass) ActivityRetryDefaults {
-	switch effectClass {
-	case ActivityEffectClassReadOnly:
-		return ActivityRetryDefaults{MaxAttempts: 3, Backoff: "exponential"}
-	case ActivityEffectClassIdempotentWrite:
-		return ActivityRetryDefaults{MaxAttempts: 2, Backoff: "exponential"}
-	default:
-		return ActivityRetryDefaults{MaxAttempts: 1, Backoff: "none"}
-	}
-}
-
-func ActivityForkPolicyForEffectClass(effectClass ActivityEffectClass) ActivityForkPolicy {
-	switch effectClass {
-	case ActivityEffectClassReadOnly:
-		return ActivityForkReexecuteRead
-	case ActivityEffectClassIdempotentWrite:
-		return ActivityForkReuseRecordedResult
-	case ActivityEffectClassNonIdempotentWrite:
-		return ActivityForkRequireConfirmation
-	default:
-		return ActivityForkForbidReexecution
-	}
-}
-
 func ActivitySitesForNode(node runtimeidentity.ExecutableNode, handlers map[string]SystemNodeEventHandler) []ActivitySite {
 	if !node.Valid() {
 		return nil
@@ -175,12 +128,11 @@ func ActivityResultEventsForSite(site ActivitySite) (ActivityResultEvents, error
 }
 
 func ActivityApprovalEventCatalogEntry(site ActivitySite, revision bool) EventCatalogEntry {
-	required := []string{"card_id", "activity_id", "tool", "effect_class", "effect_content_hash", "decided_by", "decided_at"}
+	required := []string{"card_id", "activity_id", "tool", "effect_content_hash", "decided_by", "decided_at"}
 	properties := map[string]EventFieldSpec{
 		"card_id":             {Type: "string", Description: "Decision-card identity that settled the proposed effect."},
 		"activity_id":         {Type: "string", Description: "Generated durable activity id."},
 		"tool":                {Type: "string", Description: "Authored tools.yaml tool id held by the proposal."},
-		"effect_class":        {Type: "string", Description: "Authored durable activity effect class."},
 		"effect_content_hash": {Type: "string", Description: "Canonical immutable proposed-effect digest."},
 		"decided_by":          {Type: "string", Description: "Authenticated actor that settled the card."},
 		"decided_at":          {Type: "string", Description: "Canonical decision timestamp."},
@@ -192,7 +144,6 @@ func ActivityApprovalEventCatalogEntry(site ActivitySite, revision bool) EventCa
 			"card_id":             {Type: "string", Description: "Decision-card identity that settled the proposed effect."},
 			"activity_id":         {Type: "string", Description: "Generated durable activity id."},
 			"tool":                {Type: "string", Description: "Authored tools.yaml tool id held by the proposal."},
-			"effect_class":        {Type: "string", Description: "Authored durable activity effect class."},
 			"effect_content_hash": {Type: "string", Description: "Canonical immutable proposed-effect digest."},
 			"decided_by":          {Type: "string", Description: "Authenticated actor that settled the card."},
 			"decided_at":          {Type: "string", Description: "Canonical decision timestamp."},
@@ -238,22 +189,18 @@ func activitySlug(raw string) string {
 }
 
 func ActivityResultEventCatalogEntry(site ActivitySite, tool ToolSchemaEntry, status string) EventCatalogEntry {
-	required := []string{"activity_id", "tool", "effect_class", "attempt", "result"}
+	required := []string{"activity_id", "tool", "result"}
 	properties := map[string]EventFieldSpec{
-		"activity_id":  {Type: "string", Description: "Generated durable activity id."},
-		"tool":         {Type: "string", Description: "Authored tools.yaml tool id executed by the activity."},
-		"effect_class": {Type: "string", Description: "Authored durable activity effect class."},
-		"attempt":      {Type: "integer", Description: "One-based activity attempt number."},
-		"result":       {Type: "object", Description: "Tool output shaped by the authored tool output schema."},
+		"activity_id": {Type: "string", Description: "Generated durable activity id."},
+		"tool":        {Type: "string", Description: "Authored tools.yaml tool id executed by the activity."},
+		"result":      {Type: "object", Description: "Tool output shaped by the authored tool output schema."},
 	}
 	if status == ActivityResultStatusFailed {
-		required = []string{"activity_id", "tool", "effect_class", "attempt", "failure"}
+		required = []string{"activity_id", "tool", "failure"}
 		properties = map[string]EventFieldSpec{
-			"activity_id":  {Type: "string", Description: "Generated durable activity id."},
-			"tool":         {Type: "string", Description: "Authored tools.yaml tool id attempted by the activity."},
-			"effect_class": {Type: "string", Description: "Authored durable activity effect class."},
-			"attempt":      {Type: "integer", Description: "One-based activity attempt number."},
-			"failure":      {Type: runtimefailures.EnvelopeSchemaVersion + " envelope", Description: "Canonical durable activity failure envelope."},
+			"activity_id": {Type: "string", Description: "Generated durable activity id."},
+			"tool":        {Type: "string", Description: "Authored tools.yaml tool id attempted by the activity."},
+			"failure":     {Type: runtimefailures.EnvelopeSchemaVersion + " envelope", Description: "Canonical durable activity failure envelope."},
 		}
 	}
 	if revisionField := strings.TrimSpace(site.RevisionField); revisionField != "" {
@@ -280,13 +227,11 @@ func ActivityResultEventSchemasForSite(site ActivitySite, tool ToolSchemaEntry) 
 			Schema: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
-				"required":             []string{"activity_id", "tool", "effect_class", "attempt", "result"},
+				"required":             []string{"activity_id", "tool", "result"},
 				"properties": map[string]any{
-					"activity_id":  map[string]any{"type": "string"},
-					"tool":         map[string]any{"type": "string"},
-					"effect_class": map[string]any{"type": "string"},
-					"attempt":      map[string]any{"type": "integer"},
-					"result":       toolInputSchemaToJSONSchema(tool.OutputSchema()),
+					"activity_id": map[string]any{"type": "string"},
+					"tool":        map[string]any{"type": "string"},
+					"result":      toolInputSchemaToJSONSchema(tool.OutputSchema()),
 				},
 			},
 		},
@@ -295,13 +240,11 @@ func ActivityResultEventSchemasForSite(site ActivitySite, tool ToolSchemaEntry) 
 			Schema: map[string]any{
 				"type":                 "object",
 				"additionalProperties": false,
-				"required":             []string{"activity_id", "tool", "effect_class", "attempt", "failure"},
+				"required":             []string{"activity_id", "tool", "failure"},
 				"properties": map[string]any{
-					"activity_id":  map[string]any{"type": "string"},
-					"tool":         map[string]any{"type": "string"},
-					"effect_class": map[string]any{"type": "string"},
-					"attempt":      map[string]any{"type": "integer"},
-					"failure":      runtimefailures.EnvelopeJSONSchema(),
+					"activity_id": map[string]any{"type": "string"},
+					"tool":        map[string]any{"type": "string"},
+					"failure":     runtimefailures.EnvelopeJSONSchema(),
 				},
 			},
 		},
@@ -406,12 +349,11 @@ func (b *WorkflowContractBundle) GeneratedActivityEventSchemas() map[string]Even
 
 func activityApprovalEventSchema(revision bool) EventSchema {
 	description := "Generated durable activity approval rejection event"
-	required := []string{"card_id", "activity_id", "tool", "effect_class", "effect_content_hash", "decided_by", "decided_at"}
+	required := []string{"card_id", "activity_id", "tool", "effect_content_hash", "decided_by", "decided_at"}
 	properties := map[string]any{
 		"card_id":             map[string]any{"type": "string"},
 		"activity_id":         map[string]any{"type": "string"},
 		"tool":                map[string]any{"type": "string"},
-		"effect_class":        map[string]any{"type": "string"},
 		"effect_content_hash": map[string]any{"type": "string"},
 		"decided_by":          map[string]any{"type": "string"},
 		"decided_at":          map[string]any{"type": "string"},
@@ -424,7 +366,6 @@ func activityApprovalEventSchema(revision bool) EventSchema {
 			"card_id":             map[string]any{"type": "string"},
 			"activity_id":         map[string]any{"type": "string"},
 			"tool":                map[string]any{"type": "string"},
-			"effect_class":        map[string]any{"type": "string"},
 			"effect_content_hash": map[string]any{"type": "string"},
 			"decided_by":          map[string]any{"type": "string"},
 			"decided_at":          map[string]any{"type": "string"},

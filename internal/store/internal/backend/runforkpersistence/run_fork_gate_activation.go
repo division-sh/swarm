@@ -329,7 +329,7 @@ func forkPendingProposedEffect(sourceCard decisioncard.Card, source decisioncard
 		RunID: fork.RunID, SourceEventID: fork.SourceEventID, ParentEventID: fork.ParentEventID,
 		EntityID: fork.EntityID, Owner: owner, ExecutionFlowID: fork.FlowID,
 		HandlerEventKey: fork.HandlerEventKey, ActivityID: fork.ActivityID, Tool: fork.Tool,
-		Attempt: fork.Attempt, RevisionID: fork.Generation.RevisionID,
+		Attempt: 1, RevisionID: fork.Generation.RevisionID,
 	}
 	fork.RequestEventID = activityidentity.RequestEventID(fact)
 	sourceAnchor, err := sourceCard.Anchor.ProposedEffect()

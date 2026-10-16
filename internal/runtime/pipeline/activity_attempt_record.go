@@ -31,7 +31,6 @@ type ActivityAttemptRecord struct {
 	HandlerEventKey string
 	ActivityID      string
 	Tool            string
-	EffectClass     string
 	Attempt         int
 	Status          string
 	SuccessEvent    string
@@ -63,7 +62,6 @@ func NormalizeActivityAttemptRecord(rec ActivityAttemptRecord) ActivityAttemptRe
 	rec.HandlerEventKey = strings.TrimSpace(rec.HandlerEventKey)
 	rec.ActivityID = strings.TrimSpace(rec.ActivityID)
 	rec.Tool = strings.TrimSpace(rec.Tool)
-	rec.EffectClass = strings.TrimSpace(rec.EffectClass)
 	rec.Status = strings.TrimSpace(rec.Status)
 	rec.SuccessEvent = strings.TrimSpace(rec.SuccessEvent)
 	rec.FailureEvent = strings.TrimSpace(rec.FailureEvent)
@@ -107,14 +105,11 @@ func ValidateActivityAttemptStart(rec ActivityAttemptRecord) error {
 			return err
 		}
 	}
-	if rec.ActivityID == "" || rec.Tool == "" || rec.EffectClass == "" || rec.SuccessEvent == "" || rec.FailureEvent == "" || rec.InputHash == "" {
+	if rec.ActivityID == "" || rec.Tool == "" || rec.SuccessEvent == "" || rec.FailureEvent == "" || rec.InputHash == "" {
 		return fmt.Errorf("activity attempt %s is missing required identity fields", rec.RequestEventID)
 	}
 	if rec.Generation.Valid() && rec.FlowInstance == "" {
 		return fmt.Errorf("generated activity attempt %s requires exact flow_instance", rec.RequestEventID)
-	}
-	if rec.EffectClass != "non_idempotent_write" {
-		return fmt.Errorf("activity attempt effect_class %q is not supported by the non-idempotent journal", rec.EffectClass)
 	}
 	if rec.Attempt != 1 {
 		return fmt.Errorf("activity attempt attempt = %d, want 1 for non-idempotent journal", rec.Attempt)
@@ -156,7 +151,7 @@ func ValidateActivityAttemptClaimIdentity(actual, expected ActivityAttemptRecord
 	if actual.RequestEventID == expected.RequestEventID && actual.RunID == expected.RunID &&
 		actual.EntityID == expected.EntityID && actual.FlowInstance == expected.FlowInstance && actual.NodeID == expected.NodeID &&
 		actual.HandlerEventKey == expected.HandlerEventKey && actual.ActivityID == expected.ActivityID &&
-		actual.Tool == expected.Tool && actual.EffectClass == expected.EffectClass && actual.ExecutionMode == expected.ExecutionMode &&
+		actual.Tool == expected.Tool && actual.ExecutionMode == expected.ExecutionMode &&
 		actual.SuccessEvent == expected.SuccessEvent && actual.FailureEvent == expected.FailureEvent &&
 		actual.InputHash == expected.InputHash && actual.LoopStage == expected.LoopStage &&
 		((!actual.Generation.Valid() && !expected.Generation.Valid()) || actual.Generation.Equal(expected.Generation)) {

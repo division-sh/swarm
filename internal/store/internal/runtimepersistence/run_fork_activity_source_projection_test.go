@@ -475,7 +475,7 @@ func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture au
 	}
 	payload, err := json.Marshal(map[string]any{
 		"activity_id": "inspect", "tool": "provider.read", "input": input,
-		"effect_class": string(runtimecontracts.ActivityEffectClassReadOnly), "fork_policy": string(runtimecontracts.ActivityForkReexecuteRead),
+		"effect_class": string(runtimecontracts.ActivityEffectClassReadOnly), "fork_policy": "reexecute_read",
 		"success_event": results.SuccessEvent, "failure_event": results.FailureEvent, "attempt": 1,
 		"entity_id": entityID, "node_id": fact.Owner.Key(), "flow_id": flowID, "flow_instance": activityFlow,
 		"handler_event_key": "review.inspect", "source_run_id": runID, "source_event_id": parentID,

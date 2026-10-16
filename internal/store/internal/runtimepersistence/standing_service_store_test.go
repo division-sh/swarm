@@ -894,9 +894,9 @@ func nullUUID(value string) any {
 
 func seedStandingCensusActivityAttempt(t *testing.T, fixture authorActivityReceiptFixture, ctx context.Context, runID string, mode executionmode.Mode) {
 	t.Helper()
-	query := `INSERT INTO activity_attempts (request_event_id, run_id, execution_mode, node_id, handler_event_key, activity_id, tool, effect_class, attempt, status, success_event, failure_event, input_hash, loop_generation) VALUES (?, ?, ?, 'node', 'event', 'activity', 'provider.write', 'non_idempotent_write', 1, 'started', 'activity.succeeded', 'activity.failed', 'input-hash', '{}')`
+	query := `INSERT INTO activity_attempts (request_event_id, run_id, execution_mode, node_id, handler_event_key, activity_id, tool, attempt, status, success_event, failure_event, input_hash, loop_generation) VALUES (?, ?, ?, 'node', 'event', 'activity', 'provider.write', 1, 'started', 'activity.succeeded', 'activity.failed', 'input-hash', '{}')`
 	if fixture.dialect == authoractivityfixture.DialectPostgres {
-		query = `INSERT INTO activity_attempts (request_event_id, run_id, execution_mode, node_id, handler_event_key, activity_id, tool, effect_class, attempt, status, success_event, failure_event, input_hash, loop_generation) VALUES ($1::uuid, $2::uuid, $3, 'node', 'event', 'activity', 'provider.write', 'non_idempotent_write', 1, 'started', 'activity.succeeded', 'activity.failed', 'input-hash', '{}'::jsonb)`
+		query = `INSERT INTO activity_attempts (request_event_id, run_id, execution_mode, node_id, handler_event_key, activity_id, tool, attempt, status, success_event, failure_event, input_hash, loop_generation) VALUES ($1::uuid, $2::uuid, $3, 'node', 'event', 'activity', 'provider.write', 1, 'started', 'activity.succeeded', 'activity.failed', 'input-hash', '{}'::jsonb)`
 	}
 	if _, err := fixture.db.ExecContext(ctx, query, uuid.NewString(), runID, string(mode)); err != nil {
 		t.Fatalf("seed standing activity attempt: %v", err)

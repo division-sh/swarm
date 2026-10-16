@@ -247,10 +247,10 @@ func proposedEffectAPICard(t *testing.T, runID, entityID string, fact runtimecor
 		CardID: decisioncard.ProposedEffectCardID(requestEventID, "support_reply"), RunID: runID,
 		RequestEventID: requestEventID, ActivityID: "send_support_reply", Tool: "provider_write",
 		BundleHash: fact.BundleHash(), WorkflowVersion: workflowVersion, Input: input,
-		EffectClass:  runtimecontracts.ActivityEffectClassNonIdempotentWrite,
+
 		SuccessEvent: "send_support_reply.succeeded", FailureEvent: "send_support_reply.failed",
 		RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
-		RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
+
 		EntityID: entityID, NodeID: activityOwner.Key(), FlowID: ".", FlowInstance: runID, HandlerEventKey: "thing.created",
 		SourceEventID: sourceEventID, SourceRunID: runID, SourceTaskID: "task-1",
 		ExecutionMode: "live", State: decisioncard.ProposedEffectPending, CreatedAt: now, UpdatedAt: now,

@@ -127,8 +127,8 @@ func (f cursorMailboxFixture) card(t *testing.T, entity string, at time.Time, ki
 		continuation := decisioncard.ProposedEffectContinuation{
 			CardID: decisioncard.ProposedEffectCardID(anchor.RequestEventID, anchor.Decision), RunID: card.RunID, RequestEventID: anchor.RequestEventID,
 			ActivityID: anchor.ActivityID, Tool: "telegram.send_message", Input: input, BundleHash: card.BundleHash, WorkflowVersion: card.WorkflowVersion,
-			EffectClass: runtimecontracts.ActivityEffectClassNonIdempotentWrite, SuccessEvent: "reply.sent", FailureEvent: "reply.failed", RevisionEvent: "reply.revise", RejectedEvent: "reply.rejected",
-			RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation, EntityID: entity, NodeID: activityidentity.MustNodeOwner(identitytest.RootNode(t, "reviewer")).Key(),
+			SuccessEvent: "reply.sent", FailureEvent: "reply.failed", RevisionEvent: "reply.revise", RejectedEvent: "reply.rejected",
+			EntityID: entity, NodeID: activityidentity.MustNodeOwner(identitytest.RootNode(t, "reviewer")).Key(),
 			FlowInstance: f.base.RunID, HandlerEventKey: "review.requested", SourceEventID: f.eventID, SourceRunID: card.RunID,
 			ExecutionMode: "live", State: decisioncard.ProposedEffectPending, CreatedAt: at, UpdatedAt: at,
 		}.Canonical()

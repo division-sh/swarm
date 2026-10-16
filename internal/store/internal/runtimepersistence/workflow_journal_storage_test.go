@@ -23,7 +23,7 @@ func TestWorkflowJournalStoragePreservesOriginalSnapshotAndPhysicalCountsBothSto
 				seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 				record := pipeline.ActivityAttemptRecord{
 					RequestEventID: uuid.NewString(), RunID: runID, ExecutionMode: executionmode.Live,
-					ActivityID: uuid.NewString(), Tool: "journal.storage", EffectClass: "non_idempotent_write",
+					ActivityID: uuid.NewString(), Tool: "journal.storage",
 					Attempt: 1, SuccessEvent: "fixture.succeeded", FailureEvent: "fixture.failed",
 					InputHash: "exact-storage-input", StartedAt: time.Now().UTC(),
 				}

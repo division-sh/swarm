@@ -305,8 +305,7 @@ func TestBuildShowsApprovedOutwardEffectAsCanonicalApprovalPoint(t *testing.T) {
 	}
 	got := view.ApprovalPoints[0]
 	if got.NodeID != identitytest.RootNode(t, "support").Key() || got.HandlerEvent != "support.reply_drafted" || got.Source != "handler.activity" ||
-		got.ActivityID != "send_support_reply" || got.Tool != "telegram_send" || got.Decision != "support_reply" ||
-		got.EffectClass != string(runtimecontracts.ActivityEffectClassNonIdempotentWrite) {
+		got.ActivityID != "send_support_reply" || got.Tool != "telegram_send" || got.Decision != "support_reply" {
 		t.Fatalf("approval point = %#v", got)
 	}
 }
