@@ -43,38 +43,6 @@ func family145DeliveryStatusCallerInverse(function, current string) string {
 	return current
 }
 
-func family145CheckDeliveryStatusWholeRule(t *testing.T, file, function, current string) bool {
-	t.Helper()
-	current = family145EventNameCallerInverse(function, current)
-	for _, pin := range deliveryStatusPins(t) {
-		if pin.File == file && pin.Function == function {
-			if current != pin.After {
-				t.Fatal("delivery status observation escaped exact complete rule:", file, function)
-			}
-			return true
-		}
-	}
-	return false
-}
-
-func deliveryStatusHostiles(t *testing.T, pin deliverystatus.Pin) {
-	t.Helper()
-	pins := deliveryStatusPins(t)
-	if deliverystatus.Previous(pins, pin.File, pin.Function, pin.After) != pin.Before || deliverystatus.Previous(pins, "foreign.go", pin.Function, pin.After) != pin.After {
-		t.Fatal("delivery status inverse admitted foreign/missing source")
-	}
-	finite := recipe{File: pin.File, Function: pin.Function, Before: pin.Before, After: pin.After}
-	for _, cut := range []string{"InspectSnapshot", "ReadServedDeliveryStatusCount", "reader", "ReceiverStateReader", "eventID", "runID", "statuses...", "status", "subscriberID", "subscriberType", "t.Fatal", " != ", " == ", "got == want", "servedProofPollDeadline", "duration", "25 * time.Millisecond", "servedInspectionRunDebugSummary", "waitForReady", "captureSelectedRuntimePersistence", "releaseOnce.Do", "250*time.Millisecond"} {
-		if !strings.Contains(pin.After, cut) {
-			continue
-		}
-		mutant := strings.Replace(pin.After, cut, "unreviewedStatusCut", 1)
-		if _, _, err := rewriteFunction(pin.File, []byte("package proof\n"+mutant), finite); err == nil || deliverystatus.Previous(pins, pin.File, pin.Function, mutant) != mutant {
-			t.Fatal("changed delivery status identity/assertion/lifetime accepted:", pin.Function, cut)
-		}
-	}
-}
-
 type deliveryStatusInventoryResult struct {
 	calls, definitions, compositions int
 	err                              error
