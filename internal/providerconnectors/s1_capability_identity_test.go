@@ -24,17 +24,20 @@ func TestS1ConnectorCapabilityReadbackRejectsMalformedToolIdentity(t *testing.T)
 	registry := testPackRegistry(t)
 	for _, toolID := range s1MalformedCapabilityToolIDs() {
 		t.Run(toolID, func(t *testing.T) {
-			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: map[string]runtimecontracts.ToolSchemaEntry{
-				"telegram.send_message": telegramConnectorTool("https://api.telegram.org"),
-				toolID:                  telegramConnectorTool("https://api.telegram.org"),
-			}})
-			if len(ValidateSource(source)) == 0 {
-				t.Fatal("negative fixture must fail the existing tool-ID validator")
-			}
-			for _, includeInstalled := range []bool{false, true} {
-				subjects, err := CapabilitySubjects(context.Background(), source, CapabilityOptions{Registry: registry, IncludeInstalled: includeInstalled})
-				if err == nil || !strings.Contains(err.Error(), toolID) || !strings.Contains(err.Error(), "<provider>.<action>") || len(subjects) != 0 {
-					t.Errorf("malformed identity gained readback (installed=%t): subjects=%+v err=%v", includeInstalled, subjects, err)
+			for _, withValidPeer := range []bool{false, true} {
+				tools := map[string]runtimecontracts.ToolSchemaEntry{toolID: telegramConnectorTool("https://api.telegram.org")}
+				if withValidPeer {
+					tools["telegram.send_message"] = telegramConnectorTool("https://api.telegram.org")
+				}
+				source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Tools: tools})
+				if len(ValidateSource(source)) == 0 {
+					t.Fatal("negative fixture must fail the existing tool-ID validator")
+				}
+				for _, includeInstalled := range []bool{false, true} {
+					subjects, err := CapabilitySubjects(context.Background(), source, CapabilityOptions{Registry: registry, IncludeInstalled: includeInstalled})
+					if err == nil || !strings.Contains(err.Error(), toolID) || !strings.Contains(err.Error(), "<provider>.<action>") || len(subjects) != 0 {
+						t.Errorf("malformed identity gained readback (peer=%t installed=%t): subjects=%+v err=%v", withValidPeer, includeInstalled, subjects, err)
+					}
 				}
 			}
 		})
