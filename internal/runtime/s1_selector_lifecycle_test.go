@@ -14,6 +14,8 @@ import (
 func s1SelectorAgentSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	members := s1EffectiveTriggerMembers()
+	members["policy.yaml"] = []byte("root_marker: root\n")
+	members["sibling/policy.yaml"] = []byte("sibling_marker: sibling\n")
 	for _, prefix := range []string{"", "sibling/"} {
 		members[prefix+"agents.yaml"] = []byte("worker:\n  role: worker\n  intent: prompts/worker.md\n  model: regular\n  subscriptions: [platform.join_complete]\n")
 		members[prefix+"prompts/worker.md"] = []byte("Handle the admitted work.\n")
@@ -39,6 +41,13 @@ func TestS1AgentDeclarationProofsPreserveRawSelectors(t *testing.T) {
 			t.Fatal(err)
 		}
 		actor := runtimeactors.AgentConfig{ID: plan.AgentID, FlowID: flow}
+		scope, present := semanticview.FlowScopeByID(source, flow)
+		if !present {
+			t.Fatal("fixture lost exact flow scope")
+		}
+		if scoped, err := semanticview.FlowAgentNamePlan(source, scope, declaration.LocalID); err != nil || scoped.OwnerFlowID != flow {
+			t.Fatalf("exact %s lost its flow name plan: %+v %v", flow, scoped, err)
+		}
 		if owner, found := semanticview.AgentDeclarationOwner(source, flow, declaration.LocalID); !found || owner != declaration.OwnerURI {
 			t.Fatalf("exact %s lost declaration ownership", flow)
 		}
@@ -62,10 +71,63 @@ func TestS1AgentDeclarationProofsPreserveRawSelectors(t *testing.T) {
 			if proof := semanticview.ResolveAgentMemoryProof(source, semanticview.AgentMemoryLocator{AgentID: actor.ID, FlowPath: raw}); proof.OwningFlowID != "" {
 				t.Errorf("memory proof repaired %q into %q", raw, proof.OwningFlowID)
 			}
+			invalidScope := scope
+			invalidScope.ID = raw
+			if _, err := semanticview.FlowAgentNamePlan(source, invalidScope, declaration.LocalID); err == nil {
+				t.Errorf("flow name plan repaired %q", raw)
+			}
+			invalidDeclaration := declaration
+			invalidDeclaration.OwnerFlowID = raw
+			if _, err := semanticview.ScopedAgentNamePlan(source, invalidDeclaration); err == nil {
+				t.Errorf("scoped name plan repaired declaration owner %q", raw)
+			}
+			invalidDeclaration = declaration
+			invalidDeclaration.ScopeID = raw
+			if _, err := semanticview.ScopedAgentNamePlan(source, invalidDeclaration); err == nil {
+				t.Errorf("scoped name plan repaired declaration scope %q", raw)
+			}
+			invalidPlan := plan
+			invalidPlan.OwnerFlowID = raw
+			if normalized := invalidPlan.Normalize(); normalized.OwnerFlowID != raw {
+				t.Errorf("name plan normalization repaired %q into %q", raw, normalized.OwnerFlowID)
+			}
+		}
+		other := "."
+		if flow == "." {
+			other = "sibling"
+		}
+		foreign := semanticview.AgentDeclarationsForOwner(source, other)[0]
+		scope.AgentURIs = map[string]string{declaration.LocalID: foreign.OwnerURI}
+		if scoped, err := semanticview.FlowAgentNamePlan(source, scope, declaration.LocalID); err != nil || scoped.OwnerFlowID != flow {
+			t.Errorf("caller URI readback redirected exact flow %q: %+v %v", flow, scoped, err)
 		}
 	}
 	if _, found := semanticview.ResolveAgentDeclaration(source, runtimeactors.AgentConfig{ID: "worker", FlowID: " "}); found {
 		t.Fatal("whitespace became a target-free agent query")
+	}
+}
+
+func TestS1ScopedPolicyProofsRequireRawExactSelectors(t *testing.T) {
+	source := s1SelectorAgentSource(t)
+	for _, cell := range []struct{ flow, key, value string }{{".", "root_marker", "root"}, {"sibling", "sibling_marker", "sibling"}} {
+		plain, found := semanticview.PolicyValueForFlow(source, cell.flow, cell.key)
+		owned, ownedFound := semanticview.PolicyValueForFlowWithOwner(source, cell.flow, cell.key)
+		if !found || plain.Value != cell.value || !ownedFound || owned.Value.Value != cell.value || owned.OwnerKey == "" {
+			t.Fatalf("exact %s lost policy provenance: %+v %+v", cell.flow, plain, owned)
+		}
+	}
+	if _, found := semanticview.PolicyValueForFlowWithOwner(source, "", "root_marker"); !found {
+		t.Fatal("supported target-free root-policy inspection was lost")
+	}
+	for _, raw := range []string{" . ", "\t.\n", " sibling ", "\tsibling\n", " ", "foreign", "./", "team-bot"} {
+		for _, key := range []string{"root_marker", "sibling_marker"} {
+			if _, found := semanticview.PolicyValueForFlow(source, raw, key); found {
+				t.Errorf("policy query repaired or adopted a fallback for %q", raw)
+			}
+			if _, found := semanticview.PolicyValueForFlowWithOwner(source, raw, key); found {
+				t.Errorf("policy provenance repaired or adopted a fallback for %q", raw)
+			}
+		}
 	}
 }
 
