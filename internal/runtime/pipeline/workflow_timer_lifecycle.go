@@ -110,8 +110,11 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 		if err != nil {
 			return true, false, err
 		}
-		if !found || strings.TrimSpace(instance.CurrentState) != strings.TrimSpace(timer.Stage) {
+		if !found {
 			return true, false, nil
+		}
+		if current, err := pc.workflowTimers.stageTimerEntryCurrent(ctx, instance, activation, timer); err != nil || !current {
+			return true, false, err
 		}
 		current, err := workflowLoopGenerationCurrent(&instance, activation.Ref.Generation, timer.Stage)
 		if err != nil {
@@ -138,8 +141,8 @@ func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context,
 		return true, false, err
 	}
 	currentStage := strings.TrimSpace(instance.CurrentState)
-	if currentStage != strings.TrimSpace(timer.Stage) {
-		return true, false, nil
+	if current, err := pc.workflowTimers.stageTimerEntryCurrent(ctx, instance, activation, timer); err != nil || !current {
+		return true, false, err
 	}
 	if current, generationErr := workflowLoopGenerationCurrent(&instance, activation.Ref.Generation, timer.Stage); generationErr != nil {
 		return true, false, generationErr

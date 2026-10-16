@@ -625,7 +625,7 @@ func (pc *PipelineCoordinator) intercept(ctx context.Context, evt events.Event, 
 	if err != nil {
 		return false, nil, timerOutcome, err
 	}
-	if stageTimer && (!firedStageTimer || eventType == runtimecontracts.WorkflowStageTimerInternalEvent) {
+	if stageTimer && eventType == runtimecontracts.WorkflowStageTimerInternalEvent {
 		return false, nil, timerOutcome, nil
 	}
 	consume, handled, err := pc.interceptPolicy(ctx, eventType, evt)
