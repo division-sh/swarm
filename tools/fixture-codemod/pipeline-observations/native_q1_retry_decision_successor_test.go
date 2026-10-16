@@ -5,16 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"go/ast"
 	"go/format"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 )
 
 // This inverse authenticates Q1's one appended endpoint before an older
@@ -57,42 +55,33 @@ func q1RetryDecisionPriorRows(rows []recipe) ([]recipe, error) {
 }
 
 func q1RetryDecisionPriorSource(path string, current []byte) ([]byte, error) {
+	return selectedreadrole.Q1RetryDecisionHistoricalSource("../../..", path, current)
+}
+
+func q1RetryDecisionPriorRecipeBytes(current []byte) ([]byte, error) {
+	var rows []recipe
+	if err := json.Unmarshal(current, &rows); err != nil {
+		return nil, err
+	}
+	if _, err := q1RetryDecisionPriorRows(rows); err != nil {
+		return nil, err
+	}
 	pin, err := q1RetryDecisionReceipt()
 	if err != nil {
 		return nil, err
 	}
-	if path != pin.Original.File {
-		return append([]byte(nil), current...), nil
-	}
-	set := token.NewFileSet()
-	file, err := parser.ParseFile(set, path, current, parser.AllErrors)
-	if err != nil {
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(pin.Candidate); err != nil {
 		return nil, err
 	}
-	start, end, matched := 0, 0, 0
-	for _, declaration := range file.Decls {
-		fn, ok := declaration.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != pin.Original.Function {
-			continue
-		}
-		start, end = set.Position(fn.Pos()).Offset, set.Position(fn.End()).Offset
-		matched++
+	from := bytes.TrimSuffix(encoded.Bytes(), []byte("\n"))
+	to, err := json.Marshal(pin.Original.Successor)
+	if err != nil || bytes.Count(current, from) != 1 {
+		return nil, fmt.Errorf("Q1 exact serialized endpoint changed: %v", err)
 	}
-	if matched != 1 || !canonicalComparatorEqual2617(string(current[start:end]), pin.Candidate) {
-		return nil, fmt.Errorf("Q1 current source or multiplicity changed: %s", path)
-	}
-	body := string(current[start:end])
-	due := regexp.MustCompile(`(\bRetryBase:\s*)time\.Millisecond\b`)
-	if len(due.FindAllStringIndex(body, -1)) != 1 || strings.Count(body, "storetest.WaitManagerRetryDecision(") != 1 {
-		return nil, fmt.Errorf("Q1 current retry edits changed: %s", path)
-	}
-	body = due.ReplaceAllString(body, "${1}time.Hour")
-	body = strings.Replace(body, "storetest.WaitManagerRetryDecision(", "storetest.MakeManagerRetryEligible(", 1)
-	if !canonicalComparatorEqual2617(body, pin.Original.Successor) {
-		return nil, fmt.Errorf("Q1 exact source inverse changed: %s", path)
-	}
-	prior := append(append(append([]byte(nil), current[:start]...), body...), current[end:]...)
-	return format.Source(prior)
+	return bytes.Replace(current, from, to, 1), nil
 }
 
 // #2592/6192759467 replaces the retry-age write with the committed-due wait.
@@ -181,6 +170,11 @@ func testQ1RetryDecisionHistoryComposition(t *testing.T) {
 			t.Fatal("Q1 inverse changed an unrelated receipt")
 		}
 	}
+	archivedBytes, err := q1RetryDecisionPriorRecipeBytes(recipeBytes)
+	var archivedRows []recipe
+	if err != nil || json.Unmarshal(archivedBytes, &archivedRows) != nil || !reflect.DeepEqual(prior, archivedRows) {
+		t.Fatalf("Q1 raw inverse changed more than the exact endpoint: %v", err)
+	}
 	for _, change := range []string{"missing", "duplicate", "before", "after", "mechanical", "removed", "endpoint", "old_endpoint"} {
 		t.Run(change, func(t *testing.T) {
 			changed := append([]recipe(nil), rows...)
@@ -234,5 +228,16 @@ func testQ1RetryDecisionHistoryComposition(t *testing.T) {
 	foreign, err := q1RetryDecisionPriorSource("unlisted.go", raw)
 	if err != nil || !bytes.Equal(foreign, raw) {
 		t.Fatal("Q1 inverse changed an unlisted file")
+	}
+	root := t.TempDir()
+	packetPath := filepath.Join(root, "tools/fixture-codemod/pipeline-observations/testdata/fixture_setup_successors_2617.json")
+	if err := os.MkdirAll(filepath.Dir(packetPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(packetPath, append(append([]byte(nil), fixtureSetupSuccessorBytes2617...), ' '), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := selectedreadrole.Q1RetryDecisionHistoricalSource(root, pin.Original.File, raw); err == nil {
+		t.Fatal("changed fixture evidence supplied a historical source")
 	}
 }
