@@ -22,6 +22,8 @@ func serveappCapacityMoves() map[string]string {
 		"TestProviderAliasPhysicalTupleProofPreservesScopeNullsAndMultiplicity":        "serveapp-channel-neutral",
 		"TestProviderIngressProofRoleRegistryRejectsHiddenAuthorityFromSupportedProof": "serveapp-channel-neutral",
 		"TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission":         "serveapp-channel-neutral",
+		"TestProviderRestartRecoveryBothStores":                                        "serveapp-channel-neutral",
+		"TestProviderRestartRecoveryProcess":                                           "serveapp-channel-neutral",
 	}
 }
 
