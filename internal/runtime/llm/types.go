@@ -310,9 +310,10 @@ func validateManagedCall(ctx context.Context, session *Session, call ManagedCall
 }
 
 type managedProviderCall struct {
-	message  Message
-	provider agentframe.Provider
-	frame    agentframe.Frame
+	message        Message
+	provider       agentframe.Provider
+	frame          agentframe.Frame
+	requestJournal *runtimeeffects.ProviderRequestJournal
 }
 
 func validateManagedProviderCall(ctx context.Context, session *Session, call ManagedCall, contract ProviderContract) (managedProviderCall, error) {

@@ -2,6 +2,7 @@ package llm
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -23,7 +24,30 @@ type providerRequestRendering struct {
 }
 
 func newProviderRequestJournal(adapter string, frame agentframe.Frame, surface managedcapabilities.Surface, session *Session, input Message, logicalOperation string, request *http.Request, body []byte) (runtimeeffects.ProviderRequestJournal, error) {
-	if session == nil || request == nil || request.URL == nil ||
+	if request == nil || request.URL == nil {
+		return runtimeeffects.ProviderRequestJournal{}, fmt.Errorf("provider request journal requires its physical request")
+	}
+	draft, err := providerRequestJournalDraft(adapter, frame, surface, session, input, logicalOperation)
+	if err != nil {
+		return runtimeeffects.ProviderRequestJournal{}, err
+	}
+	headers, err := providerRequestJournalHeaders(adapter, request)
+	if err != nil {
+		return runtimeeffects.ProviderRequestJournal{}, err
+	}
+	draft.Method, draft.Destination, draft.SemanticHeaders = request.Method, request.URL.String(), headers
+	journal, err := runtimeeffects.NewProviderRequestJournal(draft, body)
+	if err != nil {
+		return runtimeeffects.ProviderRequestJournal{}, err
+	}
+	if _, err := RebuildProviderRequestJournal(journal, frame, surface, runtimeeffects.Fingerprint(body)); err != nil {
+		return runtimeeffects.ProviderRequestJournal{}, err
+	}
+	return journal, nil
+}
+
+func providerRequestJournalDraft(adapter string, frame agentframe.Frame, surface managedcapabilities.Surface, session *Session, input Message, logicalOperation string) (runtimeeffects.ProviderRequestJournal, error) {
+	if session == nil ||
 		session.ID != surface.Authority.SessionID || session.AgentID != frame.Session.AgentIdentity.AgentID() ||
 		session.TurnCount+1 != surface.Authority.TurnOrdinal {
 		return runtimeeffects.ProviderRequestJournal{}, fmt.Errorf("provider request journal requires the exact managed session and request")
@@ -41,40 +65,120 @@ func newProviderRequestJournal(adapter string, frame agentframe.Frame, surface m
 	if err != nil {
 		return runtimeeffects.ProviderRequestJournal{}, fmt.Errorf("freeze provider rendering inputs: %w", err)
 	}
-	headers := map[string]string{"content-type": request.Header.Get("content-type")}
-	if len(request.Header.Values("content-type")) != 1 {
-		return runtimeeffects.ProviderRequestJournal{}, fmt.Errorf("provider request journal requires one exact content type")
-	}
-	if adapter == "anthropic_api" {
-		if len(request.Header.Values("anthropic-version")) != 1 {
-			return runtimeeffects.ProviderRequestJournal{}, fmt.Errorf("provider request journal requires one exact version header")
-		}
-		headers["anthropic-version"] = request.Header.Get("anthropic-version")
-	}
 	fingerprint, err := surface.ContinuationFingerprint()
 	if err != nil {
 		return runtimeeffects.ProviderRequestJournal{}, err
 	}
-	journal, err := runtimeeffects.NewProviderRequestJournal(runtimeeffects.ProviderRequestJournal{
+	memory := session.Memory
+	return runtimeeffects.ProviderRequestJournal{
 		Version: runtimeeffects.ProviderRequestJournalVersion, Adapter: adapter,
 		FrameID: frame.FrameID, FrameContentHash: frame.ContentHash,
 		SurfaceID: surface.ID, SurfaceFingerprint: fingerprint,
 		SessionID: session.ID, TurnOrdinal: session.TurnCount + 1, LogicalOperationIdentity: logicalOperation,
-		Memory: &session.Memory,
-		Method: request.Method, Destination: request.URL.String(), SemanticHeaders: headers, Rendering: rendering,
-	}, body)
+		Memory: &memory, Rendering: rendering,
+	}, nil
+}
+
+func providerRequestJournalHeaders(adapter string, request *http.Request) (map[string]string, error) {
+	headers := map[string]string{"content-type": request.Header.Get("content-type")}
+	if len(request.Header.Values("content-type")) != 1 {
+		return nil, fmt.Errorf("provider request journal requires one exact content type")
+	}
+	if adapter == "anthropic_api" {
+		if len(request.Header.Values("anthropic-version")) != 1 {
+			return nil, fmt.Errorf("provider request journal requires one exact version header")
+		}
+		headers["anthropic-version"] = request.Header.Get("anthropic-version")
+	}
+	return headers, nil
+}
+
+func prepareManagedProviderRequestJournal(ctx context.Context, adapter, destination string, session *Session, input Message, body []byte, managed *managedProviderCall) (*managedProviderCall, error) {
+	if managed == nil {
+		return nil, nil
+	}
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("provider request journal requires its admitted capability surface")
+	}
+	logicalOperation, ok := runtimeeffects.LogicalOperationIdentityFromContext(ctx)
+	if !ok {
+		return nil, fmt.Errorf("provider request journal requires its logical operation")
+	}
+	draft, err := providerRequestJournalDraft(adapter, managed.frame, surface, session, input, logicalOperation)
 	if err != nil {
-		return runtimeeffects.ProviderRequestJournal{}, err
+		return nil, err
 	}
-	if _, err := RebuildProviderRequestJournal(journal, frame, surface, runtimeeffects.Fingerprint(body)); err != nil {
-		return runtimeeffects.ProviderRequestJournal{}, err
+	rebuilt, err := rebuildProviderRequestJournalBody(draft, managed.frame, surface)
+	if err != nil {
+		return nil, err
 	}
-	return journal, nil
+	if !bytes.Equal(rebuilt, body) {
+		return nil, fmt.Errorf("provider request differs from its independently frozen rendering")
+	}
+	captured := *managed
+	captured.requestJournal = nil
+	// Unsupported credential-bearing destinations keep original-call semantics,
+	// but have no persisted journal and cannot enter startup resume admission.
+	if !runtimeeffects.ProviderRequestJournalSupportsDestination(destination) {
+		return &captured, nil
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, destination, nil)
+	if err != nil {
+		return nil, fmt.Errorf("prepare provider request journal metadata: %w", err)
+	}
+	request.Header.Set("content-type", "application/json")
+	if adapter == "anthropic_api" {
+		request.Header.Set("anthropic-version", "2023-06-01")
+	}
+	headers, err := providerRequestJournalHeaders(adapter, request)
+	if err != nil {
+		return nil, err
+	}
+	draft.Method, draft.Destination, draft.SemanticHeaders = request.Method, request.URL.String(), headers
+	journal, err := runtimeeffects.NewProviderRequestJournal(draft, body)
+	if err != nil {
+		return nil, err
+	}
+	captured.requestJournal = &journal
+	return &captured, nil
+}
+
+func validateHTTPProviderRequestJournal(adapter string, request *http.Request, managed *managedProviderCall) error {
+	if managed == nil || managed.requestJournal == nil {
+		return nil
+	}
+	journal := managed.requestJournal
+	headers, err := providerRequestJournalHeaders(adapter, request)
+	if err != nil {
+		return err
+	}
+	if adapter != journal.Adapter || request.Method != journal.Method || request.URL.String() != journal.Destination ||
+		len(headers) != len(journal.SemanticHeaders) {
+		return fmt.Errorf("provider request differs from its frozen physical metadata")
+	}
+	for name, value := range headers {
+		if journal.SemanticHeaders[name] != value {
+			return fmt.Errorf("provider request differs from its frozen semantic headers")
+		}
+	}
+	return nil
 }
 
 // RebuildProviderRequestJournal uses only frozen evidence and the original
 // renderers. A successful rebuild is not permission to retry or dispatch.
 func RebuildProviderRequestJournal(journal runtimeeffects.ProviderRequestJournal, frame agentframe.Frame, surface managedcapabilities.Surface, operationFingerprint string) ([]byte, error) {
+	body, err := rebuildProviderRequestJournalBody(journal, frame, surface)
+	if err != nil {
+		return nil, err
+	}
+	if err := journal.ValidateRequest(body, operationFingerprint); err != nil {
+		return nil, err
+	}
+	return body, nil
+}
+
+func rebuildProviderRequestJournalBody(journal runtimeeffects.ProviderRequestJournal, frame agentframe.Frame, surface managedcapabilities.Surface) ([]byte, error) {
 	if err := frame.Validate(); err != nil {
 		return nil, fmt.Errorf("provider request journal execution frame: %w", err)
 	}
@@ -140,9 +244,6 @@ func RebuildProviderRequestJournal(journal runtimeeffects.ProviderRequestJournal
 	body, err := json.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("encode frozen provider request: %w", err)
-	}
-	if err := journal.ValidateRequest(body, operationFingerprint); err != nil {
-		return nil, err
 	}
 	return body, nil
 }

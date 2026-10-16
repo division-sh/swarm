@@ -302,12 +302,13 @@ func TestAnthropicProviderAdmissionNeverRedispatchesAmbiguousFailure(t *testing.
 
 	ctx := runtimeactors.WithActor(harness.CompletionContext("anthropic-admission-no-redispatch"), runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-1", Model: llmselection.ModelAliasRegular, FlowPath: "test/stateless"})
 	ctx = withTestStatelessMemory(t, ctx, "agent-1", "test/stateless")
-	session, err := runtime.StartSession(ctx, "agent-1", "system", nil)
+	session, err := runtime.StartSession(ctx, "agent-1", managedProviderPromptForEffectTest(t), nil)
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx = managedProviderTestContext(t, ctx, runtime, session, nil)
-	if _, err := runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, managedProviderCallForEffectTest(t, ctx)); err == nil {
+	managed := managedProviderCallForEffectTest(t, ctx)
+	if _, err := runtime.continueSession(ctx, session, managedProviderInputForEffectTest(t, managed), managed); err == nil {
 		t.Fatal("ContinueSession succeeded after ambiguous provider status")
 	}
 	if got := requests.Load(); got != 1 {

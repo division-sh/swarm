@@ -263,6 +263,10 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 	if err != nil {
 		return nil, err
 	}
+	managed, err = prepareManagedProviderRequestJournal(ctx, "anthropic_api", r.apiURL, s, message, reqJSON, managed)
+	if err != nil {
+		return nil, err
+	}
 
 	start := time.Now()
 	rawResp, parsed, dispatch, lastErr := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON, managed)
@@ -476,11 +480,16 @@ func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte, m
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("x-api-key", r.credentialCache.snapshot())
 	req.Header.Set("anthropic-version", "2023-06-01")
+	if err := validateHTTPProviderRequestJournal("anthropic_api", req, managed); err != nil {
+		return nil, anthropicResponse{}, nil, err
+	}
 	var attempt *runtimeeffects.Handle
 	if managed == nil {
 		attempt, err = runtimeeffects.BeginCompletion(ctx, "anthropic_api", payload, nil)
-	} else {
+	} else if managed.requestJournal == nil {
 		attempt, err = runtimeeffects.BeginManagedCompletion(ctx, "anthropic_api", payload, managed.frame, nil)
+	} else {
+		attempt, err = runtimeeffects.BeginJournaledManagedCompletion(ctx, "anthropic_api", payload, managed.frame, *managed.requestJournal, nil)
 	}
 	if err != nil {
 		return nil, anthropicResponse{}, nil, err

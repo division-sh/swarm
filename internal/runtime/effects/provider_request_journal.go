@@ -131,10 +131,7 @@ func (j ProviderRequestJournal) validate() error {
 	}
 	// These adapters have no credential-free query contract. Never persist a
 	// URL component that could carry credentials or silently strip it on replay.
-	destination, err := url.Parse(j.Destination)
-	if err != nil || (destination.Scheme != "http" && destination.Scheme != "https") || destination.Host == "" ||
-		destination.User != nil || destination.RawQuery != "" || destination.ForceQuery || destination.Fragment != "" ||
-		destination.Opaque != "" || j.Destination != strings.TrimSpace(j.Destination) {
+	if !ProviderRequestJournalSupportsDestination(j.Destination) {
 		return fmt.Errorf("provider request journal requires an exact credential-free HTTP destination")
 	}
 	if j.SemanticHeaders["content-type"] != "application/json" {
@@ -162,6 +159,15 @@ func (j ProviderRequestJournal) validate() error {
 		return fmt.Errorf("provider request journal requires the original body fingerprint")
 	}
 	return nil
+}
+
+// ProviderRequestJournalSupportsDestination describes the credential-free
+// journal format, not whether the original provider request may be dispatched.
+func ProviderRequestJournalSupportsDestination(raw string) bool {
+	destination, err := url.Parse(raw)
+	return err == nil && (destination.Scheme == "http" || destination.Scheme == "https") && destination.Host != "" &&
+		destination.User == nil && destination.RawQuery == "" && !destination.ForceQuery && destination.Fragment == "" &&
+		destination.Opaque == "" && raw == strings.TrimSpace(raw)
 }
 
 func (j ProviderRequestJournal) physicalRequestFingerprint() (string, error) {
