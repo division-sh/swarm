@@ -196,6 +196,7 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 	}
 	event := loadSQLiteDeliveryFixtureEvent(t, ctx, sqliteStore.backend.ConstructionHandle(), eventID)
 	seedSQLiteTraceAgent(t, ctx, sqliteStore, runID, agentID, base)
+	ctx = admitPreparedAgentClaimContext(t, ctx, sqliteStore)
 	fields := testAgentIdentityStorageFields(t, mustTestAgentIdentityForRun(runID, agentID, "flow-a"))
 	if _, err := sqliteStore.backend.ExecContext(ctx, `
 		INSERT INTO agent_conversation_audits (
@@ -314,6 +315,7 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 	for _, agentID := range []string{"agent-late", "agent-failed", "agent-second", "agent-a", "agent-b"} {
 		seedSQLiteTraceAgent(t, ctx, sqliteStore, fixture.runID, agentID, base)
 	}
+	ctx = admitPreparedAgentClaimContext(t, ctx, sqliteStore)
 	insertSQLiteTraceSession(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000301", fixture.runID, "agent-late", base.Add(4*time.Second))
 	insertSQLiteTraceSession(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000302", fixture.runID, "agent-failed", base.Add(2500*time.Millisecond))
 	insertSQLiteTraceSession(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000303", fixture.runID, "agent-second", base.Add(6*time.Second))
@@ -386,7 +388,7 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 
 func seedSQLiteTraceAgent(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, runID, agentID string, startedAt time.Time) {
 	t.Helper()
-	seedTestAgentRow(t, ctx, sqliteStore.backend.ConstructionHandle(), false, mustTestAgentIdentityForRun(runID, agentID, "flow-a"), "active")
+	seedManagedTurnFixtureAgent(t, ctx, sqliteStore, runID, agentID, "flow-a")
 }
 
 func insertSQLiteTraceSession(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, sessionID, runID, agentID string, updatedAt time.Time) {
