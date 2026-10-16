@@ -145,7 +145,11 @@ func accountingGit(ctx context.Context, root string, args ...string) ([]byte, er
 }
 
 func accountingGitCommand(ctx context.Context, root string, args ...string) *exec.Cmd {
-	command := exec.CommandContext(ctx, "git", append([]string{"-C", root, "--no-optional-locks", "--literal-pathspecs", "--no-replace-objects", "-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "core.attributesFile=" + os.DevNull}, args...)...)
+	worktree, err := filepath.Abs(root)
+	if err != nil {
+		worktree = root
+	}
+	command := exec.CommandContext(ctx, "git", append([]string{"-C", root, "--no-optional-locks", "--literal-pathspecs", "--no-replace-objects", "-c", "core.worktree=" + worktree, "-c", "core.hooksPath=" + os.DevNull, "-c", "core.fsmonitor=false", "-c", "core.attributesFile=" + os.DevNull}, args...)...)
 	command.Env = accountingBuildEnv(runtime.GOOS, runtime.GOARCH)
 	return command
 }

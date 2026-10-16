@@ -301,6 +301,9 @@ func copyAccountingObjects(ctx context.Context, source, target string, roots []s
 }
 
 func (snapshot accountingProofSnapshot) Validate(ctx context.Context) error {
+	if err := snapshot.validateGitContext(ctx); err != nil {
+		return err
+	}
 	expected, err := accountingTreeInputs(ctx, snapshot.Root, snapshot.Manifest.Head, nil)
 	if err != nil || !reflect.DeepEqual(expected, snapshot.Manifest) {
 		return fmt.Errorf("proof manifest differs from Git objects: %v", err)
@@ -308,7 +311,7 @@ func (snapshot accountingProofSnapshot) Validate(ctx context.Context) error {
 	if err := validateAccountingProofFiles(snapshot.Root, snapshot.Manifest); err != nil {
 		return err
 	}
-	return snapshot.validateGitContext(ctx)
+	return nil
 }
 
 func validateAccountingProofFiles(root string, manifest accountingProofManifest) error {
@@ -360,26 +363,38 @@ func validateAccountingProofFiles(root string, manifest accountingProofManifest)
 }
 
 func (snapshot accountingProofSnapshot) validateGitContext(ctx context.Context) error {
-	head, err := accountingGit(ctx, snapshot.Root, "rev-parse", "HEAD")
-	if err != nil || strings.TrimSpace(string(head)) != snapshot.Manifest.Head {
-		return fmt.Errorf("proof HEAD changed: %v", err)
-	}
-	if snapshot.Origin != "" {
-		origin, err := accountingGit(ctx, snapshot.Root, "rev-parse", "origin/master^{commit}")
-		if err != nil || strings.TrimSpace(string(origin)) != snapshot.Origin {
-			return fmt.Errorf("proof comparison ref changed: %v", err)
-		}
-	}
 	if snapshot.ConfigDigest != "" {
+		info, err := os.Lstat(filepath.Join(snapshot.Root, ".git/config"))
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0222 != 0 {
+			return fmt.Errorf("replaced or writable proof Git configuration: %v", err)
+		}
 		config, err := os.ReadFile(filepath.Join(snapshot.Root, ".git/config"))
 		if err != nil || formatproof.Digest(config) != snapshot.ConfigDigest {
 			return fmt.Errorf("proof Git configuration changed: %v", err)
 		}
 	}
-	for _, forbidden := range []string{"objects/info/alternates", "info/grafts", "info/attributes", "info/exclude", "shallow", "refs/replace", "config.worktree"} {
+	for _, forbidden := range []string{"objects/info/alternates", "objects/info/http-alternates", "info/grafts", "info/attributes", "info/exclude", "info/sparse-checkout", "shallow", "refs/replace", "config.worktree", "commondir", "gitdir"} {
 		if _, err := os.Lstat(filepath.Join(snapshot.Root, ".git", forbidden)); !os.IsNotExist(err) {
 			return fmt.Errorf("undeclared proof Git input %s: %v", forbidden, err)
 		}
+	}
+	for path, expected := range map[string]string{"HEAD": snapshot.Manifest.Head, "refs/remotes/origin/master": snapshot.Origin} {
+		if expected == "" {
+			continue
+		}
+		name := filepath.Join(snapshot.Root, ".git", path)
+		info, err := os.Lstat(name)
+		if err != nil || !info.Mode().IsRegular() {
+			return fmt.Errorf("replaced proof Git identity %s: %v", path, err)
+		}
+		body, err := os.ReadFile(name)
+		if err != nil || strings.TrimSpace(string(body)) != expected {
+			return fmt.Errorf("proof Git identity changed %s: %v", path, err)
+		}
+	}
+	indexTree, err := accountingGit(ctx, snapshot.Root, "write-tree")
+	if err != nil || strings.TrimSpace(string(indexTree)) != snapshot.Manifest.Tree {
+		return fmt.Errorf("proof index differs from committed tree: %v", err)
 	}
 	return nil
 }
@@ -458,12 +473,46 @@ func accountingSource(ctx context.Context, root, expected string, clean bool) (s
 		return "", fmt.Errorf("accounting source changed")
 	}
 	if clean {
-		status, err := accountingGit(ctx, root, "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none")
-		if err != nil || len(status) != 0 {
-			return "", fmt.Errorf("accounting requires clean source: %s: %v", status, err)
+		if err := checkAccountingWorkingTree(ctx, root, head, ""); err != nil {
+			return "", err
 		}
 	}
 	return head, nil
+}
+
+// Do not invoke clean filters from a caller's .gitattributes/configuration merely
+// to admit a checkout. Compare exact blobs and the index without executing data.
+func checkAccountingWorkingTree(ctx context.Context, root, head, ownedOutput string) error {
+	if _, err := accountingGit(ctx, root, "diff-index", "--cached", "--quiet", "--no-ext-diff", "--no-textconv", head, "--"); err != nil {
+		return fmt.Errorf("accounting requires its unchanged index: %w", err)
+	}
+	changedOutput := false
+	_, err := accountingTreeInputs(ctx, root, head, func(input accountingProofInput, expected []byte) error {
+		path := filepath.Join(root, input.Path)
+		info, err := os.Lstat(path)
+		if err != nil || !info.Mode().IsRegular() || (info.Mode().Perm()&0111 != 0) != (input.Mode == "100755") {
+			return fmt.Errorf("replaced accounting source %s: %v", input.Path, err)
+		}
+		actual, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(actual, expected) {
+			if input.Path != ownedOutput {
+				return fmt.Errorf("accounting working bytes changed: %s", input.Path)
+			}
+			changedOutput = true
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	untracked, err := accountingGit(ctx, root, "ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil || len(untracked) != 0 || (ownedOutput != "" && !changedOutput) {
+		return fmt.Errorf("accounting requires clean source except its exact owned output: %v", err)
+	}
+	return nil
 }
 
 func absoluteAccountingInputs(root string, args []string) ([]string, error) {
