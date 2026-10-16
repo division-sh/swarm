@@ -146,6 +146,13 @@ func proveProviderRestartRecovery(t *testing.T, backend string, completed bool) 
 			ready := launched == 3 && entered.Load() == int32((cycle+1)*3)
 			if completed {
 				ready = active == 0 && len(attempts) >= (cycle+1)*3 && entered.Load() >= int32((cycle+1)*3)
+				if ready {
+					for _, attempt := range providerRestartAttempts(t, providerRestartSnapshot(t, observations.Reader)) {
+						if attempt.state != "settled" || attempt.projection != "response_consumed" {
+							ready = false
+						}
+					}
+				}
 			}
 			if ready {
 				t.Logf("restart recovery cut: completed=%t cycle=%d attempts=%d provider_entered=%d", completed, cycle, len(attempts), entered.Load())
@@ -177,7 +184,7 @@ func proveProviderRestartRecovery(t *testing.T, backend string, completed bool) 
 }
 
 type providerRestartAttempt struct {
-	id, operation, target, delivery, state string
+	id, operation, target, delivery, state, projection string
 }
 
 func providerRestartSnapshot(t *testing.T, selected any) map[string]storetest.SelectedForkStorageTableSnapshot {
@@ -204,7 +211,7 @@ func providerRestartAttempts(t *testing.T, snapshot map[string]storetest.Selecte
 			}
 			return value
 		}
-		out = append(out, providerRestartAttempt{text("attempt_id"), text("operation_id"), text("usage_target_id"), text("origin_delivery_id"), text("state")})
+		out = append(out, providerRestartAttempt{text("attempt_id"), text("operation_id"), text("usage_target_id"), text("origin_delivery_id"), text("state"), text("completion_projection_phase")})
 	}
 	return out
 }
