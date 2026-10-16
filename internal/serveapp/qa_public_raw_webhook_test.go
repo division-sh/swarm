@@ -17,6 +17,7 @@ import (
 
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -24,7 +25,7 @@ func TestQAPublicRawWebhookReadyRouteBothStores(t *testing.T) {
 	runPublicRawWebhookProof(t, false)
 }
 
-func TestPublicRawWebhookRetainsAcquiredContextAcrossWithdrawalBothStores(t *testing.T) {
+func TestPublicRawWebhookWithdrawalRefusesBeforePublicationBothStores(t *testing.T) {
 	runPublicRawWebhookProof(t, true)
 }
 
@@ -57,6 +58,8 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 			http.DefaultTransport = origin.Client().Transport
 			t.Cleanup(func() { http.DefaultTransport = priorTransport })
 			opts, start := clockDeploymentHarness(t, backend, root)
+			var inbound inboundpublication.Runner
+			captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) { inbound = persistence.deps.InboundStore })
 			opts.PublicWebhookBaseURL = origin.URL
 			opts.PublicWebhookListen = publicAddress
 			opts.PublicWebhookListener = publicListener
@@ -128,6 +131,14 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 				t.Fatal("serve did not expose its actual runtime")
 			}
 			withdrawn := make(chan error, 1)
+			before := manager.LookupIngress("keyed-shop", "partner")
+			if !before.Loaded() {
+				t.Fatalf("fixture has no exact loaded ingress publication: %+v", before)
+			}
+			beforeInstances, err := rt.Pipeline.ListWorkflowInstances(t.Context(), before.Target.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if withdrawAfterAcquisition {
 				var once sync.Once
 				rt.InboundGateway.SetCredentialAdmission(func(ctx context.Context, target runtimepkg.InboundTarget) (credentials.SecretBinding, func(context.Context) error, error) {
@@ -142,10 +153,10 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 			}
 			tlsCode, tlsReceipt := a9PostSignedRawIngress(t, origin.URL+route, secret, body)
 			t.Logf("advertised TLS origin signed status=%d body=%s", tlsCode, tlsReceipt)
-			if tlsCode != http.StatusAccepted {
-				t.Errorf("READY public route refused a valid signed request: status=%d, want 202", tlsCode)
-			}
 			if withdrawAfterAcquisition {
+				if tlsCode != http.StatusServiceUnavailable {
+					t.Fatalf("withdrawn publication was not refused: %d %s", tlsCode, tlsReceipt)
+				}
 				select {
 				case err := <-withdrawn:
 					if err != nil {
@@ -163,9 +174,27 @@ func runPublicRawWebhookProof(t *testing.T, withdrawAfterAcquisition bool) {
 				if code != http.StatusServiceUnavailable {
 					t.Fatalf("fresh request bypassed withdrawal: %d", code)
 				}
+				if inbound == nil {
+					t.Fatal("fixture did not retain its real inbound reader")
+				}
+				if _, found, err := inbound.LoadInboundPublicationByIdentity(t.Context(), inboundpublication.Identity{
+					ServiceID: before.Target.ServiceID, RunID: before.Target.RunID, Generation: before.Target.Generation,
+					Provider: "partner", ProviderEventID: "public-route-proof",
+				}); err != nil || found {
+					t.Fatalf("withdrawal left a publication receipt: found=%t err=%v", found, err)
+				}
+				afterInstances, err := rt.Pipeline.ListWorkflowInstances(t.Context(), before.Target.RunID)
+				if err != nil || !reflect.DeepEqual(beforeInstances, afterInstances) {
+					t.Fatalf("withdrawal changed native construction: before=%+v after=%+v err=%v", beforeInstances, afterInstances, err)
+				}
 				if err := manager.RestoreStandingServiceTargets(lookup.Target.ServiceID); err != nil {
 					t.Fatal(err)
 				}
+				tlsCode, tlsReceipt = a9PostSignedRawIngress(t, origin.URL+route, secret, body)
+				t.Logf("fresh admission after explicit restoration: status=%d body=%s", tlsCode, tlsReceipt)
+			}
+			if tlsCode != http.StatusAccepted {
+				t.Errorf("READY public route refused a valid signed request: status=%d, want 202", tlsCode)
 			}
 			publicCode, publicReceipt := a9PostSignedRawIngress(t, "http://"+publicAddress+route, secret, body)
 			wantPublic := http.StatusAccepted
