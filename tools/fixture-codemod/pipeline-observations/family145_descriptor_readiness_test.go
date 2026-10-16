@@ -151,7 +151,9 @@ func TestFamily145DescriptorReadinessEntireCallerChainHasNoPoolOrQuerySelector(t
 	root := filepath.Join("..", "..", "..", "internal", "store", "internal", "runtimepersistence")
 	for _, path := range []string{
 		"flow_instance_descriptor_authority_test.go", "flow_activation_attempt_test.go",
-		"flow_activation_rebind_test.go", "flow_route_topology_ack_consumer_external_test.go",
+		// #2617 retired mutable route topology; keep the historical transition
+		// above, but inspect the live acknowledged-readiness consumer here.
+		"flow_activation_rebind_test.go", "dynamic_flow_topology_ready_ack_consumer_test.go",
 		"workflow_route_recovery_owner_test.go",
 	} {
 		data, err := os.ReadFile(filepath.Join(root, path))

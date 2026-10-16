@@ -183,6 +183,11 @@ func prepareFiles(root string, recipes []recipe) ([]pendingFile, []recipe, error
 }
 
 func nativeEntryCurrentRecipes(root, path string, source []byte, rows []recipe) ([]recipe, error) {
+	var err error
+	rows, err = repair2698CurrentRecipes(root, path, source, rows)
+	if err != nil {
+		return nil, err
+	}
 	prior, err := selectedreadrole.NativeEntry2542HistoricalSource(root, path, source)
 	if err != nil || bytes.Equal(prior, source) {
 		return rows, err
