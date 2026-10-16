@@ -5,15 +5,14 @@ import "fmt"
 // ScopedActivityMembers contains real authored declarations with deliberately
 // ambiguous global tool aliases. It grants no execution or provider authority.
 func ScopedActivityMembers() map[string][]byte {
-	members := map[string][]byte{
-		"events.yaml": []byte("send.requested:\n"),
-	}
+	members := map[string][]byte{}
 	for _, flow := range []string{".", "child", "sibling", "inherited"} {
 		prefix := ""
 		if flow != "." {
 			prefix = flow + "/"
 		}
 		members[prefix+"schema.yaml"] = []byte("stages: []\n")
+		members[prefix+"events.yaml"] = []byte("send.requested:\n")
 		members[prefix+"nodes.yaml"] = []byte(`sender:
   execution_type: system_node
   subscribes_to: [send.requested]
