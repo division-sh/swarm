@@ -1464,23 +1464,12 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 	if registry == nil {
 		return SatisfactionPlan{}, fmt.Errorf("channel interface registry is required")
 	}
-	interfaceRef, err := admitChannelPlanIdentity("channel interface reference", channel.Envelope.Implements[0])
+	if len(channel.Envelope.Implements) != 1 {
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q requires exactly one interface reference", channel.Envelope.ID)
+	}
+	compilation, err := prepareChannelCompilation(registry, identityFromEnvelope(channel.Envelope, channel.Source), channel.Manifest, channel.Envelope.Implements[0])
 	if err != nil {
 		return SatisfactionPlan{}, err
-	}
-	definition, ok := registry.Lookup(interfaceRef.String())
-	if !ok {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q implements unknown interface %q", channel.Envelope.ID, interfaceRef.String())
-	}
-	if _, err := CompileChannelCapabilities(channel.Manifest.Capabilities.Vector()); err != nil {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q capabilities: %w", channel.Envelope.ID, err)
-	}
-	if _, err := channel.Manifest.Transport.ActivationPosture(); err != nil {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q transport: %w", channel.Envelope.ID, err)
-	}
-	definition, err = selectChannelCapabilityDefinition(definition, channel.Manifest.Capabilities, channel.Manifest.NativeInbox != nil)
-	if err != nil {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q capability contract: %w", channel.Envelope.ID, err)
 	}
 	trigger, err := resolveTriggerDependency(channel, triggers)
 	if err != nil {
@@ -1490,6 +1479,40 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 	if err != nil {
 		return SatisfactionPlan{}, err
 	}
+	return compileChannelSatisfaction(compilation, trigger, connector)
+}
+
+type channelCompilation struct {
+	Identity   PackIdentity
+	Manifest   ChannelManifest
+	reference  channelPlanIdentity
+	definition runtimecontracts.PackInterfaceDefinition
+}
+
+func prepareChannelCompilation(registry *InterfaceRegistry, identity PackIdentity, manifest ChannelManifest, reference string) (channelCompilation, error) {
+	interfaceRef, err := admitChannelPlanIdentity("channel interface reference", reference)
+	if err != nil {
+		return channelCompilation{}, err
+	}
+	definition, ok := registry.Lookup(interfaceRef.String())
+	if !ok {
+		return channelCompilation{}, fmt.Errorf("channel pack %q implements unknown interface %q", identity.ID(), interfaceRef.String())
+	}
+	if _, err := CompileChannelCapabilities(manifest.Capabilities.Vector()); err != nil {
+		return channelCompilation{}, fmt.Errorf("channel pack %q capabilities: %w", identity.ID(), err)
+	}
+	if _, err := manifest.Transport.ActivationPosture(); err != nil {
+		return channelCompilation{}, fmt.Errorf("channel pack %q transport: %w", identity.ID(), err)
+	}
+	definition, err = selectChannelCapabilityDefinition(definition, manifest.Capabilities, manifest.NativeInbox != nil)
+	if err != nil {
+		return channelCompilation{}, fmt.Errorf("channel pack %q capability contract: %w", identity.ID(), err)
+	}
+	return channelCompilation{Identity: identity, Manifest: manifest, reference: interfaceRef, definition: definition}, nil
+}
+
+func compileChannelSatisfaction(channel channelCompilation, trigger TriggerPackDescriptor, connector ConnectorPackDescriptor) (SatisfactionPlan, error) {
+	definition, interfaceRef := channel.definition, channel.reference
 	if err := validateAcceptedTriggerDescriptor(trigger); err != nil {
 		return SatisfactionPlan{}, err
 	}
@@ -1504,7 +1527,7 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 		return SatisfactionPlan{}, err
 	}
 	if provider.String() != trigger.Provider || provider.String() != connector.Provider {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q provider %q does not match trigger %q and connector %q providers", channel.Envelope.ID, provider.String(), trigger.Provider, connector.Provider)
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q provider %q does not match trigger %q and connector %q providers", channel.Identity.ID(), provider.String(), trigger.Provider, connector.Provider)
 	}
 	if err := exactKeySet("channel opaque_types", channel.Manifest.OpaqueTypes, interfaceOpaqueSlots(definition)); err != nil {
 		return SatisfactionPlan{}, err
@@ -1527,7 +1550,7 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 		capabilities: channel.Manifest.Capabilities,
 		transport:    channel.Manifest.Transport,
 		interfaceRef: interfaceRef,
-		channel:      identityFromEnvelope(channel.Envelope, channel.Source), trigger: trigger.Identity, connector: connector.Identity,
+		channel:      channel.Identity, trigger: trigger.Identity, connector: connector.Identity,
 		provider: provider, triggerGeneration: trigger.Generation, opaqueTypes: cloneSchemaMap(channel.Manifest.OpaqueTypes),
 		schemas:    cloneSchemaMap(definition.Schemas),
 		operations: map[string]compiledChannelOperation{}, events: map[string]compiledChannelEvent{}, constraints: map[string]runtimecontracts.ToolInputSchema{},
@@ -1609,29 +1632,29 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 	if channel.Manifest.Registration != nil {
 		plan.registration, err = compileChannelRegistration(*channel.Manifest.Registration, connector, provider)
 		if err != nil {
-			return SatisfactionPlan{}, fmt.Errorf("channel pack %q registration: %w", channel.Envelope.ID, err)
+			return SatisfactionPlan{}, fmt.Errorf("channel pack %q registration: %w", channel.Identity.ID(), err)
 		}
 	}
 	if channel.Manifest.Onboarding != nil {
 		compiled, compileErr := CompileChannelOnboardingProfile(provider.String(), channel.Manifest.Transport, *channel.Manifest.Onboarding, sortedKeys(plan.operations))
 		if compileErr != nil {
-			return SatisfactionPlan{}, fmt.Errorf("channel pack %q onboarding: %w", channel.Envelope.ID, compileErr)
+			return SatisfactionPlan{}, fmt.Errorf("channel pack %q onboarding: %w", channel.Identity.ID(), compileErr)
 		}
 		if compiled.ActivationPosture() == ChannelActivationWebhookRegistration && plan.registration == nil {
-			return SatisfactionPlan{}, fmt.Errorf("channel pack %q webhook onboarding requires registration", channel.Envelope.ID)
+			return SatisfactionPlan{}, fmt.Errorf("channel pack %q webhook onboarding requires registration", channel.Identity.ID())
 		}
 		compiled.learnedDestination, err = compileLearnedDestination(channel.Manifest.Onboarding.LearnedDestination, plan.opaqueTypes)
 		if err != nil {
-			return SatisfactionPlan{}, fmt.Errorf("channel pack %q onboarding learned_destination: %w", channel.Envelope.ID, err)
+			return SatisfactionPlan{}, fmt.Errorf("channel pack %q onboarding learned_destination: %w", channel.Identity.ID(), err)
 		}
 		plan.onboarding = &compiled
 	}
 	if _, err := plan.PresentationBounds(); err != nil {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q presentation bounds: %w", channel.Envelope.ID, err)
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q presentation bounds: %w", channel.Identity.ID(), err)
 	}
 	plan.nativeInbox, err = compileNativeInboxProfile(channel.Manifest.NativeInbox, plan)
 	if err != nil {
-		return SatisfactionPlan{}, fmt.Errorf("channel pack %q native inbox: %w", channel.Envelope.ID, err)
+		return SatisfactionPlan{}, fmt.Errorf("channel pack %q native inbox: %w", channel.Identity.ID(), err)
 	}
 	plan.generation, err = compileSatisfactionPlanGeneration(plan)
 	if err != nil {

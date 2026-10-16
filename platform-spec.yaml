@@ -11649,6 +11649,8 @@ tool_model:
       durable_execution: internal/runtime/pipeline activity attempt owner
     directory_body_admission:
       owner: internal/packs.AdmitChannelBody
+      structural_owner: internal/packs.CompileProviderChannel
+      identity_owner: internal/packs.NewProviderBodyIdentity
       rule: >
         A channel.yaml BODY consumes its captured provider directory key and original lexical source; it does not
         author provider, requires.packs or implements. Its operation and registration tool references use short local
@@ -11661,6 +11663,15 @@ tool_model:
         health remain their existing owners' policy; namespace projection does not rewrite them. Provider-private
         session material does not become a credential. Source bytes and body hashes remain unchanged, and a BODY
         alone supplies no installed transport, connection, claim, enabled route, delivery or effect authority.
+      structural_contract: >
+        Structural compilation selects exactly swarm.hitl-channel/v2 from the platform interface registry; it never
+        guesses another compatible interface. The selected provider directory supplies its channel, trigger and
+        connector role identities directly, without authored implements or requires.packs. Each role retains the exact
+        captured directory key, metadata version, role, body hash and source label, not a synthesized dotted role ID or
+        acquisition provenance. Crossed provider, source, version, role or body identity refuses before structural plan
+        publication. Both directory and ordinary compiler entrances use the same schema, capability, directional mapping,
+        credential requirement, native-profile and generation owners. A structural plan does not install a session
+        provider or supply connection/claim/effect authority; executable source admission remains separately mandatory.
     capability_model:
       exact_fields: [card_render, reply_to_reference, actions_as_buttons, actions_as_text, edit, acknowledgment, inbox_listing]
       admission: >
@@ -11741,7 +11752,7 @@ tool_model:
         provider-native menus or installed launcher settings. Telegram native qualification remains a separate strict
         compiled extension, not a prerequisite for neutral Inbox listing or text/reply authority.
     contract: >
-      A channel pack is a universal-envelope satisfier of one immutable provider-neutral interface. The interface owns
+      A channel BODY is a directory-owned satisfier of one immutable provider-neutral interface. The interface owns
       presentation, ordered actions, operation/event names, effects, and required semantic fields. It does not own provider
       request paths, identifier topology, transport limits, credentials, ingress targets, signing, callback registration,
       operator binding, or provider-specific branches. One accepted trigger generation, one accepted connector generation,
@@ -12816,6 +12827,13 @@ tool_model:
         original source. Admission does not rewrite captured bytes or body hashes, signature recipes, payload values,
         field paths or wire event-type conversion. Final compiled validation, typed schemas and output consumers share
         the existing trigger owner; BODY presence alone grants no ingress, catalog generation or publication authority.
+      captured_catalog_admission: >
+        The trigger catalog consumes frozen typed BODY admission through
+        internal/providertriggers.NewCatalogSnapshotFromAdmittedBodies, preserving the private captured role evidence.
+        Byte-only manifests and catalog readbacks cannot substitute for that evidence. Identity comes from the exact
+        BODY directory, version, role, hash and source label without inventing acquisition provenance. Catalog indexing,
+        duplicate refusal, generation and schema descriptors retain their existing owners. A catalog generation is not
+        an enabled ingress binding, authenticated request or publication permission.
       provider: >
         Compiled-only exact provider-directory key matched from `/webhooks/{alias}/{provider}` after alias resolves
         one loaded standing ingress target. An authored body `provider:` is refused; the directory supplies the key.

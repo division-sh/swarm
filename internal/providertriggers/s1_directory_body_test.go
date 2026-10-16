@@ -233,10 +233,7 @@ func TestS1TriggerDirectoryBodyCopyRenameRetainsExactBytesAndPolicy(t *testing.T
 			t.Fatal("namespace projection changed exact BODY hash")
 		}
 		firstHash = body.Hash()
-		catalog, err := NewCatalogSnapshot(CatalogEntry{
-			Manifest: manifest, Identity: PackIdentity{ID: provider.Key(), Version: provider.Metadata().Version, ManifestHash: body.Hash(), Provenance: "project"},
-			Source: "directory-body-test", SourcePath: body.Label(),
-		})
+		catalog, err := NewCatalogSnapshotFromAdmittedBodies(manifest)
 		if err != nil {
 			t.Fatal(err)
 		}

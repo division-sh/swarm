@@ -22,7 +22,16 @@ func CompileProviderChannel(registry *InterfaceRegistry, provider packartifact.A
 	if !exists {
 		return SatisfactionPlan{}, fmt.Errorf("provider directory %q has no channel.yaml BODY", provider.Directory())
 	}
-	if _, err := AdmitChannelBody(body); err != nil {
+	manifest, err := AdmitChannelBody(body)
+	if err != nil {
+		return SatisfactionPlan{}, err
+	}
+	identity, err := NewProviderBodyIdentity(body)
+	if err != nil {
+		return SatisfactionPlan{}, err
+	}
+	compilation, err := prepareChannelCompilation(registry, identity, manifest, providerChannelInterface)
+	if err != nil {
 		return SatisfactionPlan{}, err
 	}
 	if err := validateProviderRoleIdentity(provider, packmodel.BodyTrigger, trigger.Identity, trigger.Provider); err != nil {
@@ -31,7 +40,7 @@ func CompileProviderChannel(registry *InterfaceRegistry, provider packartifact.A
 	if err := validateProviderRoleIdentity(provider, packmodel.BodyConnector, connector.Identity, connector.Provider); err != nil {
 		return SatisfactionPlan{}, err
 	}
-	return SatisfactionPlan{}, fmt.Errorf("captured provider channel compilation is not yet installed")
+	return compileChannelSatisfaction(compilation, trigger, connector)
 }
 
 func validateProviderRoleIdentity(provider packartifact.AdmittedProvider, role packmodel.BodyRole, actual PackIdentity, key string) error {
