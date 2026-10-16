@@ -25,6 +25,7 @@ var s1TriggerSelectorFrontDoors = []struct{ file, function, raw string }{
 	{"internal/runtime/pipeline/engine_adapter.go", "validatePipelineEmitPayload", "flowID"},
 	{"internal/runtime/pipeline/engine_adapter.go", "pipelineEmitPayloadProperties", "flowID"},
 	{"internal/runtime/manager/flow_activation.go", "validateAutoEmitPayload", "flowID"},
+	{"internal/runtime/manager/agent_subscription_admission.go", "admitAgentConfigSubscriptions", "cfg.FlowID"},
 }
 
 func TestS1TriggerSelectorFrontDoorsPreserveRawCoordinates(t *testing.T) {
