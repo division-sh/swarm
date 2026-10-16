@@ -5,11 +5,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/platform"
+	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 )
 
 type canceledTurnTestStore interface {
@@ -28,6 +33,14 @@ func TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores(t *testing.T)
 		authority := fixture.authority
 		authority.BudgetScopes = nil
 		ctx := runtimeeffects.WithTurnTimeout(fixture.contextFor(authority), &timeridentity.TurnTimeout{After: time.Minute, Emit: "test.node_emitted"})
+		ctx = correlation.WithRunID(ctx, fixture.origin.RunID())
+		ctx = correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.Fact())
+		ctx = runtimeeffects.WithLifecycleToken(ctx, authority.Normal)
+		bundle, err := contracts.LoadWorkflowContractBundleFromArtifact("", sourceartifactfixture.Artifact(), platform.PlatformSpecDisplayPath, contracts.WorkflowContractLoadOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		constructStaticPublicationSourceFixture(t, ctx, store.(agentFixtureFlowStore), bundle, "global")
 		ctx = withManagedCompletionTestSurface(t, ctx, authority, "claude_cli")
 		first := beginLogicalClockCompletion(t, ctx, "canceled-physical-tail")
 		launch, err := store.MarkExternalAttemptLaunched(ctx, first.Attempt(), time.Now().UTC())
@@ -105,7 +118,6 @@ func TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores(t *testing.T)
 		if err != nil || len(page.Snapshots) != 1 || page.Snapshots[0].Status != deliverylifecycle.StatusCanceled {
 			t.Fatalf("canceled diagnostic page: %+v err=%v", page, err)
 		}
-		proveCanceledDeliveryFanOutFold(t, ctx, selected, fixture, settled.Delivery)
 		requireExternalAttemptState(t, selected.db, !selected.postgres, first.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
 		requireCompletionSettlementRows(t, fixture, first.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateOutcomeUncertain, 1, 0)
 		var response string
@@ -115,6 +127,29 @@ func TestCanceledDeliveryTurnRequiresSettledPhysicalTailBothStores(t *testing.T)
 		if response != responseBefore {
 			t.Fatalf("canceled settlement changed observed response: %s", response)
 		}
+		for read := 0; read < 2; read++ {
+			report, err := store.(operatorread.RunReader).LoadRunDebugReport(ctx, fixture.origin.RunID(), operatorread.RunDebugQueryOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, instance := range report.OperationalFacts.Instances {
+				if instance.FlowInstance != "global" {
+					continue
+				}
+				found = true
+				turn := instance.LastTurn
+				if turn == nil || turn.DeliveryID != fixture.origin.DeliveryID() || turn.LogicalTurnID == "" || turn.EvidenceReason != "turn_timeout" ||
+					turn.Emission != operatorread.RunEmissionUnknown || len(turn.EmittedEvents) != 0 || len(turn.ProviderTurns) != 1 || turn.ProviderTurns[0] != settlement.AgentTurn.TurnID {
+					t.Fatalf("diagnostics changed authored timeout or invented silence: %+v", turn)
+				}
+			}
+			if !found {
+				t.Fatal("timeout diagnostics lost the constructed instance")
+			}
+		}
+		requireProviderAttemptCount(t, fixture, 2)
+		proveCanceledDeliveryFanOutFold(t, ctx, selected, fixture, settled.Delivery)
 	})
 }
 

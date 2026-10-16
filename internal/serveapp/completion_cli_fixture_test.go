@@ -55,6 +55,7 @@ if (!startup) {
   const configuration = JSON.parse(flags.get('--mcp-config'));
   const tools = flags.get('--tools').split(',').filter(Boolean);
   const servers = [];
+  let emission;
   if (!configuration.mcpServers || Object.keys(configuration.mcpServers).length === 0) throw Error('missing MCP server');
   for (const [name, server] of Object.entries(configuration.mcpServers)) {
     const headers = {'Content-Type': 'application/json', 'Accept': 'application/json', ...server.headers};
@@ -71,11 +72,19 @@ if (!startup) {
     await rpc({jsonrpc: '2.0', method: 'notifications/initialized', params: {}});
     const listed = await rpc({jsonrpc: '2.0', id: 2, method: 'tools/list', params: {}});
     if (!Array.isArray(listed.tools)) throw Error('invalid discovered tools');
+    if (!startup && listed.tools.some(tool => tool.name === 'emit_external_observed')) {
+      if (emission) throw Error('ambiguous emission tool');
+      emission = () => rpc({jsonrpc: '2.0', id: 3, method: 'tools/call', params: {name: 'emit_external_observed', arguments: {}, _meta: {'claudecode/toolUseId': 'terminal-emission'}}});
+    }
     tools.push(...listed.tools.map(tool => 'mcp__' + name + '__' + tool.name));
     servers.push({name, status: 'connected'});
   }
   console.log(JSON.stringify({type: 'system', subtype: 'init', tools, mcp_servers: servers, model: 'initialization-not-execution', session_id: session}));
   if (startup) return;
+  if (emission) {
+    const result = await emission();
+    if (result.isError) throw Error('terminal emission refused: ' + JSON.stringify(result));
+  }
   const directory = process.env.CLAUDE_CONFIG_DIR + '/projects/' + process.cwd().replace(/[^a-zA-Z0-9]/g, '-');
   fs.mkdirSync(directory, {recursive: true});
   fs.writeFileSync(directory + '/' + session + '.jsonl', JSON.stringify({type: 'assistant', sessionId: session}) + '\n');
