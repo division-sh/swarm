@@ -206,7 +206,7 @@ func (r *OutputConsumerResolver) classify(flowID, eventType string, routingSourc
 }
 
 func PinDeclaredOutput(source semanticview.Source, flowID, eventType string) bool {
-	if source == nil {
+	if _, found := semanticview.FlowScopeByID(source, flowID); !found {
 		return false
 	}
 	proof := semanticview.ResolveFlowEventProof(source, flowID, eventType)

@@ -202,7 +202,7 @@ func (c AuthoredEventEndpointCensus) ResolveTypedPubSubRelations() TypedPubSubRe
 // typed pub/sub. Canonical name equality is delivery authority only within one
 // authored flow. Cross-flow delivery is owned exclusively by compiled connect.
 func (c AuthoredEventEndpointCensus) ResolveTypedPubSubConsumerMatches(producer AuthoredEventEndpoint) []TypedPubSubConsumerMatch {
-	if c.source == nil {
+	if _, found := FlowScopeByID(c.source, producer.FlowID); !found {
 		return nil
 	}
 	proof := producer.Event
@@ -223,7 +223,7 @@ func (c AuthoredEventEndpointCensus) ResolveTypedPubSubConsumerMatches(producer 
 		if admission, classified := endpointSubscriptionAdmission(c.source, consumer); classified && !admission.Admitted() {
 			continue
 		}
-		if strings.TrimSpace(producer.FlowID) != strings.TrimSpace(consumer.FlowID) {
+		if producer.FlowID != consumer.FlowID {
 			continue
 		}
 		if !endpointMatchesProof(c.source, consumer, proof) {
@@ -284,7 +284,9 @@ func invalidAuthoredSubscriptionID(subscription InvalidAuthoredSubscription) str
 }
 
 func (c AuthoredEventEndpointCensus) matchingEndpoints(endpoints []AuthoredEventEndpoint, flowID, eventType string) []AuthoredEventEndpoint {
-	flowID = strings.TrimSpace(flowID)
+	if _, found := FlowScopeByID(c.source, flowID); !found {
+		return nil
+	}
 	proof := ResolveFlowEventProof(c.source, flowID, eventType)
 	if c.source == nil || proof.EventKey() == "" {
 		return nil
@@ -384,11 +386,13 @@ func (e *EndpointAssociationError) Error() string {
 }
 
 func (c AuthoredEventEndpointCensus) ResolveDeclaredInputEndpoint(flowID, identity string) EndpointAssociationResult {
-	flowID = strings.TrimSpace(flowID)
 	identity = eventidentity.Normalize(identity)
+	if _, found := FlowScopeByID(c.source, flowID); !found {
+		return endpointAssociationResult(flowID, identity, "", nil)
+	}
 	candidates := make([]AuthoredEventEndpoint, 0)
 	for _, endpoint := range c.inputPins {
-		if strings.TrimSpace(endpoint.FlowID) != flowID {
+		if endpoint.FlowID != flowID {
 			continue
 		}
 		if declaredInputIdentityMatches(c.source, endpoint, identity) {

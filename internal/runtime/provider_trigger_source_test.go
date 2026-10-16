@@ -220,11 +220,14 @@ func TestProviderCompiledSchemaReadbackDoesNotGrantReceiverOwnership(t *testing.
 			t.Fatalf("undeclaring flow %q borrowed imported receiver authority: %#v", flow, admission)
 		}
 	}
-	for _, root := range []string{"", "."} {
-		readback := semanticview.ResolveEventSchema(wrapped, root, eventName)
-		if !readback.HasCompiled || !readback.HasStructural || readback.Classification != runtimecontracts.CompiledEventSchemaImported {
-			t.Fatalf("provider catalog readback %q lost compiled evidence: %#v", root, readback)
-		}
+	// #2667 review6224839305: target-free inspection is not explicit-root ownership.
+	readbackSchema := semanticview.ResolveEventSchema(wrapped, "", eventName)
+	if !readbackSchema.HasCompiled || !readbackSchema.HasStructural || readbackSchema.Classification != runtimecontracts.CompiledEventSchemaImported {
+		t.Fatalf("target-free provider catalog readback lost compiled evidence: %#v", readbackSchema)
+	}
+	rootSchema := semanticview.ResolveEventSchema(wrapped, ".", eventName)
+	if rootSchema.HasSchema || rootSchema.HasCompiled || rootSchema.HasStructural {
+		t.Fatalf("explicit root borrowed descendant-only imported schema: %#v", rootSchema)
 	}
 	// Neither a mutable diagnostic catalog nor returned schema maps may change
 	// the retained acceptance binding or turn an import into authored data.

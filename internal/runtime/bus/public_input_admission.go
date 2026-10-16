@@ -105,7 +105,6 @@ type publicInputAdmission struct {
 }
 
 func NewOrdinaryFlowAPIEventPublicationEndpoint(source semanticview.Source, flowID, eventType string) (APIEventPublicationEndpoint, error) {
-	flowID = strings.TrimSpace(flowID)
 	eventType = strings.Trim(strings.TrimSpace(eventType), "/")
 	if source == nil || flowID == "" || eventType == "" {
 		return APIEventPublicationEndpoint{}, fmt.Errorf("ordinary flow event publication endpoint is incomplete")

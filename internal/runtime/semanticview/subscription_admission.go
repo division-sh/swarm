@@ -219,7 +219,6 @@ func (a AuthoredSubscriptionAdmission) MatchesReceiverInput(eventType, flowPath 
 
 func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest) AuthoredSubscriptionAdmission {
 	req.ConsumerID = strings.TrimSpace(req.ConsumerID)
-	req.FlowID = strings.TrimSpace(req.FlowID)
 	req.FlowPath = eventidentity.Normalize(req.FlowPath)
 	req.Authored = eventidentity.Normalize(req.Authored)
 	result := AuthoredSubscriptionAdmission{
@@ -229,6 +228,12 @@ func ClassifyAuthoredSubscription(source Source, req AuthoredSubscriptionRequest
 	}
 	if req.Authored == "" {
 		return result
+	}
+	if source != nil {
+		if _, found := FlowScopeByID(source, req.FlowID); !found {
+			return failedAuthoredSubscription(result, AuthoredSubscriptionFailureSemanticScopeInvalid,
+				fmt.Sprintf("%s %q flow selector %q must identify an exact admitted flow; use . for the selected root without whitespace", req.ConsumerKind, req.ConsumerID, req.FlowID))
+		}
 	}
 	fillAuthoredSubscriptionScope(source, &req)
 
@@ -371,7 +376,7 @@ func ClassifyTimerSubscription(source Source, timerID, flowID, authored string) 
 	return ClassifyAuthoredSubscription(source, AuthoredSubscriptionRequest{
 		ConsumerKind: AuthoredSubscriptionConsumerTimer,
 		ConsumerID:   strings.TrimSpace(timerID),
-		FlowID:       strings.TrimSpace(flowID),
+		FlowID:       flowID,
 		FlowPath:     sourceFlowPath(source, flowID),
 		Authored:     authored,
 	})

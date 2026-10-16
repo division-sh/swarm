@@ -738,7 +738,6 @@ func buildDynamicFlowRuntimeCreationEventPlan(
 }
 
 func validateAutoEmitPayload(source semanticview.Source, flowID, eventType string, payload map[string]any) error {
-	flowID = strings.TrimSpace(flowID)
 	eventType = strings.TrimSpace(eventType)
 	if source == nil || flowID == "" || eventType == "" {
 		return nil

@@ -1101,7 +1101,7 @@ func (s pipelineEnginePayloadShaper) ShapeEmitPayload(ctx context.Context, req r
 }
 
 func validatePipelineEmitPayload(source semanticview.Source, flowID, eventType string, payload, envelope map[string]any, surface runtimeengine.EmitSurface) error {
-	proof := semanticview.ResolveFlowEventProof(source, strings.TrimSpace(flowID), strings.TrimSpace(eventType))
+	proof := semanticview.ResolveFlowEventProof(source, flowID, strings.TrimSpace(eventType))
 	if !proof.HasSchema {
 		return nil
 	}
@@ -1152,7 +1152,7 @@ func pipelineEmitPayloadProperties(source semanticview.Source, flowID, eventType
 	if source == nil {
 		return nil
 	}
-	proof := semanticview.ResolveFlowEventProof(source, strings.TrimSpace(flowID), strings.TrimSpace(eventType))
+	proof := semanticview.ResolveFlowEventProof(source, flowID, strings.TrimSpace(eventType))
 	if !proof.HasSchema {
 		return nil
 	}
