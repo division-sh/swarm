@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agenttopology"
+	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -123,12 +124,16 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 			if err := original.Release(ctx); err != nil {
 				t.Fatal(err)
 			}
-			successor, err := store.AcquireProcessCapability(ctx, startupownership.AcquireRequest{OwnerID: "activity-recovery-successor", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()})
+			successorRequest := startupownership.AcquireRequest{OwnerID: "activity-recovery-successor", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
+			successor, err := store.AcquireProcessCapability(ctx, successorRequest)
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = successor.Release(context.Background()) })
-			summary, err := startupownership.ReconcileDisplacedHTTPActivities(ctx, successor)
+			// Serve has process/runtime scope at this pre-dispatch boundary. The
+			// native owner, not a caller-selected primary bundle, knows each row.
+			recoveryCtx := authoractivity.WithScope(ctx, authoractivity.RuntimeScope(successorRequest.RuntimeInstanceID))
+			summary, err := startupownership.ReconcileDisplacedHTTPActivities(recoveryCtx, successor)
 			if err != nil || len(summary.Results) != 1 {
 				t.Fatalf("displaced native recovery: results=%d err=%v", len(summary.Results), err)
 			}
@@ -141,7 +146,7 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			for range 2 {
-				replayed, err := startupownership.ReconcileDisplacedHTTPActivities(ctx, successor)
+				replayed, err := startupownership.ReconcileDisplacedHTTPActivities(recoveryCtx, successor)
 				if err != nil || len(replayed.Results) != 1 || !reflect.DeepEqual(replayed.Results[0], terminal) || calls.Load() != 1 {
 					t.Fatalf("recovery replay changed the original result: %v", err)
 				}
@@ -162,7 +167,7 @@ func TestDisplacedHTTPActivityOriginalSessionRecoveryBothStores(t *testing.T) {
 				storetest.ObserveEventCardinality(t, ctx, selected.events, terminal.ResultEventID) != 1 || calls.Load() != 1 {
 				t.Fatal("result replay changed durable publication or repeated the HTTP call")
 			}
-			if settled, err := startupownership.ReconcileDisplacedHTTPActivities(ctx, successor); err != nil || len(settled.Results) != 0 {
+			if settled, err := startupownership.ReconcileDisplacedHTTPActivities(recoveryCtx, successor); err != nil || len(settled.Results) != 0 {
 				t.Fatalf("published original result retained a recovery obligation: %v", err)
 			}
 			if _, changed, err := journal.CompleteActivityAttempt(ctx, terminal.ActivityAttemptRecord); err == nil || changed {
