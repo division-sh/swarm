@@ -687,13 +687,14 @@ func TestSelectedForkDiscardSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
-			fixture := newSelectedCompletionFixture(t, store, db, sqlite)
-			ctx := testAuthorActivityContext()
+			fixture := newSelectedProviderCompletionFixture(t, store, db, sqlite)
+			ctx := testAuthorActivityContextForBundle(fixture.request.DeclarationPlan.BundleHash)
 			issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 			if err != nil {
 				t.Fatalf("issue retained selected execution: %v", err)
 			}
-			eventsByState, deliveries := seedSelectedForkDiscardDeliveries(t, ctx, store, fixture)
+			proveRetainedExecutionRefusesPhysicalCleanupHistory(t, ctx, store, fixture.forkRun, fixture.sourceRun, fixture.eventID)
+			eventsByState, deliveries := seedSelectedForkDiscardDeliveries(t, ctx, store, fixture, issued)
 
 			cancelled, cancel := context.WithCancel(ctx)
 			cancel()
@@ -734,13 +735,14 @@ func TestSelectedForkDiscardRollbackSelectedStoreParity(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
-			fixture := newSelectedCompletionFixture(t, store, db, sqlite)
-			ctx := testAuthorActivityContext()
+			fixture := newSelectedProviderCompletionFixture(t, store, db, sqlite)
+			ctx := testAuthorActivityContextForBundle(fixture.request.DeclarationPlan.BundleHash)
 			issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
 			if err != nil {
 				t.Fatalf("issue rollback selected execution: %v", err)
 			}
-			seedSelectedForkDiscardDeliveries(t, ctx, store, fixture)
+			proveRetainedExecutionRefusesPhysicalCleanupHistory(t, ctx, store, fixture.forkRun, fixture.sourceRun, fixture.eventID)
+			seedSelectedForkDiscardDeliveries(t, ctx, store, fixture, issued)
 			installSelectedForkDiscardFailure(t, ctx, db, sqlite)
 			before := loadSelectedForkDiscardProof(t, ctx, db, sqlite, fixture.forkRun, issued.ExecutionID)
 			err = store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun)
@@ -806,46 +808,43 @@ func selectedForkDiscardTestStore(t *testing.T, backend string) (selectedForkDis
 	return admitTestPostgresStore(t, db), db, false
 }
 
-func seedSelectedForkDiscardDeliveries(t *testing.T, ctx context.Context, store selectedForkDiscardStore, fixture selectedCompletionFixture) ([]events.Event, []runtimedelivery.ClaimedObligation) {
+func seedSelectedForkDiscardDeliveries(t *testing.T, ctx context.Context, store selectedForkDiscardStore, fixture selectedCompletionFixture, issued runfork.SelectedContractRuntimeExecution) ([]events.Event, []runtimedelivery.ClaimedObligation) {
 	t.Helper()
-	finishHistory := beginForkDeliveryHistoryFixture(t, ctx, store, fixture.forkRun)
-	route := testAgentDeliveryRoute(t, fixture.forkRun, "selected-agent", "fixture/selected-agent")
+	authority, err := store.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, "retained-discard-history", time.Minute)
+	if err != nil {
+		t.Fatalf("claim native retained selected execution: %v", err)
+	}
+	admitSelectedProviderFixture(t, ctx, fixture, issued, authority)
+	deliveryAuthority, err := runtimedelivery.NewSelectedExecutionAuthority(mustStoreTestSourceArtifactFact(fixture.request.DeclarationPlan.BundleHash), authority.ID, fixture.forkRun, authority.SelectedFork.Generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := fixture.providerActor.Config.Identity
+	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 	eventsByState := []events.Event{
 		eventtest.PersistedProjection(uuid.NewString(), "selected.claimed", "selected-test", "", json.RawMessage(`{}`), 0, fixture.forkRun, "", events.EventEnvelope{}, time.Now().UTC()),
 		eventtest.PersistedProjection(uuid.NewString(), "selected.settled", "selected-test", "", json.RawMessage(`{}`), 0, fixture.forkRun, "", events.EventEnvelope{}, time.Now().UTC()),
 	}
 	deliveries := make([]runtimedelivery.ClaimedObligation, 0, len(eventsByState))
 	for _, event := range eventsByState {
-		if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, []events.DeliveryRoute{route}); err != nil {
-			t.Fatalf("commit selected-fork delivery %s: %v", event.ID(), err)
-		}
-		claimed, err := claimDeliveryFixture(ctx, store, event, route)
-		if err != nil {
-			t.Fatalf("claim selected-fork delivery %s: %v", event.ID(), err)
+		commitSelectedReceiverClaimEvent(t, ctx, store.(agentFixtureFlowStore), event, route, deliveryAuthority)
+		result, err := store.ClaimDelivery(ctx, deliveryAuthority, event, route)
+		claimed, acquired := result.Acquired()
+		if err != nil || !acquired {
+			t.Fatalf("claim selected-fork delivery %s: %+v err=%v", event.ID(), result, err)
 		}
 		deliveries = append(deliveries, claimed)
 	}
 	if _, err := store.SettleSuccess(ctx, deliveries[1].Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle selected-fork delivery: %v", err)
 	}
-	finishHistory()
+	if err := store.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
+		t.Fatalf("quiesce retained selected history: %v", err)
+	}
+	if err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
+		t.Fatalf("close retained selected history: %v", err)
+	}
 	return eventsByState, deliveries
-}
-
-// Validator/discard tests construct prior delivery history, not permission to
-// execute a paused selected fork. Admit that history through the lifecycle
-// owner, then restore the materialized pause before exercising the subject.
-func beginForkDeliveryHistoryFixture(t testing.TB, ctx context.Context, store any, runID string) func() {
-	t.Helper()
-	if _, err := transitionRunForTest(ctx, store, runtimerunlifecycle.ActiveTransitionRequest{RunID: runID, State: runtimerunlifecycle.StateRunning}); err != nil {
-		t.Fatalf("admit fork delivery history fixture: %v", err)
-	}
-	return func() {
-		t.Helper()
-		if _, err := transitionRunForTest(ctx, store, runtimerunlifecycle.ActiveTransitionRequest{RunID: runID, State: runtimerunlifecycle.StatePaused}); err != nil {
-			t.Fatalf("restore materialized fork after history fixture: %v", err)
-		}
-	}
 }
 
 func loadSelectedForkDiscardProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, runID, executionID string) selectedForkDiscardProof {
@@ -1087,56 +1086,47 @@ func TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres
 }
 
 func TestSelectedForkDiscardDeletesClaimedAndSettledDeliveryHistoryPostgres(t *testing.T) {
-	_, db, _ := testutil.StartPostgres(t)
-	store := admitTestPostgresStore(t, db)
-	fixture := newSelectedCompletionFixture(t, store, db, false)
-	ctx := testAuthorActivityContext()
-	finishHistory := beginForkDeliveryHistoryFixture(t, ctx, store, fixture.forkRun)
-	route := testAgentDeliveryRoute(t, fixture.forkRun, "selected-agent", "fixture/selected-agent")
-	eventsByState := []events.Event{
-		eventtest.PersistedProjection(uuid.NewString(), "selected.claimed", "selected-test", "", json.RawMessage(`{}`), 0, fixture.forkRun, "", events.EventEnvelope{}, time.Now().UTC()),
-		eventtest.PersistedProjection(uuid.NewString(), "selected.settled", "selected-test", "", json.RawMessage(`{}`), 0, fixture.forkRun, "", events.EventEnvelope{}, time.Now().UTC()),
-	}
-	for _, evt := range eventsByState {
-		if err := commitSemanticEventFixtureWithRoutes(ctx, store, evt, []events.DeliveryRoute{route}); err != nil {
-			t.Fatalf("commit selected-fork delivery %s: %v", evt.ID(), err)
-		}
-	}
-	claimed, err := claimDeliveryFixture(ctx, store, eventsByState[0], route)
-	if err != nil {
-		t.Fatalf("claim selected-fork delivery: %v", err)
-	}
-	settled, err := claimDeliveryFixture(ctx, store, eventsByState[1], route)
-	if err != nil {
-		t.Fatalf("claim selected-fork settled delivery: %v", err)
-	}
-	if _, err := store.SettleSuccess(ctx, settled.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
-		t.Fatalf("settle selected-fork delivery: %v", err)
-	}
-	if claimed.Claim.DeliveryID() == "" {
-		t.Fatal("claimed selected-fork delivery has no durable identity")
-	}
-	finishHistory()
-	if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun); err != nil {
-		t.Fatalf("discard selected fork with delivery history: %v", err)
-	}
-	var agentRows int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents WHERE run_id=$1::uuid`, fixture.forkRun).Scan(&agentRows); err != nil || agentRows != 0 {
-		t.Fatalf("selected-fork agents after full discard = %d err=%v, want 0", agentRows, err)
-	}
-	for label, query := range map[string]string{
-		"deliveries":      `SELECT COUNT(*) FROM event_deliveries WHERE delivery_id IN ($1::uuid, $2::uuid)`,
-		"rule selections": `SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id IN ($1::uuid, $2::uuid)`,
-		"attempts":        `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN ($1::uuid, $2::uuid)`,
-		"outcomes":        `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id IN ($1::uuid, $2::uuid)`,
-	} {
-		var count int
-		if err := db.QueryRowContext(ctx, query, claimed.Snapshot.DeliveryID, settled.Snapshot.DeliveryID).Scan(&count); err != nil {
-			t.Fatalf("count selected-fork %s: %v", label, err)
-		}
-		if count != 0 {
-			t.Fatalf("selected-fork %s after discard = %d, want 0", label, count)
-		}
+	// Keep the original named PostgreSQL proof and add the same physical fixture
+	// and hostile/rollback controls on SQLite without inventing execution rights.
+	for _, backend := range []string{"postgres", "sqlite"} {
+		t.Run(backend, func(t *testing.T) {
+			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
+			fixture := newSelectedCompletionFixture(t, store, db, sqlite)
+			ctx := testAuthorActivityContext()
+			ids := installAndProveUnretainedCleanupHistory(t, ctx, store, fixture.forkRun, fixture.sourceRun, fixture.eventID)
+			sourceBefore, err := LoadCanonicalEventRecordForTest(ctx, store, fixture.eventID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun); err != nil {
+				t.Fatalf("discard selected fork with delivery history: %v", err)
+			}
+			var agentRows int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM agents WHERE run_id=$1`, fixture.forkRun).Scan(&agentRows); err != nil || agentRows != 0 {
+				t.Fatalf("selected-fork agents after full discard = %d err=%v, want 0", agentRows, err)
+			}
+			for label, query := range map[string]string{
+				"deliveries":      `SELECT COUNT(*) FROM event_deliveries WHERE delivery_id IN ($1::uuid, $2::uuid)`,
+				"rule selections": `SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id IN ($1::uuid, $2::uuid)`,
+				"attempts":        `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN ($1::uuid, $2::uuid)`,
+				"outcomes":        `SELECT COUNT(*) FROM (SELECT delivery_id, claim_version, outcome, reason_code, failure, side_effects, duration_ms, completed_at AS settled_at FROM event_delivery_attempts WHERE closure_kind='settled') WHERE delivery_id IN ($1::uuid, $2::uuid)`,
+			} {
+				if sqlite {
+					query = strings.ReplaceAll(query, "::uuid", "")
+				}
+				var count int
+				if err := db.QueryRowContext(ctx, query, ids[0], ids[1]).Scan(&count); err != nil {
+					t.Fatalf("count selected-fork %s: %v", label, err)
+				}
+				if count != 0 {
+					t.Fatalf("selected-fork %s after discard = %d, want 0", label, count)
+				}
+			}
+			sourceAfter, err := LoadCanonicalEventRecordForTest(ctx, store, fixture.eventID)
+			if err != nil || !reflect.DeepEqual(sourceBefore, sourceAfter) {
+				t.Fatalf("unretained cleanup changed its source survivor: err=%v", err)
+			}
+		})
 	}
 }
 
@@ -1481,8 +1471,8 @@ func newSelectedCompletionFixtureWithProcess(t *testing.T, store selectedComplet
 	} else {
 		requireRunningRunForTest(t, ctx, store, sourceRun, now)
 		requireRunFixtureForTest(t, ctx, store, semanticRunFixture{RunID: forkRun, Origin: forkOrigin, State: runtimerunlifecycle.StatePaused, StartedAt: now})
+		seedTestAgentRow(t, ctx, db, !sqlite, mustTestAgentIdentityForRun(forkRun, "selected-agent", "selected-test"), "active")
 	}
-	seedTestAgentRow(t, ctx, db, !sqlite, mustTestAgentIdentityForRun(forkRun, "selected-agent", "selected-test"), "active")
 	eventStore, ok := any(store).(semanticEventFixtureStore)
 	if !ok {
 		t.Fatal("selected completion fixture store has no event commit owner")
