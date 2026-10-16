@@ -14,7 +14,7 @@ func Test2293Q1AccumulateAdmitsRequiredScalarItemKeys(t *testing.T) {
 	for _, typeRef := range []string{"text", "uuid", "timestamp", "integer", "numeric", "boolean", "Rating"} {
 		t.Run(typeRef, func(t *testing.T) {
 			source := accumulateQ1KeySource(t, typeRef, true)
-			if err := ValidateSpecForHandler(source, identitytest.RootNode(t, "collector"), "review.received", &runtimecontracts.AccumulateSpec{Key: "reviewer_id"}); err != nil {
+			if err := ValidateSpecForHandler(source, identitytest.RootNode(t, "collector"), "review.received", &runtimecontracts.AccumulateSpec{Target: "reviews", Key: "reviewer_id"}); err != nil {
 				t.Fatalf("required %s item key refused: %v", typeRef, err)
 			}
 		})
@@ -38,7 +38,7 @@ func Test2293Q1AccumulateRefusesNonRequiredScalarItemKeys(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := accumulateQ1KeySource(t, tc.typeRef, tc.required)
-			err := ValidateSpecForHandler(source, identitytest.RootNode(t, "collector"), "review.received", &runtimecontracts.AccumulateSpec{Key: tc.key})
+			err := ValidateSpecForHandler(source, identitytest.RootNode(t, "collector"), "review.received", &runtimecontracts.AccumulateSpec{Target: "reviews", Key: tc.key})
 			if err == nil {
 				t.Fatal("accumulate accepted a key that is not a required scalar item field")
 			}
@@ -61,8 +61,16 @@ func accumulateQ1KeySource(t *testing.T, typeRef string, required bool) semantic
 		RootSchema: &runtimecontracts.FlowSchemaDocument{Name: "state-list-key"},
 		RootTypes: runtimecontracts.TypeCatalogDocument{
 			Enums: map[string]runtimecontracts.EnumTypeDecl{"Rating": {Values: []string{"low", "high"}, Default: "low"}},
-			Types: map[string]runtimecontracts.NamedTypeDecl{"Review": {Fields: map[string]runtimecontracts.TypeFieldSpec{"id": {Type: "text"}}}},
+			Types: map[string]runtimecontracts.NamedTypeDecl{
+				"Review": {Fields: map[string]runtimecontracts.TypeFieldSpec{"id": {Type: "text"}}},
+				"CollectedItem": {Fields: map[string]runtimecontracts.TypeFieldSpec{
+					"reviewer_id": {Type: typeRef, IsOptional: !required}, "message": {Type: "text"},
+				}},
+			},
 		},
+		RootEntities: runtimecontracts.EntityContractsDocument{"work": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+			"reviews": {Type: "[CollectedItem]", IsOptional: true},
+		}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"review.received": {Payload: payload}},
 	}
 	source := semanticviewtest.WrapRootAgents(bundle)

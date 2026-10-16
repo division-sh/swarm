@@ -558,6 +558,16 @@ type AccumulateSpec struct {
 	KeyPath     paths.Path `yaml:"-"`
 }
 
+func (s AccumulateSpec) TargetField() (string, error) {
+	if s.Target == "" {
+		return "", fmt.Errorf("accumulate requires target: <state field>")
+	}
+	if !bareAccumulateField(s.Target) {
+		return "", fmt.Errorf("accumulate.target %q names one bare state field; write target: %s", s.Target, strings.TrimPrefix(s.Target, "state."))
+	}
+	return s.Target, nil
+}
+
 // ItemKeyPath binds the bare authored item field to the payload value owner.
 func (s AccumulateSpec) ItemKeyPath() (paths.Path, error) {
 	if s.Key == "" {

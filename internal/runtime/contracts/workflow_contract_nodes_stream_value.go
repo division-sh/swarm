@@ -35,8 +35,8 @@ func projectNodeAccumulateValue(value yamlsource.Value) (*AccumulateSpec, error)
 	}, false, "target", "key"); err != nil {
 		return nil, err
 	}
-	if !bareAccumulateField(out.Target) {
-		return nil, nodeValueError(fields["target"], fmt.Errorf("accumulate.target %q names one bare state field; write target: %s", out.Target, strings.TrimPrefix(out.Target, "state.")))
+	if _, err := out.TargetField(); err != nil {
+		return nil, nodeValueError(fields["target"], err)
 	}
 	out.KeyPath, err = out.ItemKeyPath()
 	if err != nil {
