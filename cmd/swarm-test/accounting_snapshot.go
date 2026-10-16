@@ -50,7 +50,15 @@ func prepareAccountingProof(ctx context.Context, root, head string, policy accou
 	if err = checkAccountingBase(ctx, root, origin, policy); err != nil {
 		return snapshot, "", nil, err
 	}
-	snapshot, err = freezeAccountingProof(ctx, root, head, origin, policy)
+	normalized, err = absoluteAccountingInputs(root, args)
+	if err != nil {
+		return snapshot, "", nil, err
+	}
+	cuts, err := accountingProofReadCuts(ctx, root, head, origin, policy, normalized)
+	if err != nil {
+		return snapshot, "", nil, err
+	}
+	snapshot, err = freezeAccountingProof(ctx, root, head, origin, policy, cuts...)
 	if err != nil {
 		return snapshot, "", nil, err
 	}
@@ -66,8 +74,7 @@ func prepareAccountingProof(ctx context.Context, root, head string, policy accou
 	if err = saveAccountingManifest(filepath.Join(evidence, "proof-inputs.json"), snapshot.Manifest); err != nil {
 		return snapshot, evidence, nil, err
 	}
-	normalized, err = absoluteAccountingInputs(root, args)
-	return snapshot, evidence, normalized, err
+	return snapshot, evidence, normalized, nil
 }
 
 // Tree objects, not archive attributes or a clean index, define proof inputs.
@@ -172,7 +179,7 @@ func readAccountingBlob(reader *bufio.Reader, expected string) ([]byte, error) {
 	return body, nil
 }
 
-func freezeAccountingProof(ctx context.Context, repo, head, origin string, policy accountingPolicyObservation) (snapshot accountingProofSnapshot, result error) {
+func freezeAccountingProof(ctx context.Context, repo, head, origin string, policy accountingPolicyObservation, readCuts ...string) (snapshot accountingProofSnapshot, result error) {
 	directory, err := os.MkdirTemp("", "swarm-accounting-proof-")
 	if err != nil {
 		return snapshot, err
@@ -206,6 +213,7 @@ func freezeAccountingProof(ctx context.Context, repo, head, origin string, polic
 		return snapshot, err
 	}
 	roots := []string{head, origin, policy.Commit, policy.Policy.ExecutorSource}
+	roots = append(roots, readCuts...)
 	history, err := gitAccountingBlob(ctx, repo, head, ".github/test-proof-history-inputs.json")
 	if err != nil {
 		return snapshot, err
