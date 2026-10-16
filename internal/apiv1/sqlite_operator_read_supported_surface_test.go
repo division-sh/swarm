@@ -31,6 +31,7 @@ func TestSQLiteAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 
 	storetest.RequireRun(t, ctx, sqliteStore, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: base.Add(-time.Hour)})
 	seedSQLiteAgentUsageAgentForRun(t, ctx, sqliteStore, runID, agentID)
+	ctx = admitAPITestAgentExecution(t, ctx, sqliteStore, authorActivityTestSourceArtifactFact)
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
 		INSERT INTO agent_sessions (
 			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
