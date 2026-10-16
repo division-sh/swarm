@@ -127,9 +127,7 @@ func retainAPITestCompiledRoot(ctx context.Context, selected runtimebus.EventSto
 	if err != nil {
 		return fmt.Errorf("API test source requires captured rooted compilation: %w", err)
 	}
-	owner, ok := selected.(interface {
-		EnsureRootedSource(context.Context, sourceartifact.RootedSource) (sourceartifact.RootedEnsureResult, error)
-	})
+	owner, ok := selected.(sourceartifactfixture.RootedWriter)
 	if !ok {
 		return fmt.Errorf("API test store %T lacks compiled root retention", selected)
 	}

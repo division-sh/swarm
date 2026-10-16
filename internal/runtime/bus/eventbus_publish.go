@@ -2701,6 +2701,10 @@ func (eb *EventBus) CheckDirectRoutes(ctx context.Context, evt events.Event, rou
 	if !isValidEventTypeName(string(evt.Type())) {
 		return status, fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
+	ctx, err := eb.admitRecipientPreviewContext(ctx)
+	if err != nil {
+		return status, err
+	}
 	if eb.payloadAdmitter != nil {
 		var err error
 		evt, err = eb.admitEventPayload(ctx, evt)
@@ -2763,11 +2767,8 @@ func (eb *EventBus) CheckPublishRecipientPlan(ctx context.Context, evt events.Ev
 	if !isValidEventTypeName(string(evt.Type())) {
 		return PublishRecipientPlan{}, fmt.Errorf("%w: %s", ErrInvalidEventType, strings.TrimSpace(string(evt.Type())))
 	}
-	ctx, err := eb.admitSourceArtifactFact(ctx)
+	ctx, err := eb.admitRecipientPreviewContext(ctx)
 	if err != nil {
-		return PublishRecipientPlan{}, err
-	}
-	if err := ctx.Err(); err != nil {
 		return PublishRecipientPlan{}, err
 	}
 	if eb.payloadAdmitter != nil {

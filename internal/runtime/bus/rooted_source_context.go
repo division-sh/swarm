@@ -45,3 +45,11 @@ func (eb *EventBus) admitRootedSourceContext(ctx context.Context) (context.Conte
 	}
 	return correlation.WithRootAdmission(ctx, root), nil
 }
+
+func (eb *EventBus) admitRecipientPreviewContext(ctx context.Context) (context.Context, error) {
+	admitted, err := eb.admitSourceArtifactFact(ctx)
+	if err != nil {
+		return admitted, err
+	}
+	return admitted, admitted.Err()
+}
