@@ -31,6 +31,25 @@ func runDeliveryLivePins(t *testing.T) []rundelivery.Pin {
 	return pins
 }
 
+func runDeliveryInvocationPins(t *testing.T, proof sourceBlobDeclarationInvocation) []rundelivery.Pin {
+	t.Helper()
+	pins, err := rundelivery.Decode(runDeliveryBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pin := range pins {
+		raw, err := os.ReadFile(filepath.Join("../../..", pin.File))
+		if err != nil {
+			t.Fatal(err)
+		}
+		previous := proof.setupPrevious(t, pin.File, pin.Function, requestKeyDeclaration(t, raw, pin.Function))
+		if err := rundelivery.ValidateCurrentSource(pin, []byte("package proof\n"+previous)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return pins
+}
+
 func TestFamily145RunDeliveryHistoryRefusesMissingDuplicateForeignAndChangedCurrentSource(t *testing.T) {
 	for _, pin := range runDeliveryLivePins(t) {
 		if err := rundelivery.ValidateCurrentSource(pin, []byte("package proof\n"+pin.After)); err != nil {
@@ -72,26 +91,9 @@ func runDeliveryEarlierHistory(t *testing.T, current []byte, recipes bool) []byt
 	return raw
 }
 
-func family145CheckRunDeliveryWholeRule(t *testing.T, file, function, current string) bool {
-	t.Helper()
-	pins, err := rundelivery.Decode(runDeliveryBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, pin := range pins {
-		if pin.File == file && pin.Function == function {
-			runDeliveryLivePins(t)
-			if current != pin.After {
-				t.Fatal("run delivery current transition escaped its exact rule:", function)
-			}
-			return true
-		}
-	}
-	return false
-}
-
 func TestFamily145RunDeliveryHistoryRestoresCompletePriorLedgersAndCollisionSuccessor(t *testing.T) {
-	pins := runDeliveryLivePins(t)
+	proof := sourceBlobDeclarationsForInvocation(t)
+	pins := runDeliveryInvocationPins(t, proof)
 	for _, recipes := range []bool{true, false} {
 		prior := runDeliveryPriorHistory(t, recipes)
 		expected, err := rundelivery.ComposeHistory(prior, pins, recipes)
@@ -102,13 +104,16 @@ func TestFamily145RunDeliveryHistoryRestoresCompletePriorLedgersAndCollisionSucc
 		if recipes {
 			current, wantCount = recipeBytes, 1519
 		}
-		live := current
-		current = sourceBlobEarlierHistory(t, current, recipes)
+		current = proof.blobHistory(t, current, recipes)
+		restoredHistory, err := rundelivery.RestoreHistory(current, prior, pins, recipes)
+		if err != nil {
+			t.Fatal(err)
+		}
 		var before, after, composed, restored []map[string]any
 		for _, input := range []struct {
 			raw  []byte
 			rows *[]map[string]any
-		}{{prior, &before}, {current, &after}, {expected, &composed}, {runDeliveryEarlierHistory(t, live, recipes), &restored}} {
+		}{{prior, &before}, {current, &after}, {expected, &composed}, {restoredHistory, &restored}} {
 			if err := json.Unmarshal(input.raw, input.rows); err != nil {
 				t.Fatal(err)
 			}
