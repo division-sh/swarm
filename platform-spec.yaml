@@ -10937,7 +10937,10 @@ tool_model:
           headers: object — header name to value template. Supports {{credentials.key}} and {{input.field_name}} substitution.
           body: JSON value — request body template. Same substitution. Sent as JSON. Omission sends no body;
             explicit null, zero, false, empty text/list/map remain literal bodies and are not absence.
-          timeout_seconds: integer — request timeout. Default 30.
+          timeout_seconds: >
+            integer — request timeout, default 30 seconds (not a maximum). The authored request budget covers response
+            headers and body consumption; an earlier caller cancellation or deadline wins. The budget starts after rate
+            admission, not during authentication or admission waiting, and is not an effect-settlement budget.
       optional_fields:
         input_schema: object — JSON Schema for tool arguments; omission derives the object default, explicit {} is Any.
         output_schema: object — field names and types the tool returns (for documentation and LLM context)
