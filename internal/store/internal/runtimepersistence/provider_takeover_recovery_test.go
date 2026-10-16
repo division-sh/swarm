@@ -148,12 +148,36 @@ func TestProviderTakeoverRecoveryBundleSiblingIsolationBothStores(t *testing.T) 
 		actor := withRuntimePersistenceTestIntent(t, actors.AgentConfig{
 			Identity: identity, ID: fixture.agentID, Role: "worker", Type: "managed", ExecutionMode: "live",
 			Model: "regular", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli", FlowPath: identity.FlowInstance(),
+			Config: []byte(`{}`),
 		})
+		actor = resolveNativeClaimFixtureActor(t, actor)
 		if err := agentfixture.UpsertStaticForSource(t, ctx, fixture.store, manager.PersistedAgent{
 			Config: actor, Status: "active", StartedAt: time.Now().UTC(),
 		}, fact); err != nil {
 			t.Fatal(err)
 		}
+		// Consume this source's prepared grant before selecting the original source.
+		state, found, err := fixture.store.LoadAgentLifecycleState(ctx, identity)
+		if err != nil || !found {
+			t.Fatalf("read sibling lifecycle: found=%t error=%v", found, err)
+		}
+		sibling := fixture
+		sibling.authority = effects.NormalAgentAuthority(effects.LifecycleToken{
+			Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: state.RuntimeEpoch, Generation: state.Generation,
+		}, fixture.leaseHolder, time.Now().Add(time.Minute))
+		sibling.authority.ExecutionMode = effects.ExecutionModeLive
+		sibling.authority.Target = fixture.authority.Target
+		sibling.authority.Target.AgentIdentity, sibling.authority.Target.FlowInstance = identity, identity.FlowInstance()
+		sibling.authority.Target.RunID = identity.RunID
+		sibling.authority.Target.ID, sibling.authority.Target.SessionID = uuid.NewString(), uuid.NewString()
+		sibling.authority.Target.Memory = agentmemory.Plan{}
+		sibling.grantID = ""
+		sibling.origin = claimCompletionOriginForTest(t, ctx, fixture.store, sibling.authority, time.Now())
+		siblingCtx := providerDrainContext(t, sibling, "other-bundle-sibling")
+		siblingCtx = correlation.WithSourceArtifactFact(siblingCtx, mustStoreTestSourceArtifactFact(bundle))
+		siblingCtx = authoractivity.WithScope(siblingCtx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, bundle))
+		siblingCtx = withManagedCompletionTestSurface(t, siblingCtx, sibling.authority, "anthropic_api")
+		siblingAttempt := beginObservedCompletionForSettlementTest(t, siblingCtx, "anthropic_api", "other-bundle-sibling").Attempt()
 		processOwner, err := agentfixture.ProcessCapability(t, testAuthorActivityContext(), fixture.store)
 		if err != nil {
 			t.Fatal(err)
@@ -181,27 +205,6 @@ func TestProviderTakeoverRecoveryBundleSiblingIsolationBothStores(t *testing.T) 
 		}); err != nil {
 			t.Fatal(err)
 		}
-		state, found, err := fixture.store.LoadAgentLifecycleState(ctx, identity)
-		if err != nil || !found {
-			t.Fatalf("read sibling lifecycle: found=%t error=%v", found, err)
-		}
-		sibling := fixture
-		sibling.authority = effects.NormalAgentAuthority(effects.LifecycleToken{
-			Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: state.RuntimeEpoch, Generation: state.Generation,
-		}, fixture.leaseHolder, time.Now().Add(time.Minute))
-		sibling.authority.ExecutionMode = effects.ExecutionModeLive
-		sibling.authority.Target = fixture.authority.Target
-		sibling.authority.Target.AgentIdentity, sibling.authority.Target.FlowInstance = identity, identity.FlowInstance()
-		sibling.authority.Target.RunID = identity.RunID
-		sibling.authority.Target.ID, sibling.authority.Target.SessionID = uuid.NewString(), uuid.NewString()
-		sibling.authority.Target.Memory = agentmemory.Plan{}
-		sibling.grantID = ""
-		sibling.origin = claimCompletionOriginForTest(t, ctx, fixture.store, sibling.authority, time.Now())
-		siblingCtx := providerDrainContext(t, sibling, "other-bundle-sibling")
-		siblingCtx = correlation.WithSourceArtifactFact(siblingCtx, mustStoreTestSourceArtifactFact(bundle))
-		siblingCtx = authoractivity.WithScope(siblingCtx, authoractivity.BundleScope(authorActivityTestRuntimeInstanceID, bundle))
-		siblingCtx = withManagedCompletionTestSurface(t, siblingCtx, sibling.authority, "anthropic_api")
-		siblingAttempt := beginObservedCompletionForSettlementTest(t, siblingCtx, "anthropic_api", "other-bundle-sibling").Attempt()
 		attempts := makeProviderTakeoverAttempts(t, fixture)
 		grant, request, process := prepareProviderTakeover(t, fixture, nil)
 		before, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
