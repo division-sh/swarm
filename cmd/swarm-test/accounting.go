@@ -233,14 +233,9 @@ func executeAccounting(ctx context.Context, args []string, out io.Writer, remote
 	if err != nil || !reflect.DeepEqual(inputs, policy.Policy.Inputs) {
 		return fmt.Errorf("executor no longer matches approved closure: %v", err)
 	}
-	flags := flag.NewFlagSet("accounting "+args[0], flag.ContinueOnError)
-	planFile := flags.String("plan", "", "frozen read-only accounting plan")
-	receiptFile := flags.String("receipt", "", "existing certificate to independently verify")
-	if err = flags.Parse(args[1:]); err != nil {
+	planFile, receiptFile, err := accountingInputArguments(args)
+	if err != nil {
 		return err
-	}
-	if flags.NArg() != 0 || (*planFile != "" && *receiptFile != "") {
-		return fmt.Errorf("accounting accepts one exact plan or receipt, not overrides")
 	}
 	head, err := accountingSource(ctx, ".", "", true)
 	if err != nil {
@@ -259,27 +254,43 @@ func executeAccounting(ctx context.Context, args []string, out io.Writer, remote
 	}
 	switch args[0] {
 	case "plan":
-		if *planFile != "" || *receiptFile != "" {
-			return fmt.Errorf("plan reads the clean source and has no input override")
-		}
 		return planApprovedAccounting(ctx, root, head, out, remote, policy)
 	case "apply":
-		return applyApprovedAccounting(ctx, root, head, *planFile, out, remote, policy)
+		return applyApprovedAccounting(ctx, root, head, planFile, out, remote, policy)
 	case "certify":
-		if *receiptFile != "" {
-			return verifyAccountingReceipt(ctx, root, head, *receiptFile, out, remote, policy)
+		if receiptFile != "" {
+			return verifyAccountingReceipt(ctx, root, head, receiptFile, out, remote, policy)
 		}
-		if *planFile == "" {
+		if planFile == "" {
 			return fmt.Errorf("certify requires its plan or prior certificate")
 		}
 		var plan accountingPlan
-		if err = readAccountingJSON(*planFile, &plan); err != nil {
+		if err = readAccountingJSON(planFile, &plan); err != nil {
 			return err
 		}
 		return certifyAccounting(ctx, root, head, plan, out, remote, policy)
 	default:
 		return fmt.Errorf("unknown accounting operation")
 	}
+}
+
+func accountingInputArguments(args []string) (string, string, error) {
+	if len(args) == 0 {
+		return "", "", fmt.Errorf("accounting operation is required")
+	}
+	flags := flag.NewFlagSet("accounting "+args[0], flag.ContinueOnError)
+	plan := flags.String("plan", "", "frozen read-only accounting plan")
+	receipt := flags.String("receipt", "", "existing certificate to independently verify")
+	if err := flags.Parse(args[1:]); err != nil {
+		return "", "", err
+	}
+	if flags.NArg() != 0 || (*plan != "" && *receipt != "") {
+		return "", "", fmt.Errorf("accounting accepts one exact plan or receipt, not overrides")
+	}
+	if args[0] == "plan" && (*plan != "" || *receipt != "") {
+		return "", "", fmt.Errorf("plan reads the clean source and has no input override")
+	}
+	return *plan, *receipt, nil
 }
 
 func planApprovedAccounting(ctx context.Context, root, head string, out io.Writer, remote accountingRemote, policy accountingPolicyObservation) error {
