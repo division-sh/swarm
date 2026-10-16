@@ -4525,8 +4525,12 @@ handler_specification:
         case: >-
           object — first-class policy-sheet selection row for scalar or tuple dispatch. Shape is
           `{selector: <path>, equals: <scalar>}` or `{selectors: [<path>, ...], equals: [<scalar>, ...]}`. Selectors
-          must be simple dotted paths rooted in payload, entity, policy, or event. The row lowers to equality conditions
-          joined by AND. Duplicate selector/value keys fail closed.
+          must be simple dotted paths rooted in payload, entity, policy, or event. The plural form requires two or more
+          selectors and an equals list of matching length, preserving order. A one-item plural form, mixed singular/list
+          or plural/scalar form, and scalar selectors fail admission with teaching text for the two supported shapes.
+          Empty selectors are refused, not filtered. The row lowers to equality conditions joined by AND. Within a tuple,
+          repeated identical normalized selector/typed literal pairs fail closed; repeated selectors with different literals
+          are not independently forbidden. Ordered whole-row duplicate cases remain independently refused across rows.
         range: >-
           object — first-class policy-sheet selection row for numeric threshold/range dispatch. Shape includes
           `value` and one or more of `gt`, `gte`, `lt`, `lte`; bounds may be numeric literals or policy-constant
