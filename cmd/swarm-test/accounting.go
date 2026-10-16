@@ -507,6 +507,12 @@ func checkFiniteAccountingDiff(ctx context.Context, root, base, head string, inp
 			return fmt.Errorf("F1 initial rule refuses another changed source or accounting row: %s", name)
 		}
 	}
+	for _, revision := range []string{base, head} {
+		entry, err := accountingGit(ctx, root, "ls-tree", revision, "--", formatproof.Source)
+		if err != nil || !strings.HasPrefix(string(entry), "100644 blob ") {
+			return fmt.Errorf("F1 refuses noncanonical source mode or inclusion")
+		}
+	}
 	for _, input := range inputs {
 		if input.Path == formatproof.Source || input.Path == formatproof.Successors {
 			continue
