@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkreadiness"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
@@ -62,7 +63,7 @@ type runForkSelectedContractMaterializationPort struct {
 	loadSnapshot          runForkLifecycleSnapshotLoader
 	requireProfile        func(context.Context, *sql.Tx, string, scenarioexecution.Profile, bool) error
 	durableData           *storedurabledata.Owner
-	insertRun             func(context.Context, *mutationprotocol.Attempt, string, string, runfork.RunForkPoint, time.Time, runtimecorrelation.SourceArtifactFact) error
+	insertRun             func(context.Context, *mutationprotocol.Attempt, string, string, runfork.RunForkPoint, time.Time, runtimecorrelation.SourceArtifactFact, sourceartifact.RootAdmission) error
 	ensureProfile         func(context.Context, *sql.Tx, string, scenarioexecution.Profile, time.Time) error
 	materializeEntity     func(context.Context, *sql.Tx, *mutationprotocol.Attempt, activeRunSourceOwnerFunc, string, contracts.BundleIdentity, runfork.RunForkPlan, runfork.RunForkEntityState, runForkEntityMetadata, time.Time, *privaterunlifecycle.ChannelCardChanges) error
 	publishChannelChanges func(bool, bool) error
@@ -159,11 +160,11 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		source := runForkSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 			return port.loadSource(ctx, tx, runID)
 		})
-		identity, err := resolveRunForkBundleInsertIdentity(txctx, source, plan.SourceRunID, req.SourceArtifactFact)
+		identity, err := resolveRunForkBundleInsertIdentity(txctx, source, plan.SourceRunID, req.SourceArtifactFact, req.RootAdmission)
 		if err != nil {
 			return fmt.Errorf("resolve selected-contract fork bundle identity: %w", err)
 		}
-		if err := requireForkOperationMaterializationRequest(forkOperation, plan.SourceRunID, plan.ForkPoint, identity.SourceArtifactFact.BundleHash(), selection, req.DataPinOverrides); err != nil {
+		if err := requireForkOperationMaterializationRequest(forkOperation, plan.SourceRunID, plan.ForkPoint, identity.RootAdmission, selection, req.DataPinOverrides); err != nil {
 			return err
 		}
 		if err := requireOriginalFanOutCarriage(txctx, source, plan, req.OriginalLoopCarriage); err != nil {
@@ -257,7 +258,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			return fmt.Errorf("resolve selected-contract fork author activity scope: %w", err)
 		}
 		txctx = runtimeauthoractivity.WithScope(txctx, forkScope)
-		if err := port.insertRun(txctx, attempt, forkRunID, plan.SourceRunID, plan.ForkPoint, now, identity.SourceArtifactFact); err != nil {
+		if err := port.insertRun(txctx, attempt, forkRunID, plan.SourceRunID, plan.ForkPoint, now, identity.SourceArtifactFact, identity.RootAdmission); err != nil {
 			return fmt.Errorf("insert selected-contract fork run: %w", err)
 		}
 		pins, err := storedurabledata.MaterializeForkPinsTx(port.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, false, now)
@@ -311,6 +312,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		}
 		binding, err := insertRunForkSelectedContractBinding(txctx, tx, runfork.RunForkSelectedContractBindingRequest{
 			ForkRunID: forkRunID, SourceRunID: plan.SourceRunID, ForkPoint: plan.ForkPoint, ContractSelection: selection,
+			TargetRootAdmission: identity.RootAdmission,
 		}, now)
 		if err != nil {
 			return err

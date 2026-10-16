@@ -89,6 +89,12 @@ func (binding RunForkSelectedContractBinding) ValidateExecutionBinding(forkRunID
 	if binding.ForkEventID != binding.ForkPoint.EventID {
 		return fmt.Errorf("selected-contract execution admission binding event differs from fork point")
 	}
+	if err := binding.TargetRootReference.Validate(); err != nil {
+		return fmt.Errorf("selected-contract execution admission binding target root: %w", err)
+	}
+	if binding.ContractSelection.Mode == RunForkContractSelectionModeBundleHash && binding.ContractSelection.BundleHash != binding.TargetRootReference.BundleHash {
+		return fmt.Errorf("selected-contract execution admission binding target root differs from selected content")
+	}
 	return binding.ContractSelection.ValidateExecutionSelection("binding")
 }
 

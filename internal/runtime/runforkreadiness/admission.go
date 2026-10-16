@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runforkadmission"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 )
 
 // MaterializeRequest carries an admitted relation, never caller-authored states.
@@ -31,6 +32,7 @@ type MaterializeRequest struct {
 	At                      string
 	ContractSelection       runfork.RunForkContractSelection
 	SourceArtifactFact      correlation.SourceArtifactFact
+	RootAdmission           sourceartifact.RootAdmission
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
 	FrontierAdmission       runfork.RunForkContractFrontierAdmission
 	RouteTopology           runfork.RunForkSelectedContractRouteTopology

@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	privateactivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle/sourceadmission"
@@ -542,6 +543,7 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 	point runfork.RunForkPoint,
 	startedAt time.Time,
 	identity runtimecorrelation.SourceArtifactFact,
+	root sourceartifact.RootAdmission,
 ) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := identity.Validate(); err != nil {
@@ -549,6 +551,9 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 		}
 		mutation := postgresRunLifecycleMutation{store: s, tx: tx}
 		if err := mutation.requireSourceArtifactForWrite(ctx, identity); err != nil {
+			return err
+		}
+		if err := requireForkRootAdmissionTx(ctx, tx, identity, root, true); err != nil {
 			return err
 		}
 		bundleHash := identity.BundleHash()
@@ -560,11 +565,11 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 		if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			event_count, started_at, bundle_hash
+			event_count, started_at, bundle_hash, source_root_directory
 		)
-		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, NULLIF($7, '')::uuid, 0, $8, $9)
+		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, NULLIF($7, '')::uuid, 0, $8, $9, $10)
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
-			startedAt.UTC(), bundleHash); err != nil {
+			startedAt.UTC(), bundleHash, root.RootDirectory()); err != nil {
 			return fmt.Errorf("insert fork run lifecycle: %w", err)
 		}
 		if err := mutationprotocol.InvalidateActiveRunSource(ctx, tx, forkRunID); err != nil {
@@ -592,6 +597,7 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 	point runfork.RunForkPoint,
 	startedAt time.Time,
 	identity runtimecorrelation.SourceArtifactFact,
+	root sourceartifact.RootAdmission,
 ) error {
 	return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
 		if err := identity.Validate(); err != nil {
@@ -599,6 +605,9 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 		}
 		mutation := sqliteRunLifecycleMutation{store: s, tx: tx}
 		if err := mutation.requireSourceArtifact(ctx, identity); err != nil {
+			return err
+		}
+		if err := requireForkRootAdmissionTx(ctx, tx, identity, root, false); err != nil {
 			return err
 		}
 		bundleHash := identity.BundleHash()
@@ -610,11 +619,11 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 		if _, err := tx.ExecContext(ctx, `
 		INSERT INTO runs (
 			run_id, status, origin_kind, forked_from_run_id, forked_from_point_kind, forked_from_revision, forked_from_event_id,
-			event_count, started_at, bundle_hash
+			event_count, started_at, bundle_hash, source_root_directory
 		)
-		VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''), 0, ?, ?, ?)
 	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.ForkPointKind(), origin.ForkRevision(), origin.SourceEventID(),
-			startedAt.UTC(), bundleHash); err != nil {
+			startedAt.UTC(), bundleHash, root.RootDirectory()); err != nil {
 			return fmt.Errorf("insert fork run lifecycle: %w", err)
 		}
 		if err := mutationprotocol.InvalidateActiveRunSource(ctx, tx, forkRunID); err != nil {
@@ -633,6 +642,19 @@ func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
 			},
 		})
 	})
+}
+
+func requireForkRootAdmissionTx(ctx context.Context, tx *sql.Tx, identity runtimecorrelation.SourceArtifactFact, root sourceartifact.RootAdmission, postgres bool) error {
+	if err := root.Validate(); err != nil {
+		return err
+	}
+	if root.BundleHash() != identity.BundleHash() {
+		return fmt.Errorf("fork run root admission differs from admitted source content")
+	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, root.Reference()); err != nil {
+		return err
+	}
+	return sourceartifactstore.RequireRootAdmissionTx(ctx, tx, root, postgres)
 }
 
 func (m postgresRunLifecycleMutation) TransitionActive(

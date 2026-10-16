@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runstate"
+	artifactstore "github.com/division-sh/swarm/internal/store/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -105,19 +106,24 @@ func insertRunForkSelectedContractBinding(ctx context.Context, tx *sql.Tx, req r
 	if err != nil {
 		return runfork.RunForkSelectedContractBinding{}, err
 	}
+	if err := artifactstore.RequireRootAdmissionTx(ctx, tx, req.TargetRootAdmission, true); err != nil {
+		return runfork.RunForkSelectedContractBinding{}, err
+	}
 	if err := tx.QueryRowContext(ctx, `
 		INSERT INTO run_fork_selected_contract_bindings (
 			fork_run_id, source_run_id, fork_point_kind, fork_revision, fork_event_id,
-			mode, bundle_hash, created_at
+			mode, bundle_hash, target_bundle_hash, source_root_directory, created_at
 		)
-		VALUES (
+		SELECT
 			$1, $2, $3, $4, $5,
-			$6, NULLIF($7, ''), $8
-		)
+			$6, NULLIF($7, ''), $8, $9, $10
+		FROM runs WHERE run_id = $1 AND bundle_hash = $8 AND source_root_directory = $9
 		RETURNING binding_id
 	`, binding.ForkRunID, binding.SourceRunID, binding.ForkPoint.Kind, binding.ForkPoint.Revision, nullableForkEventID(binding.ForkPoint),
 		binding.ContractSelection.Mode,
 		binding.ContractSelection.BundleHash,
+		binding.TargetRootReference.BundleHash,
+		binding.TargetRootReference.RootDirectory,
 		binding.CreatedAt).Scan(&binding.BindingID); err != nil {
 		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("insert selected contract binding: %w", err)
 	}
@@ -150,6 +156,12 @@ func normalizeRunForkSelectedContractBinding(req runfork.RunForkSelectedContract
 	if err != nil {
 		return runfork.RunForkSelectedContractBinding{}, err
 	}
+	if err := req.TargetRootAdmission.Validate(); err != nil {
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding target root: %w", err)
+	}
+	if selection.Mode == runfork.RunForkContractSelectionModeBundleHash && selection.BundleHash != req.TargetRootAdmission.BundleHash() {
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding target root differs from selected content")
+	}
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
@@ -161,9 +173,10 @@ func normalizeRunForkSelectedContractBinding(req runfork.RunForkSelectedContract
 		ForkPoint: runfork.RunForkPoint{
 			Kind: req.ForkPoint.Kind, Revision: req.ForkPoint.Revision, EventID: req.ForkPoint.EventID,
 		},
-		ForkEventID:       req.ForkPoint.EventID,
-		ContractSelection: selection,
-		CreatedAt:         createdAt,
+		ForkEventID:         req.ForkPoint.EventID,
+		ContractSelection:   selection,
+		TargetRootReference: req.TargetRootAdmission.Reference(),
+		CreatedAt:           createdAt,
 	}, nil
 }
 

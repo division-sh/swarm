@@ -18,6 +18,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
@@ -108,7 +109,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 
 			identity, err := resolveRunForkBundleInsertIdentity(ctx, runForkSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 				return s.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
-			}), plan.SourceRunID, req.SourceArtifactFact)
+			}), plan.SourceRunID, req.SourceArtifactFact, req.RootAdmission)
 			if err != nil {
 				return fmt.Errorf("resolve fork bundle identity: %w", err)
 			}
@@ -167,7 +168,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 				return fmt.Errorf("resolve fork author activity scope: %w", err)
 			}
 			ctx = runtimeauthoractivity.WithScope(ctx, forkScope)
-			if err := s.InsertRunForkRunTx(ctx, attempt, forkRunID, plan.SourceRunID, plan.ForkPoint, now, identity.SourceArtifactFact); err != nil {
+			if err := s.InsertRunForkRunTx(ctx, attempt, forkRunID, plan.SourceRunID, plan.ForkPoint, now, identity.SourceArtifactFact, identity.RootAdmission); err != nil {
 				return fmt.Errorf("insert fork run: %w", err)
 			}
 			pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, ctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, false, now)
@@ -202,10 +203,11 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			var selectedContractBinding *runfork.RunForkSelectedContractBinding
 			if selection != nil {
 				binding, err := insertRunForkSelectedContractBinding(ctx, tx, runfork.RunForkSelectedContractBindingRequest{
-					ForkRunID:         forkRunID,
-					SourceRunID:       plan.SourceRunID,
-					ForkPoint:         plan.ForkPoint,
-					ContractSelection: *selection,
+					ForkRunID:           forkRunID,
+					SourceRunID:         plan.SourceRunID,
+					ForkPoint:           plan.ForkPoint,
+					ContractSelection:   *selection,
+					TargetRootAdmission: identity.RootAdmission,
 				}, now)
 				if err != nil {
 					return err
@@ -282,7 +284,7 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 			source := activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.SourceArtifactFact, error) {
 				return s.RunLifecycleSQLiteOwner.RequireActiveSourceTx(ctx, tx, runID)
 			})
-			identity, err := resolveRunForkBundleInsertIdentity(txctx, runForkSourceOwnerFunc(source), plan.SourceRunID, req.SourceArtifactFact)
+			identity, err := resolveRunForkBundleInsertIdentity(txctx, runForkSourceOwnerFunc(source), plan.SourceRunID, req.SourceArtifactFact, req.RootAdmission)
 			if err != nil {
 				return fmt.Errorf("resolve fork bundle identity: %w", err)
 			}
@@ -341,7 +343,7 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 				return fmt.Errorf("resolve fork author activity scope: %w", err)
 			}
 			txctx = runtimeauthoractivity.WithScope(txctx, forkScope)
-			if err := s.InsertRunForkRunTx(txctx, attempt, forkRunID, plan.SourceRunID, plan.ForkPoint, now, identity.SourceArtifactFact); err != nil {
+			if err := s.InsertRunForkRunTx(txctx, attempt, forkRunID, plan.SourceRunID, plan.ForkPoint, now, identity.SourceArtifactFact, identity.RootAdmission); err != nil {
 				return fmt.Errorf("insert fork run: %w", err)
 			}
 			pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, txctx, tx, plan.SourceRunID, forkRunID, identity.SourceArtifactFact.BundleHash(), req.DataPinOverrides, false, now)
@@ -374,7 +376,8 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 			if selection != nil {
 				binding, err := insertRunForkSelectedContractBinding(txctx, tx, runfork.RunForkSelectedContractBindingRequest{
 					ForkRunID: forkRunID, SourceRunID: plan.SourceRunID, ForkPoint: plan.ForkPoint,
-					ContractSelection: *selection,
+					ContractSelection:   *selection,
+					TargetRootAdmission: identity.RootAdmission,
 				}, now)
 				if err != nil {
 					return err
@@ -468,6 +471,7 @@ func loadExactRunForkMaterialization(
 	if snapshot.State != storerunlifecycle.StatePaused ||
 		!snapshot.Origin.Equal(wantOrigin) ||
 		snapshot.BundleHash != bundleHash ||
+		snapshot.RootReference != identity.RootAdmission.Reference() ||
 		snapshot.EventCount != 0 ||
 		snapshot.EntityCount != fieldRows {
 		return runfork.RunForkMaterialization{}, false, fmt.Errorf(
@@ -609,6 +613,7 @@ func loadExactRunForkMaterialization(
 			persistedBinding.ForkPoint.Kind != plan.ForkPoint.Kind ||
 			persistedBinding.ForkPoint.Revision != plan.ForkPoint.Revision ||
 			persistedBinding.ForkPoint.EventID != plan.ForkPoint.EventID ||
+			persistedBinding.TargetRootReference != identity.RootAdmission.Reference() ||
 			persistedBinding.ContractSelection != normalizedSelection {
 			return runfork.RunForkMaterialization{}, false, fmt.Errorf(
 				"fork materialization %s selected contract binding conflicts with the replay",
@@ -634,17 +639,27 @@ func loadExactRunForkMaterialization(
 
 type runForkBundleInsertIdentity struct {
 	SourceArtifactFact runtimecorrelation.SourceArtifactFact
+	RootAdmission      sourceartifact.RootAdmission
 }
 
-func resolveRunForkBundleInsertIdentity(ctx context.Context, source runForkSourceOwnerFunc, sourceRunID string, requestedFact runtimecorrelation.SourceArtifactFact) (runForkBundleInsertIdentity, error) {
+func resolveRunForkBundleInsertIdentity(ctx context.Context, source runForkSourceOwnerFunc, sourceRunID string, requestedFact runtimecorrelation.SourceArtifactFact, root sourceartifact.RootAdmission) (runForkBundleInsertIdentity, error) {
 	if err := ctx.Err(); err != nil {
+		return runForkBundleInsertIdentity{}, err
+	}
+	if err := root.Validate(); err != nil {
+		return runForkBundleInsertIdentity{}, fmt.Errorf("fork target root admission: %w", err)
+	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, root.Reference()); err != nil {
 		return runForkBundleInsertIdentity{}, err
 	}
 	if requestedFact.BundleHash() != "" {
 		if err := requestedFact.Validate(); err != nil {
 			return runForkBundleInsertIdentity{}, err
 		}
-		return runForkBundleInsertIdentity{SourceArtifactFact: requestedFact}, nil
+		if requestedFact.BundleHash() != root.BundleHash() {
+			return runForkBundleInsertIdentity{}, fmt.Errorf("fork target root differs from admitted source content")
+		}
+		return runForkBundleInsertIdentity{SourceArtifactFact: requestedFact, RootAdmission: root}, nil
 	}
 
 	if source == nil {
@@ -654,7 +669,10 @@ func resolveRunForkBundleInsertIdentity(ctx context.Context, source runForkSourc
 	if err != nil {
 		return runForkBundleInsertIdentity{}, fmt.Errorf("load source run bundle identity: %w", err)
 	}
-	return runForkBundleInsertIdentity{SourceArtifactFact: fact}, nil
+	if fact.BundleHash() != root.BundleHash() {
+		return runForkBundleInsertIdentity{}, fmt.Errorf("original fork root differs from source run content")
+	}
+	return runForkBundleInsertIdentity{SourceArtifactFact: fact, RootAdmission: root}, nil
 }
 
 func loadRunForkEntityMetadata(plan runfork.RunForkPlan) (map[string]runForkEntityMetadata, error) {

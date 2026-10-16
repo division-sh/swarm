@@ -14,13 +14,17 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 )
 
-func requireForkOperationMaterializationRequest(operation *runfork.ForkOperationRequest, sourceRunID string, point runfork.RunForkPoint, targetBundleHash string, selection runfork.RunForkContractSelection, overrides []durabledata.ExplicitPin) error {
+func requireForkOperationMaterializationRequest(operation *runfork.ForkOperationRequest, sourceRunID string, point runfork.RunForkPoint, target sourceartifact.RootAdmission, selection runfork.RunForkContractSelection, overrides []durabledata.ExplicitPin) error {
 	if operation == nil {
 		return nil
+	}
+	if err := target.Validate(); err != nil {
+		return err
 	}
 	canonical, _, err := operation.Canonical()
 	if err != nil {
@@ -31,7 +35,7 @@ func requireForkOperationMaterializationRequest(operation *runfork.ForkOperation
 		return err
 	}
 	if canonical.ResolvedPoint == nil || *canonical.ResolvedPoint != point || canonical.SourceRunID != sourceRunID ||
-		canonical.TargetBundleHash != targetBundleHash ||
+		canonical.TargetBundleHash != target.BundleHash() || canonical.TargetRootReference != target.Reference() ||
 		canonical.ContractSelection != selection || !slices.Equal(canonical.DataPinOverrides, pins) {
 		return fmt.Errorf("fork operation differs from selected materialization request")
 	}

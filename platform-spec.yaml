@@ -17987,7 +17987,11 @@ platform_tables:
         contract source identity that was admitted before materialization. This is prerequisite fork-run state for future
         selected-contract execution; CLI/API arguments, dry-run JSON, and local model output are not semantic owners. It
         does not authorize handler execution, event/delivery replay, timer, route, session, turn, source-advanced, or
-        contract-swap mutation.
+        contract-swap mutation. The required target_bundle_hash and source_root_directory freeze the target's exact
+        root admission independently of the selection-mode bundle_hash. The writer consumes opaque admission, verifies
+        the retained pair and child run in its materialization transaction, and never substitutes the source run's root.
+        History retains this pair without a restrictive source-artifact foreign key; executable reconstruction separately
+        requires the retained pair and exact content, and agreement with the child and permanent operation.
       ddl: |-
         CREATE TABLE run_fork_selected_contract_bindings (
             binding_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -17998,6 +18002,8 @@ platform_tables:
             fork_event_id    UUID REFERENCES events(event_id),
             mode             TEXT NOT NULL CHECK (mode IN ('selected_contracts', 'bundle_hash')),
             bundle_hash      TEXT CHECK (bundle_hash IS NULL OR bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
+            target_bundle_hash TEXT NOT NULL CHECK (target_bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
+            source_root_directory TEXT NOT NULL CHECK (source_root_directory <> ''),
             created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             CHECK ((mode = 'selected_contracts' AND bundle_hash IS NULL) OR (mode = 'bundle_hash' AND bundle_hash IS NOT NULL)),
             CHECK ((fork_point_kind = 'event' AND fork_event_id IS NOT NULL) OR (fork_point_kind = 'deployment_revision' AND fork_event_id IS NULL)),

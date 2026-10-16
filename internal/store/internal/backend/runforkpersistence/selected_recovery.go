@@ -203,6 +203,8 @@ func loadSelectedRecoveryRecordTx(ctx context.Context, tx *sql.Tx, snapshot runl
 		binding.ForkPoint.Revision != entry.Binding.ForkPoint.Revision ||
 		binding.ForkPoint.EventID != entry.Binding.ForkPoint.EventID ||
 		binding.ContractSelection != entry.Binding.ContractSelection ||
+		binding.TargetRootReference != entry.Binding.TargetRootReference ||
+		binding.TargetRootReference != snapshot.RootReference ||
 		!binding.CreatedAt.Equal(entry.Binding.CreatedAt) || snapshot.BundleHash != entry.BundleHash {
 		return result, fmt.Errorf("selected recovery binding changed")
 	}
@@ -715,6 +717,7 @@ func selectedForkOperationForRecoveryTx(ctx context.Context, tx *sql.Tx, binding
 		return runfork.ForkOperationRecord{}, err
 	}
 	if !found || record.ForkRunID != binding.ForkRunID || record.BindingID != binding.BindingID ||
+		record.Request.TargetRootReference != binding.TargetRootReference ||
 		record.Request.SourceRunID != binding.SourceRunID || record.Request.TargetBundleHash != bundleHash ||
 		record.Request.ResolvedPoint == nil || !sameSelectedForkPointIdentity(*record.Request.ResolvedPoint, binding.ForkPoint) ||
 		record.Request.ForkEventID != binding.ForkEventID || record.Request.ContractSelection != binding.ContractSelection {

@@ -232,6 +232,7 @@ type RunForkMaterializeRequest struct {
 	At                      string
 	ContractSelection       *RunForkContractSelection
 	SourceArtifactFact      runtimecorrelation.SourceArtifactFact
+	RootAdmission           sourceartifact.RootAdmission
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
 	DataPinOverrides        []durabledata.ExplicitPin
 	FanOutPlanRefs          []runtimecontracts.FanOutPlanRef
