@@ -2000,8 +2000,8 @@ func debtCollectorDigest(root string) (string, error) {
 	// Include the whole census implementation and the ratchet/scope policy.
 	// Hostile tests and generated debt rows do not define the permission model.
 	hash := sha256.New()
-	for _, path := range []string{"internal/store/persistence_authority_debt_census_test.go", "internal/store/persistence_authority_debt_test.go", "internal/store/persistence_authority_debt_cache_test.go", "internal/store/persistence_authority_debt_sidecar_test.go", "internal/store/persistence_authority_debt_process_lease_test.go"} {
-		if path == "internal/store/persistence_authority_debt_cache_test.go" || path == "internal/store/persistence_authority_debt_sidecar_test.go" || path == "internal/store/persistence_authority_debt_process_lease_test.go" {
+	for _, path := range []string{"internal/store/persistence_authority_debt_census_test.go", "internal/store/persistence_authority_debt_test.go", "internal/store/persistence_authority_debt_cache_test.go", "internal/store/persistence_authority_debt_sidecar_test.go", "internal/store/persistence_authority_debt_process_lease_test.go", "internal/store/persistence_authority_debt_session_inventory_test.go"} {
+		if path == "internal/store/persistence_authority_debt_cache_test.go" || path == "internal/store/persistence_authority_debt_sidecar_test.go" || path == "internal/store/persistence_authority_debt_process_lease_test.go" || path == "internal/store/persistence_authority_debt_session_inventory_test.go" {
 			if _, err := os.Stat(filepath.Join(root, path)); os.IsNotExist(err) {
 				continue // Only immutable predecessor archives predate these owners.
 			}
@@ -2414,6 +2414,9 @@ func debtValidateCollectorIdentity(base, current string, trusted, head authority
 		return fmt.Errorf("debt baseline bootstrap source changed")
 	}
 	if base == current && trusted.Collector == current && head.Collector == current {
+		return nil
+	}
+	if debtSessionInventoryCollectorTransition(base, current, trusted, head, retirement...) {
 		return nil
 	}
 	if debtRepair2698Round2CollectorTransition(base, current, trusted, head, retirement...) {

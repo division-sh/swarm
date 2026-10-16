@@ -148,7 +148,7 @@ func CatchUp2542HistoricalSource(root, path string, current []byte) ([]byte, err
 	return current, nil
 }
 
-func CatchUp2542HistoricalFunction(root, path, name, current string) (string, error) {
+func catchUp2542HistoricalFunction(root, path, name, current string) (string, error) {
 	var err error
 	repaired, err := repair2698HistoricalFunction(root, path, name, current)
 	if err != nil {

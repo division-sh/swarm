@@ -85,6 +85,7 @@ func TestPersistenceAuthorityDebtFixtureRoleFingerprintIsRequired(t *testing.T) 
 		"internal/store/persistence_authority_debt_cache_test.go",
 		"internal/store/persistence_authority_debt_sidecar_test.go",
 		"internal/store/persistence_authority_debt_process_lease_test.go",
+		"internal/store/persistence_authority_debt_session_inventory_test.go",
 		"internal/checkoutsource/fixture_role.go",
 	} {
 		data, err := os.ReadFile(filepath.Join(root, path))
@@ -92,6 +93,9 @@ func TestPersistenceAuthorityDebtFixtureRoleFingerprintIsRequired(t *testing.T) 
 			t.Fatal(err)
 		}
 		debtWriteModuleSource(t, copy, path, string(data))
+	}
+	if copied, err := debtCollectorDigest(copy); err != nil || copied != digest {
+		t.Fatalf("copied policy differs before role mutation: %s %v", copied, err)
 	}
 	const role = "internal/checkoutsource/fixture_role.go"
 	data, err := os.ReadFile(filepath.Join(copy, role))

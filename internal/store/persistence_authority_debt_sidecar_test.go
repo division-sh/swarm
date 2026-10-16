@@ -166,6 +166,9 @@ func debtRepair2698CleanupHistoricalSource(root, path string, actual []byte) ([]
 }
 
 func debtRepair2698SuccessorHistoricalSource(root, path string, current []byte) ([]byte, error) {
+	if path == debtSessionInventorySource {
+		return debtSessionInventoryHistoricalSource(root, path, current)
+	}
 	if path == debtRepair2698CleanupSource {
 		return debtRepair2698CleanupHistoricalSource(root, path, current)
 	}
@@ -232,7 +235,7 @@ func debtRepair2698SignedSource(root, ref, path, digest string) ([]byte, error) 
 func debtRepair2698HistoricalSource(root, path string, current []byte) ([]byte, error) {
 	actual := current
 	current, err := debtRepair2698SuccessorHistoricalSource(root, path, current)
-	if err != nil || (path == debtRepair2698FixtureNameSource || path == debtRepair2698CleanupSource) && bytes.Equal(actual, current) {
+	if err != nil || (path == debtRepair2698FixtureNameSource || path == debtRepair2698CleanupSource || path == debtSessionInventorySource) && bytes.Equal(actual, current) {
 		return current, err
 	}
 	packet, err := debtRepair2698ReadPacket(root)
@@ -627,15 +630,20 @@ func debtCatchUpSignedBaseline(root, ref, collector string) (authorityDebtBaseli
 
 func debtCatchUpCollectorSource(root string) error {
 	actual, err := debtCollectorDigest(root)
-	if err != nil || (actual != debtCatchUpCollectorTo && actual != debtCatchUpFreshnessCollectorTo && actual != debtCatchUpNativeEntryCollectorTo && actual != debtRepair2698CollectorTo && actual != debtRepair2698ProofCostCollectorTo && actual != debtRepair2698CleanupCollectorTo && actual != debtRepair2698Round2CollectorTo) {
+	if err != nil || (actual != debtCatchUpCollectorTo && actual != debtCatchUpFreshnessCollectorTo && actual != debtCatchUpNativeEntryCollectorTo && !debtRepair2698HasSourcePolicy(actual)) {
 		return fmt.Errorf("joined collector is not its exact enumerated source: %s: %v", actual, err)
+	}
+	if actual == debtSessionInventoryCollectorTo {
+		if err := debtSessionInventorySourcePolicy(root); err != nil {
+			return err
+		}
 	}
 	if actual == debtCatchUpFreshnessCollectorTo {
 		if err := debtCatchUpFreshnessOwnerSource(root); err != nil {
 			return err
 		}
 	}
-	if actual == debtCatchUpNativeEntryCollectorTo || actual == debtRepair2698CollectorTo || actual == debtRepair2698ProofCostCollectorTo || actual == debtRepair2698CleanupCollectorTo || actual == debtRepair2698Round2CollectorTo {
+	if actual == debtCatchUpNativeEntryCollectorTo || debtRepair2698HasSourcePolicy(actual) {
 		if err := debtCatchUpNativeEntryOwnerSource(root); err != nil {
 			return err
 		}
@@ -644,7 +652,7 @@ func debtCatchUpCollectorSource(root string) error {
 	if err != nil {
 		return err
 	}
-	if actual == debtRepair2698CollectorTo || actual == debtRepair2698ProofCostCollectorTo || actual == debtRepair2698CleanupCollectorTo || actual == debtRepair2698Round2CollectorTo {
+	if debtRepair2698HasSourcePolicy(actual) {
 		if err := debtRepair2698SourcePolicy(root, packet); err != nil {
 			return err
 		}
@@ -654,7 +662,7 @@ func debtCatchUpCollectorSource(root string) error {
 		if file.ComposedSHA256 == "absent" && os.IsNotExist(err) {
 			continue
 		}
-		if err == nil && (actual == debtRepair2698CollectorTo || actual == debtRepair2698ProofCostCollectorTo || actual == debtRepair2698CleanupCollectorTo || actual == debtRepair2698Round2CollectorTo) {
+		if err == nil && debtRepair2698HasSourcePolicy(actual) {
 			raw, err = debtRepair2698HistoricalSource(root, file.File, raw)
 		}
 		if err != nil || debtBaselineChecksum(raw) != file.ComposedSHA256 {
@@ -966,6 +974,8 @@ func debtBaselineWithCollector(root string, data []byte, collector string, histo
 func debtSourceUnrefreshedBaseline(root string, metadata, data []byte, baseline authorityDebtBaseline, collector string, historical bool, prior error) (authorityDebtBaseline, error, bool) {
 	var owner func(string, []byte, []byte, authorityDebtBaseline, bool, error) (authorityDebtBaseline, error)
 	switch collector {
+	case debtSessionInventoryCollectorTo:
+		owner = debtSessionInventoryUnrefreshedBaseline
 	case debtRepair2698Round2CollectorTo:
 		owner = debtRepair2698Round2UnrefreshedBaseline
 	case debtRepair2698CleanupCollectorTo:

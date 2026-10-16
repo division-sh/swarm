@@ -1,0 +1,12 @@
+{
+  "BeforeCommit": "f98083f8cef12a0b02e894b729b87c8b9f634921",
+  "AfterCommit": "f9802ccaf6938dd3744aed977af40455aa588079",
+  "Authorization": "https://github.com/division-sh/swarm/issues/2577#issuecomment-6223472352",
+  "Files": [
+    {
+      "File": "internal/runtime/channel_runtime_supported_surface_test.go",
+      "BeforeSHA256": "3ec8baf3b375b09c5a8d55b334ee991fd51e8f2816569ea56a5fe6d19020ea03",
+      "AfterSHA256": "488baa15e9b201b364533aa720989004d010b2a7ad9f29e482e7695a3322014f"
+    }
+  ]
+}

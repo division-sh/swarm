@@ -82,7 +82,7 @@ func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	head.Collector = debtActiveCollectorTo
+	head.Collector = debtRepair2698Round2CollectorTo
 	proof := debtDeliveryRetirementProof{Root: root, Actual: maps.Clone(head.Sites)}
 	if !debtRepair2698Round2CollectorTransition(trusted.Collector, head.Collector, trusted, head, proof) {
 		t.Fatal("exact forward source continuation refused")
@@ -98,7 +98,7 @@ func TestPersistenceAuthorityDebtRepair2698ExactSourceAndForwardPolicy(t *testin
 			t.Fatalf("round-2 retargeted its original collector: %s: %v", actual, err)
 		}
 		current := original
-		current.Collector = debtActiveCollectorTo
+		current.Collector = debtRepair2698Round2CollectorTo
 		proof := debtDeliveryRetirementProof{Root: root, Actual: maps.Clone(current.Sites)}
 		if !debtRepair2698Round2CollectorTransition(original.Collector, current.Collector, original, current, proof) ||
 			debtRepair2698Round2CollectorTransition(current.Collector, original.Collector, current, original, proof) ||

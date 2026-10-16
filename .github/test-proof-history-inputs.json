@@ -24,6 +24,8 @@
     "e857a1e482a2e08ab63f2e8169b4472e608cfdc2",
     "f5c57acafdae2cd0750f493c15ca667ca3d84e33",
     "f8ffc42420a93b6dfb3575c4a3dddeee9d858693",
+    "f9802ccaf6938dd3744aed977af40455aa588079",
+    "f98083f8cef12a0b02e894b729b87c8b9f634921",
     "ff690517b59af2456c8c9a30c42ca216fb5ae9c1"
   ],
   "github.com/division-sh/swarm/scripts/rewrite-stages-2566": [
@@ -88,7 +90,9 @@
     "dec6f1a009400d230b0bb92c83c0997ae35b2938",
     "e857a1e482a2e08ab63f2e8169b4472e608cfdc2",
     "f0ce6f7bea8f8f89d44f98a317ed0432e2ba90ce",
-    "f5c57acafdae2cd0750f493c15ca667ca3d84e33"
+    "f5c57acafdae2cd0750f493c15ca667ca3d84e33",
+    "f9802ccaf6938dd3744aed977af40455aa588079",
+    "f98083f8cef12a0b02e894b729b87c8b9f634921"
   ],
   "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/budgetdiagnostic": [
     "07e3cce858308112e45070ec35d5c73983c81460",
@@ -112,7 +116,9 @@
     "bfb2ceb887f97d66f30d1507707cabbef3c6be49",
     "dec6f1a009400d230b0bb92c83c0997ae35b2938",
     "e857a1e482a2e08ab63f2e8169b4472e608cfdc2",
-    "f5c57acafdae2cd0750f493c15ca667ca3d84e33"
+    "f5c57acafdae2cd0750f493c15ca667ca3d84e33",
+    "f9802ccaf6938dd3744aed977af40455aa588079",
+    "f98083f8cef12a0b02e894b729b87c8b9f634921"
   ],
   "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/channelsettlement": [
     "07e3cce858308112e45070ec35d5c73983c81460",
@@ -137,7 +143,9 @@
     "bfb2ceb887f97d66f30d1507707cabbef3c6be49",
     "dec6f1a009400d230b0bb92c83c0997ae35b2938",
     "e857a1e482a2e08ab63f2e8169b4472e608cfdc2",
-    "f5c57acafdae2cd0750f493c15ca667ca3d84e33"
+    "f5c57acafdae2cd0750f493c15ca667ca3d84e33",
+    "f9802ccaf6938dd3744aed977af40455aa588079",
+    "f98083f8cef12a0b02e894b729b87c8b9f634921"
   ],
   "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole": [
     "07e3cce858308112e45070ec35d5c73983c81460",
@@ -160,7 +168,9 @@
     "bfb2ceb887f97d66f30d1507707cabbef3c6be49",
     "dec6f1a009400d230b0bb92c83c0997ae35b2938",
     "e857a1e482a2e08ab63f2e8169b4472e608cfdc2",
-    "f5c57acafdae2cd0750f493c15ca667ca3d84e33"
+    "f5c57acafdae2cd0750f493c15ca667ca3d84e33",
+    "f9802ccaf6938dd3744aed977af40455aa588079",
+    "f98083f8cef12a0b02e894b729b87c8b9f634921"
   ],
   "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/servedsettlement": [
     "07e3cce858308112e45070ec35d5c73983c81460",
@@ -191,7 +201,9 @@
     "bfb2ceb887f97d66f30d1507707cabbef3c6be49",
     "dec6f1a009400d230b0bb92c83c0997ae35b2938",
     "e857a1e482a2e08ab63f2e8169b4472e608cfdc2",
-    "f5c57acafdae2cd0750f493c15ca667ca3d84e33"
+    "f5c57acafdae2cd0750f493c15ca667ca3d84e33",
+    "f9802ccaf6938dd3744aed977af40455aa588079",
+    "f98083f8cef12a0b02e894b729b87c8b9f634921"
   ],
   "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/migrate-budget-diagnostics": [
     "50315ab6755c15d6137fa5cf4186c935bc2c5c24",
@@ -221,7 +233,9 @@
     "bfb2ceb887f97d66f30d1507707cabbef3c6be49",
     "dec6f1a009400d230b0bb92c83c0997ae35b2938",
     "e857a1e482a2e08ab63f2e8169b4472e608cfdc2",
-    "f5c57acafdae2cd0750f493c15ca667ca3d84e33"
+    "f5c57acafdae2cd0750f493c15ca667ca3d84e33",
+    "f9802ccaf6938dd3744aed977af40455aa588079",
+    "f98083f8cef12a0b02e894b729b87c8b9f634921"
   ],
   "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/migrate-fork-notices": [
     "07e3cce858308112e45070ec35d5c73983c81460",
@@ -253,7 +267,9 @@
     "bfb2ceb887f97d66f30d1507707cabbef3c6be49",
     "dec6f1a009400d230b0bb92c83c0997ae35b2938",
     "e857a1e482a2e08ab63f2e8169b4472e608cfdc2",
-    "f5c57acafdae2cd0750f493c15ca667ca3d84e33"
+    "f5c57acafdae2cd0750f493c15ca667ca3d84e33",
+    "f9802ccaf6938dd3744aed977af40455aa588079",
+    "f98083f8cef12a0b02e894b729b87c8b9f634921"
   ],
   "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/migrate-public-join": [
     "07e3cce858308112e45070ec35d5c73983c81460",
@@ -285,7 +301,9 @@
     "c760d28bd28b84c7b62578cbe7037833d441747f",
     "dec6f1a009400d230b0bb92c83c0997ae35b2938",
     "e857a1e482a2e08ab63f2e8169b4472e608cfdc2",
-    "f5c57acafdae2cd0750f493c15ca667ca3d84e33"
+    "f5c57acafdae2cd0750f493c15ca667ca3d84e33",
+    "f9802ccaf6938dd3744aed977af40455aa588079",
+    "f98083f8cef12a0b02e894b729b87c8b9f634921"
   ],
   "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/migrate-served-settlement": [
     "07e3cce858308112e45070ec35d5c73983c81460",
@@ -316,7 +334,9 @@
     "bfb2ceb887f97d66f30d1507707cabbef3c6be49",
     "dec6f1a009400d230b0bb92c83c0997ae35b2938",
     "e857a1e482a2e08ab63f2e8169b4472e608cfdc2",
-    "f5c57acafdae2cd0750f493c15ca667ca3d84e33"
+    "f5c57acafdae2cd0750f493c15ca667ca3d84e33",
+    "f9802ccaf6938dd3744aed977af40455aa588079",
+    "f98083f8cef12a0b02e894b729b87c8b9f634921"
   ],
   "github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/reconcile-family145": [
     "0396a9b746ae7a4c2d901e19be8858f4dfa3f553",
@@ -364,6 +384,8 @@
     "d2dcbacad05db895e6cda5c1214ef5530f2b253e",
     "dec6f1a009400d230b0bb92c83c0997ae35b2938",
     "e857a1e482a2e08ab63f2e8169b4472e608cfdc2",
-    "f5c57acafdae2cd0750f493c15ca667ca3d84e33"
+    "f5c57acafdae2cd0750f493c15ca667ca3d84e33",
+    "f9802ccaf6938dd3744aed977af40455aa588079",
+    "f98083f8cef12a0b02e894b729b87c8b9f634921"
   ]
 }

@@ -93,6 +93,9 @@ func repair2698CleanupHistoricalSource(root, path string, actual []byte) ([]byte
 }
 
 func Repair2698SuccessorHistoricalSource(root, path string, current []byte) ([]byte, error) {
+	if path == SessionInventory2577Path {
+		return sessionInventory2577HistoricalSource(root, path, current)
+	}
 	if path == Repair2698CleanupPath {
 		return repair2698CleanupHistoricalSource(root, path, current)
 	}
@@ -209,7 +212,7 @@ func readRepair2698Sources() ([]Repair2698Source, error) {
 func Repair2698HistoricalSource(root, path string, current []byte) ([]byte, error) {
 	actual := current
 	current, err := Repair2698SuccessorHistoricalSource(root, path, current)
-	if err != nil || (path == Repair2698FixtureNamePath || path == Repair2698CleanupPath) && bytes.Equal(actual, current) {
+	if err != nil || (path == Repair2698FixtureNamePath || path == Repair2698CleanupPath || path == SessionInventory2577Path) && bytes.Equal(actual, current) {
 		return current, err // No stale intermediate acquires the combined inverse.
 	}
 	pins, err := readRepair2698Sources()
