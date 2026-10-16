@@ -114,3 +114,28 @@ pinned master9beb615299 (>=30 cognitive539->539; cyclomatic247->247); vet PASS.
 The affected native boundary/read/fault selection PASSes under race59.077s.
 The separate publication-schema consumer selection PASSes under race71.804s,
 including uncertainty, rollback and the exact installed-fault observations.
+
+## Retired Route Witness Repair
+
+Decision5's missing route witness is repaired against
+`platform-spec.yaml#platform_tables.retired_instance_routing`: querying or
+recreating routing_rules is unsupported. The historical recipe inputs remain
+unchanged and show that BOTH original route queries were GLOBAL (the supplied
+run parameter was only checked for non-nullness). Their supported replacement
+is explicitly named `persisted_delivery_routes`, using the existing closed
+delivery owner `FixtureDeliveryCardinalityTx` in each original read transaction.
+No new SQL port, runtime eligibility selector or legacy-key compatibility alias
+is introduced. Native construction remains separately witnessed by the original
+flow_instances/readiness counts.
+
+The original zero/headerless source, full maps, three independent read commits,
+cancellation, closed owner and rollback controls remain. A positive foreign-run
+persisted node obligation then proves global counts become1 while original-run
+delivery count stays0 and construction/readiness remain absent. This prevents a
+constant-zero replacement or accidental run-filtered/global conflation.
+
+The two source-entity roots plus executable-delivery/pipeline ownership guards
+PASS17.639s under race on both stores. Receipt:
+`pr2698-selected-fork-canonical-route-witness.log`. This repair is not a global
+history/registry/ratchet/preflight receipt; its current source still belongs in
+the single finite final composition.
