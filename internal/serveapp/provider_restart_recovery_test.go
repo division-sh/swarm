@@ -105,6 +105,7 @@ func proveProviderRestartRecovery(t *testing.T, backend string, completed bool) 
 	if updated == string(raw) {
 		t.Fatal("restart config has no canonical backend line")
 	}
+	updated += "\nbudget:\n  system_monthly_cap: 1\n"
 	if err := os.WriteFile(configPath, []byte(updated), 0600); err != nil {
 		t.Fatal(err)
 	}
