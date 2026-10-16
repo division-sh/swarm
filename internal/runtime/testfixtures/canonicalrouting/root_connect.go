@@ -20,12 +20,10 @@ func WritePublicTemplateInputRoute(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	files := map[string]string{
-		"manifest.yaml": `name: review
-version: "1.0.0"
+		"manifest.yaml": `version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `,
-		"schema.yaml": `name: review
-pins:
+		"schema.yaml": `pins:
   inputs:
     - bootstrap.requested
 `,
@@ -38,8 +36,7 @@ pins:
   event_handlers:
     bootstrap.requested: {}
 `,
-		"operating/schema.yaml": `name: operating
-instance: operating_id
+		"operating/schema.yaml": `instance: operating_id
 pins:
   inputs:
     - opco.product_initialization_requested
@@ -75,8 +72,7 @@ func CopyRootOutputConnect(t testing.TB, emit RootConnectEmit) string {
 	if err := os.RemoveAll(filepath.Join(root, "producer")); err != nil {
 		t.Fatalf("remove inherited producer flow: %v", err)
 	}
-	writeClosedVariantFile(t, root, "manifest.yaml", `name: root-output-connect
-version: "1.0.0"
+	writeClosedVariantFile(t, root, "manifest.yaml", `version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
 	rootInput := ""
@@ -89,13 +85,12 @@ platform_version: ">=0.7.0 <0.8.0"
 		}
 		rootNodes = "root-node:\n  execution_type: system_node\n  event_handlers:\n    root.start:\n" + emitBody
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: root-output-connect\npins:\n"+rootInput+"  outputs: [root.ready]\nconnect:\n  - event: root.ready\n    from: .\n    to: consumer\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "pins:\n"+rootInput+"  outputs: [root.ready]\nconnect:\n  - event: root.ready\n    from: .\n    to: consumer\n")
 	writeClosedVariantFile(t, root, "events.yaml", "root.start:\n  entity_id: text\nroot.ready:\n  entity_id: text\n")
 	if rootNodes != "" {
 		writeClosedVariantFile(t, root, "nodes.yaml", rootNodes)
 	}
-	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
-pins:
+	writeLegacyInstanceFlow(t, root, "consumer", `pins:
   inputs:
     - root.ready
 `, "", "", `consumer-node:
@@ -120,7 +115,7 @@ func CopyRootOutputConnectMissingReceiver(t testing.TB) string {
 func CopyRootOutputConnectWithChildPublisher(t testing.TB) string {
 	t.Helper()
 	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
-	writeClosedVariantFile(t, root, "child/schema.yaml", "name: child\npins:\n  outputs: [root.ready]\n")
+	writeClosedVariantFile(t, root, "child/schema.yaml", "pins:\n  outputs: [root.ready]\n")
 	writeClosedVariantFile(t, root, "child/events.yaml", "root.ready:\n  entity_id: text\n")
 	writeClosedVariantFile(t, root, "child/nodes.yaml", `child-node:
   execution_type: system_node
@@ -139,12 +134,10 @@ func CopyRootOutputConnectWithChildPublisher(t testing.TB) string {
 func CopyRootOutputSingletonConnect(t testing.TB) string {
 	t.Helper()
 	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
-	writeClosedVariantFile(t, root, "manifest.yaml", `name: root-output-singleton-connect
-version: "1.0.0"
+	writeClosedVariantFile(t, root, "manifest.yaml", `version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
-	writeClosedVariantFile(t, root, "schema.yaml", `name: root-output-singleton-connect
-pins:
+	writeClosedVariantFile(t, root, "schema.yaml", `pins:
   outputs:
     - root.ready
 connect:
@@ -152,8 +145,7 @@ connect:
     from: .
     to: consumer
 `)
-	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
-pins:
+	writeLegacyInstanceFlow(t, root, "consumer", `pins:
   inputs:
     - root.ready
 `, "", "", `consumer-node:
@@ -174,7 +166,6 @@ func CopyRootOutputSingletonArc(t testing.TB) string {
 	if err := os.Rename(consumerDir, receiverDir); err != nil {
 		t.Fatalf("rename singleton receiver fixture: %v", err)
 	}
-	applyClosedReplacement(t, filepath.Join(receiverDir, "schema.yaml"), "name: consumer\n", "name: receiver\n")
 	applyClosedReplacement(t, filepath.Join(receiverDir, "nodes.yaml"), "consumer-node", "arc-receiver")
 	return root
 }
@@ -189,8 +180,6 @@ func CopySingletonOutputRootConnect(t testing.TB) string {
 func CopyNestedSingletonOutputRootConnect(t testing.TB) string {
 	t.Helper()
 	root := copySingletonOutputRootConnect(t, "left/child/scout")
-	writeClosedVariantFile(t, root, "left/schema.yaml", "name: left\n")
-	writeClosedVariantFile(t, root, "left/child/schema.yaml", "name: child\n")
 	return root
 }
 
@@ -200,12 +189,10 @@ func copySingletonOutputRootConnect(t testing.TB, scoutPath string) string {
 	if err := os.RemoveAll(filepath.Join(root, "consumer")); err != nil {
 		t.Fatalf("remove unused inherited consumer flow: %v", err)
 	}
-	writeClosedVariantFile(t, root, "manifest.yaml", `name: singleton-output-root-connect
-version: "1.0.0"
+	writeClosedVariantFile(t, root, "manifest.yaml", `version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
-	writeClosedVariantFile(t, root, "schema.yaml", fmt.Sprintf(`name: singleton-output-root-connect
-pins:
+	writeClosedVariantFile(t, root, "schema.yaml", fmt.Sprintf(`pins:
   inputs: [scout.completed]
 connect:
   - event: scout.completed
@@ -221,8 +208,7 @@ connect:
         id: selected_owner
         check: _entity.id != ""
 `)
-	writeLegacyInstanceFlow(t, root, scoutPath, `name: scout
-pins:
+	writeLegacyInstanceFlow(t, root, scoutPath, `pins:
   outputs:
     - scout.completed
 `, "scout.completed:\n  proof: string\n", "", "")
@@ -236,12 +222,10 @@ func CopyRootSingletonBoomerang(t testing.TB) string {
 	if err := os.RemoveAll(filepath.Join(root, "consumer")); err != nil {
 		t.Fatalf("remove unused inherited consumer flow: %v", err)
 	}
-	writeClosedVariantFile(t, root, "manifest.yaml", `name: root-singleton-boomerang
-version: "1.0.0"
+	writeClosedVariantFile(t, root, "manifest.yaml", `version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
-	writeClosedVariantFile(t, root, "schema.yaml", `name: root-singleton-boomerang
-pins:
+	writeClosedVariantFile(t, root, "schema.yaml", `pins:
   inputs:
     - work.pong
   outputs:
@@ -264,8 +248,7 @@ connect:
         id: selected_owner
         check: _entity.id != ""
 `)
-	writeLegacyInstanceFlow(t, root, "boomerang", `name: boomerang
-pins:
+	writeLegacyInstanceFlow(t, root, "boomerang", `pins:
   inputs:
     - work.ping
   outputs:
