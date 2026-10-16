@@ -176,6 +176,15 @@ func TestS1ProviderKeyBoundariesReachEveryReferenceAndSchemaOwner(t *testing.T) 
 			} else if !strings.Contains(err.Error(), "inbound.<provider-directory>.<local-event>") {
 				t.Errorf("invalid provider declaration lost the new form: %v", err)
 			}
+			if !tc.valid {
+				bundle := &WorkflowContractBundle{}
+				for _, names := range [][2]string{{event, event}, {"business.message", "child/" + event}} {
+					_, included, err := bundle.compileCurrentEventDeclaration(".", "flow", "events.yaml", names[0], names[1], EventCatalogEntry{}, TypeCatalogDocument{})
+					if included || err == nil || !strings.Contains(err.Error(), "inbound.<provider-directory>.<local-event>") {
+						t.Errorf("current schema accepted an invalid local/qualified key or lost teaching: %q %v", names, err)
+					}
+				}
+			}
 		})
 	}
 }
