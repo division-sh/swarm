@@ -577,6 +577,7 @@ func admitHistoricalReplayReceiverClaimFixtures(t *testing.T, ctx context.Contex
 	for i, delivery := range pending {
 		records[i] = agentFixtureStaticRecord(t, delivery.Route.AgentIdentity)
 		records[i].Config.FlowID = delivery.Route.Initialization.ConstructionTarget().Route().FlowID
+		records[i].Config = resolveNativeClaimFixtureActor(t, records[i].Config)
 		if records[i].Config.EntityID != "" {
 			t.Fatal("historical actor fixture must remain exactly entityless")
 		}
