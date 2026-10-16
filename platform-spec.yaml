@@ -5202,9 +5202,20 @@ handler_specification:
         runtime-only state.
       minimal_form:
         id: 'required for handler.rules activities; optional for handler-level activities'
-        tool: string — authored tools.yaml tool id
+        tool: string — effective tool id in the activity's declaring flow
         input: object — maps tool input field names to the same expression value grammar used by emit.fields
         approval: 'optional object for non_idempotent_write only; canonical minimal form is `{decision: <stable-decision-id>}`'
+      tool_contract_owner: >
+        WorkflowContractBundle.ActivityToolEntry and the mandatory semanticview.Source.ActivityToolEntry adapter resolve
+        activities by their exact typed declaring node/flow, never a global tool alias or the concrete execution route.
+        Before effective composition, nearest whole authored declarations shadow ancestors; siblings are not visible.
+        CompileActivityToolBindings merges those inherited declarations with the effective scope tools and freezes the
+        resulting tool contracts in the existing private activityToolsByFlow snapshot. When that snapshot exists, a missing
+        flow/tool refuses without authored/global fallback. Generated outcome schemas, runtime and boot expression checks,
+        intent construction, selected lineage, ordinary dispatch and approval readback consume this same contract. Exported
+        tool/scope readbacks and later source-map mutation cannot replace a frozen binding. Private channel activities retain
+        their separate exact activation/generation-bound target owner; this rule does not admit platform, MCP or native tools
+        as ordinary authored activities, change credentials or effect classes, or grant execution from source visibility.
       mock_execution: >
         Mock-mode activity execution is admitted before journal, credential, preparation, or transport work. Only an exact
         effective provider_connector tool with a source-compiled deterministic response matching that tool's output_schema may execute,

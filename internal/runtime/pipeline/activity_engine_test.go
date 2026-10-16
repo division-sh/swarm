@@ -36,6 +36,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
@@ -818,7 +819,7 @@ func TestPipelineActivityRequestEventExecutesHTTPToolAndPublishesGeneratedSucces
 	}))
 	defer server.Close()
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := activityToolFixtureSource(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 				"title": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
@@ -892,7 +893,7 @@ func TestPipelineActivityRequestRetriesReadOnlyHTTPTool(t *testing.T) {
 	}))
 	defer server.Close()
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := activityToolFixtureSource(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
 				Method: "GET",
@@ -939,7 +940,7 @@ func TestPipelineActivityRequestFailsClosedForWriteEffectClass(t *testing.T) {
 	}))
 	defer server.Close()
 
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := activityToolFixtureSource(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
 			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
 				Method: "POST",
@@ -1000,7 +1001,8 @@ func VerifyPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCre
 	defer server.Close()
 	credentialStore := testActivityCredentialStore(t, "provider.token", "provider-secret")
 	source := semanticview.Wrap(loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml": "stages: []\n",
+		"schema.yaml":          "stages: []\n",
+		"research/schema.yaml": "stages: []\n",
 		"tools.yaml": fmt.Sprintf(`provider_write:
   handler_type: http
   effect_class: non_idempotent_write
@@ -1930,6 +1932,15 @@ func testActivityIntent(inputURL string) runtimeengine.ActivityIntent {
 		ExecutionMode:   executionmode.Live,
 		RoutingSource:   routingSource,
 	}.Normalized()
+}
+
+// Direct dispatcher component tests declare the exact research scope used by
+// testActivityIntent. This does not mint a rooted source or native authority.
+func activityToolFixtureSource(bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
+	root := &runtimecontracts.FlowContractView{Path: ".", Paths: runtimecontracts.FlowContractPaths{FlowPath: "."}, Tools: bundle.Tools}
+	root.Children = []runtimecontracts.FlowContractView{{Path: "research", Paths: runtimecontracts.FlowContractPaths{FlowPath: "research"}}}
+	bundle.FlowTree = runtimecontracts.FlowTree{Root: root, ByID: map[string]*runtimecontracts.FlowContractView{".": root, "research": &root.Children[0]}}
+	return semanticviewtest.WrapRootAgents(bundle)
 }
 
 func mustActivityInput(input map[string]any) semanticvalue.Value {

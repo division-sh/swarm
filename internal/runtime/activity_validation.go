@@ -96,7 +96,7 @@ func validateActivitySpec(source semanticview.Source, node runtimeidentity.Execu
 	if toolID == "" {
 		return []error{fmt.Errorf("%s: tool is required", context)}
 	}
-	tool, ok := source.ToolEntries()[toolID]
+	tool, ok := source.ActivityToolEntry(node, toolID)
 	if !ok {
 		return []error{fmt.Errorf("%s: tool %q is not declared in tools.yaml", context, toolID)}
 	}

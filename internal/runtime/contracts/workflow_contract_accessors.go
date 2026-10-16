@@ -524,20 +524,38 @@ func (b *WorkflowContractBundle) ToolEntries() map[string]ToolSchemaEntry {
 // ToolEntryForFlow resolves a declaration before callers inspect its handler
 // kind. A nearer declaration shadows its ancestors, including a wrong kind.
 func (b *WorkflowContractBundle) ToolEntryForFlow(flowID, toolID string) (ToolSchemaEntry, bool) {
-	if b == nil || b.FlowTree.Root == nil || strings.TrimSpace(toolID) == "" {
+	if strings.TrimSpace(toolID) == "" {
 		return ToolSchemaEntry{}, false
 	}
-	views := []*FlowContractView{b.FlowTree.Root}
-	if strings.TrimSpace(flowID) != "" {
-		views = flowmodel.CollectPathByID(b.FlowTree.Root, flowID,
-			func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.FlowPath) }, flowViewChildren)
-	}
+	views := b.toolDeclarationViews(flowID)
 	for index := len(views) - 1; index >= 0; index-- {
 		if entry, ok := views[index].Tools[strings.TrimSpace(toolID)]; ok {
 			return entry, true
 		}
 	}
 	return ToolSchemaEntry{}, false
+}
+
+// ToolEntriesForFlow uses the same whole-declaration shadowing as exact lookup.
+func (b *WorkflowContractBundle) ToolEntriesForFlow(flowID string) map[string]ToolSchemaEntry {
+	out := map[string]ToolSchemaEntry{}
+	for _, view := range b.toolDeclarationViews(flowID) {
+		for name, entry := range view.Tools {
+			out[name] = entry
+		}
+	}
+	return out
+}
+
+func (b *WorkflowContractBundle) toolDeclarationViews(flowID string) []*FlowContractView {
+	if b == nil || b.FlowTree.Root == nil {
+		return nil
+	}
+	if strings.TrimSpace(flowID) == "" {
+		return []*FlowContractView{b.FlowTree.Root}
+	}
+	return flowmodel.CollectPathByID(b.FlowTree.Root, flowID,
+		func(view *FlowContractView) string { return strings.TrimSpace(view.Paths.FlowPath) }, flowViewChildren)
 }
 
 func (b *WorkflowContractBundle) ToolEntryForExecutableNode(node runtimeidentity.ExecutableNode, toolID string) (ToolSchemaEntry, bool) {

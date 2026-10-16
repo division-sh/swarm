@@ -357,6 +357,9 @@ func (s bundleSource) EventEntry(eventType string) (runtimecontracts.EventCatalo
 func (s bundleSource) ToolEntries() map[string]runtimecontracts.ToolSchemaEntry {
 	return s.bundle.ToolEntries()
 }
+func (s bundleSource) ActivityToolEntry(node runtimeidentity.ExecutableNode, toolID string) (runtimecontracts.ToolSchemaEntry, bool) {
+	return s.bundle.ActivityToolEntry(node, toolID)
+}
 func (s bundleSource) AuthoredResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry {
 	return s.bundle.AuthoredResolvedEventCatalog()
 }

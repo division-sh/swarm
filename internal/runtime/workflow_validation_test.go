@@ -461,6 +461,10 @@ func TestActivityDiagnosticsUseRulePresentationAndPreserveRefusal(t *testing.T) 
 			runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://proof.invalid"}),
 		),
 	}
+	bundle.FlowTree.Root.Children = append(bundle.FlowTree.Root.Children, runtimecontracts.FlowContractView{
+		Path: "child", Paths: runtimecontracts.FlowContractPaths{FlowPath: "child"},
+	})
+	bundle.FlowTree.ByID["child"] = &bundle.FlowTree.Root.Children[len(bundle.FlowTree.Root.Children)-1]
 	source := compiledRuntimeValidationSource(t, bundle)
 	for _, node := range []runtimeidentity.ExecutableNode{identitytest.RootNode(t, "worker"), identitytest.FlowNode(t, "child", "worker")} {
 		t.Run(node.Key(), func(t *testing.T) {

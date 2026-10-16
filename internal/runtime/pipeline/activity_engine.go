@@ -240,7 +240,8 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 			"tool": intent.Tool, "requested_generation": intent.PlanGeneration.Diagnostic(),
 		}))
 	} else {
-		tool, ok = source.ToolEntries()[intent.Tool]
+		node, _ := intent.Owner.Node()
+		tool, ok = source.ActivityToolEntry(node, intent.Tool)
 	}
 	if !ok {
 		return d.publishActivityFailure(ctx, intent, runtimefailures.New(runtimefailures.ClassTargetUnreachable, "activity_tool_not_declared", "activity-runtime", "execute_activity", map[string]any{"tool": intent.Tool}))

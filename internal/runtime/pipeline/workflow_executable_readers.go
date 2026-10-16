@@ -216,7 +216,7 @@ func appendActivityExecutableReaders(out *[]WorkflowExecutableReader, ctx execut
 	for _, key := range keys {
 		before := len(*out)
 		appendExpressionValueExecutableReaders(out, runtimecontracts.NodeProvenanceMapPath(kind+".input", key), activity.Input[key], phase)
-		resultType, resultOptional, found, err := activityInputResultType(ctx.source, activity.Tool, key)
+		resultType, resultOptional, found, err := activityInputResultType(ctx.source, ctx.node, activity.Tool, key)
 		for index := before; index < len(*out); index++ {
 			if err != nil {
 				(*out)[index].ResultTypeError = err.Error()
@@ -232,13 +232,13 @@ func appendActivityExecutableReaders(out *[]WorkflowExecutableReader, ctx execut
 	// Approval.Decision is an opaque stable identifier, not an expression.
 }
 
-func activityInputResultType(source semanticview.Source, toolID, field string) (runtimecontracts.ResolvedCatalogType, bool, bool, error) {
+func activityInputResultType(source semanticview.Source, node runtimeidentity.ExecutableNode, toolID, field string) (runtimecontracts.ResolvedCatalogType, bool, bool, error) {
 	toolID = strings.TrimSpace(toolID)
 	field = strings.TrimSpace(field)
 	if source == nil || toolID == "" || field == "" {
 		return runtimecontracts.ResolvedCatalogType{}, false, false, nil
 	}
-	tool, ok := source.ToolEntries()[toolID]
+	tool, ok := source.ActivityToolEntry(node, toolID)
 	if !ok {
 		return runtimecontracts.ResolvedCatalogType{}, false, false, nil
 	}

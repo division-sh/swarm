@@ -256,7 +256,7 @@ func (c *checkerContext) executableReaderExpressions() []Finding {
 		nodeRef, _ := record.Identity()
 		nodeID := nodeRef.Key()
 		for _, site := range runtimecontracts.ActivitySitesForNode(nodeRef, record.Entry.EventHandlers) {
-			tool, ok := c.source.ToolEntries()[site.Spec.Tool]
+			tool, ok := c.source.ActivityToolEntry(site.Node, site.Spec.Tool)
 			if !ok {
 				continue // Tool resolution has its own check.
 			}

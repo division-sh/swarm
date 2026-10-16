@@ -412,7 +412,7 @@ func buildApprovalPoints(bundle *runtimecontracts.WorkflowContractBundle) ([]App
 		if err != nil {
 			return nil, err
 		}
-		tool := bundle.ToolEntries()[strings.TrimSpace(site.Spec.Tool)]
+		tool, _ := bundle.ActivityToolEntry(site.Node, strings.TrimSpace(site.Spec.Tool))
 		out = append(out, ApprovalPointView{
 			FlowID:       site.Node.FlowPath(),
 			NodeID:       site.Node.Key(),

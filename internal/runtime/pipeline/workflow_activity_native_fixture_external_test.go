@@ -321,6 +321,16 @@ func TestPipelineActivityRequestExecutesNonIdempotentHTTPToolOnceWithStaticCrede
 	}
 }
 
+func TestS1ScopedActivityDispatchUsesExactDeclarationBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			pipeline.VerifyS1ScopedActivityDispatchUsesExactDeclarationForTest(t, func(t *testing.T, source semanticview.Source) pipeline.WorkflowActivityNativeFixtureForTest {
+				return workflowActivityNativeSourceFixture(t, backend, source)
+			})
+		})
+	}
+}
+
 func TestGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplay(t *testing.T) {
 	verifyNativeActivityBothStores(t, pipeline.VerifyGeneratedSyntheticConnectorUsesCanonicalActivityJournalOnReplayForTest)
 }

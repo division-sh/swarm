@@ -17,7 +17,11 @@ func CompileActivityToolBindings(source Source) (Source, error) {
 	}
 	tools := make(map[string]map[string]contracts.ToolSchemaEntry)
 	for _, scope := range source.FlowScopes() {
-		tools[scope.ID] = scope.Tools
+		effective := bundle.ToolEntriesForFlow(scope.ID)
+		for name, tool := range scope.Tools {
+			effective[name] = tool
+		}
+		tools[scope.ID] = effective
 	}
 	compiled, err := contracts.CompileActivityToolBindings(bundle, tools)
 	if err != nil {
@@ -69,6 +73,10 @@ type compiledActivitySource struct {
 
 func (s compiledActivitySource) ConnectionInputs() contracts.CompiledConnectionInputs {
 	return s.connectionInputs
+}
+
+func (s compiledActivitySource) ActivityToolEntry(node identity.ExecutableNode, toolID string) (contracts.ToolSchemaEntry, bool) {
+	return s.compiled.ActivityToolEntry(node, toolID)
 }
 
 func (s compiledActivitySource) semanticSourceCore() sourceCore {

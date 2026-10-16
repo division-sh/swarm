@@ -3,7 +3,22 @@ package contracts
 import (
 	"fmt"
 	"strings"
+
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
+
+// ActivityToolEntry consumes frozen effective bindings when present. Missing
+// entries in that snapshot never fall back to an authored or global alias.
+func (b *WorkflowContractBundle) ActivityToolEntry(node runtimeidentity.ExecutableNode, toolID string) (ToolSchemaEntry, bool) {
+	if b == nil || !node.Valid() || toolID == "" || toolID != strings.TrimSpace(toolID) {
+		return ToolSchemaEntry{}, false
+	}
+	if b.activityToolsByFlow != nil {
+		tool, present := b.activityToolsByFlow[node.FlowPath()][toolID]
+		return tool, present
+	}
+	return b.ToolEntryForFlow(node.FlowPath(), toolID)
+}
 
 // CompileActivityToolBindings completes generated schemas and dependent pins
 // after tool imports have been admitted. It does not mutate the input bundle.

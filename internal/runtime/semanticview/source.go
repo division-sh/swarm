@@ -79,5 +79,6 @@ type Source interface {
 	EventEntries() map[string]runtimecontracts.EventCatalogEntry
 	EventEntry(eventType string) (runtimecontracts.EventCatalogEntry, bool)
 	ToolEntries() map[string]runtimecontracts.ToolSchemaEntry
+	ActivityToolEntry(node runtimeidentity.ExecutableNode, toolID string) (runtimecontracts.ToolSchemaEntry, bool)
 	AuthoredResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry
 }

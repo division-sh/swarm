@@ -123,7 +123,7 @@ func FreshActivityRequestLineage(request, parent events.Event, source semanticvi
 	if !delivered {
 		return ActivityRequestLineage{}, fmt.Errorf("fresh activity has no completed exact parent delivery")
 	}
-	tool, ok := source.ToolEntries()[intent.Tool]
+	tool, ok := source.ActivityToolEntry(node, intent.Tool)
 	if !ok || tool.Effect() != intent.EffectClass || !runtimecontracts.SupportedActivityEffectClass(intent.EffectClass) {
 		return ActivityRequestLineage{}, fmt.Errorf("fresh selected activity effect is not admitted")
 	}

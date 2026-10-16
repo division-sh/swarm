@@ -342,11 +342,7 @@ func (b *WorkflowContractBundle) generatedActivityDeclarationRecords() ([]curren
 		if err != nil {
 			return nil, err
 		}
-		tools := b.ToolEntries()
-		if b.activityToolsByFlow != nil {
-			tools = b.activityToolsByFlow[site.Node.FlowPath()]
-		}
-		tool, ok := tools[strings.TrimSpace(site.Spec.Tool)]
+		tool, ok := b.ActivityToolEntry(site.Node, strings.TrimSpace(site.Spec.Tool))
 		if !ok {
 			continue
 		}
