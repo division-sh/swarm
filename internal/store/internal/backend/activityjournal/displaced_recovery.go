@@ -70,8 +70,8 @@ func reconcileDisplacedHTTPActivities(ctx context.Context, attempt *mutationprot
 	return result, nil
 }
 
-func recoverActivityEvidence(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, cut storestartup.DisplacedHTTPActivityCut, dialect Dialect, id string) (runtimepipeline.ActivityAttemptRecord, error) {
-	var absent runtimepipeline.ActivityAttemptRecord
+func recoverActivityEvidence(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, cut storestartup.DisplacedHTTPActivityCut, dialect Dialect, id string) (runtimepipeline.RecoveredHTTPActivity, error) {
+	var absent runtimepipeline.RecoveredHTTPActivity
 	record, found, err := Load(ctx, tx, dialect, id)
 	if err != nil {
 		return absent, err
@@ -113,9 +113,10 @@ func activityRecoveryRequestIDs(ctx context.Context, tx *sql.Tx) ([]string, erro
 	return ids, errors.Join(rows.Err(), rows.Close())
 }
 
-func reconcileDisplacedHTTPActivity(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, dialect Dialect, record runtimepipeline.ActivityAttemptRecord, bundleHash string) (runtimepipeline.ActivityAttemptRecord, error) {
+func reconcileDisplacedHTTPActivity(ctx context.Context, tx *sql.Tx, attempt *mutationprotocol.Attempt, dialect Dialect, record runtimepipeline.ActivityAttemptRecord, bundleHash string) (runtimepipeline.RecoveredHTTPActivity, error) {
+	var absent runtimepipeline.RecoveredHTTPActivity
 	if record.ExecutionMode != runtimeeffects.ExecutionModeLive {
-		return runtimepipeline.ActivityAttemptRecord{}, errors.New("activity recovery requires exact live mode")
+		return absent, errors.New("activity recovery requires exact live mode")
 	}
 	var bundle string
 	var err error
@@ -127,31 +128,34 @@ func reconcileDisplacedHTTPActivity(ctx context.Context, tx *sql.Tx, attempt *mu
 		bundle, err = source.BundleHash(), sourceErr
 	}
 	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+		return absent, err
 	}
 	if bundle != bundleHash {
-		return runtimepipeline.ActivityAttemptRecord{}, errors.New("activity recovery run differs from the original execution source")
+		return absent, errors.New("activity recovery run differs from the original execution source")
 	}
 	request, found, err := loadActivityRecoveryEvent(ctx, tx, dialect, record.RequestEventID)
 	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+		return absent, err
 	}
 	if !found {
-		return runtimepipeline.ActivityAttemptRecord{}, errors.New("activity recovery original request is missing")
+		return absent, errors.New("activity recovery original request is missing")
 	}
 	terminal, err := runtimepipeline.DisplacedHTTPActivityResult(request, record, bundleHash)
 	if err != nil {
-		return runtimepipeline.ActivityAttemptRecord{}, err
+		return absent, err
 	}
 	if record.Status != runtimepipeline.ActivityAttemptStatusStarted {
-		return terminal, nil
+		return runtimepipeline.RecoveredHTTPActivity{ActivityAttemptRecord: terminal, Request: request, BundleHash: bundleHash}, nil
 	}
 	runOwner := postgresActivityRunOwner(tx)
 	if dialect == DialectSQLite {
 		runOwner = sqliteActivityRunOwner(tx)
 	}
 	stored, _, err := MarkUncertain(ctx, tx, dialect, runOwner, attempt, terminal)
-	return stored, err
+	if err != nil {
+		return absent, err
+	}
+	return runtimepipeline.RecoveredHTTPActivity{ActivityAttemptRecord: stored, Request: request, BundleHash: bundleHash}, nil
 }
 
 func loadActivityRecoveryEvent(ctx context.Context, tx *sql.Tx, dialect Dialect, eventID string) (events.Event, bool, error) {
