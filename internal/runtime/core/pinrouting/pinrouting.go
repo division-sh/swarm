@@ -259,7 +259,6 @@ func Resolve(input ResolutionInput, evt events.Event) Resolution {
 }
 
 func ResolveEnvelope(input ResolutionInput, envelope events.EventEnvelope) Resolution {
-	input.FlowID = strings.TrimSpace(input.FlowID)
 	input.EventType = strings.TrimSpace(input.EventType)
 	sourceRoute := input.RoutingSource.Route().Normalized()
 	if !sourceRoute.Empty() {

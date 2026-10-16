@@ -21,6 +21,7 @@ var s1TriggerSelectorFrontDoors = []struct{ file, function, raw string }{
 	{"internal/runtime/semanticview/endpoint_census.go", "matchingEndpoints", "flowID"},
 	{"internal/runtime/semanticview/endpoint_census.go", "ResolveDeclaredInputEndpoint", "flowID"},
 	{"internal/runtime/core/pinrouting/pinrouting.go", "PinDeclaredOutput", "flowID"},
+	{"internal/runtime/core/pinrouting/pinrouting.go", "ResolveEnvelope", "input.FlowID"},
 	{"internal/runtime/bus/public_input_admission.go", "NewOrdinaryFlowAPIEventPublicationEndpoint", "flowID"},
 	{"internal/runtime/pipeline/engine_adapter.go", "validatePipelineEmitPayload", "flowID"},
 	{"internal/runtime/pipeline/engine_adapter.go", "pipelineEmitPayloadProperties", "flowID"},
@@ -70,6 +71,16 @@ func TestS1TriggerSelectorGuardRejectsOwnerAndWrapperNormalization(t *testing.T)
 	}
 }
 
+func TestS1TriggerSelectorGuardAllowsResolvedEventNormalization(t *testing.T) {
+	raw := []byte(`package sample
+func render(source Source, flowID, event string) {
+    event = eventidentity.Normalize(source.ResolveFlowEventReference(flowID, event))
+}`)
+	if findings := s1TriggerSelectorNormalizations(t, raw, "render"); len(findings) != 0 {
+		t.Fatalf("resolved event normalization classified as raw flow repair: %v", findings)
+	}
+}
+
 func s1TriggerSelectorNormalizations(t *testing.T, raw []byte, function string) []string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "selector.go", raw, 0)
@@ -94,15 +105,12 @@ func s1TriggerSelectorNormalizations(t *testing.T, raw []byte, function string) 
 				return true
 			}
 			var rawFlow bool
-			ast.Inspect(call.Args[0], func(arg ast.Node) bool {
-				switch value := arg.(type) {
-				case *ast.Ident:
-					rawFlow = rawFlow || value.Name == "flowID"
-				case *ast.SelectorExpr:
-					rawFlow = rawFlow || value.Sel.Name == "FlowID"
-				}
-				return true
-			})
+			switch value := ast.Unparen(call.Args[0]).(type) {
+			case *ast.Ident:
+				rawFlow = value.Name == "flowID"
+			case *ast.SelectorExpr:
+				rawFlow = value.Sel.Name == "FlowID"
+			}
 			if rawFlow {
 				findings = append(findings, function+":raw_flow_normalization")
 			}
