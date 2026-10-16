@@ -5,6 +5,9 @@ import (
 	"path"
 	"sort"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/packmodel"
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 )
 
 var declarationFiles = map[string]struct{}{
@@ -30,28 +33,11 @@ var inertDocuments = map[string]struct{}{
 	"NOTICE.md": {}, "LICENSE.txt": {}, "LICENSE-MIT": {}, "LICENSE-APACHE": {},
 }
 
-var windowsReservedBasenames = map[string]struct{}{
-	"CON": {}, "PRN": {}, "AUX": {}, "NUL": {},
-	"COM1": {}, "COM2": {}, "COM3": {}, "COM4": {}, "COM5": {}, "COM6": {}, "COM7": {}, "COM8": {}, "COM9": {},
-	"LPT1": {}, "LPT2": {}, "LPT3": {}, "LPT4": {}, "LPT5": {}, "LPT6": {}, "LPT7": {}, "LPT8": {}, "LPT9": {},
-}
-
 func IsExcludedDirectory(name string) bool { _, ok := excludedDirectories[name]; return ok }
 func IsExcludedFile(name string) bool      { _, ok := excludedFiles[name]; return ok }
 
 func ValidateFlowSegment(segment string) error {
-	if len(segment) == 0 || len(segment) > MaxSegmentBytes {
-		return fmt.Errorf("flow segment %q must be 1..%d bytes", segment, MaxSegmentBytes)
-	}
-	if isWindowsReserved(segment) {
-		return fmt.Errorf("flow segment %q is a reserved portable basename", segment)
-	}
-	for index, char := range []byte(segment) {
-		if char > 0x7f || !((char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || (index > 0 && (char == '_' || char == '-'))) {
-			return fmt.Errorf("flow segment %q must match [a-z0-9][a-z0-9_-]*", segment)
-		}
-	}
-	return nil
+	return runtimepaths.ValidateFlowSegment(segment)
 }
 
 func validatePortableSegment(segment string) error {
@@ -70,12 +56,7 @@ func validatePortableSegment(segment string) error {
 }
 
 func isWindowsReserved(segment string) bool {
-	base := segment
-	if before, _, ok := strings.Cut(base, "."); ok {
-		base = before
-	}
-	_, ok := windowsReservedBasenames[strings.ToUpper(base)]
-	return ok
+	return runtimepaths.IsReservedPortableBasename(segment)
 }
 
 func classifyLabel(label string) (Disposition, error) {
@@ -113,6 +94,9 @@ func classifyLabel(label string) (Disposition, error) {
 	if local == "manifest.yaml" {
 		return DispositionManifest, nil
 	}
+	if _, body := packmodel.BodyRoleForFile(local); body {
+		return DispositionResource, nil
+	}
 	if _, ok := declarationFiles[local]; ok {
 		return DispositionDeclaration, nil
 	}
@@ -137,14 +121,25 @@ func splitLabelTopology(segments []string) (flowSegments []string, local, branch
 	return append([]string(nil), segments[:len(segments)-1]...), segments[len(segments)-1], "", nil
 }
 
-func buildFlowTree(entries []Entry) (*FlowNode, error) {
+func buildFlowTree(entries []Entry, providers map[string]ProviderDirectory) (*FlowNode, error) {
+	if _, providerRoot := providers["."]; providerRoot {
+		return nil, nil
+	}
 	root := &FlowNode{flowPath: ".", declarations: map[string]string{}, resources: map[string][]string{}}
 	nodes := map[string]*FlowNode{".": root}
+	attachedProviders := make(map[string]bool, len(providers))
 	for _, entry := range entries {
 		segments := strings.Split(entry.label, "/")
 		flowSegments, local, branch, err := splitLabelTopology(segments)
 		if err != nil {
 			return nil, err
+		}
+		provider, providerMember := providerForLabel(entry.label, providers)
+		if providerMember {
+			flowSegments = nil
+			if provider.flowPath != "." {
+				flowSegments = strings.Split(provider.flowPath, "/")
+			}
 		}
 		current := root
 		for index := range flowSegments {
@@ -156,6 +151,13 @@ func buildFlowTree(entries []Entry) (*FlowNode, error) {
 				current.children = append(current.children, next)
 			}
 			current = next
+		}
+		if providerMember {
+			if !attachedProviders[provider.directory] {
+				current.providers = append(current.providers, provider.directory)
+				attachedProviders[provider.directory] = true
+			}
+			continue
 		}
 		switch entry.disposition {
 		case DispositionDeclaration:
@@ -177,13 +179,20 @@ func buildFlowTree(entries []Entry) (*FlowNode, error) {
 		for branch := range node.resources {
 			sort.Strings(node.resources[branch])
 		}
+		sort.Strings(node.providers)
 		sort.Strings(node.documents)
 	}
 	if !flowNodeLive(root) {
+		if root.manifest != "" {
+			return nil, fmt.Errorf("directory . has a manifest and no body or flow files")
+		}
 		return nil, fmt.Errorf("selected source root has no semantic declarations, typed resources, or live descendants")
 	}
 	for flowPath, node := range nodes {
 		if flowPath != "." && !flowNodeLive(node) {
+			if node.manifest != "" {
+				return nil, fmt.Errorf("directory %s has a manifest and no body or flow files", flowPath)
+			}
 			return nil, fmt.Errorf("flow %q is empty; add local semantics/resources or remove the dead directory", flowPath)
 		}
 	}
@@ -194,7 +203,7 @@ func flowNodeLive(node *FlowNode) bool {
 	if node == nil {
 		return false
 	}
-	if len(node.declarations) > 0 || len(node.resources) > 0 {
+	if len(node.declarations) > 0 || len(node.resources) > 0 || len(node.providers) > 0 {
 		return true
 	}
 	for _, child := range node.children {

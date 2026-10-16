@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -25,7 +26,7 @@ const (
 	MaxArtifactBytes = 48 << 20
 	MaxLabelBytes    = 255
 	MaxPathSegments  = 32
-	MaxSegmentBytes  = 100
+	MaxSegmentBytes  = runtimepaths.MaxFlowSegmentBytes
 )
 
 type Disposition uint8
@@ -96,6 +97,7 @@ type FlowNode struct {
 	resources    map[string][]string
 	documents    []string
 	manifest     string
+	providers    []string
 	children     []*FlowNode
 }
 
@@ -146,12 +148,20 @@ func (n *FlowNode) Children() []*FlowNode {
 	return out
 }
 
+func (n *FlowNode) ProviderDirectories() []string {
+	if n == nil {
+		return nil
+	}
+	return append([]string(nil), n.providers...)
+}
+
 type AdmittedSourceArtifact struct {
 	directoryLabel string
 	entries        []Entry
 	byLabel        map[string]int
 	yaml           map[string]yamlsource.Snapshot
 	manifests      map[string]Manifest
+	providers      map[string]ProviderDirectory
 	root           *FlowNode
 	logical        []byte
 	bundleHash     string
@@ -168,7 +178,6 @@ func newArtifact(entries []Entry) (*AdmittedSourceArtifact, error) {
 	owned := make([]Entry, len(entries))
 	byLabel := make(map[string]int, len(entries))
 	yamlSnapshots := make(map[string]yamlsource.Snapshot)
-	manifests := make(map[string]Manifest)
 	folded := make(map[string]string, len(entries))
 	total := 0
 	for index, candidate := range entries {
@@ -207,13 +216,6 @@ func newArtifact(entries []Entry) (*AdmittedSourceArtifact, error) {
 				return nil, fmt.Errorf("parse admitted YAML %s: %w", label, err)
 			}
 			yamlSnapshots[label] = snapshot
-			if disposition == DispositionManifest {
-				manifest, err := projectManifest(snapshot.Document(label).Root())
-				if err != nil {
-					return nil, err
-				}
-				manifests[label] = manifest
-			}
 		}
 	}
 	sort.Slice(owned, func(i, j int) bool { return owned[i].label < owned[j].label })
@@ -221,7 +223,7 @@ func newArtifact(entries []Entry) (*AdmittedSourceArtifact, error) {
 	for index := range owned {
 		byLabel[owned[index].label] = index
 	}
-	root, err := buildFlowTree(owned)
+	membership, err := admitDirectoryMembership(owned, yamlSnapshots)
 	if err != nil {
 		return nil, err
 	}
@@ -231,7 +233,8 @@ func newArtifact(entries []Entry) (*AdmittedSourceArtifact, error) {
 	}
 	digest := sha256.Sum256(logical)
 	return &AdmittedSourceArtifact{
-		entries: owned, byLabel: byLabel, yaml: yamlSnapshots, manifests: manifests, root: root,
+		entries: owned, byLabel: byLabel, yaml: yamlSnapshots,
+		manifests: membership.manifests, providers: membership.providers, root: membership.root,
 		logical: logical, bundleHash: HashPrefix + hex.EncodeToString(digest[:]),
 	}, nil
 }
@@ -456,6 +459,7 @@ func cloneFlowNode(source *FlowNode) *FlowNode {
 		declarations: make(map[string]string, len(source.declarations)),
 		resources:    make(map[string][]string, len(source.resources)),
 		documents:    append([]string(nil), source.documents...),
+		providers:    append([]string(nil), source.providers...),
 	}
 	for key, value := range source.declarations {
 		out.declarations[key] = value

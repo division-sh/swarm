@@ -36,6 +36,9 @@ func AdmitDirectory(root string) (*AdmittedSourceArtifact, error) {
 		return nil, err
 	}
 	artifact.directoryLabel = filepath.Base(selectedRoot)
+	if provider, present := artifact.providers["."]; present && artifact.directoryLabel != provider.manifest.Name {
+		return nil, fmt.Errorf("folder %s holds provider %s; rename the folder", artifact.directoryLabel, provider.manifest.Name)
+	}
 	return artifact, nil
 }
 

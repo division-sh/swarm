@@ -177,7 +177,7 @@ func admitEnvelopeCapabilities(value, typeValue yamlsource.Value, e *Envelope) e
 			return err
 		}
 	}
-	if err := admitEnvelopeCanValues(can, e); err != nil {
+	if err := admitCanValues(can, &e.Capabilities); err != nil {
 		return err
 	}
 	if e.Capabilities.Cannot, err = envelopeTexts(capabilities["cannot"]); err != nil {
@@ -227,23 +227,23 @@ func admitEnvelopeRequirements(value yamlsource.Value, e *Envelope) error {
 	return nil
 }
 
-func admitEnvelopeCanValues(can map[string]yamlsource.Value, e *Envelope) error {
+func admitCanValues(can map[string]yamlsource.Value, capabilities *Capabilities) error {
 	var err error
-	for name, target := range map[string]*string{"receive_https_route": &e.Capabilities.Can.ReceiveHTTPSRoute, "verify_secret": &e.Capabilities.Can.VerifySecret} {
+	for name, target := range map[string]*string{"receive_https_route": &capabilities.Can.ReceiveHTTPSRoute, "verify_secret": &capabilities.Can.VerifySecret} {
 		if field, present := can[name]; present {
 			if *target, err = envelopeText(field); err != nil {
 				return err
 			}
 		}
 	}
-	for name, target := range map[string]*[]string{"emit_events": &e.Capabilities.Can.EmitEvents, "call_provider_actions": &e.Capabilities.Can.CallProviderActions} {
+	for name, target := range map[string]*[]string{"emit_events": &capabilities.Can.EmitEvents, "call_provider_actions": &capabilities.Can.CallProviderActions} {
 		if field, present := can[name]; present {
 			if *target, err = envelopeTexts(field); err != nil {
 				return err
 			}
 		}
 	}
-	for name, target := range map[string]*bool{"persist_dedupe_markers": &e.Capabilities.Can.PersistDedupeMarkers, "lower_through_activity": &e.Capabilities.Can.LowerThroughActivity, "journal_activity_attempts": &e.Capabilities.Can.JournalActivityAttempts} {
+	for name, target := range map[string]*bool{"persist_dedupe_markers": &capabilities.Can.PersistDedupeMarkers, "lower_through_activity": &capabilities.Can.LowerThroughActivity, "journal_activity_attempts": &capabilities.Can.JournalActivityAttempts} {
 		if field, present := can[name]; present {
 			scalar, scalarErr := field.Scalar()
 			if scalarErr != nil || scalar.Tag != "!!bool" {

@@ -42748,6 +42748,10 @@ filesystem_source_model:
         - rules.yaml
       flow_metadata:
         - manifest.yaml
+      provider_role_bodies:
+        - trigger.yaml
+        - connector.yaml
+        - channel.yaml
       source_semantic_inert:
         - README
         - README.md
@@ -42767,15 +42771,20 @@ filesystem_source_model:
         - docs
       selected_root_only_branch: packs
       rule: |
-        Resource descendants are resource labels, never child flows. For scenario discovery, tests is a scenario resource branch only when it is the first typed-resource segment after the owning flow path; a nested tests directory below data, mocks, or another resource branch remains part of that first resource and is never a scenario branch. Unknown included paths fail closed. Flow-disposition manifest.yaml bytes are strict metadata, never topology, declaration identity, imports, activation or routing. Resource/document lookalikes retain their original disposition and are not flow metadata.
+        Resource descendants are resource labels, never child flows. For scenario discovery, tests is a scenario resource branch only when it is the first typed-resource segment after the owning flow path; a nested tests directory below data, mocks, or another resource branch remains part of that first resource and is never a scenario branch. Unknown included paths fail closed. Outside typed resource branches, trigger.yaml, connector.yaml and channel.yaml are provider body members with resource disposition; their containing directory is a provider and never a FlowNode. Provider metadata uses manifest disposition. The existing four bundle-v2 disposition codes and exact framing are unchanged. Resource/document lookalikes retain their original disposition and acquire neither provider nor flow metadata authority.
   manifest_metadata:
-    owner: internal/sourceartifact.AdmittedSourceArtifact
+    owner: internal/packmodel.Manifest projected by internal/sourceartifact.AdmittedSourceArtifact
     optional: true
+    provider_manifest_required: true
     fields: [name, version, platform_version]
+    provider_fields: [name, version, platform_version, capabilities]
     max_field_utf8_bytes: 256
     rule: |
-      A present flow manifest is exactly one YAML mapping with exactly these three required nonempty text fields. Unknown or duplicate fields, null or wrong-kind values, malformed/multiple documents and invalid expansion fail closed. name is free text, not a directory slug; version requires strict SemVer; platform_version uses the existing platform-range grammar. Construction and stored decode project only admitted yamlsource.Value, preserving semantic path, introduction location and separately resolved alias/merge provenance. No flatten/reparse reader exists. Only the selected root range gates executable admission and explicit CLI identity selection, before publication or mutation; every nested manifest is grammar-checked but cannot reset the inherited scope or compatibility.
+      One shared decoder admits manifests against file-derived directory membership. Common name, version and platform_version are required nonempty text. A provider also requires capabilities; a flow forbids it. There is no authored type, id, implements, manifest_hash, provenance, tests or requires field. Deleted credential summaries refuse with a located instruction to declare credentials on the action, trigger or channel that uses them. Deleted type refuses with the instruction that directory kind comes from its files. Unknown or duplicate fields, null or wrong-kind values, malformed/multiple documents and invalid expansion fail closed.
+      Flow name is free text, not a directory slug or identity. Provider name is an exact non-normalizing portable flow-segment identifier and equals its folder name; team-bot and team_bot are distinct. Dotted role-pack IDs are not provider aliases. Bodies reject top-level provider declarations and consume the name from their adjacent admitted manifest. Version requires strict SemVer; platform_version uses the existing platform-range grammar. Construction and stored decode project only admitted yamlsource.Value, preserving semantic path, introduction location and separately resolved alias/merge provenance. No flatten/reparse reader exists. Only the selected root range gates executable admission and explicit CLI identity selection, before publication or mutation; every nested manifest is grammar-checked but cannot reset the inherited scope or compatibility.
       Each decoded name, version, and platform_version scalar is at most 256 UTF-8 bytes, including whitespace, checked before SemVer or range parsing; construction and stored decode reject oversized values with exact field and introduction/resolution evidence, never truncation.
+    directory_kind: |
+      One admitted membership owner governs filesystem construction, logical decoding and retained projection. A directory with trigger.yaml, connector.yaml or channel.yaml is a provider; malformed roles never cause flow fallback. A channel requires trigger.yaml and connector.yaml in that same directory. Providers cannot contain flow declarations, flow resources, child flows or nested providers; inert documents and docs remain inert. Provider directories are attached to their exact enclosing flow, not inserted as executable children. A selected provider root has no executable FlowNode. A directory with a manifest but neither body nor live flow content is refused, as is a directory mixing provider bodies and flow files. Ordinary schema-less resource/intermediate flow topology and manifest-less flows remain supported. Provider lookalikes below typed resources remain resource data, not provider declarations.
   human_source_presentation:
     owner: internal/sourceartifact.AdmittedSourceArtifact.HumanLabel
     rule: |
