@@ -50,3 +50,19 @@ func TestWebSearchPolicyDoesNotInferDeclarationFromPath(t *testing.T) {
 		}
 	}
 }
+
+func TestS1NativePolicySelectionPreservesRawActorFlow(t *testing.T) {
+	source := rateLimitedNativeWebSearchSiblingFlowSource("https://provider.invalid")
+	for _, flow := range []string{"alpha", " alpha ", "\talpha\n", "/alpha/", "missing"} {
+		actor := models.AgentConfig{ID: "independent-runtime-actor", FlowID: flow, FlowPath: "alpha/instance-1"}
+		for attempt := 0; attempt < 3; attempt++ {
+			_, err := resolveWebSearchProviderConfigForActor(source, actor)
+			if (err == nil) != (flow == "alpha") {
+				t.Errorf("attempt %d policy selection for %q accepted=%t: %v", attempt, flow, err == nil, err)
+			}
+			if actor.FlowID != flow {
+				t.Fatalf("policy query rewrote input selector %q", flow)
+			}
+		}
+	}
+}
