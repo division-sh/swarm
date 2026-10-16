@@ -817,8 +817,8 @@ func allowedSemanticRunFixtureLiteral(relative string, value string) bool {
 			compact == "UPDATE runs SET completion_revision = 1, completion_due_at = $1 WHERE run_id = $2::uuid"
 	case "internal/store/internal/schemastore/fork_point_schema_test.go":
 		// This test exercises physical CHECK and FK constraints on the real schema.
-		return compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind) VALUES ($1,$2,'scenario_setup')" ||
-			compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind,forked_from_run_id,forked_from_point_kind,forked_from_revision,forked_from_event_id) VALUES ($1,$2,'fork_materialization',$3,$4,$5,$6)"
+		return compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind,source_root_directory) VALUES ($1,$2,'scenario_setup',$3)" ||
+			compact == "INSERT INTO runs (run_id,bundle_hash,origin_kind,forked_from_run_id,forked_from_point_kind,forked_from_revision,forked_from_event_id,source_root_directory) VALUES ($1,$2,'fork_materialization',$3,$4,$5,$6,$7)"
 	}
 	return false
 }
