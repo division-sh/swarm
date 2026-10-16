@@ -37,9 +37,6 @@ func TestRunOperationalSessionWorkIsNotStalledBothStores(t *testing.T) {
 		if _, err := fixture.store.SettleSuccess(ctx, fixture.origin, nil, 0, deliverylifecycle.NotApplicableHandlerRuleSelection()); err != nil {
 			t.Fatal(err)
 		}
-		if err := acknowledgePipelineEventFixture(ctx, fixture.store, origin.EventID); err != nil {
-			t.Fatal(err)
-		}
 		registry := fixture.store.(sessions.Registry)
 		lease, err := registry.Acquire(ctx, testAgentMemoryIdentity(t, fixture.origin.RunID(), fixture.agentID, "global"), fixture.leaseHolder)
 		if err != nil {
@@ -49,6 +46,16 @@ func TestRunOperationalSessionWorkIsNotStalledBothStores(t *testing.T) {
 			if released {
 				if result, err := registry.ReleaseOutcome(ctx, lease); err != nil || !result.Acknowledged {
 					t.Fatalf("release exact native session: %+v %v", result, err)
+				}
+				report, err := fixture.store.(operatorread.RunReader).LoadRunDebugReport(ctx, fixture.origin.RunID(), operatorread.RunDebugQueryOptions{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if projected := operatorread.ProjectRunOperationalStatus(report); projected.State != "running" || report.TestQuiescence.ActiveSessionLeases != 0 || report.TestQuiescence.UnsettledPipelineEvents != 1 || len(projected.Attributions) != 0 {
+					t.Fatalf("unacknowledged pipeline work invented a stall: status=%+v work=%+v", projected, report.TestQuiescence)
+				}
+				if err := acknowledgePipelineEventFixture(ctx, fixture.store, origin.EventID); err != nil {
+					t.Fatal(err)
 				}
 			}
 			for read := 0; read < 2; read++ {
