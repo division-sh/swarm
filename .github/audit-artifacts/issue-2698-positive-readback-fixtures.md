@@ -48,3 +48,36 @@ native owner. Finite historical/corpus composition, registry/census/ratchet,
 preservation-cost proof, the remaining failed-root selections and final
 exact-head HumanTask/preflight receipts remain open in the combined batch.
 No new baseline, retained key, guard exception or deletion credit is claimed.
+
+## Drained Completion Observation
+
+The broader manager failed-root selection executes the previously omitted
+drained-completion proof and reproduces missing admitted lifecycle/grant on
+both stores in both output dispositions. It now uses the same explicit native
+receipt-manager constructor as its siblings. The effect-test observation's
+token comes from that actor's actual lifecycle, its admission is the issued
+native context, and its provider surface consumes ProjectNormalContinuation
+with that exact execution authority. The in-memory effect controller remains
+an observation sink, not a replacement for native delivery admission.
+
+The event addresses the run already created by native actor setup rather than
+contradicting its scenario origin with a second run-creation request. All
+original assertions remain: drained completion is replayed without outputs,
+late output is refused with its exact code, and the original native delivery
+remains in_progress, proving the manager did not settle it a second time.
+
+pr2698-manager-remaining-carrier-ledger.jsonl retains the broad focused run
+through swarm-test and its one failing root; no unrelated root is relabelled
+from the constructor repair. pr2698-drained-completion-native-admission.log
+retains the intermediate run-origin conflict. The corrected complete root is
+GREEN under race on both stores, all four cells, in
+pr2698-drained-completion-admitted-existing-origin.log (10.310s).
+
+The retirement-cost diagnostic is not a PASS: its complete unchanged root
+fails the still-pending finite history composition at
+requireTypedReceiverInitializationCases. Its 152.686s receipt and CPU profile
+are retained as pr2698-retirement-cost-baseline.log and
+pr2698-retirement-baseline.cpu. Source validation consumes82% of sampled CPU,
+and repeated catch-up packet authentication consumes50%. The repair must keep
+all hostile controls and reach a complete GREEN unit under the original limit;
+this diagnostic does not establish that qualification or authorize a rerun.
