@@ -30,7 +30,7 @@ func seedRunDebugAgent(t *testing.T, pg *PostgresStore, ctx context.Context, run
 	t.Helper()
 	identity := mustTestAgentIdentityForRun(runID, agentID, flowPath)
 	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+		Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            agentID,
 			Identity:      identity,
 			Role:          agentID,
@@ -41,7 +41,7 @@ func seedRunDebugAgent(t *testing.T, pg *PostgresStore, ctx context.Context, run
 			FlowPath:      flowPath,
 			EntityID:      entityID,
 			Config:        json.RawMessage(`{}`),
-		}),
+		})),
 		Status:    "active",
 		HiredBy:   "test",
 		StartedAt: time.Now().UTC(),
@@ -168,6 +168,8 @@ func TestRunDebugReadSurface_LoadRunDebugReport_UsesCanonicalRunIDForLogsAndMuta
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{
 		Origin: semanticScenarioSetupRunOriginForTest(), RunID: otherRunID, StartedAt: now.Add(-5 * time.Minute),
 	})
+	seedManagedTurnFixtureAgent(t, ctx, pg, targetRunID, "agent-1", "fixture/agent-1")
+	ctx = admitPreparedAgentClaimContext(t, ctx, pg)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, targetEventID, targetRunID, "scan.requested", events.EventProducerAgent, "test", targetEntityID, "", now.Add(-4*time.Minute))
 	targetEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, targetEventID)
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, otherEventID, otherRunID, "scan.requested", events.EventProducerAgent, "test", otherEntityID, "", now.Add(-3*time.Minute))
@@ -290,6 +292,9 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 			RunID: runID, StartedAt: now.Add(-time.Minute),
 		})
 	}
+	seedManagedTurnFixtureAgent(t, ctx, pg, blockedRunID, "agent-active", "fixture/agent-active")
+	seedManagedTurnFixtureAgent(t, ctx, pg, readyRunID, "agent-done", "fixture/agent-done")
+	ctx = admitPreparedAgentClaimContext(t, ctx, pg)
 	activeEvent := eventtest.PersistedRuntimeControlForProducer(
 		activeEventID, events.EventType("quiescence.active_delivery"), eventtest.Producer(events.EventProducerPlatform, "test"), "", []byte(`{}`), 0,
 		blockedRunID, "", events.EventEnvelope{}, now.Add(-50*time.Second),
@@ -392,6 +397,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", now)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	seedRunDebugAgent(t, pg, ctx, runID, "agent-source", entityID, agentmemory.Plan{Enabled: true}, "flow-a")
+	ctx = admitPreparedAgentClaimContext(t, ctx, pg)
 	identity := mustTestAgentIdentityForRun(runID, "agent-source", "flow-a")
 	fields := testAgentIdentityStorageFields(t, identity)
 	if _, err := db.ExecContext(ctx, `
@@ -506,6 +512,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "scan.requested", events.EventProducerPlatform, "builder", entityID, "", base)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	seedRunDebugAgent(t, pg, ctx, runID, "agent-late", entityID, agentmemory.Plan{Enabled: true}, "flow-a")
+	ctx = admitPreparedAgentClaimContext(t, ctx, pg)
 	identity := mustTestAgentIdentityForRun(runID, "agent-late", "flow-a")
 	fields := testAgentIdentityStorageFields(t, identity)
 	if _, err := db.ExecContext(ctx, `
@@ -582,6 +589,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, eventID, runID, "task.started", events.EventProducerPlatform, "builder", entityID, "", now)
 	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
 	seedRunDebugAgent(t, pg, ctx, runID, "agent-task", entityID, agentmemory.Plan{}, "flow-a")
+	ctx = admitPreparedAgentClaimContext(t, ctx, pg)
 	identity := mustTestAgentIdentityForRun(runID, "agent-task", "flow-a")
 	fields := testAgentIdentityStorageFields(t, identity)
 	if _, err := db.ExecContext(ctx, `

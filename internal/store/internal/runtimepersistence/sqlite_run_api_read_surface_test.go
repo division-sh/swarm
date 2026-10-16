@@ -57,6 +57,9 @@ func TestSQLiteRunAPIReadSurface_LoadListAndDiagnoseEvidence(t *testing.T) {
 	} {
 		RequireCorruptRunSnapshotForTest(t, ctx, sqliteStore, snapshot)
 	}
+	seedManagedTurnFixtureAgent(t, ctx, sqliteStore, newer, "agent-1", "fixture/agent-1")
+	seedManagedTurnFixtureAgent(t, ctx, sqliteStore, newer, "agent-failed", "fixture/agent-failed")
+	ctx = admitPreparedAgentClaimContext(t, ctx, sqliteStore)
 	deliveryRoutesByEvent := map[string][]events.DeliveryRoute{
 		newerEvent:       {testAgentDeliveryRoute(t, newer, "agent-1", "fixture/agent-1")},
 		newerMiddleEvent: {testAgentDeliveryRoute(t, newer, "agent-failed", "fixture/agent-failed"), testEntitylessNodeDeliveryRoute("node-success")},
@@ -269,6 +272,9 @@ func TestSQLiteRunAPIReadSurface_LoadRunDebugReportProjectsTestQuiescenceCounts(
 		RunID: readyRunID, Origin: semanticEventRunOriginForTest(t, readyEventID, "quiescence.ready"),
 		StartedAt: now.Add(-time.Minute),
 	})
+	seedManagedTurnFixtureAgent(t, ctx, sqliteStore, blockedRunID, "agent-active", "fixture/agent-active")
+	seedManagedTurnFixtureAgent(t, ctx, sqliteStore, readyRunID, "agent-done", "fixture/agent-done")
+	ctx = admitPreparedAgentClaimContext(t, ctx, sqliteStore)
 	for _, fixture := range []struct {
 		id, runID, name string
 		at              time.Time

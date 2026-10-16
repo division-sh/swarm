@@ -635,6 +635,8 @@ func TestRunDebugTracePageTypedFilters(t *testing.T) {
 	base := time.Unix(1700000400, 0).UTC()
 	until := base
 	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: base})
+	seedManagedTurnFixtureAgent(t, ctx, pg, runID, "agent-2", "fixture/agent-2")
+	ctx = admitPreparedAgentClaimContext(t, ctx, pg)
 	seedOperatorObservabilityEvent(t, ctx, pg, firstEvent, runID, "first.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), entityOne, base)
 	seedOperatorObservabilityEvent(t, ctx, pg, secondEvent, runID, "second.event", events.EventProducerPlatform, "runtime", json.RawMessage(`{}`), entityTwo, base.Add(time.Second))
 	firstSnapshot := seedDeliveryStateFixture(t, ctx, pg, loadPostgresDeliveryFixtureEvent(t, ctx, db, firstEvent), testEntitylessNodeDeliveryRoute("node-1"), runtimedelivery.StateQueued, nil)
