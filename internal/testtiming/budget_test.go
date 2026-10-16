@@ -215,8 +215,10 @@ func TestPersistenceAuthorityCensusBudgetIsIsolated(t *testing.T) {
 	if budget.Hard.UnitCommandSeconds[id].Justification != wantJustification {
 		t.Fatal("census budget lost its exact measured disposition")
 	}
-	if _, widened := budget.Hard.UnitCommandSeconds["store-admission-full"]; widened {
-		t.Fatal("census allowance widened admission instead")
+	for unit := range budget.Hard.UnitCommandSeconds {
+		if strings.HasPrefix(unit, "store-admission-") {
+			t.Fatalf("census allowance widened admission unit %s instead", unit)
+		}
 	}
 	for _, test := range []struct {
 		name                string
@@ -237,7 +239,7 @@ func TestPersistenceAuthorityCensusBudgetIsIsolated(t *testing.T) {
 				seconds := 10.0
 				if unit.ID == id {
 					seconds = test.census
-				} else if unit.ID == "store-admission-full" {
+				} else if strings.HasPrefix(unit.ID, "store-admission-") {
 					seconds = test.admission
 				}
 				evidence = append(evidence, timingTestEvidence(plan, unit.ID, AttemptPrimary, seconds))
@@ -245,20 +247,20 @@ func TestPersistenceAuthorityCensusBudgetIsIsolated(t *testing.T) {
 			result := EvaluateBudget(budget, EvaluationOptions{Plan: plan, WorkflowRunID: 1, WorkflowAttempt: 1}, evidence)
 			found := 0
 			for _, surface := range result.Surfaces {
-				switch surface.Surface {
-				case id:
+				switch {
+				case surface.Surface == id:
 					found++
 					if surface.Status != test.censusStatus || surface.LimitSeconds != 600 || surface.BufferedCeilingSeconds != 780 {
 						t.Fatalf("census budget changed: %+v", surface)
 					}
-				case "store-admission-full":
+				case strings.HasPrefix(surface.Surface, "store-admission-"):
 					found++
 					if surface.Status != test.other || surface.LimitSeconds != 240 || surface.BufferedCeilingSeconds != 312 {
 						t.Fatalf("admission budget changed: %+v", surface)
 					}
 				}
 			}
-			if found != 2 {
+			if found != 8 {
 				t.Fatal("budget evaluation omitted an isolated unit")
 			}
 		})

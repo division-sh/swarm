@@ -51,17 +51,11 @@ func loadPersistenceDebtPolicy(t *testing.T) Policy {
 }
 
 func validatePersistenceDebtEnvelopes(policy Policy) error {
-	for _, id := range []string{"store-admission-full", persistenceDebtCensusUnit} {
+	for _, id := range []string{persistenceDebtCensusUnit} {
 		unit, ok := policy.Units[id]
 		packages := []string{policy.Module + "/internal/store"}
 		run, skip, timeout := persistenceDebtCensusRun, "", "20m"
 		children := map[string][]string{persistenceNativeFamilyRoot: persistenceNativeFamilyChildren}
-		if id == "store-admission-full" {
-			packages = append(packages, policy.Module+"/internal/testpostgres")
-			run, skip = persistenceDebtAdmissionRun, ""
-			timeout = ""
-			children = nil
-		}
 		if !ok || !slices.Equal(unit.Packages, packages) || unit.Run != run || unit.Skip != skip || unit.CountMode != "count-1" || unit.EnvironmentID != "" || !reflect.DeepEqual(unit.EnvironmentIDs, managedEnvironmentIDs()) || unit.BudgetClass != "broad" || unit.GoTimeout != timeout || !reflect.DeepEqual(unit.RequiredChildren, children) {
 			return fmt.Errorf("%s changed persistence proof envelope: %+v", id, unit)
 		}
@@ -77,11 +71,15 @@ func validatePersistenceDebtEnvelopes(policy Policy) error {
 			}
 		}
 	}
-	return nil
+	return validateStoreAdmissionEnvelopes(policy)
 }
 
 func TestPersistenceAuthorityCensusPartitionPreservesEveryRoot(t *testing.T) {
 	policy := loadPersistenceDebtPolicy(t)
+	admissionOwners, err := storeAdmissionManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := validatePersistenceDebtEnvelopes(policy); err != nil {
 		t.Fatal(err)
 	}
@@ -121,8 +119,11 @@ func TestPersistenceAuthorityCensusPartitionPreservesEveryRoot(t *testing.T) {
 				for _, pkg := range []string{policy.Module + "/internal/store", policy.Module + "/internal/testpostgres"} {
 					for _, name := range inventory.Packages[pkg].Roots {
 						want := "store-admission-full"
-						if pkg == policy.Module+"/internal/store" && (name == persistenceDebtRoot || name == persistenceNativeFamilyRoot) {
-							want = persistenceDebtCensusUnit
+						if pkg == policy.Module+"/internal/store" {
+							want = admissionOwners[name]
+							if name == persistenceDebtRoot || name == persistenceNativeFamilyRoot {
+								want = persistenceDebtCensusUnit
+							}
 						}
 						if !slices.Equal(owners[TestRoot{Package: pkg, Name: name}], []string{want}) {
 							t.Fatalf("%s.%s owners=%v, want only %s", pkg, name, owners[TestRoot{Package: pkg, Name: name}], want)
