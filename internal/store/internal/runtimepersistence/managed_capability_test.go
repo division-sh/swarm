@@ -80,6 +80,11 @@ func managedCompletionTestFrameWithEvent(t testing.TB, authority runtimeeffects.
 func managedCompletionTestFrameForSource(t testing.TB, authority runtimeeffects.Authority, adapter string, event events.Event, bundleHash string) agentframe.Frame {
 	t.Helper()
 	surface := managedCompletionTestSurface(t, authority, adapter)
+	return managedCompletionTestFrameWithSurface(t, authority, event, bundleHash, surface)
+}
+
+func managedCompletionTestFrameWithSurface(t testing.TB, authority runtimeeffects.Authority, event events.Event, bundleHash string, surface managedcapabilities.Surface) agentframe.Frame {
+	t.Helper()
 	intent, err := agentintent.Resolve(
 		agentintent.SourceInline,
 		"inline",

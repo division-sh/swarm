@@ -20469,7 +20469,9 @@ run_model:
         keeps the run-level headline running. Final headers never manufacture completion.
         Attribution does not change the run-level progress clock, threshold or dedup key.
         Provider completion precedes API tool execution: empty agent_turns.emitted_events
-        is not final-turn silence evidence. Accepted publication survives feedback error;
+        is not final-turn silence evidence. A proposed emit without a proven publication
+        remains unknown even after response consumption. An unused emit grant is not an
+        obligation. Accepted publication survives feedback error;
         incomplete or ambiguous history is explicitly unknown. Drained predecessor facts
         are historical and cannot blame a replacement instance. No attribution read may
         invoke a provider, retry, re-prompt, park or re-drive work. Operator re-drive uses
