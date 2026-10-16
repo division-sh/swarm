@@ -40,12 +40,6 @@ func servedObservationPriorHistory(t *testing.T, recipes bool) []byte {
 	return raw
 }
 
-func servedObservationEarlierHistory(t *testing.T, current []byte, recipes bool) []byte {
-	t.Helper()
-	current = servedSetupEarlierHistory(t, current, recipes)
-	return restoreServedObservationHistory(t, current, servedObservationPriorHistory(t, recipes), servedObservationBatchPins(t), recipes)
-}
-
 func restoreServedObservationHistory(t *testing.T, current, prior []byte, pins []runphysical.Pin, recipes bool) []byte {
 	t.Helper()
 	raw, err := servedsettlement.RestoreBatchHistory(current, prior, pins, recipes)
