@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -43,6 +44,9 @@ func TestProviderRestartRecoveryProcess(t *testing.T) {
 	opts.WorkspaceBackend, opts.WorkspaceBackendSet = "host", true
 	opts.SelfCheck, opts.Verbose = true, true
 	opts.Output, opts.ErrorOutput = os.Stdout, os.Stderr
+	opts.TestAPIListenerBound = func(addr net.Addr) {
+		fmt.Fprintf(os.Stdout, "PROVIDER_RESTART_PROBE_BOUND %s\n", addr.String())
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if code := runFrom(ctx, repoRootForTest(), opts); code != 0 {
@@ -51,18 +55,27 @@ func TestProviderRestartRecoveryProcess(t *testing.T) {
 }
 
 func TestProviderRestartRecoveryBothStores(t *testing.T) {
+	if providerRestartStartupSucceeded("[22/22] ready FAILED (startup refusal)") || !providerRestartStartupSucceeded("[22/22] ready ok") {
+		t.Fatal("restart classification confused a final boot step with successful readiness")
+	}
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			for _, completed := range []bool{false, true} {
 				t.Run(fmt.Sprintf("completed_%t", completed), func(t *testing.T) {
-					proveProviderRestartRecovery(t, backend, completed)
+					proveProviderRestartRecovery(t, backend, completed, "abrupt")
+				})
+				t.Run(fmt.Sprintf("graceful_completed_%t", completed), func(t *testing.T) {
+					proveProviderRestartRecovery(t, backend, completed, "graceful")
 				})
 			}
+			t.Run("standby_in_flight", func(t *testing.T) {
+				proveProviderRestartRecovery(t, backend, false, "standby")
+			})
 		})
 	}
 }
 
-func proveProviderRestartRecovery(t *testing.T, backend string, completed bool) {
+func proveProviderRestartRecovery(t *testing.T, backend string, completed bool, stopMode string) {
 	t.Helper()
 	unsetStoreSelectorEnv(t)
 	root := canonicalrouting.CopyRootIngressServedLiveAgent(t)
@@ -169,11 +182,34 @@ func proveProviderRestartRecovery(t *testing.T, backend string, completed bool) 
 		}
 		expected := providerRestartAttempts(t, before)
 		requestsBefore := entered.Load()
-		if err := process.kill(); err != nil {
-			t.Fatal(err)
+		var standby *channelOnboardingCrashServeProcess
+		var standbyEndpoint string
+		if stopMode == "standby" {
+			standby, standbyEndpoint = providerRestartStandby(t, start, observations.Reader, before)
 		}
-		process = start()
+		if stopMode == "graceful" {
+			started := time.Now()
+			if err := process.stop(); err != nil {
+				t.Fatalf("graceful provider host stop: %v", err)
+			}
+			t.Logf("graceful stop: elapsed=%s completed_control=%t", time.Since(started), completed)
+			if !completed {
+				proveProviderGracefulMissingDrainRefusal(t, backend, start, observations.Reader, before, expected, &entered, requestsBefore, process)
+				return
+			}
+		} else {
+			if err := process.kill(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		process = standby
+		if process == nil {
+			process = start()
+		}
 		endpoint = process.endpoint(t) + "/v1/rpc"
+		if standby != nil && endpoint != standbyEndpoint+"/v1/rpc" {
+			t.Fatal("standby replaced its pre-admission API listener after takeover")
+		}
 		after := providerRestartSnapshot(t, observations.Reader)
 		requireProviderRestartEvidence(t, before, after, expected, completed)
 		if entered.Load() != requestsBefore {
@@ -184,6 +220,132 @@ func proveProviderRestartRecovery(t *testing.T, backend string, completed bool) 
 	if err := process.stop(); err != nil {
 		t.Fatalf("recovered serve shutdown: %v", err)
 	}
+}
+
+func providerRestartStandby(t *testing.T, start func() *channelOnboardingCrashServeProcess, selected any, before map[string]storetest.SelectedForkStorageTableSnapshot) (*channelOnboardingCrashServeProcess, string) {
+	t.Helper()
+	process := start()
+	ctx, cancel := context.WithTimeout(t.Context(), serveRuntimeReadyTimeout)
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	endpoint := ""
+	for endpoint == "" {
+		for _, line := range strings.Split(process.output.String(), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 2 && fields[0] == "PROVIDER_RESTART_PROBE_BOUND" {
+				endpoint = "http://" + fields[1]
+				break
+			}
+		}
+		if endpoint != "" {
+			break
+		}
+		select {
+		case <-process.exited:
+			t.Fatal("standby exited before publishing its pre-admission probe")
+		case <-ctx.Done():
+			t.Fatal("standby did not publish its pre-admission probe")
+		case <-ticker.C:
+		}
+	}
+	client := &http.Client{Timeout: time.Second}
+	for path, want := range map[string]int{"/healthz": http.StatusOK, "/readyz": http.StatusServiceUnavailable, "/v1/rpc": http.StatusServiceUnavailable} {
+		response, err := client.Get(endpoint + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := response.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != want {
+			t.Fatalf("standby %s status=%d want=%d", path, response.StatusCode, want)
+		}
+	}
+	after := providerRestartSnapshot(t, selected)
+	for _, table := range []string{"runtime_process_generation", "runtime_generation_grants"} {
+		if !reflect.DeepEqual(before[table], after[table]) {
+			t.Fatalf("standby changed %s before its predecessor released possession", table)
+		}
+	}
+	select {
+	case <-process.exited:
+		t.Fatal("standby did not retain its pre-admission wait")
+	default:
+	}
+	t.Log("standby: health=200 readiness=503 rpc=503 process_generation_and_grants_unchanged=true")
+	return process, endpoint
+}
+
+// This is classification evidence for the separately ruled stop-time defect,
+// not a successful-recovery oracle or permission to invent a missing drain.
+func proveProviderGracefulMissingDrainRefusal(t *testing.T, backend string, start func() *channelOnboardingCrashServeProcess, selected any, before map[string]storetest.SelectedForkStorageTableSnapshot, expected []providerRestartAttempt, entered *atomic.Int32, requestsBefore int32, stopped *channelOnboardingCrashServeProcess) {
+	t.Helper()
+	directory := filepath.Join(repoRootForTest(), "test-results", "2701-restart-recovery", "graceful-classification")
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	directory, err := os.MkdirTemp(directory, backend+"-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	retain := func(name string, value any) {
+		t.Helper()
+		raw, err := json.MarshalIndent(value, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(directory, name+".json"), raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	retain("before-stop", before)
+	if err := os.WriteFile(filepath.Join(directory, "stop.log"), []byte(stopped.output.String()), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cut := providerRestartSnapshot(t, selected)
+	retain("after-stop", cut)
+	if len(expected) != 3 || !reflect.DeepEqual(expected, providerRestartAttempts(t, cut)) || len(cut["runtime_provider_attempt_drains"].Rows) != 0 {
+		t.Fatalf("graceful no-drain classification cut differs; retained=%s", directory)
+	}
+	for restart := 1; restart <= 2; restart++ {
+		process := start()
+		select {
+		case <-process.exited:
+		case <-time.After(serveRuntimeReadyTimeout):
+			t.Fatalf("missing-drain restart did not finish at the invariant boundary; retained=%s", directory)
+		}
+		output := process.output.String()
+		if err := os.WriteFile(filepath.Join(directory, fmt.Sprintf("restart-%d.log", restart)), []byte(output), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if process.waitError() == nil || providerRestartStartupSucceeded(output) || !strings.Contains(output, "provider_attempt_drain_missing") {
+			t.Fatalf("missing-drain restart changed its invariant refusal; retained=%s", directory)
+		}
+		after := providerRestartSnapshot(t, selected)
+		retain(fmt.Sprintf("after-restart-%d", restart), after)
+		for _, table := range []string{"agents", "agent_lifecycle_operations", "agent_lifecycle_transition_facts", "runtime_external_effect_attempts", "runtime_external_effect_operations", "runtime_provider_attempt_drains", "agent_turns", "spend_ledger", "runtime_effect_budget_reservations", "event_deliveries", "event_delivery_attempts", "author_activity_occurrences"} {
+			prior, present := cut[table]
+			next, found := after[table]
+			if !present || !found || !reflect.DeepEqual(prior, next) {
+				t.Fatalf("missing-drain refusal changed %s; retained=%s", table, directory)
+			}
+		}
+		if entered.Load() != requestsBefore {
+			t.Fatalf("missing-drain restart repeated a provider request; retained=%s", directory)
+		}
+		t.Logf("graceful restart %d: REFUSED reason=provider_attempt_drain_missing classification=sibling_not_repaired attempts=%d provider_requests=%d retained=%s", restart, len(expected), requestsBefore, directory)
+	}
+}
+
+func providerRestartStartupSucceeded(output string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[0] == "[22/22]" && fields[1] == "ready" && fields[2] == "ok" {
+			return true
+		}
+	}
+	return strings.Contains(output, "\n  ready in ")
 }
 
 type providerRestartAttempt struct {
