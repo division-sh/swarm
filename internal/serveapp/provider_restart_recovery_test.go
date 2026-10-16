@@ -324,7 +324,7 @@ func proveProviderGracefulMissingDrainRefusal(t *testing.T, backend string, star
 		}
 		after := providerRestartSnapshot(t, selected)
 		retain(fmt.Sprintf("after-restart-%d", restart), after)
-		for _, table := range []string{"agents", "agent_lifecycle_operations", "agent_lifecycle_transition_facts", "runtime_external_effect_attempts", "runtime_external_effect_operations", "runtime_provider_attempt_drains", "agent_turns", "spend_ledger", "runtime_effect_budget_reservations", "event_deliveries", "event_delivery_attempts", "author_activity_occurrences"} {
+		for _, table := range []string{"runs", "agents", "agent_lifecycle_operations", "agent_lifecycle_transition_facts", "runtime_external_effect_attempts", "runtime_external_effect_operations", "runtime_provider_attempt_drains", "agent_turns", "spend_ledger", "runtime_effect_budget_reservations", "event_deliveries", "event_delivery_attempts", "author_activity_occurrences"} {
 			prior, present := cut[table]
 			next, found := after[table]
 			if !present || !found || !reflect.DeepEqual(prior, next) {
