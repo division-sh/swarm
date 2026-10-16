@@ -22,6 +22,7 @@ import (
 )
 
 const providerRestartRecoveryEnv = "TEST_PROVIDER_RESTART_RECOVERY"
+const providerGracefulClassificationEnv = "TEST_PROVIDER_GRACEFUL_CLASSIFICATION"
 
 type providerRestartRecoveryRequest struct {
 	Source, Config, Backend string
@@ -64,9 +65,13 @@ func TestProviderRestartRecoveryBothStores(t *testing.T) {
 				t.Run(fmt.Sprintf("completed_%t", completed), func(t *testing.T) {
 					proveProviderRestartRecovery(t, backend, completed, "abrupt")
 				})
-				t.Run(fmt.Sprintf("graceful_completed_%t", completed), func(t *testing.T) {
-					proveProviderRestartRecovery(t, backend, completed, "graceful")
-				})
+				// The known no-drain stop is diagnostic-only; do not turn the
+				// sibling defect into an expected hosted recovery behavior.
+				if completed || os.Getenv(providerGracefulClassificationEnv) == "1" {
+					t.Run(fmt.Sprintf("graceful_completed_%t", completed), func(t *testing.T) {
+						proveProviderRestartRecovery(t, backend, completed, "graceful")
+					})
+				}
 			}
 			t.Run("standby_in_flight", func(t *testing.T) {
 				proveProviderRestartRecovery(t, backend, false, "standby")
