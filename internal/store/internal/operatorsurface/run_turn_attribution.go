@@ -274,12 +274,7 @@ func (r completionAttributionRow) addEvidence(delivery deliverylifecycle.Snapsho
 }
 
 func loadDeliveryAcceptedEmissions(ctx context.Context, q eventReadQueryer, postgres bool, publications PipelineObligationSource, delivery deliverylifecycle.Snapshot, deliveries []deliverylifecycle.Snapshot, candidates map[string]string, nativeCLI map[string]bool) (_ []operatorread.RunAcceptedEmission, ambiguous bool, err error) {
-	matchingOrigins := 0
-	for _, sibling := range deliveries {
-		if sibling.EventID == delivery.EventID && sibling.RouteIdentity == delivery.RouteIdentity {
-			matchingOrigins++
-		}
-	}
+	matchingOrigins := countDeliveryPublicationOrigins(delivery, deliveries)
 	rows, err := q.QueryContext(ctx, `SELECT CAST(event_id AS TEXT) FROM events WHERE run_id=$1 AND source_event_id=$2 AND produced_by_type='agent' AND produced_by=$3`, delivery.RunID, delivery.EventID, delivery.SubscriberID)
 	if err != nil {
 		return nil, false, err
@@ -324,13 +319,8 @@ func loadDeliveryAcceptedEmissions(ctx context.Context, q eventReadQueryer, post
 			ambiguous = true
 			continue
 		}
-		if err := receipt.Validate(); err != nil {
+		if err := validateAttributedEmissionReceipt(receipt, id, request); err != nil {
 			return nil, false, err
-		}
-		// Entityless agents still publish from a constructed header. As in the
-		// publication owner, only an authored entity binding constrains its ID.
-		if receipt.Acceptance.EventID() != id || receipt.Acceptance.Stage().Instance != request.Instance || request.EntityID != "" && receipt.Acceptance.Stage().EntityID != request.EntityID {
-			return nil, false, fmt.Errorf("accepted emission contradicts its immutable publication receipt")
 		}
 		out = append(out, operatorread.RunAcceptedEmission{EventID: id, EventType: record.EventName})
 	}
@@ -344,6 +334,28 @@ func loadDeliveryAcceptedEmissions(ctx context.Context, q eventReadQueryer, post
 		return 0
 	})
 	return out, ambiguous, nil
+}
+
+func countDeliveryPublicationOrigins(delivery deliverylifecycle.Snapshot, deliveries []deliverylifecycle.Snapshot) int {
+	matching := 0
+	for _, sibling := range deliveries {
+		if sibling.EventID == delivery.EventID && sibling.RouteIdentity == delivery.RouteIdentity {
+			matching++
+		}
+	}
+	return matching
+}
+
+func validateAttributedEmissionReceipt(receipt pipeline.WorkflowPublicationStageEvidence, eventID string, request pipeline.WorkflowPublicationStageRequest) error {
+	if err := receipt.Validate(); err != nil {
+		return err
+	}
+	// Entityless agents still publish from a constructed header. As in the
+	// publication owner, only an authored entity binding constrains its ID.
+	if receipt.Acceptance.EventID() != eventID || receipt.Acceptance.Stage().Instance != request.Instance || request.EntityID != "" && receipt.Acceptance.Stage().EntityID != request.EntityID {
+		return fmt.Errorf("accepted emission contradicts its immutable publication receipt")
+	}
+	return nil
 }
 
 func matchDeliveryEmissionOrigin(event events.Event, identity agentidentity.Identity, candidates map[string]string, nativeCLI map[string]bool, matchingOrigins int) (request pipeline.WorkflowPublicationStageRequest, matched, ambiguous bool, err error) {
