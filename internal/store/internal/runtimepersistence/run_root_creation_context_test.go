@@ -24,6 +24,11 @@ func TestS1RunCreationChecksSuppliedRootContextBothStores(t *testing.T) {
 				}
 			}
 			correct := runtimecorrelation.WithRootAdmission(ctx, sourceB.Admission())
+			// The journal observation includes the allocated ordering row. Create
+			// an ordinary control through its owner before observing fresh refusals.
+			if _, err := selected.CreateRun(correct, rootedRunCreationRequest(sourceB)); err != nil {
+				t.Fatal(err)
+			}
 			for _, replay := range []bool{false, true} {
 				mode := "fresh"
 				if replay {
