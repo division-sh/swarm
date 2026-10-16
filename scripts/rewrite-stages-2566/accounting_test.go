@@ -24,6 +24,12 @@ func TestFiniteAccountingUnexplainedFormatterDriftRefuses(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, file), current, 0644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, formatproof.Successors)), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, formatproof.Successors), []byte(`{"version":1,"records":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	ledger := plan{Baseline: strings.Repeat("a", 40), Scope: "fixed test source", Changes: []change{{
 		File: file, BeforeHash: digest([]byte("package fixture\n")), AfterHash: digest(original),
 		Edits: []edit{{Offset: len("package fixture\n"), After: "\nvar value = true\n"}}, Review: "fixed historical bytes",
@@ -110,6 +116,7 @@ func TestFiniteAccountingCopiedSourceAndHistoricalReplayAtBothCuts(t *testing.T)
 	}
 	put(formatproof.Ledger, ledgerBytes)
 	history := formatproof.History{Version: 1, Records: []formatproof.Record{}}
+	put(formatproof.Successors, []byte(`{"version":1,"records":[]}`))
 	previous := original
 	for index, spaces := range []int{16, 17} {
 		current := bytes.Replace(original, []byte("OmitOutputPin               bool"), []byte("OmitOutputPin"+strings.Repeat(" ", spaces)+"bool"), 1)
@@ -145,11 +152,16 @@ func TestFiniteAccountingCopiedSourceAndHistoricalReplayAtBothCuts(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, literal := range literals {
-			actual, err := readEntryLiteral(root, formatproof.Source, literal.Function, literal.Ordinal)
-			if err != nil || actual.Body != literal.Body {
-				t.Fatalf("entry/generated literal facts changed: %v", err)
-			}
+		if len(literals) == 0 {
+			t.Fatal("reviewed source lost its literal facts")
+		}
+		selected, err := readEntryLiteral(root, formatproof.Source, literals[0].Function, literals[0].Ordinal)
+		if err != nil || selected.Body != literals[0].Body {
+			t.Fatalf("canonical current reader changed its selected literal: %v", err)
+		}
+		actual, err := goLiteralSites(formatproof.Source, current)
+		if err != nil || !reflect.DeepEqual(literals, actual) {
+			t.Fatalf("complete entry/generated literal facts changed: %v", err)
 		}
 		if _, err := baselineEntryGoldens(root, ledger); err != nil {
 			t.Fatal(err)
@@ -160,6 +172,12 @@ func TestFiniteAccountingCopiedSourceAndHistoricalReplayAtBothCuts(t *testing.T)
 		}
 		put(formatproof.Source, current)
 		previous = current
+	}
+	if err := os.Remove(filepath.Join(root, formatproof.Successors)); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateFiniteAccounting(root); err == nil {
+		t.Fatal("copied source without its history accepted")
 	}
 	// The copied source carries its historical inputs as record bytes. It adds no
 	// commit/fetch selector and must keep the independent history-input owner intact.

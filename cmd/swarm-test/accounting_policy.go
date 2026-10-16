@@ -262,54 +262,12 @@ func accountingClosure(ctx context.Context, root string) ([]accountingInput, err
 	}
 	sort.Strings(selected)
 	for _, variant := range accountingVariants {
-		parts := strings.Split(variant, "/")
-		args := []string{"list", "-mod=readonly", "-deps", "-test", "-json"}
-		if parts[2] == "race" {
-			args = append(args, "-race")
-		}
-		if parts[2] == "issue2413" {
-			args = append(args, "-tags=issue2413")
-		}
-		args = append(args, selected...)
-		command := exec.CommandContext(ctx, "go", args...)
-		command.Dir = root
-		command.Env = accountingBuildEnv(parts[0], parts[1])
-		raw, err := command.Output()
+		names, err := accountingVariantInputs(ctx, root, variant, selected)
 		if err != nil {
-			return nil, fmt.Errorf("derive accounting closure %s: %w", variant, err)
+			return nil, err
 		}
-		decoder := json.NewDecoder(bytes.NewReader(raw))
-		for {
-			var pkg struct {
-				Dir                                                                                                       string
-				Standard                                                                                                  bool
-				GoFiles, CgoFiles, TestGoFiles, XTestGoFiles, EmbedFiles, TestEmbedFiles, XTestEmbedFiles, IgnoredGoFiles []string
-				CFiles, CXXFiles, MFiles, HFiles, FFiles, SFiles, SwigFiles, SwigCXXFiles, SysoFiles                      []string
-			}
-			if err = decoder.Decode(&pkg); err == io.EOF {
-				break
-			} else if err != nil {
-				return nil, err
-			}
-			if pkg.Standard {
-				continue
-			}
-			rel, err := filepath.Rel(root, pkg.Dir)
-			if err != nil || !filepath.IsLocal(rel) {
-				continue
-			}
-			for _, names := range [][]string{pkg.GoFiles, pkg.CgoFiles, pkg.TestGoFiles, pkg.XTestGoFiles, pkg.EmbedFiles, pkg.TestEmbedFiles, pkg.XTestEmbedFiles, pkg.IgnoredGoFiles, pkg.CFiles, pkg.CXXFiles, pkg.MFiles, pkg.HFiles, pkg.FFiles, pkg.SFiles, pkg.SwigFiles, pkg.SwigCXXFiles, pkg.SysoFiles} {
-				for _, name := range names {
-					if filepath.IsAbs(name) {
-						continue
-					}
-					path := filepath.ToSlash(filepath.Join(rel, name))
-					if !filepath.IsLocal(path) {
-						return nil, fmt.Errorf("nonlocal accounting dependency")
-					}
-					paths[path] = true
-				}
-			}
+		for _, name := range names {
+			paths[name] = true
 		}
 	}
 	for _, path := range []string{".github/test-proof-plan.yaml", ".github/test-proof-history-inputs.json", ".github/scripts/prepare-proof-history.sh", testplanning.GeneratedWeightModelPath, ".github/flake-ledger.json", "internal/apiv1/testdata/public_surface_backend_matrix.yaml", formatproof.Ledger, "scripts/rewrite-stages-2566/intent.json", "scripts/rewrite-stages-2566/entries.json"} {
@@ -333,4 +291,74 @@ func accountingClosure(ctx context.Context, root string) ([]accountingInput, err
 	}
 	sort.Slice(inputs, func(i, j int) bool { return inputs[i].Path < inputs[j].Path })
 	return inputs, nil
+}
+
+func accountingVariantInputs(ctx context.Context, root, variant string, selected []string) ([]string, error) {
+	parts := strings.Split(variant, "/")
+	args := []string{"list", "-mod=readonly", "-deps", "-test", "-json"}
+	if parts[2] == "race" {
+		args = append(args, "-race")
+	}
+	if parts[2] == "issue2413" {
+		args = append(args, "-tags=issue2413")
+	}
+	args = append(args, selected...)
+	command := exec.CommandContext(ctx, "go", args...)
+	command.Dir = root
+	command.Env = accountingBuildEnv(parts[0], parts[1])
+	raw, err := command.Output()
+	if err != nil {
+		return nil, fmt.Errorf("derive accounting closure %s: %w", variant, err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	var paths []string
+	for {
+		var pkg struct {
+			Dir                                                                                                       string
+			Standard                                                                                                  bool
+			GoFiles, CgoFiles, TestGoFiles, XTestGoFiles, EmbedFiles, TestEmbedFiles, XTestEmbedFiles, IgnoredGoFiles []string
+			CFiles, CXXFiles, MFiles, HFiles, FFiles, SFiles, SwigFiles, SwigCXXFiles, SysoFiles                      []string
+			Module                                                                                                    *struct{ Replace *struct{ Version string } }
+		}
+		if err = decoder.Decode(&pkg); err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, err
+		}
+		if pkg.Module != nil && pkg.Module.Replace != nil && pkg.Module.Replace.Version == "" {
+			return nil, fmt.Errorf("local module replacements are outside the approved executor closure")
+		}
+		var files []string
+		for _, names := range [][]string{pkg.GoFiles, pkg.CgoFiles, pkg.TestGoFiles, pkg.XTestGoFiles, pkg.EmbedFiles, pkg.TestEmbedFiles, pkg.XTestEmbedFiles, pkg.IgnoredGoFiles, pkg.CFiles, pkg.CXXFiles, pkg.MFiles, pkg.HFiles, pkg.FFiles, pkg.SFiles, pkg.SwigFiles, pkg.SwigCXXFiles, pkg.SysoFiles} {
+			files = append(files, names...)
+		}
+		names, err := accountingLocalInputs(root, pkg.Dir, pkg.Standard, files)
+		if err != nil {
+			return nil, err
+		}
+		paths = append(paths, names...)
+	}
+	return paths, nil
+}
+
+func accountingLocalInputs(root, directory string, standard bool, files []string) ([]string, error) {
+	if standard {
+		return nil, nil
+	}
+	rel, err := filepath.Rel(root, directory)
+	if err != nil || !filepath.IsLocal(rel) {
+		return nil, nil
+	}
+	var paths []string
+	for _, name := range files {
+		if filepath.IsAbs(name) {
+			continue
+		}
+		path := filepath.ToSlash(filepath.Join(rel, name))
+		if !filepath.IsLocal(path) {
+			return nil, fmt.Errorf("nonlocal accounting dependency")
+		}
+		paths = append(paths, path)
+	}
+	return paths, nil
 }

@@ -223,51 +223,9 @@ func executeAccounting(ctx context.Context, args []string, out io.Writer, remote
 		if *planFile != "" || *receiptFile != "" {
 			return fmt.Errorf("plan reads the clean source and has no input override")
 		}
-		originRaw, err := accountingGit(ctx, root, "rev-parse", "origin/master^{commit}")
-		if err != nil {
-			return err
-		}
-		base, _, err := observePreflightComparison(ctx, head, strings.TrimSpace(string(originRaw)))
-		if err != nil {
-			return err
-		}
-		plan, err := planAccounting(ctx, root, base, head, policy)
-		if err != nil {
-			return err
-		}
-		if err = requireAccountingPolicy(ctx, remote, policy); err != nil {
-			return err
-		}
-		return writeAccountingJSON(out, plan)
+		return planApprovedAccounting(ctx, root, head, out, remote, policy)
 	case "apply":
-		if *planFile == "" {
-			return fmt.Errorf("apply requires its exact frozen plan")
-		}
-		var plan accountingPlan
-		if err = readAccountingJSON(*planFile, &plan); err != nil {
-			return err
-		}
-		if head != plan.Head {
-			return fmt.Errorf("accounting source moved before apply")
-		}
-		fresh, err := planAccounting(ctx, root, plan.Base, head, policy)
-		if err != nil || !reflect.DeepEqual(fresh, plan) {
-			return fmt.Errorf("accounting plan changed: %v", err)
-		}
-		if err = requireAccountingPolicy(ctx, remote, policy); err != nil {
-			return err
-		}
-		if plan.Rows == 0 {
-			return fmt.Errorf("accounting is not applicable; no rows regenerated")
-		}
-		if err = writeFiniteHistory(root, plan.Output); err != nil {
-			return err
-		}
-		if err = requireAccountingPolicy(ctx, remote, policy); err != nil {
-			return err
-		}
-		fmt.Fprintln(out, "accounting successor prepared; commit and certify the frozen head; no certification yet")
-		return nil
+		return applyApprovedAccounting(ctx, root, head, *planFile, out, remote, policy)
 	case "certify":
 		if *receiptFile != "" {
 			return verifyAccountingReceipt(ctx, root, head, *receiptFile, out, remote, policy)
@@ -283,6 +241,56 @@ func executeAccounting(ctx context.Context, args []string, out io.Writer, remote
 	default:
 		return fmt.Errorf("unknown accounting operation")
 	}
+}
+
+func planApprovedAccounting(ctx context.Context, root, head string, out io.Writer, remote accountingRemote, policy accountingPolicyObservation) error {
+	originRaw, err := accountingGit(ctx, root, "rev-parse", "origin/master^{commit}")
+	if err != nil {
+		return err
+	}
+	base, _, err := observePreflightComparison(ctx, head, strings.TrimSpace(string(originRaw)))
+	if err != nil {
+		return err
+	}
+	plan, err := planAccounting(ctx, root, base, head, policy)
+	if err != nil {
+		return err
+	}
+	if err = requireAccountingPolicy(ctx, remote, policy); err != nil {
+		return err
+	}
+	return writeAccountingJSON(out, plan)
+}
+
+func applyApprovedAccounting(ctx context.Context, root, head, path string, out io.Writer, remote accountingRemote, policy accountingPolicyObservation) error {
+	if path == "" {
+		return fmt.Errorf("apply requires its exact frozen plan")
+	}
+	var plan accountingPlan
+	if err := readAccountingJSON(path, &plan); err != nil {
+		return err
+	}
+	if head != plan.Head {
+		return fmt.Errorf("accounting source moved before apply")
+	}
+	fresh, err := planAccounting(ctx, root, plan.Base, head, policy)
+	if err != nil || !reflect.DeepEqual(fresh, plan) {
+		return fmt.Errorf("accounting plan changed: %v", err)
+	}
+	if err = requireAccountingPolicy(ctx, remote, policy); err != nil {
+		return err
+	}
+	if plan.Rows == 0 {
+		return fmt.Errorf("accounting is not applicable; no rows regenerated")
+	}
+	if err = writeFiniteHistory(root, plan.Output); err != nil {
+		return err
+	}
+	if err = requireAccountingPolicy(ctx, remote, policy); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(out, "accounting successor prepared; commit and certify the frozen head; no certification yet")
+	return err
 }
 
 func readAccountingJSON(path string, out any) error {
@@ -401,67 +409,15 @@ func deriveFiniteAccountingPlan(ctx context.Context, root, base, head string, po
 	if err := policy.Policy.validate(); err != nil {
 		return result, err
 	}
-	if !hexIdentity(base, 40) || !hexIdentity(head, 40) {
-		return result, fmt.Errorf("unbound accounting comparison")
+	if err := checkFiniteAccountingDiff(ctx, root, base, head, policy.Policy.Inputs); err != nil {
+		return result, err
 	}
-	if _, err := accountingGit(ctx, root, "merge-base", "--is-ancestor", base, head); err != nil {
-		return result, fmt.Errorf("accounting base is not a predecessor")
+	if err := checkImmutableFiniteLedger(ctx, root, base, head); err != nil {
+		return result, err
 	}
-	changed, err := accountingGit(ctx, root, "diff", "--name-only", "-z", base, head, "--")
+	previous, err := finiteAccountingPredecessor(ctx, root, base, head)
 	if err != nil {
 		return result, err
-	}
-	for _, name := range strings.Split(strings.TrimSuffix(string(changed), "\x00"), "\x00") {
-		if name != "" && name != formatproof.Source {
-			return result, fmt.Errorf("F1 initial rule refuses another changed source or accounting row: %s", name)
-		}
-	}
-	for _, input := range policy.Policy.Inputs {
-		if input.Path == formatproof.Source || input.Path == formatproof.Successors {
-			continue
-		}
-		raw, err := gitAccountingBlob(ctx, root, head, input.Path)
-		if err != nil || formatproof.Digest(raw) != input.SHA256 {
-			return result, fmt.Errorf("candidate changed approved owner/guard dependency %s", input.Path)
-		}
-	}
-	oldLedger, err := gitAccountingBlob(ctx, root, base, formatproof.Ledger)
-	if err != nil {
-		return result, err
-	}
-	newLedger, err := gitAccountingBlob(ctx, root, head, formatproof.Ledger)
-	if err != nil || !bytes.Equal(oldLedger, newLedger) {
-		return result, fmt.Errorf("immutable finite ledger changed")
-	}
-	// The source owner uses snake-case fields; inspect only its closed row identity.
-	var rawLedger struct {
-		Changes []struct {
-			File      string `json:"file"`
-			AfterHash string `json:"after_hash"`
-		} `json:"changes"`
-	}
-	if err = json.Unmarshal(oldLedger, &rawLedger); err != nil {
-		return result, err
-	}
-	matched := 0
-	for _, row := range rawLedger.Changes {
-		if row.File == formatproof.Source && row.AfterHash == formatproof.Origin {
-			matched++
-		}
-	}
-	if matched != 1 {
-		return result, fmt.Errorf("finite ledger has no unique approved origin")
-	}
-	previous, err := accountingHistoryAt(ctx, root, base)
-	if err != nil {
-		return result, err
-	}
-	current, err := accountingHistoryAt(ctx, root, head)
-	if err != nil {
-		return result, err
-	}
-	if !reflect.DeepEqual(previous, current) {
-		return result, fmt.Errorf("plan cannot authorize prewritten successor edits")
 	}
 	before, err := gitAccountingBlob(ctx, root, base, formatproof.Source)
 	if err != nil {
@@ -492,6 +448,80 @@ func deriveFiniteAccountingPlan(ctx context.Context, root, base, head string, po
 	}
 	result.SourceTree, err = accountingSourceTree(ctx, root, head)
 	return result, err
+}
+
+func checkFiniteAccountingDiff(ctx context.Context, root, base, head string, inputs []accountingInput) error {
+	if !hexIdentity(base, 40) || !hexIdentity(head, 40) {
+		return fmt.Errorf("unbound accounting comparison")
+	}
+	if _, err := accountingGit(ctx, root, "merge-base", "--is-ancestor", base, head); err != nil {
+		return fmt.Errorf("accounting base is not a predecessor")
+	}
+	changed, err := accountingGit(ctx, root, "diff", "--name-only", "-z", base, head, "--")
+	if err != nil {
+		return err
+	}
+	for _, name := range strings.Split(strings.TrimSuffix(string(changed), "\x00"), "\x00") {
+		if name != "" && name != formatproof.Source {
+			return fmt.Errorf("F1 initial rule refuses another changed source or accounting row: %s", name)
+		}
+	}
+	for _, input := range inputs {
+		if input.Path == formatproof.Source || input.Path == formatproof.Successors {
+			continue
+		}
+		raw, err := gitAccountingBlob(ctx, root, head, input.Path)
+		if err != nil || formatproof.Digest(raw) != input.SHA256 {
+			return fmt.Errorf("candidate changed approved owner/guard dependency %s", input.Path)
+		}
+	}
+	return nil
+}
+
+func checkImmutableFiniteLedger(ctx context.Context, root, base, head string) error {
+	oldLedger, err := gitAccountingBlob(ctx, root, base, formatproof.Ledger)
+	if err != nil {
+		return err
+	}
+	newLedger, err := gitAccountingBlob(ctx, root, head, formatproof.Ledger)
+	if err != nil || !bytes.Equal(oldLedger, newLedger) {
+		return fmt.Errorf("immutable finite ledger changed")
+	}
+	// The source owner uses snake-case fields; inspect only its closed row identity.
+	var rawLedger struct {
+		Changes []struct {
+			File      string `json:"file"`
+			AfterHash string `json:"after_hash"`
+		} `json:"changes"`
+	}
+	if err = json.Unmarshal(oldLedger, &rawLedger); err != nil {
+		return err
+	}
+	matched := 0
+	for _, row := range rawLedger.Changes {
+		if row.File == formatproof.Source && row.AfterHash == formatproof.Origin {
+			matched++
+		}
+	}
+	if matched != 1 {
+		return fmt.Errorf("finite ledger has no unique approved origin")
+	}
+	return nil
+}
+
+func finiteAccountingPredecessor(ctx context.Context, root, base, head string) (formatproof.History, error) {
+	previous, err := accountingHistoryAt(ctx, root, base)
+	if err != nil {
+		return previous, err
+	}
+	current, err := accountingHistoryAt(ctx, root, head)
+	if err != nil {
+		return previous, err
+	}
+	if !reflect.DeepEqual(previous, current) {
+		return previous, fmt.Errorf("plan cannot authorize prewritten successor edits")
+	}
+	return previous, nil
 }
 
 func writeFiniteHistory(root string, history formatproof.History) error {

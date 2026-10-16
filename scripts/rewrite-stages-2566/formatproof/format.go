@@ -85,24 +85,7 @@ func exactJSONNames(raw []byte, typ reflect.Type) error {
 	}
 	switch typ.Kind() {
 	case reflect.Struct:
-		if !bytes.HasPrefix(bytes.TrimSpace(raw), []byte("{")) {
-			return nil
-		}
-		var members map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &members); err != nil {
-			return err
-		}
-		fields := map[string]reflect.Type{}
-		exactJSONFields(typ, fields)
-		for name, value := range members {
-			field, ok := fields[name]
-			if !ok {
-				return fmt.Errorf("unknown JSON field %q", name)
-			}
-			if err := exactJSONNames(value, field); err != nil {
-				return err
-			}
-		}
+		return exactJSONMembers(raw, typ)
 	case reflect.Slice, reflect.Array:
 		var values []json.RawMessage
 		if err := json.Unmarshal(raw, &values); err != nil {
@@ -122,6 +105,28 @@ func exactJSONNames(raw []byte, typ reflect.Type) error {
 			if err := exactJSONNames(value, typ.Elem()); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func exactJSONMembers(raw []byte, typ reflect.Type) error {
+	if !bytes.HasPrefix(bytes.TrimSpace(raw), []byte("{")) {
+		return nil
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil {
+		return err
+	}
+	fields := map[string]reflect.Type{}
+	exactJSONFields(typ, fields)
+	for name, value := range members {
+		field, ok := fields[name]
+		if !ok {
+			return fmt.Errorf("unknown JSON field %q", name)
+		}
+		if err := exactJSONNames(value, field); err != nil {
+			return err
 		}
 	}
 	return nil
