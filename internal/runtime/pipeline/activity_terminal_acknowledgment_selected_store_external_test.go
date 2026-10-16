@@ -27,9 +27,6 @@ func TestActivityTerminalTimestampPostCommitErrorBothStores(t *testing.T) {
 				runID := uuid.NewString()
 				selected := tc.open(t)
 				fault := errors.New("injected activity post-commit cleanup fault")
-				persistence, faultCount := storetest.ActivityJournalCleanupPersistenceFault(t, selected.events, fault)
-				selected.persistence = persistence
-
 				var calls atomic.Int32
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					calls.Add(1)
@@ -56,6 +53,11 @@ func TestActivityTerminalTimestampPostCommitErrorBothStores(t *testing.T) {
 				intent.Input = runtimepipeline.ActivityInputForTest(map[string]any{"message_id": 42})
 				intent = intent.Normalized()
 				intent = seedSelectedActivitySource(t, ctx, selected, pc, intent)
+				original, _ := installActivityReplayJournal(t, ctx, selected, bus, pc)
+				faulted, faultCount := storetest.ActivityJournalCleanupBoundFault(t, selected.events, original, fault)
+				if err := pc.InstallActivityJournal(faulted); err != nil {
+					t.Fatal(err)
+				}
 				if err := runtimepipeline.ExecuteActivityIntentForTest(ctx, pc, client, intent); !errors.Is(err, fault) {
 					t.Fatalf("terminal execution error = %v, want post-commit fault", err)
 				}

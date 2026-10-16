@@ -19,6 +19,18 @@ func ActivityJournalCleanupPersistenceFaultForTest(selected any, fault error) (p
 	return pipeline.NewWorkflowPersistence(journal), journal.acknowledgments.Load, nil
 }
 
+func ActivityJournalCleanupBoundFaultForTest(selected any, original pipeline.ActivityAttemptJournal, fault error) (pipeline.ActivityAttemptJournal, func() int32, error) {
+	if original == nil {
+		return nil, nil, fmt.Errorf("activity journal cleanup proof requires its captured original journal")
+	}
+	journal, err := activityJournalCleanupFaultForTest(selected, fault)
+	if err != nil {
+		return nil, nil, err
+	}
+	journal.original = original
+	return journal, journal.acknowledgments.Load, nil
+}
+
 func activityJournalCleanupFaultForTest(selected any, fault error) (*activityJournalCleanupFault, error) {
 	if fault == nil {
 		return nil, fmt.Errorf("activity journal cleanup proof requires a fault")
@@ -38,17 +50,18 @@ func activityJournalCleanupFaultForTest(selected any, fault error) (*activityJou
 	default:
 		return nil, fmt.Errorf("unsupported activity journal cleanup fault owner %T", selected)
 	}
-	return &activityJournalCleanupFault{WorkflowPersistenceOwner: journal, fault: fault}, nil
+	return &activityJournalCleanupFault{WorkflowPersistenceOwner: journal, original: journal, fault: fault}, nil
 }
 
 type activityJournalCleanupFault struct {
 	pipeline.WorkflowPersistenceOwner
+	original        pipeline.ActivityAttemptJournal
 	fault           error
 	acknowledgments atomic.Int32
 }
 
 func (j *activityJournalCleanupFault) CompleteActivityAttempt(ctx context.Context, request pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
-	result, acknowledged, err := j.WorkflowPersistenceOwner.CompleteActivityAttempt(ctx, request)
+	result, acknowledged, err := j.original.CompleteActivityAttempt(ctx, request)
 	if acknowledged {
 		j.acknowledgments.Add(1)
 		err = errors.Join(err, j.fault)
@@ -57,10 +70,22 @@ func (j *activityJournalCleanupFault) CompleteActivityAttempt(ctx context.Contex
 }
 
 func (j *activityJournalCleanupFault) MarkActivityAttemptUncertain(ctx context.Context, request pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
-	result, acknowledged, err := j.WorkflowPersistenceOwner.MarkActivityAttemptUncertain(ctx, request)
+	result, acknowledged, err := j.original.MarkActivityAttemptUncertain(ctx, request)
 	if acknowledged {
 		j.acknowledgments.Add(1)
 		err = errors.Join(err, j.fault)
 	}
 	return result, acknowledged, err
+}
+
+func (j *activityJournalCleanupFault) LoadActivityAttempt(ctx context.Context, id string) (pipeline.ActivityAttemptRecord, bool, error) {
+	return j.original.LoadActivityAttempt(ctx, id)
+}
+
+func (j *activityJournalCleanupFault) StartActivityAttempt(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
+	return j.original.StartActivityAttempt(ctx, record)
+}
+
+func (j *activityJournalCleanupFault) ClaimActivityAttemptForLoopGeneration(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
+	return j.original.ClaimActivityAttemptForLoopGeneration(ctx, record)
 }

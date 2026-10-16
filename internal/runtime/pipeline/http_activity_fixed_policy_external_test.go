@@ -3,10 +3,12 @@ package pipeline_test
 import (
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"reflect"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -30,7 +32,7 @@ func (b *fixedHTTPInterruptedBody) Close() error {
 func TestKeyFreeHTTPActivityFixedSettlementBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, method := range []string{http.MethodGet, http.MethodPost} {
-			for _, outcome := range []string{"success", "forbidden", "transport", "body", "deadline"} {
+			for _, outcome := range []string{"success", "forbidden", "unavailable", "transport", "refused_transport", "body", "deadline"} {
 				t.Run(backend+"/"+method+"/"+outcome, func(t *testing.T) {
 					selected, closeStore, reopen := openActivityReplayStore(t, backend)
 					tool := runtimecontracts.MustToolSchemaEntry(
@@ -59,6 +61,8 @@ func TestKeyFreeHTTPActivityFixedSettlementBothStores(t *testing.T) {
 						switch outcome {
 						case "transport":
 							return nil, errors.New("connection lost after dispatch")
+						case "refused_transport":
+							return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
 						case "deadline":
 							<-request.Context().Done()
 							return nil, request.Context().Err()
@@ -66,6 +70,8 @@ func TestKeyFreeHTTPActivityFixedSettlementBothStores(t *testing.T) {
 							return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: interrupted}, nil
 						case "forbidden":
 							return &http.Response{StatusCode: http.StatusForbidden, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":"not allowed"}`))}, nil
+						case "unavailable":
+							return &http.Response{StatusCode: http.StatusServiceUnavailable, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":"unavailable"}`))}, nil
 						default:
 							return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"ok":true}`))}, nil
 						}
@@ -77,7 +83,7 @@ func TestKeyFreeHTTPActivityFixedSettlementBothStores(t *testing.T) {
 					want := runtimepipeline.ActivityAttemptStatusUncertain
 					if outcome == "success" {
 						want = runtimepipeline.ActivityAttemptStatusSucceeded
-					} else if outcome == "forbidden" {
+					} else if outcome == "forbidden" || outcome == "unavailable" {
 						want = runtimepipeline.ActivityAttemptStatusFailed
 					}
 					if err != nil || !found || journal.Status != want || journal.Attempt != 1 || calls.Load() != 1 || journal.CompletedAt == nil || len(bus.publishes) != 1 {
@@ -88,6 +94,9 @@ func TestKeyFreeHTTPActivityFixedSettlementBothStores(t *testing.T) {
 					}
 					if outcome == "forbidden" && (journal.Failure == nil || journal.Failure.Class != runtimefailures.ClassAuthorizationDenied || journal.Failure.Detail.Code != "provider_forbidden") {
 						t.Fatalf("complete provider refusal lost its known outcome: %+v", journal.Failure)
+					}
+					if outcome == "unavailable" && (journal.Failure == nil || journal.Failure.Class != runtimefailures.ClassConnectorFailure || journal.Failure.Detail.Code != "provider_http_status") {
+						t.Fatalf("complete provider 503 lost its known outcome: %+v", journal.Failure)
 					}
 					if outcome == "body" && !interrupted.closed.Load() {
 						t.Fatal("interrupted HTTP response body was not closed")
