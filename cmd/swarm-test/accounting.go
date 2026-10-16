@@ -67,30 +67,11 @@ func superviseAccounting(ctx context.Context, args []string, out, stderr io.Writ
 	if err = fetchAccountingExecutor(ctx, repo, policy.Policy, accountingGitHub); err != nil {
 		return err
 	}
-	originRaw, err := accountingGit(ctx, repo, "rev-parse", "origin/master^{commit}")
-	if err != nil {
-		return err
-	}
-	origin := strings.TrimSpace(string(originRaw))
-	if err = checkAccountingBase(ctx, repo, origin, policy); err != nil {
-		return err
-	}
-	snapshot, err := freezeAccountingProof(ctx, repo, frozen, origin, policy)
+	snapshot, evidence, args, err := prepareAccountingProof(ctx, repo, frozen, policy, args)
 	if err != nil {
 		return err
 	}
 	defer func() { result = errors.Join(result, snapshot.Close()) }()
-	evidence, err := newAccountingEvidence(repo)
-	if err != nil {
-		return err
-	}
-	if err = saveAccountingManifest(filepath.Join(evidence, "proof-inputs.json"), snapshot.Manifest); err != nil {
-		return err
-	}
-	args, err = absoluteAccountingInputs(repo, args)
-	if err != nil {
-		return err
-	}
 	directory, err := archiveAccountingExecutor(ctx, repo, policy.Policy.ExecutorSource)
 	if err != nil {
 		return err

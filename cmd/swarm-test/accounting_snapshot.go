@@ -41,6 +41,35 @@ type accountingProofSnapshot struct {
 	Manifest     accountingProofManifest
 }
 
+func prepareAccountingProof(ctx context.Context, root, head string, policy accountingPolicyObservation, args []string) (snapshot accountingProofSnapshot, evidence string, normalized []string, result error) {
+	originRaw, err := accountingGit(ctx, root, "rev-parse", "origin/master^{commit}")
+	if err != nil {
+		return snapshot, "", nil, err
+	}
+	origin := strings.TrimSpace(string(originRaw))
+	if err = checkAccountingBase(ctx, root, origin, policy); err != nil {
+		return snapshot, "", nil, err
+	}
+	snapshot, err = freezeAccountingProof(ctx, root, head, origin, policy)
+	if err != nil {
+		return snapshot, "", nil, err
+	}
+	defer func() {
+		if result != nil {
+			result = errors.Join(result, snapshot.Close())
+		}
+	}()
+	evidence, err = newAccountingEvidence(root)
+	if err != nil {
+		return snapshot, "", nil, err
+	}
+	if err = saveAccountingManifest(filepath.Join(evidence, "proof-inputs.json"), snapshot.Manifest); err != nil {
+		return snapshot, evidence, nil, err
+	}
+	normalized, err = absoluteAccountingInputs(root, args)
+	return snapshot, evidence, normalized, err
+}
+
 // Tree objects, not archive attributes or a clean index, define proof inputs.
 // The complete tracked tree covers runtime indirection and source read as data.
 func accountingTreeInputs(ctx context.Context, repo, head string, consume func(accountingProofInput, []byte) error) (accountingProofManifest, error) {
@@ -276,19 +305,26 @@ func (snapshot accountingProofSnapshot) Validate(ctx context.Context) error {
 	if err != nil || !reflect.DeepEqual(expected, snapshot.Manifest) {
 		return fmt.Errorf("proof manifest differs from Git objects: %v", err)
 	}
+	if err := validateAccountingProofFiles(snapshot.Root, snapshot.Manifest); err != nil {
+		return err
+	}
+	return snapshot.validateGitContext(ctx)
+}
+
+func validateAccountingProofFiles(root string, manifest accountingProofManifest) error {
 	allowed := map[string]accountingProofInput{}
 	directories := map[string]bool{".": true}
-	for _, input := range snapshot.Manifest.Inputs {
+	for _, input := range manifest.Inputs {
 		allowed[input.Path] = input
 		for dir := filepath.Dir(input.Path); dir != "."; dir = filepath.Dir(dir) {
 			directories[filepath.ToSlash(dir)] = true
 		}
 	}
-	err = filepath.WalkDir(snapshot.Root, func(path string, entry fs.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		name, err := filepath.Rel(snapshot.Root, path)
+		name, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
@@ -320,6 +356,10 @@ func (snapshot accountingProofSnapshot) Validate(ctx context.Context) error {
 	if err != nil || len(allowed) != 0 {
 		return fmt.Errorf("incomplete or changed proof snapshot (%d missing): %w", len(allowed), err)
 	}
+	return nil
+}
+
+func (snapshot accountingProofSnapshot) validateGitContext(ctx context.Context) error {
 	head, err := accountingGit(ctx, snapshot.Root, "rev-parse", "HEAD")
 	if err != nil || strings.TrimSpace(string(head)) != snapshot.Manifest.Head {
 		return fmt.Errorf("proof HEAD changed: %v", err)

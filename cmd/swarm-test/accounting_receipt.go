@@ -130,30 +130,10 @@ func certifyAccounting(ctx context.Context, root, head string, plan accountingPl
 	if err = requireAccountingPolicy(ctx, remote, policy); err != nil {
 		return err
 	}
-	if err = verifyFrozenAccountingSource(ctx, root); err != nil {
-		return err
-	}
-	preflightLog, err := os.OpenFile(filepath.Join(directory, "preflight-command.log"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	certificate.Preflight, certificate.PreflightSHA256, err = runAccountingPreflight(ctx, root, directory, head, plan.Base)
 	if err != nil {
 		return err
 	}
-	_, runErr := runPreflightProcessDirectory(ctx, root, []string{"go", "run", "./cmd/swarm-test", "preflight"}, preflightLog, preflightLog, accountingBuildEnv(runtime.GOOS, runtime.GOARCH))
-	if err = errors.Join(runErr, preflightLog.Close(), verifyFrozenAccountingSource(ctx, root)); err != nil {
-		return fmt.Errorf("canonical preflight refused accounting certification: %w", err)
-	}
-	preflight, err := newestAccountingPreflight(root, head, plan.Base)
-	if err != nil {
-		return err
-	}
-	certificate.Preflight, err = retainAccountingPreflight(root, preflight, directory)
-	if err != nil {
-		return err
-	}
-	raw, err := os.ReadFile(filepath.Join(root, preflight))
-	if err != nil {
-		return err
-	}
-	certificate.PreflightSHA256 = formatproof.Digest(raw)
 	certificate.Sample = accountingSample(head, plan.Base, policy.Digest, plan.Output.Records[len(plan.Previous.Records):])
 	if err = checkAccountingFinalSource(ctx, root, head, plan, policy); err != nil {
 		return err
@@ -176,6 +156,33 @@ func certifyAccounting(ctx context.Context, root, head string, plan accountingPl
 		return err
 	}
 	return publishAccountingCertificate(ctx, out, remote, policy, certificate)
+}
+
+func runAccountingPreflight(ctx context.Context, root, directory, head, base string) (string, string, error) {
+	if err := verifyFrozenAccountingSource(ctx, root); err != nil {
+		return "", "", err
+	}
+	log, err := os.OpenFile(filepath.Join(directory, "preflight-command.log"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return "", "", err
+	}
+	_, runErr := runPreflightProcessDirectory(ctx, root, []string{"go", "run", "./cmd/swarm-test", "preflight"}, log, log, accountingBuildEnv(runtime.GOOS, runtime.GOARCH))
+	if err = errors.Join(runErr, log.Close(), verifyFrozenAccountingSource(ctx, root)); err != nil {
+		return "", "", fmt.Errorf("canonical preflight refused accounting certification: %w", err)
+	}
+	preflight, err := newestAccountingPreflight(root, head, base)
+	if err != nil {
+		return "", "", err
+	}
+	retained, err := retainAccountingPreflight(root, preflight, directory)
+	if err != nil {
+		return "", "", err
+	}
+	body, err := os.ReadFile(retained)
+	if err != nil {
+		return "", "", err
+	}
+	return retained, formatproof.Digest(body), nil
 }
 
 func accountingGuardMap(ctx context.Context, root string) ([]accountingGuardReceipt, error) {
