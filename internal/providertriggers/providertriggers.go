@@ -136,25 +136,36 @@ func (s *CatalogSnapshot) PackDescriptors() []packs.TriggerPackDescriptor {
 	sort.Strings(ids)
 	out := make([]packs.TriggerPackDescriptor, 0, len(ids))
 	for _, id := range ids {
-		entry := s.byID[id]
-		events := map[string]packs.TriggerEvent{}
-		for _, output := range entry.manifest.OutputManifest() {
-			if output.Kind != OutputKindNormalized {
-				continue
-			}
-			fields := make(map[string]packs.TriggerEventField, len(output.Fields))
-			for name, projection := range output.Fields {
-				projection = projection.normalized()
-				fields[name] = packs.TriggerEventField{Schema: projection.Schema, Required: !projection.Optional}
-			}
-			events[output.Event] = packs.TriggerEvent{Name: output.Event, Fields: fields}
-		}
-		out = append(out, packs.TriggerPackDescriptor{
-			Identity: entry.identity,
-			Provider: entry.manifest.Provider(), Generation: s.generation, Events: events,
-		})
+		out = append(out, triggerPackDescriptor(s.byID[id], s.generation))
 	}
 	return out
+}
+
+func (s *CatalogSnapshot) PackDescriptorForProvider(provider string) (packs.TriggerPackDescriptor, bool) {
+	if s == nil {
+		return packs.TriggerPackDescriptor{}, false
+	}
+	entry, present := s.byProvider[provider]
+	if !present {
+		return packs.TriggerPackDescriptor{}, false
+	}
+	return triggerPackDescriptor(entry, s.generation), true
+}
+
+func triggerPackDescriptor(entry catalogEntryValue, generation triggergeneration.Generation) packs.TriggerPackDescriptor {
+	events := map[string]packs.TriggerEvent{}
+	for _, output := range entry.manifest.OutputManifest() {
+		if output.Kind != OutputKindNormalized {
+			continue
+		}
+		fields := make(map[string]packs.TriggerEventField, len(output.Fields))
+		for name, projection := range output.Fields {
+			projection = projection.normalized()
+			fields[name] = packs.TriggerEventField{Schema: projection.Schema, Required: !projection.Optional}
+		}
+		events[output.Event] = packs.TriggerEvent{Name: output.Event, Fields: fields}
+	}
+	return packs.TriggerPackDescriptor{Identity: entry.identity, Provider: entry.manifest.Provider(), Generation: generation, Events: events}
 }
 
 func NewCatalogSnapshot(entries ...CatalogEntry) (*CatalogSnapshot, error) {

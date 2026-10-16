@@ -11,100 +11,8 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/sourceartifact"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
-
-func s1ChannelProviderMembers() map[string][]byte {
-	return map[string][]byte{
-		"manifest.yaml": []byte("version: 1.0.0\nplatform_version: '*'\ncapabilities: {can: {emit_events: [raw, text_message], call_provider_actions: [send_message]}, cannot: [bypass journal]}\n"),
-		"trigger.yaml": []byte(`secret: {required: true}
-signature: {type: token_equality, header: X-Signature}
-event_name: {literal: raw}
-normalized_events:
-  - event: text_message
-    fields:
-      text: {from: text, schema: {type: string, minLength: 1}}
-      account: {from: account, schema: {type: string, minLength: 1, maxLength: 32}}
-      room: {from: room, schema: {type: string, minLength: 1, maxLength: 32}}
-      message: {from: message, schema: {type: string, minLength: 1, maxLength: 32}}
-      reply: {from: reply, optional: true, schema: {type: string, minLength: 1, maxLength: 32}}
-      scope: {from: scope, schema: {type: string, enum: [direct, shared]}}
-      entry:
-        from: entry
-        optional: true
-        schema:
-          type: object
-          additionalProperties: false
-          required: [reference]
-          properties:
-            reference: {type: string, minLength: 1, maxLength: 32}
-            address: {type: string, minLength: 5, maxLength: 32}
-`),
-		"connector.yaml": []byte(`tools:
-  send_message:
-    category: provider_connector
-    handler_type: http
-    effect_class: non_idempotent_write
-    credentials: [bot_token]
-    input_schema:
-      type: object
-      additionalProperties: false
-      required: [room, text]
-      properties:
-        room: {type: string, minLength: 1, maxLength: 32}
-        text: {type: string, minLength: 1, maxLength: 1000}
-    output_schema:
-      type: object
-      additionalProperties: false
-      required: [id]
-      properties:
-        id: {type: string, minLength: 1, maxLength: 32}
-    http:
-      method: POST
-      url: 'https://example.test/messages'
-      headers: {Authorization: 'Bearer {{credentials.bot_token}}'}
-      body: {room: '{{input.room}}', text: '{{input.text}}'}
-    response_success: {kind: http_status_2xx}
-    response_mapping: {id: '{{response.body.id}}'}
-`),
-		"channel.yaml": []byte(`transport: session
-capabilities:
-  card_render: true
-  reply_to_reference: true
-  actions_as_buttons: false
-  actions_as_text: true
-  edit: false
-  acknowledgment: false
-  inbox_listing: true
-onboarding:
-  ceremony: authenticated_text_challenge
-  provider_credential: bot_token
-  confirmation: deliver
-  connection_health: provider_connection
-  learned_destination: {destination: conversation_reference}
-opaque_types:
-  destination: {type: string, minLength: 1, maxLength: 32}
-  delivery_reference: {type: string, minLength: 1, maxLength: 32}
-  external_account_reference: {type: string, minLength: 1, maxLength: 32}
-  conversation_reference: {type: string, minLength: 1, maxLength: 32}
-operations:
-  deliver:
-    tool: send_message
-    input: {room: context.destination, text: input.presentation.text}
-    output: {delivery_reference: result.id}
-events:
-  text:
-    event: text_message
-    fields:
-      text: event.text
-      external_account_reference: event.account
-      conversation_reference: event.room
-      conversation_scope: event.scope
-      provider_message_reference: event.message
-      reply_to_message_reference: event.reply
-      entry_invocation: event.entry
-`),
-	}
-}
 
 func s1ChannelProviderDescriptors(t testing.TB, key string, members map[string][]byte) (packartifact.AdmittedProvider, packs.TriggerPackDescriptor, packs.ConnectorPackDescriptor) {
 	t.Helper()
@@ -136,14 +44,18 @@ func s1AcceptedChannelRoleDescriptors(t testing.TB, provider packartifact.Admitt
 	if err != nil {
 		t.Fatal(err)
 	}
-	return catalog.PackDescriptors()[0], packs.ConnectorPackDescriptor{Identity: connectorIdentity, Provider: connector.Provider, Tools: connector.Tools}
+	descriptor, present := catalog.PackDescriptorForProvider(provider.Key())
+	if !present {
+		t.Fatal("captured trigger descriptor disappeared")
+	}
+	return descriptor, packs.ConnectorPackDescriptor{Identity: connectorIdentity, Provider: connector.Provider, Tools: connector.Tools}
 }
 
 func TestS1ProviderChannelCompilesCapturedCoLocatedRoles(t *testing.T) {
 	registry := loadChannelInterfaceRegistry(t)
 	for _, key := range []string{"team-bot", "team_bot", "9-team"} {
 		t.Run(key, func(t *testing.T) {
-			members := s1ChannelProviderMembers()
+			members := packfixture.NeutralProviderMembers()
 			provider, trigger, connector := s1ChannelProviderDescriptors(t, key, members)
 			plan, err := packs.CompileProviderChannel(registry, provider, trigger, connector)
 			if err != nil {
@@ -184,16 +96,16 @@ func TestS1ProviderChannelCompilesCapturedCoLocatedRoles(t *testing.T) {
 
 func TestS1ProviderChannelRefusesCrossedRoleIdentity(t *testing.T) {
 	registry := loadChannelInterfaceRegistry(t)
-	provider, trigger, connector := s1ChannelProviderDescriptors(t, "team-bot", s1ChannelProviderMembers())
-	_, foreignTrigger, foreignConnector := s1ChannelProviderDescriptors(t, "team_bot", s1ChannelProviderMembers())
-	changed := s1ChannelProviderMembers()
+	provider, trigger, connector := s1ChannelProviderDescriptors(t, "team-bot", packfixture.NeutralProviderMembers())
+	_, foreignTrigger, foreignConnector := s1ChannelProviderDescriptors(t, "team_bot", packfixture.NeutralProviderMembers())
+	changed := packfixture.NeutralProviderMembers()
 	changed["connector.yaml"] = bytes.ReplaceAll(changed["connector.yaml"], []byte("example.test"), []byte("replacement.test"))
 	_, _, replacementConnector := s1ChannelProviderDescriptors(t, "team-bot", changed)
-	versioned := s1ChannelProviderMembers()
+	versioned := packfixture.NeutralProviderMembers()
 	versioned["manifest.yaml"] = bytes.Replace(versioned["manifest.yaml"], []byte("version: 1.0.0"), []byte("version: 1.0.1"), 1)
 	_, versionedTrigger, _ := s1ChannelProviderDescriptors(t, "team-bot", versioned)
 	members := map[string][]byte{"shop/agents.yaml": []byte("{}\n"), "shop/schema.yaml": []byte("stages: []\n")}
-	for label, body := range s1ChannelProviderMembers() {
+	for label, body := range packfixture.NeutralProviderMembers() {
 		members["shop/team-bot/"+label] = body
 	}
 	artifact, err := sourceartifact.AdmitMembers(members)
@@ -236,7 +148,7 @@ func TestS1ProviderChannelRefusesCrossedRoleIdentity(t *testing.T) {
 }
 
 func TestS1ProviderChannelUsesOneNamedPlatformInterfaceWithoutFirstFit(t *testing.T) {
-	provider, trigger, connector := s1ChannelProviderDescriptors(t, "team-bot", s1ChannelProviderMembers())
+	provider, trigger, connector := s1ChannelProviderDescriptors(t, "team-bot", packfixture.NeutralProviderMembers())
 	if _, err := packs.CompileProviderChannel(nil, provider, trigger, connector); err == nil {
 		t.Fatal("missing platform owner supplied a channel interface")
 	}
@@ -255,7 +167,7 @@ func TestS1ProviderChannelUsesOneNamedPlatformInterfaceWithoutFirstFit(t *testin
 		t.Fatal("zero provider acquired structural satisfaction")
 	}
 	for _, role := range []string{"channel.yaml", "channel.yaml and other roles"} {
-		members := s1ChannelProviderMembers()
+		members := packfixture.NeutralProviderMembers()
 		delete(members, "channel.yaml")
 		if role == "channel.yaml and other roles" {
 			delete(members, "connector.yaml")
@@ -275,7 +187,7 @@ func TestS1ProviderBodyIdentityUsesOnlyCapturedMetadataAndBytes(t *testing.T) {
 		t.Fatal("zero BODY acquired role identity")
 	}
 	for _, key := range []string{"team-bot", "team_bot"} {
-		provider, _, _ := s1ChannelProviderDescriptors(t, key, s1ChannelProviderMembers())
+		provider, _, _ := s1ChannelProviderDescriptors(t, key, packfixture.NeutralProviderMembers())
 		for _, role := range []packmodel.BodyRole{packmodel.BodyTrigger, packmodel.BodyConnector, packmodel.BodyChannel} {
 			body, _ := provider.Body(role)
 			identity, err := packs.NewProviderBodyIdentity(body)
@@ -293,7 +205,7 @@ func TestS1ProviderBodyIdentityUsesOnlyCapturedMetadataAndBytes(t *testing.T) {
 }
 
 func TestS1ProviderChannelPlanRetainsFrozenToolsAfterDescriptorMutation(t *testing.T) {
-	provider, trigger, connector := s1ChannelProviderDescriptors(t, "team-bot", s1ChannelProviderMembers())
+	provider, trigger, connector := s1ChannelProviderDescriptors(t, "team-bot", packfixture.NeutralProviderMembers())
 	plan, err := packs.CompileProviderChannel(loadChannelInterfaceRegistry(t), provider, trigger, connector)
 	if err != nil {
 		t.Fatal(err)

@@ -11649,6 +11649,7 @@ tool_model:
       durable_execution: internal/runtime/pipeline activity attempt owner
     directory_body_admission:
       owner: internal/packs.AdmitChannelBody
+      admission_owner: internal/packadmission.AdmitProviderDirectory
       structural_owner: internal/packs.CompileProviderChannel
       identity_owner: internal/packs.NewProviderBodyIdentity
       rule: >
@@ -11664,7 +11665,10 @@ tool_model:
         session material does not become a credential. Source bytes and body hashes remain unchanged, and a BODY
         alone supplies no installed transport, connection, claim, enabled route, delivery or effect authority.
       structural_contract: >
-        Structural compilation selects exactly swarm.hitl-channel/v2 from the platform interface registry; it never
+        The directory admission owner derives every role input directly from one opaque captured provider, validates
+        the manifest's platform constraint, and publishes no partial definition if any role or structural relation
+        fails. Readback cannot choose replacement role descriptors or re-admit source. Structural compilation selects
+        exactly swarm.hitl-channel/v2 from the platform interface registry; it never
         guesses another compatible interface. The selected provider directory supplies its channel, trigger and
         connector role identities directly, without authored implements or requires.packs. Each role retains the exact
         captured directory key, metadata version, role, body hash and source label, not a synthesized dotted role ID or
