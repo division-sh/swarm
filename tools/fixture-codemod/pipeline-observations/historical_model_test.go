@@ -70,23 +70,9 @@ func TestHistoricalMechanicalReceiptsAreFiniteAndSourcePinned(t *testing.T) {
 	}
 	// Reverse only Q1's appended wait/setup edits before checking the complete
 	// original digest, including every earlier live successor and assertion.
-	archived := append([]recipe(nil), rows...)
-	retryPin, retryRestored := pins[39], 0
-	for index, row := range archived {
-		if !sameReviewedRecipeKey(row, retryPin.Original) {
-			continue
-		}
-		history := row
-		history.Successor = retryPin.Original.Successor
-		body, err := reverseReviewedSuccessor2617(row.Successor, retryPin.Edits)
-		if err != nil || body != retryPin.Original.Successor || row.Successor != retryPin.Candidate || !reflect.DeepEqual(history, retryPin.Original) {
-			t.Fatalf("Q1 successor changed historical mechanical evidence: %s/%v", row.Function, err)
-		}
-		archived[index] = retryPin.Original
-		retryRestored++
-	}
-	if retryRestored != 1 {
-		t.Fatalf("exact Q1 mechanical predecessor count=%d, want1", retryRestored)
+	archived, err := q1RetryDecisionPriorRows(rows)
+	if err != nil {
+		t.Fatal(err)
 	}
 	digest, err := mechanicalReceiptDigest(archived)
 	if err != nil || digest != "637fcb76a19075ffc1dd93fc6a189652be2a50f2b199647d67cc0ffd58885fed" {
