@@ -16,10 +16,6 @@ import (
 	"github.com/google/uuid"
 )
 
-func managedConformanceExecutionContext(t testing.TB, ctx context.Context, authorityID string) context.Context {
-	return managedConformanceExecutionContextForBundle(t, ctx, authorityID, authorActivityTestSourceArtifactFact)
-}
-
 func managedConformanceExecutionContextForBundle(t testing.TB, ctx context.Context, authorityID string, fact runtimecorrelation.SourceArtifactFact) context.Context {
 	t.Helper()
 	admission, err := managedexecution.New(
