@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/store/selected/selectedtest"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 	"testing"
@@ -38,7 +39,9 @@ func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool
 	}
 	ctx := effects.WithDifferentOwner(context.Background(), effects.OwnerBuildTestInfrastructure)
 	ctx = correlation.WithSourceArtifactFact(ctx, sourceartifactfixture.Fact())
-	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(uuid.NewString(), sourceartifactfixture.BundleHash))
+	runtimeID := uuid.NewString()
+	ctx = correlation.WithRuntimeInstanceID(ctx, runtimeID)
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(runtimeID, sourceartifactfixture.BundleHash))
 	if err := sourceartifactfixture.Ensure(ctx, owner); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +58,8 @@ func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool
 	} else if err := owner.ActivateDeliveryAuthority(ctx, authority); err != nil {
 		t.Fatal(err)
 	}
-	fixture.Seed = func(t *testing.T, eventID, runID string, route events.DeliveryRoute) events.Event {
+	var prepared agentidentity.Identity
+	fixture.Seed = func(t *testing.T, eventID, runID string, route events.DeliveryRoute) (events.Event, deliverylifecycle.ExecutionAuthority) {
 		t.Helper()
 		var event events.Event
 		if selectedExecution {
@@ -65,10 +69,27 @@ func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool
 			event = fixture.SelectedEvent
 		} else {
 			storetest.RequireRunningRun(t, ctx, owner, runID, time.Now().UTC())
+			if prepared == (agentidentity.Identity{}) {
+				prepared = route.AgentIdentity
+				config := busExecutionFixtureConfig(t, actors.AgentConfig{
+					ID: prepared.AgentID(), Identity: prepared, Type: "stub", Role: "worker", Model: "regular", ExecutionMode: "live", Config: []byte(`{}`),
+				})
+				if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, owner, manager.PersistedAgent{
+					Config: config, Status: "active", HiredBy: "exact-handoff-native-proof", StartedAt: time.Now().UTC(),
+				}, sourceartifactfixture.Fact()); err != nil {
+					t.Fatal(err)
+				}
+				authority, err = agentfixture.AdmitExecutionAuthority(t, ctx, owner, sourceartifactfixture.Fact())
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if prepared != route.AgentIdentity {
+				t.Fatal("exact handoff fixture cannot extend its admitted recipient set")
+			}
 			event = eventtest.RuntimeControl(eventID, "test.work", "test", "", []byte(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC())
 		}
 		storetest.CommitNativeDeliveryPublication(t, ctx, owner, storetest.AdmitNativeDeliveryEvent(t, event), []events.DeliveryRoute{route}, authority, nil)
-		return storetest.LoadCanonicalEventRecord(t, ctx, owner, eventID)
+		return storetest.LoadCanonicalEventRecord(t, ctx, owner, eventID), authority
 	}
 	fixture.Load = func(t *testing.T, eventID string) events.Event {
 		t.Helper()
@@ -76,11 +97,8 @@ func openExactHandoffNative(t *testing.T, backend string, selectedExecution bool
 	}
 	fixture.Session = func(t *testing.T, identity agentidentity.Identity) string {
 		t.Helper()
-		if err := storetest.UpsertStaticAgentFixtureForSource(t, ctx, owner, manager.PersistedAgent{
-			Config: busTestAgentConfig(t, actors.AgentConfig{ID: identity.AgentID(), Identity: identity, Type: "stub", Role: "worker", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`)}),
-			Status: "active", HiredBy: "exact-handoff-native-proof", StartedAt: time.Now().UTC(),
-		}, authority.SourceArtifact()); err != nil {
-			t.Fatal(err)
+		if prepared != identity {
+			t.Fatal("exact handoff session requires its already prepared recipient")
 		}
 		lease, err := owner.Acquire(ctx, identity, "exact-handoff-session")
 		if err != nil {

@@ -948,7 +948,24 @@ func TestEnginePublicationRejectsFilteredDirectIntentBeforePersistence(t *testin
 func TestPublishDirectRejectsFilteredExplicitRecipient(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
-			fixture := newNativeOutboxFixture(t, backend, []runtimebus.ActiveAgentDescriptor{testActiveAgentDescriptor(t, "requester-agent", "requester-entity", "provider/instance-a")}...)
+			source := semanticview.Wrap(loadEventBusTempBundle(t, map[string]string{
+				"schema.yaml":            "name: filtered-direct\nstages:\n  active: {}\n",
+				"entities.yaml":          "outbox_state: {}\n",
+				"provider/schema.yaml":   "instance: instance_key\n",
+				"provider/entities.yaml": "provider:\n  instance_key: {type: string, _unused_reason: exact fixture key}\n",
+				"wrong-flow/schema.yaml": "name: wrong-flow\n",
+			}))
+			fixture := newNativeOutboxFixtureWithOptions(t, backend, runtimebus.EventBusOptions{ContractBundle: source}, testActiveAgentDescriptor(t, "requester-agent", "requester-entity", "provider/instance-a"))
+			identity := runtimebus.ConstructedFlowInstanceIdentityFixture(source, "provider", "instance-a", runtimebustest.DefaultRunID)
+			if identity.InstancePath != "provider/instance-a" {
+				t.Fatal("filtered direct fixture lost its original requester coordinate")
+			}
+			seedComponentFlowConstruction(t, fixture.ctx, fixture.store, source, runtimepipeline.WorkflowInstance{
+				WorkflowName: "provider", WorkflowVersion: source.WorkflowVersion(),
+				InstanceID: identity.InstanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
+				ParentFlowID: identity.ParentRoute.FlowID, ParentFlowInstance: identity.ParentRoute.FlowInstance, ParentEntityID: identity.ParentEntityID,
+				EntityType: "provider", InstanceKey: "instance-a", Fields: map[string]any{"instance_key": "instance-a"}, CreatedAt: time.Now().UTC(),
+			})
 			eb := fixture.bus
 			evt := eventtest.ExistingRunRootIngress(eventtest.UUID("evt-filtered-direct-mutation"), events.EventType("human_task.approved"), "runtime", "", []byte(`{}`), 0, runtimebustest.DefaultRunID, events.EnvelopeForTargetRoute(events.EventEnvelope{}, events.RouteIdentity{EntityID: eventtest.UUID("wrong-entity"), FlowInstance: "wrong-flow"}), time.Now().UTC())
 			err := eb.PublishDirect(fixture.ctx, evt, []string{"requester-agent"})
