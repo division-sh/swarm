@@ -14,7 +14,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/checkoutsource"
 
-	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/globalname"
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/selectedreadrole"
 
 	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
@@ -24,38 +23,22 @@ import (
 
 func sourceBlobLivePins(t *testing.T) []sourceblob.Pin {
 	t.Helper()
-	pins, err := sourceblob.Decode(sourceBlobBytes)
+	return sourceBlobDeclarationsForInvocation(t).pins
+}
+
+func sourceBlobInvocationPins(t *testing.T, image sourceBlobInvocation, setup, batch []runphysical.Pin) []sourceblob.Pin {
+	t.Helper()
+	pins, err := sourceblob.Decode(image.files[sourceblob.Path])
 	if err != nil {
-		t.Fatal(err)
-	}
-	batch, err := servedsettlement.ReadBatchPins("../../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	setup, err := servedsettlement.ReadSetupPins("../../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	paths := []string{sourceblob.Path, globalname.Path, servedsettlement.Path, servedsettlement.LookupPath,
-		servedsettlement.SetupOwnerPath, servedsettlement.SetupRolePath, "internal/serveapp/main_runtime_test.go"}
-	for _, pin := range pins {
-		paths = append(paths, pin.File)
-	}
-	for _, stage := range [][]runphysical.Pin{setup, batch} {
-		for _, pin := range stage {
-			paths = append(paths, pin.File)
-		}
-	}
-	image, err := captureSourceBlobInvocation("../../..", paths)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := servedsettlement.ValidateBatchCurrentSource("../../..", batch); err != nil {
 		t.Fatal(err)
 	}
 	for _, pin := range pins {
 		raw := image.files[pin.File]
-		current := servedSetupPredecessorSource(t, pin.File, pin.Function, requestKeyDeclaration(t, raw, pin.Function))
+		body, err := servedsettlement.UniqueBody(raw, pin.Function)
+		if err != nil {
+			t.Fatal(err)
+		}
+		current := servedSetupPredecessorSource(t, pin.File, pin.Function, body)
 		for _, stage := range [][]runphysical.Pin{setup, batch} {
 			current, err = servedsettlement.EarlierSource(stage, pin.File, pin.Function, current)
 			if err != nil {
@@ -66,21 +49,11 @@ func sourceBlobLivePins(t *testing.T) []sourceblob.Pin {
 			t.Fatal(err)
 		}
 	}
-	raw, err := os.ReadFile("../../../internal/serveapp/main_runtime_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, err = selectedreadrole.CatchUp2542HistoricalSource("../../..", "internal/serveapp/main_runtime_test.go", raw)
+	raw, err := selectedreadrole.CatchUp2542HistoricalSource("../../..", "internal/serveapp/main_runtime_test.go", image.files["internal/serveapp/main_runtime_test.go"])
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := sourceblob.ValidateFixtureRole(raw); err != nil {
-		t.Fatal(err)
-	}
-	if err := servedsettlement.ValidateBatchCurrentSource("../../..", batch); err != nil {
-		t.Fatal(err)
-	}
-	if err := image.recheck("../../.."); err != nil {
 		t.Fatal(err)
 	}
 	return pins
@@ -136,19 +109,27 @@ func sourceBlobDeclarationsForInvocation(t *testing.T) sourceBlobDeclarationInvo
 			t.Error(err)
 		}
 	})
-	return sourceBlobDeclarationInvocation{setup: servedSetupPins(t), batch: servedObservationBatchPins(t), pins: sourceBlobLivePins(t)}
+	setup, err := servedsettlement.ReadSetupPins("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := servedsettlement.ReadBatchPins("../../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := servedsettlement.ValidateBatchCurrentSource("../../..", batch); err != nil {
+		t.Fatal(err)
+	}
+	pins := sourceBlobInvocationPins(t, image, setup, batch)
+	if err := image.recheck("../../.."); err != nil {
+		t.Fatal(err)
+	}
+	return sourceBlobDeclarationInvocation{setup: setup, batch: batch, pins: pins}
 }
 
 func (proof sourceBlobDeclarationInvocation) previous(t *testing.T, file, function, current string) string {
 	t.Helper()
-	current = servedSetupPredecessorSource(t, file, function, current)
-	for _, pins := range [][]runphysical.Pin{proof.setup, proof.batch} {
-		var err error
-		current, err = servedsettlement.EarlierSource(pins, file, function, current)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
+	current = proof.observationPrevious(t, file, function, current)
 	for _, pin := range proof.pins {
 		if pin.File == file && pin.Function == function {
 			if current != pin.After {
@@ -158,6 +139,42 @@ func (proof sourceBlobDeclarationInvocation) previous(t *testing.T, file, functi
 		}
 	}
 	return current
+}
+
+func (proof sourceBlobDeclarationInvocation) observationPrevious(t *testing.T, file, function, current string) string {
+	t.Helper()
+	current = proof.setupPrevious(t, file, function, current)
+	previous, err := servedsettlement.EarlierSource(proof.batch, file, function, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return previous
+}
+
+func (proof sourceBlobDeclarationInvocation) setupPrevious(t *testing.T, file, function, current string) string {
+	t.Helper()
+	current = servedSetupPredecessorSource(t, file, function, current)
+	previous, err := servedsettlement.EarlierSource(proof.setup, file, function, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return previous
+}
+
+func (proof sourceBlobDeclarationInvocation) beforeBlobHistory(t *testing.T, current []byte, recipes bool) []byte {
+	t.Helper()
+	current = servedSetupEarlierHistory(t, current, recipes)
+	return restoreServedObservationHistory(t, current, servedObservationPriorHistory(t, recipes), proof.batch, recipes)
+}
+
+func (proof sourceBlobDeclarationInvocation) blobHistory(t *testing.T, current []byte, recipes bool) []byte {
+	t.Helper()
+	current = proof.beforeBlobHistory(t, current, recipes)
+	raw, err := sourceblob.RestoreHistory(current, sourceBlobPriorHistory(t, recipes), proof.pins, recipes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func captureSourceBlobInvocation(root string, paths []string) (sourceBlobInvocation, error) {
@@ -306,24 +323,6 @@ func sourceBlobEarlierHistory(t *testing.T, current []byte, recipes bool) []byte
 	return raw
 }
 
-func family145CheckSourceBlobWholeRule(t *testing.T, file, function, current string) bool {
-	t.Helper()
-	pins, err := sourceblob.Decode(sourceBlobBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, pin := range pins {
-		if pin.File == file && pin.Function == function {
-			sourceBlobLivePins(t)
-			if current != pin.After {
-				t.Fatal("source blob current transition escaped its exact rule:", function)
-			}
-			return true
-		}
-	}
-	return false
-}
-
 func sourceBlobPreviousDeclaration(t *testing.T, file, function, current string) string {
 	t.Helper()
 	current = servedObservationEarlierSource(t, file, function, current)
@@ -374,7 +373,8 @@ func sourceBlobEarlierInventoryEndpoint(file, function, current string) string {
 }
 
 func TestFamily145SourceBlobHistoryRestoresCompletePriorLedgersAndAllThreePriorSuccessors(t *testing.T) {
-	pins := sourceBlobLivePins(t)
+	proof := sourceBlobDeclarationsForInvocation(t)
+	pins := proof.pins
 	for _, recipes := range []bool{true, false} {
 		prior := sourceBlobPriorHistory(t, recipes)
 		expected, err := sourceblob.ComposeHistory(prior, pins, recipes)
@@ -385,13 +385,16 @@ func TestFamily145SourceBlobHistoryRestoresCompletePriorLedgersAndAllThreePriorS
 		if recipes {
 			current, wantCount = recipeBytes, 1520
 		}
-		live := current
-		current = servedObservationEarlierHistory(t, current, recipes)
+		current = proof.beforeBlobHistory(t, current, recipes)
+		restoredHistory, err := sourceblob.RestoreHistory(current, prior, pins, recipes)
+		if err != nil {
+			t.Fatal(err)
+		}
 		var before, after, composed, restored []map[string]any
 		for _, input := range []struct {
 			raw  []byte
 			rows *[]map[string]any
-		}{{prior, &before}, {current, &after}, {expected, &composed}, {sourceBlobEarlierHistory(t, live, recipes), &restored}} {
+		}{{prior, &before}, {current, &after}, {expected, &composed}, {restoredHistory, &restored}} {
 			if err := json.Unmarshal(input.raw, input.rows); err != nil {
 				t.Fatal(err)
 			}

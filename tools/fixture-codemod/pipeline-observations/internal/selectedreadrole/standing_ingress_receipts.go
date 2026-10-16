@@ -7,6 +7,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,6 +87,10 @@ func ValidateStandingIngressCurrent(root string, pins []EntityToolPin) error {
 }
 
 func standingIngressDeclarations(raw []byte) (map[string]string, error) {
+	key := fmt.Sprintf("standing-ingress/declarations/%x", sha256.Sum256(raw))
+	if cached, ok := sourceCache.Load(key); ok {
+		return maps.Clone(cached.(map[string]string)), nil
+	}
 	file, err := parser.ParseFile(token.NewFileSet(), "source.go", raw, parser.AllErrors)
 	if err != nil {
 		return nil, err
@@ -101,6 +106,8 @@ func standingIngressDeclarations(raw []byte) (map[string]string, error) {
 		}
 		bodies[fn.Name.Name] = requestkey.Node(fn)
 	}
+	// Cache only the deterministic parse, never source ownership or acceptance.
+	sourceCache.Store(key, maps.Clone(bodies))
 	return bodies, nil
 }
 

@@ -12,13 +12,19 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/runphysical"
 )
 
 //go:embed family145-transitions.json
 var family145TransitionBytes []byte
 
 func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) {
-	servedPins := servedObservationBatchPins(t)
+	proof := sourceBlobDeclarationsForInvocation(t)
+	servedPins := proof.batch
+	comparisonPins := append([]runphysical.Pin(nil), proof.pins...)
+	comparisonPins = append(comparisonPins, runDeliveryInvocationPins(t, proof)...)
+	comparisonPins = append(comparisonPins, sourceForkInvocationPins(t, proof)...)
 	var rows []struct {
 		File, Function, Before, After string
 		Removed                       bool `json:"Removed,omitempty"`
@@ -42,7 +48,7 @@ func TestFamily145AdmissionSnapshotsRetainWorkloadsAndRejectDrift(t *testing.T) 
 			}
 			continue
 		}
-		if servedObservationWholeRuleMatches(t, servedPins, row.File, row.Function, row.After) || family145CheckSourceBlobWholeRule(t, row.File, row.Function, row.After) || family145CheckRunDeliveryWholeRule(t, row.File, row.Function, row.After) || family145CheckSourceForkWholeRule(t, row.File, row.Function, row.After) || family145CheckRunIdentityWholeRule(t, row.File, row.Function, row.After) {
+		if servedObservationWholeRuleMatches(t, servedPins, row.File, row.Function, row.After) || servedObservationWholeRuleMatches(t, comparisonPins, row.File, row.Function, row.After) || family145CheckRunIdentityWholeRule(t, row.File, row.Function, row.After) {
 			continue
 		}
 		if family145CheckRunPhysicalWholeRule(t, row.File, row.Function, row.After) {

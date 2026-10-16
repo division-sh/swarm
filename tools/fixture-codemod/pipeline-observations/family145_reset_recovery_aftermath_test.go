@@ -3,6 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -126,12 +130,36 @@ func TestFamily145ResetRecoveryAftermathStoragePreservesEveryPhysicalQuery(t *te
 			t.Fatalf("aftermath physical statement changed columns, NULL behavior, scope or order: %s", port.owner)
 		}
 	}
-	count := family145ConversationForkOwnerSource(t, "internal/runtimepersistence/test_api_event_storage.go", "CountEventNameStorageForTest")
+	count := family145ConversationForkOwnerSource(t, "internal/backend/eventrecord/run_name_cardinality.go", "CountGlobalNamedEventStorageTx")
 	want := family145ConnectorSQL(t, "package proof\n"+original["TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWithoutPlatformReset"])[0]
 	got := family145ConnectorSQL(t, "package proof\n"+count)
 	if len(got) != 1 || strings.Replace(got[0], "$1", "'platform.reset'", 1) != want {
 		t.Fatal("existing exact event-name count changed original whole-store physical scope")
 	}
+	family145ResetCountBridge(t, "internal/runtimepersistence/test_event_support.go", "CountEventNameStorageForTest", "eventrecord.CountGlobalNamedEventStorageTx", "eventName")
+	old, err := os.ReadFile("../../../internal/store/internal/runtimepersistence/test_api_event_storage.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := family145ResetEventCountRetiredLocation(old); err != nil {
+		t.Fatal(err)
+	}
+	if err := family145ResetEventCountRetiredLocation(append(append([]byte(nil), old...), []byte("\nfunc CountEventNameStorageForTest() {}\n")...)); err == nil {
+		t.Fatal("moved event-name count survived at its retired location")
+	}
+}
+
+func family145ResetEventCountRetiredLocation(raw []byte) error {
+	file, err := parser.ParseFile(token.NewFileSet(), "test_api_event_storage.go", raw, parser.AllErrors)
+	if err != nil {
+		return err
+	}
+	for _, declaration := range file.Decls {
+		if fn, ok := declaration.(*ast.FuncDecl); ok && fn.Name.Name == "CountEventNameStorageForTest" {
+			return fmt.Errorf("moved event-name count survived at the old owner location")
+		}
+	}
+	return nil
 }
 
 func TestFamily145ResetRecoveryAftermathBridgesKeepOriginalCoordinatorAndNoPublicQueryAuthority(t *testing.T) {

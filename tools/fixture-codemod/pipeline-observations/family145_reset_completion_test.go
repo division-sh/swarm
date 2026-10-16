@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/division-sh/swarm/tools/fixture-codemod/pipeline-observations/internal/requestkey"
 )
 
 var family145ResetCompletionCuts = []string{
@@ -102,7 +104,7 @@ func assertFamily145ResetCompletionQueries(t *testing.T, before string) {
 		index          int
 	}{
 		{"internal/adminpersistence/reset_completion_fixture_observation.go", "ReadResetCompletionStorageRecordTx", 0},
-		{"internal/runtimepersistence/test_api_event_storage.go", "CountPhysicalRunIdentityForTest", 1},
+		{"internal/backend/runlifecycle/run_identity_cardinality.go", "CountRunIdentityStorageTx", 1},
 		{"internal/adminpersistence/reset_completion_fixture_observation.go", "CountResetCompletionStorageOperationsTx", 2},
 	} {
 		owned := family145ConversationForkOwnerSource(t, port.file, port.function)
@@ -111,6 +113,7 @@ func assertFamily145ResetCompletionQueries(t *testing.T, before string) {
 			t.Fatalf("reset completion physical predicate/record/cardinality changed: %s", port.function)
 		}
 	}
+	family145ResetCountBridge(t, "internal/runtimepersistence/test_api_event_storage.go", "CountPhysicalRunIdentityForTest", "runlifecycle.CountRunIdentityStorageTx", "runID")
 	for _, fault := range []struct{ function, keyword string }{
 		{"InstallPostgresResetAPICompletionLossTx", "CREATE"},
 		{"RemovePostgresResetAPICompletionLossTx", "DROP"},
@@ -122,4 +125,45 @@ func assertFamily145ResetCompletionQueries(t *testing.T, before string) {
 			t.Fatalf("transport completion fault phase/payload/statements changed: %v/%v", original, actual)
 		}
 	}
+}
+
+func family145ResetCountBridge(t *testing.T, file, function, owner, identity string) {
+	t.Helper()
+	actual := family145ConversationForkOwnerSource(t, file, function)
+	if err := family145ResetCountBridgeProofError(actual, function, owner, identity); err != nil {
+		t.Fatal(err)
+	}
+	for _, cut := range []string{"validateChannelObservationOwner(selected)", "readServedDeliveryObservation(ctx, selected,", owner, "ctx, tx, " + identity, "return count, nil"} {
+		mutant := strings.Replace(actual, cut, "foreignResetCountCut", 1)
+		if mutant == actual || family145ResetCountBridgeProofError(mutant, function, owner, identity) == nil {
+			t.Fatal("reset count bridge lost owner/identity/context/error semantics:", function, cut)
+		}
+	}
+}
+
+func family145ResetCountBridgeProofError(actual, function, owner, identity string) error {
+	expected := fmt.Sprintf(`func %s(ctx context.Context, selected any, %s string) (int, error) {
+	if err := validateChannelObservationOwner(selected); err != nil {
+		return 0, err
+	}
+	var count int
+	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+		var err error
+		count, err = %s(ctx, tx, %s)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}`, function, identity, owner, identity)
+	got, err := requestkey.Normalize(actual)
+	if err != nil {
+		return err
+	}
+	want, err := requestkey.Normalize(expected)
+	if err != nil || got != want {
+		return fmt.Errorf("reset count bridge changed complete native owner/context/identity/error correspondence: %s: %v", function, err)
+	}
+	return nil
 }

@@ -138,9 +138,9 @@ func TestPersistenceAuthorityDebtFreshnessCatchUpForwardAndForeignProvenance(t *
 
 func TestPersistenceAuthorityDebtFreshnessCatchUpReconcilesActualOrigins(t *testing.T) {
 	root := debtCatchUpHistoricalArchive(t, debtCatchUpNativeEntryLane)
-	findings := debtLoadPersistenceAuthorityFindings(t, root)
-	findings = append(findings, debtSelectedBoundaryFindings(t, root)...)
-	actual := authorityDebtSites(findings)
+	// The archive identifies the inspected input, not the executing analyzer.
+	cache := debtAnalysisCacheForCheckout(t, persistenceAuthorityRepoRoot(t))
+	actual := cache.baseSites(t, root, debtCatchUpNativeEntryLane)
 	raw, err := os.ReadFile(filepath.Join(root, debtBaselinePath))
 	if err != nil {
 		t.Fatal(err)
@@ -149,7 +149,6 @@ func TestPersistenceAuthorityDebtFreshnessCatchUpReconcilesActualOrigins(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	cache := debtAnalysisCacheForCheckout(t, root)
 	for _, input := range [][2]string{{debtCatchUpFreshnessLane, debtCatchUpCollectorTo}, {debtCatchUpFreshnessInput, debtProcessLeaseFreshnessCollectorTo}} {
 		origin := materializeDebtBase(t, root, input[0])
 		original := cache.baseSites(t, origin, input[0])

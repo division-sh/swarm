@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"sync"
 )
 
 const Path = "tools/fixture-codemod/pipeline-observations/family145-request-key-preimages.json"
@@ -15,9 +17,14 @@ type Pin struct {
 	Calls                                         int
 }
 
+var decodedPinCache sync.Map
+
 func Decode(raw []byte) ([]Pin, error) {
 	if fmt.Sprintf("%x", sha256.Sum256(raw)) != Digest {
 		return nil, fmt.Errorf("request-key complete source manifest changed")
+	}
+	if cached, ok := decodedPinCache.Load(Digest); ok {
+		return slices.Clone(cached.([]Pin)), nil
 	}
 	var pins []Pin
 	if err := json.Unmarshal(raw, &pins); err != nil {
@@ -26,6 +33,7 @@ func Decode(raw []byte) ([]Pin, error) {
 	if len(pins) != 28 {
 		return nil, fmt.Errorf("request-key declaration inventory changed")
 	}
+	decodedPinCache.Store(Digest, slices.Clone(pins))
 	return pins, nil
 }
 
