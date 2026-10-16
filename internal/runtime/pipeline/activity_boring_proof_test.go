@@ -478,7 +478,6 @@ func activityBoringFullFlowBundle(t *testing.T, serverURL string) *runtimecontra
 		"tools.yaml": fmt.Sprintf(`source_scrape:
   description: Read a source.
   handler_type: http
-  effect_class: read_only
   http:
     method: GET
     url: %q
@@ -534,18 +533,18 @@ func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL strin
 	if err != nil {
 		panic(err)
 	}
-	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(runtimecontracts.ActivityEffectClassReadOnly)
+	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(runtimecontracts.ActivityEffectClassNonIdempotentWrite)
 	return runtimeengine.ActivityIntent{
 		RoutingSource:    routingSource,
 		ActivityID:       resultEvents.ActivityID,
 		Tool:             "source_scrape",
 		Input:            mustActivityInput(map[string]any{"url": inputURL}),
-		EffectClass:      runtimecontracts.ActivityEffectClassReadOnly,
+		EffectClass:      runtimecontracts.ActivityEffectClassNonIdempotentWrite,
 		SuccessEvent:     resultEvents.SuccessEvent,
 		FailureEvent:     resultEvents.FailureEvent,
 		RetryMaxAttempts: defaults.MaxAttempts,
 		RetryBackoff:     defaults.Backoff,
-		ForkPolicy:       runtimecontracts.ActivityForkPolicyForEffectClass(runtimecontracts.ActivityEffectClassReadOnly),
+		ForkPolicy:       runtimecontracts.ActivityForkPolicyForEffectClass(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
 		EntityID:         identity.NormalizeEntityID(evt.EntityID()),
 		Owner:            runtimeactivityidentity.MustNodeOwner(mustActivityBoringNode("scanner")),
 		ExecutionFlowID:  identity.NormalizeFlowID("research"),

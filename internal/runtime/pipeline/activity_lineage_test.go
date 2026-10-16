@@ -75,7 +75,7 @@ func TestFreshActivityLineageRejectsCanonicallyRemintedForeignFacts(t *testing.T
 		{"tool", func(i *runtimeengine.ActivityIntent) { i.Tool = "foreign" }},
 		{"result", func(i *runtimeengine.ActivityIntent) { i.SuccessEvent = "foreign.succeeded" }},
 		{"effect", func(i *runtimeengine.ActivityIntent) {
-			i.EffectClass = runtimecontracts.ActivityEffectClassNonIdempotentWrite
+			i.EffectClass = runtimecontracts.ActivityEffectClassReadOnly
 		}},
 		{"retry", func(i *runtimeengine.ActivityIntent) { i.RetryMaxAttempts++ }},
 		{"fork_policy", func(i *runtimeengine.ActivityIntent) { i.ForkPolicy = runtimecontracts.ActivityForkReuseRecordedResult }},
@@ -108,7 +108,7 @@ func TestFreshRootActivityLineageSeparatesProducerAndReceiverCoordinates(t *test
 		"schema.yaml": "name: root-activity-lineage\nstages: []\n",
 		"events.yaml": "request:\n",
 		"nodes.yaml":  "scanner:\n  execution_type: system_node\n  subscribes_to: [request]\n  event_handlers:\n    request:\n      activity: {id: fetch, tool: source_scrape, input: {}}\n",
-		"tools.yaml":  "source_scrape:\n  description: Read-only lineage control.\n  handler_type: http\n  effect_class: read_only\n  http: {method: GET, url: 'https://proof.invalid'}\n",
+		"tools.yaml":  "source_scrape:\n  description: GET lineage control.\n  handler_type: http\n  http: {method: GET, url: 'https://proof.invalid'}\n",
 	}))
 	runID := uuid.NewString()
 	parent := eventtest.ExistingRunRootIngress(uuid.NewString(), "request", "test", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
@@ -118,12 +118,12 @@ func TestFreshRootActivityLineageSeparatesProducerAndReceiverCoordinates(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(runtimecontracts.ActivityEffectClassReadOnly)
+	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(runtimecontracts.ActivityEffectClassNonIdempotentWrite)
 	intent := runtimeengine.ActivityIntent{
 		RoutingSource: eventtest.StaticFlowRoutingSource(".", runID, runID), EntityID: identity.NormalizeEntityID(runID), FlowInstance: runID,
 		Owner: activityidentity.MustNodeOwner(node), ExecutionFlowID: identity.NormalizeFlowID("."),
 		ActivityID: result.ActivityID, Tool: "source_scrape", Input: mustActivityInput(map[string]any{}),
-		EffectClass: runtimecontracts.ActivityEffectClassReadOnly, ForkPolicy: runtimecontracts.ActivityForkReexecuteRead,
+		EffectClass: runtimecontracts.ActivityEffectClassNonIdempotentWrite, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
 		SuccessEvent: result.SuccessEvent, FailureEvent: result.FailureEvent, RevisionEvent: result.RevisionRequested, RejectedEvent: result.Rejected,
 		RetryMaxAttempts: defaults.MaxAttempts, RetryBackoff: defaults.Backoff, HandlerEventKey: "request",
 		SourceRunID: runID, SourceEventID: parent.ID(), Attempt: 1, ExecutionMode: parent.ExecutionMode(),
