@@ -60,10 +60,14 @@ The canonical registry's historical corpus counts and all historical codemod
 recipes/pins remain unchanged. The existing policy-selection row records the
 shape and distinct same-row/across-row duplicate rulings.
 
-Hosted selection: lifecycle plus core-structural-owner-guards, as reviewer-d
-ruled. Changed executable families are contracts, CLI verify and engine, plus
-the existing bootverify consumers and registry/spec guards. There are no new
-full-only fixture migrations, planner edits, timeouts or placement changes.
+Hosted selection: lifecycle, no CI-Units, per reviewer-d6208122846. The earlier
+core-only aggregate cannot be named as a full-inventory extra. Exact root
+comparison proves all 81 structural-owner guards already have one lifecycle
+owner, with zero missing or duplicate roots; this is a selection spelling
+correction, not a waiver. Changed executable families are contracts, CLI verify
+and engine, plus the existing bootverify consumers and registry/spec guards.
+There are no new full-only fixture migrations, planner edits, timeouts or
+placement changes.
 Before the PR push, record exact-head focused/guard, plan-census and preflight
 receipts on #2287 and in the PR proof comment. Local qualification is focused;
 no duplicate local lifecycle/full run is claimed.
