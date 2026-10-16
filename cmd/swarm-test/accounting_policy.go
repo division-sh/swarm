@@ -160,7 +160,7 @@ func fetchAccountingExecutor(ctx context.Context, root string, p accountingPolic
 	}
 	// The fixed repository, not a candidate-controlled origin, supplies the object.
 	if _, err := accountingGit(ctx, root, "cat-file", "-e", p.ExecutorSource+"^{commit}"); err != nil {
-		if _, err = accountingGit(ctx, root, "fetch", "--no-tags", "--depth=1", "https://github.com/"+accountingRepository+".git", p.ExecutorSource); err != nil {
+		if err = fetchAccountingObject(ctx, root, p.ExecutorSource); err != nil {
 			return fmt.Errorf("approved accounting executor unavailable: %w", err)
 		}
 	}
@@ -175,6 +175,31 @@ func fetchAccountingExecutor(ctx context.Context, root string, p accountingPolic
 		return fmt.Errorf("approved executor is not the authenticated repository object")
 	}
 	return nil
+}
+
+func checkAccountingFetchConfiguration(ctx context.Context, root string) error {
+	names, err := accountingGit(ctx, root, "config", "--local", "--no-includes", "--name-only", "--list")
+	if err != nil {
+		return err
+	}
+	for _, key := range strings.Fields(strings.ToLower(string(names))) {
+		if strings.HasPrefix(key, "include.") || strings.HasPrefix(key, "includeif.") || strings.HasPrefix(key, "url.") || key == "extensions.worktreeconfig" {
+			return fmt.Errorf("accounting fetch refuses caller Git redirection %s", key)
+		}
+	}
+	return nil
+}
+
+func fetchAccountingObject(ctx context.Context, root, source string) error {
+	if !hexIdentity(source, 40) {
+		return fmt.Errorf("invalid accounting fetch identity")
+	}
+	if err := checkAccountingFetchConfiguration(ctx, root); err != nil {
+		return err
+	}
+	// Preserve ancestry; a depth-one fetch is not a proof of predecessor authority.
+	_, err := accountingGit(ctx, root, "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "fetch", "--no-tags", "--no-recurse-submodules", "https://github.com/"+accountingRepository+".git", source)
+	return err
 }
 
 // Archive only immutable Git data. A fresh private directory cannot inherit a

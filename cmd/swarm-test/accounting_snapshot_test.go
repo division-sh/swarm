@@ -397,3 +397,19 @@ func TestAccountingProofGitIgnoresCallerConfigurationInjection(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAccountingPinnedFetchRefusesLocalTransportRedirection(t *testing.T) {
+	for _, key := range []string{"url.ext::hostile.insteadOf", "include.path", "includeIf.gitdir:/.path", "extensions.worktreeConfig"} {
+		t.Run(key, func(t *testing.T) {
+			repo, _, _, _ := accountingSnapshotFixture(t)
+			value := "https://github.com/"
+			if key == "extensions.worktreeConfig" {
+				value = "true"
+			}
+			completionGit(t, repo, "config", key, value)
+			if err := checkAccountingFetchConfiguration(context.Background(), repo); err == nil || !strings.Contains(err.Error(), "Git redirection") {
+				t.Fatalf("unrelated failure or accepted transport redirection: %v", err)
+			}
+		})
+	}
+}
