@@ -59,14 +59,14 @@ func TestSelectedForkSourceEntityFixtureUsesOriginalCoordinatorBothStores(t *tes
 			executable, err := ReadSelectedForkExecutableCardinalityForTest(ctx, opened.store, fixture.RunID)
 			if err != nil || !reflect.DeepEqual(executable, map[string]string{
 				"run_status": "running", "events": "1", "deliveries": "0", "entity_state": "1",
-				"timers": "0", "readiness": "0", "agents": "0", "routes": "0",
+				"timers": "0", "readiness": "0", "agents": "0", "persisted_delivery_routes": "0",
 				"flow_instances": "0", "execution_lineage": "0", "runtime_executions": "0",
 			}) {
 				t.Fatalf("exact executable cardinality lost physical scope: %+v %v", executable, err)
 			}
 			global, err := ReadSelectedForkGlobalCardinalityForTest(ctx, opened.store)
 			if err != nil || !reflect.DeepEqual(global, map[string]int{
-				"agents": 0, "routing_rules": 0, "flow_instances": 0, "flow_instance_runtime_readiness": 0, "timers": 0,
+				"agents": 0, "persisted_delivery_routes": 0, "flow_instances": 0, "flow_instance_runtime_readiness": 0, "timers": 0,
 			}) {
 				t.Fatalf("global cardinality added a run or eligibility filter: %+v %v", global, err)
 			}
@@ -81,7 +81,27 @@ func TestSelectedForkSourceEntityFixtureUsesOriginalCoordinatorBothStores(t *tes
 			if afterCounts.Total.Begun != beforeCounts.Total.Begun+3 || afterCounts.Total.ReadCommits != beforeCounts.Total.ReadCommits+3 || afterCounts.Total.WriteCommits != beforeCounts.Total.WriteCommits || afterCounts.Active != 0 {
 				t.Fatalf("cardinality reads bypassed or mutated the original coordinator: before=%+v after=%+v", beforeCounts, afterCounts)
 			}
+			restore()
+			assertSelectedForkGlobalRouteWitness(t, ctx, opened.store, fixture.RunID)
 		})
+	}
+}
+
+func assertSelectedForkGlobalRouteWitness(t *testing.T, ctx context.Context, selected any, originalRun string) {
+	t.Helper()
+	// A foreign-run physical obligation must be visible globally even though
+	// the original headerless source still owns no delivery or construction.
+	foreign := runForkSnapshotFixtureEvent(t, ctx, selected)
+	if err := commitDeliveryObligationFixture(ctx, selected.(deliveryFixtureStore), foreign, testEntitylessNodeDeliveryRoute("cardinality-witness")); err != nil {
+		t.Fatal(err)
+	}
+	counts, err := ReadSelectedForkExecutableCardinalityForTest(ctx, selected, originalRun)
+	if err != nil || counts["deliveries"] != "0" || counts["persisted_delivery_routes"] != "1" || counts["flow_instances"] != "0" || counts["readiness"] != "0" {
+		t.Fatalf("global route witness acquired a run filter or fabricated construction: %+v %v", counts, err)
+	}
+	global, err := ReadSelectedForkGlobalCardinalityForTest(ctx, selected)
+	if err != nil || global["persisted_delivery_routes"] != 1 || global["flow_instances"] != 0 || global["agents"] != 0 {
+		t.Fatalf("global route witness ignored the foreign persisted obligation: %+v %v", global, err)
 	}
 }
 

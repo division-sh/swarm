@@ -42,6 +42,14 @@ func ReadSelectedForkExecutableCardinalityForTest(ctx context.Context, selected 
 			}
 			result[name] = strconv.Itoa(count)
 		}
+		// platform_tables.retired_instance_routing forbids the old membership
+		// mirror. Keep its global physical refusal witness at the canonical
+		// persisted delivery facts, independently of this run's deliveries.
+		routes, err := delivery.FixtureDeliveryCardinalityTx(ctx, tx)
+		if err != nil {
+			return err
+		}
+		result["persisted_delivery_routes"] = strconv.Itoa(routes)
 		count, err := delivery.CountSelectedForkDeliveryStorageTx(ctx, tx, runID)
 		result["deliveries"] = strconv.Itoa(count)
 		return err
@@ -56,7 +64,7 @@ func ReadSelectedForkGlobalCardinalityForTest(ctx context.Context, selected any)
 	if err := validateChannelObservationOwner(selected); err != nil {
 		return nil, err
 	}
-	result := make(map[string]int, 4)
+	result := make(map[string]int, 5)
 	err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
 		for _, table := range []string{"agents", "flow_instances", "flow_instance_runtime_readiness", "timers"} {
 			var count int
@@ -65,7 +73,9 @@ func ReadSelectedForkGlobalCardinalityForTest(ctx context.Context, selected any)
 			}
 			result[table] = count
 		}
-		return nil
+		routes, err := delivery.FixtureDeliveryCardinalityTx(ctx, tx)
+		result["persisted_delivery_routes"] = routes
+		return err
 	})
 	if err != nil {
 		return nil, err
