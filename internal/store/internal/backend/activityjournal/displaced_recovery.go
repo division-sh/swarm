@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	postgresevents "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
@@ -133,7 +134,12 @@ func reconcileDisplacedHTTPActivity(ctx context.Context, tx *sql.Tx, attempt *mu
 	if bundle != bundleHash {
 		return absent, errors.New("activity recovery run differs from the original execution source")
 	}
-	request, found, err := loadActivityRecoveryEvent(ctx, tx, dialect, record.RequestEventID)
+	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundle)
+	if err != nil {
+		return absent, err
+	}
+	rowCtx := runtimeauthoractivity.WithScope(ctx, scope)
+	request, found, err := loadActivityRecoveryEvent(rowCtx, tx, dialect, record.RequestEventID)
 	if err != nil {
 		return absent, err
 	}
@@ -151,7 +157,7 @@ func reconcileDisplacedHTTPActivity(ctx context.Context, tx *sql.Tx, attempt *mu
 	if dialect == DialectSQLite {
 		runOwner = sqliteActivityRunOwner(tx)
 	}
-	stored, _, err := MarkUncertain(ctx, tx, dialect, runOwner, attempt, terminal)
+	stored, _, err := MarkUncertain(rowCtx, tx, dialect, runOwner, attempt, terminal)
 	if err != nil {
 		return absent, err
 	}
