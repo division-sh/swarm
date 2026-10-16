@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
 )
 
@@ -211,7 +212,7 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 				t.Fatalf("invalid second pin replay changed the permanent rejection: first=%#v replay=%#v", response, replay)
 			}
 		})
-		t.Run("event plus feed admits exact output pin", func(t *testing.T) {
+		t.Run("event plus feed admits exact root input", func(t *testing.T) {
 			runID := uuid.NewString()
 			data := map[string]any{"imports": []any{}, "pins": []any{
 				map[string]any{"declaration": dataRunDeclaration(scoreRef), "version_id": versions[scoreRef.Key()]},
@@ -230,7 +231,7 @@ func TestDeploymentRunStartFeedOnlyAcrossSelectedStores(t *testing.T) {
 	})
 }
 
-func TestRunStartRejectsDeclaredFeedWithoutOutputPinBeforeMutation(t *testing.T) {
+func TestRunStartRejectsDeclaredFeedWithoutInputPinBeforeMutation(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
 		ctx := context.Background()
 		source, catalog, _, _, openedRef := deploymentRunStartTestSource(t)
@@ -252,22 +253,26 @@ func TestRunStartRejectsDeclaredFeedWithoutOutputPinBeforeMutation(t *testing.T)
 				if eventBacked {
 					body = dataRunStartBodyForBundle(runID, key, bundleHash, data)
 				}
+				beforeRows, err := storetest.ReadFiniteRunStartStorageCounts(ctx, fixture.primary)
+				if err != nil {
+					t.Fatal(err)
+				}
 				response := rpcCall(t, handler, body)
 				if response.Error == nil || response.Error.Code != -32602 {
 					t.Fatalf("unroutable declaration response = %#v", response)
 				}
 				details := asMap(t, asMap(t, response.Error.Data)["details"])
-				if !strings.Contains(fmt.Sprint(details["reason"]), "no exact declared output pin") {
-					t.Fatalf("rejection did not come from compiled output-pin admission: %#v", response.Error)
+				if !strings.Contains(fmt.Sprint(details["reason"]), "no exact declared root input pin") {
+					t.Fatalf("rejection did not come from compiled root-input admission: %#v", response.Error)
 				}
 				for _, table := range []string{"runs", "events", "resource_version_pins", "fan_out_intents", "resource_run_creation_operations"} {
 					if got := dataRunCount(t, fixture, table, "run_id", runID); got != 0 {
 						t.Fatalf("failed admission mutated %s: %d rows", table, got)
 					}
 				}
-				var apiCompletions int
-				if err := fixture.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM api_idempotency WHERE resource_id=$1`, runID).Scan(&apiCompletions); err != nil || apiCompletions != 0 {
-					t.Fatalf("failed admission stored %d API completions: %v", apiCompletions, err)
+				afterRows, err := storetest.ReadFiniteRunStartStorageCounts(ctx, fixture.primary)
+				if err != nil || beforeRows != afterRows {
+					t.Fatalf("failed admission changed durable rows or API completions: before=%+v after=%+v err=%v", beforeRows, afterRows, err)
 				}
 				if sourceID != "" && dataRunCount(t, fixture, "resource_source_invocations", "source_invocation_id", sourceID) != 0 {
 					t.Fatal("failed admission committed source import")
@@ -294,7 +299,7 @@ func TestRunStartRejectsDeclaredFeedWithoutOutputPinBeforeMutation(t *testing.T)
 			Declaration: openedRef, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: []byte("{\"topic\":\"pinned\"}\n"),
 		})
 		if err != nil || imported.Outcome != "accepted" {
-			t.Fatalf("prepare non-output-pinned resource: %#v, %v", imported, err)
+			t.Fatalf("prepare non-input-pinned resource: %#v, %v", imported, err)
 		}
 		for _, eventBacked := range []bool{false, true} {
 			mode := "feed-only"

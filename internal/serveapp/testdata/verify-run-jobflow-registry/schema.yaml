@@ -4,8 +4,6 @@ stages:
 pins:
   inputs:
     - company.registered
-  outputs:
-    - company.registered
 connect:
   - event: company.registered
     from: .
