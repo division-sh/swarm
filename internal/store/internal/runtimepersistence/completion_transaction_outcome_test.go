@@ -126,7 +126,7 @@ func (tx *completionOutcomeTx) Commit() error {
 	return err
 }
 
-func openCompletionOutcomeFixture(t *testing.T, backend string) (completionSettlementFixture, *completionOutcomeConnector) {
+func openCompletionOutcomeFixture(t *testing.T, backend string, wrappers ...func(driver.Connector) driver.Connector) (completionSettlementFixture, *completionOutcomeConnector) {
 	t.Helper()
 	var native driver.Connector
 	if backend == "postgres" {
@@ -138,6 +138,9 @@ func openCompletionOutcomeFixture(t *testing.T, backend string) (completionSettl
 		}
 	} else {
 		native = pipelineCrashSQLiteConnector{path: filepath.Join(t.TempDir(), "completion.db")}
+	}
+	for _, wrap := range wrappers {
+		native = wrap(native)
 	}
 	control := &completionOutcomeConnector{Connector: native}
 	db := sql.OpenDB(control)
