@@ -33,23 +33,21 @@ func CopyUnavailableConnectionScan(t testing.TB, variant string) string {
 		if variant == "pin_collision" || receiver == "bintermediate" && variant == "collision" {
 			inputs = append(inputs, "work.audited")
 		}
-		instance, resolution, fields := "", "", ""
+		instance, resolution := "", ""
 		if receiver == "bintermediate" && (variant == "missing_key" || variant == "create") {
-			instance, resolution, fields = "instance: instance_key\n", ", resolution: select", producerFields
+			instance, resolution = "instance: instance_key\n", ", resolution: select"
 			if variant == "create" {
 				resolution = ", resolution: select-or-create"
 			}
 			writeClosedVariantFile(t, root, receiver+"/entities.yaml", "work:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
 		}
 		writeClosedVariantFile(t, root, receiver+"/schema.yaml", instance+"pins:\n  inputs: ["+strings.Join(inputs, ", ")+"]\n")
-		var events, handlers strings.Builder
+		var handlers strings.Builder
 		handlers.WriteString("receiver:\n  execution_type: system_node\n  event_handlers:\n")
 		for _, input := range inputs {
 			fmt.Fprintf(&connects, "  - {event: work.ready, from: producer, to: %s, rename: %s%s}\n", receiver, input, resolution)
-			events.WriteString(input + ":\n" + fields)
 			fmt.Fprintf(&handlers, "    %s:\n      guard:\n        id: selected_owner\n        check: _entity.id != \"\"\n", input)
 		}
-		writeClosedVariantFile(t, root, receiver+"/events.yaml", events.String())
 		writeClosedVariantFile(t, root, receiver+"/nodes.yaml", handlers.String())
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", connects.String())
