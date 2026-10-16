@@ -4,12 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -22,6 +24,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -202,17 +205,21 @@ func seedStandaloneConvergenceAgent(t *testing.T, selected any, ctx context.Cont
 	if !found {
 		t.Fatal("standalone convergence agent requires its exact source")
 	}
-	agentID := identity.AgentID()
-	if err := agentfixture.UpsertStaticForSource(t, ctx, store, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStaticForSource(t, ctx, store, standaloneConvergenceAgentRecord(t, identity), source); err != nil {
+		t.Fatalf("UpsertAgent(%s): %v", identity.AgentID(), err)
+	}
+	return admitAgentClaimProfileAuthority(t, runtimecorrelation.WithRunID(ctx, identity.RunID), store, source)
+}
+
+func standaloneConvergenceAgentRecord(t *testing.T, identity agentidentity.Identity) runtimemanager.PersistedAgent {
+	t.Helper()
+	return runtimemanager.PersistedAgent{
 		Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
-			ID: agentID, Identity: identity, Role: "observer", FlowID: "global", Type: "stub", Model: "regular",
+			ID: identity.AgentID(), Identity: identity, Role: "observer", FlowID: "global", Type: "stub", Model: "regular",
 			ExecutionMode: "live", Config: json.RawMessage(`{}`),
 		})),
 		Status: "active", HiredBy: "test", StartedAt: time.Now().UTC(),
-	}, source); err != nil {
-		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 	}
-	return admitAgentClaimProfileAuthority(t, runtimecorrelation.WithRunID(ctx, identity.RunID), store, source)
 }
 
 func TestSameLabelCausalAndRunScopedEventsCannotConvergeExistingRunParity(t *testing.T) {
@@ -272,6 +279,7 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 		testAgentDeliveryRoute(t, admitted.Event().RunID(), agents[0], ""),
 		testAgentDeliveryRoute(t, admitted.Event().RunID(), agents[1], ""),
 	}
+	ctx = prepareStandaloneConvergenceClaimContext(t, ctx, pg, routes)
 	outcome, err := commitAdmittedSemanticEventFixtureOutcome(ctx, pg, admitted, routes, runtimepipelineobligation.ScopeSubscribed)
 	if err != nil || outcome != runtimebus.EventAppendInserted {
 		t.Fatalf("commit standalone runtime event: outcome=%v err=%v", outcome, err)
@@ -281,6 +289,10 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 	if status != "running" || runID != event.RunID() || triggerID != event.ID() || triggerType != string(event.Type()) {
 		t.Fatalf("standalone routed authority = status:%q run:%q trigger:%q/%q", status, runID, triggerID, triggerType)
 	}
+	for _, route := range routes {
+		seedStandaloneConvergenceAgent(t, pg, ctx, route.AgentIdentity)
+	}
+	ctx = admitPreparedAgentClaimContext(t, ctx, pg)
 	claims := make([]runtimedelivery.Claim, 0, len(routes))
 	for _, route := range routes {
 		claimed, err := claimDeliveryFixture(ctx, pg, event, route)
@@ -347,6 +359,38 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 	if pending != 0 || delivered != len(agents) {
 		t.Fatalf("delivery counts = pending:%d delivered:%d", pending, delivered)
 	}
+}
+
+func prepareStandaloneConvergenceClaimContext(t *testing.T, ctx context.Context, selected *PostgresStore, routes []events.DeliveryRoute) context.Context {
+	t.Helper()
+	source := sourceartifactfixture.Require(t, ctx, selected)
+	coordinate := agenttopology.SourceCoordinate{BundleHash: source.BundleHash()}
+	var desired []agenttopology.DesiredAgent
+	for _, route := range routes {
+		record := standaloneConvergenceAgentRecord(t, route.AgentIdentity)
+		identity, err := route.AgentIdentity.Plan()
+		if err != nil {
+			t.Fatal(err)
+		}
+		revision, err := runtimemanager.AgentConfigPlanRevision(record.Config, identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		desired = append(desired, agenttopology.DesiredAgent{Identity: identity, Source: coordinate, ConfigRevision: revision})
+	}
+	plan, err := agenttopology.NewSourceSetPlan([]agenttopology.SourceCoordinate{coordinate}, desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentfixture.AdmitGeneration(t, ctx, selected, plan, coordinate); err != nil {
+		t.Fatal(err)
+	}
+	ctx = admitPreparedAgentClaimContext(t, ctx, selected)
+	// Plan/generation setup must not replace the event's standalone run creation.
+	if err := selected.RequirePresentRun(ctx, routes[0].AgentIdentity.RunID); !errors.Is(err, runtimerunlifecycle.ErrRunNotFound) {
+		t.Fatalf("standalone authority setup created the run before event admission: %v", err)
+	}
+	return ctx
 }
 
 func executeStandaloneCompletionCandidate(t *testing.T, ctx context.Context, selected any, runID string) {

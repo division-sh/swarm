@@ -133,6 +133,9 @@ func TestDeploymentResourceDataPortsDiscardEvidenceFromForeignCancelledAndClosed
 			if _, err := ReadResourceHeadVersionStorageForTest(f.ctx, f.store, durabledata.DeclarationRef{}); err == nil {
 				t.Fatal("invalid declaration accepted")
 			}
+			if err := f.manager.Shutdown(); err != nil {
+				t.Fatal(err)
+			}
 			if err := f.store.(interface{ Close() error }).Close(); err != nil {
 				t.Fatal(err)
 			}

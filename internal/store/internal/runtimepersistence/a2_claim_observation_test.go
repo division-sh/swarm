@@ -195,6 +195,9 @@ func TestA2ClaimObserversRefuseRawAndClosedOwners(t *testing.T) {
 		assertA2ClaimObservationFailure(t, context.Background(), selected, uuid.NewString(), "node", nil)
 	}
 	f, _ := newCompetingRevisionPairFixture(t, "sqlite")
+	if err := f.manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
 	if err := f.store.(*SQLiteRuntimeStore).Close(); err != nil {
 		t.Fatal(err)
 	}

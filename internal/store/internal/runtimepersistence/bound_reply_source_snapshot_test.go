@@ -134,6 +134,9 @@ func TestBoundReplySourceSnapshotRefusesRawClosedAndEmptyPath(t *testing.T) {
 	if got, err := ReadBoundReplySourceStorageForTest(f.ctx, f.store, state.Identity.RunID, ""); err == nil || got != nil {
 		t.Fatalf("empty concrete source was accepted: %#v %v", got, err)
 	}
+	if err := f.manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
 	if err := f.store.(*SQLiteRuntimeStore).Close(); err != nil {
 		t.Fatal(err)
 	}

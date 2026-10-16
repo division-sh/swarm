@@ -157,6 +157,9 @@ func TestWorkflowTimerEventObserversRefuseCancelledRawAndClosedOwnersBothStores(
 			ctx, cancel := context.WithCancel(f.ctx)
 			cancel()
 			assertWorkflowTimerEventObserversRefuse(t, ctx, f.store, context.Canceled)
+			if err := f.manager.Shutdown(); err != nil {
+				t.Fatal(err)
+			}
 			if err := f.store.(interface{ Close() error }).Close(); err != nil {
 				t.Fatal(err)
 			}
