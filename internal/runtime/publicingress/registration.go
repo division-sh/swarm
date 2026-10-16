@@ -676,7 +676,7 @@ func (c *ProviderRegistrationController) callbackTargetCurrent(ctx context.Conte
 // ExposureCurrent shares readiness's exposure predicate without requiring an
 // unrelated managed registration to be ready before an author route executes.
 func (c *ProviderRegistrationController) ExposureCurrent(ctx context.Context) bool {
-	if c == nil || c.opts.Readiness == nil {
+	if c == nil || c.snapshot == nil || c.opts.Readiness == nil || c.opts.Now == nil {
 		return false
 	}
 	evaluated := c.opts.Readiness.evaluate(ctx, c.opts.Now().UTC())

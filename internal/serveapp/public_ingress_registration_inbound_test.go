@@ -116,6 +116,10 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	declaredPublication, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
@@ -142,7 +146,7 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		t.Fatalf("InstalledCapabilitySubjects: %v", err)
 	}
 	rt := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway, ChannelActivations: activationOwner,
-		Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString(), ProviderCredentials: credentialStore, WorkflowModule: module, ProviderTriggerCatalog: catalog,
+		Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString(), ProviderCredentials: credentialStore, WorkflowModule: module, ProviderTriggerCatalog: catalog, DeclaredChannelPublication: declaredPublication,
 			SourceArtifactFact: mustServeTestEphemeralSourceArtifactFact(bundleHash)}}
 	if _, err := rt.PlanStandingTargets(); err != nil {
 		t.Fatal(err)
@@ -250,14 +254,29 @@ func TestProviderRegistrationRotationCannotRefreshRuntimeIngressAdmission(t *tes
 		t.Fatalf("initial registration readiness = %#v", initial)
 	}
 	handler := runtimeProcessInboundHandler{contexts: manager, publicRegistration: controller}
+	use, lookup, err := manager.AcquireIngress(t.Context(), "chat", "telegram")
+	if err != nil || use == nil {
+		t.Fatalf("registration control did not acquire its context: %+v err=%v", lookup, err)
+	}
+	_, _, admissionErr := use.AdmitPublicIngressTarget(runtimepkg.InboundTarget{
+		BundleHash: lookup.Target.BundleHash, ServiceID: lookup.Target.ServiceID, FlowPath: lookup.Target.FlowPath,
+		RunID: lookup.Target.RunID, Generation: lookup.Target.Generation, PublicationSequence: lookup.Target.PublicationSequence,
+		Alias: lookup.Target.Alias, Provider: lookup.Target.Provider, SigningSecret: lookup.Target.SigningSecret, AdmissionPlan: lookup.Target.AdmissionPlan,
+	})
+	if err := use.Done(); err != nil {
+		t.Fatal(err)
+	}
+	if admissionErr != nil {
+		t.Fatalf("registration control lacks exact acquired ownership: %v", admissionErr)
+	}
 	initialBody := `{"update_id":99,"message":{"message_id":7,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"initial"}}`
-	for _, callback := range []string{"/webhooks/chat/telegram", "/webhooks/chat/telegram?swarm_callback_generation=foreign"} {
+	for _, callback := range []string{"/webhooks/chat/telegram", "/webhooks/chat/telegram?swarm_callback_generation=foreign", "/webhooks/chat/TELEGRAM?swarm_callback_generation=foreign"} {
 		request := httptest.NewRequest(http.MethodPost, callback, strings.NewReader(initialBody))
 		request.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret-v1")
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
 		if response.Code != http.StatusNotFound || len(eventsStore.events) != 0 {
-			t.Fatalf("managed callback bypassed token fence: status=%d events=%d", response.Code, len(eventsStore.events))
+			t.Fatalf("managed callback %s bypassed token fence: status=%d events=%d", callback, response.Code, len(eventsStore.events))
 		}
 	}
 	initialRequest := httptest.NewRequest(http.MethodPost, initial.Registrations[0].CallbackURL, strings.NewReader(initialBody))
