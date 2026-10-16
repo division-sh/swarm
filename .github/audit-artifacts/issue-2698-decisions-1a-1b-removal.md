@@ -64,6 +64,11 @@ package/root identities (415 top-level plus72 subpackage); a separate AST
 comparison against signed2db verifies every retained declaration is unchanged.
 The same AST comparison remains green after dependency cleanup. Receipts:
 pr2698-decision1b-discovery.jsonl and pr2698-verify-decision1b.go in the cache.
+Actual store Go discovery on the integrated5a5b399c5f source also omits exactly
+the two removed reconciliation roots while retaining all six sibling controls,
+the real ratchet and the current-source ReconcilesLiveCensus root. The two
+ratchet correctness/selection controls also remain discoverable. Receipt:
+pr2698-decision1a-store-discovery.jsonl (listing only, no test execution credit).
 
 Normal native U1000 analysis of the top-level tooling package and internal/store
 identified453 declarations exclusive to the removed roots:379 functions
