@@ -12865,11 +12865,14 @@ tool_model:
       event_type: authoritative provider event type source for normalized provider_event_type payload metadata. Sources may be header, JSONPath, form parameter, query parameter, or manifest literal.
       event_name: literal or `{event_type}` template for the emitted Swarm event name.
       event_name_policy: >
-        New provider-trigger manifests MUST use a literal Swarm event name and carry the provider-specific event kind in
-        `provider_event_type`. The `{event_type}` template form is grandfathered only for the existing GitHub and Slack
-        manifests because live subscriptions already consume `inbound.github.raw.<event_type>` and
-        `inbound.slack.<event_type>`. Any additional dynamic event-name template requires an explicit spec/gate migration
-        decision.
+        Provider-local raw naming is a literal or one of the two bounded template policies `{event_type}` and
+        `raw.{event_type}`. The admitted directory qualifies the policy once under its exact `inbound.<directory>.`
+        namespace. Template admission depends on that exact policy, never a GitHub/Slack directory-name whitelist;
+        copying or renaming a provider cannot select a physical protocol or alter authentication. The compiled policy
+        refuses foreign prefixes, repeated/unknown placeholders, suffixes, route segments, wildcards and whitespace.
+        Only the separately normalized wire event-type value fills the single placeholder; the admitted key is unchanged.
+        This rule replaces the prior named-provider grandfathering under S1 Gate F 6208241566; additional template
+        shapes remain unsupported.
       ack.mode: >
         Omission selects `after_publish`; the only authored mode is `durable_before_dispatch`. Explicit `after_publish`
         is not an authored alternative.

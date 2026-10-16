@@ -760,16 +760,8 @@ func (m manifestDefinition) validate() error {
 			return err
 		}
 	}
-	eventNameLiteral := strings.TrimSpace(m.EventName.Literal)
-	eventNameTemplate := strings.TrimSpace(m.EventName.Template)
-	if eventNameLiteral == "" && eventNameTemplate == "" {
-		return fmt.Errorf("%s manifest event_name is required", provider)
-	}
-	if eventNameLiteral != "" && eventNameTemplate != "" {
-		return fmt.Errorf("%s manifest event_name must use literal or template, not both", provider)
-	}
-	if eventNameTemplate != "" && provider != "github" && provider != "slack" {
-		return fmt.Errorf("%s manifest event_name template is reserved for grandfathered GitHub/Slack compatibility", provider)
+	if err := validateRawEventName(provider, m.EventName); err != nil {
+		return err
 	}
 	switch strings.TrimSpace(m.Ack.Mode) {
 	case "", "durable_before_dispatch":

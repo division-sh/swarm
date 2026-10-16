@@ -65,8 +65,12 @@ func TestS1RawTemplatesRefuseForeignRepeatedAndMalformedNames(t *testing.T) {
 			t.Run(key+"/"+template, func(t *testing.T) {
 				fixture := admissionTestManifest(key, signatureTypeTokenEquality, true)
 				fixture.EventName = EventNameManifest{Template: template}
-				if manifest, err := fixture.admit(); err == nil || manifest.Validate() == nil {
+				manifest, err := fixture.admit()
+				if err == nil || manifest.Validate() == nil {
 					t.Fatalf("invalid raw template %q gained policy", template)
+				}
+				if !strings.Contains(err.Error(), "event_name.template") || !strings.Contains(err.Error(), "raw.{event_type}") || !strings.Contains(err.Error(), "trigger.yaml:") {
+					t.Fatalf("template refusal lost its policy, valid form or source: %v", err)
 				}
 			})
 		}

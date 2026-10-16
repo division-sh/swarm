@@ -1167,12 +1167,12 @@ func TestManifestValidationRejectsAuthoringErrors(t *testing.T) {
 			},
 		},
 		{
-			name: "new provider event name template",
+			name: "unknown event name template placeholder",
 			manifest: triggerFixture{
 				Provider:   "badtemplate",
 				DeliveryID: ValueSource{JSONPath: "$.id", Required: true},
 				EventType:  ValueSource{JSONPath: "$.type", Required: true},
-				EventName:  EventNameManifest{Template: "inbound.badtemplate.{event_type}"},
+				EventName:  EventNameManifest{Template: "inbound.badtemplate.{unknown}"},
 			},
 		},
 		{
