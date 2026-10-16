@@ -95,7 +95,7 @@ func accountingTreeInputs(ctx context.Context, repo, head string, consume func(a
 		metadata, name, ok := bytes.Cut(entry, []byte{'\t'})
 		fields := strings.Fields(string(metadata))
 		path := string(name)
-		if !ok || len(fields) != 3 || (fields[0] != "100644" && fields[0] != "100755") || fields[1] != "blob" || !hexIdentity(fields[2], 40) || !filepath.IsLocal(path) || filepath.ToSlash(filepath.Clean(path)) != path || strings.Contains(path, "\n") || path == ".git" || strings.HasPrefix(path, ".git/") || path == "test-results" || strings.HasPrefix(path, "test-results/") {
+		if !ok || len(fields) != 3 || (fields[0] != "100644" && fields[0] != "100755") || fields[1] != "blob" || !hexIdentity(fields[2], 40) || !accountingProofPath(path) {
 			return manifest, fmt.Errorf("unsupported proof tree entry %q", entry)
 		}
 		manifest.Inputs = append(manifest.Inputs, accountingProofInput{Path: path, Mode: fields[0], Object: fields[2]})
@@ -132,6 +132,16 @@ func accountingTreeInputs(ctx context.Context, repo, head string, consume func(a
 	}
 	sort.Slice(manifest.Inputs, func(i, j int) bool { return manifest.Inputs[i].Path < manifest.Inputs[j].Path })
 	return manifest, nil
+}
+
+func accountingProofPath(path string) bool {
+	if !filepath.IsLocal(path) || filepath.ToSlash(filepath.Clean(path)) != path || strings.Contains(path, "\n") {
+		return false
+	}
+	first, _, _ := strings.Cut(path, "/")
+	// The closed Linux/Darwin matrix must not let a case-insensitive checkout
+	// reinterpret a source path as private Git metadata or writable output.
+	return !strings.EqualFold(first, ".git") && !strings.EqualFold(first, "test-results")
 }
 
 func readAccountingBlob(reader *bufio.Reader, expected string) ([]byte, error) {

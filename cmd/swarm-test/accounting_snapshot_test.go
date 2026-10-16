@@ -413,3 +413,16 @@ func TestAccountingPinnedFetchRefusesLocalTransportRedirection(t *testing.T) {
 		})
 	}
 }
+
+func TestAccountingProofPathsRejectControlDirectoryAliases(t *testing.T) {
+	for _, path := range []string{".git/config", ".GIT/objects/info/alternates", ".GiT/HEAD", "test-results/input.go", "TEST-RESULTS/input.yaml", "../outside", "/absolute", "a/../b", "a\nb"} {
+		if accountingProofPath(path) {
+			t.Errorf("control/escaping path admitted: %q", path)
+		}
+	}
+	for _, path := range []string{"schema.yaml", "internal/store/testdata/input.tsv", "nested/test-results/owned-source.txt", "go.mod"} {
+		if !accountingProofPath(path) {
+			t.Errorf("ordinary tracked proof input refused: %q", path)
+		}
+	}
+}
