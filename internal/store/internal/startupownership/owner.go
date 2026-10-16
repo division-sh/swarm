@@ -44,6 +44,7 @@ type StartupPostgresOwner struct {
 	fanOutPipeline       *storepipeline.PipelinePostgresOwner
 	channelChanges       *runtimechanneldelivery.ReconcileSignal
 	lifecycleCandidates  *storerunhandoff.CandidateCoordinator
+	activityJournal      displacedHTTPActivityJournal
 }
 
 type StartupSQLiteOwner struct {
@@ -58,6 +59,7 @@ type StartupSQLiteOwner struct {
 	fanOutPipeline      *storepipeline.PipelineSQLiteOwner
 	channelChanges      *runtimechanneldelivery.ReconcileSignal
 	lifecycleCandidates *storerunhandoff.CandidateCoordinator
+	activityJournal     displacedHTTPActivityJournal
 }
 
 func (s *StartupPostgresOwner) BindLifecycleCandidates(candidates *storerunhandoff.CandidateCoordinator) error {
