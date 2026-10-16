@@ -214,6 +214,9 @@ func assertCatchUp2542CurrentFiles(t *testing.T, packet selectedreadrole.CatchUp
 			}
 			continue
 		}
+		if err == nil {
+			raw, err = selectedreadrole.Repair2698HistoricalSource("../../..", file.File, raw)
+		}
 		if err != nil || fmt.Sprintf("%x", sha256.Sum256(raw)) != file.ComposedSHA256 {
 			t.Fatalf("composed source differs from finite packet: %s: %v", file.File, err)
 		}

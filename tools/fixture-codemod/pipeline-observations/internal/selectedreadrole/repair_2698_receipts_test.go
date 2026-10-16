@@ -25,7 +25,11 @@ func TestRepair2698SourceCompositionPreservesBothSignedCuts(t *testing.T) {
 			}
 			previousPath = pin.File
 			current, err := os.ReadFile(filepath.Join(root, pin.File))
-			if err != nil || fmt.Sprintf("%x", sha256.Sum256(current)) != pin.AfterSHA256 {
+			if err != nil {
+				t.Fatal(err)
+			}
+			endpoint, err := Repair2698FixtureNameHistoricalSource(root, pin.File, current)
+			if err != nil || fmt.Sprintf("%x", sha256.Sum256(endpoint)) != pin.AfterSHA256 {
 				t.Fatal("actual source differs from the finite repaired endpoint:", err)
 			}
 			for _, cut := range []struct{ ref, digest string }{{Repair2698Before, pin.BeforeSHA256}, {Repair2698After, pin.AfterSHA256}} {
@@ -56,6 +60,58 @@ func TestRepair2698SourceCompositionPreservesBothSignedCuts(t *testing.T) {
 				t.Fatal("foreign source path received an inverse:", err)
 			}
 		})
+	}
+}
+
+func TestRepair2698FixtureNameContinuationIsExactAndOnceOnly(t *testing.T) {
+	root := filepath.Clean("../../../../..")
+	packet, err := readRepair2698FixtureNamePacket(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []Repair2698Source{packet.Files[0], packet.Guard} {
+		current, err := os.ReadFile(filepath.Join(root, file.File))
+		if err != nil || fmt.Sprintf("%x", sha256.Sum256(current)) != file.AfterSHA256 {
+			t.Fatal("actual source/table differs from exact rename endpoint:", file.File, err)
+		}
+	}
+	current, err := os.ReadFile(filepath.Join(root, Repair2698FixtureNamePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, err := Repair2698FixtureNameHistoricalSource(root, Repair2698FixtureNamePath, current)
+	if err != nil || fmt.Sprintf("%x", sha256.Sum256(previous)) != packet.Files[0].BeforeSHA256 {
+		t.Fatal("exact rename inverse refused:", err)
+	}
+	for _, hostile := range [][]byte{previous, append(bytes.Clone(current), '\n'), bytes.Replace(current, []byte("ctx == nil"), []byte("ctx != nil"), 1), append(bytes.Clone(current), []byte("\nfunc extraRawCaller(){}\n")...)} {
+		got, err := Repair2698HistoricalSource(root, Repair2698FixtureNamePath, hostile)
+		if err == nil && !bytes.Equal(got, hostile) {
+			t.Fatal("stale/changed-body/extra-call source acquired a combined inverse")
+		}
+	}
+	copy := t.TempDir()
+	gitdir, err := exec.Command("git", "-C", root, "rev-parse", "--absolute-git-dir").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(copy, ".git"), []byte("gitdir: "+strings.TrimSpace(string(gitdir))+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(copy, Repair2698FixtureNamePath)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, current, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Repair2698FixtureNameHistoricalSource(copy, Repair2698FixtureNamePath, current); err != nil {
+		t.Fatal("exact copied source refused:", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Repair2698FixtureNameHistoricalSource(copy, Repair2698FixtureNamePath, current); err == nil {
+		t.Fatal("warm cache certified missing copied source against pristine gitdir")
 	}
 }
 
@@ -105,5 +161,22 @@ func TestRepair2698FunctionReadsCopiedSourceNotGitdirCheckout(t *testing.T) {
 	}
 	if _, err := repair2698HistoricalFunction(copy, path, function, actual); err == nil {
 		t.Fatal("warm source cache hid a missing actual sibling")
+	}
+}
+
+func TestRepair2698PacketCacheCannotHideChangedMetadataOrCallerMutation(t *testing.T) {
+	pins, err := Repair2698Sources()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pins[0].AfterSHA256 = "foreign"
+	if current, err := Repair2698Sources(); err != nil || current[0].AfterSHA256 == "foreign" {
+		t.Fatal("a caller mutated the authenticated immutable packet:", err)
+	}
+	original := repair2698Sources
+	t.Cleanup(func() { repair2698Sources = original })
+	repair2698Sources = append(bytes.Clone(original), '\n')
+	if _, err := Repair2698Sources(); err == nil {
+		t.Fatal("warm immutable cache hid changed packet bytes")
 	}
 }

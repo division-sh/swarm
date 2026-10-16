@@ -150,9 +150,12 @@ func CatchUp2542HistoricalSource(root, path string, current []byte) ([]byte, err
 
 func CatchUp2542HistoricalFunction(root, path, name, current string) (string, error) {
 	var err error
-	current, err = repair2698HistoricalFunction(root, path, name, current)
+	repaired, err := repair2698HistoricalFunction(root, path, name, current)
 	if err != nil {
 		return "", err
+	}
+	if repaired != current {
+		return repaired, nil // The finite repair already composed earlier cuts.
 	}
 	current, err = nativeEntry2542HistoricalFunction(root, path, name, current)
 	if err != nil {

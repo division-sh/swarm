@@ -36,6 +36,10 @@ func ReadEntityToolPins(root string) ([]EntityToolPin, error) {
 	if fmt.Sprintf("%x", sha256.Sum256(raw)) != entityToolFileDigest {
 		return nil, fmt.Errorf("entity-tool complete manifest bytes changed")
 	}
+	key := "immutable-pins/" + entityToolFileDigest
+	if cached, ok := sourceCache.Load(key); ok {
+		return append([]EntityToolPin(nil), cached.([]EntityToolPin)...), nil
+	}
 	var pins []EntityToolPin
 	if err := json.Unmarshal(raw, &pins); err != nil {
 		return nil, err
@@ -44,6 +48,7 @@ func ReadEntityToolPins(root string) ([]EntityToolPin, error) {
 	if err != nil || len(pins) != 43 || fmt.Sprintf("%x", sha256.Sum256(canonical)) != EntityToolDigest {
 		return nil, fmt.Errorf("entity-tool complete source inventory changed: %v", err)
 	}
+	sourceCache.Store(key, append([]EntityToolPin(nil), pins...))
 	return pins, nil
 }
 
