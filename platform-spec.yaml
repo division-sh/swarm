@@ -20766,6 +20766,16 @@ run_model:
         activates the paused child, and records both lifecycle author activities. Ordinary activation and selected-contract
         unadvanced activation consume this owner. Generic terminal mutation rejects forked. Rollback leaves every coupled
         source, child, decision, pointer, and activity fact unchanged.
+      selected_historical_source: >
+        Independently admitted selected-contract children may read a source already frozen by this owner. Materialization
+        and activation each validate its locked canonical lifecycle, original freeze successor origin and committed cut,
+        plus this child's own exact origin, binding, preparation and current attached execution authority. The original
+        successor may have completed; continued_as_run_id identifies that original freeze, not all independently owned
+        child branches. Historical admission activates only the new child, never freezes the source again, changes its
+        pointer or ended_at, emits another source-freeze mutation, resumes its execution, or fabricates divergence.
+        Actual post-cut advancement remains separately accounted. Results and immutable operation ACKs report the actual
+        source status forked and source_frozen=true, not a claim that this invocation performed the original freeze.
+        Generic/state-only activation and source execution retain their existing refusals.
       preserved_lineage: >
         Freeze preserves source events, deliveries, receipts, dead letters, timers, sessions, turns, audits, reply contexts,
         state history, decision/effect/directive evidence, and fork facts as immutable history. It does not dead-letter,
@@ -21278,8 +21288,9 @@ run_model:
       by the underlying event''s occurrence timestamp or position. Source scope rows MUST NOT be copied into the fork, reused as
       fork-local recovery proof, treated as executable fork work, or used as selected-fork suppressors. Fork-local
       committed replay-scope truth must be freshly written under the fork run_id by selected-contract execution or
-      approved fork-local delivery-event replay owners. Source scope facts absent from the selected revision
-      remain fail-closed unless a separate approved source-advanced/reconstruction owner changes that policy.'
+      approved fork-local delivery-event replay owners. Later source scope writes remain source-only advancement
+      evidence, outside the selected cut; they neither authorize recovery nor suppress independently admitted child
+      obligations. Exact child scope conflicts still refuse atomically.'
     selected_contract_diagnostic_platform_outcome_policy: 'Mutating selected-contract fixed-event execution may consume
       runtime.run_fork.contract_frontier_admission.selected_contract_diagnostic_platform_outcome_policy to classify
       source outcome facts present in the selected revision for spec-declared diagnostic/non-routed platform events as lineage/no-action

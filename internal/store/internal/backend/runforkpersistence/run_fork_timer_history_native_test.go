@@ -47,12 +47,13 @@ type timerHistoryNativeScheduleOwner interface {
 }
 
 type timerHistoryNativeFixture struct {
-	db       *sql.DB
-	postgres *postgresbackend.Backend
-	sqlite   *sqlitebackend.Backend
-	pipeline timerHistoryNativeOwner
-	generic  timerHistoryNativeScheduleOwner
-	runs     interface {
+	requireCurrent func() error
+	db             *sql.DB
+	postgres       *postgresbackend.Backend
+	sqlite         *sqlitebackend.Backend
+	pipeline       timerHistoryNativeOwner
+	generic        timerHistoryNativeScheduleOwner
+	runs           interface {
 		CreateRun(context.Context, runtimerunlifecycle.CreateRequest) (runtimerunlifecycle.MutationDisposition, error)
 	}
 }
@@ -204,6 +205,7 @@ func openTimerHistoryNativeFixture(t *testing.T, dialect string) *timerHistoryNa
 		if err := schema.BootstrapSchema(t.Context(), bootstrap); err != nil {
 			t.Fatal(err)
 		}
+		f.requireCurrent = schema.RequireCurrent
 		artifacts, err := artifactstore.NewPostgres(f.postgres, schema.RequireCurrent)
 		if err != nil {
 			t.Fatal(err)
@@ -243,6 +245,7 @@ func openTimerHistoryNativeFixture(t *testing.T, dialect string) *timerHistoryNa
 		if err := schema.BootstrapSchema(t.Context(), bootstrap); err != nil {
 			t.Fatal(err)
 		}
+		f.requireCurrent = schema.RequireCurrent
 		artifacts, err := artifactstore.NewSQLite(f.sqlite, schema.RequireCurrent, nil)
 		if err != nil {
 			t.Fatal(err)

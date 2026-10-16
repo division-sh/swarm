@@ -249,6 +249,9 @@ func commitSelectedForkEvent(
 	if result.AppendOutcome != runtimebus.EventAppendInserted {
 		return runtimebus.CommittedSelectedForkEvent{}, fmt.Errorf("selected-fork operation returned invalid append outcome")
 	}
+	if err := lineageOwner.InstallSelectedForkExecutionLineageTx(ctx, attempt, req.Lineage, req.Commit.Event, req.Commit.DeliveryRoutes); err != nil {
+		return runtimebus.CommittedSelectedForkEvent{}, err
+	}
 	result.DeliveryHandoffs, err = committer.commitInitialSideEffectEvidence(ctx, req.Commit, true)
 	if err != nil {
 		return runtimebus.CommittedSelectedForkEvent{}, err
