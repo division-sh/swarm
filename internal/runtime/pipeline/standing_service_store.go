@@ -81,6 +81,12 @@ func (c StandingServiceCandidate) Validate() error {
 	if err := c.Source.Validate(); err != nil {
 		return fmt.Errorf("standing service bundle source: %w", err)
 	}
+	if err := c.RootAdmission.Validate(); err != nil {
+		return err
+	}
+	if c.RootAdmission.BundleHash() != c.Source.BundleHash() {
+		return fmt.Errorf("standing declaration requires its exact source/root pair")
+	}
 	return nil
 }
 
@@ -111,7 +117,8 @@ type StandingServiceOperation struct {
 }
 
 func (r StandingServiceReconciliation) SameAuthority(other StandingServiceReconciliation) bool {
-	return r.ServiceID != "" && r.ServiceID == other.ServiceID && r.RunID == other.RunID && r.Generation == other.Generation &&
+	return r.RootReference.Validate() == nil && r.RootReference.BundleHash == r.BundleHash && r.RootReference == other.RootReference &&
+		r.ServiceID != "" && r.ServiceID == other.ServiceID && r.RunID == other.RunID && r.Generation == other.Generation &&
 		r.FlowPath == other.FlowPath &&
 		r.BundleHash == other.BundleHash && r.PublicationSequence == other.PublicationSequence && r.RestartDisposition == other.RestartDisposition
 }

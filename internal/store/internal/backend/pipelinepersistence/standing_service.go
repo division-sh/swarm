@@ -1140,7 +1140,7 @@ func (s *standingServiceAdapter) createStandingServiceTx(ctx context.Context, tx
 		return runtimepipeline.StandingServiceReconciliation{}, errors.New("standing run lifecycle owner is required")
 	}
 	if _, err := s.createRun(ctx, tx, runtimerunlifecycle.CreateRequest{
-		RunID: runID, Origin: origin, Source: candidate.Source, StartedAt: now,
+		RunID: runID, Origin: origin, Source: candidate.Source, RootAdmission: candidate.RootAdmission, StartedAt: now,
 	}); err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
