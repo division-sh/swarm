@@ -46,9 +46,13 @@ func (s *PipelinePostgresOwner) CommitScenarioSetup(ctx context.Context, command
 			if !ok {
 				return fmt.Errorf("postgres scenario setup requires executable bundle source fact")
 			}
+			root, ok := runtimecorrelation.RootAdmissionFromContext(txctx)
+			if !ok {
+				return fmt.Errorf("postgres scenario setup requires exact rooted source admission")
+			}
 			if _, err := s.RunLifecyclePostgresOwner.CreateRunTx(txctx, attempt, runtimerunlifecycle.CreateRequest{
 				RunID: req.RunID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
-				Source: fact, StartedAt: req.CreatedAt,
+				Source: fact, RootAdmission: root, StartedAt: req.CreatedAt,
 			}); err != nil {
 				return err
 			}
@@ -147,9 +151,13 @@ func (s *PipelineSQLiteOwner) CommitScenarioSetup(ctx context.Context, command r
 			if !ok {
 				return fmt.Errorf("sqlite scenario setup requires executable bundle source fact")
 			}
+			root, ok := runtimecorrelation.RootAdmissionFromContext(txctx)
+			if !ok {
+				return fmt.Errorf("sqlite scenario setup requires exact rooted source admission")
+			}
 			if _, err := s.RunLifecycleSQLiteOwner.CreateRunTx(txctx, attempt, runtimerunlifecycle.CreateRequest{
 				RunID: req.RunID, Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
-				Source: fact, StartedAt: req.CreatedAt,
+				Source: fact, RootAdmission: root, StartedAt: req.CreatedAt,
 			}); err != nil {
 				return err
 			}

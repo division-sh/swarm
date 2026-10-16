@@ -45,3 +45,11 @@ func (s *PostgresStore) ResolveUnboundRootedSource(ctx context.Context, hash str
 func (s *SQLiteRuntimeStore) ResolveUnboundRootedSource(ctx context.Context, hash string) (sourceartifact.RootedSource, error) {
 	return s.sourceArtifactOwner.ResolveUnboundRootedSource(ctx, hash)
 }
+
+func (s *PostgresStore) LoadRunRootedSource(ctx context.Context, runID string) (sourceartifact.RootedSource, error) {
+	return s.runLifecyclePostgresOwner.LoadRunRootedSource(ctx, runID)
+}
+
+func (s *SQLiteRuntimeStore) LoadRunRootedSource(ctx context.Context, runID string) (sourceartifact.RootedSource, error) {
+	return s.runLifecycleSQLiteOwner.LoadRunRootedSource(ctx, runID)
+}

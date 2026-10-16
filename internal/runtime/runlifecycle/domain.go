@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/forkpoint"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/google/uuid"
 )
 
@@ -472,10 +473,11 @@ func (r ActiveTransitionRequest) Validate() error {
 }
 
 type CreateRequest struct {
-	RunID     string
-	Origin    RunOrigin
-	Source    runtimecorrelation.SourceArtifactFact
-	StartedAt time.Time
+	RunID         string
+	Origin        RunOrigin
+	Source        runtimecorrelation.SourceArtifactFact
+	RootAdmission sourceartifact.RootAdmission
+	StartedAt     time.Time
 }
 
 func (r CreateRequest) Validate() error {
@@ -491,12 +493,13 @@ func (r CreateRequest) Validate() error {
 	if r.StartedAt.IsZero() {
 		return errors.New("run creation requires started_at")
 	}
-	return nil
+	return requireMatchingRootAdmission(r.Source, r.RootAdmission)
 }
 
 type SourceRevisionRequest struct {
-	RunID  string
-	Source runtimecorrelation.SourceArtifactFact
+	RunID         string
+	Source        runtimecorrelation.SourceArtifactFact
+	RootAdmission sourceartifact.RootAdmission
 }
 
 func (r SourceRevisionRequest) Validate() error {
@@ -506,6 +509,16 @@ func (r SourceRevisionRequest) Validate() error {
 	if err := r.Source.Validate(); err != nil {
 		return fmt.Errorf("run source revision: %w", err)
 	}
+	return requireMatchingRootAdmission(r.Source, r.RootAdmission)
+}
+
+func requireMatchingRootAdmission(source runtimecorrelation.SourceArtifactFact, root sourceartifact.RootAdmission) error {
+	if err := root.Validate(); err != nil {
+		return fmt.Errorf("run source root admission: %w", err)
+	}
+	if root.BundleHash() != source.BundleHash() {
+		return errors.New("run root admission does not match the exact source artifact")
+	}
 	return nil
 }
 
@@ -514,6 +527,7 @@ type Snapshot struct {
 	State            State
 	Origin           RunOrigin
 	BundleHash       string
+	RootReference    sourceartifact.RootAdmissionReference
 	EventCount       int
 	EntityCount      int
 	Failure          *runtimefailures.Envelope
@@ -534,6 +548,12 @@ func (s Snapshot) Validate() error {
 	}
 	if err := runtimebundleidentity.ValidateCanonicalHash(strings.TrimSpace(s.BundleHash)); err != nil {
 		return fmt.Errorf("run lifecycle snapshot bundle_hash: %w", err)
+	}
+	if err := s.RootReference.Validate(); err != nil {
+		return fmt.Errorf("run lifecycle snapshot root: %w", err)
+	}
+	if s.RootReference.BundleHash != s.BundleHash {
+		return errors.New("run lifecycle snapshot root does not match its source artifact")
 	}
 	if s.EventCount < 0 || s.EntityCount < 0 {
 		return errors.New("run lifecycle snapshot counters must be non-negative")

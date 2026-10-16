@@ -159,12 +159,16 @@ func (s *EventSQLiteOwner) ensureActiveRunRow(ctx context.Context, tx *sql.Tx, a
 	if !ok {
 		return fmt.Errorf("ensure active sqlite run row: executable bundle source fact is required")
 	}
+	root, ok := runtimecorrelation.RootAdmissionFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("ensure active sqlite run row: exact rooted source admission is required")
+	}
 	origin, err := runtimerunlifecycle.EventRunOrigin(triggerEventID, triggerEventType)
 	if err != nil {
 		return fmt.Errorf("ensure active sqlite run row origin: %w", err)
 	}
 	_, err = s.RunLifecycleSQLiteOwner.CreateRunTx(ctx, attempt, runtimerunlifecycle.CreateRequest{
-		RunID: runID, Origin: origin, Source: fact, StartedAt: runtimerunlifecycle.CanonicalTimestamp(now),
+		RunID: runID, Origin: origin, Source: fact, RootAdmission: root, StartedAt: runtimerunlifecycle.CanonicalTimestamp(now),
 	})
 	if err != nil {
 		return err

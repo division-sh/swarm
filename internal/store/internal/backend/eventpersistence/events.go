@@ -343,12 +343,16 @@ func (s *EventPostgresOwner) ensureRunRow(ctx context.Context, tx *sql.Tx, attem
 	if !ok {
 		return fmt.Errorf("ensure run row: executable bundle source fact is required")
 	}
+	root, ok := runtimecorrelation.RootAdmissionFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("ensure run row: exact rooted source admission is required")
+	}
 	origin, err := runtimerunlifecycle.EventRunOrigin(triggerEventID, triggerEventType)
 	if err != nil {
 		return fmt.Errorf("ensure run row origin: %w", err)
 	}
 	_, err = s.RunLifecyclePostgresOwner.CreateRunTx(ctx, attempt, runtimerunlifecycle.CreateRequest{
-		RunID: runID, Origin: origin, Source: fact, StartedAt: time.Now().UTC(),
+		RunID: runID, Origin: origin, Source: fact, RootAdmission: root, StartedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		return err

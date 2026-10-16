@@ -131,7 +131,7 @@ func loadPostgresRunLifecycleSnapshot(
 		}
 	}
 	query := `
-		SELECT run_id::text, status, bundle_hash, origin_kind,
+		SELECT run_id::text, status, bundle_hash, source_root_directory, origin_kind,
 		       COALESCE(trigger_event_id::text, ''), COALESCE(trigger_event_type, ''),
 		       COALESCE(origin_service_id::text, ''), COALESCE(origin_generation, 0),
 		       COALESCE(forked_from_run_id::text, ''), COALESCE(forked_from_point_kind, ''),
@@ -162,7 +162,7 @@ func loadPostgresRunLifecycleSnapshot(
 		endedAt       sql.NullTime
 	)
 	err := q.QueryRowContext(ctx, query, runID).Scan(
-		&snapshot.RunID, &state, &snapshot.BundleHash,
+		&snapshot.RunID, &state, &snapshot.BundleHash, &snapshot.RootReference.RootDirectory,
 		&originKind, &eventID, &eventType, &serviceID, &generation, &sourceRunID, &forkPointKind, &forkRevision, &sourceEventID,
 		&snapshot.EventCount, &snapshot.EntityCount, &failureRaw, &snapshot.ContinuedAsRunID, &startedAt, &endedAt,
 	)
@@ -172,6 +172,7 @@ func loadPostgresRunLifecycleSnapshot(
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, fmt.Errorf("load PostgreSQL run lifecycle snapshot: %w", err)
 	}
+	snapshot.RootReference.BundleHash = snapshot.BundleHash
 	snapshot.Origin, err = runtimerunlifecycle.DecodeRunOrigin(
 		originKind, eventID, eventType, serviceID, generation, sourceRunID, forkPointKind, forkRevision, sourceEventID,
 	)
@@ -236,7 +237,7 @@ func loadSQLiteRunLifecycleSnapshot(
 		endedAt       any
 	)
 	err := q.QueryRowContext(ctx, `
-		SELECT run_id, status, bundle_hash, origin_kind,
+		SELECT run_id, status, bundle_hash, source_root_directory, origin_kind,
 		       COALESCE(trigger_event_id, ''), COALESCE(trigger_event_type, ''),
 		       COALESCE(origin_service_id, ''), COALESCE(origin_generation, 0),
 		       COALESCE(forked_from_run_id, ''), COALESCE(forked_from_point_kind, ''),
@@ -247,7 +248,7 @@ func loadSQLiteRunLifecycleSnapshot(
 		FROM runs
 		WHERE run_id = ?
 	`, runID).Scan(
-		&snapshot.RunID, &state, &snapshot.BundleHash,
+		&snapshot.RunID, &state, &snapshot.BundleHash, &snapshot.RootReference.RootDirectory,
 		&originKind, &eventID, &eventType, &serviceID, &generation, &sourceRunID, &forkPointKind, &forkRevision, &sourceEventID,
 		&snapshot.EventCount, &snapshot.EntityCount, &failureRaw, &snapshot.ContinuedAsRunID, &startedAt, &endedAt,
 	)
@@ -257,6 +258,7 @@ func loadSQLiteRunLifecycleSnapshot(
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, fmt.Errorf("load SQLite run lifecycle snapshot: %w", err)
 	}
+	snapshot.RootReference.BundleHash = snapshot.BundleHash
 	snapshot.Origin, err = runtimerunlifecycle.DecodeRunOrigin(
 		originKind, eventID, eventType, serviceID, generation, sourceRunID, forkPointKind, forkRevision, sourceEventID,
 	)

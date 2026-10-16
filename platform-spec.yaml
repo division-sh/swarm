@@ -19711,7 +19711,10 @@ platform_tables:
         discriminated origin: event, deployment, scenario setup, standing generation, or fork materialization. Every event,
         delivery, session, and turn belongs to exactly one run. run_id is the primary correlation key for
         observability, debugging, and fork/replay. Nullable origin payload columns never imply a kind and readers never
-        infer origin from event history. Standing origins are additionally validated against the exact
+        infer origin from event history. source_root_directory pins the exact admitted root alongside bundle_hash;
+        creation replay compares both and only the explicit source-revision owner may atomically revise the pair.
+        The historical reference has no cascading source-content foreign key, so deletion removes availability,
+        never run history. Standing origins are additionally validated against the exact
         standing_service_generations relation. Fork-materialized runs link back to their parent through the origin-owned
         forked_from_run_id, forked_from_point_kind, and positive forked_from_revision coordinates. Event forks also
         retain forked_from_event_id; deployment-revision forks have no event ID and never invent one.
@@ -19732,6 +19735,7 @@ platform_tables:
             run_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             status            TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'paused', 'completed', 'failed', 'cancelled', 'forked')),
             bundle_hash        TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v2:sha256:[0-9a-f]{64}$'),
+            source_root_directory TEXT NOT NULL CHECK (LENGTH(source_root_directory) >= 1 AND LENGTH(source_root_directory) <= 100),
             origin_kind        TEXT NOT NULL CHECK (origin_kind IN ('event', 'deployment', 'scenario_setup', 'standing_generation', 'fork_materialization')),
             trigger_event_id   UUID,
             trigger_event_type TEXT,
@@ -42850,6 +42854,8 @@ filesystem_source_model:
         Byte-content identity and rooted admission are distinct facts. Genuine filesystem admission captures the exact validated selected root directory before walking the owned member snapshot. RootAdmission is the immutable pair (bundle_hash, root_directory), and RootedSource pairs that evidence with exact admitted bytes. Neither bundle-v2 framing nor machine WorkflowName dot / WorkflowVersion bundle_hash changes. Content-only logical decoding never invents a root. The selected-store owner inserts source_root_admissions atomically with rooted content ingestion and restores a pair only through exact row/blob readback, without mutating the shared content artifact, a latest-name pointer, cwd, schema/manifest name or a runtime projection basename. A reference is not authority and a root row cannot reconstruct deleted content. This is internal execution evidence, never an authored import receipt, acquisition provenance, new public selector or multi-deployment contract.
         Source operands and invocation coordinates are filesystem paths, never whitespace-trimmed identifiers. Invalid whitespace in the selected root basename refuses with the rename teaching error and cannot select a valid sibling. Whitespace in ancestor directory names is preserved and does not invalidate a valid selected root. CLI selection, executable loading and project-local scratch coordinates preserve that exact path before admission; they never repair a spelling by opening a different directory.
         Only a genuinely unbound hash request may resolve a sole retained pair. Zero pairs is missing evidence; multiple pairs is explicit ambiguity, never first/last/latest selection. Discovery freezes one exact pair before content readback, and later work consumes that pair rather than selecting again. Existing bound run, declaration, operation or selected live-context evidence wins and must not fall back to global discovery. Content-only reads remain independent of root ambiguity.
+        Run creation and explicit source revision take opaque RootAdmission alongside their exact content fact. Missing root evidence and a root for another content hash refuse before mutation. Existing run-origin validation remains authoritative; a content hash alone never supplies the rooted portion of a new run or revision.
+        The selected run-lifecycle owner writes source_root_directory in the same native transaction as run creation or explicit source revision and validates that exact pair through the source owner. Same-content creation under another root conflicts; same-content explicit source revision is not a no-op unless the pair matches. Bound reconstruction reads the run reference and its exact retained content within one native read snapshot. Source deletion makes reconstruction unavailable without erasing the historical pair. Neither fresh filesystem access nor unique-hash discovery repairs a missing bound reference.
     reconstruction: |
       Internal standing recovery, replay, reset and fork decode the selected-store blob and compile only the reconstructed artifact. They never require or inspect the original filesystem. Public process restart admits the same exact directory tree and reconciles its blob; a changed tree is a distinct source, never a fallback for retained work. Fresh selected stores are required; no old-row migration, export, purge, compatibility reader, or inferred reconstruction exists.
     process_epoch_rule: |
