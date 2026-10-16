@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -29,8 +30,10 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/sourceartifact"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
 	"github.com/google/uuid"
 )
 
@@ -113,20 +116,20 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			if err != nil {
 				t.Fatalf("hash selected standing module: %v", err)
 			}
-			primaryHash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
-			if primaryHash == selectedHash {
-				primaryHash = "bundle-v2:sha256:" + strings.Repeat("b", 64)
-			}
-			primaryFact := mustServeTestPersistedSourceArtifactFact(primaryHash)
 			selectedFact := mustServeTestPersistedSourceArtifactFact(selectedHash)
 			seedStandingRuntimeContextBundle(t, selectedStores.SourceArtifactWriter(), selectedBundle)
 			runtimeInstanceID := uuid.NewString()
-			primaryBundle := &runtimecontracts.WorkflowContractBundle{
-				Platform: selectedBundle.Platform,
+			primaryRoot, _ := sourceartifactfixture.Rooted(t, "primary", sourceartifactfixture.New("schema.yaml", []byte("stages: []\n")))
+			primaryBundle, err := runtimecontracts.LoadWorkflowContractBundleFromRootedSource(repoRoot, primaryRoot, "", runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory})
+			if err != nil {
+				t.Fatalf("compile primary control root: %v", err)
 			}
-			if err := runtimecontracts.CompileWorkflowSemantics(primaryBundle); err != nil {
-				t.Fatalf("admit primary control bundle: %v", err)
+			primaryFact := sourceartifactfixture.FactFor(primaryRoot.Artifact())
+			selectedRoot, err := selectedBundle.RootedSource()
+			if err != nil {
+				t.Fatal(err)
 			}
+			seedStandingRuntimeContextBundle(t, primaryStores.SourceArtifactWriter(), primaryBundle)
 			primaryModule := stubWorkflowModule{source: semanticview.Wrap(primaryBundle)}
 			primary := newStandingRuntimeContextRuntime(t, process, primaryStores, primaryModule, primaryFact, runtimeInstanceID, catalog)
 			faults := &standingRuntimeContextFaultOwner{}
@@ -167,10 +170,10 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 				t.Fatalf("selected standing capability subjects: %v", err)
 			}
 			manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
-				SourceArtifactFact: primaryFact, Source: primaryModule.SemanticSource(), Runtime: primary, WorkOwner: primary.WorkOccurrence(),
+				SourceArtifactFact: primaryFact, RootAdmission: primaryRoot.Admission(), Source: primaryModule.SemanticSource(), Runtime: primary, WorkOwner: primary.WorkOccurrence(),
 				ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
 			}), completeServeTestPackContext(t, runtimepkg.BundleContext{
-				SourceArtifactFact: selectedFact, Source: selectedModule.SemanticSource(), Runtime: selected, WorkOwner: selected.WorkOccurrence(), StandingTargets: targets,
+				SourceArtifactFact: selectedFact, RootAdmission: selectedRoot.Admission(), Source: selectedModule.SemanticSource(), Runtime: selected, WorkOwner: selected.WorkOccurrence(), StandingTargets: targets,
 				ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
 			}))
 			if err != nil {
@@ -181,6 +184,36 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 					t.Errorf("quiesce standing runtime contexts: %v", err)
 				}
 			})
+			ingress := manager.LookupIngress(targets[0].Alias, targets[0].Provider)
+			if !ingress.Found || ingress.Context == nil || !ingress.Context.RootAdmission.Equal(selectedRoot.Admission()) {
+				t.Fatalf("ingress readback lost its exact rooted context: %+v", ingress)
+			}
+			ingress.Context.RootAdmission, ingress.Context.Source = primaryRoot.Admission(), primaryModule.SemanticSource()
+			use, _, err := manager.AcquireIngress(selectedCtx, targets[0].Alias, targets[0].Provider)
+			if err != nil || use == nil {
+				t.Fatalf("exact selected ingress acquisition: %v", err)
+			}
+			workRoot, present, rootErr := runtimecorrelation.RootAdmissionFromContext(use.WorkContext())
+			doneErr := use.Done()
+			if rootErr != nil || doneErr != nil || !present || !workRoot.Equal(selectedRoot.Admission()) {
+				t.Fatalf("ingress metadata retargeted executable work: root=%+v rootErr=%v doneErr=%v", workRoot.Reference(), rootErr, doneErr)
+			}
+			otherRoot, _ := sourceartifactfixture.Rooted(t, "other-ingress", selectedRoot.Artifact())
+			before := selected.WorkOccurrence().ActiveCount()
+			for _, root := range []sourceartifact.RootAdmission{otherRoot.Admission(), {}} {
+				wrong := runtimecorrelation.WithRootAdmission(selectedCtx, root)
+				use, _, err := manager.AcquireIngress(wrong, targets[0].Alias, targets[0].Provider)
+				if use != nil {
+					_ = use.Done()
+					t.Fatal("foreign or cleared root acquired selected ingress work")
+				}
+				if err == nil || selected.WorkOccurrence().ActiveCount() != before {
+					t.Fatalf("ingress rooted refusal lost its error or leaked work: %v", err)
+				}
+				if refusedTargets, refusedActivations, err := selected.EnsureStandingServiceTargets(wrong, serviceID); err == nil || len(refusedTargets) != 0 || len(refusedActivations) != 0 {
+					t.Fatalf("foreign or cleared root reused standing publication: targets=%+v activations=%+v error=%v", refusedTargets, refusedActivations, err)
+				}
+			}
 
 			var primarySignals, selectedSignals atomic.Int32
 			primaryRegistration := registerStandingRuntimeContextSignal(t, primary.Pipeline, primaryFact, "primary", &primarySignals)

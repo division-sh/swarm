@@ -2219,7 +2219,7 @@ func (c *serveStandingServiceController) mutateStandingService(ctx context.Conte
 	}
 	candidate := runtimepipeline.StandingServiceCandidate{BindingEnabled: true,
 		ServiceID: target.ServiceID, FlowPath: target.FlowPath,
-		Source: use.Context.SourceArtifactFact,
+		Source: use.Context.SourceArtifactFact, RootAdmission: use.Context.RootAdmission,
 	}
 	expected, found, err := owner.Pipeline.LoadReconciledStandingService(ctx, candidate)
 	if err != nil || !found {

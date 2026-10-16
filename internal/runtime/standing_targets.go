@@ -484,12 +484,13 @@ func (rt *Runtime) standingTargetsMutation(ctx context.Context, serviceID string
 		if !initial.IsStatelessPosture() {
 			initialState = initial.ID()
 		}
+		candidate, err := rt.standingServiceCandidate(plan)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		selectedPlans = append(selectedPlans, plan)
 		mutations = append(mutations, runtimepipeline.StandingTargetMutation{
-			Candidate: runtimepipeline.StandingServiceCandidate{BindingEnabled: plan.bindingEnabled, BindingBlockReason: plan.blockReason,
-				ServiceID: plan.serviceID, FlowPath: declaration.FlowPath,
-				Source: fact,
-			},
+			Candidate: candidate,
 			Activation: runtimepipeline.FlowInstanceActivationRequest{
 				ContractBundle: source,
 				InitialState:   initialState,
@@ -602,15 +603,35 @@ func (rt *Runtime) PlanStandingServiceCandidates() ([]runtimepipeline.StandingSe
 	if err != nil {
 		return nil, err
 	}
-	fact := rt.Options.SourceArtifactFact
 	out := make([]runtimepipeline.StandingServiceCandidate, 0, len(plans))
 	for _, plan := range plans {
-		out = append(out, runtimepipeline.StandingServiceCandidate{BindingEnabled: plan.bindingEnabled, BindingBlockReason: plan.blockReason,
-			ServiceID: plan.serviceID, FlowPath: plan.declaration.FlowPath,
-			Source: fact,
-		})
+		candidate, err := rt.standingServiceCandidate(plan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, candidate)
 	}
 	return out, nil
+}
+
+func (rt *Runtime) standingServiceCandidate(plan standingTargetPlan) (runtimepipeline.StandingServiceCandidate, error) {
+	bundle, present := semanticview.Bundle(rt.Options.WorkflowModule.SemanticSource())
+	if !present || bundle == nil {
+		return runtimepipeline.StandingServiceCandidate{}, fmt.Errorf("standing declaration requires its compiled rooted source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		return runtimepipeline.StandingServiceCandidate{}, err
+	}
+	candidate := runtimepipeline.StandingServiceCandidate{
+		BindingEnabled: plan.bindingEnabled, BindingBlockReason: plan.blockReason,
+		ServiceID: plan.serviceID, FlowPath: plan.declaration.FlowPath,
+		Source: rt.Options.SourceArtifactFact, RootAdmission: rooted.Admission(),
+	}
+	if err := candidate.Validate(); err != nil {
+		return runtimepipeline.StandingServiceCandidate{}, err
+	}
+	return candidate, nil
 }
 
 func (rt *Runtime) standingTargetPlans() ([]standingTargetPlan, error) {
