@@ -78,18 +78,20 @@ func TestEventCatalogFactoringCharacterization(t *testing.T) {
 		{"citation", "test.event:\n  id: {type: text, citation: {criteria: ' note ', allowed_classes: [soft, hard, soft]}}\n"},
 		{"citation_unknown", "test.event:\n  id: {type: text, citation: {unknown: value}}\n"},
 		{"citation_wrong_kind", "test.event:\n  id: {type: text, citation: {allowed_classes: scalar}}\n"},
-		{"business_key", "test.event:\n  key: id\n  id: uuid\n  note: text?\n"},
-		{"business_key_missing", "test.event:\n  key: id\n  note: text\n"},
-		{"business_key_optional", "test.event:\n  key: id\n  id: uuid?\n"},
-		{"business_key_space", "test.event:\n  key: ' id '\n  id: uuid\n"},
+		{"business_key", "test.event:\n  _key: id\n  id: uuid\n  note: text?\n"},
+		{"business_key_missing", "test.event:\n  _key: id\n  note: text\n"},
+		{"business_key_optional", "test.event:\n  _key: id\n  id: uuid?\n"},
+		{"business_key_space", "test.event:\n  _key: ' id '\n  id: uuid\n"},
 		{"introductions", "test.event:\n  id: &field\n    type: text?\n    length: {min: 1, max: 8}\n  alias: *field\n  merged:\n    <<: *field\n"},
-		{"provenance", "test.event:\n  key: id\n  id: uuid\n  value:\n    type: text?\n    description: note\n    pattern: ^[a-z]+$\n    length: {min: 1, max: 8}\n    citation: {criteria: source, allowed_classes: [hard]}\n"},
+		{"provenance", "test.event:\n  _key: id\n  id: uuid\n  value:\n    type: text?\n    description: note\n    pattern: ^[a-z]+$\n    length: {min: 1, max: 8}\n    citation: {criteria: source, allowed_classes: [hard]}\n"},
 		{"first_error_retirement", "test.event:\n  id: text\n  id: uuid\n  swarm: null\n"},
 		{"first_error_field_order", "test.event:\n  z: {type: list}\n  a: text??\n"},
 		{"first_error_refinement_order", "test.event:\n  id: {type: text, citation: {unknown: bad}, range: {min: null}, length: {min: null}, pattern: '['}\n"},
-		{"first_error_business_key", "test.event:\n  key: absent\n  id: text??\n"},
+		{"first_error_business_key", "test.event:\n  _key: absent\n  id: text??\n"},
 	}
-	for _, reserved := range sortedContractKeys(reservedEventCatalogFieldNames) {
+	for _, reserved := range []string{
+		"swarm", "emitter", "emitter_type", "producer", "_producer", "alternate_emitters", "consumer", "_consumer", "consumer_type", "_consumer_type", "_source", "_status", "_note", "intercepted", "passthrough", "runtime_handling", "owning_node", "delivery_channel", "author_summary_field",
+	} {
 		for _, spelling := range []string{"null", "{}", "''", "{nested: value}"} {
 			cases = append(cases, struct{ name, source string }{"reserved_fields/" + reserved + "/" + spelling, "test.event:\n  " + reserved + ": " + spelling + "\n"})
 		}
@@ -106,7 +108,7 @@ func TestEventCatalogFactoringCharacterization(t *testing.T) {
 		}
 	}
 	got := map[string]eventAdmissionObservation{}
-	valid := toolSchemaStringSet([]string{"document_empty", "bare", "key_pattern", "business_names", "scalar_types", "sequence_types", "mapping_types", "optionality", "text_refinements", "length", "range", "equality", "citation", "business_key", "introductions", "provenance"})
+	valid := toolSchemaStringSet([]string{"document_empty", "bare", "bare_description", "retired_required", "key_pattern", "business_names", "scalar_types", "sequence_types", "mapping_types", "optionality", "text_refinements", "length", "range", "equality", "citation", "business_key", "introductions", "provenance"})
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			snapshot, err := yamlsource.Load([]byte(tc.source))

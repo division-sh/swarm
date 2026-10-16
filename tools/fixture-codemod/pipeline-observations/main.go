@@ -187,6 +187,10 @@ func checkpointRecipes(source []byte, rows []recipe) ([]recipe, error) {
 	}
 	var current []recipe
 	for _, row := range rows {
+		row, err = stateSpellingEndpoint1745(row)
+		if err != nil {
+			return nil, err
+		}
 		if row.Removed {
 			if row.Successor != "" {
 				return nil, fmt.Errorf("retired recipe also has a successor: %s", row.Function)

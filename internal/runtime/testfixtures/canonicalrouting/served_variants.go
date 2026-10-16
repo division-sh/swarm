@@ -113,7 +113,7 @@ pins:
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - external.observed\n", "    - external.observed\n    - fork.source_message\n")
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "outputs: [external.observed]\n", "outputs: [external.observed, fork.source_message, item.processed]\nconnect:\n  - {event: fork.source_message, from: ., to: fork-source}\n  - {event: item.processed, from: ., to: fork-source}\n")
-	writeClosedVariantFile(t, root, "fork-source/entities.yaml", "conversation: {}\n")
+	writeClosedVariantFile(t, root, "fork-source/state.yaml", "conversation: {}\n")
 	writeClosedVariantFile(t, root, "fork-source/nodes.yaml", "owner:\n  execution_type: system_node\n  event_handlers:\n    fork.source_message:\n      advances_to: active\n    item.processed:\n      advances_to: done\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "external.observed:\n", "external.observed:\nfork.source_message:\n  note: text\n")
 	writeClosedVariantFile(t, root, "fork-source/agents.yaml", `fork-source-agent:
@@ -154,7 +154,7 @@ pins:
     - item.processed
 `)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - item.processed\n", "    - item.processed\n    - item.agent_hold\n  outputs: [item.agent_hold, item.processed]\nconnect:\n  - {event: item.agent_hold, from: ., to: hold}\n  - {event: item.processed, from: ., to: hold}\n")
-	writeClosedVariantFile(t, root, "hold/entities.yaml", "session: {}\n")
+	writeClosedVariantFile(t, root, "hold/state.yaml", "session: {}\n")
 	writeClosedVariantFile(t, root, "hold/nodes.yaml", "owner:\n  execution_type: system_node\n  event_handlers:\n    item.agent_hold:\n      advances_to: active\n    item.processed:\n      advances_to: done\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "item.processed:\n", "item.agent_hold:\n  note: text\nitem.processed:\n")
 	writeClosedVariantFile(t, root, "hold/agents.yaml", `load-agent:
@@ -210,7 +210,7 @@ pins:
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `)
-	writeClosedVariantFile(t, root, "operating/entities.yaml", `
+	writeClosedVariantFile(t, root, "operating/state.yaml", `
 product:
   instance_id: {type: text, _unused_reason: receiver instance identity}
   product_id: text
@@ -281,7 +281,7 @@ pins:
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `)
-	writeClosedVariantFile(t, root, "operating/entities.yaml", `
+	writeClosedVariantFile(t, root, "operating/state.yaml", `
 product:
   instance_id: {type: text, _unused_reason: receiver instance identity}
   product_id: text
@@ -348,7 +348,7 @@ connect:
   - {event: opco.create_requested, from: ., to: operating, resolution: create}
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "      advances_to: processed\n", "      advances_to: waiting\n")
-	applyClosedReplacement(t, filepath.Join(root, "entities.yaml"), `item:
+	applyClosedReplacement(t, filepath.Join(root, "state.yaml"), `item:
   item_id:
     type: text
     _unused_reason: external root instance identity
@@ -365,7 +365,7 @@ opco.spinup_requested:
   instance_id: text
   product_id: text
 opco.create_requested:
-  key: instance_id
+  _key: instance_id
   instance_id: text
   product_id: text
 `)

@@ -7,7 +7,7 @@ import "testing"
 func CopyHandlerRuleSelectionProof(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
-	removeClosedVariantFiles(t, root, "entities.yaml")
+	removeClosedVariantFiles(t, root, "state.yaml")
 	writeClosedVariantFile(t, root, "schema.yaml", `name: handler-rule-selection-proof
 pins:
   inputs:
@@ -104,13 +104,13 @@ pins:
 	switch flowID {
 	case "":
 		writeClosedVariantFile(t, root, "schema.yaml", joinSchema)
-		writeClosedVariantFile(t, root, "entities.yaml", joinEntities)
+		writeClosedVariantFile(t, root, "state.yaml", joinEntities)
 		writeClosedVariantFile(t, root, "events.yaml", joinEvents)
 		writeClosedVariantFile(t, root, "types.yaml", joinTypes)
 		writeClosedVariantFile(t, root, "nodes.yaml", joinNodes)
 	case "orders":
 		writeClosedVariantFile(t, root, "schema.yaml", "name: join-eventbus-proof\n")
-		removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
+		removeClosedVariantFiles(t, root, "state.yaml", "events.yaml", "nodes.yaml")
 		writeLegacyInstanceFlow(t, root, "orders", "instance: order_id\n"+joinSchema,
 			joinEvents, joinEntities+"  order_id: {type: text, _unused_reason: receiver instance identity}\n", joinNodes)
 		writeClosedVariantFile(t, root, "orders/types.yaml", joinTypes)
@@ -137,7 +137,7 @@ pins:
 `)
 	writeClosedVariantFile(t, root, "events.yaml", `timer.cancel:
 `)
-	writeClosedVariantFile(t, root, "entities.yaml", "timer_state: {}\n")
+	writeClosedVariantFile(t, root, "state.yaml", "timer_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `controller:
   execution_type: system_node
   subscribes_to: [timer.cancel]
@@ -165,7 +165,7 @@ connect:
     from: producer
     to: .
 `)
-	writeClosedVariantFile(t, root, "entities.yaml", "root_state: {}\n")
+	writeClosedVariantFile(t, root, "state.yaml", "root_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-receiver:
   execution_type: system_node
   subscribes_to: [deploy.done]

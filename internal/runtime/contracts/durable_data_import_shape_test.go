@@ -14,7 +14,7 @@ func TestDurableDataImportShapeUsesCompiledStructuralFields(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(root, "types.yaml"), "scalars:\n  ResumeText: text\n  CandidateUUID: uuid\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), `
 candidate.created:
-  key: id
+  _key: id
   id: text
   resume: ResumeText
   cover: {type: "text?", pattern: "^Dear"}

@@ -145,11 +145,11 @@ type recordingPipelineBus struct {
 func handlerEngineProjectNodeModule(t *testing.T) *previewWorkflowModule {
 	t.Helper()
 	module := &previewWorkflowModule{bundle: loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: handler-engine-test\nstages:\n  queued: {}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "custom.trigger:\ncustom.emitted:\n  summary: EmitSummary?\n  flags: EmitFlags?\n  label: text?\n  kill_reason_missing: boolean?\n",
-		"types.yaml":    "types:\n  EmitSummary:\n    entity_id: text\n    stage: text\n  EmitFlags:\n    ready: boolean\n",
-		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
+		"schema.yaml": "name: handler-engine-test\nstages:\n  queued: {}\n",
+		"state.yaml":  "test_entity: {}\n",
+		"events.yaml": "custom.trigger:\ncustom.emitted:\n  summary: EmitSummary?\n  flags: EmitFlags?\n  label: text?\n  kill_reason_missing: boolean?\n",
+		"types.yaml":  "types:\n  EmitSummary:\n    entity_id: text\n    stage: text\n  EmitFlags:\n    ready: boolean\n",
+		"nodes.yaml":  "node-a:\n  execution_type: system_node\n",
 	})}
 	return module
 }
@@ -421,7 +421,7 @@ func pipelineSourceWithStructuredRendererModule(t *testing.T, outputSchema map[s
 	if err := os.WriteFile(filepath.Join(root, "tools.yaml"), wire, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "entities.yaml"), []byte("render_entity: {}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "state.yaml"), []byte("render_entity: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("render.requested:\n  component: text\n  owner: text\n  language: text\n  files: [text]\n"), 0o644); err != nil {
@@ -459,7 +459,7 @@ func VerifyExecuteNodeContractHandlerUsesConstructedEntityIdentityForWritesAndEm
 stages:
   queued: {}
 `,
-		"scoring/entities.yaml": `
+		"scoring/state.yaml": `
 subject:
   name: text
 `,
@@ -671,10 +671,10 @@ func VerifyNativeExecuteNodeContractHandlerPublishesAfterPersistencePrerequisite
 func handlerDataAccumulationModule(t *testing.T) *previewWorkflowModule {
 	t.Helper()
 	return &previewWorkflowModule{bundle: loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: validation\nstages:\n  queued: {}\n",
-		"entities.yaml": "test_entity:\n  revision_count: integer\n  kill_reason: text\n  kill_reason_missing: boolean\n",
-		"events.yaml":   "validation.spec_requested:\n",
-		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
+		"schema.yaml": "name: validation\nstages:\n  queued: {}\n",
+		"state.yaml":  "test_entity:\n  revision_count: integer\n  kill_reason: text\n  kill_reason_missing: boolean\n",
+		"events.yaml": "validation.spec_requested:\n",
+		"nodes.yaml":  "node-a:\n  execution_type: system_node\n",
 	})}
 }
 
@@ -827,7 +827,7 @@ func VerifyNativeExecuteNodeContractHandlerCreateEntityPersistsSchemaInitialValu
 stages:
   queued: {}
 `,
-		"validation/entities.yaml": `
+		"validation/state.yaml": `
 validation_entity:
   revision_count:
     type: integer
@@ -919,7 +919,7 @@ instance: validation_id
 stages:
   queued: {}
 `,
-		"validation/entities.yaml": `
+		"validation/state.yaml": `
 validation_request:
   validation_id: uuid
   request_id: text?
@@ -999,7 +999,7 @@ func VerifyNativeExecuteNodeContractHandlerCreateEntityPersistsNonValidationChil
 stages:
   queued: {}
 `,
-		"review/entities.yaml": `
+		"review/state.yaml": `
 review_entity:
   status:
     type: text
@@ -1066,7 +1066,7 @@ func VerifyNativeExecuteNodeContractHandlerCreateEntityAllowsLaterClearOfSchemaI
 stages:
   queued: {}
 `,
-		"validation/entities.yaml": `
+		"validation/state.yaml": `
 validation_entity:
   revision_count:
     type: integer?
@@ -1137,10 +1137,10 @@ func VerifyNativeExecuteNodeContractHandlerReturnsTerminalRejectForTerminalEntit
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			bundle := loadWorkflowTempBundle(t, map[string]string{
-				"schema.yaml":   "name: demo\nstages:\n  queued: {}\n  done: {final: true}\n",
-				"entities.yaml": "test_entity: {}\n",
-				"nodes.yaml":    "node-a:\n  execution_type: system_node\n  event_handlers:\n    finish:\n      advances_to: done\n    custom.trigger: {}\n",
-				"events.yaml":   "finish:\ncustom.trigger:\n",
+				"schema.yaml": "name: demo\nstages:\n  queued: {}\n  done: {final: true}\n",
+				"state.yaml":  "test_entity: {}\n",
+				"nodes.yaml":  "node-a:\n  execution_type: system_node\n  event_handlers:\n    finish:\n      advances_to: done\n    custom.trigger: {}\n",
+				"events.yaml": "finish:\ncustom.trigger:\n",
 			})
 			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
 			bus := observeNativePipelineDeliveryBusForTest(t, pc)
@@ -1302,20 +1302,20 @@ func declarativeEmitContractTestBundle(t *testing.T) *runtimecontracts.WorkflowC
 func additiveOnSuccessContractBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: test\nstages:\n  queued: {}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
-		"events.yaml":   "rule.emitted:\nhandler.succeeded:\n",
+		"schema.yaml": "name: test\nstages:\n  queued: {}\n",
+		"state.yaml":  "test_entity: {}\n",
+		"nodes.yaml":  "node-a:\n  execution_type: system_node\n",
+		"events.yaml": "rule.emitted:\nhandler.succeeded:\n",
 	})
 }
 
 func rulesEmitTemplateContractBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: test\nstages:\n  queued: {}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"nodes.yaml":    "node-a:\n  execution_type: system_node\n",
-		"events.yaml":   "account.scored:\n  account_id: text\n  score: float\naccount.bucketed:\n  account_id: text\n  score: float\n  bucket: text\n",
+		"schema.yaml": "name: test\nstages:\n  queued: {}\n",
+		"state.yaml":  "test_entity: {}\n",
+		"nodes.yaml":  "node-a:\n  execution_type: system_node\n",
+		"events.yaml": "account.scored:\n  account_id: text\n  score: float\naccount.bucketed:\n  account_id: text\n  score: float\n  bucket: text\n",
 	})
 }
 

@@ -40,7 +40,7 @@ pins:
 connect:
   - {event: worker.requested, from: ., to: worker, resolution: select-or-create}
 `,
-		"entities.yaml": "root: {}\n",
+		"state.yaml": "root: {}\n",
 		"events.yaml": `work.requested:
   worker_id: text
   label: text
@@ -84,7 +84,7 @@ leaf.requested:
   label: text
   count: integer
 `,
-		"worker/entities.yaml": `worker:
+		"worker/state.yaml": `worker:
   worker_id: {type: text, _unused_reason: canonical receiver key}
   label: text
   count: integer
@@ -118,7 +118,7 @@ pins:
   label: text
   count: integer
 `,
-		"worker/leaf/entities.yaml": `leaf:
+		"worker/leaf/state.yaml": `leaf:
   worker_id: {type: text, _unused_reason: canonical receiver key}
   label: text
   count: integer

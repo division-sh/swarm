@@ -16,13 +16,13 @@ import (
 func TestExecutionFrameSchemaBindingUsesExactDeclarationScope(t *testing.T) {
 	root := t.TempDir()
 	for path, raw := range map[string]string{
-		"schema.yaml":         "name: schema-binding\nstages: []\n",
-		"entities.yaml":       "subject:\n  threshold: boolean\n",
-		"left/schema.yaml":    "name: left\nstages: []\n",
-		"left/entities.yaml":  "subject:\n  threshold: integer\n",
-		"right/schema.yaml":   "name: right\nstages: []\n",
-		"right/entities.yaml": "subject:\n  threshold: text\n",
-		"empty/schema.yaml":   "name: empty\nstages: []\n",
+		"schema.yaml":       "name: schema-binding\nstages: []\n",
+		"state.yaml":        "subject:\n  threshold: boolean\n",
+		"left/schema.yaml":  "name: left\nstages: []\n",
+		"left/state.yaml":   "subject:\n  threshold: integer\n",
+		"right/schema.yaml": "name: right\nstages: []\n",
+		"right/state.yaml":  "subject:\n  threshold: text\n",
+		"empty/schema.yaml": "name: empty\nstages: []\n",
 	} {
 		full := filepath.Join(root, path)
 		if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {

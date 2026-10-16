@@ -68,7 +68,7 @@ func configuredChannelAgentBundle(t *testing.T) *runtimecontracts.WorkflowContra
 stages:
   active: {}
 `,
-		"global/entities.yaml": "channel_state: {}\n",
+		"global/state.yaml": "channel_state: {}\n",
 		"global/agents.yaml": `channel-sender:
   role: worker
   intent: {inline: "Deliver provider-neutral channel operations."}

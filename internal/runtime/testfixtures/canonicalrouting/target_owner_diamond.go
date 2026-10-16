@@ -24,7 +24,7 @@ connect:
     from: branch
     to: .
 `,
-		"events.yaml": "branch.start:\n  key: branch_id\n  branch_id: string\n",
+		"events.yaml": "branch.start:\n  _key: branch_id\n  branch_id: string\n",
 		"nodes.yaml": `root-collector:
   execution_type: system_node
   event_handlers:
@@ -49,8 +49,8 @@ connect:
     from: .
     to: worker/result
 `,
-		"branch/entities.yaml": "branch_state:\n  branch_id:\n    type: string\n    _unused_reason: concrete diamond branch identity\n",
-		"branch/events.yaml":   "work.ready:\n  branch_id: string\nbranch.done:\n  branch_id: string\n",
+		"branch/state.yaml":  "branch_state:\n  branch_id:\n    type: string\n    _unused_reason: concrete diamond branch identity\n",
+		"branch/events.yaml": "work.ready:\n  branch_id: string\nbranch.done:\n  branch_id: string\n",
 		"branch/nodes.yaml": `branch-worker:
   execution_type: system_node
   event_handlers:

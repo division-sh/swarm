@@ -35,7 +35,7 @@ func TestSelectedRunTargetOwnersUseConstructedHeadersBothStores(t *testing.T) {
 					"review/schema.yaml": "name: review\nstages:\n  pending: {}\n",
 				}
 				if fielded {
-					files["review/entities.yaml"] = "review_item:\n  marker: {type: text, initial: original}\n"
+					files["review/state.yaml"] = "review_item:\n  marker: {type: text, initial: original}\n"
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 				runID := correlation.RunIDFromContext(f.ctx)
@@ -174,7 +174,7 @@ func TestOrdinaryHandlerRequiresCanonicalConstructionBothStores(t *testing.T) {
 						"review/nodes.yaml":  "inspect:\n  execution_type: system_node\n  event_handlers:\n    work.ready:\n      advances_to: reviewing\n" + shape.effects,
 					}
 					if shape.entity != "" {
-						files["review/entities.yaml"] = "review_item:\n  marker: {type: text, initial: original}\n"
+						files["review/state.yaml"] = "review_item:\n  marker: {type: text, initial: original}\n"
 					}
 					f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 					runID := correlation.RunIDFromContext(f.ctx)

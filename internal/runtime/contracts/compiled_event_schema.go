@@ -559,6 +559,7 @@ func newCompiledEventSchema(
 	businessKeyField string,
 	source CompiledEventSchemaSource,
 ) (CompiledEventSchema, error) {
+	types = eventDeclarationCatalog(entry, types)
 	for name, field := range entry.Payload.Properties {
 		if field.ExactSchema != nil || field.Type == runtimefailures.EnvelopeSchemaVersion+" envelope" {
 			continue

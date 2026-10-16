@@ -12,12 +12,12 @@ import (
 
 func VerifyPipelineExpressionPreservesExactExecutionFlowOnBothStoresForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":         "name: display-name-is-not-a-flow\nstages:\n  ready: {}\n",
-		"entities.yaml":       "root_entity:\n  root_only: text\n",
-		"events.yaml":         "query.requested:\n  value: text\n",
-		"child/schema.yaml":   "name: child\nstages:\n  ready: {}\n",
-		"child/entities.yaml": "child_entity:\n  child_only: text\n",
-		"child/events.yaml":   "query.requested:\n  value: text\n",
+		"schema.yaml":       "name: display-name-is-not-a-flow\nstages:\n  ready: {}\n",
+		"state.yaml":        "root_entity:\n  root_only: text\n",
+		"events.yaml":       "query.requested:\n  value: text\n",
+		"child/schema.yaml": "name: child\nstages:\n  ready: {}\n",
+		"child/state.yaml":  "child_entity:\n  child_only: text\n",
+		"child/events.yaml": "query.requested:\n  value: text\n",
 	})
 	fixture := open(t, source)
 	ctx := correlation.WithRunID(fixture.Context, testPipelineRunID)

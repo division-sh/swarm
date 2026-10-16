@@ -39,5 +39,5 @@ func captureCatalogEventFieldReference(entry EventCatalogEntry, catalog TypeCata
 	if !ok || strings.TrimSpace(decl.Type) == "" {
 		return CatalogTypeReference{}, false
 	}
-	return CatalogTypeReference{Type: strings.TrimSpace(decl.Type), Catalog: cloneTypeCatalogDocument(catalog)}, true
+	return CatalogTypeReference{Type: strings.TrimSpace(decl.Type), Catalog: cloneTypeCatalogDocument(eventDeclarationCatalog(entry, catalog))}, true
 }

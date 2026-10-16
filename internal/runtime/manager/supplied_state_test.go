@@ -49,7 +49,7 @@ func declareSuppliedFields(t *testing.T, bundle *runtimecontracts.WorkflowContra
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: supplied-state-fixture\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/schema.yaml"), "name: review\ninstance: instance_key\npins: {inputs: [construction.requested]}\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/entities.yaml"), state.String())
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "review/state.yaml"), state.String())
 	repo := runtimepipeline.WorkflowRepoRoot()
 	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {

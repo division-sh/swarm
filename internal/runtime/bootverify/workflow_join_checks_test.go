@@ -203,7 +203,7 @@ pins:
   inputs:
     - item.received
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "entities.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "a", "state.yaml"), `
 state:
   expected:
     type: '[text]'

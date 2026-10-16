@@ -36,8 +36,8 @@ loops:
     escape:
       advances_to: escaped
 `,
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "loop.start:\nloop.rule:\n  revision_id: text\nloop.complete:\n  revision_id: text\nloop.repeat:\n  revision_id: text\nloop.close:\n  revision_id: text\n",
+		"state.yaml":  "test_entity: {}\n",
+		"events.yaml": "loop.start:\nloop.rule:\n  revision_id: text\nloop.complete:\n  revision_id: text\nloop.repeat:\n  revision_id: text\nloop.close:\n  revision_id: text\n",
 		"nodes.yaml": `starter:
   event_handlers:
     loop.start:

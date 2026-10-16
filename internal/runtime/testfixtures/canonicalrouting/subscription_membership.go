@@ -8,7 +8,7 @@ func CopyAncestorEventWithoutReceiverMembership(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	removeInheritedScenarios(t, root)
-	removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
+	removeClosedVariantFiles(t, root, "state.yaml", "events.yaml", "nodes.yaml")
 
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root
 pins:

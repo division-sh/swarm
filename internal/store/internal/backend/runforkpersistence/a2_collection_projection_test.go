@@ -36,7 +36,7 @@ func a2ForkMapFixture(t *testing.T) (runfork.RunForkPlan, rc.FanOutCompiledPlan,
 	if err := os.WriteFile(filepath.Join(root, "nodes.yaml"), []byte(strings.Replace(string(nodes), "items_from: payload.items", "items_from: entity.items", 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "entities.yaml"), []byte("root:\n  items: 'map[text][integer]'\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "state.yaml"), []byte("root:\n  items: 'map[text][integer]'\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	repo := canonicalrouting.RepoRoot(t)

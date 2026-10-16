@@ -19,7 +19,7 @@ import (
 func TestDescribeRendersCanonicalConstructors(t *testing.T) {
 	root := canonicalrouting.CopyTemplateInstanceRoute(t, canonicalrouting.TemplateInstanceRouteOptions{Mode: canonicalrouting.TemplateInstanceRouteCreate})
 	writeDescribeTestFile(t, filepath.Join(root, "producer/events.yaml"), "deploy.done:\n  vertical_id: text\n  brief: text\n")
-	writeDescribeTestFile(t, filepath.Join(root, "consumer/entities.yaml"), "deployment:\n  vertical_id: text\n  brief: text\n")
+	writeDescribeTestFile(t, filepath.Join(root, "consumer/state.yaml"), "deployment:\n  vertical_id: text\n  brief: text\n")
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(RepoRoot(), root, contracts.DefaultPlatformSpecFile(RepoRoot()))
 	if err != nil {
 		t.Fatal(err)

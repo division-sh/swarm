@@ -27,6 +27,7 @@ func EventSchemaRegistryFromCatalog(entries map[string]EventCatalogEntry) map[st
 }
 
 func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry, types TypeCatalogDocument) EventSchema {
+	types = eventDeclarationCatalog(entry, types)
 	properties := make(map[string]any, len(entry.Payload.Properties))
 	citations := map[string]CriteriaCitation{}
 	fieldNames := make([]string, 0, len(entry.Payload.Properties))
@@ -79,8 +80,12 @@ func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry, type
 	if required := normalizeStrings(entry.Payload.Required); len(required) > 0 {
 		schema["required"] = required
 	}
+	description := entry.Description
+	if description == "" {
+		description = fmt.Sprintf("Emit %s event", eventType)
+	}
 	return EventSchema{
-		Description:    fmt.Sprintf("Emit %s event", eventType),
+		Description:    description,
 		Schema:         schema,
 		CitationFields: citations,
 	}

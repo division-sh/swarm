@@ -31,10 +31,10 @@ import (
 func constructWorkflowMutationFixture(t *testing.T, backend, flowID string, at time.Time) (receiverConfigActivationFixture, runtimepipeline.WorkflowEngineStateRecord) {
 	t.Helper()
 	f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-		"schema.yaml":             "name: workflow-mutation\n",
-		flowID + "/schema.yaml":   "name: " + flowID + "\ninstance: receiver_key\nstages:\n  active: {}\n  done: {}\npins:\n  inputs: [construct.requested]\n",
-		flowID + "/entities.yaml": "review_item:\n  receiver_key: text\n  account_id: {type: text, initial: preserved}\n  handled: boolean?\n",
-		flowID + "/events.yaml":   "construct.requested:\n",
+		"schema.yaml":           "name: workflow-mutation\n",
+		flowID + "/schema.yaml": "name: " + flowID + "\ninstance: receiver_key\nstages:\n  active: {}\n  done: {}\npins:\n  inputs: [construct.requested]\n",
+		flowID + "/state.yaml":  "review_item:\n  receiver_key: text\n  account_id: {type: text, initial: preserved}\n  handled: boolean?\n",
+		flowID + "/events.yaml": "construct.requested:\n",
 	}, nil)
 	runID := correlation.RunIDFromContext(f.ctx)
 	activateFixtureStructuralRoot(t, f.ctx, f.manager, f.bundle, at)

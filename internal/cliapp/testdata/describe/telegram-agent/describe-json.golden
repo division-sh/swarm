@@ -32,7 +32,7 @@
       "mode": "template",
       "source_files": {
         "schema": "telegram-chat/schema.yaml",
-        "entities": "telegram-chat/entities.yaml",
+        "entities": "telegram-chat/state.yaml",
         "nodes": "telegram-chat/nodes.yaml",
         "events": "telegram-chat/events.yaml",
         "agents": "telegram-chat/agents.yaml"
@@ -96,7 +96,7 @@
         "fields": {
           "conversation_reference": "text"
         },
-        "source_file": "telegram-chat/entities.yaml"
+        "source_file": "telegram-chat/state.yaml"
       },
       "template_instance": {
         "field": "conversation_reference",
@@ -139,7 +139,7 @@
       },
       "source_files": {
         "schema": "telegram-ingress/schema.yaml",
-        "entities": "telegram-ingress/entities.yaml"
+        "entities": "telegram-ingress/state.yaml"
       },
       "required_agents": {
         "source": "inferred",
@@ -147,7 +147,7 @@
       },
       "primary_entity": {
         "type": "telegram_service",
-        "source_file": "telegram-ingress/entities.yaml"
+        "source_file": "telegram-ingress/state.yaml"
       },
       "input_pins": [
         {

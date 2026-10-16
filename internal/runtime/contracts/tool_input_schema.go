@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
 
@@ -212,6 +213,12 @@ func validateToolSchemaObjectEqualities(path string, schema ToolInputSchema, mem
 // requires readback isolation.
 func cloneEventCatalogEntry(in EventCatalogEntry) EventCatalogEntry {
 	out := in
+	out.embeds = append([]catalogEmbedding(nil), in.embeds...)
+	out.types = cloneCatalogEmbeddingTypes(in.types)
+	out.fieldSources = make(map[string]yamlsource.Location, len(in.fieldSources))
+	for name, location := range in.fieldSources {
+		out.fieldSources[name] = location
+	}
 	out.Payload.Required = append([]string(nil), in.Payload.Required...)
 	out.admissionProvenance = make(map[string]EffectiveValueProvenance, len(in.admissionProvenance))
 	for path, provenance := range in.admissionProvenance {

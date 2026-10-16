@@ -143,7 +143,7 @@ func admitPrimaryEntityFixtureBundle(t *testing.T, flowSchema, flowEntities stri
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: primary-entity-fixture\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "schema.yaml"), strings.TrimSpace(flowSchema)+"\n")
 	if strings.TrimSpace(flowEntities) != "" {
-		writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "entities.yaml"), strings.TrimSpace(flowEntities)+"\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "scoring", "state.yaml"), strings.TrimSpace(flowEntities)+"\n")
 	}
 	return runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 }

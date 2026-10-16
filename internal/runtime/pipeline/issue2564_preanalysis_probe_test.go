@@ -14,8 +14,8 @@ func VerifyIssue2564EvaluatedSnapshotMustFenceCommitBothStoresForTest(t *testing
 	for _, tc := range workflowJoinStoreCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
-				"schema.yaml":   "name: stale-evaluated-snapshot\nstages:\n  pending: {}\n",
-				"entities.yaml": "test_entity:\n  count: integer\n  marker: integer\n",
+				"schema.yaml": "name: stale-evaluated-snapshot\nstages:\n  pending: {}\n",
+				"state.yaml":  "test_entity:\n  count: integer\n  marker: integer\n",
 			})
 			fixture := open(t, tc.name, source)
 			pc := fixture.NewCoordinator(PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: source}})

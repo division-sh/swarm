@@ -57,7 +57,7 @@ func ApplyTemplateSelectOrCreateNegativeMutation(t testing.TB, root string, muta
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    resolution: select-or-create\n", "    resolution: select-or-create\n    instance_key: account_id\n")
 	case TemplateSelectOrCreateOptionalIdentitySource:
 		applyClosedReplacement(t, filepath.Join(root, "producer", "events.yaml"),
-			"account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: text?\n")
+			"account.ready:\n  _key: account_id\n  account_id: text\n", "account.ready:\n  _key: account_id\n  account_id: text?\n")
 	case TemplateSelectOrCreateReceiverSelector:
 		applyClosedReplacement(t, receiverNodes,
 			"    account.ready:\n      data_accumulation:\n",

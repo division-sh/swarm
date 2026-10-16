@@ -40,10 +40,10 @@ func newSnapshotOwnershipFixture(t *testing.T, backend eventRecordContractBacken
 	t.Helper()
 	opened := backend.open(t)
 	construction := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, map[string]string{
-		"schema.yaml":         "name: snapshot-ownership\n",
-		"owner/schema.yaml":   "name: owner\ninstance: subject_id\nstages:\n  active: {}\n  ready: {}\n  later: {}\npins:\n  inputs:\n    - construct.requested\n",
-		"owner/entities.yaml": "review_item:\n  subject_id: text\n  entity_type: {type: text, initial: authored-not-owner}\n  value: text?\n",
-		"owner/events.yaml":   "construct.requested:\n",
+		"schema.yaml":       "name: snapshot-ownership\n",
+		"owner/schema.yaml": "name: owner\ninstance: subject_id\nstages:\n  active: {}\n  ready: {}\n  later: {}\npins:\n  inputs:\n    - construct.requested\n",
+		"owner/state.yaml":  "review_item:\n  subject_id: text\n  entity_type: {type: text, initial: authored-not-owner}\n  value: text?\n",
+		"owner/events.yaml": "construct.requested:\n",
 	}, nil, ownStoreTestAgentManager, nil)
 	f := snapshotOwnershipFixture{store: opened.store.(snapshotOwnershipStore), db: opened.db, ctx: construction.ctx, runID: runtimecorrelation.RunIDFromContext(construction.ctx)}
 	at := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)

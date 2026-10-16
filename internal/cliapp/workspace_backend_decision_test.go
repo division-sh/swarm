@@ -311,7 +311,7 @@ func scopedWorkspaceBackendAgentFixtureOptions(t *testing.T, includeRootAgent bo
 	root := t.TempDir()
 
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-workspace-backend\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "state.yaml"), "item:\n  item_id: string\n")
 	rootAgents := ""
 	if includeRootAgent {
 		rootAgents = "root-mock:\n  model: regular\n  intent:\n    inline: Exercise root workspace backend selection.\n  mock:\n    kind: python\n    module: mocks/root-mock.py\n"

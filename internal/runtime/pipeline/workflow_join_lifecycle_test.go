@@ -915,8 +915,8 @@ func workflowJoinLifecycleBundleWithOptions(t *testing.T, review bool, loop stri
 
 func workflowJoinLifecycleFixtureFiles(review bool, loop string) map[string]string {
 	files := map[string]string{
-		"schema.yaml":   "name: workflow-join-lifecycle\n",
-		"entities.yaml": "test_entity: {}\n",
+		"schema.yaml": "name: workflow-join-lifecycle\n",
+		"state.yaml":  "test_entity: {}\n",
 		"orders/schema.yaml": `name: orders
 instance: instance_key
 stages:
@@ -925,8 +925,8 @@ stages:
   ready: {final: true}
   attention: {final: true}
 `,
-		"orders/entities.yaml": "test_entity:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n  expected: [text]\n",
-		"orders/types.yaml":    "types:\n  ItemResult:\n    ok: boolean\n  LineItem:\n    id: text\n",
+		"orders/state.yaml": "test_entity:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n  expected: [text]\n",
+		"orders/types.yaml": "types:\n  ItemResult:\n    ok: boolean\n  LineItem:\n    id: text\n",
 		"orders/events.yaml": `item.completed:
   member_id: text
   result: ItemResult
@@ -1008,7 +1008,7 @@ join-node:
 	}
 	// Root and child executions use independently compiled declarations, even
 	// when the fixture deliberately gives them identical local names.
-	for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
+	for _, name := range []string{"schema.yaml", "state.yaml", "events.yaml", "types.yaml", "nodes.yaml"} {
 		files[name] = files["orders/"+name]
 	}
 	files["schema.yaml"] = strings.Replace(files["schema.yaml"], "name: orders", "name: workflow-join-lifecycle", 1)

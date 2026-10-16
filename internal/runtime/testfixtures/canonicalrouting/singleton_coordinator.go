@@ -69,7 +69,7 @@ shared-node:
           - {source_field: items, target_field: items}
 `
 		}
-		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "entities.yaml"), entities)
+		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "state.yaml"), entities)
 		writeSingletonCoordinatorFile(t, root, filepath.Join(flowID, "nodes.yaml"), nodes)
 	}
 	return root
@@ -114,7 +114,7 @@ coordinator_state:
 	if variant == SingletonCoordinatorPilotDemandProjection {
 		entities += "  unused_index: map[text]json\n"
 	}
-	writeSingletonCoordinatorFile(t, root, "coordinator/entities.yaml", entities)
+	writeSingletonCoordinatorFile(t, root, "coordinator/state.yaml", entities)
 	writeSingletonCoordinatorFile(t, root, "events.yaml", `
 lead.observed:
   coordinator_id: text
@@ -159,7 +159,7 @@ pins:
     - job.received
 `)
 	writeSingletonCoordinatorFile(t, root, "coordinator/types.yaml", singletonCoordinatorTypesYAMLForFixture())
-	writeSingletonCoordinatorFile(t, root, "coordinator/entities.yaml", "coordinator_state: {}\n")
+	writeSingletonCoordinatorFile(t, root, "coordinator/state.yaml", "coordinator_state: {}\n")
 	writeSingletonCoordinatorFile(t, root, "coordinator/nodes.yaml", `
 coordinator-node:
   execution_type: system_node
@@ -190,7 +190,7 @@ types:
 func writeRetiredFanInSingletonCoordinatorFlow(t testing.TB, root string) {
 	t.Helper()
 	writeSingletonCoordinatorFile(t, root, "coordinator/schema.yaml", RetiredFanInCoordinatorSchema())
-	writeSingletonCoordinatorFile(t, root, "coordinator/entities.yaml", "coordinator_state: {}\n")
+	writeSingletonCoordinatorFile(t, root, "coordinator/state.yaml", "coordinator_state: {}\n")
 	writeSingletonCoordinatorFile(t, root, "coordinator/events.yaml", "job.received:\n  vertical_id: text\n")
 }
 

@@ -14,27 +14,10 @@ import (
 
 const eventRequiredByDefaultRule = "event_payload_field_required_by_default/v1"
 
-// Reserved names cannot be reinterpreted as business payload fields.
-var reservedEventCatalogFieldNames = map[string]struct{}{
-	"swarm":                {},
-	"emitter":              {},
-	"emitter_type":         {},
-	"producer":             {},
-	"_producer":            {},
-	"alternate_emitters":   {},
-	"consumer":             {},
-	"_consumer":            {},
-	"consumer_type":        {},
-	"_consumer_type":       {},
-	"_source":              {},
-	"_status":              {},
-	"_note":                {},
-	"intercepted":          {},
-	"passthrough":          {},
-	"runtime_handling":     {},
-	"owning_node":          {},
-	"delivery_channel":     {},
-	"author_summary_field": {},
+var eventCatalogMetadataFields = map[string]struct{}{
+	"_embed":       {},
+	"_key":         {},
+	"_description": {},
 }
 
 func loadOptionalEventCatalog(path string) (map[string]EventCatalogEntry, error) {
@@ -109,6 +92,7 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 	entry := EventCatalogEntry{
 		Payload:             EventPayloadSpec{Properties: map[string]EventFieldSpec{}},
 		admissionProvenance: map[string]EffectiveValueProvenance{},
+		fieldSources:        map[string]yamlsource.Location{},
 	}
 	entry.admissionProvenance["declaration"] = EffectiveValueProvenance{
 		Origin:         EffectiveValueOriginAuthored,
@@ -117,7 +101,7 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 		SourceColumn:   declaration.IntroductionLocation().Column,
 		SourcePresence: value.Presence().String(),
 	}
-	if field, ok := byName["key"]; ok {
+	if field, ok := byName["_key"]; ok {
 		key, err := requiredLiteralString(field.Value, "event key")
 		if err != nil {
 			return EventCatalogEntry{}, err
@@ -128,14 +112,29 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 		entry.BusinessKeyField = key
 		entry.admissionProvenance["business_key"] = authoredSourceProvenance(field.Value)
 	}
+	if field, ok := byName["_description"]; ok {
+		entry.Description, err = optionalScalarString(field.Value, "event description")
+		if err != nil {
+			return EventCatalogEntry{}, err
+		}
+		entry.admissionProvenance["description"] = authoredSourceProvenance(field.Value)
+	}
+	if field, ok := byName["_embed"]; ok {
+		entry.embeds, err = admitCatalogEmbeddings(field.Value)
+		if err != nil {
+			return EventCatalogEntry{}, err
+		}
+	}
 	if err := populateEventCatalogPayload(&entry, fields); err != nil {
 		return EventCatalogEntry{}, err
 	}
-	if !bare && len(entry.Payload.Properties) == 0 {
+	if !bare && len(entry.Payload.Properties) == 0 && len(entry.embeds) == 0 {
 		return EventCatalogEntry{}, payloadlessEventDeclarationError(name, "mapping")
 	}
-	if err := validateEventCatalogBusinessKey(entry); err != nil {
-		return EventCatalogEntry{}, err
+	if len(entry.embeds) == 0 {
+		if err := validateEventCatalogBusinessKey(entry); err != nil {
+			return EventCatalogEntry{}, err
+		}
 	}
 	return entry, nil
 }
@@ -150,14 +149,10 @@ func admitEventCatalogFields(name string, value yamlsource.Value, bare bool) ([]
 		}
 	}
 	for _, field := range fields {
-		if _, reserved := reservedEventCatalogFieldNames[field.Name]; reserved {
-			return nil, nil, fmt.Errorf("event field name %q at %s is reserved and cannot declare business payload", field.Name, field.IntroductionLocation())
-		}
-		if field.Name == "required" {
-			return nil, nil, fmt.Errorf("event field name %q at %s is reserved for required-by-default field semantics", field.Name, field.IntroductionLocation())
-		}
-		if field.Name == "payload" && eventPayloadValueIsRetiredNestedBlock(field.Value) {
-			return nil, nil, fmt.Errorf("event payload at %s must be a field type declaration, not a nested payload block", field.IntroductionLocation())
+		if strings.HasPrefix(field.Name, "_") {
+			if _, supported := eventCatalogMetadataFields[field.Name]; !supported {
+				return nil, nil, NewUndefinedFieldDiagnostic("event metadata", field.Name, eventCatalogMetadataFields, field)
+			}
 		}
 	}
 	if !bare {
@@ -180,7 +175,7 @@ func admitEventCatalogFields(name string, value yamlsource.Value, bare bool) ([]
 func populateEventCatalogPayload(entry *EventCatalogEntry, fields []yamlsource.MappingField) error {
 	payloadFieldNames := make([]string, 0, len(fields))
 	for _, field := range fields {
-		if field.Name == "key" || field.Name == "description" {
+		if strings.HasPrefix(field.Name, "_") {
 			continue
 		}
 		payloadField, optional, typeSource, err := admitEventPayloadField(field.Value)
@@ -191,6 +186,7 @@ func populateEventCatalogPayload(entry *EventCatalogEntry, fields []yamlsource.M
 			entry.Payload.Required = append(entry.Payload.Required, field.Name)
 		}
 		entry.Payload.Properties[field.Name] = payloadField
+		entry.fieldSources[field.Name] = field.IntroductionLocation()
 		payloadFieldNames = append(payloadFieldNames, field.Name)
 		typePath := "fields." + field.Name + ".type"
 		entry.admissionProvenance[typePath] = authoredSourceProvenance(typeSource)
@@ -517,35 +513,6 @@ func admitEventCitation(value yamlsource.Value) (CriteriaCitation, error) {
 	}
 	out.AllowedClasses = normalizeStrings(out.AllowedClasses)
 	return out, nil
-}
-
-func eventPayloadValueIsRetiredNestedBlock(value yamlsource.Value) bool {
-	if value.Presence() != yamlsource.PresenceMapping && value.Presence() != yamlsource.PresenceEmptyMapping {
-		return false
-	}
-	fields, err := value.Mapping()
-	if err != nil {
-		return false
-	}
-	hasType := false
-	for _, field := range fields {
-		if field.Name == "type" {
-			hasType = true
-			break
-		}
-	}
-	for _, field := range fields {
-		switch field.Name {
-		case "properties", "fields", "shape", "required":
-			return true
-		case "type":
-		default:
-			if _, supported := eventPayloadFieldMappingKeys[field.Name]; field.Name != "" && !supported {
-				return !hasType
-			}
-		}
-	}
-	return false
 }
 
 func uniqueYAMLMappingFields(value yamlsource.Value, context string) ([]yamlsource.MappingField, error) {

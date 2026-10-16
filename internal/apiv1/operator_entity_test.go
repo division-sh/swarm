@@ -266,10 +266,10 @@ func operatorReadbackBundle(t *testing.T) *runtimecontracts.WorkflowContractBund
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
-		"schema.yaml":           "stages:\n  active: {}\n",
-		"entities.yaml":         "run: {}\n",
-		"scoring/schema.yaml":   "name: scoring\ninstance: vertical_id\nstages:\n  discovered: {}\n  pending: {}\n",
-		"scoring/entities.yaml": "vertical:\n  vertical_id: string\n  vertical_name: string\n",
+		"schema.yaml":         "stages:\n  active: {}\n",
+		"state.yaml":          "run: {}\n",
+		"scoring/schema.yaml": "name: scoring\ninstance: vertical_id\nstages:\n  discovered: {}\n  pending: {}\n",
+		"scoring/state.yaml":  "vertical:\n  vertical_id: string\n  vertical_name: string\n",
 	} {
 		writeRunCompletionFixtureFile(t, filepath.Join(root, path), contents)
 	}

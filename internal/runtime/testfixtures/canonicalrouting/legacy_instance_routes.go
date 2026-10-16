@@ -96,7 +96,7 @@ connect:
 pins:
   outputs:
     - deploy.done
-`, "deploy.done:\n  key: "+producerField+"\n  "+producerField+": string\n", "", "")
+`, "deploy.done:\n  _key: "+producerField+"\n  "+producerField+": string\n", "", "")
 
 	consumerNodes := "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n" + secondHandler
 	consumerAgents := ""
@@ -148,7 +148,7 @@ pins:
 	writeClosedVariantFile(t, root, "flows/producer/events.yaml", `deploy.requested:
   vertical_id: string
 deploy.done:
-  key: vertical_id
+  _key: vertical_id
   vertical_id: string
 `)
 	writeClosedVariantFile(t, root, "flows/producer/nodes.yaml", `producer-node:
@@ -168,7 +168,7 @@ deploy.done:
     inline: Preserve static source-set authority.
   subscriptions: [deploy.done]
 `)
-	writeClosedVariantFile(t, root, "flows/consumer/entities.yaml", `deployment:
+	writeClosedVariantFile(t, root, "flows/consumer/state.yaml", `deployment:
   vertical_id:
     type: string
     _unused_reason: source-set survivor topology proof identity field
@@ -184,7 +184,7 @@ func writeLegacyInstanceFlow(t testing.TB, root, id, schema, events, entities, n
 		writeClosedVariantFile(t, root, base+"/events.yaml", events)
 	}
 	if strings.TrimSpace(entities) != "" {
-		writeClosedVariantFile(t, root, base+"/entities.yaml", entities)
+		writeClosedVariantFile(t, root, base+"/state.yaml", entities)
 	}
 	if strings.TrimSpace(nodes) != "" {
 		writeClosedVariantFile(t, root, base+"/nodes.yaml", nodes)

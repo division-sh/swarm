@@ -19,7 +19,7 @@ pins:
   inputs:
     - inbound.telegram.text_message
 `)
-	writeClosedVariantFile(t, root, "telegram-chat/entities.yaml", `chat:
+	writeClosedVariantFile(t, root, "telegram-chat/state.yaml", `chat:
   conversation_reference: {type: text, _unused_reason: canonical receiver key}
   text: text
   provider_message_reference: integer

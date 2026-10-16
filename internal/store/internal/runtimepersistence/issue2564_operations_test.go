@@ -434,7 +434,7 @@ func newIssue2564OperationFixture(t *testing.T, backend string) issue2564Operati
 		"events.yaml":            "operations.requested:\noperations.snapshot:\n",
 		"types.yaml":             "types:\n  OperationProfile:\n    leaf: text\n    sibling: text\n",
 		"operations/schema.yaml": "name: operations\ninstance: receiver_key\nstages:\n  active: {}\n  done: {final: true}\npins:\n  inputs: [construct.requested]\n",
-		"operations/entities.yaml": `operation_state:
+		"operations/state.yaml": `operation_state:
   receiver_key: text
   items: {type: "[text]", initial: [equal]}
   labels: {type: 'map[text]text', initial: {kept: initial}}

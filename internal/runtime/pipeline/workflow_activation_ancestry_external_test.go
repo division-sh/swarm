@@ -15,16 +15,16 @@ import (
 func activationAncestrySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	return semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, map[string]string{
-		"schema.yaml":                    "name: activation-ancestry\nstages:\n  created: {}\n",
-		"operating/schema.yaml":          "name: operating\ninstance: instance_key\nstages:\n  created: {}\n",
-		"operating/entities.yaml":        "item:\n  instance_key: text\n",
-		"operating/review/schema.yaml":   "name: review\ninstance: instance_key\nstages:\n  created: {}\n",
-		"operating/review/entities.yaml": "item:\n  instance_key: text\n",
-		"operating/scout/schema.yaml":    "name: scout\nstages:\n  created: {}\n",
-		"scout/schema.yaml":              "name: scout\nstages:\n  created: {}\n",
-		"scout/review/schema.yaml":       "name: review\ninstance: instance_key\nstages:\n  created: {}\n",
-		"scout/review/entities.yaml":     "item:\n  instance_key: text\n",
-		"scout/detail/schema.yaml":       "name: detail\nstages:\n  created: {}\n",
+		"schema.yaml":                  "name: activation-ancestry\nstages:\n  created: {}\n",
+		"operating/schema.yaml":        "name: operating\ninstance: instance_key\nstages:\n  created: {}\n",
+		"operating/state.yaml":         "item:\n  instance_key: text\n",
+		"operating/review/schema.yaml": "name: review\ninstance: instance_key\nstages:\n  created: {}\n",
+		"operating/review/state.yaml":  "item:\n  instance_key: text\n",
+		"operating/scout/schema.yaml":  "name: scout\nstages:\n  created: {}\n",
+		"scout/schema.yaml":            "name: scout\nstages:\n  created: {}\n",
+		"scout/review/schema.yaml":     "name: review\ninstance: instance_key\nstages:\n  created: {}\n",
+		"scout/review/state.yaml":      "item:\n  instance_key: text\n",
+		"scout/detail/schema.yaml":     "name: detail\nstages:\n  created: {}\n",
 	}))
 }
 

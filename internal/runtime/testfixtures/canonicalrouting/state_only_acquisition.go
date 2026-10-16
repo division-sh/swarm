@@ -90,7 +90,7 @@ func writeStateOnlyAcquisitionFlow(t testing.TB, root, workflowName, rootSchema,
 	if mode == "template" {
 		entity = "review_item:\n  account_id: text\n  instance_key: text\n  items: {type: '[json]', initial: []}\n"
 	}
-	writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "entities.yaml")), entity)
+	writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "state.yaml")), entity)
 	if path != "." && path != targetFlow {
 		if !parentConstructor {
 			writeClosedVariantFile(t, root, filepath.ToSlash(filepath.Join(path, "events.yaml")), baseEventSchemas)

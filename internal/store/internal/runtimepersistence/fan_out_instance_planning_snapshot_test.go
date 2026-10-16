@@ -363,10 +363,10 @@ func TestFanOutInstancePlanningReobservesAbsentKeyAndNewMemberBothStores(t *test
 		for _, createdKey := range []string{"requested", "other"} {
 			t.Run(backend+"/"+createdKey, func(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-					"schema.yaml":          "name: planning-key-proof\n",
-					"worker/schema.yaml":   "name: worker\ninstance: item_id\npins:\n  inputs: [item.created]\n",
-					"worker/entities.yaml": "item:\n  item_id: text\n",
-					"worker/events.yaml":   "item.created:\n  item_id: text\n",
+					"schema.yaml":        "name: planning-key-proof\n",
+					"worker/schema.yaml": "name: worker\ninstance: item_id\npins:\n  inputs: [item.created]\n",
+					"worker/state.yaml":  "item:\n  item_id: text\n",
+					"worker/events.yaml": "item.created:\n  item_id: text\n",
 				}, nil)
 				seed := seedFanOutOwnerFixtureWithArtifact(t, f.ctx, f.db, f.store, backend == "postgres", 1, time.Now().UTC().Truncate(time.Microsecond), f.bundle.SourceArtifact)
 				ctx := correlation.WithRunID(f.ctx, seed.runID)

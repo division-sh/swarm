@@ -40,7 +40,7 @@
       "mode": "template",
       "source_files": {
         "schema": "account/schema.yaml",
-        "entities": "account/entities.yaml",
+        "entities": "account/state.yaml",
         "nodes": "account/nodes.yaml"
       },
       "required_agents": {
@@ -52,7 +52,7 @@
         "fields": {
           "account_id": "text"
         },
-        "source_file": "account/entities.yaml"
+        "source_file": "account/state.yaml"
       },
       "template_instance": {
         "field": "account_id",

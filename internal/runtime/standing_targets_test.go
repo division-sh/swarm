@@ -59,7 +59,7 @@ func TestResolveStandingTargetDeclarationsConsumesRootConstructor(t *testing.T) 
 				"nodes.yaml":  constructorIngressNodes,
 			}
 			if tc.fields != "" {
-				documents["entities.yaml"] = "root_state:\n" + tc.fields
+				documents["state.yaml"] = "root_state:\n" + tc.fields
 			}
 			if tc.handler != "" {
 				documents["events.yaml"] += "work:\n"
@@ -107,7 +107,7 @@ func TestA9DeclarationAncestryMayBeKeyed(t *testing.T) {
 				"parent/service/nodes.yaml":  constructorIngressNodes,
 			}
 			documents[filepath.Join(keyed, "schema.yaml")] += "instance: tenant\n"
-			documents[filepath.Join(keyed, "entities.yaml")] = "owner:\n  tenant: text\n"
+			documents[filepath.Join(keyed, "state.yaml")] = "owner:\n  tenant: text\n"
 			for name, contents := range documents {
 				path := filepath.Join(root, name)
 				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {

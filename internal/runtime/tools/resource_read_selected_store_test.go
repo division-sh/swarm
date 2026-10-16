@@ -45,7 +45,7 @@ func TestResourceReadSelectedStore(t *testing.T) {
 			t.Run(backend+"/"+name, func(t *testing.T) {
 				root := resourceReadSourceRoot(t)
 				if keyed {
-					if err := os.WriteFile(filepath.Join(root, "support/events.yaml"), []byte("records.loaded:\n  key: id\n  id: text\n  payload: text\n"), 0o600); err != nil {
+					if err := os.WriteFile(filepath.Join(root, "support/events.yaml"), []byte("records.loaded:\n  _key: id\n  id: text\n  payload: text\n"), 0o600); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -203,11 +203,11 @@ func resourceReadSourceRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
-		"schema.yaml":           "name: resource-read-store\n",
-		"support/schema.yaml":   "name: support\n",
-		"support/entities.yaml": "support_state:\n  support_id: text\n",
-		"support/agents.yaml":   "factory-cto:\n  id: public-factory-cto\n  role: factory_cto\n  intent: {inline: Read exact run data.}\n  data_access:\n    - data: support/records.loaded\n",
-		"support/events.yaml":   "records.loaded:\n  id: text\n  payload: text\n",
+		"schema.yaml":         "name: resource-read-store\n",
+		"support/schema.yaml": "name: support\n",
+		"support/state.yaml":  "support_state:\n  support_id: text\n",
+		"support/agents.yaml": "factory-cto:\n  id: public-factory-cto\n  role: factory_cto\n  intent: {inline: Read exact run data.}\n  data_access:\n    - data: support/records.loaded\n",
+		"support/events.yaml": "records.loaded:\n  id: text\n  payload: text\n",
 	} {
 		file := filepath.Join(root, path)
 		if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {

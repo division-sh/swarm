@@ -25,7 +25,7 @@ func TestR7ReadinessDiagnosticsDoNotExemptLaterNativeForkConstructionBothStores(
 				"schema.yaml":               "name: later-native-diagnostic\n",
 				"events.yaml":               "checkpoint:\n",
 				"worker/schema.yaml":        "name: worker\ninstance: item_id\npins:\n  inputs: [item.created]\n",
-				"worker/entities.yaml":      "item:\n  item_id: text\n",
+				"worker/state.yaml":         "item:\n  item_id: text\n",
 				"worker/events.yaml":        "item.created:\n  item_id: text\n",
 				"worker/detail/schema.yaml": "name: fieldless-detail\n",
 			}, nil)

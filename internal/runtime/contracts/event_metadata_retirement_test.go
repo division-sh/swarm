@@ -15,11 +15,21 @@ func TestEventMetadataRetirementRejectsPresenceBeforeValueInterpretation(t *test
 		"passthrough", "runtime_handling", "owning_node", "delivery_channel",
 		"author_summary_field",
 	} {
+		metadata := strings.HasPrefix(field, "_")
 		for _, value := range []string{"null", "''", "false", "{}", "[]", "text"} {
 			t.Run(field+"/"+value, func(t *testing.T) {
-				_, err := admitEventCatalogEntryForTest(t, field+": "+value)
-				if err == nil || !strings.Contains(err.Error(), `event field name "`+field+`"`) {
-					t.Fatalf("retired field presence admitted: %v", err)
+				entry, err := admitEventCatalogEntryForTest(t, field+": "+value)
+				if !metadata && value == "text" {
+					if err != nil || entry.Payload.Properties[field].Type != "text" {
+						t.Fatalf("ordinary field consumed as retired metadata: %v", err)
+					}
+					return
+				}
+				if err == nil {
+					_, err = newCompiledEventSchema(".", "test.event", entry, TypeCatalogDocument{}, "", CompiledEventSchemaSource{})
+				}
+				if err == nil || (metadata && !strings.Contains(err.Error(), "event metadata")) {
+					t.Fatalf("invalid field/metadata admitted: %v", err)
 				}
 			})
 		}
@@ -30,9 +40,13 @@ func TestEventMetadataRetirementRejectsPresenceBeforeValueInterpretation(t *test
 			field + ": null\n" + field + ": {}",
 		} {
 			t.Run(field+"/indirect/"+shape, func(t *testing.T) {
-				_, err := admitEventCatalogEntryForTest(t, shape)
-				if err == nil || !strings.Contains(err.Error(), `event field name "`+field+`"`) {
-					t.Fatalf("indirect retired declaration admitted: %v", err)
+				entry, err := admitEventCatalogEntryForTest(t, shape)
+				if !metadata && strings.Contains(shape, "*value") {
+					if err != nil || entry.Payload.Properties[field].Type != "text" {
+						t.Fatalf("ordinary aliased field consumed as metadata: %v", err)
+					}
+				} else if err == nil {
+					t.Fatalf("malformed indirect or duplicate declaration admitted: %v", err)
 				}
 			})
 		}

@@ -60,7 +60,7 @@ complete-request:
 		files["events.yaml"] = rootEvents
 		delete(files, "fulfillment/events.yaml")
 		files["fulfillment/schema.yaml"] = "name: fulfillment\nstages: {pending: {}, done: {final: true}}\npins:\n  inputs: [fulfillment.requested]\n"
-		files["fulfillment/entities.yaml"] = "fulfillment_state: {}\n"
+		files["fulfillment/state.yaml"] = "fulfillment_state: {}\n"
 		files["fulfillment/nodes.yaml"] = "complete-request:\n  execution_type: system_node\n  subscribes_to: [fulfillment.requested]\n  event_handlers:\n    fulfillment.requested: {advances_to: done}\n"
 	}
 	for relative, body := range files {

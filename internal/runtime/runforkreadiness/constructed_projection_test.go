@@ -49,7 +49,7 @@ func TestSelectedConstructedActorProjectionCompleteCensus(t *testing.T) {
 					}
 				}
 				if fields {
-					if err := os.WriteFile(filepath.Join(root, flow, "entities.yaml"), []byte("child_state:\n  value: text\n"), 0600); err != nil {
+					if err := os.WriteFile(filepath.Join(root, flow, "state.yaml"), []byte("child_state:\n  value: text\n"), 0600); err != nil {
 						t.Fatal(err)
 					}
 				}

@@ -15,11 +15,11 @@ import (
 func instanceIndexTestSource(t *testing.T, fieldType string) (semanticview.Source, correlation.SourceArtifactFact) {
 	t.Helper()
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":          "name: instance-index\n",
-		"worker/schema.yaml":   "name: worker\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
-		"worker/entities.yaml": "item:\n  item_id: " + fieldType + "\n",
-		"worker/events.yaml":   "item.created:\n  item_id: " + fieldType + "\n",
-		"detail/schema.yaml":   "name: detail\n",
+		"schema.yaml":        "name: instance-index\n",
+		"worker/schema.yaml": "name: worker\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+		"worker/state.yaml":  "item:\n  item_id: " + fieldType + "\n",
+		"worker/events.yaml": "item.created:\n  item_id: " + fieldType + "\n",
+		"detail/schema.yaml": "name: detail\n",
 	})
 	bundle, _ := semanticview.Bundle(source)
 	fact, err := correlation.NewSourceArtifactFact(bundle.SourceArtifact.BundleHash())

@@ -44,7 +44,7 @@ pins:
   inputs:
     - work.keyed
 `, instanceField))
-	writeClosedVariantFile(t, root, "review/entities.yaml", "review_entity:\n  receiver_id: {type: text, indexed: true}\n  account_id: {type: text, indexed: true}\n  owner: {type: text, _unused_reason: distinguishes existing receiver state}\n")
+	writeClosedVariantFile(t, root, "review/state.yaml", "review_entity:\n  receiver_id: {type: text, indexed: true}\n  account_id: {type: text, indexed: true}\n  owner: {type: text, _unused_reason: distinguishes existing receiver state}\n")
 	writeClosedVariantFile(t, root, "review/nodes.yaml", `key-consumer:
   execution_type: system_node
   subscribes_to: [work.keyed]

@@ -19,8 +19,8 @@ stages:
       - {id: deadline, after: 1h, advances_to: done}
   done: {final: true}
 `,
-		"entities.yaml": "test_entity:\n  marker: text\n",
-		"events.yaml":   "work:\n",
+		"state.yaml":  "test_entity:\n  marker: text\n",
+		"events.yaml": "work:\n",
 		"nodes.yaml": `router:
   execution_type: system_node
   event_handlers:

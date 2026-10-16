@@ -105,7 +105,7 @@
       "mode": "template",
       "source_files": {
         "schema": "validator/schema.yaml",
-        "entities": "validator/entities.yaml",
+        "entities": "validator/state.yaml",
         "nodes": "validator/nodes.yaml",
         "events": "validator/events.yaml"
       },
@@ -127,7 +127,7 @@
         "fields": {
           "validation_case_id": "uuid"
         },
-        "source_file": "validator/entities.yaml"
+        "source_file": "validator/state.yaml"
       },
       "template_instance": {
         "field": "validation_case_id",

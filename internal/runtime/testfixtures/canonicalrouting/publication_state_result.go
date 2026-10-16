@@ -25,7 +25,7 @@ func CopyPublicationStateResult(t testing.TB, mode string) string {
 		writeClosedVariantFile(t, root, "events.yaml", "document.requested:\n  request_id: text\n  content: text\n  result_kind: text\n")
 	}
 	writeClosedVariantFile(t, root, prefix+"schema.yaml", schema)
-	writeClosedVariantFile(t, root, prefix+"entities.yaml", `document:
+	writeClosedVariantFile(t, root, prefix+"state.yaml", `document:
   request_id: text
   content: text
   result_kind: text

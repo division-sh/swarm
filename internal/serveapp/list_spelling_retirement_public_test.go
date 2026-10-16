@@ -68,10 +68,10 @@ func TestListSpellingRetirementPublicBothStores(t *testing.T) {
 
 func listRetirementPublicSource() map[string]string {
 	return map[string]string{
-		"schema.yaml":   "name: list-retirement\nstages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs: [proof.append, proof.finish]\n",
-		"types.yaml":    "types:\n  ProbeItem:\n    name: text\n    tags: [text]\n",
-		"entities.yaml": "probe:\n  entries: {type: '[ProbeItem]', initial: []}\n  snapshots:\n    type: '[ProbeItem]'\n    materialize_from: collector.observed\n",
-		"events.yaml":   "proof.append:\n  name: text\n  tags: [text]\nproof.finish:\n",
+		"schema.yaml": "name: list-retirement\nstages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs: [proof.append, proof.finish]\n",
+		"types.yaml":  "types:\n  ProbeItem:\n    name: text\n    tags: [text]\n",
+		"state.yaml":  "probe:\n  entries: {type: '[ProbeItem]', initial: []}\n  snapshots:\n    type: '[ProbeItem]'\n    materialize_from: collector.observed\n",
+		"events.yaml": "proof.append:\n  name: text\n  tags: [text]\nproof.finish:\n",
 		"nodes.yaml": `collector:
   execution_type: system_node
   state_schema:
@@ -96,7 +96,7 @@ func listRetirementPublicSource() map[string]string {
 func TestListSpellingRetirementPublicAdmission(t *testing.T) {
 	for _, field := range []struct{ file, original, prefix, element string }{
 		{"types.yaml", "    tags: [text]", "    tags: ", "text"},
-		{"entities.yaml", "  entries: {type: '[ProbeItem]', initial: []}", "  entries: ", "ProbeItem"},
+		{"state.yaml", "  entries: {type: '[ProbeItem]', initial: []}", "  entries: ", "ProbeItem"},
 		{"events.yaml", "  tags: [text]", "  tags: ", "text"},
 		{"nodes.yaml", "      observed: [ProbeItem]", "      observed: ", "ProbeItem"},
 	} {

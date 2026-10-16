@@ -155,7 +155,7 @@ func TestEntityProgressivePresencePublicServeRestartSQLitePostgres(t *testing.T)
 
 func writePresenceLastFieldFixture(t *testing.T, root string) {
 	t.Helper()
-	writeReleaseFile(t, filepath.Join(root, "entities.yaml"), "work:\n  review_note:\n    type: text?\n    initial: seeded\n")
+	writeReleaseFile(t, filepath.Join(root, "state.yaml"), "work:\n  review_note:\n    type: text?\n    initial: seeded\n")
 	writeReleaseFile(t, filepath.Join(root, "nodes.yaml"), `owner:
   execution_type: system_node
   subscribes_to: [work.opened, work.annotated, work.assessed, work.consume, work.completed]

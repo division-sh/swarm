@@ -37,7 +37,7 @@ func CopyImportBoundaryAlias(t testing.TB, variant ImportBoundaryAliasVariant) s
 		connected = true
 	case ImportBoundaryAliasTemplateBindOnly:
 		instance = "instance: work_id\n"
-		writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "entities.yaml"), "work:\n  work_id: text\n")
+		writeBootverifyFixtureFile(t, filepath.Join(root, "worker", "state.yaml"), "work:\n  work_id: text\n")
 	default:
 		t.Fatalf("unsupported import-boundary alias variant %d", variant)
 	}

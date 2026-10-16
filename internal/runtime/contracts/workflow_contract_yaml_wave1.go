@@ -76,6 +76,7 @@ var typeMetadataFieldOptions = map[string]struct{}{
 var entityMetadataFieldOptions = map[string]struct{}{
 	"_description": {},
 	"_owner":       {},
+	"_embed":       {},
 }
 
 var schemaLengthRefinementFieldOptions = map[string]struct{}{
@@ -329,6 +330,7 @@ func projectNamedTypeDeclaration(value yamlsource.Value) (NamedTypeDecl, error) 
 		if err != nil {
 			return NamedTypeDecl{}, fmt.Errorf("field %s: %w", name, err)
 		}
+		spec.source = field.IntroductionLocation()
 		decl.Fields[name] = spec
 	}
 	return decl, nil
@@ -439,6 +441,8 @@ func projectEntityContract(value yamlsource.Value) (EntityContract, error) {
 				decl.Description, err = optionalScalarString(field.Value, "entity description")
 			case "_owner":
 				decl.Owner, err = optionalScalarString(field.Value, "entity owner")
+			case "_embed":
+				decl.embeds, err = admitCatalogEmbeddings(field.Value)
 			default:
 				return EntityContract{}, NewUndefinedFieldDiagnostic("entity metadata", name, entityMetadataFieldOptions, field)
 			}
@@ -447,13 +451,11 @@ func projectEntityContract(value yamlsource.Value) (EntityContract, error) {
 			}
 			continue
 		}
-		if name == "state_field" {
-			return EntityContract{}, fmt.Errorf("entity field name %q at %s is reserved for schema-owned state authority", name, field.IntroductionLocation())
-		}
 		spec, err := projectEntityFieldDecl(field.Value)
 		if err != nil {
 			return EntityContract{}, fmt.Errorf("field %s: %w", name, err)
 		}
+		spec.source = field.IntroductionLocation()
 		decl.Fields[name] = spec
 	}
 	return decl, nil

@@ -666,12 +666,12 @@ func (o *singleTurnFanOutOwner) FanOutRunSummary(context.Context, string, time.T
 func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":          "name: root\nstages: []\n",
-		"entities.yaml":        "parent: {}\n",
-		"types.yaml":           "types:\n  Component:\n    component_id: text\n",
-		"events.yaml":          "component_scaffold.batch_requested:\n  components: [Component]\ncomponent_scaffold.spawn_requested:\n  component_id: text\n  nested_items: [text]\ncomponent_scaffold.task_requested:\n  component_id: text\n  task: text\n",
-		"review/schema.yaml":   "name: review\nstages:\n  pending: {}\npins:\n  inputs:\n    - component_scaffold.spawn_requested\n",
-		"review/entities.yaml": "test_entity: {}\n",
+		"schema.yaml":        "name: root\nstages: []\n",
+		"state.yaml":         "parent: {}\n",
+		"types.yaml":         "types:\n  Component:\n    component_id: text\n",
+		"events.yaml":        "component_scaffold.batch_requested:\n  components: [Component]\ncomponent_scaffold.spawn_requested:\n  component_id: text\n  nested_items: [text]\ncomponent_scaffold.task_requested:\n  component_id: text\n  task: text\n",
+		"review/schema.yaml": "name: review\nstages:\n  pending: {}\npins:\n  inputs:\n    - component_scaffold.spawn_requested\n",
+		"review/state.yaml":  "test_entity: {}\n",
 		"nodes.yaml": `fanout-node:
   execution_type: system_node
   event_handlers:

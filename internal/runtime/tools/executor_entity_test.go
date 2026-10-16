@@ -1906,7 +1906,7 @@ func TestEntityTools_RootActorImplicitReadToolsDoNotReadChildFlowRows(t *testing
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 
 	writeEntityToolFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-read-bundle\n")
-	writeEntityToolFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+	writeEntityToolFixtureFile(t, filepath.Join(root, "state.yaml"), `
 root_subject:
   status: text
   score: integer
@@ -1917,7 +1917,7 @@ stages:
   active: {}
   done: {final: true}
 `)
-	writeEntityToolFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), `
+	writeEntityToolFixtureFile(t, filepath.Join(root, "child", "state.yaml"), `
 child_subject:
   status: text
   score: integer
@@ -2969,7 +2969,7 @@ stages:
 		t.Fatalf("unsupported entity-tool fixture initial stage %q; want queued or marginal_review", initial)
 	}
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), schemaYAML)
-	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), entityToolKeyedFixtureYAML(entitiesYAML))
+	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "state.yaml"), entityToolKeyedFixtureYAML(entitiesYAML))
 	writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "agents.yaml"), entityToolAgentYAML(actor)+"  entity_writes:\n    "+entityType+": {save: all}\n")
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
@@ -3148,7 +3148,7 @@ stages:
 			if strings.Contains(schemaYAML, "instance: fixture_key") {
 				entities = entityToolKeyedFixtureYAML(entities)
 			}
-			writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), entities)
+			writeEntityToolFixtureFile(t, filepath.Join(root, flowID, "state.yaml"), entities)
 		}
 		if strings.TrimSpace(fixture.AgentsYAML) != "" {
 			agents := fixture.AgentsYAML

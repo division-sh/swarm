@@ -430,8 +430,8 @@ func selectedContractActivityDeclaredSource(t *testing.T, serverURL string, effe
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
-		"schema.yaml":   "name: activity-fork-proof\nstages:\n  pending: {}\n",
-		"entities.yaml": "root: {}\n",
+		"schema.yaml": "name: activity-fork-proof\nstages:\n  pending: {}\n",
+		"state.yaml":  "root: {}\n",
 		"flow_a/schema.yaml": `name: flow_a
 stages:
   pending: {}
@@ -444,8 +444,8 @@ loops:
     max_attempts: 3
     escape: {advances_to: exhausted}
 `,
-		"flow_a/entities.yaml": "test_entity:\n  name: text\n",
-		"flow_a/events.yaml":   "review.requested:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
+		"flow_a/state.yaml":  "test_entity:\n  name: text\n",
+		"flow_a/events.yaml": "review.requested:\n  revision_id: text\nreview.start:\nreview.retry:\n  revision_id: text\nreview.close:\n  revision_id: text\n",
 		"flow_a/nodes.yaml": `test-node:
   execution_type: system_node
   subscribes_to: [review.start, review.requested, review.retry, review.close]

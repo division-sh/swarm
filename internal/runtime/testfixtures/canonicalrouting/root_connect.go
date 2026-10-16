@@ -44,7 +44,7 @@ pins:
   inputs:
     - opco.product_initialization_requested
 `,
-		"operating/entities.yaml": `operating:
+		"operating/state.yaml": `operating:
   operating_id:
     type: uuid
     immutable: true

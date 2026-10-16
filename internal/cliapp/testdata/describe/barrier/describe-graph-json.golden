@@ -107,7 +107,7 @@
       "mode": "template",
       "source_files": {
         "schema": "operating/schema.yaml",
-        "entities": "operating/entities.yaml",
+        "entities": "operating/state.yaml",
         "nodes": "operating/nodes.yaml",
         "events": "operating/events.yaml"
       },
@@ -132,7 +132,7 @@
         "fields": {
           "operating_instance_id": "text"
         },
-        "source_file": "operating/entities.yaml"
+        "source_file": "operating/state.yaml"
       },
       "template_instance": {
         "field": "operating_instance_id",
@@ -184,7 +184,7 @@
       "mode": "template",
       "source_files": {
         "schema": "portfolio/schema.yaml",
-        "entities": "portfolio/entities.yaml",
+        "entities": "portfolio/state.yaml",
         "nodes": "portfolio/nodes.yaml",
         "events": "portfolio/events.yaml"
       },
@@ -216,7 +216,7 @@
         "fields": {
           "portfolio_id": "text"
         },
-        "source_file": "portfolio/entities.yaml"
+        "source_file": "portfolio/state.yaml"
       },
       "template_instance": {
         "field": "portfolio_id",
@@ -296,7 +296,7 @@
       "mode": "template",
       "source_files": {
         "schema": "portfolio/period/schema.yaml",
-        "entities": "portfolio/period/entities.yaml",
+        "entities": "portfolio/period/state.yaml",
         "nodes": "portfolio/period/nodes.yaml"
       },
       "required_agents": {
@@ -310,7 +310,7 @@
           "period_id": "text",
           "portfolio_id": "text"
         },
-        "source_file": "portfolio/period/entities.yaml"
+        "source_file": "portfolio/period/state.yaml"
       },
       "template_instance": {
         "field": "period_id",

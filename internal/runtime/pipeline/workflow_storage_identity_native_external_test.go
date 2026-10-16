@@ -54,13 +54,13 @@ func TestWorkflowInstanceStoreAddressesRowsOnlyByExactRouteOnBothStores(t *testi
 
 func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *testing.T) {
 	bundle := loadPipelineLifecycleFixtureBundle(t, map[string]string{
-		"schema.yaml":                    "name: storage-identity\nstages:\n  created: {}\n",
-		"operating/schema.yaml":          "name: operating\ninstance: instance_key\nstages:\n  created: {}\n",
-		"operating/entities.yaml":        "test_entity:\n  instance_key: text\n",
-		"operating/review/schema.yaml":   "name: review\ninstance: instance_key\nstages:\n  created: {}\n",
-		"operating/review/entities.yaml": "test_entity:\n  instance_key: text\n",
-		"review/schema.yaml":             "name: review\ninstance: instance_key\nstages:\n  created: {}\n",
-		"review/entities.yaml":           "test_entity:\n  instance_key: text\n",
+		"schema.yaml":                  "name: storage-identity\nstages:\n  created: {}\n",
+		"operating/schema.yaml":        "name: operating\ninstance: instance_key\nstages:\n  created: {}\n",
+		"operating/state.yaml":         "test_entity:\n  instance_key: text\n",
+		"operating/review/schema.yaml": "name: review\ninstance: instance_key\nstages:\n  created: {}\n",
+		"operating/review/state.yaml":  "test_entity:\n  instance_key: text\n",
+		"review/schema.yaml":           "name: review\ninstance: instance_key\nstages:\n  created: {}\n",
+		"review/state.yaml":            "test_entity:\n  instance_key: text\n",
 	})
 	source := semanticview.Wrap(bundle)
 	for _, backend := range []string{"sqlite", "postgres"} {

@@ -968,10 +968,10 @@ func sqliteFlowActivationBundle(t *testing.T) *runtimecontracts.WorkflowContract
 		Semantics: runtimecontracts.WorkflowSemanticView{Version: "v-test"},
 	}
 	bundle := loadLifecyclePersistenceFixtureForTest(t, map[string]string{
-		"schema.yaml":          "name: flow-activation-proof\n",
-		"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
-		"review/entities.yaml": "review_item:\n  request_id: text\n",
-		"review/events.yaml":   "task.started:\n  request_id: text\n",
+		"schema.yaml":        "name: flow-activation-proof\n",
+		"review/schema.yaml": "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+		"review/state.yaml":  "review_item:\n  request_id: text\n",
+		"review/events.yaml": "task.started:\n  request_id: text\n",
 	})
 	// The actor authority fixture supplies its admitted test intent separately
 	// from the compiled flow declaration.
@@ -1486,10 +1486,10 @@ func assertSQLiteRuntimeCount(t *testing.T, store *SQLiteRuntimeStore, query str
 
 func TestSQLiteRuntimeStorePipelineWorkflowInstanceOwner(t *testing.T) {
 	f := newReceiverConfigActivationFixtureWithDocuments(t, "sqlite", false, map[string]string{
-		"schema.yaml":        "name: persistence-proof\n",
-		"root/schema.yaml":   "name: root\ninstance: company_id\nstages:\n  qualified: {}\npins:\n  inputs:\n    - company.opened\n",
-		"root/entities.yaml": "company:\n  company_id: text\n  score: {type: numeric, initial: 9}\n",
-		"root/events.yaml":   "company.opened:\n",
+		"schema.yaml":      "name: persistence-proof\n",
+		"root/schema.yaml": "name: root\ninstance: company_id\nstages:\n  qualified: {}\npins:\n  inputs:\n    - company.opened\n",
+		"root/state.yaml":  "company:\n  company_id: text\n  score: {type: numeric, initial: 9}\n",
+		"root/events.yaml": "company.opened:\n",
 	}, nil)
 	f.constructKeylessRoot(t)
 	ctx, owner := f.ctx, f.workflows

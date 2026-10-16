@@ -33,7 +33,7 @@ func TestRunGuardTerminationReachabilityThroughSourceAdmission(t *testing.T) {
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "stages:\n  ready: {}\n  "+tc.target+": {final: true}\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "router:\n  execution_type: system_node\n  subscribes_to: [work]\n  event_handlers:\n    work:\n"+tc.handler)
 			writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work:\n")
-			writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "item: {}\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), "item: {}\n")
 			repo := repoRootForBootverifyTest(t)
 			bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 			report := Run(context.Background(), compileBootverifySchemasPreservingPlans(bundle), Options{})

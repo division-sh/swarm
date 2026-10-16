@@ -64,7 +64,7 @@ func TestEntityResetProjectionUsesWholeNodeOwnership(t *testing.T) {
 			if variant == "nonempty refinement" {
 				entities = strings.Replace(entities, "  first:\n", "  first:\n    length: {min: 1}\n", 1)
 			}
-			writeEngineProjectionFixtureFile(t, filepath.Join(root, "entities.yaml"), entities)
+			writeEngineProjectionFixtureFile(t, filepath.Join(root, "state.yaml"), entities)
 			writeEngineProjectionFixtureFile(t, filepath.Join(root, "events.yaml"), "work.first:\n  id: text\nwork.second:\n  id: text\nwork.peer:\n  id: text\n")
 			writeEngineProjectionFixtureFile(t, filepath.Join(root, "nodes.yaml"), `collector:
   execution_type: system_node

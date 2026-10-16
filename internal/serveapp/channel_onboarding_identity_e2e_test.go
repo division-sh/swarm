@@ -399,7 +399,7 @@ func addSecondChannelOnboardingTarget(t *testing.T, sourceRoot string) {
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		t.Fatalf("create second channel onboarding target: %v", err)
 	}
-	for _, name := range []string{"entities.yaml", "schema.yaml"} {
+	for _, name := range []string{"state.yaml", "schema.yaml"} {
 		contents, err := os.ReadFile(filepath.Join(sourceDir, name))
 		if err != nil {
 			t.Fatalf("read second channel onboarding target source %s: %v", name, err)

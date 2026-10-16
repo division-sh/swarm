@@ -78,8 +78,8 @@ pins:
   inputs:
     - task.create
 `,
-		"review/entities.yaml": "review_item:\n  request_id: text\n  label: text\n  nested: json\n  enabled: {type: boolean, initial: true}\n",
-		"review/events.yaml":   "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\n",
+		"review/state.yaml":  "review_item:\n  request_id: text\n  label: text\n  nested: json\n  enabled: {type: boolean, initial: true}\n",
+		"review/events.yaml": "task.create:\n  request_id: text\n  label: text\n  nested: json\ntask.started:\n",
 	}
 	if autoEmit {
 		files["events.yaml"] = "request.started:\n  request_id: string\n  label: string\n  nested: json\n"

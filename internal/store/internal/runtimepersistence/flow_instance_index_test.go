@@ -34,11 +34,11 @@ func TestR7DirectoryScalarSelectorsBothStores(t *testing.T) {
 		} {
 			t.Run(backend+"/"+scalar.name, func(t *testing.T) {
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-					"schema.yaml":          "name: scalar-index\n",
-					"events.yaml":          "checkpoint:\n",
-					"worker/schema.yaml":   "name: worker\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
-					"worker/entities.yaml": "item:\n  item_id: " + scalar.kind + "\n",
-					"worker/events.yaml":   "item.created:\n  item_id: " + scalar.kind + "\n",
+					"schema.yaml":        "name: scalar-index\n",
+					"events.yaml":        "checkpoint:\n",
+					"worker/schema.yaml": "name: worker\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+					"worker/state.yaml":  "item:\n  item_id: " + scalar.kind + "\n",
+					"worker/events.yaml": "item.created:\n  item_id: " + scalar.kind + "\n",
 				}, nil)
 				runID := correlation.RunIDFromContext(f.ctx)
 				rootRequest := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)
@@ -201,7 +201,7 @@ func TestR7ConstructionAddressImmutableBothStores(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
 				"schema.yaml":        "name: immutable-construction\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
 				"events.yaml":        "item.created:\n  item_id: text\n",
-				"entities.yaml":      "item:\n  item_id: text\n",
+				"state.yaml":         "item:\n  item_id: text\n",
 				"detail/schema.yaml": "name: detail\n",
 			}, nil)
 			runID := correlation.RunIDFromContext(f.ctx)
@@ -602,10 +602,10 @@ func TestR7DirectoryDeclarationCannotHideCorruptKeyedConstructionBothStores(t *t
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":          "name: keyed-corruption-proof\n",
-				"worker/schema.yaml":   "name: worker\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
-				"worker/entities.yaml": "item:\n  item_id: text\n",
-				"worker/events.yaml":   "item.created:\n  item_id: text\n",
+				"schema.yaml":        "name: keyed-corruption-proof\n",
+				"worker/schema.yaml": "name: worker\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"worker/state.yaml":  "item:\n  item_id: text\n",
+				"worker/events.yaml": "item.created:\n  item_id: text\n",
 			}, nil)
 			runID := correlation.RunIDFromContext(f.ctx)
 			rootRequest := sqliteFlowActivationRequest(f.bundle, ".", runID, "", runID)

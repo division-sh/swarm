@@ -12,7 +12,7 @@
     ],
     "source_files": {
       "schema": "schema.yaml",
-      "entities": "entities.yaml"
+      "entities": "state.yaml"
     },
     "events": [
       {
@@ -47,7 +47,7 @@
         "batch_id": "text",
         "candidate_ids": "[text]"
       },
-      "source_file": "entities.yaml"
+      "source_file": "state.yaml"
     }
   },
   "flows": [
@@ -64,7 +64,7 @@
       "mode": "template",
       "source_files": {
         "schema": "candidate/schema.yaml",
-        "entities": "candidate/entities.yaml",
+        "entities": "candidate/state.yaml",
         "nodes": "candidate/nodes.yaml",
         "events": "candidate/events.yaml",
         "agents": "candidate/agents.yaml"
@@ -144,7 +144,7 @@
         "fields": {
           "candidate_id": "text"
         },
-        "source_file": "candidate/entities.yaml"
+        "source_file": "candidate/state.yaml"
       },
       "template_instance": {
         "field": "candidate_id",
@@ -189,7 +189,7 @@
       "mode": "static",
       "source_files": {
         "schema": "scout/schema.yaml",
-        "entities": "scout/entities.yaml",
+        "entities": "scout/state.yaml",
         "nodes": "scout/nodes.yaml",
         "events": "scout/events.yaml",
         "agents": "scout/agents.yaml"
@@ -260,7 +260,7 @@
         "fields": {
           "candidate_ids": "[text]"
         },
-        "source_file": "scout/entities.yaml"
+        "source_file": "scout/state.yaml"
       },
       "singleton_coordinator": {
         "primary_entity": "scout_task",

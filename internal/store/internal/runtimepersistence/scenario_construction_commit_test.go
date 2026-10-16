@@ -29,7 +29,7 @@ func TestScenarioConstructionNativeCommitBothStores(t *testing.T) {
 				selected, db, connector := newP16RaceStore(t, backend)
 				f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, map[string]string{
 					"schema.yaml":        "name: scenario-construction\nstages:\n  pending: {}\n",
-					"entities.yaml":      "record:\n  marker: text\n",
+					"state.yaml":         "record:\n  marker: text\n",
 					"nested/schema.yaml": "name: nested\n",
 				}, nil, ownStoreTestAgentManager, nil)
 				runID := uuid.NewString()

@@ -46,13 +46,13 @@ const (
 func TestIssue2564H1EquivalentCorpus(t *testing.T) {
 	root := issue2564H1WriteCorpus(t)
 	files := issue2564H1Corpus(t, root)
-	if len(files) != 7 || files["entities.yaml"] != "" || strings.Contains(files["hub/nodes.yaml"], "has(") {
+	if len(files) != 7 || files["state.yaml"] != "" || strings.Contains(files["hub/nodes.yaml"], "has(") {
 		t.Fatal("published fieldless root / explicit-counter corpus drift")
 	}
 	for _, side := range []string{"a", "b"} {
 		for n := 1; n <= issue2564H1Fields; n++ {
 			field := fmt.Sprintf("%s%02d", side, n)
-			if strings.Count(files["hub/entities.yaml"], "  "+field+": {type: integer, initial: 0}\n") != 1 || strings.Count(files["hub/agents.yaml"], field) != 1 {
+			if strings.Count(files["hub/state.yaml"], "  "+field+": {type: integer, initial: 0}\n") != 1 || strings.Count(files["hub/agents.yaml"], field) != 1 {
 				t.Fatalf("published distinct field assignment drift: %s", field)
 			}
 		}

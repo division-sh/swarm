@@ -101,8 +101,10 @@ func constructorViews(source semanticview.Source, flowID string) []FlowConstruct
 }
 
 type EventView struct {
-	Name   string   `json:"name"`
-	Fields []string `json:"fields"`
+	Name         string                                               `json:"name"`
+	Fields       []string                                             `json:"fields"`
+	Description  string                                               `json:"description,omitempty"`
+	FieldOrigins map[string]runtimecontracts.EffectiveValueProvenance `json:"field_origins,omitempty"`
 }
 
 type StandingIngressView struct {
@@ -266,9 +268,10 @@ type AgentFieldView struct {
 }
 
 type PrimaryEntityView struct {
-	Type       string            `json:"type"`
-	Fields     map[string]string `json:"fields,omitempty"`
-	SourceFile string            `json:"source_file,omitempty"`
+	Type         string                                               `json:"type"`
+	Fields       map[string]string                                    `json:"fields,omitempty"`
+	SourceFile   string                                               `json:"source_file,omitempty"`
+	FieldOrigins map[string]runtimecontracts.EffectiveValueProvenance `json:"field_origins,omitempty"`
 }
 
 type TemplateInstanceView struct {
@@ -1016,11 +1019,15 @@ func eventViews(entries map[string]runtimecontracts.EventCatalogEntry) []EventVi
 	out := make([]EventView, 0, len(names))
 	for _, name := range names {
 		fields := make([]string, 0, len(entries[name].Payload.Properties))
+		origins := map[string]runtimecontracts.EffectiveValueProvenance{}
 		for field := range entries[name].Payload.Properties {
 			fields = append(fields, field)
+			if origin, ok := entries[name].FieldProvenance(field); ok && origin.Origin == runtimecontracts.EffectiveValueOriginDerived {
+				origins[field] = origin
+			}
 		}
 		sort.Strings(fields)
-		out = append(out, EventView{Name: name, Fields: fields})
+		out = append(out, EventView{Name: name, Fields: fields, Description: entries[name].Description, FieldOrigins: origins})
 	}
 	return out
 }
@@ -1080,13 +1087,18 @@ func requiredAgentsView(schema runtimecontracts.FlowSchemaDocument, facts []runt
 
 func primaryEntityView(primary runtimecontracts.PrimaryEntityContract, sourceFile string) *PrimaryEntityView {
 	fields := map[string]string{}
+	origins := map[string]runtimecontracts.EffectiveValueProvenance{}
 	for _, field := range sortedEntityFields(primary.Contract.Fields) {
 		fields[field] = strings.TrimSpace(primary.Contract.Fields[field].Type)
+		if origin, ok := primary.Contract.FieldProvenance(field); ok && origin.Origin == runtimecontracts.EffectiveValueOriginDerived {
+			origins[field] = origin
+		}
 	}
 	return &PrimaryEntityView{
-		Type:       strings.TrimSpace(primary.EntityType),
-		Fields:     fields,
-		SourceFile: strings.TrimSpace(sourceFile),
+		Type:         strings.TrimSpace(primary.EntityType),
+		Fields:       fields,
+		SourceFile:   strings.TrimSpace(sourceFile),
+		FieldOrigins: origins,
 	}
 }
 

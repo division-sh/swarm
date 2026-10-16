@@ -52,9 +52,9 @@ import (
 func boundedInboundTestSource(t *testing.T) semanticview.Source {
 	t.Helper()
 	bundle := loadRuntimeTempBundle(t, map[string]string{
-		"schema.yaml":                   "name: bounded-standing-connector\n",
-		"bounded_inbound/schema.yaml":   "name: bounded_inbound\nstages:\n  active: {}\n",
-		"bounded_inbound/entities.yaml": "bounded_entity: {}\n",
+		"schema.yaml":                 "name: bounded-standing-connector\n",
+		"bounded_inbound/schema.yaml": "name: bounded_inbound\nstages:\n  active: {}\n",
+		"bounded_inbound/state.yaml":  "bounded_entity: {}\n",
 	})
 	return semanticview.Wrap(bundle)
 }

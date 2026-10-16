@@ -460,8 +460,8 @@ stages:
   ready: {final: true}
   attention: {final: true}
 `,
-		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  expected: [text]\n",
-		"orders/events.yaml":   "item.completed:\n  member_id: text\n  result: JoinResult\ndispatch.completed:\n",
+		"orders/state.yaml":  "order_state:\n  order_id: {type: text, indexed: true}\n  expected: [text]\n",
+		"orders/events.yaml": "item.completed:\n  member_id: text\n  result: JoinResult\ndispatch.completed:\n",
 		"orders/nodes.yaml": `collector:
   execution_type: system_node
   event_handlers:

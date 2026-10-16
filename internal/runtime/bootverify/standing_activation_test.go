@@ -22,7 +22,7 @@ func TestStandingFlowConstructorEligibility(t *testing.T) {
 			root := t.TempDir()
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: standing-root\nstages: []\n"+tc.schema)
 			if tc.fields != "" {
-				writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "root_state:\n"+tc.fields)
+				writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), "root_state:\n"+tc.fields)
 			}
 			if tc.handler != "" {
 				writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work:\n")

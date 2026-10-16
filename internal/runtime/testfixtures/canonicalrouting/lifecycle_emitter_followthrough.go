@@ -23,7 +23,7 @@ func CopyLifecycleEmitterLoopScopeTopology(t testing.TB, variant LifecycleLoopSc
 		t.Fatalf("unsupported loop scope variant %d", variant)
 	}
 	for _, scope := range []string{"left", "left/deep", "right"} {
-		for _, file := range []string{"schema.yaml", "events.yaml", "nodes.yaml", "entities.yaml", "agents.yaml", "prompts/collector.md"} {
+		for _, file := range []string{"schema.yaml", "events.yaml", "nodes.yaml", "state.yaml", "agents.yaml", "prompts/collector.md"} {
 			writeClosedVariantFile(t, root, scope+"/"+file, lifecycleStaticRead(t, root, file))
 		}
 	}

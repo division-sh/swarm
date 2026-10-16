@@ -85,7 +85,7 @@ func TestPayloadlessEventRejectsAlternateNullSpellings(t *testing.T) {
 		{"single_quotes", "test.event: ''\n", "''"},
 		{"anchor", "test.event: &empty\n", "&empty"},
 		{"null_tag", "test.event: !!null\n", "!!null"},
-		{"metadata_only", "test.event:\n  description: No fields\n", "mapping"},
+		{"metadata_only", "test.event:\n  _description: No fields\n", "mapping"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			snapshot, err := yamlsource.Load([]byte(tc.source))

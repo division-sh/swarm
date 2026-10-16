@@ -76,8 +76,8 @@ stages:
           emit: run_fork.compiled_root_gate_approved
   done: {final: true}
 `,
-		"entities.yaml": "default: {}\n",
-		"events.yaml":   "run_fork.compiled_root_gate_approved:\n",
+		"state.yaml":  "default: {}\n",
+		"events.yaml": "run_fork.compiled_root_gate_approved:\n",
 	} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(contents), 0o600); err != nil {
 			t.Fatal(err)
@@ -664,7 +664,7 @@ func TestMaterializeRunForkProposedEffectCreatesFreshPendingAuthority(t *testing
 				opened := backend.open(t)
 				files := map[string]string{"schema.yaml": "name: proposed-effect-remint\nstages:\n  operating: {}\n"}
 				if fields {
-					files["entities.yaml"] = "item:\n  label: text?\n"
+					files["state.yaml"] = "item:\n  label: text?\n"
 				}
 				f := newReceiverConfigActivationFixtureForStore(t, opened.store.(agentFixtureFlowStore), false, files, nil, ownStoreTestAgentManager, nil)
 				target, err := runtimecontracts.BootBundleIdentity(f.bundle)

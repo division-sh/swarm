@@ -41,7 +41,7 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 			files["observer/schema.yaml"] = strings.Replace(files["requester/schema.yaml"], "name: requester", "name: observer", 1)
 			files["observer/schema.yaml"] = strings.Replace(files["observer/schema.yaml"], "  outputs:\n    - provider.requested\n", "", 1)
 			files["observer/schema.yaml"] += "    - provider.notified\n"
-			files["observer/entities.yaml"] = files["requester/entities.yaml"] + "  ordinary_result: JoinResult\n"
+			files["observer/state.yaml"] = files["requester/state.yaml"] + "  ordinary_result: JoinResult\n"
 			start := strings.Index(files["requester/nodes.yaml"], "collector:\n")
 			end := strings.Index(files["requester/nodes.yaml"], "dispatcher:\n")
 			files["observer/nodes.yaml"] = files["requester/nodes.yaml"][start:end] + `    provider.notified:
@@ -61,7 +61,7 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 		}
 		if variant == ArrivalJoinPayloadDirectedMultipleRecipients {
 			files["schema.yaml"] += "  - {event: item.completed, from: ., to: mirror, resolution: select}\n"
-			for _, name := range []string{"schema.yaml", "entities.yaml", "events.yaml", "nodes.yaml"} {
+			for _, name := range []string{"schema.yaml", "state.yaml", "events.yaml", "nodes.yaml"} {
 				files["mirror/"+name] = strings.Replace(files["orders/"+name], "name: orders", "name: mirror", 1)
 			}
 		}
@@ -76,10 +76,10 @@ func ArrivalJoinRoutingFiles(t testing.TB, variant ArrivalJoinRoutingFixture) ma
 
 func arrivalJoinPayloadDirectedFiles() map[string]string {
 	return map[string]string{
-		"schema.yaml":   "name: a2-publication-binding\nstages:\n  active: {}\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - item.completed\nconnect:\n  - {event: item.completed, from: ., to: orders, resolution: select}\n",
-		"entities.yaml": "root_state:\n  work_count: {type: integer, initial: 0}\n",
-		"events.yaml":   "work.requested:\n  prefix: text\n  suffix: text\nitem.completed:\n  order_id: text\n  member_id: text\n  result: JoinResult\n",
-		"types.yaml":    "types:\n  JoinResult:\n    value: text\n",
+		"schema.yaml": "name: a2-publication-binding\nstages:\n  active: {}\npins:\n  inputs:\n    - work.requested\n  outputs:\n    - item.completed\nconnect:\n  - {event: item.completed, from: ., to: orders, resolution: select}\n",
+		"state.yaml":  "root_state:\n  work_count: {type: integer, initial: 0}\n",
+		"events.yaml": "work.requested:\n  prefix: text\n  suffix: text\nitem.completed:\n  order_id: text\n  member_id: text\n  result: JoinResult\n",
+		"types.yaml":  "types:\n  JoinResult:\n    value: text\n",
 		"nodes.yaml": `worker:
   execution_type: system_node
   event_handlers:
@@ -105,8 +105,8 @@ pins:
   inputs:
     - item.completed
 `,
-		"orders/entities.yaml": "order_state:\n  order_id: {type: text, indexed: true}\n  expected: [text]\n",
-		"orders/events.yaml":   "manual.abort:\ndispatch.completed:\n",
+		"orders/state.yaml":  "order_state:\n  order_id: {type: text, indexed: true}\n  expected: [text]\n",
+		"orders/events.yaml": "manual.abort:\ndispatch.completed:\n",
 		"orders/nodes.yaml": `collector:
   execution_type: system_node
   event_handlers:
@@ -144,8 +144,8 @@ pins:
   outputs:
     - provider.requested
 `,
-		"requester/entities.yaml": "request_state:\n  order_id: {type: text, indexed: true}\n  expected: [text]\n",
-		"requester/events.yaml":   "request.send:\nmanual.abort:\ndispatch.completed:\nprovider.requested:\n  order_id: text\n",
+		"requester/state.yaml":  "request_state:\n  order_id: {type: text, indexed: true}\n  expected: [text]\n",
+		"requester/events.yaml": "request.send:\nmanual.abort:\ndispatch.completed:\nprovider.requested:\n  order_id: text\n",
 		"requester/nodes.yaml": `requester:
   execution_type: system_node
   event_handlers:
@@ -261,7 +261,7 @@ pins:
   inputs:
     - halt.requested
 `, flow)
-		files[flow+"/entities.yaml"] = "order_state:\n  order_id: {type: text, indexed: true}\n  expected: [text]\n  halt_count: {type: integer, initial: 0}\n"
+		files[flow+"/state.yaml"] = "order_state:\n  order_id: {type: text, indexed: true}\n  expected: [text]\n  halt_count: {type: integer, initial: 0}\n"
 		files[flow+"/events.yaml"] = "manual.abort:\ndispatch.completed:\nitem.completed:\n  member_id: text\n  result: JoinResult\nalternate.completed:\n  member_id: text\n  result: JoinResult\nhalt.observed:\n  order_id: text\n  count: integer\n"
 		for _, name := range []string{"first.closed", "second.closed"} {
 			files[flow+"/events.yaml"] += name + ":\n  expected: integer\n  completed: integer\n  missing: [text]\n  results: [JoinResult]\n  timed_out: boolean\n  close_reason: text\n"

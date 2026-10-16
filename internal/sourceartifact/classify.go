@@ -8,7 +8,7 @@ import (
 )
 
 var declarationFiles = map[string]struct{}{
-	"schema.yaml": {}, "types.yaml": {}, "entities.yaml": {}, "nodes.yaml": {},
+	"schema.yaml": {}, "types.yaml": {}, "state.yaml": {}, "nodes.yaml": {},
 	"events.yaml": {}, "agents.yaml": {}, "tools.yaml": {}, "policy.yaml": {}, "rules.yaml": {},
 }
 

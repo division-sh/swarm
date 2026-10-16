@@ -526,7 +526,7 @@ contract_formats:
     - pins.outputs
     rule: Flow reachability, declared state membership, and flow-local pin event declarations resolve against this parsed
       owner. Runtime liveness and temporal progress are separate runtime concerns. Entity ownership is not selected in
-      schema.yaml for normal flows; the single flow-owned `entities.yaml` entry is authoritative.
+      schema.yaml for normal flows; the single flow-owned `state.yaml` entry is authoritative.
     source_admission: |
       The entire non-empty schema mapping and every nested declaration are
       admitted from the authoritative yamlsource.Value. No reflected root
@@ -1062,9 +1062,9 @@ contract_formats:
         authored accumulator/data/clear paths. Supported entity/tool readbacks
         expose a typed loop projection and omit the mutable internal bucket.
   entity_schema:
-    description: Authoritative entity contracts live in each FlowNode entities.yaml and are owned by filesystem-derived flow identity.
+    description: Authoritative entity contracts live in each FlowNode state.yaml and are owned by filesystem-derived flow identity.
     replacement_surface:
-      owner_file: <flow-path>/entities.yaml (entities.yaml at root)
+      owner_file: <flow-path>/state.yaml (state.yaml at root)
       type_source: <flow-path>/types.yaml plus visible ancestor type declarations
     migration_rules:
       retired:
@@ -1120,8 +1120,8 @@ contract_formats:
       before scalar, named, list, or map type semantics are admitted. Optional
       lists use the explicit scalar metadata slot `type: '[T]?'`; a `?` inside a list
       element, map key/value, named type, or any other non-trailing position is
-      invalid. The retired event-level `required:` list fails closed on
-      presence, including through a YAML merge. Optional `key:` names one
+      invalid. A business field named required follows the ordinary field
+      grammar; there is no event-level required-list override. Optional `_key:` names one
       required declared payload field whose admitted semantics are boolean,
       number, or string; it is the sole event business-key authoring surface.
       Validation ownership is layered, not competing: supported emit
@@ -1135,7 +1135,9 @@ contract_formats:
     format:
       payloadless_event: "investigation.timed_out:"
       event_name: |
-        key: entity_id (optional; must name a required scalar payload field)
+        _key: entity_id (optional; must name a required scalar payload field)
+        _description: Human-readable event documentation
+        _embed: [NamedRecord] (optional; named nonempty records only)
         required_field: type
         optional_field: type?
         nested_field:
@@ -2692,7 +2694,7 @@ contract_formats:
           runtime_callback_routes: '#2423 supersedes consumer-side callback name repair with canonical producer publication; authoritative route semantics remain in route_plan_authority.runtime_callback_context.'
   persistence_model:
     description: Agents do not have raw database access. The platform derives agent-facing persistence tools from the
-      authoritative flow-owned entity contracts in entities.yaml, agents.yaml entity_writes declarations, and the shared
+      authoritative flow-owned entity contracts in state.yaml, agents.yaml entity_writes declarations, and the shared
       type system. This ensures all data access is permissioned, auditable, and storage-backend agnostic.
     role_scoped_entity_tools:
       default_surface: 'For normal agents, the Path alpha entity-tool model is mandatory. If an actor resolves to a
@@ -2756,7 +2758,7 @@ contract_formats:
       compatibility_boundary: 'Retained legacy platform entity handlers are trusted runtime-internal compatibility only.
         A normal agent MUST NOT regain them by setting agent-authored type/role/config fields; they are not a valid normal-agent
         provider-visible or callable surface.'
-    schema_source: entities.yaml + types.yaml
+    schema_source: state.yaml + types.yaml
   required_agents:
     description: 'schema.yaml required_agents is optional. When omitted, the flow''s effective required-agent facts are
       inferred from same-scope agents.yaml map keys plus each agent''s subscriptions and emit_events. When present,
@@ -2794,21 +2796,22 @@ contract_formats:
     explicit authored assertion surface: the verifier checks it matches actual emits, including an explicit empty list, with
     a PRODUCES-DRIFT warning. Authors should omit produces and let the platform derive it.
   underscore_prefix_convention:
-    description: Fields starting with _ in contract YAML files.
-    semantic_fields:
-      _source: 'Retired event metadata alias. Reject on presence; no replacement metadata, compatibility interpretation, or migration path.'
-      _consumer: 'Retired event metadata alias. Reject on presence; no replacement metadata, compatibility interpretation, or migration path.'
-      _status: 'Retired event metadata alias. Reject on presence; no replacement metadata, compatibility interpretation, or migration path.'
-      _producer: 'Retired event metadata alias. Reject on presence; no replacement metadata, compatibility interpretation, or migration path.'
-    documentation_fields: Event metadata aliases, including _note, are rejected on presence. Use YAML comments for
-      event documentation; a leading underscore does not grant a metadata or routing exemption.
+    description: Role-specific closed metadata in flat event and state declarations.
+    event_fields: [_embed, _key, _description]
+    rules: |
+      Non-underscore names are ordinary business fields, including key,
+      description, required, producer, type, payload, fields and payload_type.
+      Their values obey the ordinary field grammar; names confer no envelope
+      or routing authority. Unknown underscore keys refuse strict admission.
+      State metadata remains role-specific and includes _embed. Event
+      _description is documentation, not an acceptance constraint.
 rule:
   statement: |
     Entity contracts are the authoritative source of truth for what
     persists in entity_state. Entity type names are flow-scoped: each
-    entity type is declared in exactly one owner flow's entities.yaml,
+    entity type is declared in exactly one owner flow's state.yaml,
     and the owner flow is determined by the file location under
-    <flow-path>/entities.yaml. Different flows may reuse the
+    <flow-path>/state.yaml. Different flows may reuse the
     same short local name; the fully-qualified form is
     <flow>.<entity_name>.
 
@@ -3127,13 +3130,32 @@ type_system:
     - inheritance / extends clauses
     - recursive types in Wave 1
     allowed_composition: |
-      Reuse is compositional only: types reference other named types via
-      declared fields. There is no inheritance hierarchy.
+      Types reference other named types through declared fields. Flat event
+      and state declarations additionally reuse record fields with the same
+      _embed: [NamedRecord, ...] mechanism. This is field-set composition,
+      never inheritance, extends, override or an importer.
+    flat_record_embedding: |
+      _embed is a nonempty sequence of distinct named nonempty records in
+      the declaring flow's resolved types.yaml catalog. Scalars, enums,
+      lists, maps, optional references and empty records are not embeddable.
+      Resolve and check all declarations, including unused ones, before
+      publishing effective views. Expand the records' fields flat alongside
+      own fields; the sequence has set semantics for acceptance. Any repeated
+      field name refuses, even when the declarations are identical. Own
+      declarations cannot annotate or override embedded fields.
+      Preserve the defining field's type, description, optionality and
+      refinements, including nested named types and equal_to sibling checks.
+      initial, indexed, immutable, citation and other role-specific attributes
+      belong only to own fields. Alias and merge admission uses the existing
+      YAML owner. Provenance records both the defining field coordinate and
+      the actual authored _embed element index, without reopening files.
+      Effective fields capture their declaring catalog: child shadowing and
+      consumer catalog changes never rebind an inherited producer's fields.
   entity_envelope:
     description: |
       Every entity has a platform-owned envelope parallel to the event
       envelope. Envelope fields are implicit and are not author-declared
-      in entities.yaml.
+      in state.yaml.
     fields:
       id: uuid
       current_state: text (or null for stateless flows)
@@ -3152,9 +3174,9 @@ type_system:
       for their required members; missing parents are never synthesized.
 entity_contracts:
   description: |
-    Entity contracts are declared in entities.yaml owned by a single
+    Entity contracts are declared in state.yaml owned by a single
     flow. Ownership is implicit from file location. Bundle-root
-    entities.yaml remains a rare bundle-scope exception.
+    state.yaml remains a rare bundle-scope exception.
   ownership: |
     Exactly one flow owns each entity type. Only the owner flow edits
     the contract and creates instances of that type.
@@ -3162,6 +3184,7 @@ entity_contracts:
     form: |
       <entity_type>:
         _description: Human-readable description
+        _embed: [NamedRecord]
         <field_name>: <type>
         <field_name>:
           type: <type>
@@ -3277,7 +3300,7 @@ entity_contracts:
   one_entity_type_per_flow: |
     For normal flow-instance-centered authoring (stateful schemas with no
     static/template mode), a stateful normal flow declares exactly one entity
-    type in its flow-owned entities.yaml. That single entity type is the
+    type in its flow-owned state.yaml. That single entity type is the
     flow's primary entity; there is no normal-flow primary/secondary split and
     no schema.yaml `entity: <Type>` selector. Bundle-root entity declarations,
     when present, use the same single-entity/no-schema-selector resolver so
@@ -3294,7 +3317,7 @@ entity_contracts:
       State is flow-scoped and declared in schema.yaml. The entity
       envelope field exposed to expressions as _entity.current_state is populated from that flow
       state machine. Authors do not declare a state field or state model
-      inside entities.yaml.
+      inside state.yaml.
 event_payload_migration:
   description: |
     Event payload contracts use the same type system and the same flat
@@ -3303,7 +3326,11 @@ event_payload_migration:
   rules:
     flat_form: |
       Event schemas are declared directly under the event name. Nested
-      `payload:` blocks are retired.
+      wrapper syntax is not accepted; payload is nevertheless an ordinary
+      business field when its value follows the field grammar. _embed is the
+      shared flat-record composition mechanism, _key selects a declared
+      required business-key field after expansion, and _description is
+      event documentation. No business field name is reserved as metadata.
     envelope_payload_split: |
       Envelope fields are platform-managed and accessed through event.*.
       Author-declared payload fields are accessed through payload.*.
@@ -6497,7 +6524,7 @@ engine:
         action: Root flow's platform_version range includes the running platform version.
       - step: 12
         name: initialize_state_stores
-        action: Create or verify platform runtime tables, including the canonical entity_state/accumulator current-state store, event store, and generated node-local state tables. Derive entity contract metadata from entities.yaml plus the shared type system, but do not create product-specific typed entity tables during normal runtime boot.
+        action: Create or verify platform runtime tables, including the canonical entity_state/accumulator current-state store, event store, and generated node-local state tables. Derive entity contract metadata from state.yaml plus the shared type system, but do not create product-specific typed entity tables during normal runtime boot.
       - step: 13
         name: start_system_nodes
         action: Each node subscribes to its declared events. Nodes are ready to handle.
@@ -6698,7 +6725,7 @@ engine:
         is specifically on leaving terminal states, not on backward movement in general. Revision loops, reset-to-earlier-state,
         and similar patterns are valid.
     entity_field_resolution:
-      description: entity.X resolves against declared entities.yaml fields and node-local state; no manifest-owned entity schema exists.
+      description: entity.X resolves against declared state.yaml fields and node-local state; no manifest-owned entity schema exists.
     state_schema_scoping: state_schema fields are node-scoped in storage. In CEL, entity.X reads the current handler node
       state. Cross-node state reads are not supported — use events to pass data between nodes.
   accumulation_engine:
@@ -13630,7 +13657,7 @@ flow_model:
     primary_entity_model:
       status: merge_bearing_contract_behavior
       implementation_tracker: '#1539'
-      declaration_surface: 'exactly one flow-owned entities.yaml entry; root entities.yaml uses the same resolver when present'
+      declaration_surface: 'exactly one flow-owned state.yaml entry; root state.yaml uses the same resolver when present'
       canonical_code_owner: internal/runtime/contracts.WorkflowContractBundle.ResolveRootPrimaryEntity / ResolveFlowPrimaryEntity
       single_entity_rule: >
         If exactly one entity type exists for a normal child flow, that entity
@@ -15709,7 +15736,7 @@ durable_data_resources:
 platform_tables:
   description: Platform-owned infrastructure tables. These exist regardless of which product contracts are loaded. They are
     the normal runtime boot schema, including canonical entity_state. They do not include product-specific typed entity
-    tables derived from entities.yaml. The platform generates DDL for these at boot via GeneratePlatformTableDDLs.
+    tables derived from state.yaml. The platform generates DDL for these at boot via GeneratePlatformTableDDLs.
   retired_instance_routing:
     status: unsupported
     selected_store_policy: Reject the retired routing_rules table before preparation or runtime admission; select a fresh store. No migration, purge, export or compatibility reader is supported.
@@ -25615,7 +25642,7 @@ test_specification:
             `as` aliases are non-empty and unique within the scenario.
           - >
             `type` must match the primary entity type for the selected flow scope.
-            For legacy root packages with no entities.yaml, root setup may use
+            For legacy root packages with no state.yaml, root setup may use
             `type: default` only for state/gate setup; public setup fields still
             require a declared entity contract field.
           - >
@@ -42739,7 +42766,7 @@ filesystem_source_model:
       declarations:
         - schema.yaml
         - types.yaml
-        - entities.yaml
+        - state.yaml
         - nodes.yaml
         - events.yaml
         - agents.yaml

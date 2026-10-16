@@ -3,6 +3,7 @@
     "Entries": {
       "test.event": {
         "BusinessKeyField": "",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {},
@@ -35,10 +36,77 @@
     "ErrorType": "*fmt.wrapError"
   },
   "bare_description": {
-    "Entries": null,
-    "Provenance": null,
-    "Error": "event \"test.event\": an event with no fields is declared bare — write `test.event:` (remove the `mapping`).",
-    "ErrorType": "*fmt.wrapError"
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "",
+        "Description": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {
+            "description": {
+              "Type": "note",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            }
+          },
+          "Required": [
+            "description"
+          ]
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "mapping"
+        },
+        "fields.description.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.description.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 27
+        },
+        "fields.description.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 27,
+          "source_presence": "scalar"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.description.type"
+          ]
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
   },
   "bare_mapping": {
     "Entries": null,
@@ -74,6 +142,7 @@
     "Entries": {
       "test.event": {
         "BusinessKeyField": "id",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {
@@ -130,7 +199,7 @@
           "origin": "authored",
           "source_file": "events.yaml",
           "source_line": 2,
-          "source_column": 8,
+          "source_column": 9,
           "source_presence": "scalar"
         },
         "declaration": {
@@ -199,13 +268,14 @@
   "business_key_space": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event key at events.yaml:2:8 must not have surrounding whitespace",
+    "Error": "event \"test.event\": event key at events.yaml:2:9 must not have surrounding whitespace",
     "ErrorType": "*fmt.wrapError"
   },
   "business_names": {
     "Entries": {
       "test.event": {
         "BusinessKeyField": "",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {
@@ -395,6 +465,7 @@
     "Entries": {
       "test.event": {
         "BusinessKeyField": "",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {
@@ -550,6 +621,7 @@
     "Entries": {
       "test.event": {
         "BusinessKeyField": "",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {
@@ -709,13 +781,14 @@
   "first_error_retirement": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"swarm\" at events.yaml:4:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": event test.event has duplicate effective field \"id\" at events.yaml:2:3 and events.yaml:3:3",
     "ErrorType": "*fmt.wrapError"
   },
   "introductions": {
     "Entries": {
       "test.event": {
         "BusinessKeyField": "",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {
@@ -925,6 +998,7 @@
     "Entries": {
       "**/test.event": {
         "BusinessKeyField": "",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {},
@@ -933,6 +1007,7 @@
       },
       "test.*": {
         "BusinessKeyField": "",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {},
@@ -975,6 +1050,7 @@
     "Entries": {
       "test.event": {
         "BusinessKeyField": "",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {
@@ -1097,6 +1173,7 @@
     "Entries": {
       "test.event": {
         "BusinessKeyField": "",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {
@@ -1214,6 +1291,7 @@
     "Entries": {
       "test.event": {
         "BusinessKeyField": "",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {
@@ -1397,6 +1475,7 @@
     "Entries": {
       "test.event": {
         "BusinessKeyField": "id",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {
@@ -1455,7 +1534,7 @@
           "origin": "authored",
           "source_file": "events.yaml",
           "source_line": 2,
-          "source_column": 8,
+          "source_column": 9,
           "source_presence": "scalar"
         },
         "declaration": {
@@ -1555,6 +1634,7 @@
     "Entries": {
       "test.event": {
         "BusinessKeyField": "",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {
@@ -1652,475 +1732,582 @@
   "reserved_fields/_consumer/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_consumer\"]: event metadata field \"_consumer\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_consumer/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_consumer\"]: event metadata field \"_consumer\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_consumer/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_consumer\"]: event metadata field \"_consumer\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_consumer/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_consumer\"]: event metadata field \"_consumer\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_consumer_type/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_consumer_type\"]: event metadata field \"_consumer_type\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_consumer_type/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_consumer_type\"]: event metadata field \"_consumer_type\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_consumer_type/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_consumer_type\"]: event metadata field \"_consumer_type\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_consumer_type/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_consumer_type\"]: event metadata field \"_consumer_type\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_note/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_note\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_note\"]: event metadata field \"_note\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_note/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_note\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_note\"]: event metadata field \"_note\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_note/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_note\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_note\"]: event metadata field \"_note\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_note/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_note\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_note\"]: event metadata field \"_note\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_producer/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_producer\"]: event metadata field \"_producer\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_producer/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_producer\"]: event metadata field \"_producer\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_producer/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_producer\"]: event metadata field \"_producer\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_producer/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_producer\"]: event metadata field \"_producer\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_source/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_source\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_source\"]: event metadata field \"_source\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_source/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_source\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_source\"]: event metadata field \"_source\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_source/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_source\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_source\"]: event metadata field \"_source\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_source/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_source\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_source\"]: event metadata field \"_source\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_status/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_status\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_status\"]: event metadata field \"_status\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_status/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_status\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_status\"]: event metadata field \"_status\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_status/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_status\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_status\"]: event metadata field \"_status\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/_status/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"_status\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": events.yaml:$[\"test.event\"][\"_status\"]: event metadata field \"_status\" is not supported. (line 2, column 3) Valid fields: _description, _embed, _key. Use one of the supported event metadata fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/alternate_emitters/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"alternate_emitters\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"alternate_emitters\" at events.yaml:2:23: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/alternate_emitters/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"alternate_emitters\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"alternate_emitters\" at events.yaml:2:23: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/alternate_emitters/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"alternate_emitters\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"alternate_emitters\" at events.yaml:2:23: events.yaml:$[\"test.event\"][\"alternate_emitters\"][\"nested\"]: event payload field field \"nested\" is not supported. (line 2, column 24) Valid fields: citation, description, equal_to, length, pattern, range, type. Use one of the supported event payload field fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/alternate_emitters/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"alternate_emitters\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"alternate_emitters\" at events.yaml:2:23: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/author_summary_field/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"author_summary_field\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"author_summary_field\" at events.yaml:2:25: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/author_summary_field/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"author_summary_field\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"author_summary_field\" at events.yaml:2:25: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/author_summary_field/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"author_summary_field\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"author_summary_field\" at events.yaml:2:25: events.yaml:$[\"test.event\"][\"author_summary_field\"][\"nested\"]: event payload field field \"nested\" is not supported. (line 2, column 26) Valid fields: citation, description, equal_to, length, pattern, range, type. Use one of the supported event payload field fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/author_summary_field/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"author_summary_field\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"author_summary_field\" at events.yaml:2:25: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/consumer/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"consumer\" at events.yaml:2:13: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/consumer/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"consumer\" at events.yaml:2:13: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/consumer/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"consumer\" at events.yaml:2:13: events.yaml:$[\"test.event\"][\"consumer\"][\"nested\"]: event payload field field \"nested\" is not supported. (line 2, column 14) Valid fields: citation, description, equal_to, length, pattern, range, type. Use one of the supported event payload field fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/consumer/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"consumer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"consumer\" at events.yaml:2:13: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/consumer_type/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"consumer_type\" at events.yaml:2:18: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/consumer_type/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"consumer_type\" at events.yaml:2:18: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/consumer_type/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"consumer_type\" at events.yaml:2:18: events.yaml:$[\"test.event\"][\"consumer_type\"][\"nested\"]: event payload field field \"nested\" is not supported. (line 2, column 19) Valid fields: citation, description, equal_to, length, pattern, range, type. Use one of the supported event payload field fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/consumer_type/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"consumer_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"consumer_type\" at events.yaml:2:18: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/delivery_channel/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"delivery_channel\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"delivery_channel\" at events.yaml:2:21: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/delivery_channel/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"delivery_channel\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"delivery_channel\" at events.yaml:2:21: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/delivery_channel/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"delivery_channel\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"delivery_channel\" at events.yaml:2:21: events.yaml:$[\"test.event\"][\"delivery_channel\"][\"nested\"]: event payload field field \"nested\" is not supported. (line 2, column 22) Valid fields: citation, description, equal_to, length, pattern, range, type. Use one of the supported event payload field fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/delivery_channel/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"delivery_channel\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"delivery_channel\" at events.yaml:2:21: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/emitter/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"emitter\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"emitter\" at events.yaml:2:12: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/emitter/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"emitter\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"emitter\" at events.yaml:2:12: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/emitter/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"emitter\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"emitter\" at events.yaml:2:12: events.yaml:$[\"test.event\"][\"emitter\"][\"nested\"]: event payload field field \"nested\" is not supported. (line 2, column 13) Valid fields: citation, description, equal_to, length, pattern, range, type. Use one of the supported event payload field fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/emitter/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"emitter\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"emitter\" at events.yaml:2:12: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/emitter_type/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"emitter_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"emitter_type\" at events.yaml:2:17: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/emitter_type/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"emitter_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"emitter_type\" at events.yaml:2:17: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/emitter_type/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"emitter_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"emitter_type\" at events.yaml:2:17: events.yaml:$[\"test.event\"][\"emitter_type\"][\"nested\"]: event payload field field \"nested\" is not supported. (line 2, column 18) Valid fields: citation, description, equal_to, length, pattern, range, type. Use one of the supported event payload field fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/emitter_type/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"emitter_type\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"emitter_type\" at events.yaml:2:17: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/intercepted/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"intercepted\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"intercepted\" at events.yaml:2:16: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/intercepted/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"intercepted\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"intercepted\" at events.yaml:2:16: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/intercepted/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"intercepted\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"intercepted\" at events.yaml:2:16: events.yaml:$[\"test.event\"][\"intercepted\"][\"nested\"]: event payload field field \"nested\" is not supported. (line 2, column 17) Valid fields: citation, description, equal_to, length, pattern, range, type. Use one of the supported event payload field fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/intercepted/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"intercepted\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"intercepted\" at events.yaml:2:16: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/owning_node/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"owning_node\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"owning_node\" at events.yaml:2:16: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/owning_node/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"owning_node\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"owning_node\" at events.yaml:2:16: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/owning_node/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"owning_node\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"owning_node\" at events.yaml:2:16: events.yaml:$[\"test.event\"][\"owning_node\"][\"nested\"]: event payload field field \"nested\" is not supported. (line 2, column 17) Valid fields: citation, description, equal_to, length, pattern, range, type. Use one of the supported event payload field fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/owning_node/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"owning_node\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"owning_node\" at events.yaml:2:16: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/passthrough/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"passthrough\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"passthrough\" at events.yaml:2:16: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/passthrough/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"passthrough\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"passthrough\" at events.yaml:2:16: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/passthrough/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"passthrough\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"passthrough\" at events.yaml:2:16: events.yaml:$[\"test.event\"][\"passthrough\"][\"nested\"]: event payload field field \"nested\" is not supported. (line 2, column 17) Valid fields: citation, description, equal_to, length, pattern, range, type. Use one of the supported event payload field fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/passthrough/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"passthrough\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"passthrough\" at events.yaml:2:16: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/producer/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"producer\" at events.yaml:2:13: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/producer/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"producer\" at events.yaml:2:13: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/producer/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"producer\" at events.yaml:2:13: events.yaml:$[\"test.event\"][\"producer\"][\"nested\"]: event payload field field \"nested\" is not supported. (line 2, column 14) Valid fields: citation, description, equal_to, length, pattern, range, type. Use one of the supported event payload field fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/producer/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"producer\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"producer\" at events.yaml:2:13: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/runtime_handling/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"runtime_handling\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"runtime_handling\" at events.yaml:2:21: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/runtime_handling/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"runtime_handling\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"runtime_handling\" at events.yaml:2:21: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/runtime_handling/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"runtime_handling\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"runtime_handling\" at events.yaml:2:21: events.yaml:$[\"test.event\"][\"runtime_handling\"][\"nested\"]: event payload field field \"nested\" is not supported. (line 2, column 22) Valid fields: citation, description, equal_to, length, pattern, range, type. Use one of the supported event payload field fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/runtime_handling/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"runtime_handling\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"runtime_handling\" at events.yaml:2:21: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/swarm/''": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"swarm\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"swarm\" at events.yaml:2:10: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/swarm/null": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"swarm\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"swarm\" at events.yaml:2:10: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/swarm/{nested: value}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"swarm\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"swarm\" at events.yaml:2:10: events.yaml:$[\"test.event\"][\"swarm\"][\"nested\"]: event payload field field \"nested\" is not supported. (line 2, column 11) Valid fields: citation, description, equal_to, length, pattern, range, type. Use one of the supported event payload field fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "reserved_fields/swarm/{}": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event field name \"swarm\" at events.yaml:2:3 is reserved and cannot declare business payload",
+    "Error": "event \"test.event\": payload field \"swarm\" at events.yaml:2:10: event payload field type is required",
     "ErrorType": "*fmt.wrapError"
   },
   "retired_payload": {
     "Entries": null,
     "Provenance": null,
-    "Error": "event \"test.event\": event payload at events.yaml:2:3 must be a field type declaration, not a nested payload block",
+    "Error": "event \"test.event\": payload field \"payload\" at events.yaml:2:12: events.yaml:$[\"test.event\"][\"payload\"][\"fields\"]: event payload field field \"fields\" is not supported. (line 2, column 13) Valid fields: citation, description, equal_to, length, pattern, range, type. Use one of the supported event payload field fields.",
     "ErrorType": "*fmt.wrapError"
   },
   "retired_required": {
-    "Entries": null,
-    "Provenance": null,
-    "Error": "event \"test.event\": event field name \"required\" at events.yaml:3:3 is reserved for required-by-default field semantics",
-    "ErrorType": "*fmt.wrapError"
+    "Entries": {
+      "test.event": {
+        "BusinessKeyField": "",
+        "Description": "",
+        "Payload": {
+          "Type": "",
+          "Properties": {
+            "id": {
+              "Type": "text",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            },
+            "required": {
+              "Type": "[id]",
+              "Description": "",
+              "Refinements": {
+                "Pattern": "",
+                "Length": {
+                  "Min": null,
+                  "Max": null
+                },
+                "Range": {
+                  "Min": null,
+                  "Max": null
+                },
+                "EqualTo": ""
+              },
+              "Citation": {
+                "Criteria": "",
+                "AllowedClasses": null
+              }
+            }
+          },
+          "Required": [
+            "id",
+            "required"
+          ]
+        }
+      }
+    },
+    "Provenance": {
+      "test.event": {
+        "declaration": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 1,
+          "source_column": 1,
+          "source_presence": "mapping"
+        },
+        "fields.id.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 7
+        },
+        "fields.id.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 2,
+          "source_column": 7,
+          "source_presence": "scalar"
+        },
+        "fields.required.is_optional": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.required.type"
+          ],
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 14
+        },
+        "fields.required.type": {
+          "origin": "authored",
+          "source_file": "events.yaml",
+          "source_line": 3,
+          "source_column": 14,
+          "source_presence": "scalar"
+        },
+        "payload.required": {
+          "origin": "derived",
+          "rule_id": "event_payload_field_required_by_default/v1",
+          "input_paths": [
+            "fields.id.type",
+            "fields.required.type"
+          ]
+        }
+      }
+    },
+    "Error": "",
+    "ErrorType": ""
   },
   "scalar_types": {
     "Entries": {
       "test.event": {
         "BusinessKeyField": "",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {
@@ -2328,6 +2515,7 @@
     "Entries": {
       "test.event": {
         "BusinessKeyField": "",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {
@@ -2412,6 +2600,7 @@
     "Entries": {
       "test.event": {
         "BusinessKeyField": "",
+        "Description": "",
         "Payload": {
           "Type": "",
           "Properties": {

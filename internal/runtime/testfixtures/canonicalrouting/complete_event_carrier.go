@@ -22,6 +22,6 @@ connect:
 `)
 	writeClosedVariantFile(t, root, "source-flow/schema.yaml", "name: source-flow\ninstance: instance_key\npins:\n  outputs: [custom.replay.checked]\n")
 	writeClosedVariantFile(t, root, "source-flow/events.yaml", "custom.replay.checked:\n  task_id: string\n  text: string\n")
-	writeClosedVariantFile(t, root, "source-flow/entities.yaml", "work:\n  instance_key:\n    type: string\n    _unused_reason: exact publication source identity\n")
+	writeClosedVariantFile(t, root, "source-flow/state.yaml", "work:\n  instance_key:\n    type: string\n    _unused_reason: exact publication source identity\n")
 	return root
 }

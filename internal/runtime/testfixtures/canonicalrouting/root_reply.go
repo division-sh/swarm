@@ -11,7 +11,7 @@ func CopyRootReplyBoundary(t testing.TB, rootRequester, explicitCorrelation bool
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	removeInheritedScenarios(t, root)
-	writeClosedVariantFile(t, root, "entities.yaml", "request_state: {}\n")
+	writeClosedVariantFile(t, root, "state.yaml", "request_state: {}\n")
 	requester, provider := ".", "provider"
 	if !rootRequester {
 		requester, provider = "requester", "."

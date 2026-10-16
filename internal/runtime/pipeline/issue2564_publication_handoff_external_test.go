@@ -91,7 +91,7 @@ pins:
   inputs: [bump, recurse]
   outputs: [child]
 `,
-		"entities.yaml": `work:
+		"state.yaml": `work:
   count: {type: integer, initial: 0}
   parents: {type: integer, initial: 0}
   children: {type: integer, initial: 0}

@@ -1622,7 +1622,7 @@ func loadFlowActivationEntityContracts(
 			t.Fatalf("flow activation entity contract requires nonblank flow and entity type: flow=%q type=%q", flowID, entityType)
 		}
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), fmt.Sprintf("name: %s\nstages:\n  active: {}\n", flowID))
-		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), fmt.Sprintf("%s:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n", entityType))
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flowID, "state.yaml"), fmt.Sprintf("%s:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n", entityType))
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-activation-test\n")
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
@@ -5694,7 +5694,7 @@ func loadFilesystemStaticAgentSource(t *testing.T) semanticview.Source {
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
 
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "state.yaml"), `
 item:
   item_id: string
 `)
@@ -5742,7 +5742,7 @@ func loadNestedProjectAgentSource(t *testing.T, mode string) semanticview.Source
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
 
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "state.yaml"), `
 item:
   item_id: string
 `)
@@ -5754,7 +5754,7 @@ item.created:
 	shape := ""
 	if mode == runtimecontracts.FlowModeTemplate {
 		shape = "instance: instance_key\n"
-		writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), "support:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "state.yaml"), "support:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), fmt.Sprintf(`name: support
 %sstages:

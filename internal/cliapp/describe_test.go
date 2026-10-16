@@ -782,7 +782,7 @@ func writeDescribeScalarTemplateInstanceContracts(t testing.TB) string {
 name: scoring
 instance: account_id
 `)
-	writeDescribeTestFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
+	writeDescribeTestFile(t, filepath.Join(root, "scoring", "state.yaml"), `
 account:
   account_id: uuid
 `)
@@ -799,7 +799,7 @@ func writeDescribeRootPrimaryEntityContracts(t testing.TB) string {
 	root := t.TempDir()
 
 	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "name: root-primary-entity\n")
-	writeDescribeTestFile(t, filepath.Join(root, "entities.yaml"), `
+	writeDescribeTestFile(t, filepath.Join(root, "state.yaml"), `
 workspace:
   org_id: text
   region: text

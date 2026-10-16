@@ -228,7 +228,7 @@ types:
     dimension: text
     score: integer
 `)
-	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
+	writeProjectionFixtureFile(t, filepath.Join(root, "scoring", "state.yaml"), `
 vertical:
   scores:
     type: "[DimensionScore]"

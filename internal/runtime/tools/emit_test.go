@@ -571,7 +571,7 @@ func TestValidateGeneratedEmitToolSchemasForSourceRejectsUnloweredContractRefs(t
 func TestLoadRejectsGeneratedEmitToolSchemaWithUnresolvedFlowLocalType(t *testing.T) {
 	root := t.TempDir()
 
-	writeEmitFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: uuid\n")
+	writeEmitFixtureFile(t, filepath.Join(root, "state.yaml"), "item:\n  item_id: uuid\n")
 	writeEmitFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: provider-schema-validation\n")
 
 	writeEmitFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), `name: support

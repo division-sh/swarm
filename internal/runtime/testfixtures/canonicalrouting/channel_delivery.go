@@ -84,7 +84,7 @@ func CopyChannelLearnedObjectAnchorJourney(t testing.TB) string {
 	mailbox := CopyMailboxCompletionMatrix(t)
 	copyTree(t, mailbox, filepath.Join(root, "reviews"))
 	copyTree(t, filepath.Join(mailbox, "observers"), filepath.Join(root, "observers"))
-	removeClosedVariantFiles(t, root, "reviews/observers/mocks/observer.py", "reviews/observers/mocks", "reviews/observers/agents.yaml", "reviews/observers/entities.yaml", "reviews/observers/nodes.yaml", "reviews/observers/schema.yaml", "reviews/observers")
+	removeClosedVariantFiles(t, root, "reviews/observers/mocks/observer.py", "reviews/observers/mocks", "reviews/observers/agents.yaml", "reviews/observers/state.yaml", "reviews/observers/nodes.yaml", "reviews/observers/schema.yaml", "reviews/observers")
 	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"), "provider: telegram\n      tool: telegram.send_message", "provider: mock\n      tool: mock.deliver")
 	applyClosedReplacement(t, filepath.Join(root, "reviews/schema.yaml"), "    - observer.requested\n  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n", "")
 	applyClosedReplacement(t, filepath.Join(root, "reviews/nodes.yaml"), "tool: telegram.send_message", "tool: mock.deliver")
@@ -138,7 +138,7 @@ stages:
 pins:
   inputs: [work.requested]
 `)
-	writeClosedVariantFile(t, root, "reviews/entities.yaml", "work:\n  detail: text\n")
+	writeClosedVariantFile(t, root, "reviews/state.yaml", "work:\n  detail: text\n")
 	writeClosedVariantFile(t, root, "reviews/nodes.yaml", `requester:
   execution_type: system_node
   subscribes_to: [work.requested]
@@ -160,6 +160,6 @@ ingress:
   alias: objects
   providers: [{provider: mock, signing_secret: webhook_signing.mock}]
 `)
-	writeClosedVariantFile(t, root, "ingress/entities.yaml", "object_service: {}\n")
+	writeClosedVariantFile(t, root, "ingress/state.yaml", "object_service: {}\n")
 	return root
 }

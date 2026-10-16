@@ -411,10 +411,10 @@ func dynamicFlowCreationAtomicityBundle(t *testing.T) *runtimecontracts.Workflow
 	t.Helper()
 	root := t.TempDir()
 	for name, content := range map[string]string{
-		"schema.yaml":          "name: dynamic-creation-proof\n",
-		"review/schema.yaml":   "name: review\ninstance: name\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\nauto_emit_on_create:\n  event: task.started\n",
-		"review/entities.yaml": "test_entity:\n  name: text\n",
-		"review/events.yaml":   "task.started:\n  name: text\n",
+		"schema.yaml":        "name: dynamic-creation-proof\n",
+		"review/schema.yaml": "name: review\ninstance: name\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\nauto_emit_on_create:\n  event: task.started\n",
+		"review/state.yaml":  "test_entity:\n  name: text\n",
+		"review/events.yaml": "task.started:\n  name: text\n",
 	} {
 		path := filepath.Join(root, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

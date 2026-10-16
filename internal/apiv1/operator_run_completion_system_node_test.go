@@ -343,7 +343,7 @@ func writeRunCompletionFixtureFile(t *testing.T, path, contents string) {
 
 func isRunCompletionOptionalDeclarationFixture(path string) bool {
 	switch filepath.Base(path) {
-	case "agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
+	case "agents.yaml", "state.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
 		return true
 	default:
 		return false

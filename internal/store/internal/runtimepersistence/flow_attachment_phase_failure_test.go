@@ -152,10 +152,10 @@ func TestFlowAttachmentPhaseFailureRetainsConstructionBothStores(t *testing.T) {
 					routes := &attachmentAgentRouteProbe{prepared: make(map[effects.LifecycleToken]struct{}), fenced: make(map[effects.LifecycleToken]struct{}), removed: make(map[effects.LifecycleToken]struct{})}
 					workflow.enabled.Store(true)
 					f := newReceiverConfigActivationFixtureWithOwnership(t, backend, true, map[string]string{
-						"schema.yaml":          "name: phase-failure\n",
-						"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending:\n    timers:\n      - {id: pending.timeout, after: 2h, emit: timer.timeout}\npins:\n  inputs:\n    - task.started\n",
-						"review/entities.yaml": "review_item:\n  request_id: text\n",
-						"review/events.yaml":   "task.started:\ntimer.timeout:\n",
+						"schema.yaml":        "name: phase-failure\n",
+						"review/schema.yaml": "name: review\ninstance: request_id\nstages:\n  pending:\n    timers:\n      - {id: pending.timeout, after: 2h, emit: timer.timeout}\npins:\n  inputs:\n    - task.started\n",
+						"review/state.yaml":  "review_item:\n  request_id: text\n",
+						"review/events.yaml": "task.started:\ntimer.timeout:\n",
 					}, nil, func(t *testing.T, am *manager.AgentManager) *manager.AgentManager {
 						t.Cleanup(func() {
 							err := am.Shutdown()

@@ -221,9 +221,9 @@ func boundedStandingConnectorBundle(t *testing.T, bundle *runtimecontracts.Workf
 		Tools:  bundle.Tools,
 	}
 	admitted := loadRuntimeTempBundle(t, map[string]string{
-		"schema.yaml":                   "name: bounded-standing-connector\n",
-		"bounded_inbound/schema.yaml":   "name: bounded_inbound\nstages:\n  active: {}\n",
-		"bounded_inbound/entities.yaml": "bounded_entity: {}\n",
+		"schema.yaml":                 "name: bounded-standing-connector\n",
+		"bounded_inbound/schema.yaml": "name: bounded_inbound\nstages:\n  active: {}\n",
+		"bounded_inbound/state.yaml":  "bounded_entity: {}\n",
 	})
 	admitted.RootSchema = bundle.RootSchema
 	admitted.FlowTree.Root.Schema = *bundle.RootSchema

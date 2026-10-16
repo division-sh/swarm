@@ -28,14 +28,14 @@ func CopySelectedDeploymentResource(t testing.TB, route string, keyed bool) stri
 	root := CopyRootOutputSingletonConnect(t)
 	eventsYAML := "root.ready:\n  account_id: text\n  document: json?\n"
 	if keyed {
-		eventsYAML = "root.ready:\n  key: account_id\n  account_id: text\n  document: json?\n"
+		eventsYAML = "root.ready:\n  _key: account_id\n  account_id: text\n  document: json?\n"
 	}
 	writeClosedVariantFile(t, root, "events.yaml", eventsYAML+DeploymentFixtureCloseDeclaration)
 	writeClosedVariantFile(t, root, "schema.yaml", "name: root-output-singleton-connect\nstages: {active: {}, done: {final: true}}\npins:\n  inputs: [fixture.close.requested]\n  outputs:\n    - root.ready\n    - fixture.close.requested\nconnect:\n  - event: root.ready\n    from: .\n    to: consumer\n  - event: fixture.close.requested\n    from: .\n    to: consumer\n")
-	writeClosedVariantFile(t, root, "entities.yaml", "fixture_state: {}\n")
+	writeClosedVariantFile(t, root, "state.yaml", "fixture_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "close-fixture:\n  execution_type: system_node\n  event_handlers:\n    fixture.close.requested: {advances_to: done}\n")
 	writeClosedVariantFile(t, root, "consumer/schema.yaml", "name: consumer\nstages: {active: {}, done: {final: true}}\npins:\n  inputs: [root.ready, fixture.close.requested]\n")
-	writeClosedVariantFile(t, root, "consumer/entities.yaml", "consumer_state: {}\n")
+	writeClosedVariantFile(t, root, "consumer/state.yaml", "consumer_state: {}\n")
 	writeClosedVariantFile(t, root, "consumer/nodes.yaml", "consumer-node:\n  execution_type: system_node\n  event_handlers:\n    root.ready: {}\n    fixture.close.requested: {advances_to: done}\n")
 	switch route {
 	case "singleton":
@@ -43,7 +43,7 @@ func CopySelectedDeploymentResource(t testing.TB, route string, keyed bool) stri
 		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "consumer/schema.yaml"), "name: consumer\n", "name: consumer\ninstance: account_id\n")
 		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "schema.yaml"), "  - event: root.ready\n    from: .\n    to: consumer\n", "  - event: root.ready\n    from: .\n    to: consumer\n    resolution: select-or-create\n")
 		replaceDeploymentFixtureExactlyOnce(t, filepath.Join(root, "schema.yaml"), "  - event: fixture.close.requested\n    from: .\n    to: consumer\n", "  - event: fixture.close.requested\n    from: .\n    to: consumer\n    resolution: select\n")
-		writeClosedVariantFile(t, root, "consumer/entities.yaml", "consumer_state:\n  account_id: text\n")
+		writeClosedVariantFile(t, root, "consumer/state.yaml", "consumer_state:\n  account_id: text\n")
 	case "root":
 		if err := os.RemoveAll(filepath.Join(root, "consumer")); err != nil {
 			t.Fatal(err)

@@ -221,7 +221,7 @@ types:
   ScoreBreakdown:
     total: numeric
 `)
-	writeFixtureFile(t, root+"/scoring/entities.yaml", `
+	writeFixtureFile(t, root+"/scoring/state.yaml", `
 vertical:
   _description: scoring vertical
   name: text
@@ -604,7 +604,7 @@ stages:
   pending: {}
   done: {final: true}
 `)
-	writeFixtureFile(t, root+"/scoring/entities.yaml", `
+	writeFixtureFile(t, root+"/scoring/state.yaml", `
 vertical:
   name: text
 campaign:
@@ -626,7 +626,7 @@ stages:
   pending: {}
   done: {final: true}
 `)
-	writeFixtureFile(t, root+"/entities.yaml", `
+	writeFixtureFile(t, root+"/state.yaml", `
 vertical:
   name: text
 campaign:
@@ -650,7 +650,7 @@ stages:
   pending: {}
   done: {final: true}
 `)
-	writeFixtureFile(t, root+"/scoring/entities.yaml", `
+	writeFixtureFile(t, root+"/scoring/state.yaml", `
 vertical:
   name: text
 `)
@@ -671,7 +671,7 @@ stages:
   pending: {}
   done: {final: true}
 `)
-	writeFixtureFile(t, root+"/entities.yaml", `
+	writeFixtureFile(t, root+"/state.yaml", `
 vertical:
   name: text
 `)
@@ -693,7 +693,7 @@ stages:
   pending: {}
   done: {final: true}
 `)
-	writeFixtureFile(t, root+"/scoring/entities.yaml", `
+	writeFixtureFile(t, root+"/scoring/state.yaml", `
 vertical:
   name: text
 `)
@@ -726,9 +726,18 @@ composite_score:
 func TestEventCatalogEntryDecode_RejectsRetiredAuthorSummaryField(t *testing.T) {
 	for _, value := range []string{"text", "null", "false", "{}"} {
 		t.Run(value, func(t *testing.T) {
-			_, err := admitEventCatalogEntryForTest(t, "text: text\nauthor_summary_field: "+value+"\n")
-			if err == nil || !strings.Contains(err.Error(), "reserved") || !strings.Contains(err.Error(), "author_summary_field") {
-				t.Fatalf("retired selector admission = %v", err)
+			entry, err := admitEventCatalogEntryForTest(t, "text: text\nauthor_summary_field: "+value+"\n")
+			if value == "text" {
+				if err != nil || entry.Payload.Properties["author_summary_field"].Type != "text" {
+					t.Fatalf("ordinary business field was interpreted as a selector: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				_, err = newCompiledEventSchema(".", "test.event", entry, TypeCatalogDocument{}, "", CompiledEventSchemaSource{})
+			}
+			if err == nil || !strings.Contains(err.Error(), "author_summary_field") {
+				t.Fatalf("malformed ordinary field accepted: %v", err)
 			}
 		})
 	}
@@ -740,7 +749,7 @@ payload:
   entity_id: uuid
 vertical_name: text
 `)
-	if err == nil || !strings.Contains(err.Error(), "not a nested payload block") || !strings.Contains(err.Error(), "payload") {
+	if err == nil || !strings.Contains(err.Error(), `field "entity_id" is not supported`) || !strings.Contains(err.Error(), "payload") {
 		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED nested payload rejection", err)
 	}
 }

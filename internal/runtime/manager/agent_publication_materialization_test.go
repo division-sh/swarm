@@ -24,7 +24,7 @@ func TestMaterializedAgentEmitPermissionRetainsDeclarationOnEveryScope(t *testin
 			shape = "instance: instance_key\n"
 		}
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "schema.yaml"), fmt.Sprintf("%sstages:\n  active: {}\n", shape))
-		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "entities.yaml"), "item:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
+		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "state.yaml"), "item:\n  instance_key: {type: text, _unused_reason: fixture instance identity}\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "events.yaml"), "result.done:\n  owned: text\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, flow.id, "agents.yaml"), "worker:\n  role: worker\n  intent: {inline: Emit this flow's result.}\n  emit_events: [result.done]\n")
 	}

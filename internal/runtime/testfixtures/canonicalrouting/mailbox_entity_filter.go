@@ -20,7 +20,7 @@ pins:
   inputs:
     - review.requested
 `)
-	writeClosedVariantFile(t, root, "entities.yaml", "review_item:\n  item_id: text\n")
+	writeClosedVariantFile(t, root, "state.yaml", "review_item:\n  item_id: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", "review.requested:\n  item_id: text\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `reviewer:
   execution_type: system_node

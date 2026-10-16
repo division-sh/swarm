@@ -69,7 +69,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 	switch variant {
 	case LifecycleStaticLoopLocal, LifecycleStaticLoopDangling, LifecycleStaticLoopNoEmit, LifecycleStaticLoopLocalNodeInvalid:
 		schema = strings.Split(schema, "  outputs:\n")[0]
-		removeClosedVariantFiles(t, root, "sink/schema.yaml", "sink/nodes.yaml", "sink/entities.yaml")
+		removeClosedVariantFiles(t, root, "sink/schema.yaml", "sink/nodes.yaml", "sink/state.yaml")
 		if err := os.Remove(filepath.Join(root, "sink")); err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +99,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 			writeClosedVariantFile(t, root, scope+"/schema.yaml", schema)
 			writeClosedVariantFile(t, root, scope+"/events.yaml", events)
 			writeClosedVariantFile(t, root, scope+"/nodes.yaml", nodes)
-			writeClosedVariantFile(t, root, scope+"/entities.yaml", lifecycleStaticRead(t, root, "entities.yaml"))
+			writeClosedVariantFile(t, root, scope+"/state.yaml", lifecycleStaticRead(t, root, "state.yaml"))
 		}
 		if variant == LifecycleStaticForeignOnly {
 			nodes = strings.Split(nodes, "collector:\n")[0]
@@ -139,7 +139,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		schema = strings.Replace(schema, "  review:\n", "  review:\n    timers:\n      - {id: reminder, after: 1h, emit: work.completed}\n", 1)
 	case LifecycleStaticLoopScopeMatrix:
 		for _, scope := range []string{"left", "right", "left/deep"} {
-			for _, file := range []string{"schema.yaml", "events.yaml", "nodes.yaml", "entities.yaml", "sink/schema.yaml", "sink/nodes.yaml", "sink/entities.yaml"} {
+			for _, file := range []string{"schema.yaml", "events.yaml", "nodes.yaml", "state.yaml", "sink/schema.yaml", "sink/nodes.yaml", "sink/state.yaml"} {
 				writeClosedVariantFile(t, root, scope+"/"+file, lifecycleStaticRead(t, root, file))
 			}
 		}
@@ -153,7 +153,7 @@ func CopyLifecycleEmitterStatic(t testing.TB, variant LifecycleEmitterStaticVari
 		// Unlike the journey shell with its removed collector, this minimal
 		// dangling contract has no unrelated unused state or entity fields.
 		schema = strings.Replace(schema, "  approved: {}\n  done: {final: true}", "  approved: {final: true}", 1)
-		writeClosedVariantFile(t, root, "entities.yaml", "work: {}\n")
+		writeClosedVariantFile(t, root, "state.yaml", "work: {}\n")
 	case LifecycleStaticLoopUnknownEvent:
 		schema = strings.Replace(schema, "event: loop.escaped", "event: absent.event", 1)
 	case LifecycleStaticLoopBadField:

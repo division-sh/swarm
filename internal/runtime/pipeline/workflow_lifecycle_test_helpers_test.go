@@ -29,12 +29,12 @@ func withLiveWorkflowInitialEntry(ctx context.Context) context.Context {
 func lifecycleStateFixtureForTest(t *testing.T, flowID, from, to string, eventTypes ...string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	prefix := ""
-	files := map[string]string{"schema.yaml": "name: lifecycle-state-fixture\n", "entities.yaml": "test_entity: {}\n"}
+	files := map[string]string{"schema.yaml": "name: lifecycle-state-fixture\n", "state.yaml": "test_entity: {}\n"}
 	if flowID != "." {
 		prefix = flowID + "/"
 	}
 	files[prefix+"schema.yaml"] = fmt.Sprintf("name: lifecycle-state-fixture\nstages:\n  %s: {}\n  %s: {}\n", from, to)
-	files[prefix+"entities.yaml"] = "test_entity: {}\n"
+	files[prefix+"state.yaml"] = "test_entity: {}\n"
 	nodes := "lifecycle-owner:\n  execution_type: system_node\n  event_handlers:\n"
 	for _, eventType := range eventTypes {
 		files[prefix+"events.yaml"] += eventType + ":\n"

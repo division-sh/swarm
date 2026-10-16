@@ -54,7 +54,7 @@ pins:
     - state.seeded
     - state.closed
 `)
-		writeClosedVariantFile(t, root, owner.path+"/entities.yaml", owner.entity+":\n  name: text\n")
+		writeClosedVariantFile(t, root, owner.path+"/state.yaml", owner.entity+":\n  name: text\n")
 		writeClosedVariantFile(t, root, owner.path+"/nodes.yaml", `state-owner:
   execution_type: system_node
   subscribes_to: [state.seeded, state.closed]

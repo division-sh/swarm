@@ -336,7 +336,7 @@ func TestFlowConstructorNestedPresence(t *testing.T) {
 
 func TestKeylessConstructorHasNoSuppliedClass(t *testing.T) {
 	root := canonicalrouting.CopyTemplateInstanceRoute(t, canonicalrouting.TemplateInstanceRouteOptions{})
-	writeBootverifyFixtureFile(t, filepath.Join(root, "producer/entities.yaml"), "producer_state:\n  count: {type: integer, initial: 0}\n  note: text?\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "producer/state.yaml"), "producer_state:\n  count: {type: integer, initial: 0}\n  note: text?\n")
 	repo := repoRootForBootverifyTest(t)
 	source := semanticview.Wrap(loadFixtureBundleAt(t, repo, root, c.DefaultPlatformSpecFile(repo)))
 	constructor, err := pipeline.CompileFlowConstructor(source, "producer", "")

@@ -30,7 +30,7 @@ pins:
   inputs: [requested]
   outputs: [completed]
 `)
-			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "case: {}\n")
+			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "state.yaml"), "case: {}\n")
 			writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "requested:\n  selector: "+tc.fieldType+"\ncompleted:\n  choice: text\n")
 			// The lookup has one value, chosen, and fails on a missing key; its
 			// successful branch is therefore the effectful structural default.

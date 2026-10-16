@@ -61,7 +61,7 @@ pins:
   outputs:
     - item.recorded
 `,
-		"entities.yaml": "work:\n  marker: text?\n",
+		"state.yaml": "work:\n  marker: text?\n",
 		"types.yaml": `types:
   AuthoredNested:
     id: text

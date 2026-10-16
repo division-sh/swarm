@@ -316,7 +316,7 @@ func removeClosedVariantFiles(t testing.TB, root string, relativePaths ...string
 
 func isOptionalDeclarationFile(path string) bool {
 	switch filepath.Base(path) {
-	case "agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
+	case "agents.yaml", "state.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
 		return true
 	default:
 		return false
@@ -378,7 +378,7 @@ pins:
   inputs:
     - legacy.seen
 `)
-	writeClosedNegativeFile(t, root, "legacy_static/entities.yaml", `legacy_record:
+	writeClosedNegativeFile(t, root, "legacy_static/state.yaml", `legacy_record:
   legacy_id:
     type: text
     indexed: true
@@ -404,7 +404,7 @@ pins:
 // caller-selected identity invalidity used by the retirement proof.
 func AddRootDefaultEntityIDForNegativeMutation(t testing.TB, root string) {
 	t.Helper()
-	writeClosedNegativeFile(t, root, "entities.yaml", "subject:\n  display_name: text\n")
+	writeClosedNegativeFile(t, root, "state.yaml", "subject:\n  display_name: text\n")
 	writeClosedNegativeFile(t, root, "events.yaml", "subject.created:\n  entity_id: text\n  display_name: text\n")
 	writeClosedNegativeFile(t, root, "schema.yaml", `name: template-select-or-create
 stages:

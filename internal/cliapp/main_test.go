@@ -3422,7 +3422,7 @@ stages:
   waiting: {}
   done: {final: true}
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "state.yaml"), `
 ticket:
   ticket_id:
     type: string
@@ -3527,7 +3527,7 @@ stages:
   idle: {}
   done: {final: true}
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), `
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "child", "state.yaml"), `
 case:
   business_brief:
     type: text
@@ -3698,7 +3698,7 @@ stages:
 item.arrived:
   expected_count: integer
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "item: {}\n")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "state.yaml"), "item: {}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
   execution_type: system_node
@@ -3758,7 +3758,7 @@ func writeWorkflowValidationFixtureFile(t *testing.T, path, contents string) {
 
 func isOptionalWorkflowDeclarationFixture(path string) bool {
 	switch filepath.Base(path) {
-	case "agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
+	case "agents.yaml", "state.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
 		return true
 	default:
 		return false

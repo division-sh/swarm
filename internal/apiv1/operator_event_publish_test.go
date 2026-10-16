@@ -2628,7 +2628,7 @@ pins:
   topic: text
   entity_id: text?
 `)
-	writeRunCompletionFixtureFile(t, root+"/operating/entities.yaml", "operating:\n  operating_id: text\n")
+	writeRunCompletionFixtureFile(t, root+"/operating/state.yaml", "operating:\n  operating_id: text\n")
 	repoRoot := runCompletionRepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,

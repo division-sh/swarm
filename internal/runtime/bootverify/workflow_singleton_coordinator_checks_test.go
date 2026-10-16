@@ -91,10 +91,10 @@ coordinator_state:
 	if !typed || diagnostic.Code != "contract_loader.invalid_type_reference" {
 		t.Fatalf("unresolved contained type lost typed admission refusal: %v", err)
 	}
-	if diagnostic.Location.File != "coordinator/entities.yaml" || diagnostic.Location.YAMLPath != "entity coordinator_state.verticals" {
+	if diagnostic.Location.File != "coordinator/state.yaml" || diagnostic.Location.YAMLPath != "entity coordinator_state.verticals" {
 		t.Fatalf("unresolved contained type lost exact source location: %+v", diagnostic.Location)
 	}
-	if !strings.Contains(err.Error(), `coordinator/entities.yaml: entity coordinator_state.verticals: unknown catalog type "MissingType"`) {
+	if !strings.Contains(err.Error(), `coordinator/state.yaml: entity coordinator_state.verticals: unknown catalog type "MissingType"`) {
 		t.Fatalf("unresolved contained type lost source and cause: %v", err)
 	}
 }
@@ -566,7 +566,7 @@ func writeSingletonCoordinatorFixtureRoot(t *testing.T, flowSchema, flowEntities
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: singleton-coordinator-fixture\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "schema.yaml"), strings.TrimSpace(flowSchema)+"\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "types.yaml"), singletonCoordinatorTypesYAML())
-	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "entities.yaml"), strings.TrimSpace(flowEntities)+"\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "state.yaml"), strings.TrimSpace(flowEntities)+"\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "coordinator", "events.yaml"), `
 job.received:
   vertical_id: text

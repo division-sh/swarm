@@ -76,7 +76,7 @@ func TestClockScheduleRequiresKeylessAncestry(t *testing.T) {
 				schema := "stages: []\n"
 				if path == keyed {
 					schema += "instance: account_id\n"
-					if err := os.WriteFile(filepath.Join(dir, "entities.yaml"), []byte("account:\n  account_id: text\n"), 0600); err != nil {
+					if err := os.WriteFile(filepath.Join(dir, "state.yaml"), []byte("account:\n  account_id: text\n"), 0600); err != nil {
 						t.Fatal(err)
 					}
 				}

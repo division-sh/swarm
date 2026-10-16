@@ -26,7 +26,7 @@ func (r optionalDeclarationRole) fileName() string {
 	case optionalDeclarationAgents:
 		return "agents.yaml"
 	case optionalDeclarationEntities:
-		return "entities.yaml"
+		return "state.yaml"
 	case optionalDeclarationEvents:
 		return "events.yaml"
 	case optionalDeclarationNodes:

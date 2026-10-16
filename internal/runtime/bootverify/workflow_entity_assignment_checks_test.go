@@ -19,13 +19,13 @@ func TestEntityProgressivePresenceSourceLoadedFullVerify(t *testing.T) {
 		t.Run(variant, func(t *testing.T) {
 			repo := repoRootForBootverifyTest(t)
 			root := t.TempDir()
-			for _, name := range []string{"manifest.yaml", "schema.yaml", "entities.yaml", "events.yaml", "nodes.yaml"} {
+			for _, name := range []string{"manifest.yaml", "schema.yaml", "state.yaml", "events.yaml", "nodes.yaml"} {
 				data, err := os.ReadFile(filepath.Join(repo, "tests", "conformance", "entity-progressive-presence", name))
 				if err != nil {
 					t.Fatal(err)
 				}
 				contents := string(data)
-				if name == "entities.yaml" && strings.HasPrefix(variant, "naive optional") {
+				if name == "state.yaml" && strings.HasPrefix(variant, "naive optional") {
 					contents = strings.Replace(contents, "business_brief: text", "business_brief: text?", 1)
 				}
 				if name == "nodes.yaml" {
@@ -72,7 +72,7 @@ func TestEntityDefiniteAssignmentLoops(t *testing.T) {
 	for _, variant := range []string{"start assignment", "backedge only"} {
 		t.Run(variant, func(t *testing.T) {
 			root := canonicalrouting.CopyForkLoopGenerationState(t)
-			writeBootverifyFixtureFile(t, filepath.Join(root, "review", "entities.yaml"), "work:\n  observed_revision: {type: text, initial: ''}\n  observed_token: {type: text, initial: ''}\n  brief: text\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "review", "state.yaml"), "work:\n  observed_revision: {type: text, initial: ''}\n  observed_token: {type: text, initial: ''}\n  brief: text\n")
 			path := filepath.Join(root, "review", "nodes.yaml")
 			data, err := os.ReadFile(path)
 			if err != nil {
@@ -217,7 +217,7 @@ stages:
   consume: {}
   done: {final: true}
 `)
-			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), "work:\n  score: {type: integer}\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "state.yaml"), "work:\n  score: {type: integer}\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `work.opened:
 work.scored:
   score: integer
@@ -375,7 +375,7 @@ func TestEntityDefiniteAssignmentStructuralMutations(t *testing.T) {
 			root := t.TempDir()
 			writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: mutation-assignment\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "types.yaml"), "types:\n  Profile:\n    id: text\n    note: text?\n")
-			writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "work:\n  profile: Profile\n  observed: text\n  notes: [text]\n  by_id: map[text]Profile\n")
+			writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), "work:\n  profile: Profile\n  observed: text\n  notes: [text]\n  by_id: map[text]Profile\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "work.requested:\n")
 			writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `owner:
   execution_type: system_node

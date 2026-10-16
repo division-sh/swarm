@@ -28,7 +28,7 @@ func TestA9KeyedStandingGenerationDoesNotConstructBothStores(t *testing.T) {
 					"parent/service/schema.yaml": "name: service\n",
 				}
 				documents[filepath.Join(keyed, "schema.yaml")] += "instance: tenant\n"
-				documents[filepath.Join(keyed, "entities.yaml")] = "owner:\n  tenant: text\n"
+				documents[filepath.Join(keyed, "state.yaml")] = "owner:\n  tenant: text\n"
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
 				source := semanticview.Wrap(f.bundle)
 				fact, found := correlation.SourceArtifactFactFromContext(f.ctx)
@@ -179,9 +179,9 @@ func TestStandingPreparationVerifiesCompleteRootTreeBothStores(t *testing.T) {
 					"service/schema.yaml":        "name: service\n",
 					"service/detail/schema.yaml": "name: detail\n",
 					"receiver/schema.yaml":       "name: receiver\n",
-					"receiver/entities.yaml":     "receipt:\n  marker: {type: text, initial: unchanged}\n",
+					"receiver/state.yaml":        "receipt:\n  marker: {type: text, initial: unchanged}\n",
 					"deferred/schema.yaml":       "name: deferred\ninstance: job_id\npins:\n  inputs:\n    - job.started\n",
-					"deferred/entities.yaml":     "job:\n  job_id: text\n",
+					"deferred/state.yaml":        "job:\n  job_id: text\n",
 					"deferred/events.yaml":       "job.started:\n  job_id: text\n",
 				}, nil)
 				runID := correlation.RunIDFromContext(f.ctx)

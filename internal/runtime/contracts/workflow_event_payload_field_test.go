@@ -53,8 +53,8 @@ func TestEventCatalogPayloadFieldDistinguishesRetiredBlocksFromMalformedFields(t
 		yaml    string
 		wantErr string
 	}{
-		{name: "properties block", yaml: "payload:\n  properties:\n    message: json\n", wantErr: "not a nested payload block"},
-		{name: "child field block", yaml: "payload:\n  message: json\n", wantErr: "not a nested payload block"},
+		{name: "properties block", yaml: "payload:\n  properties:\n    message: json\n", wantErr: `field "properties" is not supported`},
+		{name: "child field block", yaml: "payload:\n  message: json\n", wantErr: `field "message" is not supported`},
 		{name: "missing type", yaml: "payload:\n  description: raw provider envelope\n", wantErr: "event payload field type is required"},
 		{name: "unknown metadata with type", yaml: "payload:\n  type: json\n  mystery: true\n", wantErr: "event payload field field \"mystery\" is not supported"},
 		{name: "invalid refinement", yaml: "payload:\n  type: text\n  pattern: \"[\"\n", wantErr: "must compile as a regular expression"},

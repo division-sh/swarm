@@ -37,7 +37,7 @@ func TestEventCatalogFactoringRetainedArtifactBothStores(t *testing.T) {
 			root := t.TempDir()
 			for name, body := range map[string]string{
 				"schema.yaml": "name: event-retained\nstages: {done: {final: true}}\n",
-				"events.yaml": "# exact authored bytes\nsignal.ping:  # bare\ntask.requested:\n  key: id\n  id: uuid\n  note: {type: 'text?', length: {min: 0, max: 8}}\n",
+				"events.yaml": "# exact authored bytes\nsignal.ping:  # bare\ntask.requested:\n  _key: id\n  id: uuid\n  note: {type: 'text?', length: {min: 0, max: 8}}\n",
 			} {
 				if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0600); err != nil {
 					t.Fatal(err)

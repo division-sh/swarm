@@ -246,7 +246,7 @@ ingress:
 	if err := os.WriteFile(schemaPath, []byte(updatedSchema), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(sourceRoot, "fulfillment", "entities.yaml"), []byte("fulfillment: {}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(sourceRoot, "fulfillment", "state.yaml"), []byte("fulfillment: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -33,7 +33,7 @@ func TestCanonicalRetirementBundleAdmission(t *testing.T) {
 			file:      "events.yaml",
 			canonical: "work.requested:\n  work_id: text\n",
 			retired:   "work.requested:\n  work_id: text\n  emitter: worker\n",
-			want:      `event field name "emitter"`,
+			want:      `unknown catalog type "worker"`,
 		},
 		{
 			name:      "input pin has derived name",

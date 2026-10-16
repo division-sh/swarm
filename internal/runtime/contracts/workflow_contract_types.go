@@ -1048,14 +1048,18 @@ type TypeFieldSpec struct {
 	IsOptional  bool              `yaml:"-" json:"is_optional"`
 	Description string            `yaml:"description"`
 	Refinements SchemaRefinements `yaml:"-"`
+	source      yamlsource.Location
 }
 
 type EntityContractsDocument map[string]EntityContract
 
 type EntityContract struct {
-	Description string                     `yaml:"-"`
-	Owner       string                     `yaml:"-"`
-	Fields      map[string]EntityFieldDecl `yaml:"-"`
+	Description         string                     `yaml:"-"`
+	Owner               string                     `yaml:"-"`
+	Fields              map[string]EntityFieldDecl `yaml:"-"`
+	embeds              []catalogEmbedding
+	types               *TypeCatalogDocument
+	admissionProvenance map[string]EffectiveValueProvenance
 }
 
 type EntityFieldDecl struct {
@@ -1070,6 +1074,7 @@ type EntityFieldDecl struct {
 	Project            map[string]any    `yaml:"project"`
 	UnusedReason       string            `yaml:"_unused_reason"`
 	UnusedReaderReason string            `yaml:"_unused_reader_reason"`
+	source             yamlsource.Location
 }
 type ProjectFlowIngress struct {
 	Alias     string                       `yaml:"alias,omitempty"`
@@ -1497,9 +1502,13 @@ type SystemNodeEventHandler struct {
 	Clear            *ClearSpec               `yaml:"clear"`
 }
 type EventCatalogEntry struct {
-	BusinessKeyField    string           `yaml:"key"`
+	BusinessKeyField    string           `yaml:"_key"`
+	Description         string           `yaml:"_description"`
 	Payload             EventPayloadSpec `yaml:"payload"`
 	admissionProvenance map[string]EffectiveValueProvenance
+	embeds              []catalogEmbedding
+	types               *TypeCatalogDocument
+	fieldSources        map[string]yamlsource.Location
 }
 
 type AgentRegistryEntry struct {

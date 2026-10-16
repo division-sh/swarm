@@ -29,7 +29,7 @@ pins:
   inputs: [task.assigned, task.feedback]
   outputs: [task.result]
 `)
-	writeClosedVariantFile(t, root, filepath.Join("child", "entities.yaml"), `
+	writeClosedVariantFile(t, root, filepath.Join("child", "state.yaml"), `
 task:
   retry_count:
     type: integer

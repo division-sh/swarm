@@ -26,8 +26,8 @@ ingress:
         authentication: {kind: hmac_sha256, header: X-Signature, prefix: "sha256=", encoding: hex}
         delivery_id: {source: json_path, json_path: "$.delivery_id"}
 `,
-		"events.yaml":   "account.opened:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n",
-		"entities.yaml": "account_state:\n  provider_event_id: text\n  processed_count: {type: integer, initial: 0}\n",
+		"events.yaml": "account.opened:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n",
+		"state.yaml":  "account_state:\n  provider_event_id: text\n  processed_count: {type: integer, initial: 0}\n",
 		"nodes.yaml": `receiver:
   execution_type: system_node
   subscribes_to: [account.opened]
@@ -50,7 +50,7 @@ func CopyKeyedRootRawIngressCreationEvent(t testing.TB) string {
 	root := CopyKeyedRootRawIngress(t)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "stages: []\n", "stages: []\nauto_emit_on_create: {event: root.created}\n")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "account.opened:\n", "root.created:\n  provider_event_id: text\n  processed_count: integer\n  creation_count: integer\naccount.opened:\n")
-	applyClosedReplacement(t, filepath.Join(root, "entities.yaml"), "  processed_count: {type: integer, initial: 0}\n", "  processed_count: {type: integer, initial: 0}\n  creation_count: {type: integer, initial: 0}\n")
+	applyClosedReplacement(t, filepath.Join(root, "state.yaml"), "  processed_count: {type: integer, initial: 0}\n", "  processed_count: {type: integer, initial: 0}\n  creation_count: {type: integer, initial: 0}\n")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "subscribes_to: [account.opened]", "subscribes_to: [account.opened, root.created]")
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "  event_handlers:\n", `  event_handlers:
     root.created:
@@ -76,7 +76,7 @@ ingress:
       admission: {kind: pack, pack: {id: provider.telegram}}
 `)
 	removeClosedVariantFiles(t, root, "events.yaml")
-	writeClosedVariantFile(t, root, "entities.yaml", "chat_state:\n  conversation_reference: text\n  processed_count: {type: integer, initial: 0}\n")
+	writeClosedVariantFile(t, root, "state.yaml", "chat_state:\n  conversation_reference: text\n  processed_count: {type: integer, initial: 0}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "receiver:\n  execution_type: system_node\n  subscribes_to: [inbound.telegram.text_message]\n  event_handlers:\n    inbound.telegram.text_message:\n      data_accumulation:\n        source_event: inbound.telegram.text_message\n        writes: [{target_field: processed_count, value: entity.processed_count + 1}]\n")
 	return root
 }
@@ -85,7 +85,7 @@ func CopyConcurrentKeyedRootRawIngress(t testing.TB) string {
 	t.Helper()
 	root := CopyKeyedRootRawIngressCreationEvent(t)
 	applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "instance: provider_event_id", "instance: provider")
-	applyClosedReplacement(t, filepath.Join(root, "entities.yaml"), "  provider_event_id: text", "  provider: text")
+	applyClosedReplacement(t, filepath.Join(root, "state.yaml"), "  provider_event_id: text", "  provider: text")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), "root.created:\n  provider_event_id: text", "root.created:\n  provider: text")
 	return root
 }
@@ -110,14 +110,14 @@ connect:
   - {event: start, from: ., to: parent, resolution: select-or-create, key_from: payload.parent_key}
   - {event: start, from: ., to: parent/middle/leaf, resolution: select-or-create, key_from: payload.leaf_key}
 `,
-		"events.yaml":                      "start:\n  parent_key: text\n  leaf_key: text\n",
-		"parent/schema.yaml":               "name: parent\ninstance: id\npins: {inputs: [start]}\n",
-		"parent/entities.yaml":             "parent_state:\n  id: text\n",
-		"parent/nodes.yaml":                "receiver:\n  execution_type: system_node\n  subscribes_to: [start]\n  event_handlers:\n    start:\n      guard: {check: payload.parent_key != ''}\n",
-		"parent/middle/schema.yaml":        "name: middle\n",
-		"parent/middle/leaf/schema.yaml":   "name: leaf\ninstance: id\npins: {inputs: [start]}\n",
-		"parent/middle/leaf/entities.yaml": "leaf_state:\n  id: text\n",
-		"parent/middle/leaf/nodes.yaml":    "receiver:\n  execution_type: system_node\n  subscribes_to: [start]\n  event_handlers:\n    start:\n      guard: {check: payload.leaf_key != ''}\n",
+		"events.yaml":                    "start:\n  parent_key: text\n  leaf_key: text\n",
+		"parent/schema.yaml":             "name: parent\ninstance: id\npins: {inputs: [start]}\n",
+		"parent/state.yaml":              "parent_state:\n  id: text\n",
+		"parent/nodes.yaml":              "receiver:\n  execution_type: system_node\n  subscribes_to: [start]\n  event_handlers:\n    start:\n      guard: {check: payload.parent_key != ''}\n",
+		"parent/middle/schema.yaml":      "name: middle\n",
+		"parent/middle/leaf/schema.yaml": "name: leaf\ninstance: id\npins: {inputs: [start]}\n",
+		"parent/middle/leaf/state.yaml":  "leaf_state:\n  id: text\n",
+		"parent/middle/leaf/nodes.yaml":  "receiver:\n  execution_type: system_node\n  subscribes_to: [start]\n  event_handlers:\n    start:\n      guard: {check: payload.leaf_key != ''}\n",
 	} {
 		writeClosedVariantFile(t, root, label, body)
 	}
@@ -147,11 +147,11 @@ func CopyConnectionAncestorCandidates(t testing.TB, dependentEvent string, compe
 	}
 	edges += "  - {event: " + dependentEvent + ", from: ., to: parent/middle/leaf, " + rename + "resolution: select-or-create, key_from: payload.leaf_key}\n"
 	for label, body := range map[string]string{
-		"schema.yaml":          "name: construction-candidates\npins: {inputs: [start, other]}\nconnect:\n" + edges,
-		"events.yaml":          "start:\n  parent_key: text\n  leaf_key: text\nother:\n  parent_key: text\n  leaf_key: text\n",
-		"worker/schema.yaml":   "name: worker\ninstance: id\npins: {inputs: [start]}\n",
-		"worker/entities.yaml": "worker_state:\n  id: text\n",
-		"worker/nodes.yaml":    "receiver:\n  execution_type: system_node\n  event_handlers:\n    start:\n      guard: {check: payload.leaf_key != ''}\n",
+		"schema.yaml":        "name: construction-candidates\npins: {inputs: [start, other]}\nconnect:\n" + edges,
+		"events.yaml":        "start:\n  parent_key: text\n  leaf_key: text\nother:\n  parent_key: text\n  leaf_key: text\n",
+		"worker/schema.yaml": "name: worker\ninstance: id\npins: {inputs: [start]}\n",
+		"worker/state.yaml":  "worker_state:\n  id: text\n",
+		"worker/nodes.yaml":  "receiver:\n  execution_type: system_node\n  event_handlers:\n    start:\n      guard: {check: payload.leaf_key != ''}\n",
 	} {
 		writeClosedVariantFile(t, root, label, body)
 	}
@@ -181,14 +181,14 @@ connect:
   - {event: account.opened, from: ., to: parent, resolution: select-or-create, key_from: payload.provider_event_id}
   - {event: account.opened, from: ., to: parent/middle/leaf, resolution: select-or-create, key_from: payload.provider}
 `,
-		"events.yaml":                      "account.opened:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n",
-		"parent/schema.yaml":               "name: parent\ninstance: id\nstages: []\npins: {inputs: [account.opened]}\n",
-		"parent/entities.yaml":             "parent_state:\n  id: text\n  seen: {type: integer, initial: 0}\n",
-		"parent/nodes.yaml":                "receiver:\n  execution_type: system_node\n  subscribes_to: [account.opened]\n  event_handlers:\n    account.opened:\n      data_accumulation:\n        source_event: account.opened\n        writes: [{target_field: seen, value: entity.seen + 1}]\n",
-		"parent/middle/schema.yaml":        "name: middle\n",
-		"parent/middle/leaf/schema.yaml":   "name: leaf\ninstance: id\nstages: []\npins: {inputs: [account.opened]}\n",
-		"parent/middle/leaf/entities.yaml": "leaf_state:\n  id: text\n  seen: {type: integer, initial: 0}\n",
-		"parent/middle/leaf/nodes.yaml":    "receiver:\n  execution_type: system_node\n  subscribes_to: [account.opened]\n  event_handlers:\n    account.opened:\n      data_accumulation:\n        source_event: account.opened\n        writes: [{target_field: seen, value: entity.seen + 1}]\n",
+		"events.yaml":                    "account.opened:\n  provider: text\n  provider_event_id: text\n  provider_event_type: text\n  data: json\n",
+		"parent/schema.yaml":             "name: parent\ninstance: id\nstages: []\npins: {inputs: [account.opened]}\n",
+		"parent/state.yaml":              "parent_state:\n  id: text\n  seen: {type: integer, initial: 0}\n",
+		"parent/nodes.yaml":              "receiver:\n  execution_type: system_node\n  subscribes_to: [account.opened]\n  event_handlers:\n    account.opened:\n      data_accumulation:\n        source_event: account.opened\n        writes: [{target_field: seen, value: entity.seen + 1}]\n",
+		"parent/middle/schema.yaml":      "name: middle\n",
+		"parent/middle/leaf/schema.yaml": "name: leaf\ninstance: id\nstages: []\npins: {inputs: [account.opened]}\n",
+		"parent/middle/leaf/state.yaml":  "leaf_state:\n  id: text\n  seen: {type: integer, initial: 0}\n",
+		"parent/middle/leaf/nodes.yaml":  "receiver:\n  execution_type: system_node\n  subscribes_to: [account.opened]\n  event_handlers:\n    account.opened:\n      data_accumulation:\n        source_event: account.opened\n        writes: [{target_field: seen, value: entity.seen + 1}]\n",
 	} {
 		writeClosedVariantFile(t, root, label, body)
 	}
@@ -220,7 +220,7 @@ func CopyNestedConcurrentRawIngress(t testing.TB, distinctLeaves bool) string {
 	}
 	applyClosedReplacement(t, filepath.Join(root, "parent/schema.yaml"), "stages: []\n", "stages: []\nauto_emit_on_create: {event: parent.created}\n")
 	writeClosedVariantFile(t, root, "parent/events.yaml", "parent.created:\n  id: text\n  seen: integer\n  creation_count: integer\n")
-	applyClosedReplacement(t, filepath.Join(root, "parent/entities.yaml"), "  seen: {type: integer, initial: 0}\n", "  seen: {type: integer, initial: 0}\n  creation_count: {type: integer, initial: 0}\n")
+	applyClosedReplacement(t, filepath.Join(root, "parent/state.yaml"), "  seen: {type: integer, initial: 0}\n", "  seen: {type: integer, initial: 0}\n  creation_count: {type: integer, initial: 0}\n")
 	applyClosedReplacement(t, filepath.Join(root, "parent/nodes.yaml"), "subscribes_to: [account.opened]", "subscribes_to: [account.opened, parent.created]")
 	applyClosedReplacement(t, filepath.Join(root, "parent/nodes.yaml"), "  event_handlers:\n", "  event_handlers:\n    parent.created:\n      data_accumulation:\n        source_event: parent.created\n        writes: [{target_field: creation_count, value: entity.creation_count + 1}]\n")
 	return root

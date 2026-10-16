@@ -187,7 +187,7 @@ func declarationValues(root yamlsource.Value, kind string) []yamlsource.Value {
 	switch kind {
 	case "types.yaml":
 		return recordFields(mappingValue(root, "types"), false)
-	case "entities.yaml":
+	case "state.yaml":
 		return recordFields(root, false)
 	case "events.yaml":
 		return recordFields(root, true)
@@ -254,7 +254,7 @@ func sourceFamily(call *ast.CallExpr) string {
 		ast.Inspect(arg, func(node ast.Node) bool {
 			if lit, ok := node.(*ast.BasicLit); ok && lit.Kind == token.STRING {
 				text, _ := strconv.Unquote(lit.Value)
-				for _, kind := range []string{"entities.yaml", "events.yaml", "nodes.yaml", "types.yaml"} {
+				for _, kind := range []string{"state.yaml", "events.yaml", "nodes.yaml", "types.yaml"} {
 					if strings.Contains(text, kind) {
 						found = kind
 					}
@@ -275,7 +275,7 @@ func sourceKeyFamily(key ast.Expr) string {
 		case "TypesYAML":
 			return "types.yaml"
 		case "EntitiesYAML":
-			return "entities.yaml"
+			return "state.yaml"
 		case "EventsYAML":
 			return "events.yaml"
 		case "NodesYAML":
@@ -392,7 +392,7 @@ func main() {
 		}
 		kind := filepath.Base(path)
 		isGo := strings.HasSuffix(path, ".go")
-		if !isGo && kind != "entities.yaml" && kind != "events.yaml" && kind != "types.yaml" && kind != "nodes.yaml" {
+		if !isGo && kind != "state.yaml" && kind != "events.yaml" && kind != "types.yaml" && kind != "nodes.yaml" {
 			return nil
 		}
 		if strings.Contains(path, "list_spelling_retirement_test.go") || strings.Contains(path, "list_declaration_value.go") {

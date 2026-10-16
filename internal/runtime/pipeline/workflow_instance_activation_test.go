@@ -165,7 +165,7 @@ func VerifyNativeTemplateInstanceSystemNodeDeliveryUsesExactLocalHandlerKeyForTe
 		t.Run(backend, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
 
-				"operating/entities.yaml": "test_entity:\n  instance_key: text\n",
+				"operating/state.yaml": "test_entity:\n  instance_key: text\n",
 				"operating/schema.yaml": `name: operating
 instance: instance_key
 stages:

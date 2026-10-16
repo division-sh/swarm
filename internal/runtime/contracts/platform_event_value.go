@@ -47,9 +47,6 @@ func admitPlatformPayloadValue(value yamlsource.Value) (map[string]EventFieldSpe
 	if err != nil {
 		return nil, nil, err
 	}
-	if v, ok := f["required"]; ok {
-		return nil, nil, nodeValueError(v, fmt.Errorf("platform payload field name required is reserved for required-by-default field semantics"))
-	}
 	out := make(map[string]EventFieldSpec, len(f))
 	var required []string
 	for _, name := range sortedContractKeys(f) {

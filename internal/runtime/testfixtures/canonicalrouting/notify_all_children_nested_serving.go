@@ -21,7 +21,7 @@ func CopyNotifyAllChildrenNestedServing(t testing.TB) string {
 	// This closed variant uses business system-node recipients, not the example's
 	// LLM agent that would terminate an account before its nested tasks settle.
 	removeClosedVariantFiles(t, root, "account/agents.yaml")
-	writeClosedVariantFile(t, root, "account/entities.yaml", "account_state:\n  account_id: text\n")
+	writeClosedVariantFile(t, root, "account/state.yaml", "account_state:\n  account_id: text\n")
 	writeClosedVariantFile(t, root, "account/schema.yaml", `name: account
 stages:
   active: {}
@@ -40,7 +40,7 @@ connect:
     resolution: select-or-create
 `)
 	writeClosedVariantFile(t, root, "account/events.yaml", `account.task.requested:
-  key: task_key
+  _key: task_key
   account_id: text
   task: text
   task_key: text
@@ -103,7 +103,7 @@ pins:
   outputs:
     - account.task.completed
 `)
-	writeClosedVariantFile(t, root, "account/task/entities.yaml", `task_state:
+	writeClosedVariantFile(t, root, "account/task/state.yaml", `task_state:
   account_id: text
   task: text
   task_key: text

@@ -22,10 +22,10 @@ func TestFlowAttachmentNativeLostAckAfterRebindBothStores(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			selected, _, connector := newP16RaceStore(t, backend)
 			f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, map[string]string{
-				"schema.yaml":          "name: attachment-rebind-ack\n",
-				"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
-				"review/entities.yaml": "review_item:\n  request_id: text\n",
-				"review/events.yaml":   "task.started:\n",
+				"schema.yaml":        "name: attachment-rebind-ack\n",
+				"review/schema.yaml": "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+				"review/state.yaml":  "review_item:\n  request_id: text\n",
+				"review/events.yaml": "task.started:\n",
 			}, nil, ownStoreTestAgentManager, nil)
 			f.constructKeylessRoot(t)
 			request := f.request("business-key", "rebind-ack", "unused")
@@ -138,10 +138,10 @@ func TestFlowAttachmentNativeCommitAcknowledgmentBothStores(t *testing.T) {
 				t.Run(backend+"/"+predecessor+"/"+cut, func(t *testing.T) {
 					selected, _, connector := newP16RaceStore(t, backend)
 					f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, map[string]string{
-						"schema.yaml":          "name: attachment-commit-boundary\n",
-						"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
-						"review/entities.yaml": "review_item:\n  request_id: text\n",
-						"review/events.yaml":   "task.started:\n",
+						"schema.yaml":        "name: attachment-commit-boundary\n",
+						"review/schema.yaml": "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+						"review/state.yaml":  "review_item:\n  request_id: text\n",
+						"review/events.yaml": "task.started:\n",
 					}, nil, ownStoreTestAgentManager, nil)
 					f.constructKeylessRoot(t)
 					ctx, cancel := context.WithTimeout(f.ctx, 15*time.Second)

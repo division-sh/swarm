@@ -80,6 +80,7 @@ func TestNativeSelectedCausalDiagnosticRootRetainsEveryLifecycleCut(t *testing.T
 
 func selectedCausalObservationBody(t *testing.T, path, name string) string {
 	t.Helper()
+	relative := path
 	path = filepath.Join("..", "..", "..", path)
 	body, err := os.ReadFile(path)
 	if err != nil {
@@ -94,7 +95,7 @@ func selectedCausalObservationBody(t *testing.T, path, name string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(body[set.Position(fn.Pos()).Offset:set.Position(fn.End()).Offset])
+	return stateSpellingHistoricalBody1745(relative, name, string(body[set.Position(fn.Pos()).Offset:set.Position(fn.End()).Offset]))
 }
 
 func TestNativeSelectedCausalDiagnosticOwnersPreserveEveryOriginalQuery(t *testing.T) {

@@ -30,7 +30,7 @@ func optionalDeclarationRoleTestCases() []optionalDeclarationRoleTestCase {
 			},
 		},
 		{
-			name: "entities", fileName: "entities.yaml", valid: "item: {}\n", merged: "<<: &declarations\n  item: {}\n", blank: "\"\": {}\n", collide: "item: {}\n\" item \": {}\n",
+			name: "entities", fileName: "state.yaml", valid: "item: {}\n", merged: "<<: &declarations\n  item: {}\n", blank: "\"\": {}\n", collide: "item: {}\n\" item \": {}\n",
 			load: func(path string) (int, error) {
 				value, err := loadOptionalEntityDeclarations(path)
 				return len(value), err
@@ -391,10 +391,10 @@ func TestMergeOnlyCustomDocumentsFailBeforeBundlePublicationAtEverySupportedScop
 		name   string
 		target func(string) string
 	}{
-		{name: "root/entities", target: func(root string) string { return filepath.Join(root, "entities.yaml") }},
+		{name: "root/entities", target: func(root string) string { return filepath.Join(root, "state.yaml") }},
 		{name: "root/types", target: func(root string) string { return filepath.Join(root, "types.yaml") }},
 		{name: "root/policy", target: func(root string) string { return filepath.Join(root, "policy.yaml") }},
-		{name: "child/entities", target: func(root string) string { return filepath.Join(root, "child", "entities.yaml") }},
+		{name: "child/entities", target: func(root string) string { return filepath.Join(root, "child", "state.yaml") }},
 		{name: "child/types", target: func(root string) string { return filepath.Join(root, "child", "types.yaml") }},
 		{name: "child/policy", target: func(root string) string { return filepath.Join(root, "child", "policy.yaml") }},
 	} {

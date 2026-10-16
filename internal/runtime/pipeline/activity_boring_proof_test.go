@@ -462,10 +462,10 @@ func activityBoringSource(serverURL string) semanticview.Source {
 func activityBoringFullFlowBundle(t *testing.T, serverURL string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	return loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":            "name: activity-boring-proof\nstages: []\n",
-		"research/schema.yaml":   "name: research\ninstance: marker\nstages:\n  pending: {}\n",
-		"research/entities.yaml": "test_entity:\n  marker: text\n",
-		"research/events.yaml":   "source.requested:\n  url: text\n",
+		"schema.yaml":          "name: activity-boring-proof\nstages: []\n",
+		"research/schema.yaml": "name: research\ninstance: marker\nstages:\n  pending: {}\n",
+		"research/state.yaml":  "test_entity:\n  marker: text\n",
+		"research/events.yaml": "source.requested:\n  url: text\n",
 		"research/nodes.yaml": `scanner:
   subscribes_to: [source.requested]
   event_handlers:

@@ -27,7 +27,7 @@ func standaloneTextDataFixture2456(t *testing.T, backend string, keyed bool) *de
 	root := canonicalrouting.CopySelectedDeploymentResource(t, "root", keyed)
 	declaration := "root.ready:\n  body: text\n"
 	if keyed {
-		declaration = "root.ready:\n  key: account_id\n  account_id: text\n  body: text\n"
+		declaration = "root.ready:\n  _key: account_id\n  account_id: text\n  body: text\n"
 	}
 	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte(declaration+canonicalrouting.DeploymentFixtureCloseDeclaration), 0o600); err != nil {
 		t.Fatal(err)

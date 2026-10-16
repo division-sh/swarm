@@ -297,10 +297,14 @@ func (b *WorkflowContractBundle) FlowPrimaryEntityContract(flowID string) (strin
 // StructuralType preserves declaration optionality; definite assignment is
 // tracked separately at each executable read.
 func (p PrimaryEntityContract) StructuralType() (ResolvedCatalogType, error) {
+	types := p.Types
+	if p.Contract.types != nil {
+		types = *p.Contract.types
+	}
 	fields := make([]ResolvedCatalogField, 0, len(p.Contract.Fields))
 	for _, name := range sortedEntityFieldKeys(p.Contract.Fields) {
 		decl := p.Contract.Fields[name]
-		resolved, err := (CatalogTypeReference{Type: decl.Type, Catalog: p.Types}).Resolve()
+		resolved, err := (CatalogTypeReference{Type: decl.Type, Catalog: types}).Resolve()
 		if err != nil {
 			return ResolvedCatalogType{}, fmt.Errorf("entity %s field %s: %w", p.EntityType, name, err)
 		}
@@ -364,6 +368,9 @@ func resolvePrimaryEntityContract(flowID string, entities EntityContractsDocumen
 		return PrimaryEntityContract{}, fmt.Errorf("INVALID-PRIMARY-ENTITY: flow %s has no declared entity types; stateful normal flows must declare exactly one entity type or be explicitly stateless/template", label)
 	case 1:
 		entityType := keys[0]
+		if captured := entities[entityType].types; captured != nil {
+			types = *captured
+		}
 		return PrimaryEntityContract{
 			FlowID:     flowID,
 			EntityType: entityType,
@@ -520,8 +527,14 @@ func cloneEntityContractsDocument(in EntityContractsDocument) EntityContractsDoc
 
 func cloneEntityContract(in EntityContract) EntityContract {
 	out := EntityContract{
-		Description: in.Description,
-		Owner:       in.Owner,
+		Description:         in.Description,
+		Owner:               in.Owner,
+		embeds:              append([]catalogEmbedding(nil), in.embeds...),
+		types:               cloneCatalogEmbeddingTypes(in.types),
+		admissionProvenance: make(map[string]EffectiveValueProvenance, len(in.admissionProvenance)),
+	}
+	for name, provenance := range in.admissionProvenance {
+		out.admissionProvenance[name] = cloneEffectiveValueProvenance(provenance)
 	}
 	if len(in.Fields) > 0 {
 		out.Fields = make(map[string]EntityFieldDecl, len(in.Fields))

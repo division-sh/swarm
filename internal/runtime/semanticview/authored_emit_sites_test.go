@@ -275,7 +275,7 @@ market_research.scan_assigned:
   geography:
     type: string
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "state.yaml"), `
 scan:
   scan_id:
     type: text

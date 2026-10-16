@@ -51,7 +51,7 @@ func CopyForkFanOutConsumer(t testing.TB, loop, barrier bool) string {
           - {target_field: processed_value, value: payload.value}
 `
 	writeClosedVariantFile(t, root, "nodes.yaml", string(nodes)+consumer)
-	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  processed_value: text\n  account_id: {type: text, initial: preserved}\n  handled: {type: boolean, initial: false}\n")
+	writeClosedVariantFile(t, root, "state.yaml", "root:\n  processed_value: text\n  account_id: {type: text, initial: preserved}\n  handled: {type: boolean, initial: false}\n")
 	return root
 }
 
@@ -129,7 +129,7 @@ pins:
       advances_to: done
 `
 	}
-	for path, body := range map[string]string{"schema.yaml": schema, "events.yaml": events, "nodes.yaml": nodes, "entities.yaml": "root: {}\n"} {
+	for path, body := range map[string]string{"schema.yaml": schema, "events.yaml": events, "nodes.yaml": nodes, "state.yaml": "root: {}\n"} {
 		writeClosedVariantFile(t, root, path, body)
 	}
 	return root
@@ -140,7 +140,7 @@ pins:
 func CopyNumericForkFanOutCarrier(t testing.TB, resourceRows bool) string {
 	t.Helper()
 	root := CopyForkFanOutCarrier(t, false, false)
-	writeClosedVariantFile(t, root, "entities.yaml", "root:\n  integer: {type: integer, initial: 0}\n  decimal: {type: numeric, initial: 0.0}\n")
+	writeClosedVariantFile(t, root, "state.yaml", "root:\n  integer: {type: integer, initial: 0}\n  decimal: {type: numeric, initial: 0.0}\n")
 	if resourceRows {
 		writeClosedVariantFile(t, root, "types.yaml", "types:\n  ResourceRow:\n    slug: text\n    score: integer\n")
 		writeClosedVariantFile(t, root, "events.yaml", "items.ready:\n  items: [ResourceRow]\nitems.child:\n  value: text\n  integer_result: integer\n  double_result: numeric\n")

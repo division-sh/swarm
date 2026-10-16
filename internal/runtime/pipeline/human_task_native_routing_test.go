@@ -40,9 +40,9 @@ func (s foreignHumanTaskRequesterForTest) LoadHumanTaskContinuation(ctx context.
 func nativeHumanTaskRoutingFixtureForTest(t *testing.T, backend string, global bool, open pipelineDeliveryNativeOpenerForTest) (*PipelineDeliveryNativeFixtureForTest, *PipelineCoordinator, context.Context, decisioncard.Card, decisioncard.HumanTaskContinuation, *nativePipelineDeliveryBusObservationForTest) {
 	t.Helper()
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: human-task-native\nstages:\n  active: {}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "provider.requested:\nmailbox.card_decided:\nmailbox.card_deferred:\nmailbox.card_expired:\nhuman_task.approved:\nhuman_task.rejected:\nhuman_task.deferred:\nhuman_task.expired:\n",
+		"schema.yaml": "name: human-task-native\nstages:\n  active: {}\n",
+		"state.yaml":  "test_entity: {}\n",
+		"events.yaml": "provider.requested:\nmailbox.card_decided:\nmailbox.card_deferred:\nmailbox.card_expired:\nhuman_task.approved:\nhuman_task.rejected:\nhuman_task.deferred:\nhuman_task.expired:\n",
 	})
 	fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
 	if err := fixture.Construct(ctx, constructedScenarioInstanceForTest(t, pc.SemanticSource(), ctx, ".")); err != nil {

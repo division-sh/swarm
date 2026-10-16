@@ -11,8 +11,8 @@ import (
 func TestListRewritePreservesDataAndDeclarationOrder(t *testing.T) {
 	before := "# keep this comment\nwork:\n  items: list<text>\n  groups: map[text]list<WorkItem>\n  optional: '[WorkItem]?'\n  explicit: {type: '[text]', initial: ['list<text>', '[text]']}\n"
 	want := "# keep this comment\nwork:\n  items: [text]\n  groups: map[text][WorkItem]\n  optional: {type: \"[WorkItem]?\"}\n  explicit: {type: '[text]', initial: ['list<text>', '[text]']}\n"
-	got := rewriteYAML(before, "entities.yaml")
-	if got != want || rewriteYAML(got, "entities.yaml") != got {
+	got := rewriteYAML(before, "state.yaml")
+	if got != want || rewriteYAML(got, "state.yaml") != got {
 		t.Fatalf("rewrite changed data/order or is not idempotent:\n%s", got)
 	}
 	for _, untouched := range []string{
@@ -64,8 +64,8 @@ func TestListRewriteNestedDeclarationsRemainValidYAML(t *testing.T) {
 	for _, ref := range []string{"[map[text]text]", "[[text]]", "[numeric(5,2)]"} {
 		before := "work:\n  items: " + strconv.Quote(ref) + "\n"
 		want := "work:\n  items: {type: " + strconv.Quote(ref) + "}\n"
-		got := rewriteYAML(before, "entities.yaml")
-		if got != want || rewriteYAML(got, "entities.yaml") != got {
+		got := rewriteYAML(before, "state.yaml")
+		if got != want || rewriteYAML(got, "state.yaml") != got {
 			t.Fatalf("nested declaration %s is not exact/idempotent: %s", ref, got)
 		}
 		if _, err := yamlsource.Load([]byte(got)); err != nil {

@@ -231,10 +231,10 @@ func stageRecoveryArtifact(t *testing.T, stages string) *sourceartifact.Admitted
 		childSchema = "name: child\nstages: []\n"
 	}
 	for path, contents := range map[string]string{
-		"schema.yaml":         "name: stage-recovery\n",
-		"child/schema.yaml":   childSchema,
-		"child/entities.yaml": "item: {}\n",
-		"policy.yaml":         "budget_warning_percent: 50\nbudget_throttle_percent: 75\nbudget_emergency_percent: 90\n",
+		"schema.yaml":       "name: stage-recovery\n",
+		"child/schema.yaml": childSchema,
+		"child/state.yaml":  "item: {}\n",
+		"policy.yaml":       "budget_warning_percent: 50\nbudget_throttle_percent: 75\nbudget_emergency_percent: 90\n",
 	} {
 		absolute := filepath.Join(root, path)
 		if err := os.MkdirAll(filepath.Dir(absolute), 0o755); err != nil {

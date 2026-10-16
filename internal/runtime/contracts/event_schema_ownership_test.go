@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -298,6 +299,14 @@ func TestDeclaredLocalEventReferenceFastPathMatchesCanonicalScopeResolution(t *t
 }
 
 func TestEffectiveEventResolutionPrefersConnectedProducerOverUnrelatedSameNameRoot(t *testing.T) {
+	for _, embedded := range []bool{false, true} {
+		t.Run(fmt.Sprintf("embedded=%t", embedded), func(t *testing.T) {
+			testEffectiveEventResolutionProducerCatalog(t, embedded)
+		})
+	}
+}
+
+func testEffectiveEventResolutionProducerCatalog(t *testing.T, embedded bool) {
 	repo := repoRootForContractsTest(t)
 	source := filepath.Join(repo, "examples", "routing", "template-create-minted-key")
 	root := filepath.Join(t.TempDir(), "template-create-minted-key")
@@ -319,6 +328,11 @@ validation.requested:
 	}
 	if err := os.WriteFile(filepath.Join(root, "producer", "types.yaml"), []byte("scalars:\n  ProducerCandidate: text\n"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	if embedded {
+		writeFixtureFile(t, filepath.Join(root, "producer", "events.yaml"), "validation.triggered:\n  candidate: text?\nvalidation.requested:\n  _embed: [Request]\n")
+		writeFixtureFile(t, filepath.Join(root, "producer", "types.yaml"), "scalars:\n  ProducerCandidate: text\ntypes:\n  Request:\n    candidate: {type: 'ProducerCandidate?', description: Candidate under validation, pattern: '^[a-z]+$'}\n")
+		writeFixtureFile(t, filepath.Join(root, "validator", "types.yaml"), "scalars:\n  ProducerCandidate: integer\ntypes:\n  Request: {candidate: integer}\n")
 	}
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {

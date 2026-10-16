@@ -59,11 +59,11 @@ func TestManagerNativeLostAdmissionCleanupBothStores(t *testing.T) {
 				var routes *bus.EventBus
 				var nativeOptions manager.AgentManagerOptions
 				f := newReceiverConfigActivationFixtureForStore(t, selected.(agentFixtureFlowStore), false, map[string]string{
-					"schema.yaml":          "name: native-admission-manager\n",
-					"review/schema.yaml":   "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
-					"review/entities.yaml": "review_item:\n  request_id: text\n",
-					"review/events.yaml":   "task.started:\n",
-					"review/agents.yaml":   "reviewer:\n  role: reviewer\n  intent: {inline: \"Review the task.\"}\n  model: regular\n  subscriptions: [task.started]\n",
+					"schema.yaml":        "name: native-admission-manager\n",
+					"review/schema.yaml": "name: review\ninstance: request_id\nstages:\n  pending: {}\npins:\n  inputs:\n    - task.started\n",
+					"review/state.yaml":  "review_item:\n  request_id: text\n",
+					"review/events.yaml": "task.started:\n",
+					"review/agents.yaml": "reviewer:\n  role: reviewer\n  intent: {inline: \"Review the task.\"}\n  model: regular\n  subscriptions: [task.started]\n",
 				}, nil, func(t *testing.T, original *manager.AgentManager) *manager.AgentManager {
 					if err := original.Shutdown(); err != nil {
 						t.Fatal(err)

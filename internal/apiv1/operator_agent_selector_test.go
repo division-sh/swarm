@@ -27,7 +27,7 @@ func TestOperatorEventPublishAgentHeaderSelectorsBothStores(t *testing.T) {
 			}
 			root := canonicalrouting.CopyExplicitAgentSelectors(t)
 			for _, flow := range []string{"review", "other"} {
-				writeRunCompletionFixtureFile(t, filepath.Join(root, flow, "entities.yaml"), "test_entity: {}\n")
+				writeRunCompletionFixtureFile(t, filepath.Join(root, flow, "state.yaml"), "test_entity: {}\n")
 			}
 			bundle := loadEventPublicationConstructorFixture(t, root)
 			source := semanticview.Wrap(bundle)

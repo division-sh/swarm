@@ -150,6 +150,7 @@ func TestPlatformEventCatalogUsesRequiredByDefaultTypedOmission(t *testing.T) {
   catalog:
     sample:
       payload:
+        required: string
         required_value: string
         optional_value: string?
         described_optional_value:
@@ -164,8 +165,8 @@ func TestPlatformEventCatalogUsesRequiredByDefaultTypedOmission(t *testing.T) {
 		t.Fatal("missing admitted catalog entry")
 	}
 
-	if len(entry.Payload.Required) != 1 || entry.Payload.Required[0] != "required_value" {
-		t.Fatalf("Required = %#v, want only required_value", entry.Payload.Required)
+	if len(entry.Payload.Required) != 2 || entry.Payload.Required[0] != "required" || entry.Payload.Required[1] != "required_value" {
+		t.Fatalf("Required = %#v, want both ordinary required fields", entry.Payload.Required)
 	}
 }
 

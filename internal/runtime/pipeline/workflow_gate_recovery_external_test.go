@@ -1562,9 +1562,9 @@ func openPostgresGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 func proposedEffectProofBundle(t *testing.T, serverURL string, queueAfterProposal bool) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	files := map[string]string{
-		"schema.yaml":   "name: support\nstages:\n  drafting: {}\n",
-		"entities.yaml": "test_entity: {}\n",
-		"events.yaml":   "support.reply_drafted:\n  chat_id: text\n  text: text\n",
+		"schema.yaml": "name: support\nstages:\n  drafting: {}\n",
+		"state.yaml":  "test_entity: {}\n",
+		"events.yaml": "support.reply_drafted:\n  chat_id: text\n  text: text\n",
 		"nodes.yaml": `support:
   execution_type: system_node
   subscribes_to: [support.reply_drafted, send_support_reply.revision_requested, send_support_reply.rejected]
@@ -1730,7 +1730,7 @@ stages:
       outcomes:
         approve:
 ` + outcome,
-		"entities.yaml": "test_entity: {}\n",
+		"state.yaml": "test_entity: {}\n",
 	}
 	if !terminal {
 		files["events.yaml"] = "launch.approved:\n"

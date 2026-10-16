@@ -6,7 +6,7 @@ func CopyStageCompletionJourney(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
 	for path, contents := range map[string]string{
-		"entities.yaml": "run:\n  topic: string\n",
+		"state.yaml": "run:\n  topic: string\n",
 		"schema.yaml": `stages:
   active: {}
   done: {final: true}
@@ -21,11 +21,11 @@ connect:
   - {event: flow.started, from: ., to: discovery}
   - {event: flow.finish, from: ., to: discovery}
 `,
-		"events.yaml":             "flow.started:\n  topic:\n    type: string?\nflow.finish:\n  topic:\n    type: string?\n",
-		"nodes.yaml":              "root-completion:\n  execution_type: system_node\n  subscribes_to: [flow.finish]\n  event_handlers:\n    flow.finish:\n      advances_to: done\n",
-		"discovery/schema.yaml":   "name: discovery\nstages:\n  ready: {}\n  Ready:\n    final: true\npins:\n  inputs:\n    - flow.started\n    - flow.finish\n",
-		"discovery/entities.yaml": "discovery: {}\n",
-		"discovery/nodes.yaml":    "pipeline:\n  execution_type: system_node\n  subscribes_to: [flow.started, flow.finish]\n  event_handlers:\n    flow.started: {}\n    flow.finish:\n      advances_to: Ready\n",
+		"events.yaml":           "flow.started:\n  topic:\n    type: string?\nflow.finish:\n  topic:\n    type: string?\n",
+		"nodes.yaml":            "root-completion:\n  execution_type: system_node\n  subscribes_to: [flow.finish]\n  event_handlers:\n    flow.finish:\n      advances_to: done\n",
+		"discovery/schema.yaml": "name: discovery\nstages:\n  ready: {}\n  Ready:\n    final: true\npins:\n  inputs:\n    - flow.started\n    - flow.finish\n",
+		"discovery/state.yaml":  "discovery: {}\n",
+		"discovery/nodes.yaml":  "pipeline:\n  execution_type: system_node\n  subscribes_to: [flow.started, flow.finish]\n  event_handlers:\n    flow.started: {}\n    flow.finish:\n      advances_to: Ready\n",
 	} {
 		writeClosedVariantFile(t, root, path, contents)
 	}

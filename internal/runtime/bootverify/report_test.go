@@ -4662,7 +4662,7 @@ func TestRun_EntityWriterCoverageCountsExplicitAgentEntityWritesForScopedDuplica
 
 	for _, flowID := range []string{"alpha", "beta"} {
 		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "schema.yaml"), "name: "+flowID+"\n")
-		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "entities.yaml"), `
+		writeBootverifyFixtureFile(t, filepath.Join(root, flowID, "state.yaml"), `
 case:
   business_brief:
     type: text
@@ -6458,7 +6458,7 @@ opco.spend_requested:
   vertical_id: string
   amount_usd: number
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "entities.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "treasury", "state.yaml"), `
 opco_budget:
   vertical_id:
     type: text
@@ -6486,7 +6486,7 @@ func writeBootverifyFixtureFile(t *testing.T, path, contents string) {
 
 func isOptionalBootverifyDeclarationFile(path string) bool {
 	switch filepath.Base(path) {
-	case "agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
+	case "agents.yaml", "state.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
 		return true
 	default:
 		return false
@@ -6503,7 +6503,7 @@ func loadAgentMemoryValidationFixture(t *testing.T, fixtureRoot string) semantic
 func writeAgentMemoryValidationFixture(t *testing.T, rootAgents, flowSchema, flowAgents string) string {
 	t.Helper()
 	root := t.TempDir()
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), `
 item:
   item_id: string
 `)
@@ -6535,7 +6535,7 @@ func writePackageBackedAgentMemoryValidationFixture(t *testing.T, flowSchema, pa
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), `
 item:
   item_id: string
 `)
@@ -6652,7 +6652,7 @@ func writeCrossFlowPinAmbiguityFixture(t *testing.T, scoped bool) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), `
 item:
   item_id: string
 `)
@@ -6735,7 +6735,7 @@ stages:
   review: {}
   done: {final: true}
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "state.yaml"), `
 ticket: {}
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
@@ -6779,7 +6779,7 @@ func writeStagedLifecycleFixture(t *testing.T, schema string) string {
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: staged-lifecycle\n")
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "schema.yaml"), schema)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "entities.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "state.yaml"), `
 ticket: {}
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "support", "events.yaml"), `
@@ -6820,7 +6820,7 @@ func writeWave1RootReaderCoverageFixture(t *testing.T) string {
 	root := t.TempDir()
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wave1-root-reader-coverage\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), `
 case:
   priority:
     type: integer
@@ -6834,7 +6834,7 @@ pins:
   inputs:
     - task.assigned
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), "case:\n  local: text\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "state.yaml"), "case:\n  local: text\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "events.yaml"), `
 task.assigned:
   entity_id: string
@@ -6869,7 +6869,7 @@ stages:
   idle: {}
   done: {final: true}
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), entitiesYAML)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "state.yaml"), entitiesYAML)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "agents.yaml"), agentsYAML)
 	if strings.TrimSpace(promptText) == "" {
 		promptText = "Write the fields authorized by the contract.\n"

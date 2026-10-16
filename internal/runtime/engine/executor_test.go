@@ -7899,7 +7899,7 @@ types:
     dimension: text
     score: integer
 `)
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "scoring", "state.yaml"), `
 vertical:
   scores:
     type: "[DimensionScore]"
@@ -7966,7 +7966,7 @@ types:
     id: text
     title: text
 `)
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "entities.yaml"), `
+	writeEngineProjectionFixtureFile(t, filepath.Join(root, "coordinator", "state.yaml"), `
 coordinator_state:
   verticals: map[text]VerticalState
 `)

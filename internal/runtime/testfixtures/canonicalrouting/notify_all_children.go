@@ -64,10 +64,10 @@ func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 	connectFile := filepath.Join(root, "schema.yaml")
 	ownerSchema := filepath.Join(root, NotifyAllChildrenOwnerFlowID, "schema.yaml")
 	ownerNodes := filepath.Join(root, NotifyAllChildrenOwnerFlowID, "nodes.yaml")
-	ownerEntities := filepath.Join(root, NotifyAllChildrenOwnerFlowID, "entities.yaml")
+	ownerEntities := filepath.Join(root, NotifyAllChildrenOwnerFlowID, "state.yaml")
 	accountAgents := filepath.Join(root, NotifyAllChildrenChildFlowID, "agents.yaml")
 	accountNodes := filepath.Join(root, NotifyAllChildrenChildFlowID, "nodes.yaml")
-	accountEntities := filepath.Join(root, NotifyAllChildrenChildFlowID, "entities.yaml")
+	accountEntities := filepath.Join(root, NotifyAllChildrenChildFlowID, "state.yaml")
 	accountEvents := filepath.Join(root, NotifyAllChildrenChildFlowID, "events.yaml")
 	accountSchema := filepath.Join(root, NotifyAllChildrenChildFlowID, "schema.yaml")
 	if opts.OmitConnect {
@@ -143,11 +143,11 @@ auto_emit_on_create:
               canceled: join.dispositions.canceled
 `)
 		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.notify.requested:
-  key: account_id
+  _key: account_id
   account_id: text
   command: text
 `, `account.notify.requested:
-  key: account_id
+  _key: account_id
   account_id: text
   command: text
 portfolio.notify.completed:
@@ -231,10 +231,10 @@ portfolio.notify.completed:
             account_id: account.account_id
 `)
 		applyClosedReplacement(t, filepath.Join(root, NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.registered:
-  key: account_id
+  _key: account_id
   account_id: text
 `, `account.registered:
-  key: account_id
+  _key: account_id
   portfolio_id: text
   account_id: text
   eng_roles: integer

@@ -14,9 +14,9 @@ func TestEntityContractResolutionCannotBorrowParentState(t *testing.T) {
 	repo := repoRootForBootverifyTest(t)
 	root := t.TempDir()
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: local-state\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "Root:\n  parent_only: text\n  shared: text\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), "Root:\n  parent_only: text\n  shared: text\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "schema.yaml"), "name: child\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "entities.yaml"), "Child:\n  local: text\n  shared: integer\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "child", "state.yaml"), "Child:\n  local: text\n  shared: integer\n")
 	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	source := semanticview.Wrap(bundle)
 	for _, tc := range []struct {
@@ -75,7 +75,7 @@ writer:
     case:
       save: all
 `, "case:\n  local_status: text\n", "Use `save_entity_field` for `priority`.\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "root_case:\n  priority: integer\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "state.yaml"), "root_case:\n  priority: integer\n")
 	repo := repoRootForBootverifyTest(t)
 	bundle := loadFixtureBundleAt(t, repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})

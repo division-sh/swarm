@@ -41,7 +41,7 @@ stages:
   ready: {}
   done: {final: true}
 `,
-		"repo-scaffold/entities.yaml": "test_entity:\n  request_id: {type: text, _unused_reason: receiver instance identity}\n",
+		"repo-scaffold/state.yaml": "test_entity:\n  request_id: {type: text, _unused_reason: receiver instance identity}\n",
 		"repo-scaffold/events.yaml": `repo_scaffold.repo_commit_requested:
   request_id: string
   mvp_yaml: string

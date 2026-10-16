@@ -132,8 +132,8 @@ func TestReceiverConstructionPublicationObservesStandingTypedAbsenceBothStores(t
 					"service/schema.yaml": "name: service\n",
 				}
 				if fielded {
-					documents["entities.yaml"] = "receipt:\n  marker: {type: text, initial: unchanged}\n"
-					documents["service/entities.yaml"] = documents["entities.yaml"]
+					documents["state.yaml"] = "receipt:\n  marker: {type: text, initial: unchanged}\n"
+					documents["service/state.yaml"] = documents["state.yaml"]
 				}
 				f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, documents, nil)
 				runID := correlation.RunIDFromContext(f.ctx)

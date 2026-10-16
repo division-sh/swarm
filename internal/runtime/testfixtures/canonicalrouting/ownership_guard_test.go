@@ -522,11 +522,11 @@ func TestCanonicalRoutingD01DocumentsPreserveReviewedBytes(t *testing.T) {
 	// Pins come from the two off-owner maps at d528702fd before their extraction.
 	// These are complete Documents factories, not exempt non-bundle SourceIDs.
 	activityHashes := map[string]string{
-		"schema.yaml":            "eae6005ef74636c90683c2273fa0cd3f7aac7c2150f9ee3956e22be6064ddfb4",
-		"events.yaml":            "6d51a124fd856efb5376c0fda402f36fe30267c4e0896422134cb52978eaf0f7",
-		"research/schema.yaml":   "82b3bb8edb04b8d5e0cecbb8f22ff670f847c7be1d7f4f14d3131a1c8e3f4323",
-		"research/entities.yaml": "a8c48360389df0978447b89923ff9b8b07f6fcf31671837fc883ce4b5e5a0a4e",
-		"research/nodes.yaml":    "95a8fe55da683df04df59023b5b265be9921f4f23c61d2dedd6478a310acc7c9",
+		"schema.yaml":          "eae6005ef74636c90683c2273fa0cd3f7aac7c2150f9ee3956e22be6064ddfb4",
+		"events.yaml":          "6d51a124fd856efb5376c0fda402f36fe30267c4e0896422134cb52978eaf0f7",
+		"research/schema.yaml": "82b3bb8edb04b8d5e0cecbb8f22ff670f847c7be1d7f4f14d3131a1c8e3f4323",
+		"research/state.yaml":  "a8c48360389df0978447b89923ff9b8b07f6fcf31671837fc883ce4b5e5a0a4e",
+		"research/nodes.yaml":  "95a8fe55da683df04df59023b5b265be9921f4f23c61d2dedd6478a310acc7c9",
 	}
 	startupHashes := map[string]string{
 		"manifest.yaml":        "0b98bb0dc9ca912634118cf85d7a9bbabb285b23ddb4f41ff1cd8b373900c43b",
@@ -535,7 +535,7 @@ func TestCanonicalRoutingD01DocumentsPreserveReviewedBytes(t *testing.T) {
 		"nodes.yaml":           "b40b746340f62856131f6f9c8e4be1d94229c6ae51a2e12d277e86d6b6fc571f",
 		"worker/schema.yaml":   "d69201d130fd3f9d61c45ffe76ecfd3337211d159d31cf75716d768f4f49cb4f",
 		"worker/manifest.yaml": "61e91cd8884561aed8273c2bbeb4821b93f985131b140fd621b5e7874fb9d28d",
-		"worker/entities.yaml": "ec9c2584f62eef5905b9bed10e15f8fac80b641c73e35ea6f8df689e52a9bd6c",
+		"worker/state.yaml":    "ec9c2584f62eef5905b9bed10e15f8fac80b641c73e35ea6f8df689e52a9bd6c",
 		"worker/nodes.yaml":    "1dec27207100b1d277d99f8ee5f1803072bf45421e83538639ab01b8f06e288d",
 	}
 	check := func(t *testing.T, documents, hashes map[string]string, schemaHash string) {

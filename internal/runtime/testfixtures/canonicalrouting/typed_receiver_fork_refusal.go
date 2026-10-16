@@ -26,7 +26,7 @@ auto_emit_on_create:
   account_id: text
   values: InitializationValues
 work.ready:
-  key: account_id
+  _key: account_id
   account_id: text
   count: integer
   label: text
@@ -62,7 +62,7 @@ work.ready:
   instance_id: text
   workflow_version: numeric
 `)
-	writeClosedVariantFile(t, root, "account/entities.yaml", `account_state:
+	writeClosedVariantFile(t, root, "account/state.yaml", `account_state:
   account_id: {type: text, _unused_reason: receiver instance identity}
   processed_count: integer?
   count: integer

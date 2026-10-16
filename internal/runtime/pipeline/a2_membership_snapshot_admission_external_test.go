@@ -54,11 +54,11 @@ func TestA2MembershipSnapshotValidationOnBothStores(t *testing.T) {
 					// Change only the catalog field type before source admission; the
 					// canonical ordinary-connect declarations remain unchanged.
 					const listDeclaration = "  expected: [text]\n"
-					entitySource := files["orders/entities.yaml"]
+					entitySource := files["orders/state.yaml"]
 					if count := strings.Count(entitySource, listDeclaration); count != 1 {
 						t.Fatalf("map membership fixture requires exactly one canonical list declaration, got %d", count)
 					}
-					files["orders/entities.yaml"] = strings.Replace(entitySource, listDeclaration, "  expected: map[text]text\n", 1)
+					files["orders/state.yaml"] = strings.Replace(entitySource, listDeclaration, "  expected: map[text]text\n", 1)
 					membership = tc.mapSource
 				}
 				source := semanticview.Wrap(loadPipelineLifecycleFixtureBundle(t, files))

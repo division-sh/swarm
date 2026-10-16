@@ -29,7 +29,7 @@ connect:
   account_id: text
   values: InitializationValues
 work.ready:
-  key: account_id
+  _key: account_id
   account_id: text
   values: InitializationValues
 `,
@@ -51,7 +51,7 @@ pins:
   inputs:
     - work.ready
 `,
-		"account/entities.yaml": `account_state:
+		"account/state.yaml": `account_state:
   account_id: {type: text, _unused_reason: receiver instance identity}
   values: InitializationValues
   processed_count: {type: integer, initial: 0}

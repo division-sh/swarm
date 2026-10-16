@@ -38,9 +38,9 @@ func TestFlowConstructorInitialStateUsesCompiledOwner(t *testing.T) {
 
 func TestFlowConstructorPayloadConsumesExactDeliveryProjection(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: constructor-projection\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
-		"entities.yaml": "item:\n  item_id: text\n  precise: double?\n  message: text?\n",
-		"events.yaml":   "item.created:\n  precise: double\n  message: text\n",
+		"schema.yaml": "name: constructor-projection\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+		"state.yaml":  "item:\n  item_id: text\n  precise: double?\n  message: text?\n",
+		"events.yaml": "item.created:\n  precise: double\n  message: text\n",
 	})
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "source.created", "constructor-fixture", "", []byte(`{"precise":7.0,"message":"unchanged"}`), 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
 	projection, err := events.NewDeliveryPayloadProjection(map[string]string{"item_id": "minted-key"})
@@ -116,9 +116,9 @@ func TestFlowInstanceKeyRequiresScalarAdmissionBeforeFormatting(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
-				"schema.yaml":   "name: typed-instance-key\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
-				"entities.yaml": "item:\n  item_id: " + test.fieldType + "\n",
-				"events.yaml":   "item.created:\n  item_id: " + test.fieldType + "\n",
+				"schema.yaml": "name: typed-instance-key\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"state.yaml":  "item:\n  item_id: " + test.fieldType + "\n",
+				"events.yaml": "item.created:\n  item_id: " + test.fieldType + "\n",
 			})
 			material, err := AdmitFlowInstanceKey(source, ".", test.value)
 			if err != nil || material != test.material {
@@ -150,9 +150,9 @@ func TestFlowConstructorResolvedKeySatisfiesOnlyItsDeclaredSlot(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			source := loadWorkflowTempSource(t, map[string]string{
-				"schema.yaml":   "name: constructor-key-slot\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
-				"entities.yaml": "item:\n  item_id: text\n  message: text?\n",
-				"events.yaml":   eventSchema,
+				"schema.yaml": "name: constructor-key-slot\ninstance: item_id\npins:\n  inputs:\n    - item.created\n",
+				"state.yaml":  "item:\n  item_id: text\n  message: text?\n",
+				"events.yaml": eventSchema,
 			})
 			constructor, err := CompileFlowConstructor(source, ".", "item.created")
 			if err != nil {

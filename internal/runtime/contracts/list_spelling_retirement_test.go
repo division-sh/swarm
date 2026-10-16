@@ -116,6 +116,13 @@ func TestListSpellingRetirementMetadataAndData(t *testing.T) {
 	}
 }
 
+func listRetirementSourceFile(surface string) string {
+	if surface == "entities" {
+		return "state.yaml"
+	}
+	return surface + ".yaml"
+}
+
 func TestListSpellingRetirementBundleStyle(t *testing.T) {
 	for _, surface := range []string{"types", "entities", "events", "nodes"} {
 		for _, form := range []struct {
@@ -138,15 +145,15 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 			t.Run(surface+"/"+form.name, func(t *testing.T) {
 				root := t.TempDir()
 				files := map[string]string{
-					"schema.yaml":   "name: list-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
-					"types.yaml":    "types:\n  ProbeItem:\n    value: text\n",
-					"entities.yaml": "probe:\n  item: text\n",
+					"schema.yaml": "name: list-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
+					"types.yaml":  "types:\n  ProbeItem:\n    value: text\n",
+					"state.yaml":  "probe:\n  item: text\n",
 				}
 				switch surface {
 				case "types":
 					files["types.yaml"] += "  Container:\n    items: " + strings.ReplaceAll(form.source, "\n", "\n  ") + "\n"
 				case "entities":
-					files["entities.yaml"] = "probe:\n  items: " + form.source + "\n"
+					files["state.yaml"] = "probe:\n  items: " + form.source + "\n"
 				case "events":
 					files["events.yaml"] = "proof.received:\n  items: " + form.source + "\n"
 				case "nodes":
@@ -158,7 +165,7 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 				repo := repoRootForContractsTest(t)
 				bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 				if form.reject {
-					if err == nil || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), surface+".yaml") {
+					if err == nil || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), listRetirementSourceFile(surface)) {
 						t.Fatalf("full bundle failed to teach the offending source: %v", err)
 					}
 					artifact, err := sourceartifact.AdmitDirectory(root)
@@ -178,7 +185,7 @@ func TestListSpellingRetirementBundleStyle(t *testing.T) {
 						t.Fatal(err)
 					}
 					for _, source := range []*sourceartifact.AdmittedSourceArtifact{artifact, catalog, retained} {
-						if _, err := LoadWorkflowContractBundleFromArtifact(repo, source, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{}); err == nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), surface+".yaml") {
+						if _, err := LoadWorkflowContractBundleFromArtifact(repo, source, DefaultPlatformSpecFile(repo), WorkflowContractLoadOptions{}); err == nil || !errors.Is(err, ErrInvalidField) || !strings.Contains(err.Error(), "[T]") || !strings.Contains(err.Error(), listRetirementSourceFile(surface)) {
 							t.Fatalf("retained source bypassed shape/style admission: %v", err)
 						}
 					}
@@ -310,7 +317,7 @@ func TestListSpellingRetirementCombinedNestedBundle(t *testing.T) {
 					if scope != "" {
 						writeFixtureFile(t, root+"/child/schema.yaml", "name: child\nstages: {done: {final: true}}\n")
 					}
-					file := scope + surface + ".yaml"
+					file := scope + listRetirementSourceFile(surface)
 					prefix := ""
 					switch surface {
 					case "types":
@@ -357,11 +364,11 @@ func TestListSpellingRetirementPreservesNamedTypeCase(t *testing.T) {
 			}
 			root := t.TempDir()
 			for file, source := range map[string]string{
-				"schema.yaml":   "name: case-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
-				"types.yaml":    "types:\n  " + name + ":\n    value: text\n  Holder:\n    item: " + name + "\n",
-				"entities.yaml": "probe:\n  item: " + name + "\n",
-				"events.yaml":   "proof.received:\n  item: " + name + "\n",
-				"nodes.yaml":    "collector:\n  state_schema:\n    fields:\n      item: " + name + "\n",
+				"schema.yaml": "name: case-proof\nstages:\n  ready: {}\n  done: {final: true}\n",
+				"types.yaml":  "types:\n  " + name + ":\n    value: text\n  Holder:\n    item: " + name + "\n",
+				"state.yaml":  "probe:\n  item: " + name + "\n",
+				"events.yaml": "proof.received:\n  item: " + name + "\n",
+				"nodes.yaml":  "collector:\n  state_schema:\n    fields:\n      item: " + name + "\n",
 			} {
 				writeFixtureFile(t, root+"/"+file, source)
 			}

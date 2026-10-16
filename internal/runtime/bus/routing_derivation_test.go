@@ -280,7 +280,7 @@ pins:
 	instance := ""
 	if mode == runtimecontracts.FlowModeTemplate {
 		instance = "instance: order_id\n"
-		write(filepath.Join(root, "orders", "entities.yaml"), "order:\n  order_id: text\n")
+		write(filepath.Join(root, "orders", "state.yaml"), "order:\n  order_id: text\n")
 	}
 	write(filepath.Join(root, "orders", "schema.yaml"), "name: orders\n"+instance+`stages:
   active: {}

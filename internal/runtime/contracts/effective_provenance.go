@@ -151,6 +151,7 @@ func populateEffectiveProvenance(bundle *WorkflowContractBundle) error {
 		}
 	}
 	populateEffectiveEventProjectionProvenance(bundle, builder)
+	populateEffectiveEntityProvenance(bundle, builder)
 	for key, entry := range bundle.scopedTools {
 		prefix := "tools[" + strconv.Quote(key) + "]"
 		for path, provenance := range entry.admissionProvenance {
@@ -173,6 +174,23 @@ func populateEffectiveProvenance(bundle *WorkflowContractBundle) error {
 	}
 	bundle.effectiveProvenance = builder.ledger()
 	return nil
+}
+
+func populateEffectiveEntityProvenance(bundle *WorkflowContractBundle, builder *effectiveProvenanceBuilder) {
+	for _, flow := range sortedFlowSources(bundle.FlowSources) {
+		entities := bundle.RootEntities
+		if flow.FlowPath != "." {
+			entities = bundle.flowEntities[flow.FlowPath]
+		}
+		for _, name := range sortedEntityContractKeys(entities) {
+			entry := entities[name]
+			prefix := "state[" + strconv.Quote(flow.FlowPath+":"+name) + "]"
+			for path, value := range entry.admissionProvenance {
+				value.InputPaths = qualifyEffectiveEventInputPaths(prefix, value.InputPaths)
+				builder.set(prefix+"."+path, value)
+			}
+		}
+	}
 }
 
 func effectiveNodeProvenancePrefix(flowPath, nodeID string) string {

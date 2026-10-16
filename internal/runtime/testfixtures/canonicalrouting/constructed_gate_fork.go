@@ -5,7 +5,7 @@ import "testing"
 func CopyConstructedGateMutationControl(t testing.TB, fields bool) string {
 	root := CopyConstructedGateForkControl(t, fields)
 	if fields {
-		writeClosedVariantFile(t, root, "entities.yaml", "default:\n  name:\n    type: text\n    initial: At R\n")
+		writeClosedVariantFile(t, root, "state.yaml", "default:\n  name:\n    type: text\n    initial: At R\n")
 	}
 	return root
 }
@@ -21,7 +21,7 @@ func CopyConstructedGateForkControl(t testing.TB, fields bool) string {
 		"nodes.yaml":  "frontier:\n  execution_type: system_node\n  subscribes_to: [item.received]\n  event_handlers:\n    item.received:\n      guard: {id: retained_frontier, check: true}\n",
 	}
 	if fields {
-		files["entities.yaml"] = "default:\n  name: text\n"
+		files["state.yaml"] = "default:\n  name: text\n"
 	}
 	for name, body := range files {
 		writeClosedVariantFile(t, root, name, body)

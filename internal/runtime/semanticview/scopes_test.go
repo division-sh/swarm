@@ -67,7 +67,7 @@ func TestResolveAgentMemoryProof_FlowScopedAgentCarriesFlowPath(t *testing.T) {
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", ".."))
 	root := t.TempDir()
 
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+	writeSemanticviewFixtureFile(t, filepath.Join(root, "state.yaml"), `
 item:
   item_id: string
 `)

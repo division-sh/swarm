@@ -21,7 +21,7 @@ connect:
   - {event: work.ready, from: producer, to: consumer}
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "parent.seeded:\n  work_id: text\nwork.requested:\n  work_id: text\n")
-	writeClosedVariantFile(t, root, "entities.yaml", "seed: {}\n")
+	writeClosedVariantFile(t, root, "state.yaml", "seed: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `parent-node:
   execution_type: system_node
   subscribes_to: [parent.seeded]
@@ -43,7 +43,7 @@ pins:
   outputs:
     - work.ready
 `)
-	writeClosedVariantFile(t, root, "producer/entities.yaml", "work:\n  work_id: text\n")
+	writeClosedVariantFile(t, root, "producer/state.yaml", "work:\n  work_id: text\n")
 	writeClosedVariantFile(t, root, "producer/events.yaml", "work.ready:\n  work_id: text\n")
 	writeClosedVariantFile(t, root, "producer/nodes.yaml", `producer-node:
   execution_type: system_node

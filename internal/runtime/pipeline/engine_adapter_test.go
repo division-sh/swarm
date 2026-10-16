@@ -200,7 +200,7 @@ stages:
 stages:
   queued: {}
 `,
-		"child/entities.yaml": `
+		"child/state.yaml": `
 child_entity:
   request_id: text
 `,
@@ -507,11 +507,11 @@ func VerifyUpdateEntityState_ReturnsWorkflowStoreMutationErrorForTest(t *testing
 
 func VerifyPipelineEngineMutationOwnerRejectsForeignFlowWriteForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":          "name: foreign-flow-write\n",
-		"flow-a/schema.yaml":   "name: flow-a\nstages:\n  pending: {}\n",
-		"flow-a/entities.yaml": "test_entity: {}\n",
-		"flow-b/schema.yaml":   "name: flow-b\nstages:\n  pending: {}\n",
-		"flow-b/entities.yaml": "test_entity: {}\n",
+		"schema.yaml":        "name: foreign-flow-write\n",
+		"flow-a/schema.yaml": "name: flow-a\nstages:\n  pending: {}\n",
+		"flow-a/state.yaml":  "test_entity: {}\n",
+		"flow-b/schema.yaml": "name: flow-b\nstages:\n  pending: {}\n",
+		"flow-b/state.yaml":  "test_entity: {}\n",
 	})
 	fixture := open(t, source)
 	store := fixture.Persistence.store
@@ -699,7 +699,7 @@ func VerifyPipelineEngineStateRepoLoadStateMissingEntityDoesNotMaterializeDefaul
 stages:
   queued: {}
 `,
-		"review/entities.yaml": `
+		"review/state.yaml": `
 review_entity:
   status:
     type: text
@@ -731,8 +731,8 @@ review_entity:
 
 func VerifyPipelineEngineMutationOwnerRoundTripsTypedCarrierForTest(t *testing.T, open func(*testing.T, semanticview.Source) WorkflowHandlerNativeFixtureForTest) {
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: root\n",
-		"entities.yaml": "test_entity:\n  score: integer\n  subject_id: text\n",
+		"schema.yaml": "name: root\n",
+		"state.yaml":  "test_entity:\n  score: integer\n  subject_id: text\n",
 	})
 	fixture := open(t, source)
 	ctx := runtimecorrelation.WithRunID(fixture.Context, testPipelineRunID)
@@ -1099,9 +1099,9 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemp
 		"schema.yaml": "stages:\n  idle: {}\n  done: {final: true}\npins:\n  inputs:\n    - parent.trigger\n",
 		"events.yaml": "parent.trigger:\n  entity_id: string\n",
 
-		"child/schema.yaml":   "name: child\ninstance: entity_id\nstages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.done\n",
-		"child/entities.yaml": "work:\n  entity_id: text\n",
-		"child/events.yaml":   "child.start:\n  entity_id: string\nchild.done:\n  step: string\n",
+		"child/schema.yaml": "name: child\ninstance: entity_id\nstages:\n  waiting: {}\n  processed: {final: true}\npins:\n  inputs:\n    - child.start\n  outputs:\n    - child.done\n",
+		"child/state.yaml":  "work:\n  entity_id: text\n",
+		"child/events.yaml": "child.start:\n  entity_id: string\nchild.done:\n  step: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -1450,8 +1450,8 @@ func (r *pipelineTestEntityCollectionPersistenceReader) QueryWorkflowEntityColle
 func TestPipelineEngineEntityCollectionReaderMaterializesDeclaredStateRows(t *testing.T) {
 	runID := uuid.NewString()
 	source := loadWorkflowTempSource(t, map[string]string{
-		"schema.yaml":   "name: work\nstages:\n  active: {}\n",
-		"entities.yaml": "items:\n  id: text\n  status: text\n",
+		"schema.yaml": "name: work\nstages:\n  active: {}\n",
+		"state.yaml":  "items:\n  id: text\n  status: text\n",
 	})
 	persisted := &pipelineTestEntityCollectionPersistenceReader{records: []WorkflowEntityStatePersistenceRecord{
 		{EntityID: uuid.NewString(), FlowInstance: runID, EntityType: "items", Fields: json.RawMessage(`{"id":"a","status":"queued","undeclared":"drop"}`)},

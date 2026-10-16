@@ -143,6 +143,9 @@ func LoadWorkflowContractBundleFromArtifact(repoRoot string, artifact *sourceart
 			}
 		}
 	}
+	if err := expandScopedCatalogDeclarations(bundle, flowViewsByID); err != nil {
+		return nil, err
+	}
 	if err := buildFilesystemFlowTree(bundle, flowViewsByID); err != nil {
 		return nil, err
 	}

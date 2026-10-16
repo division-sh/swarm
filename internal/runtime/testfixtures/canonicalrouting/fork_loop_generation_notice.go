@@ -46,8 +46,8 @@ connect:
   - {event: review.retry, from: ., to: review}
   - {event: review.closed, from: ., to: review}
 `,
-		"entities.yaml": "root: {}\n",
-		"events.yaml":   "work.requested:\n  token: text\nroot.closed:\nwork.started:\n  token: text\nreview.retry:\n  revision_id: text\n  token: text\nreview.closed:\n  revision_id: text\n",
+		"state.yaml":  "root: {}\n",
+		"events.yaml": "work.requested:\n  token: text\nroot.closed:\nwork.started:\n  token: text\nreview.retry:\n  revision_id: text\n  token: text\nreview.closed:\n  revision_id: text\n",
 		"nodes.yaml": `controller:
   execution_type: system_node
   subscribes_to: [work.requested, root.closed]
@@ -78,7 +78,7 @@ pins:
     - review.retry
     - review.closed
 `,
-		"review/entities.yaml": "work:\n  observed_revision: {type: text, initial: ''}\n  observed_token: {type: text, initial: ''}\n",
+		"review/state.yaml": "work:\n  observed_revision: {type: text, initial: ''}\n  observed_token: {type: text, initial: ''}\n",
 		"review/events.yaml": `review.requested:
   revision_id: text
   token: text

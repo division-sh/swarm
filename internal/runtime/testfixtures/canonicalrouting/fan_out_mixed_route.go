@@ -30,7 +30,7 @@ pins:
   inputs:
     - mixed.one
 `,
-		"one/entities.yaml": "test_entity: {}\n",
+		"one/state.yaml": "test_entity: {}\n",
 		"one/nodes.yaml": `one-node:
   execution_type: system_node
   subscribes_to: [mixed.one]
@@ -44,7 +44,7 @@ pins:
   inputs:
     - mixed.multi
 `,
-		"multi-a/entities.yaml": "test_entity: {}\n",
+		"multi-a/state.yaml": "test_entity: {}\n",
 		"multi-a/nodes.yaml": `multi-a-node:
   execution_type: system_node
   subscribes_to: [mixed.multi]
@@ -58,7 +58,7 @@ pins:
   inputs:
     - mixed.multi
 `,
-		"multi-b/entities.yaml": "test_entity: {}\n",
+		"multi-b/state.yaml": "test_entity: {}\n",
 		"multi-b/nodes.yaml": `multi-b-node:
   execution_type: system_node
   subscribes_to: [mixed.multi]
@@ -72,7 +72,7 @@ pins:
   inputs:
     - mixed.multi
 `,
-		"child/entities.yaml": "test_entity: {}\n",
+		"child/state.yaml": "test_entity: {}\n",
 		"child/nodes.yaml": `child-node:
   execution_type: system_node
   subscribes_to: [mixed.multi]

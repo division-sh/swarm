@@ -35,10 +35,10 @@ func VerifyNativeAuthoredRuleReceiverPreparationRetryBothStoresForTest(t *testin
 		for _, variant := range []string{"no_fault_control", "fresh_retry", "recovered_retry"} {
 			t.Run(backend+"/"+variant, func(t *testing.T) {
 				bundle := loadWorkflowTempBundle(t, map[string]string{
-					"schema.yaml":   "name: delivery-authority\nstages:\n  queued: {}\n  done: {final: true}\n",
-					"entities.yaml": "test_entity: {}\n",
-					"events.yaml":   "source.evt:\n",
-					"nodes.yaml":    "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      rules:\n        - when: |-\n                  true\n          advances_to: done\n",
+					"schema.yaml": "name: delivery-authority\nstages:\n  queued: {}\n  done: {final: true}\n",
+					"state.yaml":  "test_entity: {}\n",
+					"events.yaml": "source.evt:\n",
+					"nodes.yaml":  "node-a:\n  execution_type: system_node\n  subscribes_to: [source.evt]\n  event_handlers:\n    source.evt:\n      rules:\n        - when: |-\n                  true\n          advances_to: done\n",
 				})
 				module := handlerTestWorkflowModuleWithBundle(bundle, ".", "node-a").(*previewWorkflowModule)
 				node := pipelineNode(t, ".", "node-a")

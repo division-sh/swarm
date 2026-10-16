@@ -9,7 +9,7 @@ scope:
   included:
     - schema.yaml
     - types.yaml
-    - entities.yaml
+    - state.yaml
     - events.yaml
     - nodes.yaml
     - agents.yaml
@@ -85,7 +85,7 @@ corpus:
 rows:
   - id: workflow.optional_declaration_file_liveness
     ruled: issue-2318
-    paths: "each admitted filesystem FlowNode: agents.yaml, entities.yaml, events.yaml, nodes.yaml, policy.yaml, rules.yaml, tools.yaml, types.yaml; declaration files outside a FlowNode are resources and never semantic declarations"
+    paths: "each admitted filesystem FlowNode: agents.yaml, state.yaml, events.yaml, nodes.yaml, policy.yaml, rules.yaml, tools.yaml, types.yaml; declaration files outside a FlowNode are resources and never semantic declarations"
     owners: [admitOptionalDeclarationFile, optionalDeclarationAdmission.RequireLive, admitEventCatalogDocument]
     information:
       fact: [file presence and admitted typed declarations]
@@ -230,7 +230,7 @@ rows:
 
   - id: flow.output_pin_route_projection
     ruled: issue-2352
-    paths: "events.<event>.key plus connection-owned ordinary resolution and immutable compiled edge evidence"
+    paths: "events.<event>._key plus connection-owned ordinary resolution and immutable compiled edge evidence"
     owners: [CompiledEventSchema, CompiledConnectionInput, ConnectRoutePlan]
     information: {fact: [producer_event_business_key], derived_projection: [receiver_specific_delivery_projection]}
     spelling:
@@ -294,18 +294,20 @@ rows:
 
   - id: entity_document
     ruled: mechanical-ratified
-    paths: "entities.<entity>._description, entities.<entity>._owner, entities.<entity>.<field>"
+    paths: "state.<entity>._description, state.<entity>._owner, state.<entity>._embed, state.<entity>.<field>"
     owners: [EntityContractsDocument.UnmarshalYAML, EntityContract.UnmarshalYAML]
     information:
       fact: [entity and field map keys]
       choice: [_owner]
       annotation: [_description]
-    spelling: {canonical: keyed_entity_and_field_maps, already_retired: [_state_model, state_field], retired_duplicates: []}
+    spelling: {canonical: keyed_entity_and_field_maps_with_named_record_embedding, already_retired: [_state_model], retired_duplicates: []}
+    embedding_ruling: "#1745/6207714184: state.yaml is the sole finite filename; _embed uses nonempty named records with no collisions or override; state_field is an ordinary business field. Historical corpus counts are retained."
     corpus: {entities: 6, fields: 16}
 
   - id: event.schema_ownership
     ruled: mechanical-ratified
-    paths: "events.<event>, events.<event>.key, events.<event>.swarm, events.<event>.<payload_field>, events.<event>.<payload_field>.type?"
+    paths: "events.<event>, events.<event>._key, events.<event>._description, events.<event>._embed, events.<event>.<payload_field>, events.<event>.<payload_field>.type?"
+    embedding_ruling: "#1745/6207714184: one scoped expansion boundary for event and state fields; named-record metadata is preserved, role attributes stay own-only, underscore metadata is closed, non-underscore names are ordinary business fields. Historical corpus counts are retained."
     owners: [yamlsource.Document, admitEventCatalogDocument, admitEventCatalogEntry, admitEventPayloadField, effectiveEventDeclarationForFlowEvent, EffectiveProvenanceLedger]
     information:
       fact: [producer-owned event ID and payload schema]

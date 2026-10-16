@@ -32,7 +32,7 @@ func deploymentResourceSourceWithAgent(t *testing.T, includeAgent bool) semantic
 	if err != nil {
 		t.Fatal(err)
 	}
-	const old = "account.registered:\n  key: account_id\n  account_id: text\n"
+	const old = "account.registered:\n  _key: account_id\n  account_id: text\n"
 	if strings.Count(string(raw), old) != 1 {
 		t.Fatalf("account.registered fixture changed: %s", raw)
 	}

@@ -56,7 +56,7 @@ pins:
   inputs:
     - observer.requested
 `)
-	writeClosedVariantFile(t, root, "observers/entities.yaml", "observer: {}\n")
+	writeClosedVariantFile(t, root, "observers/state.yaml", "observer: {}\n")
 	writeClosedVariantFile(t, root, "observers/nodes.yaml", `start:
   execution_type: system_node
   subscribes_to: [observer.requested]
@@ -127,9 +127,9 @@ func CopyHumanTaskOwnership(t testing.TB, mode string) string {
 			writeClosedVariantFile(t, root, name, string(child))
 		}
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  outputs: [observer.requested]\nconnect:\n  - {event: observer.requested, from: ., to: observers}\n", "")
-		removeClosedVariantFiles(t, root, "observers/mocks/observer.py", "observers/mocks", "observers/agents.yaml", "observers/entities.yaml", "observers/nodes.yaml", "observers/schema.yaml", "observers")
+		removeClosedVariantFiles(t, root, "observers/mocks/observer.py", "observers/mocks", "observers/agents.yaml", "observers/state.yaml", "observers/nodes.yaml", "observers/schema.yaml", "observers")
 	case "template":
-		writeClosedVariantFile(t, root, "observers/entities.yaml", "observer:\n  case_id: text\n")
+		writeClosedVariantFile(t, root, "observers/state.yaml", "observer:\n  case_id: text\n")
 		applyClosedReplacement(t, filepath.Join(root, "observers/schema.yaml"), "name: observers\n", "name: observers\ninstance: case_id\n")
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "  - {event: observer.requested, from: ., to: observers}\n", "  - {event: observer.requested, from: ., to: observers, resolution: create}\n")
 		applyClosedReplacement(t, filepath.Join(root, "schema.yaml"), "    - observer.requested\n", "    - observer.requested\n    - observer.seed\n")

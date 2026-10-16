@@ -538,8 +538,8 @@ func TestBuildShowsRootPrimaryEntity(t *testing.T) {
 	if view.Root.PrimaryEntity.Fields["org_id"] != "text" {
 		t.Fatalf("root primary entity fields = %#v, want org_id text", view.Root.PrimaryEntity.Fields)
 	}
-	if view.Root.PrimaryEntity.SourceFile == "" || !strings.HasSuffix(view.Root.PrimaryEntity.SourceFile, "entities.yaml") {
-		t.Fatalf("root primary entity source file = %q, want entities.yaml", view.Root.PrimaryEntity.SourceFile)
+	if view.Root.PrimaryEntity.SourceFile == "" || !strings.HasSuffix(view.Root.PrimaryEntity.SourceFile, "state.yaml") {
+		t.Fatalf("root primary entity source file = %q, want state.yaml", view.Root.PrimaryEntity.SourceFile)
 	}
 }
 
@@ -1115,7 +1115,7 @@ func TestBuildShowsStatelessCountJoinWithoutCoordinatorDemandWithExactProvenance
 func TestBuildDoesNotInferCoordinatorFromUnusedContainedField(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	entitiesPath := filepath.Join(root, "telegram-ingress", "entities.yaml")
+	entitiesPath := filepath.Join(root, "telegram-ingress", "state.yaml")
 	entities := []byte("telegram_service:\n  unused_index:\n    type: map[text]json\n    initial: {}\n")
 	if err := os.WriteFile(entitiesPath, entities, 0o644); err != nil {
 		t.Fatalf("write standing singleton entities: %v", err)
@@ -1351,7 +1351,7 @@ func loadDefaultedTemplatePolicySource(t testing.TB) semanticview.Source {
 name: scoring
 instance: account_id
 `)
-	writeAuthoringViewTestFile(t, filepath.Join(root, "scoring", "entities.yaml"), `
+	writeAuthoringViewTestFile(t, filepath.Join(root, "scoring", "state.yaml"), `
 account:
   account_id: uuid
 `)
@@ -1368,7 +1368,7 @@ func writeRootPrimaryEntityContracts(t testing.TB) string {
 	root := t.TempDir()
 
 	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: root-primary-entity\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "entities.yaml"), `
+	writeAuthoringViewTestFile(t, filepath.Join(root, "state.yaml"), `
 workspace:
   org_id: text
   region: text
@@ -1406,7 +1406,7 @@ types:
   Item:
     name: text
 `)
-	writeAuthoringViewTestFile(t, filepath.Join(dir, "entities.yaml"), `
+	writeAuthoringViewTestFile(t, filepath.Join(dir, "state.yaml"), `
 state:
   id: text
   items: map[text]Item

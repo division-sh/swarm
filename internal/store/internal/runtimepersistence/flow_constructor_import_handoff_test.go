@@ -21,9 +21,9 @@ func TestFlowConstructorScenarioImportCannotAcquireExecutionBothStores(t *testin
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, map[string]string{
-				"schema.yaml":   "name: imported-history\nstages:\n  pending: {}\n",
-				"events.yaml":   "checkpoint:\n",
-				"entities.yaml": "record:\n  marker: text\n",
+				"schema.yaml": "name: imported-history\nstages:\n  pending: {}\n",
+				"events.yaml": "checkpoint:\n",
+				"state.yaml":  "record:\n  marker: text\n",
 			}, nil)
 			owner := f.store.(interface {
 				SetupScenarioEntities(context.Context, pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error)

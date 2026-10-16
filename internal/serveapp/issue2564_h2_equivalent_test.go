@@ -124,7 +124,7 @@ func TestIssue2564H2ServeProcessHelper(t *testing.T) {
 func issue2564H2Source(t *testing.T) string {
 	t.Helper()
 	root := canonicalrouting.CopyIssue2564H2Equivalent(t)
-	paths := []string{"schema.yaml", "events.yaml", "hub/schema.yaml", "hub/entities.yaml", "hub/nodes.yaml"}
+	paths := []string{"schema.yaml", "events.yaml", "hub/schema.yaml", "hub/state.yaml", "hub/nodes.yaml"}
 	slices.Sort(paths)
 	manifest := sha256.New()
 	for _, path := range paths {

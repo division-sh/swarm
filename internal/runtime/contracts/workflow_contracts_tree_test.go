@@ -363,7 +363,7 @@ func TestNodeEventHandler_LocalizesCrossFlowQualifiedInputEventToLocalHandler(t 
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "state.yaml"), `
 item:
   item_id: string
 `)
@@ -437,7 +437,7 @@ func TestNodeEventHandler_ExternalizesOnSuccessEmitWithRules(t *testing.T) {
 	repoRoot := repoRootForContractsTest(t)
 	root := t.TempDir()
 
-	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "state.yaml"), `
 item:
   item_id: string
 `)
@@ -532,7 +532,7 @@ func currentWorkflowContractsDirForTest(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 
-	writeFixtureFile(t, filepath.Join(root, "entities.yaml"), `
+	writeFixtureFile(t, filepath.Join(root, "state.yaml"), `
 item:
   item_id: string
   status: string
@@ -819,14 +819,14 @@ gate_state:
 
 func TestEventCatalogEntry_RejectsRetiredSwarmMetadata(t *testing.T) {
 	snippet := canonicalrouting.EventCatalogMetadataParserSnippet(t, canonicalrouting.CanonicalExternalEventMetadata)
-	if _, err := admitEventCatalogParserSnippet(t, snippet); err == nil || !strings.Contains(err.Error(), "reserved") || !strings.Contains(err.Error(), "swarm") {
+	if _, err := admitEventCatalogParserSnippet(t, snippet); err == nil || !strings.Contains(err.Error(), `field "source" is not supported`) || !strings.Contains(err.Error(), "swarm") {
 		t.Fatalf("retired swarm metadata admission = %v", err)
 	}
 }
 
 func TestEventCatalogEntry_LegacyMetadataFieldsFailClosed(t *testing.T) {
 	snippet := canonicalrouting.EventCatalogMetadataParserSnippet(t, canonicalrouting.RetiredExternalEventMetadata)
-	if _, err := admitEventCatalogParserSnippet(t, snippet); err == nil || !strings.Contains(err.Error(), "reserved") {
+	if _, err := admitEventCatalogParserSnippet(t, snippet); err == nil || !strings.Contains(err.Error(), `event metadata field "_source" is not supported`) {
 		t.Fatalf("load event catalog entry error = %v, want retired metadata failure", err)
 	}
 }
@@ -855,8 +855,11 @@ entity_id: string
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := admitEventCatalogEntryForTest(t, tc.yaml)
-			if err == nil || !strings.Contains(err.Error(), "reserved") || !strings.Contains(err.Error(), tc.wantField) {
+			entry, err := admitEventCatalogEntryForTest(t, tc.yaml)
+			if err == nil {
+				_, err = newCompiledEventSchema(".", "test.event", entry, TypeCatalogDocument{}, "", CompiledEventSchemaSource{})
+			}
+			if err == nil || !strings.Contains(err.Error(), "unknown catalog type") || !strings.Contains(err.Error(), tc.wantField) {
 				t.Fatalf("load event catalog entry error = %v, want retired %s failure", err, tc.wantField)
 			}
 		})
@@ -866,7 +869,7 @@ entity_id: string
 func TestEventCatalogEntry_ConflictingSwarmAndLegacyMetadataFailsClosed(t *testing.T) {
 	snippet := canonicalrouting.EventCatalogMetadataParserSnippet(t, canonicalrouting.ConflictingEventMetadata)
 	_, err := admitEventCatalogParserSnippet(t, snippet)
-	if err == nil || !strings.Contains(err.Error(), "reserved") || !strings.Contains(err.Error(), `event field name "swarm"`) {
+	if err == nil || !strings.Contains(err.Error(), `event metadata field "_source" is not supported`) {
 		t.Fatalf("load event catalog entry error = %v, want retirement before legacy conflict interpretation", err)
 	}
 }

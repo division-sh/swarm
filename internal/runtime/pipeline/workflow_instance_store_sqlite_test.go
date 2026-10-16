@@ -19,8 +19,8 @@ import (
 
 func VerifySQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRowsForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: initial-value-proof\nstages:\n  created: {}\n",
-		"entities.yaml": "test_entity:\n  region: {type: text, initial: \"west\"}\n  tier: {type: integer, initial: 1}\n",
+		"schema.yaml": "name: initial-value-proof\nstages:\n  created: {}\n",
+		"state.yaml":  "test_entity:\n  region: {type: text, initial: \"west\"}\n  tier: {type: integer, initial: 1}\n",
 	})
 	fixture, _, ctx := nativePilotPipelineForTest(t, "sqlite", bundle, open)
 	runID := runtimecorrelation.RunIDFromContext(ctx)
@@ -87,8 +87,8 @@ func VerifyNativeInitialValueMutationRequiresExistingCanonicalRunBeforeMutationF
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			bundle := loadWorkflowTempBundle(t, map[string]string{
-				"schema.yaml":   "name: missing-initial-run\nstages:\n  ready: {}\n",
-				"entities.yaml": "test_entity:\n  region: {type: text, initial: \"west\"}\n",
+				"schema.yaml": "name: missing-initial-run\nstages:\n  ready: {}\n",
+				"state.yaml":  "test_entity:\n  region: {type: text, initial: \"west\"}\n",
 			})
 			fixture, pc, ctx := nativePilotPipelineForTest(t, backend, bundle, open)
 			before, err := fixture.PhysicalCounts(ctx)
@@ -220,8 +220,8 @@ func VerifySQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadataForTes
 
 func VerifySQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunnerForTest(t *testing.T, open pipelineDeliveryNativeOpenerForTest) {
 	bundle := loadWorkflowTempBundle(t, map[string]string{
-		"schema.yaml":   "name: termination-proof\nstages:\n  running: {}\n",
-		"entities.yaml": "test_entity: {}\n",
+		"schema.yaml": "name: termination-proof\nstages:\n  running: {}\n",
+		"state.yaml":  "test_entity: {}\n",
 	})
 	fixture, coordinator, ctx := nativePilotPipelineForTest(t, "sqlite", bundle, open)
 	runID := runtimecorrelation.RunIDFromContext(ctx)

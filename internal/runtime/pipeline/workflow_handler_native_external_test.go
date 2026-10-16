@@ -533,6 +533,16 @@ func TestEntityLastFieldClearAndColdReloadBothStores(t *testing.T) {
 	}
 }
 
+func TestFlatEmbeddingExecutionBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			pipeline.VerifyFlatEmbeddingExecutionBothStoresForTest(t, func(t *testing.T, source semanticview.Source) pipeline.WorkflowHandlerNativeFixtureForTest {
+				return workflowHandlerNativeFixture(t, backend, source, 1, 1)
+			})
+		})
+	}
+}
+
 func TestSelectedHandlerSparsePresenceWriteAndEmitBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {

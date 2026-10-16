@@ -42,10 +42,10 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 	}
 	for _, scope := range scopes {
 		files := map[string]string{
-			"schema.yaml":   "name: fork-input\nstages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.seeded\n    - " + eventName + "\n",
-			"events.yaml":   "work.seeded:\n  seed: boolean\n" + eventName + ":\n  token: " + tokenType + "\n",
-			"entities.yaml": "work: {}\n",
-			"nodes.yaml":    "controller:\n  execution_type: system_node\n  subscribes_to: [work.seeded, " + eventName + "]\n  event_handlers:\n    work.seeded:\n      advances_to: ready\n    " + eventName + ":\n      advances_to: done\n",
+			"schema.yaml": "name: fork-input\nstages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.seeded\n    - " + eventName + "\n",
+			"events.yaml": "work.seeded:\n  seed: boolean\n" + eventName + ":\n  token: " + tokenType + "\n",
+			"state.yaml":  "work: {}\n",
+			"nodes.yaml":  "controller:\n  execution_type: system_node\n  subscribes_to: [work.seeded, " + eventName + "]\n  event_handlers:\n    work.seeded:\n      advances_to: ready\n    " + eventName + ":\n      advances_to: done\n",
 		}
 		if scope == "" {
 			switch variant {
@@ -78,12 +78,12 @@ func CopySelectedForkPendingInput(t testing.TB, variant SelectedForkPendingInput
 	}
 	if variant == PendingInputMixedCompletion {
 		writeClosedVariantFile(t, root, "a_finished/schema.yaml", "name: finished\nstages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.seeded\n    - work.first\n")
-		writeClosedVariantFile(t, root, "a_finished/entities.yaml", "work: {}\n")
+		writeClosedVariantFile(t, root, "a_finished/state.yaml", "work: {}\n")
 		writeClosedVariantFile(t, root, "a_finished/nodes.yaml", "controller:\n  execution_type: system_node\n  subscribes_to: [work.seeded, work.first]\n  event_handlers:\n    work.seeded:\n      advances_to: ready\n    work.first:\n      advances_to: done\n")
 	}
 	if variant == PendingInputConnectedSiblings {
 		writeClosedVariantFile(t, root, "on_demand/schema.yaml", "name: on_demand\ninstance: token\nstages:\n  ready: {}\n  done: {final: true}\npins:\n  inputs:\n    - work.first\n")
-		writeClosedVariantFile(t, root, "on_demand/entities.yaml", "work:\n  token: {type: text, indexed: true, _unused_reason: receiver instance identity}\n")
+		writeClosedVariantFile(t, root, "on_demand/state.yaml", "work:\n  token: {type: text, indexed: true, _unused_reason: receiver instance identity}\n")
 		writeClosedVariantFile(t, root, "on_demand/nodes.yaml", "controller:\n  execution_type: system_node\n  subscribes_to: [work.first]\n  event_handlers:\n    work.first:\n      advances_to: done\n")
 	}
 	return root

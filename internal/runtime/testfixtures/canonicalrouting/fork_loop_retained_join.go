@@ -57,7 +57,7 @@ pins:
   outputs:
     - join.observed
 `,
-		"entities.yaml": `work:
+		"state.yaml": `work:
   members: {type: "[text]"}
   window: text
 `,

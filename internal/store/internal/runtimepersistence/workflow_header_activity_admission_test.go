@@ -29,7 +29,7 @@ func TestActivityAdmissionConsumesConstructedHeaderBothStores(t *testing.T) {
 				t.Run(backend+"/"+shape+"/"+cell, func(t *testing.T) {
 					files := map[string]string{"schema.yaml": "name: activity-header\nstages:\n  review: {}\n"}
 					if shape == "fields" {
-						files["entities.yaml"] = "default:\n  title: text\n"
+						files["state.yaml"] = "default:\n  title: text\n"
 					}
 					f := newReceiverConfigActivationFixtureWithDocuments(t, backend, false, files, nil)
 					run := correlation.RunIDFromContext(f.ctx)

@@ -115,7 +115,7 @@ func TestCurrentVocabularyDiagnosticsAcrossDeclarationFamilies(t *testing.T) {
 		{"agents.yaml", "worker: {intent: {inline: business intent}, modle: typo}\n", "modle", "model", func(d yamlsource.Document) error { _, err := projectAgentDeclarationsValue(d.Root()); return err }},
 		{"tools.yaml", "worker: {descriptoin: typo}\n", "descriptoin", "description", func(d yamlsource.Document) error { _, err := projectToolDeclarationsValue(d.Root()); return err }},
 		{"types.yaml", "enmus: {}\n", "enmus", "enums", func(d yamlsource.Document) error { _, err := projectTypeCatalogDocument(d.Root()); return err }},
-		{"entities.yaml", "Item: {_descriptoin: typo, value: text}\n", "_descriptoin", "_description", func(d yamlsource.Document) error { _, err := projectEntityContractsDocument(d.Root()); return err }},
+		{"state.yaml", "Item: {_descriptoin: typo, value: text}\n", "_descriptoin", "_description", func(d yamlsource.Document) error { _, err := projectEntityContractsDocument(d.Root()); return err }},
 		{"events.yaml", "work.ready: {value: {type: text, descriptoin: typo}}\n", "descriptoin", "description", func(d yamlsource.Document) error { _, err := admitEventCatalogDocument(d); return err }},
 	} {
 		t.Run(tc.file, func(t *testing.T) {
@@ -152,7 +152,7 @@ func TestCurrentVocabularyDiskDiagnosticsPreserveSource(t *testing.T) {
 		load       func(string) error
 	}{
 		{"types.yaml", "enmus: {}\n", func(path string) error { _, err := loadOptionalTypeDeclarations(path); return err }},
-		{"entities.yaml", "Item: {_descriptoin: typo, value: text}\n", func(path string) error { _, err := loadOptionalEntityDeclarations(path); return err }},
+		{"state.yaml", "Item: {_descriptoin: typo, value: text}\n", func(path string) error { _, err := loadOptionalEntityDeclarations(path); return err }},
 		{"events.yaml", "work.ready: {value: {type: text, descriptoin: typo}}\n", func(path string) error { _, err := loadOptionalEventCatalog(path); return err }},
 	} {
 		t.Run(tc.file, func(t *testing.T) {
@@ -167,15 +167,25 @@ func TestCurrentVocabularyDiskDiagnosticsPreserveSource(t *testing.T) {
 }
 
 func TestCurrentVocabularyKeepsOpenNameReservations(t *testing.T) {
-	for reserved := range reservedEventCatalogFieldNames {
+	for _, reserved := range []string{"swarm", "producer", "consumer", "required", "key", "description", "payload_type", "type", "payload", "fields", "state_field"} {
 		t.Run(reserved, func(t *testing.T) {
 			for _, value := range []string{"text", "null", "''", "{}", "[]"} {
 				snapshot, err := yamlsource.Load([]byte("work.ready: {" + reserved + ": " + value + "}\n"))
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := admitEventCatalogDocument(snapshot.Document("events.yaml")); err == nil || !strings.Contains(err.Error(), reserved) || !strings.Contains(err.Error(), "reserved") {
-					t.Fatalf("reserved name became business data: %v", err)
+				entries, err := admitEventCatalogDocument(snapshot.Document("events.yaml"))
+				if value == "text" {
+					if err != nil || entries["work.ready"].Payload.Properties[reserved].Type != "text" {
+						t.Fatalf("business field consumed as metadata: %v", err)
+					}
+				} else {
+					if err == nil {
+						_, err = (CatalogTypeReference{Type: entries["work.ready"].Payload.Properties[reserved].Type}).Resolve()
+					}
+					if err == nil {
+						t.Fatalf("malformed business field admitted: %s=%s", reserved, value)
+					}
 				}
 			}
 		})

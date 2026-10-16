@@ -19,10 +19,10 @@ func loadDetachedCatalogFixture(t *testing.T) *WorkflowContractBundle {
 	types := "enums:\n  Choice: {values: [alpha, beta], default: alpha}\ntypes:\n  Probe:\n" + bytesToIndented(detachedCatalogFields) + "  Outer:\n    child: Probe\n"
 	for name, body := range map[string]string{
 		"schema.yaml": "name: detached-catalog\nstages: {done: {final: true}}\n",
-		"types.yaml":  types, "entities.yaml": "person:\n" + detachedCatalogFields + "  members: map[text]Probe\n",
+		"types.yaml":  types, "state.yaml": "person:\n" + detachedCatalogFields + "  members: map[text]Probe\n",
 		"events.yaml":       "audit.record:\n" + detachedCatalogFields + "batch.ready:\n  rows: [Probe]\n  label: text\n  result: Probe\n",
 		"child/schema.yaml": "name: child\nstages: {done: {final: true}}\n",
-		"child/types.yaml":  types, "child/entities.yaml": "person:\n" + detachedCatalogFields,
+		"child/types.yaml":  types, "child/state.yaml": "person:\n" + detachedCatalogFields,
 		"child/events.yaml": "audit.record:\n" + detachedCatalogFields,
 	} {
 		writeFixtureFile(t, filepath.Join(root, name), body)

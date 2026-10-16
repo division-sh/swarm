@@ -17,6 +17,7 @@ func loadRefinementBound(t *testing.T, family, kind, refinement, source string) 
 	case "types":
 		text = "types:\n  Probe:\n    " + field + "\n"
 	case "entities":
+		file = "state.yaml"
 		text = "probe:\n  " + field + "\n"
 	case "events":
 		text = "probe.ready:\n  " + field + "\n"

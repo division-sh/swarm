@@ -1,5 +1,5 @@
 item.registered:
-  key: item_id
+  _key: item_id
   batch_id: text
   item_id: text
   label: text

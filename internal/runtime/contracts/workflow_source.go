@@ -40,7 +40,7 @@ func (s FlowSource) DeclarationLabel(fileName string) string {
 		return s.Schema
 	case "types.yaml":
 		return s.Types
-	case "entities.yaml":
+	case "state.yaml":
 		return s.Entities
 	case "nodes.yaml":
 		return s.Nodes
@@ -72,7 +72,7 @@ func indexFlowSources(artifact *sourceartifact.AdmittedSourceArtifact) (map[stri
 			return
 		}
 		source := FlowSource{FlowPath: node.Path(), Resources: map[string][]string{}}
-		for _, fileName := range []string{"schema.yaml", "types.yaml", "entities.yaml", "nodes.yaml", "events.yaml", "agents.yaml", "tools.yaml", "policy.yaml", "rules.yaml"} {
+		for _, fileName := range []string{"schema.yaml", "types.yaml", "state.yaml", "nodes.yaml", "events.yaml", "agents.yaml", "tools.yaml", "policy.yaml", "rules.yaml"} {
 			label, ok := node.Declaration(fileName)
 			if !ok {
 				continue
@@ -82,7 +82,7 @@ func indexFlowSources(artifact *sourceartifact.AdmittedSourceArtifact) (map[stri
 				source.Schema = label
 			case "types.yaml":
 				source.Types = label
-			case "entities.yaml":
+			case "state.yaml":
 				source.Entities = label
 			case "nodes.yaml":
 				source.Nodes = label
