@@ -15,6 +15,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
 const (
@@ -57,6 +58,31 @@ func managerTestTopologyAdmission(t testing.TB) runtimeagenttopology.Admission {
 	)
 	if err != nil {
 		t.Fatalf("construct manager test topology admission: %v", err)
+	}
+	return admission
+}
+
+func managerTestTopologyAdmissionForSource(t testing.TB, source semanticview.Source) runtimeagenttopology.Admission {
+	t.Helper()
+	bundle, present := semanticview.Bundle(source)
+	if !present || bundle == nil {
+		t.Fatal("manager topology fixture requires its compiled source")
+	}
+	rooted, err := bundle.RootedSource()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := runtimeagenttopology.NewSourceCoordinate(rooted.Admission())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{coordinate}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, runtimeagenttopology.LifetimeDurableManaged)
+	if err != nil {
+		t.Fatal(err)
 	}
 	return admission
 }

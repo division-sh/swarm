@@ -307,7 +307,7 @@ func newTestAgentManagerWithOptions(t *testing.T, bus Bus, factory AgentFactory,
 	manager := NewAgentManagerWithOptions(bus, factory, opts, stores...)
 	manager.mu.Lock()
 	if err := manager.staticTopology.Validate(); err != nil {
-		manager.staticTopology = managerTestTopologyAdmission(t)
+		manager.staticTopology = managerTestTopologyAdmissionForSource(t, opts.SemanticSource)
 	}
 	manager.mu.Unlock()
 	if setter, ok := bus.(interface {

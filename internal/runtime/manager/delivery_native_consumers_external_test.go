@@ -426,7 +426,7 @@ func TestSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregateReleas
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregateRelease(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerSourceSetDeliverySource(t))
 			})
 		})
 	}
@@ -436,7 +436,7 @@ func TestSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancella
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			manager.ProveNativeSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerCancellation(t, func(t *testing.T) *manager.ManagerDeliveryNativeFixture {
-				return openManagerNativeDelivery(t, backend)
+				return openManagerNativeDelivery(t, backend, managerSourceSetDeliverySource(t))
 			})
 		})
 	}

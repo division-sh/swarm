@@ -36,7 +36,6 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 				s := storetest.StartPostgresRuntimeStore(t)
 				selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
 			}
-			db := storetest.Database(selected)
 			ctx := runForkTestContext(t)
 			process, _ := worklifetime.ProcessFromContext(ctx)
 			capability := selectedContractTestProcessCapability(t, ctx, selected)
@@ -47,7 +46,7 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 				t.Fatal(err)
 			}
 			sourceRun, eventID := uuid.NewString(), uuid.NewString()
-			seedSelectedOperationSource(t, ctx, backend, db, selected, loaded, sourceRun, eventID)
+			seedSelectedOperationSource(t, ctx, selected, loaded, sourceRun, eventID)
 			request := SelectedContractExecutionRequest{
 				Owner: owner, SourceRunID: sourceRun, At: eventID,
 				SourceArtifactFact: loaded.SourceArtifactFact,
@@ -55,7 +54,14 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 				SourceLoader:       SourceArtifactSelectedContractSourceLoader{RepoRoot: repo, PlatformSpecPath: contracts.DefaultPlatformSpecFile(repo), Store: selected.(SourceArtifactSelectedContractSourceStore)},
 				AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability},
 			}
-			before := selectedPreparationDatabaseSnapshot(t, db, backend)
+			snapshot := func() map[string]storetest.SelectedForkStorageTableSnapshot {
+				state, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return state
+			}
+			before := snapshot()
 			baseline := process.ActiveCount()
 			for _, test := range []struct {
 				name string
@@ -75,7 +81,7 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 						}
 						t.Fatalf("wrong preparation disposition: prepared=%v err=%v", prepared, err)
 					}
-					if !reflect.DeepEqual(before, selectedPreparationDatabaseSnapshot(t, db, backend)) || process.ActiveCount() != baseline {
+					if !reflect.DeepEqual(before, snapshot()) || process.ActiveCount() != baseline {
 						t.Fatal("rejected preparation changed persisted facts or leaked process ownership")
 					}
 				})
@@ -87,7 +93,7 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 			if err := prepared.Close(); err != nil {
 				t.Fatal(err)
 			}
-			if !reflect.DeepEqual(before, selectedPreparationDatabaseSnapshot(t, db, backend)) || process.ActiveCount() != baseline {
+			if !reflect.DeepEqual(before, snapshot()) || process.ActiveCount() != baseline {
 				t.Fatal("non-executable preparation mutated the store or retained process work")
 			}
 			t.Run("root-selection-frozen", func(t *testing.T) {
@@ -108,11 +114,11 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 				if !prepared.loadedSource.RootedSource.Admission().Equal(loaded.RootedSource.Admission()) {
 					t.Fatal("later admission retargeted the prepared source")
 				}
-				afterAdmission := selectedPreparationDatabaseSnapshot(t, db, backend)
+				afterAdmission := snapshot()
 				if err := prepared.Close(); err != nil {
 					t.Fatal(err)
 				}
-				if !reflect.DeepEqual(afterAdmission, selectedPreparationDatabaseSnapshot(t, db, backend)) || process.ActiveCount() != baseline {
+				if !reflect.DeepEqual(afterAdmission, snapshot()) || process.ActiveCount() != baseline {
 					t.Fatal("prepared-source cleanup changed retained authority or leaked work")
 				}
 				ambiguous, err := owner.Prepare(ctx, request)
@@ -135,7 +141,7 @@ func TestSelectedForkPreparationProcessBoundaryBothStores(t *testing.T) {
 				if err := exact.Close(); err != nil {
 					t.Fatal(err)
 				}
-				if !reflect.DeepEqual(afterAdmission, selectedPreparationDatabaseSnapshot(t, db, backend)) || process.ActiveCount() != baseline {
+				if !reflect.DeepEqual(afterAdmission, snapshot()) || process.ActiveCount() != baseline {
 					t.Fatal("ambiguous or bound preparation changed native facts or leaked work")
 				}
 			})

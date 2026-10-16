@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/runforkexecution"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil/sourceartifactfixture"
@@ -36,8 +37,11 @@ type managerNativeDeliveryOwner interface {
 	ListAuthorActivity(context.Context, authoractivity.ListOptions) (authoractivity.ListResult, error)
 }
 
-func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDeliveryNativeFixture {
+func openManagerNativeDelivery(t *testing.T, backend string, sources ...semanticview.Source) *manager.ManagerDeliveryNativeFixture {
 	t.Helper()
+	if len(sources) > 1 {
+		t.Fatal("native delivery fixture accepts one exact compiled source")
+	}
 	var selected managerNativeDeliveryOwner
 	switch backend {
 	case "sqlite":
@@ -47,23 +51,55 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 	default:
 		t.Fatalf("unsupported manager delivery fixture backend %q", backend)
 	}
-	source := sourceartifactfixture.Fact()
+	artifact := sourceartifactfixture.Artifact()
+	ctx := manager.TerminalPanicFixtureContext()
+	var semanticSource semanticview.Source
+	if len(sources) == 1 {
+		semanticSource = sources[0]
+		bundle, present := semanticview.Bundle(semanticSource)
+		if !present || bundle == nil {
+			t.Fatal("native delivery fixture requires its compiled source")
+		}
+		rooted, err := bundle.RootedSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+		artifact = rooted.Artifact()
+		ctx = correlation.WithRootAdmission(ctx, rooted.Admission())
+	}
+	source := sourceartifactfixture.FactFor(artifact)
+	ctx = correlation.WithSourceArtifactFact(ctx, source)
+	scope, present := authoractivity.ScopeFromContext(ctx)
+	if !present {
+		t.Fatal("native delivery fixture requires its original author scope")
+	}
+	ctx = authoractivity.WithScope(ctx, authoractivity.BundleScope(scope.RuntimeInstanceID, source.BundleHash()))
 	authority, err := deliverylifecycle.NewNormalExecutionAuthority(source, "manager-delivery-test", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := manager.TerminalPanicFixtureContext()
-	if err := sourceartifactfixture.Ensure(ctx, selected); err != nil {
+	if err := sourceartifactfixture.EnsureArtifact(ctx, selected, artifact); err != nil {
 		t.Fatal(err)
 	}
 	if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
 		t.Fatal(err)
 	}
 	return &manager.ManagerDeliveryNativeFixture{
-		Store: selected, Authority: authority, Context: ctx, NormalAuthority: authority,
+		Store: selected, Authority: authority, Context: ctx, NormalAuthority: authority, SemanticSource: semanticSource,
 		RequireRun: func(t *testing.T, runID string) {
 			t.Helper()
-			storetest.RequireRunningRun(t, ctx, selected, runID, time.Now().UTC())
+			if semanticSource != nil {
+				rooted, err := artifact.RootedSource()
+				if err != nil {
+					t.Fatal(err)
+				}
+				storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
+					RunID: runID, Origin: storetest.ScenarioSetupOrigin(), Artifact: artifact,
+					RootAdmission: rooted.Admission(), StartedAt: time.Now().UTC(),
+				})
+			} else {
+				storetest.RequireRunningRun(t, ctx, selected, runID, time.Now().UTC())
+			}
 		},
 		Publish: func(t *testing.T, ctx context.Context, event events.Event, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) {
 			t.Helper()
@@ -115,6 +151,16 @@ func openManagerNativeDelivery(t *testing.T, backend string) *manager.ManagerDel
 			}
 		},
 	}
+}
+
+func managerSourceSetDeliverySource(t *testing.T) semanticview.Source {
+	t.Helper()
+	rooted, _ := sourceartifactfixture.Rooted(t, "delivery", sourceartifactfixture.New("events.yaml", []byte("test.source_set_wait:\ntest.source_set_cancelled:\n")))
+	bundle, err := contracts.LoadWorkflowContractBundleFromRootedSource(canonicalrouting.RepoRoot(t), rooted, "", contracts.WorkflowContractLoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func publishManagerNativeDelivery(t *testing.T, ctx context.Context, selected managerNativeDeliveryOwner, event events.Event, routes []events.DeliveryRoute, authority deliverylifecycle.ExecutionAuthority) {

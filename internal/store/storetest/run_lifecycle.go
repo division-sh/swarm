@@ -281,6 +281,10 @@ func EnsureEphemeralRun(
 	if err != nil {
 		return err
 	}
+	root, err := semanticFixtureRootAdmission(ctx, RunFixture{}, source)
+	if err != nil {
+		return err
+	}
 	if err := ensureSemanticFixtureSourceArtifact(ctx, runner, source.BundleHash(), nil); err != nil {
 		return err
 	}
@@ -289,10 +293,8 @@ func EnsureEphemeralRun(
 	}
 	ctx = semanticFixtureContext(ctx, source)
 	_, err = runner.CreateRun(ctx, runtimerunlifecycle.CreateRequest{
-		RunID:     strings.TrimSpace(runID),
-		Origin:    runtimerunlifecycle.ScenarioSetupRunOrigin(),
-		Source:    source,
-		StartedAt: startedAt.UTC(),
+		RunID: strings.TrimSpace(runID), Origin: runtimerunlifecycle.ScenarioSetupRunOrigin(),
+		Source: source, RootAdmission: root, StartedAt: startedAt.UTC(),
 	})
 	return err
 }
@@ -330,6 +332,10 @@ func EnsureRunForAdmittedEvent(
 	if err != nil {
 		return err
 	}
+	root, err := semanticFixtureRootAdmission(ctx, RunFixture{}, source)
+	if err != nil {
+		return err
+	}
 	if err := ensureSemanticFixtureSourceArtifact(ctx, runner, source.BundleHash(), nil); err != nil {
 		return err
 	}
@@ -337,10 +343,8 @@ func EnsureRunForAdmittedEvent(
 		startedAt = time.Now().UTC()
 	}
 	request := runtimerunlifecycle.CreateRequest{
-		RunID:     runID,
-		Origin:    runtimerunlifecycle.RunOrigin{},
-		Source:    source,
-		StartedAt: startedAt.UTC(),
+		RunID: runID, Origin: runtimerunlifecycle.RunOrigin{},
+		Source: source, RootAdmission: root, StartedAt: startedAt.UTC(),
 	}
 	request.Origin, err = runtimerunlifecycle.EventRunOrigin(
 		admitted.ID(),

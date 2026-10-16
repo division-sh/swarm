@@ -831,12 +831,13 @@ func ProveNativeSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregat
 	}}
 	manager := newTestAgentManagerWithOptions(t, eventBus, func(runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	}, AgentManagerOptions{DeliveryStore: deliveryStore, TestLifecycleProbe: probe.Raw()}, persistence)
-	record := PersistedAgent{Topology: managerTestTopologyAdmission(t), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()), Subscriptions: []string{"test.source_set_wait"}})}
-	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), record, true); err != nil {
+	}, AgentManagerOptions{DeliveryStore: deliveryStore, TestLifecycleProbe: probe.Raw(), SemanticSource: nativeDelivery.SemanticSource, SourceArtifactFact: nativeDelivery.Authority.SourceArtifact()}, persistence)
+	record := PersistedAgent{Topology: managerTestTopologyAdmissionForSource(t, nativeDelivery.SemanticSource), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()), Subscriptions: []string{"test.source_set_wait"}})}
+	record.ProcessBinding.BundleHash = nativeDelivery.Authority.SourceArtifact().BundleHash()
+	if err := manager.spawnAgentInternal(nativeDelivery.Context, record, true); err != nil {
 		t.Fatalf("spawn waiting agent: %v", err)
 	}
-	if err := manager.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
+	if err := manager.Run(nativeDelivery.normalRunContext(t)); err != nil {
 		t.Fatalf("run waiting manager: %v", err)
 	}
 	t.Cleanup(func() {
@@ -845,6 +846,7 @@ func ProveNativeSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregat
 		}
 	})
 	admission := newSourceSetTransitionAdmissionProbe("source-set-successor")
+	t.Cleanup(admission.release)
 	if err := manager.lifecycle.installSourceSetTransitionAdmission(admission, false); err != nil {
 		t.Fatalf("install source-set transition admission: %v", err)
 	}
@@ -858,7 +860,7 @@ func ProveNativeSourceSetTransitionKeepsRealEventBusDeliveryPendingUntilAggregat
 	}
 	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("source-set-waiting-event"), events.EventType("test.source_set_wait"), "test", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{evt})
-	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), evt); err != nil {
+	if err := eventBus.Publish(nativeDelivery.Context, evt); err != nil {
 		t.Fatalf("publish waiting event: %v", err)
 	}
 	deliveryID, err := runtimedelivery.DeliveryID(evt.ID(), managerAgentDeliveryRouteForRun(evt.RunID(), agent.ID()))
@@ -926,12 +928,13 @@ func ProveNativeSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerC
 	}}
 	manager := newTestAgentManagerWithOptions(t, trackingBus, func(runtimeactors.AgentConfig) (Agent, error) {
 		return agent, nil
-	}, AgentManagerOptions{DeliveryStore: deliveryStore}, persistence)
-	record := PersistedAgent{Topology: managerTestTopologyAdmission(t), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()), Subscriptions: []string{"test.source_set_cancelled"}})}
-	if err := manager.spawnAgentInternal(testAuthorActivityContext(context.Background()), record, true); err != nil {
+	}, AgentManagerOptions{DeliveryStore: deliveryStore, SemanticSource: nativeDelivery.SemanticSource, SourceArtifactFact: nativeDelivery.Authority.SourceArtifact()}, persistence)
+	record := PersistedAgent{Topology: managerTestTopologyAdmissionForSource(t, nativeDelivery.SemanticSource), ProcessBinding: lifecycleProbeProcessBinding(), Config: managerTestAgentConfig(runtimeactors.AgentConfig{ExecutionMode: "live", ID: agent.ID(), Identity: managerAgentIdentity(agent.ID()), Subscriptions: []string{"test.source_set_cancelled"}})}
+	record.ProcessBinding.BundleHash = nativeDelivery.Authority.SourceArtifact().BundleHash()
+	if err := manager.spawnAgentInternal(nativeDelivery.Context, record, true); err != nil {
 		t.Fatalf("spawn waiting agent: %v", err)
 	}
-	runCtx, cancelRun := context.WithCancel(managedExecutionTestContext(t, testAuthorActivityContext(context.Background())))
+	runCtx, cancelRun := context.WithCancel(nativeDelivery.normalRunContext(t))
 	if err := manager.Run(runCtx); err != nil {
 		cancelRun()
 		t.Fatalf("run waiting manager: %v", err)
@@ -948,7 +951,7 @@ func ProveNativeSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerC
 	baselineReads := gate.readCount()
 	evt := eventtest.RunCreatingRootIngress(eventtest.UUID("source-set-cancelled-event"), events.EventType("test.source_set_cancelled"), "test", "", nil, 0, managerIdentityTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
 	nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{evt})
-	if err := eventBus.Publish(testAuthorActivityContext(context.Background()), evt); err != nil {
+	if err := eventBus.Publish(nativeDelivery.Context, evt); err != nil {
 		t.Fatalf("publish waiting event: %v", err)
 	}
 	deadline := time.Now().Add(time.Second)
@@ -994,7 +997,7 @@ func ProveNativeSourceSetTransitionRetainsDequeuedDeliveryAndRouteAcrossManagerC
 		t.Fatalf("waiting delivery = %#v err=%v, want the exact persisted obligation with no accepted claim", snapshot, snapshotErr)
 	}
 	gate.release()
-	if lease, acquireErr := manager.lifecycle.acquireExecutionIdentity(testAuthorActivityContext(context.Background()), identity, "execute_directive", false); acquireErr == nil {
+	if lease, acquireErr := manager.lifecycle.acquireExecutionIdentity(nativeDelivery.Context, identity, "execute_directive", false); acquireErr == nil {
 		lease.Release()
 		t.Fatal("cancelled generation admitted direct execution after source-set release")
 	} else if !strings.Contains(acquireErr.Error(), "lifecycle_generation_not_running") {
