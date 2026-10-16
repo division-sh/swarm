@@ -149,6 +149,9 @@ func admitEventCatalogFields(name string, value yamlsource.Value, bare bool) ([]
 		}
 	}
 	for _, field := range fields {
+		if field.Name == "_description" {
+			return nil, nil, NewUndefinedFieldDiagnostic("event metadata", field.Name, map[string]struct{}{"key": {}}, field)
+		}
 		if _, reserved := reservedEventCatalogFieldNames[field.Name]; reserved {
 			return nil, nil, fmt.Errorf("event field name %q at %s is reserved and cannot declare business payload", field.Name, field.IntroductionLocation())
 		}

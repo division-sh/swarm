@@ -148,6 +148,19 @@ func NewUndefinedFieldDiagnostic(context, key string, allowed map[string]struct{
 			remediation = "indexed is a state-field option, not an event-field option."
 		}
 	}
+	if context == "type field" || context == "entity field" {
+		switch key {
+		case "description", "pattern", "length", "range", "equal_to", "immutable", "citation":
+			remediation = "A field is its type or {type: <type>, indexed: true} on state only; put prose in a YAML comment. Authored refinements and citations are not supported; use a validate row for machine-checked rules."
+		case "materialize_from", "project":
+			remediation = "The accumulate target is the collected list; a differently shaped list is a second field written by op: append with an explicit value."
+		case "indexed":
+			remediation = "indexed is a state-field option, not a record-field option."
+		}
+	}
+	if key == "_description" {
+		remediation = "_description is not a key; use a YAML comment."
+	}
 	diagnostic := &LoaderDiagnostic{
 		Code:         "contract_loader.undefined_field",
 		Problem:      fmt.Sprintf("%s field %q is not supported.", context, key),
