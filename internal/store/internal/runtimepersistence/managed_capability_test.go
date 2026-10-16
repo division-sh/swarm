@@ -255,10 +255,14 @@ func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store agentf
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
+	source, found := runtimecorrelation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("managed turn fixture requires its original source context")
+	}
+	if err := agentfixture.UpsertStaticForSource(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: resolved.Actor,
 		Status: "active", StartedAt: time.Now().UTC(),
-	}); err != nil {
+	}, source); err != nil {
 		t.Fatalf("seed managed turn fixture agent: %v", err)
 	}
 	return identity
