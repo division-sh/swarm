@@ -758,12 +758,20 @@ func loadConversationForkEntitySnapshot(ctx context.Context, owner conversationF
 			}
 		}
 		entityID = strings.TrimSpace(entityID)
+		mutation := mutationlog.ProjectionMutation{Domain: mutationlog.Domain(domain), Path: path, NewValue: value}
+		projects, err := mutation.ProjectsEntityState()
+		if err != nil {
+			return nil, fmt.Errorf("classify conversation fork entity mutation %s/%s/%s: %w", entityID, domain, path, err)
+		}
+		if !projects {
+			continue
+		}
 		if _, ok := seen[entityID]; !ok {
 			seen[entityID] = struct{}{}
 			entityOrder = append(entityOrder, entityID)
 		}
 		grouped[entityID] = append(grouped[entityID], timedProjectionMutation{
-			ProjectionMutation: mutationlog.ProjectionMutation{Domain: mutationlog.Domain(domain), Path: path, NewValue: value},
+			ProjectionMutation: mutation,
 			CreatedAt:          createdAt.Time,
 		})
 	}

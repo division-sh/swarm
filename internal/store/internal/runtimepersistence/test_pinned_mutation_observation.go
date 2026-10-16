@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 )
 
+// Observe the exact retained fan-out source, including genuine historical
+// authored revisions and current source-only observations, without projecting it.
 func ReadPinnedAuthoredMutationStorageForTest(ctx context.Context, selected any, source fanoutobligation.SourceRef) (json.RawMessage, error) {
 	if source.Kind != fanoutobligation.SourceEntityField {
 		return nil, fmt.Errorf("pinned mutation evidence requires an entity-field source")
@@ -28,7 +30,7 @@ func ReadPinnedAuthoredMutationStorageForTest(ctx context.Context, selected any,
 	var value []byte
 	read := func(ctx context.Context, tx *sql.Tx) error {
 		return tx.QueryRowContext(ctx, `SELECT CAST(new_value AS TEXT) FROM entity_mutations
-			WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain='authored_field' AND path=$4`,
+			WHERE mutation_id=$1 AND run_id=$2 AND entity_id=$3 AND domain IN ('authored_field','fan_out_source') AND path=$4`,
 			source.MutationID, source.RunID, source.EntityID, source.Field).Scan(&value)
 	}
 	var err error

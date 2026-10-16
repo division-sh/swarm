@@ -20008,9 +20008,10 @@ platform_tables:
         multi_bundle_persistence.bundle_identity format and intentionally have no database foreign key
         to bundles.bundle_hash so historical audit identity survives bundle deletion.'
     entity_mutations:
-      description: 'Append-only mutation log for entity_state changes. Every write to entity_state.fields,
+      description: 'Append-only mutation log for entity_state changes and explicitly classified immutable fan-out source observations. Every write to entity_state.fields,
         entity_state.bookkeeping, entity_state.current_state, entity_state.gates, or entity_state.accumulator produces a row.
         The mutation log is the audit trail for the flight recorder and the undo log for fork/replay.
+        Source-only observations retain evaluation evidence but never replay as state changes.
         Not a separate event stream — just a side-table that captures the before/after of every state change. Domain is
         producer-owned and never inferred from path spelling; path is uninterpreted within its selected domain.'
       ddl: |
@@ -20018,7 +20019,7 @@ platform_tables:
             mutation_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             run_id          UUID NOT NULL REFERENCES runs(run_id),
             entity_id       UUID NOT NULL,
-            domain          TEXT NOT NULL CHECK (domain IN ('lifecycle_state', 'authored_field', 'bookkeeping', 'gate', 'accumulator')),
+            domain          TEXT NOT NULL CHECK (domain IN ('lifecycle_state', 'authored_field', 'bookkeeping', 'gate', 'accumulator', 'fan_out_source')),
             path            TEXT NOT NULL,
             old_value       JSONB,
             new_value       JSONB,
@@ -21695,8 +21696,8 @@ run_model:
     write_contract: 'Every write to entity_state MUST carry an explicit run_id and produce a corresponding
       entity_mutations row with the same run_id in the same transaction. This includes system node handler writes
       (data_accumulation, compute, sets_gate, advances_to, clear) and agent tool writes (save_entity_field).
-      Every row carries exactly one closed domain (`lifecycle_state`, `authored_field`, `bookkeeping`, `gate`, or
-      `accumulator`) plus an uninterpreted path. lifecycle_state alone requires an empty path; every other domain requires
+      Every row carries exactly one closed domain (`lifecycle_state`, `authored_field`, `bookkeeping`, `gate`,
+      `accumulator`, or `fan_out_source`) plus an uninterpreted path. lifecycle_state alone requires an empty path; every other domain requires
       a nonempty path. The runtime enforces this — there is no code path that mutates entity_state without logging the mutation.'
     reconstruction_path_meaning: >
       The closed mutation domain determines path meaning at the shared reconstruction owner. lifecycle_state
@@ -21705,6 +21706,11 @@ run_model:
       they never interpret that key as a nested path or infer its meaning from spelling. Replacement and null-valued
       removal use that same domain law. Run-fork and conversation-fork reconstruction consume this owner in chronological
       mutation order for the exact source run and revision; neither installs its own key parser or compatibility behavior.
+      fan_out_source retains a non-null immutable collection observed at the fan-out evaluation point, with equal
+      old/new values. It is source evidence, never a business-state write: the shared fold validates it but does not
+      apply it to state, create an entity, or advance lifecycle timestamps. Source lookup preserves its exact run,
+      entity, field and revision identity independently of final business state and UUID ordering. Retained genuine
+      authored_field revisions remain valid fan-out inputs; new source-only observations use fan_out_source.
     drift_detection: >-
       swarm verify --run <run_id> reads physical entity_mutations and canonical current state for one run in one
       selected-store read-only snapshot. The shared constructed-header projection owns exact membership and pairing:
@@ -21718,7 +21724,8 @@ run_model:
       Mutation ordering shares the run-fork committed-revision owner: first
       revision, then mutation ID within a revision. This UUID tie-break is deterministic, not an intra-transaction
       chronology. Revision facts supply validated ordering coordinates, never replacement mutation values.
-      The shared reconstruction owner folds all five domains; the comparison preserves entity and field presence,
+      The shared reconstruction owner folds the five state domains and validates but excludes source-only observations;
+      the comparison preserves entity and field presence,
       null, empty containers and integer/double kinds. Text and --json render the same entity/domain/path mismatch
       rows, with explicit entity-presence rows for entities existing on only one side. Drift exits nonzero and proves
       state/history disagreement, not uniquely a bypassing writer. Missing or inconsistent history/order evidence,

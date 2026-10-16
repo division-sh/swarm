@@ -318,17 +318,21 @@ func loadRunForkEntityStates(snapshot *runForkRevisionSnapshot) ([]runfork.RunFo
 		if err != nil {
 			return nil, fmt.Errorf("decode fork entity mutation %s/%s/%s: %w", entityID, domain, path, err)
 		}
+		mutation := mutationlog.ProjectionMutation{Domain: domain, Path: path, NewValue: value}
+		projects, err := mutation.ProjectsEntityState()
+		if err != nil {
+			return nil, fmt.Errorf("classify fork entity mutation %s/%s/%s: %w", entityID, domain, path, err)
+		}
+		if !projects {
+			continue
+		}
 		if _, ok := seen[entityID]; !ok {
 			seen[entityID] = struct{}{}
 			entityOrder = append(entityOrder, entityID)
 		}
 		grouped[entityID] = append(grouped[entityID], timedProjectionMutation{
-			ProjectionMutation: mutationlog.ProjectionMutation{
-				Domain:   domain,
-				Path:     path,
-				NewValue: value,
-			},
-			CreatedAt: fact.CreatedAt,
+			ProjectionMutation: mutation,
+			CreatedAt:          fact.CreatedAt,
 		})
 	}
 

@@ -34,11 +34,12 @@ const (
 	DomainBookkeeping    Domain = "bookkeeping"
 	DomainGate           Domain = "gate"
 	DomainAccumulator    Domain = "accumulator"
+	DomainFanOutSource   Domain = "fan_out_source"
 )
 
 func (d Domain) Valid() bool {
 	switch d {
-	case DomainLifecycleState, DomainAuthoredField, DomainBookkeeping, DomainGate, DomainAccumulator:
+	case DomainLifecycleState, DomainAuthoredField, DomainBookkeeping, DomainGate, DomainAccumulator, DomainFanOutSource:
 		return true
 	default:
 		return false
@@ -80,6 +81,28 @@ type ProjectionMutation struct {
 	Domain   Domain
 	Path     string
 	NewValue any
+}
+
+// Source observations retain an immutable collection, not an entity-state
+// change. Historical readers use this before creating entity/timestamp groups.
+func (rec ProjectionMutation) ProjectsEntityState() (bool, error) {
+	if err := ValidateDomainPath(rec.Domain, rec.Path); err != nil {
+		return false, err
+	}
+	if rec.Domain != DomainFanOutSource {
+		return true, nil
+	}
+	switch value := rec.NewValue.(type) {
+	case []any:
+		if value != nil {
+			return false, nil
+		}
+	case map[string]any:
+		if value != nil {
+			return false, nil
+		}
+	}
+	return false, ErrInvalidMutationLogWriter("fan_out_source evidence requires a non-null collection")
 }
 
 func AuthorActivityDraft(ctx context.Context, runID, mutationID string, rec Record, occurredAt time.Time) (runtimeauthoractivity.Draft, bool, error) {
@@ -194,8 +217,12 @@ func ApplyEntityStateProjectionMutation(state *EntityStateProjection, domain Dom
 		return ErrInvalidMutationLogWriter("projection state is required")
 	}
 	path = strings.TrimSpace(path)
-	if err := ValidateDomainPath(domain, path); err != nil {
+	projects, err := (ProjectionMutation{Domain: domain, Path: path, NewValue: value}).ProjectsEntityState()
+	if err != nil {
 		return err
+	}
+	if !projects {
+		return nil
 	}
 	switch domain {
 	case DomainLifecycleState:
