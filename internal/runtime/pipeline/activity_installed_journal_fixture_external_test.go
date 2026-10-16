@@ -16,7 +16,7 @@ import (
 
 // Native activity proofs capture a real admitted role. Historical result replay
 // intentionally continues to use the unbound, read-only journal after reopening.
-func installActivityReplayJournal(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, bus *activityJournalProofBus, pc *pipeline.PipelineCoordinator) (pipeline.ActivityAttemptJournal, func()) {
+func installActivityReplayJournal(t *testing.T, ctx context.Context, selected gateRecoveryStoreCase, bus interface{ WaitForQuiescence(context.Context) error }, pc *pipeline.PipelineCoordinator) (pipeline.ActivityAttemptJournal, func()) {
 	t.Helper()
 	fact, found := correlation.SourceArtifactFactFromContext(ctx)
 	scope, scoped := authoractivity.ScopeFromContext(ctx)
