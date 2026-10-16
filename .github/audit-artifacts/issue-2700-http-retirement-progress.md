@@ -244,3 +244,12 @@ Fresh affected guards/censuses/debt20m, unused, complexity, root-to-family
 mapping and exact-head preflight are still owed before the eventual permitted
 push. No old preflight or broad/incomplete run is current-head credit. The
 upload-dependent preflight remains explicitly blocked by the no-push hold.
+
+## Later Native Integration Evidence
+
+The append-only successor `issue-2700-amendment2-native-proof-packet.md`
+records the original scope/fixture REDs, exact A/E common-source custody and
+subsequent genuine native execution receipts. Its narrowly scoped credits
+supersede the earlier "assembly pending" status only where explicitly stated;
+the full R04/ACK-loss and final qualification rows remain open. No historical
+receipt or frozen packet above is rewritten or promoted to exact-head credit.

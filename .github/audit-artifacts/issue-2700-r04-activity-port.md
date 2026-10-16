@@ -134,3 +134,16 @@ the two native assembly bindings and startup recovery call. Both-store live
 duplicate/takeover orderings, still-alive predecessor refusal, selected/foreign/
 current isolation, rollback, lost ACK, historical terminal reuse and one
 physical HTTP call/one durable uncertain outcome remain mandatory.
+
+## Later Integration Pins
+
+The original-session bridge is Ec2bbbd9fec51f72c927724430b4273a70e76dfb1;
+the two exact native assembly bindings are Ed07a728f492ae1a36387a659ed0de5a3accfc354.
+They are present in the explicit local A/E proof composition71d0dcae08.
+Reviewer-a6226308728 and A handoff6226331649 identify the finite bridge/owner/
+constructor hunks C needs, without unrelated B/provider-resume integration.
+The source-scope repair is A85bc859141, consumed in Ea16990adca. E's
+e515e07f5f native runtime-scope/two-bundle/publication receipts are recorded in
+`issue-2700-amendment2-native-proof-packet.md`; the original runtime-scope RED
+and open ACK-loss/full-resume rows remain distinct. No port or boot success
+grants fresh permission to copied terminal evidence.
