@@ -278,6 +278,7 @@ func TestFiniteAccountingEmptyHistoryCannotEraseCurrentEndpoint(t *testing.T) {
 			put(formatproof.Successors, test.chain)
 			for name, invoke := range map[string]func() error{
 				"copied_source": func() error { return validateFiniteAccounting(root) },
+				"preparation":   func() error { return validateFinitePreparation(root, false, false, false, false, true) },
 				"current_literal": func() error {
 					_, err := readEntryLiteral(root, formatproof.Source, literals[0].Function, literals[0].Ordinal)
 					return err

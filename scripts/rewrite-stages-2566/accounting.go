@@ -57,6 +57,15 @@ func validateFiniteApplication(root string, check bool) error {
 	return nil
 }
 
+func validateFinitePreparation(root string, selected ...bool) error {
+	for _, current := range selected {
+		if current {
+			return validateFiniteAccounting(root)
+		}
+	}
+	return nil // Original application/preview validates through its own owner.
+}
+
 func finiteCurrentOutput(root string, c change, historical []byte) ([]byte, error) {
 	raw, err := os.ReadFile(filepath.Join(root, formatproof.Successors))
 	if os.IsNotExist(err) {
