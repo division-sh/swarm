@@ -12,7 +12,9 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -32,14 +34,16 @@ func TestHandlerSelectionStoragePreservesExactColumnsAndScopesBothStores(t *test
 				}
 				routes := []events.DeliveryRoute{testEntitylessNodeDeliveryRoute("first"), testEntitylessNodeDeliveryRoute("second"),
 					{Recipient: events.MustAgentDeliveryRecipient(uuid.NewString())}}
-				if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, routes); err != nil {
+				routes[2] = canonicalDeliveryFixtureRoute(t, run, routes[2])
+				claimCtx := preparePositiveAgentClaimFixture(t, correlation.WithRunID(ctx, run), fixture.store.(agentFixtureFlowStore), routes[2].AgentIdentity)
+				if err := commitSemanticEventFixtureWithRoutes(claimCtx, selected, event, routes); err != nil {
 					t.Fatal(err)
 				}
 				if rows, err := ReadHandlerSelectionStorageForTest(ctx, fixture.store, event.ID()); err != nil || len(rows) != 0 {
 					t.Fatalf("pending delivery fabricated final selection: %#v %v", rows, err)
 				}
 				for index, route := range routes {
-					claimed, err := claimDeliveryFixture(ctx, selected, event, route)
+					claimed, err := claimDeliveryFixture(claimCtx, selected, event, route)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -66,7 +70,7 @@ func TestHandlerSelectionStoragePreservesExactColumnsAndScopesBothStores(t *test
 								Family: ref.Family(), SemanticPath: ref.SemanticPath(), DisplayLabel: fact.DisplayLabel()}
 						}
 					}
-					if _, err := selected.SettleSuccess(ctx, claimed.Claim, nil, 0, fact); err != nil {
+					if _, err := selected.SettleSuccess(claimCtx, claimed.Claim, nil, 0, fact); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -123,6 +127,13 @@ func TestHandlerSelectionStoragePreservesExactColumnsAndScopesBothStores(t *test
 				if expected, ok := want[row.DeliveryID]; !ok || row != expected {
 					t.Fatalf("readback normalized stored columns: %#v, want %#v", row, want)
 				}
+			}
+			process, err := agentfixture.ProcessCapability(t, ctx, fixture.store.(agentFixtureFlowStore))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := process.Release(context.WithoutCancel(ctx)); err != nil {
+				t.Fatal(err)
 			}
 			if err := fixture.store.(interface{ Close() error }).Close(); err != nil {
 				t.Fatal(err)

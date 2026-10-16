@@ -107,6 +107,9 @@ func TestExactJoinDeliveryObserversRefuseCancelledRawAndClosedOwnersBothStores(t
 			ctx, cancel := context.WithCancel(f.ctx)
 			cancel()
 			assertExactJoinObserversFailure(t, ctx, f.store, context.Canceled)
+			if err := f.manager.Shutdown(); err != nil {
+				t.Fatal(err)
+			}
 			if err := f.store.(interface{ Close() error }).Close(); err != nil {
 				t.Fatal(err)
 			}

@@ -251,6 +251,9 @@ func TestSelectedCapabilityReadPortsRefuseRawInvalidCancelledAndClosedOwnersBoth
 					t.Fatalf("cancelled %s returned evidence: %+v %v", tc.name, got, err)
 				}
 			}
+			if err := f.manager.Shutdown(); err != nil {
+				t.Fatal(err)
+			}
 			if err := f.store.(interface{ Close() error }).Close(); err != nil {
 				t.Fatal(err)
 			}

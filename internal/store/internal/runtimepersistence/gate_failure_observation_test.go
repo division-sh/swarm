@@ -120,17 +120,18 @@ func TestGateFailureReadersPreserveNullAbsenceScopesAndPhysicalBytesBothStores(t
 func assertGateNodeFailureExcludesActualAgentDelivery(t *testing.T, f receiverConfigActivationFixture, owner deliveryFixtureStore, runID string) {
 	t.Helper()
 	identity := mustTestAgentIdentityForRun(runID, "failure-reader-agent", "failure-read/agent")
+	ctx := preparePositiveAgentClaimFixture(t, f.ctx, f.store, identity)
 	event := eventtest.ExistingRunRootIngress(uuid.NewString(), "review/finish.requested", "fixture", "", []byte(`{}`), 0, runID, events.EventEnvelope{}, time.Now().UTC())
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
-	if err := commitSemanticEventFixtureWithRoutes(f.ctx, owner, event, []events.DeliveryRoute{route}); err != nil {
+	if err := commitSemanticEventFixtureWithRoutes(ctx, owner, event, []events.DeliveryRoute{route}); err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := claimDeliveryFixture(f.ctx, owner, event, route)
+	claimed, err := claimDeliveryFixture(ctx, owner, event, route)
 	if err != nil {
 		t.Fatal(err)
 	}
 	failure := testRetryableFailure()
-	if _, err := owner.SettleFailure(f.ctx, claimed.Claim, deliverylifecycle.Settlement{Disposition: deliverylifecycle.FailureDeadLetter, ReasonCode: failure.Detail.Code, Failure: failure, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation()}); err != nil {
+	if _, err := owner.SettleFailure(ctx, claimed.Claim, deliverylifecycle.Settlement{Disposition: deliverylifecycle.FailureDeadLetter, ReasonCode: failure.Detail.Code, Failure: failure, RuleSelection: deliverylifecycle.NotApplicableHandlerRuleObservation()}); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := ReadGateSubscriberFailureForTest(f.ctx, f.store, event.ID(), identity.AgentID()); err != nil || got == "" {
@@ -154,6 +155,9 @@ func TestGateFailureReadersRefuseRawAndClosedOwners(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f, _ := newCompetingRevisionPairFixture(t, backend)
+			if err := f.manager.Shutdown(); err != nil {
+				t.Fatal(err)
+			}
 			if err := f.store.(interface{ Close() error }).Close(); err != nil {
 				t.Fatal(err)
 			}

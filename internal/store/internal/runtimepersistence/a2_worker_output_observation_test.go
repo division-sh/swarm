@@ -133,6 +133,9 @@ func TestA2WorkerOutputObserverRefusesRawAndClosedOwners(t *testing.T) {
 		assertA2SourceChildReadFailure(t, context.Background(), selected, uuid.NewString(), nil)
 	}
 	f, _ := newCompetingRevisionPairFixture(t, "sqlite")
+	if err := f.manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
 	if err := f.store.(*SQLiteRuntimeStore).Close(); err != nil {
 		t.Fatal(err)
 	}

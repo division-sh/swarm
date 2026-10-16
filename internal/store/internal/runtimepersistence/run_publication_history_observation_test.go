@@ -81,6 +81,9 @@ func TestRunPublicationHistoryObserverRefusesRawInvalidAndClosedOwnersBothStores
 			if got, err := ReadRunPublicationHistoryStorageForTest(f.ctx, f.store, "invalid-run"); err == nil || got != (RunPublicationHistoryStorage{}) {
 				t.Fatalf("invalid run supplied publication/history witness: %+v %v", got, err)
 			}
+			if err := f.manager.Shutdown(); err != nil {
+				t.Fatal(err)
+			}
 			if err := f.store.(interface{ Close() error }).Close(); err != nil {
 				t.Fatal(err)
 			}

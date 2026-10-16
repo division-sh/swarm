@@ -169,6 +169,9 @@ func TestDeploymentObservationPortsRefuseRawCancelledInvalidAndClosedOwnersBothS
 			cancelled, cancel := context.WithCancel(f.ctx)
 			cancel()
 			refuse(cancelled, f.store, state.Identity.RunID, context.Canceled)
+			if err := f.manager.Shutdown(); err != nil {
+				t.Fatal(err)
+			}
 			if err := f.store.(interface{ Close() error }).Close(); err != nil {
 				t.Fatal(err)
 			}

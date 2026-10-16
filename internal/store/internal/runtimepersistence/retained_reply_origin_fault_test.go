@@ -45,6 +45,9 @@ func TestRetainedReplyOriginFaultRefusesMissingRawAndClosedOwners(t *testing.T) 
 		}
 	}
 	f, state := newCompetingRevisionPairFixture(t, "sqlite")
+	if err := f.manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
 	if err := f.store.(*SQLiteRuntimeStore).Close(); err != nil {
 		t.Fatal(err)
 	}

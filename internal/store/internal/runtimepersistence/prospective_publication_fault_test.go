@@ -84,6 +84,9 @@ func TestProspectivePublicationFaultRefusesRawAndClosedOwners(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f, _ := newCompetingRevisionPairFixture(t, backend)
+			if err := f.manager.Shutdown(); err != nil {
+				t.Fatal(err)
+			}
 			if err := f.store.(interface{ Close() error }).Close(); err != nil {
 				t.Fatal(err)
 			}

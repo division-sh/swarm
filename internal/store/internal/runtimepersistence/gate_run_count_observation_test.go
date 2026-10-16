@@ -116,6 +116,9 @@ func TestGateRunCountsRefuseRawAndClosedOwners(t *testing.T) {
 			t.Fatalf("%s accepted a raw pool: %d %v", tc.table, got, err)
 		}
 	}
+	if err := f.manager.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
 	if err := f.store.(*SQLiteRuntimeStore).Close(); err != nil {
 		t.Fatal(err)
 	}

@@ -127,6 +127,9 @@ func TestCanonicalClaimAndAppearanceObserversRefuseRawInvalidAndClosedOwnersBoth
 		t.Run(backend, func(t *testing.T) {
 			f, _ := newCompetingRevisionPairFixture(t, backend)
 			assertCanonicalClaimObserversFail(t, f.ctx, f.store, "invalid-event", nil)
+			if err := f.manager.Shutdown(); err != nil {
+				t.Fatal(err)
+			}
 			if err := f.store.(interface{ Close() error }).Close(); err != nil {
 				t.Fatal(err)
 			}
