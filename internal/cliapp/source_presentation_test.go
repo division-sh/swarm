@@ -21,8 +21,7 @@ import (
 func Test2376HumanSourceIdentityConsumerTable(t *testing.T) {
 	hash := "bundle-v2:sha256:" + strings.Repeat("a", 64)
 	root := outputModeVerifyFixture(t)
-	name := "Shop\u202eReception\u2066\u200dDesk"
-	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("name: \"Shop\\u202eReception\\u2066\\u200dDesk\"\nversion: 1.2.3\nplatform_version: '>=0.7.0 <0.8.0'\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifest.yaml"), []byte("version: 1.2.3\nplatform_version: '>=0.7.0 <0.8.0'\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	source, err := sourceartifact.AdmitDirectory(root)
@@ -30,7 +29,7 @@ func Test2376HumanSourceIdentityConsumerTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	metadata, present := source.RootManifest()
-	if !present || metadata.Name != name || source.HumanLabel() != "Shop Reception  Desk@1.2.3" {
+	if !present || metadata.Version != "1.2.3" || source.HumanLabel() != filepath.Base(root)+"@1.2.3" {
 		t.Fatalf("unsafe label or rewritten metadata: %q %#v", source.HumanLabel(), metadata)
 	}
 	for _, label := range []string{"Reception@1.2.3", "reception@aaaaaaa", "", source.HumanLabel()} {
@@ -81,12 +80,12 @@ func Test2376HumanSourceIdentityConsumerTable(t *testing.T) {
 			})
 		}
 	}
-	for _, manifestName := range []string{"", "Reception", name} {
-		t.Run(fmt.Sprintf("verify/name=%q", manifestName), func(t *testing.T) {
+	for _, version := range []string{"", "1.2.3", "1.2.3+display"} {
+		t.Run(fmt.Sprintf("verify/version=%q", version), func(t *testing.T) {
 			root := outputModeVerifyFixture(t)
 			manifest := filepath.Join(root, "manifest.yaml")
-			if manifestName != "" {
-				if err := os.WriteFile(manifest, []byte(fmt.Sprintf("name: %q\nversion: 1.2.3\nplatform_version: '>=0.7.0 <0.8.0'\n", manifestName)), 0600); err != nil {
+			if version != "" {
+				if err := os.WriteFile(manifest, []byte(fmt.Sprintf("version: %q\nplatform_version: '>=0.7.0 <0.8.0'\n", version)), 0600); err != nil {
 					t.Fatal(err)
 				}
 			} else if err := os.Remove(manifest); err != nil && !os.IsNotExist(err) {
@@ -109,7 +108,7 @@ func Test2376HumanSourceIdentityConsumerTable(t *testing.T) {
 			if err := json.Unmarshal(out.Bytes(), &result); err != nil {
 				t.Fatal(err)
 			}
-			if result.BundleHash != artifact.BundleHash() || result.SourceLabel != artifact.HumanLabel() || (result.Manifest != nil) != (manifestName != "") || result.Manifest != nil && result.Manifest.Name != manifestName {
+			if result.BundleHash != artifact.BundleHash() || result.SourceLabel != artifact.HumanLabel() || (result.Manifest != nil) != (version != "") || result.Manifest != nil && result.Manifest.Version != version {
 				t.Fatalf("machine identity or original metadata changed: %s", &out)
 			}
 		})

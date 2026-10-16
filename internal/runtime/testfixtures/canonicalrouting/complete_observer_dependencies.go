@@ -7,7 +7,7 @@ import "testing"
 func CopyCompleteObserverDependencies(t testing.TB) string {
 	t.Helper()
 	root := t.TempDir()
-	writeClosedVariantFile(t, root, "manifest.yaml", "name: complete-observer\nversion: '1.0.0'\nplatform_version: '>=0.7.0 <0.8.0'\n")
+	writeClosedVariantFile(t, root, "manifest.yaml", "version: '1.0.0'\nplatform_version: '>=0.7.0 <0.8.0'\n")
 	writeClosedVariantFile(t, root, "schema.yaml", `stages:
   active: {}
   done: {final: true}

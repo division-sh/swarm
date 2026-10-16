@@ -24,8 +24,8 @@ func Test2376NestedManifestPreservesSemanticScope(t *testing.T) {
 	}
 	before := load()
 	for _, member := range []struct{ path, body string }{
-		{"manifest.yaml", "name: Not the directory name\nversion: 1.2.3\nplatform_version: '>=0.7.0 <0.8.0'\n"},
-		{"producer/manifest.yaml", "name: Also free text\nversion: 4.5.6\nplatform_version: '>=9.0.0'\n"},
+		{"manifest.yaml", "version: 1.2.3\nplatform_version: '>=0.7.0 <0.8.0'\n"},
+		{"producer/manifest.yaml", "version: 4.5.6\nplatform_version: '>=9.0.0'\n"},
 	} {
 		if err := os.WriteFile(filepath.Join(root, member.path), []byte(member.body), 0600); err != nil {
 			t.Fatal(err)
