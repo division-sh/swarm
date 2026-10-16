@@ -86,12 +86,8 @@ func issue2655EventSource(t *testing.T, backend string) (*deploymentResourceFixt
 	root := canonicalrouting.CopySelectedDeploymentResource(t, "root", true)
 	schemaPath := filepath.Join(root, "schema.yaml")
 	schema, err := os.ReadFile(schemaPath)
-	if err != nil || strings.Count(string(schema), "inputs: [fixture.close.requested]") != 1 {
+	if err != nil || strings.Count(string(schema), "inputs: [root.ready, fixture.close.requested]") != 1 {
 		t.Fatalf("event-origin control requires the exact root fixture: %v", err)
-	}
-	schema = []byte(strings.Replace(string(schema), "inputs: [fixture.close.requested]", "inputs: [root.ready, fixture.close.requested]", 1))
-	if err := os.WriteFile(schemaPath, schema, 0o600); err != nil {
-		t.Fatal(err)
 	}
 	repo := conformanceRepoRoot(t)
 	bundle, err := contracts.LoadWorkflowContractBundleWithOverrides(repo, root, contracts.DefaultPlatformSpecFile(repo))
