@@ -8,14 +8,11 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 )
 
-func (a runForkSourceStateAdmission) requireOriginalActivityApproval(ctx context.Context, tx *sql.Tx, sourceID string) (bool, error) {
-	origin, err := a.activityRequestOriginAtCut(ctx, tx, sourceID, make(map[string]bool))
-	if err != nil {
-		return false, err
-	}
+func (a runForkSourceStateAdmission) requireOriginalActivityApproval(ctx context.Context, tx *sql.Tx, origin semanticview.ActivityRequestOrigin) (bool, error) {
 	var request runForkActivityRequestPayload
 	if err := json.Unmarshal(origin.Request.Payload(), &request); err != nil {
 		return false, err

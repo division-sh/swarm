@@ -73,6 +73,9 @@ func TestActivityOriginApprovalFollowsProducingDeclarationAcrossReplacementHops(
 			if err != nil || got != original {
 				t.Fatalf("inherited approval=%q want origin=%q, selected=%q err=%v", got, original, selected, err)
 			}
+			if role, loop, err := prepared.ResolveOriginalActivity(origin, node, "start", "write", "send"); err != nil || !loop || role.LoopID() != "revision" {
+				t.Fatalf("origin approval transport changed captured loop ownership: role=%+v loop=%t err=%v", role, loop, err)
+			}
 			if _, err := carriage.ResolveOriginalActivityApproval(origin, node, "start", "write", "send"); err == nil {
 				t.Fatal("unprepared carriage acquired origin evidence by alias")
 			}

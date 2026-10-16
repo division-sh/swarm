@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/activityresult"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -62,6 +63,9 @@ func (a runForkSourceStateAdmission) activityRequestOriginAtCut(ctx context.Cont
 	}
 	step := semanticview.ActivityRequestCut{RunID: cut.runID, RequestID: request.ID(), Revision: a.snapshot.Revision, Source: artifact}
 	if activityidentity.RequestEventID(fact) == request.ID() {
+		if err := requireOriginalActivityRequestArtifact(request, artifact); err != nil {
+			return semanticview.ActivityRequestOrigin{}, err
+		}
 		origin := semanticview.ActivityRequestOrigin{Request: request, Cuts: []semanticview.ActivityRequestCut{step}}
 		return origin, origin.Validate()
 	}
@@ -119,6 +123,18 @@ func (a runForkSourceStateAdmission) activityRequestOriginAtCut(ctx context.Cont
 	step.ParentPointInput, step.ParentPointRevision = binding.ForkPoint.Input, binding.ForkPoint.Revision
 	origin.Cuts = append([]semanticview.ActivityRequestCut{step}, origin.Cuts...)
 	return origin, origin.Validate()
+}
+
+func requireOriginalActivityRequestArtifact(request events.Event, artifact correlation.SourceArtifactFact) error {
+	if err := artifact.Validate(); err != nil {
+		return err
+	}
+	admission, present := request.PayloadAdmission()
+	if !present || admission.Binding().BundleHash() != artifact.BundleHash() ||
+		admission.Binding().SchemaClass() != events.PayloadSchemaPlatform || admission.Binding().EventKey() != runForkActivityRequestEvent {
+		return fmt.Errorf("original activity request does not retain the exact run-bound source artifact")
+	}
+	return nil
 }
 
 // Follow only retained request/publication bindings through their own fixed

@@ -255,10 +255,14 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if sourceRequest.SourceRunID != admission.snapshot.RunID || sourceRequest.EntityID != state.Source.EntityID || sourceRequest.FlowID != flowID {
 		return event, fmt.Errorf("activity source request disagrees with fixed-revision ownership")
 	}
+	origin, err := admission.activityRequestOriginAtCut(ctx, tx, sourceEvent.SourceEventID, make(map[string]bool))
+	if err != nil {
+		return event, err
+	}
 	var role semanticview.LoopRevisionRole
 	var declared bool
 	if node, isNode := owner.Node(); isNode {
-		role, declared, err = admission.carriage.ResolveActivity(node, sourceRequest.HandlerEventKey, sourceRequest.ActivityID, sourceRequest.Tool)
+		role, declared, err = admission.carriage.ResolveOriginalActivity(origin, node, sourceRequest.HandlerEventKey, sourceRequest.ActivityID, sourceRequest.Tool)
 	} else {
 		role, declared, err = admission.carriage.ResolveEvent(sourceEvent.RoutingSource, sourceRequest.HandlerEventKey, identity.ExecutableNode{}, "")
 	}
@@ -294,7 +298,7 @@ func prepareRunForkSelectedContractSourceEvent(ctx context.Context, tx *sql.Tx, 
 	if err := json.Unmarshal(event.Payload, &request); err != nil {
 		return event, fmt.Errorf("decode selected-contract activity request %s: %w", event.SourceEventID, err)
 	}
-	proposed, err := admission.requireOriginalActivityApproval(ctx, tx, sourceEvent.SourceEventID)
+	proposed, err := admission.requireOriginalActivityApproval(ctx, tx, origin)
 	if err != nil {
 		return event, err
 	}

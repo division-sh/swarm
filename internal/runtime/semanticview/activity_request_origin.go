@@ -137,19 +137,31 @@ func (c OriginalLoopCarriage) activityOriginDeclaration(origin ActivityRequestOr
 }
 
 func (c OriginalLoopCarriage) ResolveOriginalActivityApproval(origin ActivityRequestOrigin, node identity.ExecutableNode, handler, activity, tool string) (string, error) {
-	if err := origin.Validate(); err != nil {
-		return "", err
-	}
-	if c.state == nil {
-		return "", fmt.Errorf("activity origin has no prepared declaration")
-	}
-	prepared, found := c.state.activityOrigins[activityRequestScope{origin.Cuts[0].RunID, origin.Cuts[0].RequestID}]
-	if !found || !prepared.Matches(origin) {
-		return "", fmt.Errorf("activity origin changed between preparation and commit")
-	}
-	declaration, err := c.activityOriginDeclaration(origin)
+	declaration, err := c.requirePreparedActivityOrigin(origin)
 	if err != nil {
 		return "", err
 	}
 	return declaration.ResolveActivityApproval(node, handler, activity, tool)
+}
+
+func (c OriginalLoopCarriage) ResolveOriginalActivity(origin ActivityRequestOrigin, node identity.ExecutableNode, handler, activity, tool string) (LoopRevisionRole, bool, error) {
+	declaration, err := c.requirePreparedActivityOrigin(origin)
+	if err != nil {
+		return LoopRevisionRole{}, false, err
+	}
+	return declaration.ResolveActivity(node, handler, activity, tool)
+}
+
+func (c OriginalLoopCarriage) requirePreparedActivityOrigin(origin ActivityRequestOrigin) (OriginalLoopCarriage, error) {
+	if err := origin.Validate(); err != nil {
+		return OriginalLoopCarriage{}, err
+	}
+	if c.state == nil {
+		return OriginalLoopCarriage{}, fmt.Errorf("activity origin has no prepared declaration")
+	}
+	prepared, found := c.state.activityOrigins[activityRequestScope{origin.Cuts[0].RunID, origin.Cuts[0].RequestID}]
+	if !found || !prepared.Matches(origin) {
+		return OriginalLoopCarriage{}, fmt.Errorf("activity origin changed between preparation and commit")
+	}
+	return c.activityOriginDeclaration(origin)
 }

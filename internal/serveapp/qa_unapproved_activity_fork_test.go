@@ -1,6 +1,8 @@
 package serveapp
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -213,8 +216,60 @@ func TestQAUnapprovedRecordedHTTPWriteForkBothStores(t *testing.T) {
 
 func requireQARecordedWriteForkConsumption(t *testing.T, rt servedControlProofRuntime, runID string) {
 	t.Helper()
+	// Activation ACK precedes retained serving. An empty delivery table is
+	// not a completion boundary before the selected input has been published.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var state string
+		var failure sql.NullString
+		if err := rt.DB.QueryRow(`SELECT state, CAST(failure AS TEXT) FROM run_fork_selected_contract_runtime_executions WHERE CAST(fork_run_id AS TEXT)=$1 ORDER BY generation DESC LIMIT 1`, runID).Scan(&state, &failure); err != nil {
+			t.Fatalf("read exact selected execution completion: %v", err)
+		}
+		if failure.Valid && failure.String != "" && failure.String != "null" || state == "failed" {
+			t.Fatalf("selected execution failed before consuming recorded result: state=%s failure=%s", state, failure.String)
+		}
+		if state == "closed" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("selected execution did not finish within the existing numeric proof's 10s bound: state=%s", state)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	var consumed string
 	if err := rt.DB.QueryRow(`SELECT CAST(payload AS TEXT) FROM events WHERE CAST(run_id AS TEXT)=$1 AND event_name='numeric.completed'`, runID).Scan(&consumed); err != nil {
+		summary, summaryErr := rt.ReadRunDeliveries(context.Background(), runID)
+		t.Logf("QA CHILD run=%s delivery_summary=%+v error=%v", runID, summary, summaryErr)
+		rows, readErr := rt.DB.Query(`SELECT CAST(event_id AS TEXT), event_name, CAST(payload AS TEXT) FROM events WHERE CAST(run_id AS TEXT)=$1 ORDER BY created_at, event_id LIMIT 20`, runID)
+		if readErr != nil {
+			t.Logf("QA CHILD event read error=%v", readErr)
+		} else {
+			for rows.Next() {
+				var id, name, payload string
+				if scanErr := rows.Scan(&id, &name, &payload); scanErr != nil {
+					t.Logf("QA CHILD event scan error=%v", scanErr)
+					break
+				}
+				t.Logf("QA CHILD event=%s name=%s payload=%s", id, name, payload)
+			}
+			t.Logf("QA CHILD event rows error=%v", rows.Err())
+			_ = rows.Close()
+		}
+		failures, readErr := rt.DB.Query(`SELECT CAST(d.failure AS TEXT) FROM dead_letters d JOIN events e ON e.event_id=d.original_event_id WHERE CAST(e.run_id AS TEXT)=$1 LIMIT 10`, runID)
+		if readErr != nil {
+			t.Logf("QA CHILD diagnostic read error=%v", readErr)
+		} else {
+			for failures.Next() {
+				var failure string
+				if scanErr := failures.Scan(&failure); scanErr != nil {
+					t.Logf("QA CHILD diagnostic scan error=%v", scanErr)
+					break
+				}
+				t.Logf("QA CHILD diagnostic=%s", failure)
+			}
+			t.Logf("QA CHILD diagnostic rows error=%v", failures.Err())
+			_ = failures.Close()
+		}
 		t.Fatalf("fork did not actually consume the recorded activity result: %v", err)
 	}
 	var value any
