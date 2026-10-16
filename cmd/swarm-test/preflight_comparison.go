@@ -28,6 +28,14 @@ func observePreflightComparison(ctx context.Context, head, origin string) (strin
 	if strings.TrimSpace(string(current)) != origin {
 		return "", comparison, fmt.Errorf("preflight trusted origin/master identity changed")
 	}
+	return derivePreflightComparison(ctx, head, origin)
+}
+
+// A frozen authenticated source comparison is independent of policy freshness.
+// Ordinary preflight still observes its live origin/master through the wrapper.
+func derivePreflightComparison(ctx context.Context, head, origin string) (string, testplanning.PreflightComparison, error) {
+	var comparison testplanning.PreflightComparison
+	git := func(args ...string) ([]byte, error) { return exec.CommandContext(ctx, "git", args...).Output() }
 	base, err := git("merge-base", "--all", head, origin)
 	if err != nil {
 		return "", comparison, fmt.Errorf("preflight comparison missing: %w", err)

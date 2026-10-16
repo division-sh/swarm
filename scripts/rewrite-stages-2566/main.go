@@ -57,6 +57,10 @@ func main() {
 	baseline := flag.String("refresh-baseline", "", "record exact corpus edits against this reviewed git baseline; does not apply a rewrite")
 	reviewedRevision := flag.String("reviewed-plan-revision", "", "original independently reviewed ledger revision for a post-rebase capture")
 	flag.Parse()
+	if err := validateFiniteAccounting(*root); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	var err error
 	if *prove {
 		if *typed || *literals || *entries || *write || *check || *baseline != "" {
@@ -125,6 +129,9 @@ func rewrite(c change, body []byte) ([]byte, error) {
 }
 
 func apply(root, ledger string, write, check bool) error {
+	if err := validateFiniteAccounting(root); err != nil {
+		return err
+	}
 	if write && check {
 		return fmt.Errorf("choose -write or -check, not both")
 	}
@@ -188,7 +195,7 @@ func pendingChange(root string, c change, check bool) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	output, err := rewrite(c, body)
+	output, err := finiteCurrentSource(root, c, body)
 	if err != nil || bytes.Equal(output, body) {
 		return nil, err
 	}
