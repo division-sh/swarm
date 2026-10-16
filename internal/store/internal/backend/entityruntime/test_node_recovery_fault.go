@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
 	"github.com/google/uuid"
 )
 
@@ -30,18 +31,6 @@ func InstallNodeRecoveryPoisonFunctionFaultTx(ctx context.Context, tx *sql.Tx, e
 	}
 	_, err = tx.ExecContext(ctx, fmt.Sprintf(`CREATE FUNCTION fail_node_recovery_poison_update_fn() RETURNS trigger AS $$ BEGIN IF OLD.entity_id = '%s'::uuid THEN RAISE EXCEPTION 'injected node recovery poison mutation'; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql`, entityID))
 	return err
-}
-
-func CountNodeRecoveryPoisonFaultObjectsTx(ctx context.Context, tx *sql.Tx, postgres bool) (int, error) {
-	query := `SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='fail_node_recovery_poison_update'`
-	if postgres {
-		query = `SELECT
-	(SELECT COUNT(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname='fail_node_recovery_poison_update_fn')+
-	(SELECT COUNT(*) FROM pg_trigger WHERE tgname='fail_node_recovery_poison_update' AND NOT tgisinternal)`
-	}
-	var out int
-	err := tx.QueryRowContext(ctx, query).Scan(&out)
-	return out, err
 }
 
 func RemoveNodeRecoveryPoisonFaultTx(ctx context.Context, tx *sql.Tx, postgres bool) error {

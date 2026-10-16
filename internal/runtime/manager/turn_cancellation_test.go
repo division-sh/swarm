@@ -77,8 +77,8 @@ func ProveNativeCanceledDeliveryConsumerKeepsExactCommitAndCleanupEvidence(t *te
 		t.Run(mode, func(t *testing.T) {
 			store := open(t)
 			bus := &canceledTurnConsumerBus{reaction: turnReactionProbe{id: uuid.NewString()}}
-			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: store})
-			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
+			am, _ := newPreparedNativeReceiptManager(t, bus, store, panicStubAgent{id: "canceled-consumer"}, event, AgentManagerOptions{})
 			store.seedClaim(t, store.Context, event, "canceled-consumer")
 			ctx := managerClaimedDeliveryContext(t, am, store.Context, event, "canceled-consumer")
 			claim, _ := deliverylifecycle.ClaimFromContext(ctx)
@@ -176,8 +176,8 @@ func ProveNativeStartupCanceledTurnCommitsBeforeAdmissionWithoutExecutingReactio
 				t.Fatal("startup dispatched a reaction before runtime admission")
 				return nil
 			}
-			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: deliveries})
-			event := eventtest.RunCreatingRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
+			event := eventtest.ExistingRunRootIngress(uuid.NewString(), "work.requested", "source", "", nil, 0, uuid.NewString(), events.EventEnvelope{}, time.Now().UTC())
+			am, _ := newPreparedNativeReceiptManager(t, bus, deliveries, panicStubAgent{id: "startup-canceled"}, event, AgentManagerOptions{})
 			deliveries.seedClaim(t, deliveries.Context, event, "startup-canceled")
 			ctx := managerClaimedDeliveryContext(t, am, deliveries.Context, event, "startup-canceled")
 			claim, _ := deliverylifecycle.ClaimFromContext(ctx)

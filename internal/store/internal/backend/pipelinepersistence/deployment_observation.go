@@ -3,6 +3,8 @@ package pipelinepersistence
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 )
@@ -271,4 +273,102 @@ func ReadDeploymentReceiptStorageTx(ctx context.Context, tx *sql.Tx, runID strin
 		return nil, err
 	}
 	return out, nil
+}
+
+type DeploymentEventDeliveryCutStorage struct {
+	ID, Status, EventRunID string
+	Handoff                bool
+	Receipts, Attempts     int
+}
+
+func ReadDeploymentPreReceiptDeliveryCutStorageTx(ctx context.Context, tx *sql.Tx, event string) (DeploymentEventDeliveryCutStorage, error) {
+	var out DeploymentEventDeliveryCutStorage
+	err := tx.QueryRowContext(ctx, `SELECT CAST(d.delivery_id AS TEXT),d.status,d.continuation_handoff_at IS NOT NULL,CAST(e.run_id AS TEXT),
+		(SELECT COUNT(*) FROM event_receipts r WHERE r.event_id=e.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'),
+		(SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id)
+		FROM events e JOIN event_deliveries d ON d.event_id=e.event_id WHERE e.event_id=$1`, event).
+		Scan(&out.ID, &out.Status, &out.Handoff, &out.EventRunID, &out.Receipts, &out.Attempts)
+	return out, err
+}
+
+func ReadDeploymentPendingReceiverCutStorageTx(ctx context.Context, tx *sql.Tx, run, event string) (DeploymentEventDeliveryCutStorage, error) {
+	var out DeploymentEventDeliveryCutStorage
+	err := tx.QueryRowContext(ctx, `SELECT CAST(d.delivery_id AS TEXT),d.status,d.continuation_handoff_at IS NOT NULL,
+		(SELECT COUNT(*) FROM event_receipts r WHERE r.event_id=d.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline' AND r.outcome='success'),
+		(SELECT COUNT(*) FROM event_delivery_attempts a WHERE a.delivery_id=d.delivery_id)
+		FROM event_deliveries d WHERE d.run_id=$1 AND d.event_id=$2`, run, event).
+		Scan(&out.ID, &out.Status, &out.Handoff, &out.Receipts, &out.Attempts)
+	return out, err
+}
+
+type PinnedPortfolioDeliveryDiagnosticStorage struct {
+	EventName, Receipt, Reason, Failure, Delivery string
+	Handoff                                       bool
+}
+
+func ReadPinnedPortfolioDeliveryDiagnosticsStorageTx(ctx context.Context, tx *sql.Tx, run string) ([]PinnedPortfolioDeliveryDiagnosticStorage, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT e.event_name,COALESCE(r.outcome,''),COALESCE(r.reason_code,''),COALESCE(CAST(r.failure AS TEXT),''),COALESCE(d.status,''),
+		CASE WHEN d.continuation_handoff_at IS NULL THEN 0 ELSE 1 END
+		FROM events e LEFT JOIN event_receipts r ON r.event_id=e.event_id AND r.subscriber_type='platform' AND r.subscriber_id='pipeline'
+		LEFT JOIN event_deliveries d ON d.event_id=e.event_id WHERE e.run_id=$1 ORDER BY e.event_name`, run)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PinnedPortfolioDeliveryDiagnosticStorage
+	for rows.Next() {
+		var row PinnedPortfolioDeliveryDiagnosticStorage
+		if err := rows.Scan(&row.EventName, &row.Receipt, &row.Reason, &row.Failure, &row.Delivery, &row.Handoff); err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func ReadCanonicalRoutingSQLiteDiagnosticTx(ctx context.Context, tx *sql.Tx) (string, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT e.event_name,
+		       COALESCE(e.flow_instance, ''),
+		       COALESCE((SELECT r.outcome FROM event_receipts r
+		                 WHERE r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline'), ''),
+		       COALESCE((SELECT r.reason_code || ':' || r.side_effects FROM event_receipts r
+		                 WHERE r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline'), ''),
+		       COALESCE((SELECT group_concat(d.subscriber_type || '/' || d.subscriber_id || '=' || d.status || '@' || d.delivery_context, ',')
+		                 FROM event_deliveries d WHERE d.event_id = e.event_id), '')
+		FROM events e
+		WHERE e.event_name <> 'platform.runtime_log'
+		ORDER BY e.created_at, e.event_id
+	`)
+	if err != nil {
+		return "query canonical routing debug: " + err.Error(), nil
+	}
+	defer rows.Close()
+	var lines []string
+	for rows.Next() {
+		var name, flow, outcome, detail, deliveries string
+		if err := rows.Scan(&name, &flow, &outcome, &detail, &deliveries); err != nil {
+			return "scan canonical routing debug: " + err.Error(), nil
+		}
+		lines = append(lines, fmt.Sprintf("event=%s flow=%s pipeline=%s detail=%s deliveries=%s", name, flow, outcome, detail, deliveries))
+	}
+	if err := rows.Err(); err != nil {
+		return "read canonical routing debug: " + err.Error(), nil
+	}
+	deadRows, err := tx.QueryContext(ctx, `SELECT original_event, failure FROM dead_letters ORDER BY created_at`)
+	if err != nil {
+		return strings.Join(lines, "\n") + "\nquery dead letters: " + err.Error(), nil
+	}
+	defer deadRows.Close()
+	for deadRows.Next() {
+		var name, failure string
+		if err := deadRows.Scan(&name, &failure); err != nil {
+			return strings.Join(lines, "\n") + "\nscan dead letters: " + err.Error(), nil
+		}
+		lines = append(lines, fmt.Sprintf("dead_letter event=%s failure=%s", name, failure))
+	}
+	return strings.Join(lines, "\n"), nil
 }

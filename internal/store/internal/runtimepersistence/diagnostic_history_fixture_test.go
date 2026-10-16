@@ -20,6 +20,10 @@ func TestRunDiagnosticHistoryFixturePreservesPairAndOriginalWriterBothStores(t *
 		t.Run(backend.name, func(t *testing.T) {
 			selected, ctx := backend.open(t).store, testAuthorActivityContext()
 			root := runForkSnapshotFixtureEvent(t, ctx, selected)
+			historyBefore, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, selected)
+			if err != nil {
+				t.Fatal(err)
+			}
 			id, at := uuid.NewString(), time.Unix(1700002214, 0).UTC()
 			payload := []byte(`{"level":"info","message":"diagnostic platform row must remain lineage-only"}`)
 			probe, restore, err := InstallTransactionProbeForTest(selected, transactiontest.Options{})
@@ -31,8 +35,19 @@ func TestRunDiagnosticHistoryFixturePreservesPairAndOriginalWriterBothStores(t *
 			if err != nil || event.ID() != id || event.RunID() != root.RunID() || event.AdmissionClass() != events.EventAdmissionDiagnosticDirect || event.ExecutionMode() != executionmode.Live || !event.CreatedAt().Equal(at) || !bytes.Equal(event.Payload(), payload) {
 				t.Fatalf("diagnostic history changed exact identity/class/mode/bytes/clock: id=%s run=%s class=%s mode=%s at=%s payload=%s err=%v", event.ID(), event.RunID(), event.AdmissionClass(), event.ExecutionMode(), event.CreatedAt(), event.Payload(), err)
 			}
-			if counts := probe.Snapshot(); counts.Total.WriteCommits != 1 || counts.Total.Revision.Finalizations != 1 || counts.Active != 0 {
+			if counts := probe.Snapshot(); counts.Total.WriteCommits != 1 || counts.Total.Revision.Finalizations != 0 || counts.Active != 0 {
 				t.Fatalf("diagnostic pair split or escaped the original canonical event writer: %+v", counts)
+			}
+			historyAfter, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, selected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, table := range []string{"run_fork_revisions", "run_fork_revision_heads", "run_fork_fact_revisions"} {
+				before, hadBefore := historyBefore[table]
+				after, hasAfter := historyAfter[table]
+				if !hadBefore || !hasAfter || !reflect.DeepEqual(before, after) {
+					t.Fatalf("lineage-only diagnostic changed physical revision history %s: before=%+v after=%+v", table, before, after)
+				}
 			}
 			stored, found, err := ReadCanonicalEventRecordForTest(ctx, selected, id)
 			if err != nil || !found || stored.ID() != id || stored.RunID() != root.RunID() || stored.AdmissionClass() != events.EventAdmissionDiagnosticDirect || stored.ParentEventID() != "" || stored.Envelope().Scope != events.EventScopeGlobal || stored.ProducerType() != events.EventProducerPlatform || stored.Producer().ID() != "runtime" || stored.ExecutionMode() != executionmode.Live || !stored.CreatedAt().Equal(at) || !bytes.Equal(stored.Payload(), payload) {

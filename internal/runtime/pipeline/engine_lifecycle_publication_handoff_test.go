@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 )
 
@@ -97,7 +99,7 @@ func TestCommittedEngineTransfersDeclaredLifecyclePublications(t *testing.T) {
 }
 
 func TestCommittedEngineRejectsChangedPublicationReceipts(t *testing.T) {
-	for _, defect := range []string{"missing", "unexpected", "duplicate", "reordered", "nil", "wrong_intent", "duplicate_plan", "missing_activity"} {
+	for _, defect := range []string{"missing", "unexpected", "duplicate", "reordered", "nil", "wrong_intent", "conflicting_duplicate_plan", "missing_activity"} {
 		t.Run(defect, func(t *testing.T) {
 			mutation, command := outcomeConstructedMutation(t)
 			at := time.Now().UTC()
@@ -118,8 +120,11 @@ func TestCommittedEngineRejectsChangedPublicationReceipts(t *testing.T) {
 				committed[1] = nil
 			case "wrong_intent":
 				committed[1] = pipelineTestCommittedPublication{eventID: second.Event.ID(), intent: first}
-			case "duplicate_plan":
-				command.Publications[1], committed[1] = command.Publications[0], committed[0]
+			case "conflicting_duplicate_plan":
+				command.Publications[1] = command.Publications[0]
+				conflict := first
+				conflict.Event = eventtest.RuntimeControl(first.Event.ID(), first.Event.Type(), "platform", "", []byte(`{"changed":true}`), 0, mutation.Address.FlowInstance.RunID, "", events.EventEnvelope{}, at)
+				committed[1] = pipelineTestCommittedPublication{eventID: first.Event.ID(), intent: conflict}
 			case "missing_activity":
 				mutation.ActivityIntents = []runtimeengine.ActivityIntent{testActivityIntent("https://example.com/missing")}
 			}
@@ -127,9 +132,43 @@ func TestCommittedEngineRejectsChangedPublicationReceipts(t *testing.T) {
 			planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}}
 			owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: store}, publication: planner}
 			result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, command.Publications)
-			if !result.Committed || err == nil || len(result.EmitIntents) != 0 || len(result.ActivityRequestIntents) != 0 || planner.finalizes != 1 || planner.releases != 0 {
+			if !result.Committed || err == nil || len(result.EmitIntents) != 0 || len(result.ActivityRequestIntents) != 0 || planner.finalizes != 0 || planner.releases != 1 {
 				t.Fatalf("invalid receipt authorized dispatch or lost acknowledged cleanup: result=%+v err=%v planner=%+v", result, err, planner)
 			}
 		})
+	}
+}
+
+func TestCommittedEnginePreservesExactDuplicatePublicationOutcomes(t *testing.T) {
+	mutation, command := outcomeConstructedMutation(t)
+	intent := runtimeengine.EmitIntent{Event: eventtest.RuntimeControl(eventtest.UUID("exact-duplicate"), "fixture.handler_emitted", "platform", "", []byte(`{}`), 0, mutation.Address.FlowInstance.RunID, "", events.EventEnvelope{}, time.Now().UTC())}
+	plan := pipelineTestPublicationPlan{intent: intent}
+	receipt := pipelineTestCommittedPublication{eventID: intent.Event.ID(), intent: intent}
+	command.Publications = []runtimeengine.DurablePublicationPlan{plan, plan}
+	store := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true, Stage: outcomeCommittedStage(t), Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true}, Publications: []runtimeengine.CommittedDurablePublication{receipt, receipt}}}
+	planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}}
+	owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: store}, publication: planner}
+	result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, command.Publications)
+	if err != nil || !result.Committed || planner.finalizes != 1 || planner.releases != 0 || len(result.EmitIntents) != 2 {
+		t.Fatalf("exact duplicates lost ordered outcomes: result=%+v error=%v planner=%+v", result, err, planner)
+	}
+	for index, actual := range result.EmitIntents {
+		if !reflect.DeepEqual(actual, intent) {
+			t.Fatalf("duplicate outcome %d changed the exact event", index)
+		}
+	}
+}
+
+func TestInvalidEnginePublicationEvidenceJoinsIndependentCleanupFailures(t *testing.T) {
+	mutation, command := outcomeConstructedMutation(t)
+	intent := runtimeengine.EmitIntent{Event: eventtest.RuntimeControl(eventtest.UUID("missing-receipt"), "fixture.handler_emitted", "platform", "", []byte(`{}`), 0, mutation.Address.FlowInstance.RunID, "", events.EventEnvelope{}, time.Now().UTC())}
+	command.Publications = []runtimeengine.DurablePublicationPlan{pipelineTestPublicationPlan{intent: intent}}
+	store := &acknowledgedEngineOwner{result: CommittedWorkflowEngineMutation{Committed: true, Stage: outcomeCommittedStage(t), Lifecycle: CommittedWorkflowLifecycleMutation{Committed: true, Wakeups: []timeridentity.WorkflowTimerActivationRef{{}}}}}
+	cleanupErr := errors.New("release original prepared publication failed")
+	planner := &outcomeEnginePlanner{recordingPipelineBus: &recordingPipelineBus{}, releaseErr: cleanupErr}
+	owner := pipelineEngineMutationOwner{store: &workflowInstanceStore{engineMutations: store}, publication: planner}
+	result, err := owner.commitPreparedEngineMutation(context.Background(), mutation, command, command.Publications)
+	if !result.Committed || result.Stage == nil || len(result.EmitIntents) != 0 || len(result.ActivityRequestIntents) != 0 || planner.releases != 1 || planner.finalizes != 0 || !errors.Is(err, cleanupErr) || !strings.Contains(err.Error(), "wakeup evidence 0 is invalid") {
+		t.Fatalf("invalid receipt lost independent acknowledged cleanup: result=%+v error=%v planner=%+v", result, err, planner)
 	}
 }

@@ -294,7 +294,11 @@ func ProveNativePersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *t
 			bus := newProjectionTestBus()
 			handled := make(chan int, 1)
 			factory := &projectionTestFactory{handled: handled}
-			am, executionCtx := newNativeProjectionTestManager(t, bus, factory.Build, native)
+			const agentID = "restored-dynamic-agent"
+			am, executionCtx, rec := newNativeProjectionTestManager(t, bus, factory.Build, native, managerTestAgentConfig(models.AgentConfig{
+				ExecutionMode: "live", ID: agentID,
+				Identity: runtimeagentidentitytest.RootRuntime(t, agentID, "persisted-adoption-test"), Subscriptions: []string{"test.old"},
+			}))
 			probe := runtimelifecycleprobe.New()
 			am.testLifecycleProbe = probe
 			runCtx, cancelRun := context.WithCancel(executionCtx)
@@ -308,18 +312,7 @@ func ProveNativePersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *t
 				}
 			})
 
-			const agentID = "restored-dynamic-agent"
-			rec, err := managerTestStaticAgentRecord(am, managerTestAgentConfig(models.AgentConfig{
-				ExecutionMode: "live",
-				ID:            agentID,
-				Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "persisted-adoption-test"),
-				Subscriptions: []string{"test.old"},
-			}))
-			if err != nil {
-				t.Fatalf("construct persisted agent: %v", err)
-			}
-			seedUnitAgentLifecycle(t, am, rec)
-			if err := am.adoptPersistedAgentForLifecycle(testAuthorActivityContext(context.Background()), am.semanticSource, rec); err != nil {
+			if err := am.adoptPersistedAgentForLifecycle(executionCtx, am.semanticSource, rec); err != nil {
 				t.Fatalf("adopt persisted agent: %v", err)
 			}
 			identity, err := rec.Config.ConcreteIdentity()
@@ -346,7 +339,7 @@ func ProveNativePersistedExecutableAdoptionStartsInCurrentManagerOccurrence(t *t
 			}
 
 			generation := readiness.State.Generation
-			if _, err := am.ensureExecutableAgentLifecycle(testAuthorActivityContext(context.Background()), identity); err != nil {
+			if _, err := am.ensureExecutableAgentLifecycle(executionCtx, identity); err != nil {
 				t.Fatalf("exact readiness replay: %v", err)
 			}
 			replayed, err := am.lifecycle.executableReadinessByIdentity(identity)

@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
-	entitystore "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 
 	"github.com/division-sh/swarm/internal/store/internal/backend/mutationprotocol"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
@@ -33,7 +33,7 @@ func SeedPostgresPublicationIdentityLookalikesForTest(ctx context.Context, selec
 	}
 	return runEventFixtureMutationForTest(ctx, selected, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 		return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-			return entitystore.SeedPostgresPublicationIdentityLookalikesTx(ctx, tx, runID, entityID)
+			return pipelinepersistence.SeedPostgresPublicationIdentityLookalikesTx(ctx, tx, runID, entityID)
 		})
 	})
 }
@@ -44,7 +44,7 @@ func SeedPostgresPublicationUnroutableEntityForTest(ctx context.Context, selecte
 	}
 	return runEventFixtureMutationForTest(ctx, selected, func(ctx context.Context, attempt *mutationprotocol.Attempt) error {
 		return attempt.WithSQL(ctx, func(ctx context.Context, tx *sql.Tx) error {
-			return entitystore.SeedPostgresPublicationUnroutableEntityTx(ctx, tx, runID, entityID, flowInstance)
+			return pipelinepersistence.SeedPostgresPublicationUnroutableEntityTx(ctx, tx, runID, entityID, flowInstance)
 		})
 	})
 }

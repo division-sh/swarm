@@ -109,10 +109,10 @@ func ProveNativeWriteReceiptPreservesCommittedSettlementAndContinuation(t *testi
 				if phase == "continuation_error" || phase == "both_errors" {
 					bus.failure = cleanup
 				}
-				am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: store})
-				evt := eventtest.RunCreatingRootIngress(eventtest.UUID("receipt-outcome"), "work.requested", "", "", nil, 0, eventtest.UUID("receipt-outcome-run"), "", events.EventEnvelope{}, time.Time{})
+				evt := eventtest.ExistingRunRootIngress(eventtest.UUID("receipt-outcome"), "work.requested", "", "", nil, 0, eventtest.UUID("receipt-outcome-run"), events.EventEnvelope{}, time.Time{})
+				am, base := newPreparedNativeReceiptManager(t, bus, nativeDelivery, panicStubAgent{id: "agent-a"}, evt, AgentManagerOptions{DeliveryStore: store})
 				nativeDelivery.seedAgentDeliveries(t, "agent-a", []events.Event{evt})
-				ctx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), evt, "agent-a")
+				ctx := managerClaimedDeliveryContext(t, am, base, evt, "agent-a")
 				claim, _ := runtimedelivery.ClaimFromContext(ctx)
 				snapshot, err := am.writeReceipt(ctx, evt, status, testFailure("receipt_failure"))
 				if store.failure != nil && !errors.Is(err, failure) || bus.failure != nil && !errors.Is(err, cleanup) {
@@ -168,14 +168,14 @@ func ProveNativeProcessEventDoesNotResettleAcknowledgedReceiptError(t *testing.T
 			nativeDelivery := newNativeDelivery(t)
 			store := &receiptOutcomeStore{Store: nativeDelivery, failure: failure}
 			bus := &receiptOutcomeBus{failure: cleanup}
-			am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{DeliveryStore: store})
 			agent := &countingFailureAgent{failureReturningAgent: failureReturningAgent{id: "agent-a"}}
 			if failed {
 				agent.err = errors.New("handler failed")
 			}
-			evt := eventtest.RunCreatingRootIngress(eventtest.UUID("process-receipt"), "work.requested", "", "", nil, 0, eventtest.UUID("process-receipt-run"), "", events.EventEnvelope{}, time.Time{})
+			evt := eventtest.ExistingRunRootIngress(eventtest.UUID("process-receipt"), "work.requested", "", "", nil, 0, eventtest.UUID("process-receipt-run"), events.EventEnvelope{}, time.Time{})
+			am, base := newPreparedNativeReceiptManager(t, bus, nativeDelivery, agent, evt, AgentManagerOptions{DeliveryStore: store})
 			nativeDelivery.seedAgentDeliveries(t, agent.ID(), []events.Event{evt})
-			ctx := managerClaimedDeliveryContext(t, am, testAuthorActivityContext(context.Background()), evt, agent.ID())
+			ctx := managerClaimedDeliveryContext(t, am, base, evt, agent.ID())
 			result := am.processEventDetailed(ctx, agent, evt)
 			if !errors.Is(result.err, failure) || !errors.Is(result.err, cleanup) || agent.calls != 1 || store.settlements.Load() != 1 {
 				t.Fatalf("result=%v handler=%d settlements=%d", result.err, agent.calls, store.settlements.Load())

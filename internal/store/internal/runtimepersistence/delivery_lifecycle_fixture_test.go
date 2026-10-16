@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -239,6 +240,12 @@ func deliveryFixtureAuthorityForRun(ctx context.Context, queryer interface {
 	source, err := runtimecorrelation.DecodeSourceArtifactFact(bundleHash)
 	if err != nil {
 		return runtimedelivery.ExecutionAuthority{}, err
+	}
+	if admission, found := managedexecution.FromContext(ctx); found {
+		if admission.Kind != managedexecution.KindNormalRuntime || admission.BundleHash != source.BundleHash() {
+			return runtimedelivery.ExecutionAuthority{}, fmt.Errorf("delivery fixture admission differs from its exact normal run source")
+		}
+		return runtimedelivery.NewExecutionAuthority(source, admission)
 	}
 	return runtimedelivery.NewNormalExecutionAuthority(source, "delivery-fixture:"+runID, 1)
 }

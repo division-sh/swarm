@@ -21,7 +21,7 @@ type DeploymentIntentDiagnosticStorage = pipelinepersistence.DeploymentIntentDia
 type DeploymentIntentCardinalityStorage = pipelinepersistence.DeploymentIntentCardinalityStorage
 type PinnedDeploymentFeedStorage = pipelinepersistence.PinnedDeploymentFeedStorage
 type DeploymentSettlementDiagnosticStorage = pipelinepersistence.DeploymentSettlementDiagnosticStorage
-type PinnedPortfolioDeliveryDiagnosticStorage = delivery.PinnedPortfolioDeliveryDiagnosticStorage
+type PinnedPortfolioDeliveryDiagnosticStorage = pipelinepersistence.PinnedPortfolioDeliveryDiagnosticStorage
 type DeploymentReceiptStorage = pipelinepersistence.DeploymentReceiptStorage
 type DeploymentDeliveryStorage = delivery.DeploymentDeliveryStorage
 type DeploymentAttemptStorage = delivery.DeploymentAttemptStorage
@@ -126,7 +126,7 @@ func CountPinnedPortfolioSettledDeliveriesStorageForTest(ctx context.Context, se
 }
 
 func ReadPinnedPortfolioDeliveryDiagnosticsStorageForTest(ctx context.Context, selected any, run string) ([]PinnedPortfolioDeliveryDiagnosticStorage, error) {
-	return readDeploymentStorageForTest(ctx, selected, run, delivery.ReadPinnedPortfolioDeliveryDiagnosticsStorageTx)
+	return readDeploymentStorageForTest(ctx, selected, run, pipelinepersistence.ReadPinnedPortfolioDeliveryDiagnosticsStorageTx)
 }
 
 func ReadDeploymentIntentProgressStorageForTest(ctx context.Context, selected any, runID string) (DeploymentIntentProgressStorage, error) {

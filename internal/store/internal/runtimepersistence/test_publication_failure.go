@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	"github.com/google/uuid"
@@ -82,7 +81,7 @@ func (f *PublicationFailure) set(ctx context.Context, enabled bool) error {
 		case PublicationBeforeReplayScope:
 			return pipelinepersistence.SetPublicationReplayFailureTx(ctx, tx, postgres, f.id, f.template, enabled)
 		case PublicationBeforeAPICompletion:
-			return apiidempotency.SetPublicationCompletionFailureTx(ctx, tx, postgres, f.id, f.template, enabled)
+			return pipelinepersistence.SetPublicationCompletionFailureTx(ctx, tx, postgres, f.id, f.template, enabled)
 		default:
 			return fmt.Errorf("publication fault has no temporal cut")
 		}

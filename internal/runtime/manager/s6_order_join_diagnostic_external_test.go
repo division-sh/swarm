@@ -24,11 +24,10 @@ func TestS6DifferentStoryAgentOrderJoinDiagnosticBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			fixture := openManagerNativeDelivery(t, backend)
-			ctx := fixture.Context
 			owner := fixture.Store.(managerNativeDeliveryOwner)
 			runID := uuid.NewString()
-			fixture.RequireRun(t, runID)
 			identity := agentidentitytest.RootRuntimeForRun(t, runID, "s6-order", "s6.audit")
+			ctx, _, _, _ := fixture.PrepareActor(t, managerNativeClaimActor(t, identity))
 			route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 			at := time.Now().UTC().Truncate(time.Microsecond)
 			eventsByID := map[string]events.Event{}

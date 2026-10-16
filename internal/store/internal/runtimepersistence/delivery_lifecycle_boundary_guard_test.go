@@ -1,7 +1,11 @@
 package runtimepersistence
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -88,6 +92,7 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 			if err != nil {
 				return err
 			}
+			classifiedReads := classifiedPipelineDeliveryReads(relative, file)
 			ast.Inspect(file, func(node ast.Node) bool {
 				literal, ok := node.(*ast.BasicLit)
 				if !ok || literal.Kind != token.STRING {
@@ -98,7 +103,7 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 					return true
 				}
 				found[relative]++
-				if _, allowed := executableDeliverySQLOwners[relative]; !allowed {
+				if _, allowed := executableDeliverySQLOwners[relative]; !allowed && !classifiedReads[literal] {
 					t.Errorf("%s:%d owns executable-delivery SQL outside the closed lifecycle boundary", relative, fset.Position(literal.Pos()).Line)
 				}
 				return true
@@ -126,6 +131,38 @@ func TestExecutableDeliverySQLHasClosedOwners(t *testing.T) {
 			t.Errorf("closed executable-delivery SQL owner %s has %d queries, want %d", path, got, want)
 		}
 	}
+}
+
+func classifiedPipelineDeliveryReads(path string, file *ast.File) map[*ast.BasicLit]bool {
+	classified := map[*ast.BasicLit]bool{}
+	if path != "internal/store/internal/backend/pipelinepersistence/deployment_observation.go" {
+		return classified
+	}
+	// #2698/6205327685: exact read-only joins of pipeline receipts and delivery
+	// facts, retaining their original SQL, ordering, failure behavior and cut.
+	digests := map[string]string{
+		"ReadDeploymentPreReceiptDeliveryCutStorageTx":    "70faa35732b3f5c9ef5683d6719ab0c69a5cb3ae3bb4ff2943fb6a835c9a3333",
+		"ReadDeploymentPendingReceiverCutStorageTx":       "2f487864a056416dbd4a38bf547f77fa41d8f76fc5db79c25f92c75c7122e126",
+		"ReadPinnedPortfolioDeliveryDiagnosticsStorageTx": "633692570e3484ee64ba7d9dcfa4ce1bc49e799b25a26d7de41a3dc967fc4c13",
+		"ReadCanonicalRoutingSQLiteDiagnosticTx":          "148a5129aa61a7044063cd19d393816b9a256ef6311b13a8d9300cd12f4474a9",
+	}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || digests[fn.Name.Name] == "" {
+			continue
+		}
+		var out bytes.Buffer
+		if format.Node(&out, token.NewFileSet(), fn) != nil || fmt.Sprintf("%x", sha256.Sum256(out.Bytes())) != digests[fn.Name.Name] {
+			continue
+		}
+		ast.Inspect(fn, func(node ast.Node) bool {
+			if literal, ok := node.(*ast.BasicLit); ok {
+				classified[literal] = true
+			}
+			return true
+		})
+	}
+	return classified
 }
 
 // The former public-fixture exemptions are gone, including identical old SQL.

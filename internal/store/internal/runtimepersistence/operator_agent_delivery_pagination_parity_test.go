@@ -38,14 +38,15 @@ func TestOperatorAgentDeliveryPagesBoundHydrationParity(t *testing.T) {
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			identity := mustTestAgentIdentityForRun(runID, "agent-a", "")
 			if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{
-				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+				Config: resolveNativeClaimFixtureActor(t, withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					ID: "agent-a", Identity: identity, Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
 					Memory: agentmemory.Plan{}, Config: json.RawMessage(`{}`),
-				}),
+				})),
 				Status: "active", StartedAt: now,
 			}); err != nil {
 				t.Fatalf("upsert agent: %v", err)
 			}
+			ctx = admitPreparedAgentClaimContext(t, ctx, selected)
 
 			route := testAgentDeliveryRoute(t, runID, "agent-a", "")
 			failed := seedOperatorAgentDeliveryPageHistory(t, ctx, fixture, selected, route, runID, "failed", now)

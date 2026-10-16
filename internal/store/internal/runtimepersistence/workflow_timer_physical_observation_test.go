@@ -17,6 +17,7 @@ func TestWorkflowTimerPhysicalReadersKeepTaskTypeScopeAndDriverTimeBothStores(t 
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			f := newReceiverConfigActivationFixtureWithTimer(t, backend, false, false, true, false)
+			f.constructKeylessRoot(t)
 			req := f.request("physical-timer-key", "physical-timer-instance", "native")
 			req.OccurredAt = time.Now().UTC().Truncate(time.Microsecond)
 			plan, err := f.manager.PrepareFlowInstanceActivation(f.ctx, req)

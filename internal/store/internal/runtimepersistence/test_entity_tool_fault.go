@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	entitystore "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
+	"github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 )
 
 func InsertEntityToolSiblingAliasFaultForTest(ctx context.Context, selected any, runID, ownerID, siblingID string, fields map[string]any, at time.Time) error {
@@ -17,7 +17,7 @@ func InsertEntityToolSiblingAliasFaultForTest(ctx context.Context, selected any,
 		return fmt.Errorf("entity-tool sibling alias fault requires a distinct sibling and exact time")
 	}
 	return runWorkflowProjectionFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return entitystore.InsertEntityToolSiblingAliasFaultTx(ctx, tx, runID, ownerID, siblingID, fields, at)
+		return pipelinepersistence.InsertEntityToolSiblingAliasFaultTx(ctx, tx, runID, ownerID, siblingID, fields, at)
 	})
 }
 
@@ -26,7 +26,7 @@ func SetEntityToolPrivateBookkeepingFaultForTest(ctx context.Context, selected a
 		return err
 	}
 	return runWorkflowProjectionFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return entitystore.SetEntityToolPrivateBookkeepingFaultTx(ctx, tx, entityID)
+		return pipelinepersistence.SetEntityToolPrivateBookkeepingFaultTx(ctx, tx, entityID)
 	})
 }
 
@@ -35,7 +35,7 @@ func SetEntityToolUndeclaredFieldFaultForTest(ctx context.Context, selected any,
 		return err
 	}
 	return runWorkflowProjectionFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return entitystore.SetEntityToolUndeclaredFieldFaultTx(ctx, tx, entityID)
+		return pipelinepersistence.SetEntityToolUndeclaredFieldFaultTx(ctx, tx, entityID)
 	})
 }
 
@@ -44,7 +44,7 @@ func SetEntityToolMarginalStateFaultForTest(ctx context.Context, selected any, e
 		return err
 	}
 	return runWorkflowProjectionFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return entitystore.SetEntityToolMarginalStateFaultTx(ctx, tx, entityID)
+		return pipelinepersistence.SetEntityToolMarginalStateFaultTx(ctx, tx, entityID)
 	})
 }
 
@@ -56,6 +56,6 @@ func AdvanceEntityToolForkSourceFaultForTest(ctx context.Context, selected any, 
 		return fmt.Errorf("entity-tool fork-source advance requires its exact clock")
 	}
 	return runWorkflowProjectionFault(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
-		return entitystore.AdvanceEntityToolForkSourceFaultTx(ctx, tx, runID, entityID, at)
+		return pipelinepersistence.AdvanceEntityToolForkSourceFaultTx(ctx, tx, runID, entityID, at)
 	})
 }

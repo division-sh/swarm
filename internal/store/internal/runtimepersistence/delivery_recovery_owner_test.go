@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	entitystore "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	"github.com/division-sh/swarm/internal/store/internal/backend/transactiontest"
+	"github.com/division-sh/swarm/internal/store/internal/schemastore"
 	"github.com/google/uuid"
 )
 
@@ -213,10 +214,10 @@ func deliveryRecoveryFaultObjectCount(t *testing.T, ctx context.Context, selecte
 	_, postgres := selected.(*PostgresStore)
 	count, err := readFanOutSemanticStorage(ctx, selected, []string{}, func(ctx context.Context, tx *sql.Tx) (int, error) {
 		if kind == "diagnostic" {
-			out, err := delivery.ReadConformanceDiagnosticFaultObjectsTx(ctx, tx, postgres)
+			out, err := schemastore.ReadConformanceDiagnosticFaultObjectsTx(ctx, tx, postgres)
 			return out.Functions + out.Triggers, err
 		}
-		return entitystore.CountNodeRecoveryPoisonFaultObjectsTx(ctx, tx, postgres)
+		return schemastore.CountNodeRecoveryPoisonFaultObjectsTx(ctx, tx, postgres)
 	})
 	if err != nil {
 		t.Fatal(err)

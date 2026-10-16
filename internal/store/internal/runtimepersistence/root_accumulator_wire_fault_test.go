@@ -106,15 +106,30 @@ func TestRootAccumulatorWireFaultRespectsOriginalSQLiteWriterAdmission(t *testin
 		t.Fatal(err)
 	}
 	holderJoined = true
-	// The valid child is not the root. A widened run-only write must fail this control.
-	if changed, err := SetRootFlowAccumulatorWireForTest(ctx, owner, run, []byte("[]")); err == nil || changed != 0 {
-		t.Fatalf("root-only fault borrowed the existing child: %d %v", changed, err)
+	// This fixture now lawfully constructs both the root and its child. A foreign
+	// run has neither; the separate exact-root control below preserves the child.
+	if changed, err := SetRootFlowAccumulatorWireForTest(ctx, owner, uuid.NewString(), []byte("[]")); err == nil || changed != 0 {
+		t.Fatalf("root-only fault borrowed another run's construction: %d %v", changed, err)
 	}
 	if counts := probe.Snapshot(); counts.Active != 0 || counts.Total.Begun != 2 || counts.Total.WriteCommits != 1 || counts.Total.Failed != 1 || counts.Total.RollbackAttempts != 1 {
 		t.Fatalf("absent root did not roll back behind the exact original writer: %+v", counts)
 	}
 	if !reflect.DeepEqual(before, competingRevisionPairSnapshot(t, f)) {
 		t.Fatal("queued or absent-root fault changed child, history, data or clocks")
+	}
+	restore()
+	original, err := ReadRootFlowAccumulatorStorageForTest(f.ctx, owner, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := SetRootFlowAccumulatorWireForTest(f.ctx, owner, run, []byte("[]")); err != nil || changed != 1 {
+		t.Fatalf("exact constructed root fault: changed=%d error=%v", changed, err)
+	}
+	if changed, err := SetRootFlowAccumulatorWireForTest(f.ctx, owner, run, original); err != nil || changed != 1 {
+		t.Fatalf("exact constructed root restoration: changed=%d error=%v", changed, err)
+	}
+	if !reflect.DeepEqual(before, competingRevisionPairSnapshot(t, f)) {
+		t.Fatal("exact root fault or restoration changed the child, another field, history or clocks")
 	}
 }
 

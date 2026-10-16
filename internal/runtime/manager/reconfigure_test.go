@@ -188,6 +188,7 @@ func ReconfigureMemoryNativeFixture(t testing.TB, enabled bool) PersistedAgent {
 	rec.Config.Identity = managerRuntimeAgentIdentityForFlowPath(rec.Config.ID, rec.Config.FlowPath)
 	rec.Config.Memory.Enabled = enabled
 	rec.Config.LLMBackend = "anthropic"
+	rec.Config.Config = []byte(`{}`)
 	if err := resolveAgentModel(&rec.Config, executionposture.Live, "anthropic", llmselection.ModelAliases{}, true); err != nil {
 		t.Fatal(err)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -88,6 +89,35 @@ func admitAgentClaimProfileAuthority(t testing.TB, ctx context.Context, selected
 		t.Fatal(err)
 	}
 	return authority
+}
+
+func admitPreparedAgentClaimContext(t testing.TB, ctx context.Context, selected interface {
+	agentfixture.Store
+	deliverylifecycle.Store
+}) context.Context {
+	t.Helper()
+	source, found := correlation.SourceArtifactFactFromContext(ctx)
+	if !found {
+		t.Fatal("prepared agent claim requires its original source context")
+	}
+	authority := admitAgentClaimProfileAuthority(t, ctx, selected, source)
+	process, err := agentfixture.ProcessCapability(t, ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, found, err := process.CurrentSourceSet(ctx)
+	if err != nil || !found {
+		t.Fatalf("prepared agent claim requires its complete original source plan: found=%t error=%v", found, err)
+	}
+	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, authority.ExecutionID(), authority.Generation(), "", plan.Revision, source.BundleHash(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx = managedexecution.WithAdmission(ctx, admission)
+	if err := selected.ActivateDeliveryAuthority(ctx, authority); err != nil {
+		t.Fatal(err)
+	}
+	return ctx
 }
 
 func (f agentClaimProfileFixture) claim(t *testing.T) (events.Event, deliverylifecycle.ClaimedObligation, deliverylifecycle.AgentClaimProfile) {

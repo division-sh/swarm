@@ -12,7 +12,7 @@ import (
 func TestSingleDeploymentConfigRejectsNullContainersBeforeProjection(t *testing.T) {
 	for _, path := range []string{
 		"", "runtime", "database", "store", "store.sqlite", "workspace", "llm",
-		"llm.models", "llm.models.regular", "llm.session", "llm.claude_cli",
+		"llm.models", "llm.models.regular", "llm.models.cheap", "llm.models.expensive", "llm.session", "llm.claude_cli",
 		"llm.openai_compatible", "llm.openai_responses", "llm.provider_limits",
 		"llm.provider_limits.anthropic", "llm.provider_limits.anthropic.models",
 		"llm.provider_limits.anthropic.models.model", "platform", "platform.packs",
@@ -41,6 +41,14 @@ func TestSingleDeploymentConfigRejectsNullContainersBeforeProjection(t *testing.
 					before := Config{Runtime: RuntimeConfig{RecoveryOnStartup: true}, LLM: LLMConfig{Backend: "anthropic"}}
 					got := before
 					err := decodeConfigSourceTest(source, &got)
+					if path == "llm.provider_limits.anthropic.models" || path == "llm.provider_limits.anthropic.models.model" {
+						// S6 retires this field entirely, including explicit null.
+						assertS6RetiredProviderField(t, err, "models")
+						if !reflect.DeepEqual(got, before) {
+							t.Fatal("retired container changed caller-owned defaults")
+						}
+						return
+					}
 					diagnostic, ok := runtimecontracts.AsLoaderDiagnostic(err)
 					wantPath := "config"
 					if path != "" {

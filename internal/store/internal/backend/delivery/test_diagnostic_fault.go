@@ -22,20 +22,6 @@ func InstallConformanceDiagnosticFunctionFaultTx(ctx context.Context, tx *sql.Tx
 	return err
 }
 
-type ConformanceFaultObjectsStorage struct{ Functions, Triggers int }
-
-func ReadConformanceDiagnosticFaultObjectsTx(ctx context.Context, tx *sql.Tx, postgres bool) (ConformanceFaultObjectsStorage, error) {
-	var out ConformanceFaultObjectsStorage
-	query := `SELECT 0,(SELECT COUNT(*) FROM sqlite_master WHERE type='trigger' AND name='fail_delivery_dead_letter_insert')`
-	if postgres {
-		query = `SELECT
-	(SELECT COUNT(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='public' AND p.proname='fail_delivery_dead_letter_insert'),
-	(SELECT COUNT(*) FROM pg_trigger WHERE tgname='fail_delivery_dead_letter_insert' AND NOT tgisinternal)`
-	}
-	err := tx.QueryRowContext(ctx, query).Scan(&out.Functions, &out.Triggers)
-	return out, err
-}
-
 func RemoveConformanceDiagnosticFaultTx(ctx context.Context, tx *sql.Tx, postgres bool) error {
 	query := `DROP TRIGGER IF EXISTS fail_delivery_dead_letter_insert`
 	if postgres {

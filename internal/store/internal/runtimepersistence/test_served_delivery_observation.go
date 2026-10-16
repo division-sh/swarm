@@ -32,7 +32,7 @@ func ReadCanonicalRoutingSQLiteDiagnosticForTest(ctx context.Context, selected a
 	if owner, ok := selected.(*SQLiteRuntimeStore); !ok || owner == nil {
 		return "", fmt.Errorf("canonical SQLite routing diagnostic requires its original SQLite owner")
 	}
-	return readFanOutSemanticStorage(ctx, selected, nil, delivery.ReadCanonicalRoutingSQLiteDiagnosticTx)
+	return readFanOutSemanticStorage(ctx, selected, nil, pipelinepersistence.ReadCanonicalRoutingSQLiteDiagnosticTx)
 }
 
 func CountExactRunEventDeliveryStorageForTest(ctx context.Context, selected any, runID, eventID string) (int, error) {
@@ -951,6 +951,15 @@ func readServedRunDebugInspectionSection(ctx context.Context, selected any, back
 }
 
 func readServedRunDebugSection(ctx context.Context, selected any, backend, scope, runID string) ([]string, string, error) {
+	if scope == "pipeline_obligations" {
+		out, stage := []string{}, ""
+		err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
+			var err error
+			out, stage, err = pipelinepersistence.ReadServedPipelineObligationDebugTx(ctx, tx, backend == "postgres", runID)
+			return err
+		})
+		return out, stage, err
+	}
 	if scope == "runs" || scope == "event_deliveries" || scope == "settled_delivery_attempts" || scope == "delivery_agents" {
 		out, stage := []string{}, ""
 		err := readServedDeliveryObservation(ctx, selected, func(ctx context.Context, tx *sql.Tx) error {
@@ -1026,8 +1035,6 @@ func servedRunDebugSQL(backend, scope string) string {
 			sqlText = `SELECT event_id::text, event_name, COALESCE(entity_id::text, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = $1::uuid ORDER BY created_at, event_id LIMIT 5`
 		case "event_receipts":
 			sqlText = `SELECT r.event_id::text, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects::text, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = $1::uuid ORDER BY r.processed_at, r.event_id LIMIT 8`
-		case "pipeline_obligations":
-			sqlText = `SELECT e.event_id::text, e.event_name, COALESCE(r.outcome, ''), COALESCE(o.status, '') FROM events e LEFT JOIN event_receipts r ON r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' LEFT JOIN decision_card_route_obligations o ON o.event_id = e.event_id WHERE e.run_id = $1::uuid ORDER BY e.created_at, e.event_id LIMIT 12`
 		case "dead_letters":
 			sqlText = `SELECT d.original_event, COALESCE(d.entity_id::text, ''), d.failure::text FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1::uuid ORDER BY d.created_at LIMIT 5`
 		case "runtime_logs":
@@ -1043,8 +1050,6 @@ func servedRunDebugSQL(backend, scope string) string {
 			sqlText = `SELECT event_id, event_name, COALESCE(entity_id, ''), COALESCE(flow_instance, '') FROM events WHERE run_id = ? ORDER BY created_at, event_id LIMIT 5`
 		case "event_receipts":
 			sqlText = `SELECT r.event_id, r.subscriber_type, r.subscriber_id, r.outcome, COALESCE(r.reason_code, ''), COALESCE(r.side_effects, '') FROM event_receipts r JOIN events e ON e.event_id = r.event_id WHERE e.run_id = ? ORDER BY r.processed_at, r.event_id LIMIT 8`
-		case "pipeline_obligations":
-			sqlText = `SELECT e.event_id, e.event_name, COALESCE(r.outcome, ''), COALESCE(o.status, '') FROM events e LEFT JOIN event_receipts r ON r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline' LEFT JOIN decision_card_route_obligations o ON o.event_id = e.event_id WHERE e.run_id = ? ORDER BY e.created_at, e.event_id LIMIT 12`
 		case "dead_letters":
 			sqlText = `SELECT d.original_event, COALESCE(d.entity_id, ''), d.failure FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = ? ORDER BY d.created_at LIMIT 5`
 		case "runtime_logs":
