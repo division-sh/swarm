@@ -331,6 +331,7 @@ func TestSelectedForkCrashProcessHelper(t *testing.T) {
 		}}
 	}
 	result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: sourceLoader,
+		SourceArtifactFact: loaded.SourceArtifactFact, ForkOperation: selectedForkFixtureOperation(t, loaded, sourceRun, eventID),
 		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
 		AgentRuntime:      options})
 	if err != nil {

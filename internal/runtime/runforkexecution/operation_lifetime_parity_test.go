@@ -223,8 +223,9 @@ func TestSelectedContractOperationReplacementBothStores(t *testing.T) {
 				}
 				request := SelectedContractExecutionRequest{
 					SourceRunID: sourceID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
-					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: selectedContractTestProcessCapability(t, ctx, capabilityStore)},
+					SourceArtifactFact: loaded.SourceArtifactFact,
+					ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
+					AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: selectedContractTestProcessCapability(t, ctx, capabilityStore)},
 				}
 				var result SelectedContractExecutionResult
 				if point == "delayed_submission" {
@@ -349,6 +350,24 @@ func seedSelectedOperationSource(t *testing.T, ctx context.Context, selected any
 	storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{selectedExecutionEntitylessNodeRoute("source-only-node")}, pipelineobligation.ScopeSubscribed)
 	commitSelectedOperationRootFixture(t, ctx, selected, loaded, event)
 	storetest.CaptureRunForkSnapshot(t, ctx, selected, runID)
+}
+
+func selectedForkFixtureOperation(t testing.TB, loaded LoadedSelectedContractSource, runID, eventID string) *runfork.ForkOperationRequest {
+	t.Helper()
+	if err := loaded.RootedSource.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	operation := runfork.ForkOperationRequest{
+		OperationID: uuid.NewString(), Actor: "selected-fork-fixture", TransportHash: "selected-fork-fixture",
+		SourceRunID: runID, ForkEventID: eventID, TargetBundleHash: loaded.SourceArtifactFact.BundleHash(),
+		TargetRootReference: loaded.RootedSource.Admission().Reference(), AllowSourceFreeze: true,
+		ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
+	}
+	canonical, _, err := operation.Canonical()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &canonical
 }
 
 // This is explicit component construction with no route/arm installation, not

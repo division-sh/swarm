@@ -140,8 +140,9 @@ func testSelectedForkControlLifetime(t *testing.T, outcomeOperation string) {
 				sourceRun, eventID := uuid.NewString(), uuid.NewString()
 				seedSelectedOperationSource(t, ctx, selected, loaded, sourceRun, eventID)
 				request := SelectedContractExecutionRequest{SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
-					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}
+					SourceArtifactFact: loaded.SourceArtifactFact,
+					ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
+					AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}
 				var forkRun string
 				if phase != "executing" && phase != "executing_retirement" {
 					result, err := ExecuteSelectedContractRunFork(ctx, request)

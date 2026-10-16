@@ -214,8 +214,9 @@ func TestSelectedSourceCleanupBothStores(t *testing.T) {
 					}
 				}()
 				request := SelectedContractExecutionRequest{SourceRunID: runID, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: probe,
-					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}
+					SourceArtifactFact: loaded.SourceArtifactFact,
+					ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
+					AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: capability}}
 				before := selectedPreparationDatabaseSnapshot(t, db, backend)
 				baseline := process.ActiveCount()
 				var p *PreparedSelectedFork

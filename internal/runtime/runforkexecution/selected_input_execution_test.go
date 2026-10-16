@@ -140,8 +140,9 @@ func TestSelectedInputExecutionEvidenceBothStores(t *testing.T) {
 				}}
 				result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 					SourceRunID: run, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
-					ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-					AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: selectedContractTestProcessCapability(t, ctx, capabilityStore)},
+					SourceArtifactFact: loaded.SourceArtifactFact,
+					ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
+					AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.Live, ProcessCapability: selectedContractTestProcessCapability(t, ctx, capabilityStore)},
 				})
 				if !observed && !claimed {
 					t.Fatalf("did not reach evidence consumer: %v", err)

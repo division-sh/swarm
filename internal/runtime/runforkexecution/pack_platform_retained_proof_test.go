@@ -95,8 +95,9 @@ func TestPackPlatformRetainedSourceExecutesSelectedForkBothStores(t *testing.T) 
 			}
 			result, err := ExecuteSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
 				SourceRunID: sourceRun, At: eventID, AllowSourceFreeze: true, Owner: owner, SourceLoader: loader,
-				ContractSelection: runforkadmission.SelectedContractSelection(loaded.Source),
-				AgentRuntime:      SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected)},
+				SourceArtifactFact: loaded.SourceArtifactFact,
+				ContractSelection:  runforkadmission.SelectedContractSelection(loaded.Source),
+				AgentRuntime:       SelectedContractAgentRuntimeOptions{ExecutionPosture: executionposture.MockOnly, ProcessCapability: selectedContractTestProcessCapability(t, ctx, selected)},
 			})
 			if err != nil {
 				t.Fatalf("retained selected fork execution: %v", err)
