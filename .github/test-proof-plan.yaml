@@ -416,6 +416,27 @@ units:
     count_mode: count-1
     environment_ids: *postgres_gateway_empty
     budget_class: full
+  # Private complement for hosted core + the complete serveapp-channel unit.
+  # The channel unit retains the receiver restart's two backend obligations.
+  local-serveapp-canaries-without-channel:
+    packages: [github.com/division-sh/swarm/internal/serveapp]
+    run: '^(TestMockAgentSupportedSurfaceSQLitePostgres|TestServedResetRetainClearAndHistoricalReplayBothStores|TestSelectedForkPublicChangedTargetExecutionBothStores|TestIssue2394ServedStopTwentyBothStores|TestServedParityHarnessRunControlLifecycle|TestServedParityHarnessStandingServiceLifecycle|TestPausedMixedRunsStartupBothStores|TestPausedAcceptedTimerAndDecisionPublicBothStores|TestEdgeOwnedConnectionPoliciesSharingInputBothStores|TestEdgeOwnedMixedConnectionProjectionsBothStores|TestReleaseReceiverInitializationBothStores|TestProviderSelectedRootStandingBootBothStores)$'
+    required_children:
+      TestMockAgentSupportedSurfaceSQLitePostgres: [sqlite, postgres]
+      TestServedResetRetainClearAndHistoricalReplayBothStores: [default_sqlite/clear=false, default_sqlite/clear=true, explicit_postgres/clear=false, explicit_postgres/clear=true]
+      TestSelectedForkPublicChangedTargetExecutionBothStores: [default_sqlite, explicit_postgres]
+      TestIssue2394ServedStopTwentyBothStores: [default_sqlite, explicit_postgres]
+      TestServedParityHarnessRunControlLifecycle: [default_sqlite, explicit_postgres]
+      TestServedParityHarnessStandingServiceLifecycle: [default_sqlite, explicit_postgres]
+      TestPausedMixedRunsStartupBothStores: [sqlite, postgres]
+      TestPausedAcceptedTimerAndDecisionPublicBothStores: [default_sqlite/timer, default_sqlite/decision, explicit_postgres/timer, explicit_postgres/decision]
+      TestEdgeOwnedConnectionPoliciesSharingInputBothStores: [sqlite/forward, sqlite/reverse, postgres/forward, postgres/reverse]
+      TestEdgeOwnedMixedConnectionProjectionsBothStores: [sqlite/generated.uuid/forward, sqlite/generated.uuid/reverse, sqlite/event.id/forward, sqlite/event.id/reverse, postgres/generated.uuid/forward, postgres/generated.uuid/reverse, postgres/event.id/forward, postgres/event.id/reverse]
+      TestReleaseReceiverInitializationBothStores: [default_sqlite/connected_typed_creation, default_sqlite/direct_provider_schema, default_sqlite/connected_restart/before_restart, default_sqlite/connected_restart/after_restart, explicit_postgres/connected_typed_creation, explicit_postgres/direct_provider_schema, explicit_postgres/connected_restart/before_restart, explicit_postgres/connected_restart/after_restart]
+      TestProviderSelectedRootStandingBootBothStores: [default_sqlite, explicit_postgres]
+    count_mode: count-1
+    environment_ids: *postgres_gateway_empty
+    budget_class: full
   local-runtime-bus-full:
     packages: [github.com/division-sh/swarm/internal/runtime/bus]
     required_children:
