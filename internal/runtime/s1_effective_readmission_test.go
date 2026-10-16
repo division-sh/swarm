@@ -17,8 +17,10 @@ import (
 func s1ReadmissionMembers(withProvider bool) map[string][]byte {
 	members := packfixture.ScopedActivityMembers()
 	if withProvider {
-		members["team-bot/manifest.yaml"] = s1EffectiveProviderScopeMembers()["team-bot/manifest.yaml"]
-		members["team-bot/connector.yaml"] = packfixture.NeutralProviderMembers()["connector.yaml"]
+		provider := packfixture.NeutralProviderMembers()
+		members["team-bot/manifest.yaml"] = provider["manifest.yaml"]
+		members["team-bot/connector.yaml"] = provider["connector.yaml"]
+		members["team-bot/trigger.yaml"] = provider["trigger.yaml"]
 	}
 	return members
 }

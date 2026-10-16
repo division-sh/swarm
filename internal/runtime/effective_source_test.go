@@ -223,7 +223,7 @@ func TestEffectiveSourceProjectionHasNoProductionCompositionBypass(t *testing.T)
 		"SourceWithConnectorPackImports": {
 			"internal/cliapp/provider_connector_tools.go": true, // inventory readback, not execution admission
 		},
-		"SourceWithProviderTriggerEvents": {"internal/runtime/effective_source.go": true},
+		"SourceWithProviderTriggerEvents": {},
 		"WithRuntimeTools":                {"internal/runtime/effective_source.go": true},
 		"WithChannelRuntimeToolProjection": {
 			"internal/runtime/tools/executor.go": true,

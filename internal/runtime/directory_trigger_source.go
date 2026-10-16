@@ -12,9 +12,6 @@ import (
 )
 
 func sourceWithDirectoryTriggerSchemas(source semanticview.Source, providers packadmission.ProviderSource) (semanticview.Source, error) {
-	if _, base, applied := source.SemanticCapabilities().ProviderTriggerEvents(); applied {
-		source = base
-	}
 	owners := map[providerTriggerSchemaCoordinate]providerTriggerSchemaOwner{}
 	byFlow := map[string]map[string]runtimecontracts.EventCatalogEntry{}
 	var evidence []map[string]any

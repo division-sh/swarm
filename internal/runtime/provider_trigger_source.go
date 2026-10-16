@@ -312,7 +312,7 @@ func addProviderTriggerSchema(
 			return fmt.Errorf("provider trigger event %q collision between %s and %s; remove one provider-trigger declaration", eventName, existingOwner.diagnostic(), owner.diagnostic())
 		}
 	} else {
-		if _, _, collision := source.ResolveFlowEventCatalogEntry(projectKey, eventName); collision {
+		if _, collision := source.AuthoredEventEntries()[eventName]; collision {
 			existingOwner := "existing event catalog"
 			return fmt.Errorf("provider trigger event %q collision between %s and %s; remove the local redeclaration and inspect the pack with `swarm describe pack %s`", eventName, existingOwner, owner.diagnostic(), owner.identity.ID)
 		}
