@@ -14,13 +14,18 @@ import (
 
 func sourceForkLivePins(t *testing.T) []sourcefork.Pin {
 	t.Helper()
+	return sourceForkInvocationPins(t, sourceBlobDeclarationsForInvocation(t))
+}
+
+func sourceForkInvocationPins(t *testing.T, proof sourceBlobDeclarationInvocation) []sourcefork.Pin {
+	t.Helper()
 	pins := sourceForkPins(t)
 	for _, pin := range pins {
 		raw, err := os.ReadFile(filepath.Join("../../..", pin.File))
 		if err == nil {
 			raw, err = selectedreadrole.CatchUp2542HistoricalSource("../../..", pin.File, raw)
 		}
-		if err != nil || servedObservationEarlierSource(t, pin.File, pin.Function, requestKeyDeclaration(t, raw, pin.Function)) != pin.After {
+		if err != nil || proof.observationPrevious(t, pin.File, pin.Function, requestKeyDeclaration(t, raw, pin.Function)) != pin.After {
 			t.Fatal("source fork live endpoint changed:", pin.Function, err)
 		}
 	}
@@ -56,20 +61,6 @@ func restoreSourceForkHistory(t *testing.T, rows []map[string]any, recipes bool)
 		t.Fatal(err)
 	}
 	return rows
-}
-
-func family145CheckSourceForkWholeRule(t *testing.T, file, function, current string) bool {
-	t.Helper()
-	for _, pin := range sourceForkPins(t) {
-		if pin.File == file && pin.Function == function {
-			sourceForkLivePins(t)
-			if current != pin.After {
-				t.Fatal("source fork current transition escaped exact pin:", function)
-			}
-			return true
-		}
-	}
-	return false
 }
 
 func TestFamily145SourceForkHistoryRestoresCompletePriorLedgersAndTimerSuccessor(t *testing.T) {
