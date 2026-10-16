@@ -425,6 +425,9 @@ func (m postgresRunLifecycleMutation) Create(
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, request.RootAdmission.Reference()); err != nil {
+		return "", err
+	}
 	if err := m.requireSourceArtifactForWrite(ctx, request.Source); err != nil {
 		return "", err
 	}
@@ -481,6 +484,9 @@ func (m sqliteRunLifecycleMutation) Create(
 	}
 	request.StartedAt = runtimerunlifecycle.CanonicalTimestamp(request.StartedAt)
 	if err := request.Validate(); err != nil {
+		return "", err
+	}
+	if err := runtimecorrelation.CheckRootAdmissionContext(ctx, request.RootAdmission.Reference()); err != nil {
 		return "", err
 	}
 	if err := m.requireSourceArtifact(ctx, request.Source); err != nil {

@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -17,7 +16,6 @@ import (
 type rootedStandingCleanupStore interface {
 	rootedStandingStore
 	genericschedule.Store
-	authoractivity.Reader
 }
 
 func TestS1DormantDifferentContentRemovalUsesPredecessorBothStores(t *testing.T) {
@@ -53,7 +51,7 @@ func TestS1DormantDifferentContentRemovalUsesPredecessorBothStores(t *testing.T)
 			activation := admitGenericScheduleFixture(t, ctxA, selected, testRootGenericScheduleCommand(t,
 				created.RunID, uuid.NewString(), "orphan-old-source", genericschedule.AbsoluteDue(time.Now().UTC().Add(time.Hour)),
 			))
-			head, err := selected.HeadAuthorActivity(ctxA)
+			beforeCleanup, err := ReadWorkflowJournalStorageForTest(ctxA, selected, created.RunID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -68,13 +66,11 @@ func TestS1DormantDifferentContentRemovalUsesPredecessorBothStores(t *testing.T)
 			if err != nil || !found || cancelled.Status != genericschedule.StatusCancelled || cancelled.CancelCause != "standing_declaration_removed" || cancelled.CancelledAt.IsZero() {
 				t.Fatalf("retained run's timer was not terminally cleaned up: %+v, %t, %v", cancelled, found, err)
 			}
-			stories, err := selected.ListAuthorActivity(ctxA, authoractivity.ListOptions{AfterSequence: head, RunID: created.RunID, Limit: 100})
-			if err != nil || len(stories.Occurrences) != 1 {
-				t.Fatalf("orphan cleanup did not retain exactly one timer story: %+v, %v", stories, err)
-			}
-			story := stories.Occurrences[0]
-			if story.SourceIdentity != activation.ID || story.Transition != "cancelled" || story.Scope.BundleHash != sourceA.Artifact().BundleHash() {
-				t.Fatalf("cleanup journal borrowed declaration B's authority: %+v", story)
+			cleanup, err := ReadWorkflowJournalStorageForTest(ctxA, selected, created.RunID)
+			wantCleanup := beforeCleanup
+			wantCleanup.RunForkRevisions++
+			if err != nil || cleanup != wantCleanup {
+				t.Fatalf("cleanup did not retain exactly one predecessor timer revision without another story: got=%+v want=%+v err=%v", cleanup, wantCleanup, err)
 			}
 			statuses, err := selected.ListStandingServiceStatuses(ctxB)
 			if err != nil || len(statuses) != 1 || statuses[0].DeclarationPresent || statuses[0].RootReference != sourceB.Admission().Reference() || statuses[0].Transition != "orphaned" || statuses[0].Reason != "standing_declaration_removed" {

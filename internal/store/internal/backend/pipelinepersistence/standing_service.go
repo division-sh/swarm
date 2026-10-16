@@ -585,7 +585,7 @@ func (s *standingServiceAdapter) SuspendStandingService(ctx context.Context, ope
 		if err != nil {
 			return err
 		}
-		cancellations, err := s.quiesceStandingRunTx(txctx, tx, current.RunID, current.BundleHash, "standing_suspended", "cancelled", now, true)
+		cancellations, err := s.quiesceStandingRunTx(txctx, tx, current.RunID, "standing_suspended", "cancelled", now, true)
 		if err != nil {
 			return err
 		}
@@ -712,8 +712,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 		if err := s.admitStandingServiceRunTx(txctx, tx, current.RunID, operation.ExecutionPosture); err != nil {
 			return err
 		}
-		currentRunSource, err := s.requireStandingRunSourceTx(txctx, tx, current, false)
-		if err != nil {
+		if _, err := s.requireStandingRunSourceTx(txctx, tx, current, false); err != nil {
 			return err
 		}
 		declarationRoot, err := sourceartifactstore.LoadRootedSourceTx(txctx, tx, current.RootReference, s.postgres)
@@ -730,7 +729,7 @@ func (s *standingServiceAdapter) ResetStandingService(ctx context.Context, opera
 			return err
 		}
 		if currentState.Active() {
-			cancellations, err = s.quiesceStandingRunTx(txctx, tx, current.RunID, currentRunSource.BundleHash(), "standing_reset", "cancelled", now, false)
+			cancellations, err = s.quiesceStandingRunTx(txctx, tx, current.RunID, "standing_reset", "cancelled", now, false)
 			if err != nil {
 				return err
 			}
@@ -1354,11 +1353,11 @@ func (s *standingServiceAdapter) disableStandingServiceTx(ctx context.Context, t
 	var cancellations []runtimetimercancellation.Ref
 	quiesce := current.BindingEnabled || !current.DeclarationPresent
 	if quiesce {
-		runSource, err := s.requireStandingRunSourceTx(ctx, tx, current, current.BindingEnabled)
-		if err != nil {
+		if _, err := s.requireStandingRunSourceTx(ctx, tx, current, current.BindingEnabled); err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, err
 		}
-		cancellations, err = s.quiesceStandingRunTx(ctx, tx, current.RunID, runSource.BundleHash(), reason, "cancelled", now, false)
+		var err error
+		cancellations, err = s.quiesceStandingRunTx(ctx, tx, current.RunID, reason, "cancelled", now, false)
 		if err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, err
 		}
@@ -1484,7 +1483,7 @@ func (s *standingServiceAdapter) orphanStandingServiceTx(ctx context.Context, tx
 	previousState := current.EffectiveState
 	var cancellations []runtimetimercancellation.Ref
 	if currentState.Active() {
-		cancellations, err = s.quiesceStandingRunTx(ctx, tx, current.RunID, current.BundleHash, "standing_declaration_removed", "orphaned", now, false)
+		cancellations, err = s.quiesceStandingRunTx(ctx, tx, current.RunID, "standing_declaration_removed", "orphaned", now, false)
 		if err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, err
 		}
@@ -1526,7 +1525,7 @@ func (s *standingServiceAdapter) standingClockTimeTx(ctx context.Context, tx *sq
 	return storegenericschedule.SelectedStoreTimeTx(ctx, tx, s.postgres, now)
 }
 
-func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *sql.Tx, runID, bundleHash, reason, sessionReason string, now time.Time, parkDeclaredClocks bool) ([]runtimetimercancellation.Ref, error) {
+func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *sql.Tx, runID, reason, sessionReason string, now time.Time, parkDeclaredClocks bool) ([]runtimetimercancellation.Ref, error) {
 	if !s.validRunLifecycleMutation(tx) {
 		return nil, fmt.Errorf("quiesce standing run: standing transaction owner is required")
 	}
@@ -1534,14 +1533,11 @@ func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *s
 	if err != nil {
 		return nil, err
 	}
-	if source.Admission().BundleHash() != bundleHash {
-		return nil, fmt.Errorf("quiesce standing run source contradicts its exact run binding")
-	}
 	quiesceGeneric := storegenericschedule.CancelRunsTx
 	if parkDeclaredClocks {
 		quiesceGeneric = storegenericschedule.ParkClockRunsTx
 	}
-	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, bundleHash)
+	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, source.Admission().BundleHash())
 	if err != nil {
 		return nil, fmt.Errorf("quiesce standing run scope: %w", err)
 	}
