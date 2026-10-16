@@ -1,10 +1,14 @@
 package serveapp
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"runtime"
+	"slices"
 	"testing"
 	"time"
 
@@ -16,6 +20,7 @@ import (
 
 // Disposable diagnostic: native SQL logging belongs to this test's private server.
 func TestH2CancellationProvenanceDiagnostic(t *testing.T) {
+	t.Logf("H2_DIAGNOSTIC_SCHEDULER gomaxprocs=%d gogc=%q godebug=%q", runtime.GOMAXPROCS(0), os.Getenv("GOGC"), os.Getenv("GODEBUG"))
 	probe := testpostgres.StartCapacityProbe(t, 300)
 	t.Setenv(testpostgres.SourceEnv, probe.DSN)
 	t.Cleanup(func() {
@@ -23,8 +28,17 @@ func TestH2CancellationProvenanceDiagnostic(t *testing.T) {
 		if path == "" {
 			t.Fatal("explicit diagnostic log destination is required")
 		}
-		if err := os.WriteFile(path, []byte(probe.Log(t)), 0600); err != nil {
-			t.Errorf("retain private SQL trace: %v", err)
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if err != nil {
+			t.Errorf("open private SQL trace: %v", err)
+			return
+		}
+		compressed := gzip.NewWriter(file)
+		_, writeErr := io.WriteString(compressed, probe.Log(t))
+		for _, err := range []error{writeErr, compressed.Close(), file.Close()} {
+			if err != nil {
+				t.Errorf("retain private SQL trace: %v", err)
+			}
 		}
 		t.Logf("H2_NATIVE_SQL_TRACE path=%s", path)
 	})
@@ -34,6 +48,7 @@ func TestH2CancellationProvenanceDiagnostic(t *testing.T) {
 func traceH2CancellationDiagnostic(t *testing.T, ctx context.Context, rt issue2564H2Fixture, run string, snapshot issue2564H2Snapshot, timer issue2564H2Timer) {
 	t.Helper()
 	t.Logf("H2_CANCEL observed=%s run=%s timer=%+v", time.Now().UTC().Format(time.RFC3339Nano), run, timer)
+	traceH2DiagnosticInventory(t, "pre_close_cancel", run, snapshot)
 	for _, hub := range snapshot.Hubs {
 		if hub.Entity != timer.Entity {
 			continue
@@ -96,6 +111,32 @@ func traceH2CancellationDiagnostic(t *testing.T, ctx context.Context, rt issue25
 			}
 		}
 	}
+}
+
+func traceH2DiagnosticInventory(t *testing.T, phase, run string, snapshot issue2564H2Snapshot) {
+	t.Helper()
+	ids := make([]string, 0, len(snapshot.Timers))
+	for id := range snapshot.Timers {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	rows := make([]issue2564H2Timer, 0, len(ids))
+	for _, id := range ids {
+		rows = append(rows, snapshot.Timers[id])
+	}
+	encoded, err := json.Marshal(struct {
+		Phase    string
+		Run      string
+		Observed time.Time
+		Timers   []issue2564H2Timer
+		Hubs     map[string]issue2564H2Hub
+		Events   map[string]issue2564H2Event
+	}{phase, run, time.Now().UTC(), rows, snapshot.Hubs, snapshot.Events})
+	if err != nil {
+		t.Errorf("encode diagnostic inventory: %v", err)
+		return
+	}
+	t.Logf("H2_DIAGNOSTIC_INVENTORY %s", encoded)
 }
 
 func h2DiagnosticCell(cell storetest.SelectedForkSnapshotCell) string {

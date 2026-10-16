@@ -666,6 +666,11 @@ func issue2564H2WaitAccounting(t *testing.T, rt issue2564H2Fixture, run string, 
 			}
 			err = issue2564H2Accounting(run, snapshot, closed, keys, 6)
 			if err == nil {
+				phase := "pre_close_settled"
+				if closed {
+					phase = "closed_settled"
+				}
+				traceH2DiagnosticInventory(t, phase, run, snapshot)
 				return snapshot
 			}
 			lastAccounting = err
