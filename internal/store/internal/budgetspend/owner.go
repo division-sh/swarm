@@ -120,7 +120,7 @@ func (s *BudgetPostgresOwner) ListBudgetProjectionTargets(ctx context.Context) (
 		return nil, fmt.Errorf("postgres budget spend store is required")
 	}
 	rows, err := s.backend.QueryContext(ctx, `
-		SELECT es.run_id::text, es.entity_id::text, run.bundle_hash,
+		SELECT es.run_id::text, es.entity_id::text, run.bundle_hash, run.source_root_directory,
 		       COALESCE(fi.flow_template, ''), COALESCE(es.flow_instance, ''), COALESCE(es.current_state, '')
 		FROM entity_state es
 		JOIN runs run ON run.run_id = es.run_id
@@ -254,7 +254,7 @@ func (s *BudgetSQLiteOwner) ListBudgetProjectionTargets(ctx context.Context) ([]
 		return nil, fmt.Errorf("sqlite budget spend store is required")
 	}
 	query := `
-		SELECT es.run_id, es.entity_id, run.bundle_hash,
+		SELECT es.run_id, es.entity_id, run.bundle_hash, run.source_root_directory,
 		       COALESCE(fi.flow_template, ''), COALESCE(es.flow_instance, ''), COALESCE(es.current_state, '')
 		FROM entity_state es
 		JOIN runs run ON run.run_id = es.run_id
@@ -371,11 +371,14 @@ func scanBudgetProjectionTargets(rows *sql.Rows) ([]budgetspend.ProjectionTarget
 	out := make([]budgetspend.ProjectionTarget, 0)
 	for rows.Next() {
 		var target budgetspend.ProjectionTarget
-		if err := rows.Scan(&target.RunID, &target.EntityID, &target.RootReference.BundleHash, &target.FlowTemplate, &target.FlowInstance, &target.Stage); err != nil {
+		if err := rows.Scan(&target.RunID, &target.EntityID, &target.RootReference.BundleHash, &target.RootReference.RootDirectory, &target.FlowTemplate, &target.FlowInstance, &target.Stage); err != nil {
 			return nil, fmt.Errorf("scan budget projection target: %w", err)
 		}
 		target.RunID = strings.TrimSpace(target.RunID)
 		target.EntityID = strings.TrimSpace(target.EntityID)
+		if err := target.RootReference.Validate(); err != nil {
+			return nil, fmt.Errorf("budget projection target for run %q has invalid source root reference: %w", target.RunID, err)
+		}
 		out = append(out, target)
 	}
 	if err := rows.Err(); err != nil {
