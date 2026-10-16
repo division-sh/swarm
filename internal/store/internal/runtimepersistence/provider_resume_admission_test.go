@@ -1,8 +1,11 @@
 package runtimepersistence
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,13 +13,15 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/google/uuid"
 )
 
 func TestProviderResumeAdmissionRetainsOriginalLogicalAuthorityBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
-		for _, capped := range []bool{false, true} {
-			t.Run(backend+"/"+map[bool]string{false: "uncapped", true: "retained_spend_cap"}[capped], func(t *testing.T) {
-				fixture, _ := openProviderJournalFixture(t, backend, agentmemory.Plan{})
+		for _, phase := range []string{"uncapped", "retained_spend_cap", "commit_refused", "commit_ack_lost"} {
+			t.Run(backend+"/"+phase, func(t *testing.T) {
+				fixture, control := openProviderJournalFixture(t, backend, agentmemory.Plan{})
+				capped := phase == "retained_spend_cap"
 				if !capped {
 					fixture.authority.BudgetScopes = nil
 					fixture.context = effects.WithAuthority(fixture.context, fixture.authority)
@@ -74,13 +79,57 @@ func TestProviderResumeAdmissionRetainsOriginalLogicalAuthorityBothStores(t *tes
 				if err != nil {
 					t.Fatal(err)
 				}
-				resumed, err := fixture.store.AuthorizeExternalAttempt(resumeCtx, successor, effects.AuthorizeRequest{
+				request := effects.AuthorizeRequest{
 					OperationID: original.Attempt().OperationID, AttemptID: attemptID,
 					Kind: effects.KindProviderTurn, Class: effects.EffectWriteOrUnknown, Adapter: "anthropic_api", Transport: "http",
 					CompletionRequest: successor.CompletionRequest, RequestFingerprint: effects.Fingerprint(body),
 					AgentFrame: &frame, CapabilitySurface: &surface, ProviderRequestJournal: &journal,
 					Origin: origin, Now: time.Now().UTC(),
-				})
+				}
+				if phase == "uncapped" {
+					proveProviderResumeAdmissionRefusals(t, resumeCtx, fixture, successor, request, original.Attempt(), before)
+				}
+				if phase == "commit_refused" || phase == "commit_ack_lost" {
+					control.phase, control.failure = phase, errors.New("provider resume admission commit observation")
+					control.statement = func(query string) bool {
+						if !strings.HasPrefix(strings.Join(strings.Fields(strings.ToUpper(query)), " "), "INSERT INTO RUNTIME_EXTERNAL_EFFECT_ATTEMPTS (") {
+							return false
+						}
+						control.enabled.Store(true)
+						return true
+					}
+				}
+				resumed, err := fixture.store.AuthorizeExternalAttempt(resumeCtx, successor, request)
+				control.enabled.Store(false)
+				if phase == "commit_refused" || phase == "commit_ack_lost" {
+					if !errors.Is(err, control.failure) || resumed.AttemptID != "" || control.writes.Load() != 1 {
+						t.Fatalf("native admission cut was not reached without launch authority: %v", err)
+					}
+					after, readErr := ReadSelectedForkApplicationStorageSnapshotForTest(resumeCtx, fixture.store)
+					if readErr != nil {
+						t.Fatal(readErr)
+					}
+					if phase == "commit_refused" {
+						if !reflect.DeepEqual(before, after) {
+							t.Fatal("refused admission retained partial child, clock or budget rows")
+						}
+						return
+					}
+					child := providerResumeSnapshotRow(t, after, "runtime_external_effect_attempts", "attempt_id", attemptID)
+					parent, _ := child["resume_from_attempt_id"].Text()
+					state, _ := child["state"].Text()
+					if parent != original.Attempt().AttemptID || state != "authorized" || string(child["launched_at"].Value) != "null" {
+						t.Fatal("unacknowledged admission lost the exact parent or launched a request")
+					}
+					if _, err := fixture.store.AuthorizeExternalAttempt(resumeCtx, successor, request); err == nil {
+						t.Fatal("ordinary replay converted an unacknowledged child into launch authority")
+					}
+					replayed, err := ReadSelectedForkApplicationStorageSnapshotForTest(resumeCtx, fixture.store)
+					if err != nil || !reflect.DeepEqual(after, replayed) {
+						t.Fatalf("unacknowledged child replay changed durable rows: %v", err)
+					}
+					return
+				}
 				if capped {
 					failure, typed := failures.EnvelopeFromError(err)
 					if !typed || failure.Detail.Code != "completion_spend_budget_exhausted" || resumed.AttemptID != "" {
@@ -135,7 +184,51 @@ func TestProviderResumeAdmissionRetainsOriginalLogicalAuthorityBothStores(t *tes
 				if err := json.Unmarshal(delivery["retry_count"].Value, &retries); err != nil || retries != deliverylifecycle.AgentMaxRetries {
 					t.Fatal("child admission charged a second retry or lost the first charge")
 				}
+				if _, err := fixture.store.AuthorizeExternalAttempt(resumeCtx, successor, request); err == nil {
+					t.Fatal("repeated child admission created another physical request")
+				}
+				if err := original.MarkResponseObserved(resumeCtx, map[string]any{"provider_resume_late_response": true}); err == nil {
+					t.Fatal("fenced predecessor accepted a late response after successor admission")
+				}
+				repeated, err := ReadSelectedForkApplicationStorageSnapshotForTest(resumeCtx, fixture.store)
+				if err != nil || !reflect.DeepEqual(after, repeated) {
+					t.Fatalf("repeated admission or predecessor response changed durable evidence: %v", err)
+				}
 			})
 		}
+	}
+}
+
+func proveProviderResumeAdmissionRefusals(t *testing.T, ctx context.Context, fixture completionSettlementFixture, authority effects.Authority, request effects.AuthorizeRequest, previous effects.Attempt, expected map[string]SelectedForkStorageTableSnapshot) {
+	t.Helper()
+	for _, scenario := range []string{"stale_generation", "original_claim", "foreign_operation", "missing_journal", "logical_identity", "semantic_destination", "body_fingerprint"} {
+		t.Run("refuse_"+scenario, func(t *testing.T) {
+			changed, changedAuthority := request, authority
+			journal := *request.ProviderRequestJournal
+			changed.ProviderRequestJournal = &journal
+			switch scenario {
+			case "stale_generation":
+				changedAuthority = previous.Authority
+			case "original_claim":
+				changed.Origin = previous.Origin
+			case "foreign_operation":
+				changed.OperationID = uuid.NewString()
+			case "missing_journal":
+				changed.ProviderRequestJournal = nil
+			case "logical_identity":
+				journal.LogicalOperationIdentity = "another-logical-provider-call"
+			case "semantic_destination":
+				journal.Destination += "/foreign"
+			case "body_fingerprint":
+				changed.RequestFingerprint = effects.Fingerprint([]byte("another physical request"))
+			}
+			if attempt, err := fixture.store.AuthorizeExternalAttempt(ctx, changedAuthority, changed); err == nil || attempt.AttemptID != "" {
+				t.Fatal("inexact retained provider evidence granted a child attempt")
+			}
+			actual, err := ReadSelectedForkApplicationStorageSnapshotForTest(ctx, fixture.store)
+			if err != nil || !reflect.DeepEqual(expected, actual) {
+				t.Fatalf("resume refusal changed durable rows: %v", err)
+			}
+		})
 	}
 }
