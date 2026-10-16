@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	"github.com/division-sh/swarm/internal/servedparity"
 )
 
@@ -130,15 +132,34 @@ func TestQAUnapprovedRecordedHTTPWriteForkBothStores(t *testing.T) {
 				if err := rt.DB.QueryRow(`SELECT CAST(result_payload AS TEXT) FROM activity_attempts WHERE CAST(run_id AS TEXT)=$1 AND status='succeeded'`, fork.ForkRunID).Scan(&copied); err != nil || copied == "" {
 					t.Fatalf("copied result=%s err=%v", copied, err)
 				}
-				var sourcePayload, childPayload map[string]any
+				var sourcePayload, childPayload struct {
+					Result json.RawMessage `json:"result"`
+				}
 				if err := json.Unmarshal([]byte(sourceResult), &sourcePayload); err != nil {
 					t.Fatal(err)
 				}
 				if err := json.Unmarshal([]byte(copied), &childPayload); err != nil {
 					t.Fatal(err)
 				}
-				if sourcePayload["result"] == nil || !reflect.DeepEqual(sourcePayload["result"], childPayload["result"]) {
+				sourceValue, err := canonicaljson.Decode(sourcePayload.Result)
+				if err != nil {
+					t.Fatal(err)
+				}
+				childValue, err := canonicaljson.Decode(childPayload.Result)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !sourceValue.Equal(childValue) {
 					t.Fatalf("recorded result was not reused: source=%s child=%s", sourceResult, copied)
+				}
+				var preserved any
+				if err := canonicaljson.DecodePreservingNumberLexemes(childPayload.Result, &preserved); err != nil {
+					t.Fatal(err)
+				}
+				projected, err := workflowexpr.ProjectCELValue(preserved)
+				want := map[string]any{"value": int64(7), "nested": map[string]any{"numbers": []any{int64(7)}, "fraction": float64(7.5)}}
+				if err != nil || !reflect.DeepEqual(projected, want) {
+					t.Fatalf("recorded result changed numeric kinds: got=%#v want=%#v err=%v", projected, want, err)
 				}
 			}
 			var after string
