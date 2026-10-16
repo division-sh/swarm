@@ -64,20 +64,29 @@ func TestS1DirectRecipientPreviewAdmitsFrozenRootBeforeSourceConsumers(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
+			const agentID = "preview-agent"
+			received := subscribeTestAgent(t, bus, agentID, events.EventType("bootstrap.requested"))
+			identity := testAgentRouteIdentity(t, agentID, "")
+			requested := []events.DeliveryRoute{{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity}}
 			event := eventtest.RunCreatingRootIngress(eventtest.UUID("rooted-direct-preview"), "bootstrap.requested", "operator", "", []byte(`{}`), 0, busInternalTestRunID, "", events.EventEnvelope{}, time.Now().UTC())
-			status, err := bus.CheckDirectRoutes(test.ctx, event, nil)
+			status, err := bus.CheckDirectRoutes(test.ctx, event, requested)
 			if test.valid {
-				if err != nil || payloadCalls != 1 {
-					t.Fatalf("valid direct preview lost its frozen source: payload_calls=%d err=%v", payloadCalls, err)
+				if err != nil || payloadCalls != 1 || len(status.Deliverable) != 1 || status.Deliverable[0].AgentIdentity != identity {
+					t.Fatalf("valid direct preview lost its frozen source or exact recipient: payload_calls=%d status=%+v err=%v", payloadCalls, status, err)
 				}
-			} else if err == nil || payloadCalls != 0 {
+			} else if err == nil || payloadCalls != 0 || len(status.Deliverable) != 0 {
 				t.Fatalf("invalid direct preview reached source consumers: payload_calls=%d err=%v", payloadCalls, err)
 			}
 			if test.name == "canceled" && !errors.Is(err, context.Canceled) {
 				t.Fatalf("direct preview concealed cancellation: %v", err)
 			}
-			if len(selected.events) != 0 || len(selected.routes) != 0 || len(status.Deliverable) != 0 || len(status.Missing) != 0 {
-				t.Fatal("direct inspection persisted work or fabricated delivery")
+			if len(selected.events) != 0 || len(selected.routes) != 0 || len(status.Missing) != 0 || len(status.Requested) != 1 || status.Requested[0].AgentIdentity != identity {
+				t.Fatal("direct inspection persisted work or changed requested delivery identity")
+			}
+			select {
+			case got := <-received:
+				t.Fatalf("preview dispatched a local delivery: %v", got)
+			default:
 			}
 		})
 	}
