@@ -59,10 +59,15 @@ func (r EventSchemaResolution) RequiredFieldNames() []string {
 }
 
 func ResolveEventSchema(source Source, flowID, eventType string) EventSchemaResolution {
-	flowID = strings.TrimSpace(flowID)
 	eventType = strings.TrimSpace(eventType)
 	if source == nil || eventType == "" {
 		return EventSchemaResolution{}
+	}
+	if flowID != "" {
+		scope, found := source.FlowScopeByID(flowID)
+		if !found || scope.ID != flowID {
+			return EventSchemaResolution{}
+		}
 	}
 	if compiled, ok, err := source.ResolveEffectiveCompiledFlowEventSchema(flowID, eventType); err == nil && ok {
 		resolution := EventSchemaResolution{
