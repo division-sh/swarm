@@ -15,12 +15,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 type nativeBashInput struct {
@@ -545,22 +547,19 @@ func resolveWebSearchProviderConfigFromSourceForFlow(source semanticview.Source,
 		cfg.MaxResultsDefault = 10
 	}
 	if httpRaw, ok := normalizeAnyMap(root["http"]); ok {
-		// Policy values use the authored YAML spelling, not Go field names.
-		spec := struct {
-			runtimecontracts.HTTPToolSpec
-			AuthoredTimeoutSeconds *int `json:"timeout_seconds"`
-		}{}
-		raw, err := json.Marshal(httpRaw)
-		if err == nil && json.Unmarshal(raw, &spec) == nil {
-			if spec.AuthoredTimeoutSeconds != nil {
-				spec.HTTPToolSpec.TimeoutSeconds = *spec.AuthoredTimeoutSeconds
-			}
-			cfg.HTTP, err = runtimecontracts.AdmitToolHTTPExecution(spec.HTTPToolSpec)
-			if err != nil {
-				return webSearchProviderConfig{}, fmt.Errorf("policy.web_search_provider.http: %w", err)
-			}
-			cfg.HasHTTP = true
+		raw, err := canonicaljson.MarshalPreservingNumberKinds(httpRaw)
+		if err != nil {
+			return webSearchProviderConfig{}, fmt.Errorf("policy.web_search_provider.http: %w", err)
 		}
+		authored, err := yamlsource.Load(raw)
+		if err != nil {
+			return webSearchProviderConfig{}, fmt.Errorf("policy.web_search_provider.http: %w", err)
+		}
+		cfg.HTTP, err = runtimecontracts.AdmitToolHTTPExecutionValue(authored.Document("policy.yaml").Root())
+		if err != nil {
+			return webSearchProviderConfig{}, fmt.Errorf("policy.web_search_provider.http: %w", err)
+		}
+		cfg.HasHTTP = true
 	}
 	if mappingRaw, ok := normalizeAnyMap(root["field_mapping"]); ok {
 		for _, key := range []string{"title", "url", "snippet"} {

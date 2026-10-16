@@ -38,6 +38,10 @@ func nativeTimeoutSource(url string, seconds int, rate, maxWait string) semantic
 	if seconds != 0 {
 		httpValue["timeout_seconds"] = seconds
 	}
+	return nativeTimeoutPolicySource(httpValue, rate, maxWait)
+}
+
+func nativeTimeoutPolicySource(httpValue map[string]any, rate, maxWait string) semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Policy: runtimecontracts.PolicyDocument{
 		Values: map[string]runtimecontracts.PolicyValue{"web_search_provider": {Value: map[string]any{
 			"provider": "custom", "http": httpValue, "response_path": "items", "rate_limit": rate, "rate_limit_max_wait": maxWait,
@@ -139,7 +143,7 @@ func TestNativeWebSearchCustomTimeoutInvalidBudgetCannotDispatch(t *testing.T) {
 	if !ok {
 		t.Fatal("missing native actor")
 	}
-	if _, err := executor.resolveWebSearchProviderConfig(actor); err == nil || !strings.Contains(err.Error(), "http.timeout_seconds must be non-negative") {
+	if _, err := executor.resolveWebSearchProviderConfig(actor); err == nil || !strings.Contains(err.Error(), "http.timeout_seconds must be positive") {
 		t.Fatalf("invalid budget lost its canonical admission refusal: %v", err)
 	}
 	var calls atomic.Int32

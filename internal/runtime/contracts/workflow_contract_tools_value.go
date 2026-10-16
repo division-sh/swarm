@@ -184,6 +184,15 @@ func ProjectToolResponseSuccessValue(field yamlsource.Value) (HTTPResponseSucces
 	return success, nil
 }
 
+// AdmitToolHTTPExecutionValue uses the same authored HTTP admission as tools.yaml.
+func AdmitToolHTTPExecutionValue(value yamlsource.Value) (ToolHTTPExecution, error) {
+	spec, err := projectToolHTTPValue(value)
+	if err != nil {
+		return ToolHTTPExecution{}, err
+	}
+	return AdmitToolHTTPExecution(spec)
+}
+
 func projectToolHTTPValue(value yamlsource.Value) (HTTPToolSpec, error) {
 	fields, err := schemaValueFields(value, "http", map[string]struct{}{"method": {}, "url": {}, "headers": {}, "body": {}, "timeout_seconds": {}}, true)
 	if err != nil {

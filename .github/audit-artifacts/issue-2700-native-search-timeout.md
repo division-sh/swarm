@@ -24,7 +24,7 @@ The one physical primitive remains
 `internal/runtime/tools/executor_native.go:doNormalizedSearch:http_do:1`.
 Normalization, credentials, policy provenance, effect classification,
 acknowledgment, fences, uncertainty and no-replay behavior are unchanged.
-There is no new effect owner, retry, table, public API, production test hook,
+There is no new effect owner, retry, table, public tool/operator API, production test hook,
 SQL test site, source grammar, timeout allowance or baseline increase.
 
 The spec adds only a cross-reference in the existing platform-executed custom
@@ -80,12 +80,18 @@ returns a real response after 2s so a dropped 1s budget cannot satisfy it merely
 by eventually timing out at 30s. `native-canonical-policy-deadline-red.log`
 records explicit 1s/10s/120s all RED with a 30s outgoing deadline (0.019s);
 omitted/default 30s remains PASS. A bounded existing-contract admission seam
-was needed before the final authored-policy proofs could turn GREEN. The
-existing native policy decoder now gives that one authored spelling a typed
-integer projection into the same HTTPToolSpec and its unchanged admission
-owner. No shared JSON tag, persisted encoding, historical packet, replacement
-parser or additional public API changes. The existing field-name decoding is
-not redefined, and the default prepared duration remains 30s.
+was needed before the authored-policy proofs could turn GREEN. Checkpoint
+8178aca1f3 added a typed timeout overlay but retained DTO spelling/presence
+loss; reviewer-c rejected that remaining gap in 6212852556. The current
+correction routes the HTTP block through `projectToolHTTPValue` and the same
+typed execution admission, exposed only by a thin internal contracts entry
+point `AdmitToolHTTPExecutionValue`. Existing
+`canonicaljson.MarshalPreservingNumberKinds` plus `yamlsource.Load` transports
+the policy value into that owner, preserving scalar kinds and explicit nulls;
+it does not validate another dialect.
+No shared JSON tag, persisted encoding or historical packet changes. Synthetic
+rate fixtures now use canonical authored keys instead of Go field names.
+Omitted timeout remains 30s; present invalid values and unknown keys refuse.
 
 The strengthened N08 counterexample is separately retained in
 `native-canonical-policy-stores-red.log`: SQLite returned success after
@@ -94,6 +100,33 @@ After the projection repair, `native-canonical-policy-fixed.log` passes all
 four exact-deadline cases and all twelve native-store cells (package 5.566s).
 The timeout cells fail correctly after 1.011779676s / 1.007494693s, retaining
 their exact native transport uncertainty and durable terminal evidence.
+
+### P2 Canonical Admission (6212852556)
+
+`native-p2-canonical-admission-red.log` preserves the new baseline RED, 0.029s:
+zero/null/integral-float timeout, Go-field-only/mixed spelling and unknown
+field were admitted; explicit-null body was lost. Other wrong-kind, negative
+and fractional controls already refused and remain mandatory. Current active
+roots `TestNativeWebSearchCustomPolicyRejectsInvalidHTTP` (12 cases) and
+`TestNativeWebSearchCustomPolicyPreservesBodyPresence` (7 cases) exercise
+actual config/Prepare/Execute admission, zero dispatch/attempt/settlement on
+invalid input, omitted/null/zero/false/empty body values, headers, GetBody,
+single settlement and no replay. Negative-duration assertions now pin the
+canonical authored owner's earlier positive-timeout refusal, retaining the
+exact public capability refusal separately.
+
+An intermediate direct YAML transport erased the distinction between `1.0`
+and `1`, exposed by the integral-float counterexample on all three repetitions.
+`native-p2-canonical-admission-race3-green.log` is therefore RED despite its
+filename (11.226s); it is not credited as a passing run. Replacing only that
+transport with the existing number-kind-preserving transport resolves the
+counterexample without adding an admission rule.
+
+The accepted request-context/client-copy/effect path is unchanged. Gate
+6212852556 carries the slow-positive and mutation-control evidence; only
+affected admission, native/store consumers, guards and final-head checks are
+refreshed. The prior 8178aca1f3 unused and b650ffe917 preflight (400.073s) are
+retained but are not final-head static attestations for this correction.
 
 ## Focused Receipts
 
@@ -104,6 +137,11 @@ their exact native transport uncertainty and durable terminal evidence.
 | `native-invalid-budget-phase-race3.log` | Corrected phase oracle PASS, 1.044s, race x3: direct config admission must retain the exact negative-duration refusal AND normal Execute must retain its exact unsupported-tool capability refusal, with zero physical requests/attempts/settlements. No production or other test change after the preceding run. |
 | `native-preserved-store-source-controls-race1.log` | PASS: tools 28.433s, effects 9.163s. Native selected-store twelve-cell matrix under race; authored both-store acknowledged cleanup remains separately proved. Existing rate/provenance, credentials, launch/cancellation/identity, CLI/fallback capability controls and four exact primitive/source guards pass. |
 | `native-canonical-slow-fixed.log` | Canonical authored-key 120s/45s journey PASS, count1/non-race, 45.045128301s request / 45.066s package. Exact normalized result, one physical request/attempt/settlement, replay refused. The earlier component pair retains separate credit; this validates the corrected policy ingress without another baseline repetition. |
+| `native-p2-canonical-admission-red.log` | Original P2 counterexamples RED, 0.029s; all results retained as described above. |
+| `native-p2-canonical-admission-race3-green.log` | Intermediate transport RED despite filename, 11.226s: integral floating-point timeout wrongly admitted in each repetition. No passing-package credit. |
+| `native-p2-canonical-bridge-fast-race3.log` | PASS, 12.126s, fourteen roots x3 / 144 passing records: twelve invalid-admission cases, seven body-presence cases, exact positive/default deadlines, native lifetime/cancellation/concurrent-client/admission/built-in controls and existing policy/rate controls. |
+| `native-p2-store-owner-guards-race1.log` | Partial/aggregate RED: tools PASS 29.204s, including all twelve real selected-store cells under race (matrix 23.74s); effects PASS 9.848s, including the four exact source-owner guards. The overselected contracts filesystem-guard aggregate hit its unchanged 180s package cap in `TestMockPerformanceCoordinateReaderBoundary`; that aggregate is not credited. No assertion failure preceded the package timeout. |
+| `native-p2-admission-census-guards.log` | PASS: contracts 4.892s / tools 0.279s, non-race count1. All census/inventory/registry roots in the two changed packages, authored HTTP presence/closed-schema/admission controls, current-vocabulary/spec checks, native capability/CLI/provider/provenance controls and canonical URL/body consumers. This is a targeted replacement for the unrelated overselected guard aggregate, not a duplicate tier. |
 
 | Retained file | SHA-256 |
 | --- | --- |
@@ -117,6 +155,11 @@ their exact native transport uncertainty and durable terminal evidence.
 | `native-invalid-budget-phase-race3.log` | `0609fa6ff909948ebba862d82dd4fd8cc6d78402cb8d77818f571106fe61b432` |
 | `native-preserved-store-source-controls-race1.log` | `0ee8866eb0971569317d1f28302455d14058da51ac4e3bcaee5eb3cd0429d7b6` |
 | `native-canonical-slow-fixed.log` | `46624cff3d24c7a6bdd54e44c0d7aa66bccd8c313c51059520ebdfce5af7624a` |
+| `native-p2-canonical-admission-red.log` | `ce7c72f9f9f2b0574ddce8357f683d8eb88ef31ffbbb661309417eed990b6446` |
+| `native-p2-canonical-admission-race3-green.log` (RED) | `44b617474f7048126eac1b1c5acfcca3c1b601a4657d128a909392ffa69bd894` |
+| `native-p2-canonical-bridge-fast-race3.log` | `6c278abdb49c67e8e05db8a125fded9e47b9c35b3e57dad431652aa5ad201b03` |
+| `native-p2-store-owner-guards-race1.log` (partial) | `b29f503d6ece4781e38dab2d0323b03d16d0665ef494b6f984ccb06356da9416` |
+| `native-p2-admission-census-guards.log` | `a91f9d7bcd7c8a0131f070b502fcb09910c27232ab3b2e3eda45dc953867c7e7` |
 
 ## Retained Parent Rows
 
