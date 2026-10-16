@@ -2,20 +2,16 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"io"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
-	"github.com/lib/pq"
 )
 
 // Omit only the effect recovery scan to retain the pre-repair transaction split.
@@ -88,34 +84,6 @@ func (r *providerTakeoverHistoryRows) Next(values []driver.Value) error {
 	return nil
 }
 
-func openProviderTakeoverHistoryFixture(t *testing.T, backend string) (completionSettlementFixture, *providerTakeoverHistoryConnector) {
-	t.Helper()
-	var native driver.Connector
-	if backend == "postgres" {
-		dsn, _, _ := testutil.StartPostgres(t)
-		var err error
-		native, err = pq.NewConnector(dsn)
-		if err != nil {
-			t.Fatal(err)
-		}
-	} else {
-		native = pipelineCrashSQLiteConnector{path: filepath.Join(t.TempDir(), "retained-takeover.db")}
-	}
-	control := &providerTakeoverHistoryConnector{Connector: native}
-	db := sql.OpenDB(control)
-	t.Cleanup(func() { _ = db.Close() })
-	if backend == "postgres" {
-		return newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false), control
-	}
-	store := NewSQLiteRuntimeStoreForTest(db)
-	if err := store.BootstrapSchema(testAuthorActivityContext(), canonicalSchemaBootstrapTestRequest(t)); err != nil {
-		t.Fatal(err)
-	}
-	store.SetEventPayloadAdmitter(storeTestPayloadAdmitter)
-	registerTestAuthorActivityCatalog(t, store)
-	return newCompletionSettlementFixture(t, store, db, true), control
-}
-
 func TestProviderTakeoverRecoveryRetainedHistoryBothStores(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, fault := range []string{"", "missing", "foreign_operation", "ordinary_restart", "read_error"} {
@@ -124,7 +92,11 @@ func TestProviderTakeoverRecoveryRetainedHistoryBothStores(t *testing.T) {
 				name = "same_identity_chain"
 			}
 			t.Run(backend+"/"+name, func(t *testing.T) {
-				fixture, control := openProviderTakeoverHistoryFixture(t, backend)
+				control := &providerTakeoverHistoryConnector{}
+				fixture, _ := openCompletionOutcomeFixture(t, backend, func(native driver.Connector) driver.Connector {
+					control.Connector = native
+					return control
+				})
 				attempts := makeProviderTakeoverAttempts(t, fixture)
 				grant, request, process := prepareProviderTakeover(t, fixture, nil)
 				control.omit.Store(true)

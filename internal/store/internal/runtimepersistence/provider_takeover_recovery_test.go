@@ -162,7 +162,23 @@ func TestProviderTakeoverRecoveryBundleSiblingIsolationBothStores(t *testing.T) 
 		if err != nil || !exists {
 			t.Fatalf("read combined source plan: found=%t error=%v", exists, err)
 		}
-		if _, err := agentfixture.AdmitGeneration(t, testAuthorActivityContext(), fixture.store, plan, agenttopology.SourceCoordinate{BundleHash: authorActivityTestBundleHash}); err != nil {
+		originalGrant, err := agentfixture.AdmitGeneration(t, testAuthorActivityContext(), fixture.store, plan, agenttopology.SourceCoordinate{BundleHash: authorActivityTestBundleHash})
+		if err != nil {
+			t.Fatal(err)
+		}
+		original := providerDrainFixtureState(t, fixture)
+		topology, err := agenttopology.StaticAdmission(plan.Revision, authorActivityTestBundleHash, original.Topology.Lifetime)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := originalGrant.CommitAgentLifecycleTransition(testAuthorActivityContext(), manager.AgentLifecycleTransition{
+			DiagnosticOrigin: manager.LifecycleDiagnosticOrigin{Owner: manager.LifecycleDiagnosticNormal, Causality: manager.LifecycleDiagnosticObservation},
+			OperationID:      uuid.NewString(), OperationKind: "source_set_rebind", RequestHash: uuid.NewString(),
+			Identity: original.Identity, AgentID: original.AgentID, Trigger: "source_set_rebind",
+			ExpectedEpoch: original.RuntimeEpoch, ExpectedGeneration: original.Generation, ExpectedPhase: original.Phase,
+			TargetEpoch: original.RuntimeEpoch, TargetGeneration: original.Generation, TargetPhase: original.Phase,
+			ConfigRevision: original.ConfigRevision, RunMode: original.RunMode, Topology: topology, Now: time.Now().UTC(),
+		}); err != nil {
 			t.Fatal(err)
 		}
 		state, found, err := fixture.store.LoadAgentLifecycleState(ctx, identity)
