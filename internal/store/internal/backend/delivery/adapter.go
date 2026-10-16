@@ -2022,6 +2022,42 @@ func (a *Adapter) SnapshotsForEvent(ctx context.Context, q queryer, eventID stri
 	return snapshots[eventID], nil
 }
 
+// SnapshotsForRun keeps diagnostic instance accounting on the same canonical
+// delivery decoder as execution, without granting claim or settlement authority.
+func (a *Adapter) SnapshotsForRun(ctx context.Context, q queryer, runID string) ([]Snapshot, error) {
+	if id, err := uuid.Parse(runID); err != nil || id.String() != runID {
+		return nil, fmt.Errorf("delivery run snapshots require exact run identity")
+	}
+	rows, err := q.QueryContext(ctx, `SELECT CAST(delivery_id AS TEXT) FROM event_deliveries WHERE run_id=$1 ORDER BY delivery_id`, runID)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, errors.Join(err, rows.Close())
+		}
+		ids = append(ids, id)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	now, err := a.databaseNow(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Snapshot, 0, len(ids))
+	for _, id := range ids {
+		record, err := a.loadByID(ctx, q, id, false)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, snapshotAt(record, now))
+	}
+	return out, nil
+}
+
 // RunDiagnosticCounts aggregates run-debug delivery counts in storage without
 // hydrating each canonical snapshot.
 func (a *Adapter) RunDiagnosticCounts(ctx context.Context, q queryer, runID string) ([]RunDiagnosticCount, error) {
