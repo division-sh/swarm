@@ -38,12 +38,15 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 				ctx := runForkTestContext(t)
 				var selected startupownership.Store
 				var owner SelectedContractExecutionOwner
+				var reopen func() startupownership.Store
 				if backend == "sqlite" {
-					s := storetest.StartSQLiteRuntimeStore(t)
+					s, again := storetest.StartSQLiteRuntimeStoreWithReopen(t, context.Background())
 					selected, owner = s, selectedContractSQLiteExecutionOwnerForTest(t, s)
+					reopen = func() startupownership.Store { return again() }
 				} else {
-					s, _ := storetest.StartPostgresRuntimeStoreWithReopen(t)
+					s, again := storetest.StartPostgresRuntimeStoreWithReopen(t)
 					selected, owner = s, selectedContractExecutionOwnerForTest(t, s)
+					reopen = func() startupownership.Store { return again() }
 				}
 				var providerCalls, lookupCalls atomic.Int32
 				lookup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -261,6 +264,23 @@ func proveSelectedQ1SessionSiblingReforkBothStores(t *testing.T) {
 					var conflict *runfork.ForkOperationKeyConflictError
 					if _, err := executeLiveSelectedContractRunFork(ctx, request); !errors.As(err, &conflict) {
 						t.Fatalf("changed same-key meaning was not refused: %v", err)
+					}
+					retry.TransportHash = requests[i].ForkOperation.TransportHash
+					retry.ForkEventID, retry.ResolvedPoint = uuid.NewString(), nil
+					request.At = retry.ForkEventID
+					if _, _, err := retry.Canonical(); err != nil {
+						t.Fatalf("changed selector is not an independently valid request: %v", err)
+					}
+					if rejected, err := executeLiveSelectedContractRunFork(ctx, request); err == nil || err.Error() != "selected operation observation differs from original request coordinates" || rejected.Activation.Activated {
+						t.Fatalf("changed same-key event selector was not refused at the exact observation fence: %+v %v", rejected, err)
+					}
+				}
+				fresh := reopen().(liveWinnerOperationReader)
+				for _, original := range operations {
+					request := original.Request
+					recovered, found, err := fresh.LoadForkOperation(ctx, request.Actor, request.IdempotencyKey, request.TransportHash)
+					if err != nil || !found || !reflect.DeepEqual(original, recovered) {
+						t.Fatalf("fresh native owner changed the immutable operation ACK: before=%+v after=%+v found=%t err=%v", original, recovered, found, err)
 					}
 				}
 				afterReplay, err := storetest.ReadSelectedForkApplicationStorageSnapshot(ctx, selected)
