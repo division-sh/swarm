@@ -42,13 +42,19 @@ func (a runForkSourceStateAdmission) activityRequestOriginAtCut(ctx context.Cont
 	if request.Type() != runForkActivityRequestEvent {
 		return semanticview.ActivityRequestOrigin{}, fmt.Errorf("activity origin is not an activity request")
 	}
+	if _, err := pipeline.ActivityRequestResultPublications(request); err != nil {
+		return semanticview.ActivityRequestOrigin{}, err
+	}
 	var payload runForkActivityRequestPayload
 	if err := json.Unmarshal(request.Payload(), &payload); err != nil {
 		return semanticview.ActivityRequestOrigin{}, err
 	}
 	fact, err := runForkActivityFact(payload)
-	if err != nil || fact.RunID != cut.runID {
-		return semanticview.ActivityRequestOrigin{}, fmt.Errorf("activity origin has foreign request coordinates: %w", err)
+	if err != nil {
+		return semanticview.ActivityRequestOrigin{}, err
+	}
+	if fact.RunID != cut.runID {
+		return semanticview.ActivityRequestOrigin{}, fmt.Errorf("activity origin has foreign request coordinates")
 	}
 	artifact, err := a.sourceAt(ctx, tx, cut.runID)
 	if err != nil {

@@ -42,6 +42,7 @@ type StartupPostgresOwner struct {
 	destructiveReset     *storeadmin.DestructiveResetPostgresOwner
 	fanOutPipeline       *storepipeline.PipelinePostgresOwner
 	channelChanges       *runtimechanneldelivery.ReconcileSignal
+	activityJournal      displacedHTTPActivityJournal
 }
 
 type StartupSQLiteOwner struct {
@@ -55,6 +56,7 @@ type StartupSQLiteOwner struct {
 	ownerMu         sync.Mutex
 	fanOutPipeline  *storepipeline.PipelineSQLiteOwner
 	channelChanges  *runtimechanneldelivery.ReconcileSignal
+	activityJournal displacedHTTPActivityJournal
 }
 
 func (s *StartupPostgresOwner) BindChannelReconciliation(signal *runtimechanneldelivery.ReconcileSignal) error {

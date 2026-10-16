@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -60,10 +61,20 @@ func (o ActivityRequestOrigin) Source() correlation.SourceArtifactFact {
 }
 
 func (o ActivityRequestOrigin) Matches(other ActivityRequestOrigin) bool {
+	admission, admitted := o.Request.PayloadAdmission()
+	otherAdmission, otherAdmitted := other.Request.PayloadAdmission()
+	lineage, selected := o.Request.SelectedForkLineage()
+	otherLineage, otherSelected := other.Request.SelectedForkLineage()
 	return slices.Equal(o.Cuts, other.Cuts) && o.Request.ID() == other.Request.ID() &&
 		o.Request.RunID() == other.Request.RunID() && o.Request.Type() == other.Request.Type() &&
 		o.Request.ExecutionMode() == other.Request.ExecutionMode() && o.Request.RoutingSource() == other.Request.RoutingSource() &&
-		o.Request.CreatedAt().Equal(other.Request.CreatedAt()) && bytes.Equal(o.Request.Payload(), other.Request.Payload())
+		o.Request.CreatedAt().Equal(other.Request.CreatedAt()) && bytes.Equal(o.Request.Payload(), other.Request.Payload()) &&
+		o.Request.Producer().Equal(other.Request.Producer()) && o.Request.TaskID() == other.Request.TaskID() &&
+		o.Request.ParentEventID() == other.Request.ParentEventID() && o.Request.ChainDepth() == other.Request.ChainDepth() &&
+		o.Request.AdmissionClass() == other.Request.AdmissionClass() &&
+		reflect.DeepEqual(o.Request.NormalizedEnvelope(), other.Request.NormalizedEnvelope()) &&
+		admitted == otherAdmitted && reflect.DeepEqual(admission, otherAdmission) &&
+		selected == otherSelected && reflect.DeepEqual(lineage, otherLineage)
 }
 
 type activityRequestScope struct{ run, request string }
