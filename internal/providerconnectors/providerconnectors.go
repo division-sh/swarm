@@ -282,7 +282,10 @@ func validateProviderConnectorAgentExposure(source semanticview.Source) []error 
 }
 
 func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, toolID string, tool runtimecontracts.ToolSchemaEntry, opts CapabilityOptions) (packs.Subject, error) {
-	provider, action, _ := splitToolID(toolID)
+	provider, action, valid := splitToolID(toolID)
+	if !valid {
+		return packs.Subject{}, fmt.Errorf("provider connector tool %q must use <provider>.<action> id form", toolID)
+	}
 	host := ""
 	if httpExecution, ok := tool.HTTPExecution(); ok {
 		host = httpExecution.StaticHost()
@@ -377,7 +380,7 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 		}
 	}
 	subject := packs.Subject{
-		ID:            strings.TrimSpace(toolID),
+		ID:            toolID,
 		Kind:          packs.SubjectProviderConnector,
 		Provider:      provider,
 		Action:        action,
@@ -414,13 +417,16 @@ func capabilitySubjectForTool(ctx context.Context, source semanticview.Source, t
 }
 
 func availableCapabilitySubject(installed InstalledTool) (packs.Subject, error) {
-	provider, action, _ := splitToolID(installed.ToolID)
+	provider, action, valid := splitToolID(installed.ToolID)
+	if !valid {
+		return packs.Subject{}, fmt.Errorf("installed provider connector tool %q must use <provider>.<action> id form", installed.ToolID)
+	}
 	host := ""
 	if httpExecution, ok := installed.Tool.HTTPExecution(); ok {
 		host = httpExecution.StaticHost()
 	}
 	subject := packs.Subject{
-		ID:            strings.TrimSpace(installed.ToolID),
+		ID:            installed.ToolID,
 		Kind:          packs.SubjectProviderConnector,
 		Provider:      provider,
 		Action:        action,

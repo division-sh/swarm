@@ -11227,6 +11227,9 @@ tool_model:
       identities; invalid provider keys fail through the portable-directory owner rather than a token normalizer.
       Structural channel joins compare the raw channel, trigger and connector keys after portable key admission;
       onboarding-profile projection and capability subjects likewise cannot repair a provider key into another identity.
+      Effective and installed connector capability readback must honor the exact tool-ID parser's refusal before
+      constructing any subject or evaluating credential requirements. Accepted IDs and actions remain unchanged;
+      malformed tool IDs cannot become capability rows through display normalization.
       Existing wire protocol URLs, headers, credentials, payloads, descriptions and HTTP response rules are not renamed
       by provider-key admission. Directory-owned BODY lowering qualifies local names separately; a name cannot grant
       installation, credential, activity or journal authority.
