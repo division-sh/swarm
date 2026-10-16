@@ -157,6 +157,7 @@ func (n *FlowNode) ProviderDirectories() []string {
 
 type AdmittedSourceArtifact struct {
 	directoryLabel string
+	rootAdmission  RootAdmission
 	entries        []Entry
 	byLabel        map[string]int
 	yaml           map[string]yamlsource.Snapshot

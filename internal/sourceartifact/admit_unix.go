@@ -18,6 +18,14 @@ func AdmitDirectory(root string) (*AdmittedSourceArtifact, error) {
 	if root == "" {
 		return nil, fmt.Errorf("source root is required")
 	}
+	selectedRoot, err := filepath.Abs(root)
+	if err != nil {
+		return nil, err
+	}
+	directory := filepath.Base(selectedRoot)
+	if err := validateRootDirectory(directory); err != nil {
+		return nil, err
+	}
 	fd, err := unix.Open(root, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_DIRECTORY|unix.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open source root %q: %w", root, err)
@@ -31,11 +39,8 @@ func AdmitDirectory(root string) (*AdmittedSourceArtifact, error) {
 	if err != nil {
 		return nil, err
 	}
-	selectedRoot, err := filepath.Abs(root)
-	if err != nil {
-		return nil, err
-	}
-	artifact.directoryLabel = filepath.Base(selectedRoot)
+	artifact.directoryLabel = directory
+	artifact.rootAdmission = RootAdmission{bundleHash: artifact.BundleHash(), rootDirectory: directory}
 	if provider, present := artifact.providers["."]; present && artifact.directoryLabel != provider.manifest.Name {
 		return nil, fmt.Errorf("folder %s holds provider %s; rename the folder", artifact.directoryLabel, provider.manifest.Name)
 	}

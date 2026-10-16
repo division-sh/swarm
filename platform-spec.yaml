@@ -20189,6 +20189,15 @@ platform_tables:
             total_bytes      BIGINT NOT NULL CHECK (total_bytes >= 0 AND total_bytes <= 50331648),
             created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+    source_root_admissions:
+      description: Immutable internal rooted-admission evidence, separate from byte-content identity. Only genuine filesystem admission or the closed selected-store decoder yields a RootAdmission. Exact root spelling is validated through the portable flow-segment owner; caller-provided references alone confer no admission. Equal content may retain several historical roots without changing bundle_hash or creating multiple public contexts. Content deletion removes these dependent rows, never run history, and missing content remains unavailable.
+      ddl: |-
+        CREATE TABLE source_root_admissions (
+            bundle_hash      TEXT NOT NULL,
+            root_directory   TEXT NOT NULL CHECK (length(root_directory) > 0 AND length(root_directory) <= 100),
+            PRIMARY KEY (bundle_hash, root_directory),
+            FOREIGN KEY (bundle_hash) REFERENCES source_artifacts(bundle_hash) ON DELETE CASCADE
+        );
   notes:
     product_tables: Product-specific typed entity tables are not runtime-store schema inputs. Entity contracts shape
       entity_state values and validation; they do not generate product DDL or per-entity SQL schemas.
@@ -42835,6 +42844,10 @@ filesystem_source_model:
       - postgres
     rule: |
       Local durable run/serve persists or reconciles the exact logical blob before publishing a runtime or run that references its hash. Missing, corrupt, conflicting, or hash-mismatched blobs fail closed. Acknowledgment uncertainty is reconciled by exact hash/blob readback; it never permits a runtime without proven source availability.
+    rooted_admission:
+      owner: internal/sourceartifact.RootAdmission and the existing selected-store source-artifact owner
+      rule: |
+        Byte-content identity and rooted admission are distinct facts. Genuine filesystem admission captures the exact validated selected root directory before walking the owned member snapshot. RootAdmission is the immutable pair (bundle_hash, root_directory), and RootedSource pairs that evidence with exact admitted bytes. Neither bundle-v2 framing nor machine WorkflowName dot / WorkflowVersion bundle_hash changes. Content-only logical decoding never invents a root. The selected-store owner inserts source_root_admissions atomically with rooted content ingestion and restores a pair only through exact row/blob readback, without mutating the shared content artifact, a latest-name pointer, cwd, schema/manifest name or a runtime projection basename. A reference is not authority and a root row cannot reconstruct deleted content. This is internal execution evidence, never an authored import receipt, acquisition provenance, new public selector or multi-deployment contract.
     reconstruction: |
       Internal standing recovery, replay, reset and fork decode the selected-store blob and compile only the reconstructed artifact. They never require or inspect the original filesystem. Public process restart admits the same exact directory tree and reconciles its blob; a changed tree is a distinct source, never a fallback for retained work. Fresh selected stores are required; no old-row migration, export, purge, compatibility reader, or inferred reconstruction exists.
     process_epoch_rule: |
