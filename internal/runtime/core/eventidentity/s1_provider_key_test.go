@@ -53,3 +53,58 @@ func TestS1ProviderKeyDoesNotBroadenOrdinaryEventTokens(t *testing.T) {
 		}
 	}
 }
+
+func TestS1EveryConcreteProviderKeyUsesPortableDirectoryOwner(t *testing.T) {
+	type boundaryCase struct {
+		label, key string
+		valid      bool
+	}
+	cases := []boundaryCase{
+		{"plain", "team", true},
+		{"underscore", "team_bot", true},
+		{"hyphen", "team-bot", true},
+		{"plain_100", strings.Repeat("a", 100), true},
+		{"plain_101", strings.Repeat("a", 101), false},
+		{"hyphen_100", strings.Repeat("a", 98) + "-b", true},
+		{"hyphen_101", strings.Repeat("a", 99) + "-b", false},
+		{"leading_underscore", "_team", false},
+		{"leading_space", " team", false},
+		{"trailing_space", "team ", false},
+		{"leading_tab", "\tteam", false},
+		{"trailing_tab", "team\t", false},
+		{"newline", "team\n", false},
+		{"empty", "", false},
+	}
+	for _, reserved := range []string{"con", "prn", "aux", "nul", "com1", "com9", "lpt1", "lpt9"} {
+		cases = append(cases, boundaryCase{"reserved_" + reserved, reserved, false})
+	}
+	for _, tc := range cases {
+		t.Run(tc.label, func(t *testing.T) {
+			if got := runtimepaths.ValidateFlowSegment(tc.key) == nil; got != tc.valid {
+				t.Fatalf("directory-owner control=%v want %v for %q", got, tc.valid, tc.key)
+			}
+			for _, prefix := range []string{"", "child/", "child/deep/"} {
+				name := prefix + "inbound." + tc.key + ".message"
+				if IsValidName(name) != tc.valid || IsCanonicalName(name) != tc.valid || IsCanonicalDeclaration(name) != tc.valid {
+					t.Errorf("concrete reference disagrees with directory owner: %q want valid=%v", name, tc.valid)
+				}
+				pattern := prefix + "inbound." + tc.key + ".*"
+				if IsCanonicalPattern(pattern) != tc.valid || IsCanonicalDeclaration(pattern) != tc.valid {
+					t.Errorf("fixed-key pattern disagrees with directory owner: %q want valid=%v", pattern, tc.valid)
+				}
+			}
+			pattern := "**/inbound." + tc.key + ".*"
+			if IsCanonicalPattern(pattern) != tc.valid {
+				t.Errorf("recursive fixed-key pattern disagrees with directory owner: %q", pattern)
+			}
+		})
+	}
+	for _, pattern := range []string{"inbound.*.message", "inbound.*.*", "**/inbound.*.message"} {
+		if !IsCanonicalPattern(pattern) {
+			t.Errorf("whole-token provider wildcard refused: %q", pattern)
+		}
+	}
+	if IsCanonicalPattern("inbound.**.message") || IsCanonicalName("inbound.*.message") {
+		t.Fatal("provider wildcard became concrete or partial globstar became valid")
+	}
+}
