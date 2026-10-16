@@ -36,7 +36,7 @@ func seedConnectorCredentialStorageWitness(t *testing.T, fixture authorActivityR
 	} {
 		record, inserted, err := journal.StartActivityAttempt(ctx, pipeline.ActivityAttemptRecord{
 			RequestEventID: uuid.NewString(), RunID: runID, ExecutionMode: executionmode.Live,
-			ActivityID: uuid.NewString(), Tool: "fixture.credential_storage", EffectClass: "non_idempotent_write",
+			ActivityID: uuid.NewString(), Tool: "fixture.credential_storage",
 			Attempt: 1, SuccessEvent: "fixture.succeeded", FailureEvent: "fixture.failed", InputHash: "exact-storage-input",
 		})
 		if err != nil || !inserted {

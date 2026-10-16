@@ -345,7 +345,7 @@ func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, e
 	executor.Preflight = func(ctx context.Context) error {
 		return c.revalidateCredentials(ctx, admittedPair{pair: pair, provider: provider, signing: signing})
 	}
-	result, err := executor.Read(ctx, identify.ToolID(), identify.Tool(), input, credentials)
+	result, err := executor.Read(ctx, identify, input, credentials)
 	if err != nil {
 		return admittedPair{}, fmt.Errorf("identify provider registration slot for %s: %w", key, err)
 	}
@@ -510,7 +510,7 @@ func (c *ProviderRegistrationController) launchAttempt(ctx context.Context, expo
 	effectCtx = runtimeauthoractivity.WithScope(effectCtx, runtimeauthoractivity.BundleScope(c.opts.RuntimeInstanceID, candidate.pair.Target.BundleHash))
 	executor := c.opts.HTTP
 	executor.Preflight = func(ctx context.Context) error { return c.revalidateCredentials(ctx, candidate) }
-	result, applyErr := executor.Apply(effectCtx, apply.ToolID(), apply.Tool(), input, candidateCredentials(candidate), map[string]string{
+	result, applyErr := executor.Apply(effectCtx, apply, input, candidateCredentials(candidate), map[string]string{
 		"binding_id": candidate.pair.BindingID, "target": candidate.pair.Target.Selector, "intent_id": intent.IntentID, "slot_id": candidate.slotID,
 	})
 	if applyErr != nil && result.Pending == nil {
@@ -566,7 +566,7 @@ func (c *ProviderRegistrationController) refreshReadback(ctx context.Context, ca
 	if readErr == nil {
 		executor := c.opts.HTTP
 		executor.Preflight = func(ctx context.Context) error { return c.revalidateCredentials(ctx, candidate) }
-		result, readErr = executor.Read(ctx, readback.ToolID(), readback.Tool(), input, candidateCredentials(candidate))
+		result, readErr = executor.Read(ctx, readback, input, candidateCredentials(candidate))
 	}
 	exact := false
 	if readErr == nil {

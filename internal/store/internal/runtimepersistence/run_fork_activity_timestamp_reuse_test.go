@@ -15,7 +15,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	render "github.com/division-sh/swarm/internal/runtime/channeldelivery"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -109,7 +108,7 @@ func TestRunForkActivityTimestampRecordedReuseBothStores(t *testing.T) {
 						if approved {
 							wantEntity, wantFlow = child.ForkRunID, child.ForkRunID
 						}
-						if payload.SourceRunID != child.ForkRunID || copied.EntityID != wantEntity || copied.FlowInstance != wantFlow || copied.Generation.Valid() || payload.Generation.Valid() || (approved && payload.ForkPolicy != string(runtimecontracts.ActivityForkRequireConfirmation)) {
+						if payload.SourceRunID != child.ForkRunID || copied.EntityID != wantEntity || copied.FlowInstance != wantFlow || copied.Generation.Valid() || payload.Generation.Valid() {
 							t.Fatalf("source/child owner or approval policy changed: payload=%#v copied=%#v", payload, copied)
 						}
 						sourceAfter, found, err := journal.LoadActivityAttempt(ctx, sourceRecord.RequestEventID)
@@ -479,7 +478,6 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 	flow, instance := "flow-a", "flow-a"
 	node := mustPersistenceNode(flow, "writer")
 	owner := activityidentity.MustNodeOwner(node)
-	policy := runtimecontracts.ActivityForkReuseRecordedResult
 	activity, tool, handler, success, failure := "commit", "provider.write", "review.accepted", "flow-a/commit.succeeded", "flow-a/commit.failed"
 	if ordinaryReplay && !approved {
 		flow, instance, entityID = ".", runID, runID
@@ -498,7 +496,6 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 		if err != nil {
 			t.Fatal(err)
 		}
-		policy = continuation.ForkPolicy
 		activity, tool, handler, success, failure = continuation.ActivityID, continuation.Tool, continuation.HandlerEventKey, continuation.SuccessEvent, continuation.FailureEvent
 		anchor, err := card.Anchor.ProposedEffect()
 		if err != nil {
@@ -593,8 +590,8 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 			t.Fatal(err)
 		}
 	}
-	payload, err := json.Marshal(map[string]any{"activity_id": activity, "tool": tool, "input": input, "effect_class": "non_idempotent_write", "fork_policy": string(policy),
-		"success_event": success, "failure_event": failure, "attempt": 1, "entity_id": entityID, "node_id": owner.Key(), "flow_id": flow, "flow_instance": instance,
+	payload, err := json.Marshal(map[string]any{"activity_id": activity, "tool": tool, "input": input,
+		"success_event": success, "failure_event": failure, "entity_id": entityID, "node_id": owner.Key(), "flow_id": flow, "flow_instance": instance,
 		"handler_event_key": handler, "source_run_id": runID, "source_event_id": parentID, "loop_generation": generation, "loop_stage": loopStage})
 	if err != nil {
 		t.Fatal(err)
@@ -618,7 +615,7 @@ func seedActivityEvidenceForForkWithReply(t *testing.T, fixture authorActivityRe
 	record, inserted, err := journal.StartActivityAttempt(ctx, runtimepipeline.ActivityAttemptRecord{
 		RequestEventID: requestID, RunID: runID, SourceEventID: parentID, ExecutionMode: executionmode.Live,
 		EntityID: entityID, FlowInstance: instance, NodeID: owner.Key(), HandlerEventKey: handler, ActivityID: activity, Tool: tool,
-		EffectClass: "non_idempotent_write", Attempt: 1, SuccessEvent: success, FailureEvent: failure, InputHash: "recorded-input-hash",
+		Attempt: 1, SuccessEvent: success, FailureEvent: failure, InputHash: "recorded-input-hash",
 		Generation: generation, LoopStage: loopStage, ReplyContextID: replyID,
 	})
 	if err != nil || !inserted {

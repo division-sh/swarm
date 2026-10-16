@@ -20,6 +20,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
@@ -283,7 +284,6 @@ func VerifyNativeActivityBoringProofReadOnlyForkReexecuteUsesForkLocalRequestIde
 			sourceIntent := newActivityBoringIntent("https://example.com/source", sourceRunID)
 			forkIntent := sourceIntent
 			forkIntent.SourceRunID = forkRunID
-			forkIntent.ForkPolicy = runtimecontracts.ActivityForkReexecuteRead
 			if activityRequestEventID(sourceIntent) == activityRequestEventID(forkIntent) {
 				t.Fatal("fork-local request identity did not change")
 			}
@@ -349,8 +349,6 @@ func VerifyNativeActivityBoringProofRetryIsBoundedAndTracedForTest(t *testing.T,
 
 			fixture := newActivityBoringFixture(t, tc.name, server.URL, open)
 			intent := newActivityBoringIntent("https://example.com/source", testPipelineRunID)
-			intent.RetryMaxAttempts = 3
-			intent.RetryBackoff = "none"
 			ctx := runtimecorrelation.WithRunID(fixture.native.Context, intent.SourceRunID)
 			if err := fixture.native.RequireRun(ctx, intent.SourceRunID); err != nil {
 				t.Fatal(err)
@@ -368,11 +366,15 @@ func VerifyNativeActivityBoringProofRetryIsBoundedAndTracedForTest(t *testing.T,
 			if !handled {
 				t.Fatal("handleEventResult handled = false, want true")
 			}
-			if got := calls.Load(); got != 3 {
-				t.Fatalf("server calls = %d, want bounded retry success on third attempt", got)
+			if got := calls.Load(); got != 1 {
+				t.Fatalf("server calls = %d, want one HTTP attempt without transient-response retry", got)
 			}
-			assertActivityBoringRuntimeLogActionCount(t, fixture.bus, "attempt_started", 3)
+			assertActivityBoringRuntimeLogActionCount(t, fixture.bus, "attempt_started", 1)
 			assertActivityBoringRuntimeLogAction(t, fixture.bus, "result_published")
+			journal, found, err := fixture.pc.workflowStore.LoadActivityAttempt(ctx, request.Event.ID())
+			if err != nil || !found || journal.Status != ActivityAttemptStatusFailed || journal.Attempt != 1 || journal.Failure == nil || journal.Failure.Class != runtimefailures.ClassConnectorFailure || journal.Failure.Detail.Code != "provider_http_status" {
+				t.Fatalf("transient HTTP response did not retain its exact known failure: %+v found=%t err=%v", journal, found, err)
+			}
 		})
 	}
 }
@@ -386,7 +388,7 @@ func TestActivityBoringProofRuntimeLogFailureDoesNotBlockReadOnlyActivity(t *tes
 	defer server.Close()
 
 	bus := &recordingPipelineBus{runtimeLogErr: errors.New("runtime log unavailable")}
-	pc := newPreviewPipelineCoordinatorForTest(bus, PipelineCoordinatorOptions{
+	pc := newJournaledActivityHTTPComponentForTest(t, bus, PipelineCoordinatorOptions{
 		Module: staticSemanticWorkflowModule{source: activityBoringSource(server.URL)},
 	})
 	intent := newActivityBoringIntent("https://example.com/source", testPipelineRunID)
@@ -451,7 +453,7 @@ func persistNativeActivityBoringRequestForTest(t *testing.T, fixture activityBor
 func activityBoringSource(serverURL string) semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
+			"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{
 				Method: "GET",
 				URL:    strings.TrimRight(serverURL, "/") + "?url={{input.url}}",
 			})),
@@ -478,7 +480,6 @@ func activityBoringFullFlowBundle(t *testing.T, serverURL string) *runtimecontra
 		"tools.yaml": fmt.Sprintf(`source_scrape:
   description: Read a source.
   handler_type: http
-  effect_class: read_only
   http:
     method: GET
     url: %q
@@ -534,30 +535,27 @@ func activityBoringExpectedIntentForSourceEvent(evt events.Event, inputURL strin
 	if err != nil {
 		panic(err)
 	}
-	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(runtimecontracts.ActivityEffectClassReadOnly)
 	return runtimeengine.ActivityIntent{
-		RoutingSource:    routingSource,
-		ActivityID:       resultEvents.ActivityID,
-		Tool:             "source_scrape",
-		Input:            mustActivityInput(map[string]any{"url": inputURL}),
-		EffectClass:      runtimecontracts.ActivityEffectClassReadOnly,
-		SuccessEvent:     resultEvents.SuccessEvent,
-		FailureEvent:     resultEvents.FailureEvent,
-		RetryMaxAttempts: defaults.MaxAttempts,
-		RetryBackoff:     defaults.Backoff,
-		ForkPolicy:       runtimecontracts.ActivityForkPolicyForEffectClass(runtimecontracts.ActivityEffectClassReadOnly),
-		EntityID:         identity.NormalizeEntityID(evt.EntityID()),
-		Owner:            runtimeactivityidentity.MustNodeOwner(mustActivityBoringNode("scanner")),
-		ExecutionFlowID:  identity.NormalizeFlowID("research"),
-		FlowInstance:     flowInstance,
-		HandlerEventKey:  "source.requested",
-		SourceEventID:    evt.ID(),
-		SourceRunID:      evt.RunID(),
-		SourceTaskID:     evt.TaskID(),
-		ParentEventID:    evt.ParentEventID(),
-		ChainDepth:       evt.ChainDepth(),
-		Attempt:          1,
-		ExecutionMode:    evt.ExecutionMode(),
+		RoutingSource: routingSource,
+		ActivityID:    resultEvents.ActivityID,
+		Tool:          "source_scrape",
+		Input:         mustActivityInput(map[string]any{"url": inputURL}),
+
+		SuccessEvent: resultEvents.SuccessEvent,
+		FailureEvent: resultEvents.FailureEvent,
+
+		EntityID:        identity.NormalizeEntityID(evt.EntityID()),
+		Owner:           runtimeactivityidentity.MustNodeOwner(mustActivityBoringNode("scanner")),
+		ExecutionFlowID: identity.NormalizeFlowID("research"),
+		FlowInstance:    flowInstance,
+		HandlerEventKey: "source.requested",
+		SourceEventID:   evt.ID(),
+		SourceRunID:     evt.RunID(),
+		SourceTaskID:    evt.TaskID(),
+		ParentEventID:   evt.ParentEventID(),
+		ChainDepth:      evt.ChainDepth(),
+
+		ExecutionMode: evt.ExecutionMode(),
 	}.Normalized()
 }
 
@@ -581,27 +579,25 @@ func newActivityBoringIntent(inputURL, runID string) runtimeengine.ActivityInten
 		panic(err)
 	}
 	return runtimeengine.ActivityIntent{
-		RoutingSource:    mustActivityBoringRoutingSource(entityID),
-		ActivityID:       "scanner_source_scrape",
-		Tool:             "source_scrape",
-		Input:            mustActivityInput(map[string]any{"url": inputURL}),
-		EffectClass:      runtimecontracts.ActivityEffectClassReadOnly,
-		SuccessEvent:     resultEvents.SuccessEvent,
-		FailureEvent:     resultEvents.FailureEvent,
-		RetryMaxAttempts: 3,
-		RetryBackoff:     "none",
-		ForkPolicy:       runtimecontracts.ActivityForkReexecuteRead,
-		EntityID:         identity.NormalizeEntityID(entityID),
-		Owner:            runtimeactivityidentity.MustNodeOwner(mustActivityBoringNode("scanner")),
-		ExecutionFlowID:  identity.NormalizeFlowID("research"),
-		FlowInstance:     "research/" + entityID,
-		HandlerEventKey:  "source.requested",
-		SourceEventID:    uuid.NewString(),
-		SourceRunID:      runID,
-		SourceTaskID:     "task-activity-boring-proof",
-		ChainDepth:       4,
-		Attempt:          1,
-		ExecutionMode:    executionmode.Live,
+		RoutingSource: mustActivityBoringRoutingSource(entityID),
+		ActivityID:    "scanner_source_scrape",
+		Tool:          "source_scrape",
+		Input:         mustActivityInput(map[string]any{"url": inputURL}),
+
+		SuccessEvent: resultEvents.SuccessEvent,
+		FailureEvent: resultEvents.FailureEvent,
+
+		EntityID:        identity.NormalizeEntityID(entityID),
+		Owner:           runtimeactivityidentity.MustNodeOwner(mustActivityBoringNode("scanner")),
+		ExecutionFlowID: identity.NormalizeFlowID("research"),
+		FlowInstance:    "research/" + entityID,
+		HandlerEventKey: "source.requested",
+		SourceEventID:   uuid.NewString(),
+		SourceRunID:     runID,
+		SourceTaskID:    "task-activity-boring-proof",
+		ChainDepth:      4,
+
+		ExecutionMode: executionmode.Live,
 	}.Normalized()
 }
 

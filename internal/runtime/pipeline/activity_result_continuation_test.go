@@ -9,7 +9,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/activityresult"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -21,7 +20,6 @@ func publishedActivityAccountingFixture(t *testing.T) (runtimeengine.ActivityInt
 	intent := testActivityIntent("https://input.invalid")
 	intent.SourceRunID, intent.SourceEventID = uuid.NewString(), uuid.NewString()
 	intent.EntityID = identity.NormalizeEntityID(uuid.NewString())
-	intent.EffectClass = runtimecontracts.ActivityEffectClassNonIdempotentWrite
 	publication, err := admitActivityPublication(intent, intent.SuccessEvent)
 	if err != nil {
 		t.Fatal(err)
@@ -36,7 +34,7 @@ func publishedActivityAccountingFixture(t *testing.T) (runtimeengine.ActivityInt
 		t.Fatal(err)
 	}
 	retained, err := activityresult.NewPublishedContinuation(activityIdentityFact(intent), uuid.NewString(), record.ResultEventType, raw,
-		record.ExecutionMode, intent.EffectClass, record.InputHash, record.ReplyContextID, completed)
+		record.ExecutionMode, record.InputHash, record.ReplyContextID, completed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,13 +165,12 @@ func TestRecordedActivityPublicationUsesCanonicalRequestJournalResultLinkage(t *
 
 func TestSelectedReadOnlyActivityPublicationKeepsExactInputAndScope(t *testing.T) {
 	intent, record, _, ctx := publishedActivityAccountingFixture(t)
-	intent.EffectClass = runtimecontracts.ActivityEffectClassReadOnly
 	raw, err := canonicaljson.MarshalPreservingNumberKinds(record.ResultPayload)
 	if err != nil {
 		t.Fatal(err)
 	}
 	publication, err := activityresult.NewPublishedContinuation(activityIdentityFact(intent), uuid.NewString(), record.ResultEventType, raw,
-		intent.ExecutionMode, intent.EffectClass, record.InputHash, "", *record.CompletedAt)
+		intent.ExecutionMode, record.InputHash, "", *record.CompletedAt)
 	if err != nil {
 		t.Fatal(err)
 	}

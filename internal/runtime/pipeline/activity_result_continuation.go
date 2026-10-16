@@ -89,7 +89,7 @@ func selectedActivityInputPublication(ctx context.Context, intent runtimeengine.
 	if !ok || authority.Kind != runtimeeffects.AuthoritySelectedContractFork || authority.SelectedFork.ForkRunID != intent.SourceRunID {
 		return activityresult.PublishedContinuation{}, false, fmt.Errorf("published activity accounting is outside its current child scope")
 	}
-	if err := publication.RequireInput(activityRequestEventID(intent), intent.SourceRunID, activityInputHash(intent.Input), intent.ExecutionMode, intent.EffectClass); err != nil {
+	if err := publication.RequireInput(activityRequestEventID(intent), intent.SourceRunID, activityInputHash(intent.Input), intent.ExecutionMode); err != nil {
 		return activityresult.PublishedContinuation{}, false, err
 	}
 	return publication, true, nil

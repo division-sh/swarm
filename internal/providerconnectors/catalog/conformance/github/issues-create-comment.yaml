@@ -3,8 +3,8 @@ provider: github
 operation_id: issues/create-comment
 tool_id: github.create_issue_comment
 source_sha256: sha256:a00d391d74dbc940025e6bad601f08014cbdca4ab890606178e42102e436ded9
-profile_sha256: sha256:1992268f155b9ea2bf3d0da7f3727253b6df2bd5cd53c983c964ddba28765ced
-manifest_sha256: sha256:95cf8119c6f2efdb6916298dc9162d117f60a4333120b5f4c7edbb951c512118
+profile_sha256: sha256:c7629e728265d18ed8ec186da11213c15617a2951eb5fc3cb4a36b91a72a98ec
+manifest_sha256: sha256:96a5ef923f72d653cce89b6e66112de9c2517f1b278cc37949668467b6ea3f59
 fixture_status: passing
 review_status: approved
 input:

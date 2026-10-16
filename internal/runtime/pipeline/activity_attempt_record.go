@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	"github.com/division-sh/swarm/internal/runtime/core/processbinding"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
@@ -30,7 +31,6 @@ type ActivityAttemptRecord struct {
 	HandlerEventKey string
 	ActivityID      string
 	Tool            string
-	EffectClass     string
 	Attempt         int
 	Status          string
 	SuccessEvent    string
@@ -46,6 +46,8 @@ type ActivityAttemptRecord struct {
 	StartedAt       time.Time
 	CompletedAt     *time.Time
 	UpdatedAt       time.Time
+
+	ExecutionBinding processbinding.ActivityExecutionBinding
 }
 
 func NormalizeActivityAttemptRecord(rec ActivityAttemptRecord) ActivityAttemptRecord {
@@ -60,7 +62,6 @@ func NormalizeActivityAttemptRecord(rec ActivityAttemptRecord) ActivityAttemptRe
 	rec.HandlerEventKey = strings.TrimSpace(rec.HandlerEventKey)
 	rec.ActivityID = strings.TrimSpace(rec.ActivityID)
 	rec.Tool = strings.TrimSpace(rec.Tool)
-	rec.EffectClass = strings.TrimSpace(rec.EffectClass)
 	rec.Status = strings.TrimSpace(rec.Status)
 	rec.SuccessEvent = strings.TrimSpace(rec.SuccessEvent)
 	rec.FailureEvent = strings.TrimSpace(rec.FailureEvent)
@@ -104,14 +105,11 @@ func ValidateActivityAttemptStart(rec ActivityAttemptRecord) error {
 			return err
 		}
 	}
-	if rec.ActivityID == "" || rec.Tool == "" || rec.EffectClass == "" || rec.SuccessEvent == "" || rec.FailureEvent == "" || rec.InputHash == "" {
+	if rec.ActivityID == "" || rec.Tool == "" || rec.SuccessEvent == "" || rec.FailureEvent == "" || rec.InputHash == "" {
 		return fmt.Errorf("activity attempt %s is missing required identity fields", rec.RequestEventID)
 	}
 	if rec.Generation.Valid() && rec.FlowInstance == "" {
 		return fmt.Errorf("generated activity attempt %s requires exact flow_instance", rec.RequestEventID)
-	}
-	if rec.EffectClass != "non_idempotent_write" {
-		return fmt.Errorf("activity attempt effect_class %q is not supported by the non-idempotent journal", rec.EffectClass)
 	}
 	if rec.Attempt != 1 {
 		return fmt.Errorf("activity attempt attempt = %d, want 1 for non-idempotent journal", rec.Attempt)
@@ -153,7 +151,7 @@ func ValidateActivityAttemptClaimIdentity(actual, expected ActivityAttemptRecord
 	if actual.RequestEventID == expected.RequestEventID && actual.RunID == expected.RunID &&
 		actual.EntityID == expected.EntityID && actual.FlowInstance == expected.FlowInstance && actual.NodeID == expected.NodeID &&
 		actual.HandlerEventKey == expected.HandlerEventKey && actual.ActivityID == expected.ActivityID &&
-		actual.Tool == expected.Tool && actual.EffectClass == expected.EffectClass && actual.ExecutionMode == expected.ExecutionMode &&
+		actual.Tool == expected.Tool && actual.ExecutionMode == expected.ExecutionMode &&
 		actual.SuccessEvent == expected.SuccessEvent && actual.FailureEvent == expected.FailureEvent &&
 		actual.InputHash == expected.InputHash && actual.LoopStage == expected.LoopStage &&
 		((!actual.Generation.Valid() && !expected.Generation.Valid()) || actual.Generation.Equal(expected.Generation)) {
@@ -173,6 +171,26 @@ func ValidateActivityAttemptTerminalMode(actual, expected ActivityAttemptRecord)
 		return nil
 	}
 	return fmt.Errorf("activity attempt %s execution_mode conflict: stored %q, terminal %q", expected.RequestEventID, actual.ExecutionMode, expected.ExecutionMode)
+}
+
+// Execution identity is stricter than historical result reuse. A copied terminal
+// row is not a new execution, and its attribution must never become a writer permit.
+func ValidateActivityAttemptExecutionIdentity(actual, expected ActivityAttemptRecord) error {
+	if actual.Attempt != expected.Attempt {
+		return fmt.Errorf("activity execution callback attempt differs from the original attempt")
+	}
+	if err := ValidateActivityAttemptClaimIdentity(actual, expected); err != nil {
+		return err
+	}
+	actual, expected = NormalizeActivityAttemptRecord(actual), NormalizeActivityAttemptRecord(expected)
+	if actual.SourceEventID == expected.SourceEventID && actual.ParentEventID == expected.ParentEventID &&
+		actual.ReplyContextID == expected.ReplyContextID && actual.Attempt == expected.Attempt &&
+		actual.Generation == expected.Generation && actual.ExecutionBinding == expected.ExecutionBinding {
+		return nil
+	}
+	return runtimefailures.New(runtimefailures.ClassConflictingDuplicate, "activity_execution_identity_conflict", "activity-runtime", "write_activity_attempt", map[string]any{
+		"activity_id": expected.ActivityID, "request_event_id": expected.RequestEventID,
+	})
 }
 
 func validateActivityAttemptUUID(value, field string) error {

@@ -36,9 +36,8 @@ type CLISourceConfig struct {
 		APITokenFile  string `yaml:"api_token_file"`
 	} `yaml:"serve"`
 	Paths struct {
-		SwarmDir         string `yaml:"swarm_dir"`
-		PlatformSpecPath string `yaml:"platform_spec_path"`
-		MonitorDir       string `yaml:"monitor_dir"`
+		SwarmDir   string `yaml:"swarm_dir"`
+		MonitorDir string `yaml:"monitor_dir"`
 	} `yaml:"paths"`
 }
 
@@ -94,7 +93,7 @@ func validateConfigValue(value yamlsource.Value, shape reflect.Type, owner strin
 		for _, field := range fields {
 			child := declared[field.Name]
 			if _, admitted := options[field.Name]; !admitted {
-				return runtimecontracts.NewUndefinedFieldDiagnostic(owner, field.Name, options, field)
+				return undefinedConfigSourceKey(owner, field, options)
 			}
 			if err := validateConfigValue(field.Value, child, owner+"."+field.Name); err != nil {
 				return err
@@ -126,6 +125,14 @@ func validateConfigValue(value yamlsource.Value, shape reflect.Type, owner strin
 		}
 	}
 	return nil
+}
+
+func undefinedConfigSourceKey(owner string, field yamlsource.MappingField, options map[string]struct{}) error {
+	diagnostic := runtimecontracts.NewUndefinedFieldDiagnostic(owner, field.Name, options, field)
+	if owner == "config.paths" && field.Name == "platform_spec_path" {
+		diagnostic.Location.YAMLPath = "paths.platform_spec_path"
+	}
+	return SourceKeyError(diagnostic)
 }
 
 func validateConfigContainerShape(value yamlsource.Value, shape reflect.Type, owner string) error {

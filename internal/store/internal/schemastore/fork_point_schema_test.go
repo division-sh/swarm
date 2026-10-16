@@ -23,6 +23,9 @@ func TestForkPointSchemaClosedArmsBothStores(t *testing.T) {
 			if _, err := db.ExecContext(ctx, `INSERT INTO runs (run_id,bundle_hash,origin_kind) VALUES ($1,$2,'scenario_setup')`, sourceRunID, bundleHash); err != nil {
 				t.Fatalf("create source run: %v", err)
 			}
+			t.Run("activity_execution_binding", func(t *testing.T) {
+				verifyActivityExecutionBindingColumn(t, db, sourceRunID)
+			})
 			eventID := uuid.NewString()
 			runOwnerKey := "COALESCE('run:' || CAST($2 AS TEXT), '')"
 			if backend == "postgres" {

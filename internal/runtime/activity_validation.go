@@ -110,38 +110,20 @@ func validateActivitySpec(source semanticview.Source, node runtimeidentity.Execu
 	if tool.RatePolicy().Enabled() {
 		errs = append(errs, fmt.Errorf("%s: tool %q uses rate_limit; activity HTTP rate-limit admission is split until the activity dispatcher consumes the external dispatch owner", context, toolID))
 	}
-	effectClass := tool.Effect()
-	if effectClass == "" {
-		errs = append(errs, fmt.Errorf("%s: tool %q must declare effect_class; executable Stage 1 values are read_only and non_idempotent_write on the activity journal path", context, toolID))
-	} else if effectClass == runtimecontracts.ActivityEffectClassLongRunning {
-		errs = append(errs, fmt.Errorf("%s: tool %q effect_class long_running is split to later durable resume/cancel support", context, toolID))
-	} else if effectClass == runtimecontracts.ActivityEffectClassIdempotentWrite {
-		errs = append(errs, fmt.Errorf("%s: tool %q effect_class %q is split until idempotency execution ownership is specified and implemented", context, toolID, effectClass))
-	} else if !runtimecontracts.SupportedActivityEffectClass(effectClass) {
-		errs = append(errs, fmt.Errorf("%s: tool %q effect_class %q is not supported for activities", context, toolID, effectClass))
-	}
 	_, hasManagedCredential := tool.ManagedCredentialExecution()
 	credentials := tool.Credentials()
 	if hasManagedCredential {
 		if len(credentials) > 0 {
 			errs = append(errs, fmt.Errorf("%s: tool %q must not declare both static credentials and managed_credential for activity HTTP execution", context, toolID))
 		}
-		if tool.Category() != runtimecontracts.ToolCategoryProviderConnector || effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
-			errs = append(errs, fmt.Errorf("%s: tool %q uses managed_credential; managed credential activity HTTP execution is supported only for non_idempotent_write provider connector tools", context, toolID))
+		if tool.Category() != runtimecontracts.ToolCategoryProviderConnector {
+			errs = append(errs, fmt.Errorf("%s: tool %q uses managed_credential; managed credential activity HTTP execution is supported only for provider connector tools", context, toolID))
 		}
-	}
-	if len(credentials) > 0 && effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
-		errs = append(errs, fmt.Errorf("%s: tool %q uses static credentials; static credential activity HTTP execution is supported only for non_idempotent_write authored HTTP activities", context, toolID))
 	}
 	if activity.Approval != nil {
 		decision := strings.TrimSpace(activity.Approval.Decision)
 		if decision == "" || decision != activity.Approval.Decision {
 			errs = append(errs, fmt.Errorf("%s.approval.decision: a canonical stable decision id is required", context))
-		}
-		if effectClass == runtimecontracts.ActivityEffectClassReadOnly {
-			errs = append(errs, fmt.Errorf("%s.approval: read-only activities don't need approval - approvals guard outward effects", context))
-		} else if effectClass != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
-			errs = append(errs, fmt.Errorf("%s.approval: activity approval requires effect_class non_idempotent_write", context))
 		}
 		if !activityRevisionConsumerExists(source, resultEvents.RevisionRequested) {
 			errs = append(errs, fmt.Errorf("%s.approval: generated revision event %q has no consumer; add a handler so operator feedback cannot disappear", context, resultEvents.RevisionRequested))

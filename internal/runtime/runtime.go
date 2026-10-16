@@ -678,6 +678,12 @@ func (p *PreparedSourceSetGenerationRefresh) Commit(
 		p.topology.Abort()
 		return errors.New("runtime source-set generation refresh successor is not admitted for the requested plan")
 	}
+	if p.runtime.Pipeline != nil {
+		if err := runtimestartupownership.InstallActivityJournal(ctx, successor, evidence, p.runtime.Pipeline); err != nil {
+			p.topology.Abort()
+			return fmt.Errorf("install successor activity journal: %w", err)
+		}
+	}
 	commitErr = p.topology.Commit(ctx, successor, evidence.GrantID)
 	if predecessor != nil {
 		commitErr = errors.Join(commitErr, predecessor.Retire(context.Background()))

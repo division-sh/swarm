@@ -248,7 +248,7 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 	}
 }
 
-func TestValidateWorkflowContractSurface_DurableActivityHTTPToolRequiresEffectClass(t *testing.T) {
+func TestValidateWorkflowContractSurface_KeyFreeDurableActivityHTTPAccepted(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle("source.requested")
 	declareRuntimeValidationSourceRequestedEvent(bundle)
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
@@ -277,15 +277,15 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPToolRequiresEffectCl
 		FatalToolImplementationWarning: false,
 		FatalBootWarnings:              false,
 	})
-	if err == nil || !strings.Contains(err.Error(), "must declare effect_class") {
-		t.Fatalf("ValidateWorkflowContractSurface error = %v, want missing effect_class", err)
+	if err != nil {
+		t.Fatalf("key-free authored HTTP activity admission: %v", err)
 	}
 }
 
 func TestValidateWorkflowContractSurface_DurableActivityFailsClosedForMCPTool(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle("source.requested")
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"mcp_source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("mcp")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
+		"mcp_source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("mcp")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"scanner": {
@@ -312,7 +312,7 @@ func TestValidateWorkflowContractSurface_DurableActivityMinimalHTTPAccepted(t *t
 	bundle := testRuntimeWorkflowValidationBundle("source.requested")
 	declareRuntimeValidationSourceRequestedEvent(bundle)
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 			"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 		}), runtimecontracts.ToolSchemaRequired("url")),
 
@@ -349,7 +349,7 @@ func TestValidateWorkflowContractSurface_DurableActivityMinimalHTTPAccepted(t *t
 func TestValidateWorkflowContractSurface_DurableActivityNonIdempotentWriteAdmitted(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle("source.requested")
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...)),
+		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"}), runtimecontracts.WithToolCredentials([]string{"provider_token"}...)),
 	}
 	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
 		"scanner": {
@@ -376,20 +376,23 @@ func TestValidateWorkflowContractSurface_DurableActivityNonIdempotentWriteAdmitt
 func TestValidateWorkflowContractSurface_ActivityApprovalBoundary(t *testing.T) {
 	for _, tc := range []struct {
 		name            string
-		effectClass     runtimecontracts.ActivityEffectClass
+		method          string
 		decision        string
 		includeConsumer bool
 		wantError       string
 	}{
-		{name: "valid", effectClass: runtimecontracts.ActivityEffectClassNonIdempotentWrite, decision: "support_reply", includeConsumer: true},
-		{name: "read only teaching error", effectClass: runtimecontracts.ActivityEffectClassReadOnly, decision: "support_reply", includeConsumer: true, wantError: "read-only activities don't need approval"},
-		{name: "missing revision consumer", effectClass: runtimecontracts.ActivityEffectClassNonIdempotentWrite, decision: "support_reply", wantError: "has no consumer"},
-		{name: "noncanonical programmatic decision", effectClass: runtimecontracts.ActivityEffectClassNonIdempotentWrite, decision: " support_reply ", includeConsumer: true, wantError: "canonical stable decision id is required"},
+		// USER6220888538: GET is not a different approval or retry policy.
+		{name: "valid POST", method: "POST", decision: "support_reply", includeConsumer: true},
+		{name: "valid GET", method: "GET", decision: "support_reply", includeConsumer: true},
+		{name: "missing revision consumer POST", method: "POST", decision: "support_reply", wantError: "has no consumer"},
+		{name: "missing revision consumer GET", method: "GET", decision: "support_reply", wantError: "has no consumer"},
+		{name: "noncanonical programmatic decision POST", method: "POST", decision: " support_reply ", includeConsumer: true, wantError: "canonical stable decision id is required"},
+		{name: "noncanonical programmatic decision GET", method: "GET", decision: " support_reply ", includeConsumer: true, wantError: "canonical stable decision id is required"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := testRuntimeWorkflowValidationBundle("support.reply_drafted")
 			bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-				"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(tc.effectClass))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"})),
+				"provider_write": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: tc.method, URL: "https://example.test"})),
 			}
 			handlers := map[string]runtimecontracts.SystemNodeEventHandler{
 				"support.reply_drafted": {
@@ -427,7 +430,7 @@ func TestRuleActivityValidationRequiresExplicitIDAndPreservesCombinationRefusal(
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
 		"send": runtimecontracts.MustToolSchemaEntry(
 			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+
 			runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
 			runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://proof.invalid"}),
 		),
@@ -456,7 +459,7 @@ func TestActivityDiagnosticsUseRulePresentationAndPreserveRefusal(t *testing.T) 
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
 		"send": runtimecontracts.MustToolSchemaEntry(
 			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+
 			runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
 			runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://proof.invalid"}),
 		),
@@ -488,7 +491,7 @@ func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t
 	bundle := testRuntimeWorkflowValidationBundle("inbound.telegram")
 	declareRuntimeValidationTelegramEvent(bundle)
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"telegram.send_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolDescription("send Telegram messages"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+		"telegram.send_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolDescription("send Telegram messages"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 			"chat_id": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 			"text":    runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 		}), runtimecontracts.ToolSchemaRequired("chat_id", "text")),
@@ -547,7 +550,7 @@ func TestValidateWorkflowContractSurface_TelegramProviderConnectorToolAdmitted(t
 func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnectorToolAdmitted(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle("inbound.telegram")
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"slack.post_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolDescription("post Slack messages"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+		"slack.post_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolDescription("post Slack messages"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 			"channel": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 			"text":    runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 		}), runtimecontracts.ToolSchemaRequired("channel", "text")),
@@ -599,7 +602,7 @@ func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnector
 func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnectorRequiresResponseSuccess(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle("inbound.telegram")
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"slack.post_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolDescription("post Slack messages"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+		"slack.post_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolDescription("post Slack messages"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 			"channel": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 			"text":    runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 		}), runtimecontracts.ToolSchemaRequired("channel", "text")),
@@ -646,7 +649,7 @@ func TestValidateWorkflowContractSurface_SlackManagedCredentialProviderConnector
 func TestValidateWorkflowContractSurface_ProviderConnectorToolFailsClosedForUnsupportedShape(t *testing.T) {
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"telegram.send_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage"})),
+		"telegram.send_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("provider_connector"), runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://api.telegram.org/bot{{credentials.telegram_bot_token}}/sendMessage"})),
 	}
 	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
 		ExecutionPosture:               executionposture.Live,
@@ -655,34 +658,42 @@ func TestValidateWorkflowContractSurface_ProviderConnectorToolFailsClosedForUnsu
 		FatalToolImplementationWarning: false,
 		FatalBootWarnings:              false,
 	})
-	if err == nil || !strings.Contains(err.Error(), "provider connector mock response compilation failed") || !strings.Contains(err.Error(), "effect_class must be non_idempotent_write") {
-		t.Fatalf("ValidateWorkflowContractSurface error = %v, want provider connector fail-closed", err)
+	for _, want := range []string{
+		"provider connector mock response compilation failed",
+		"must declare exactly one credential binding mode: static credentials or managed_credential",
+		"must declare exactly one response_success policy",
+	} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("ValidateWorkflowContractSurface error = %v, want provider connector refusal %q", err, want)
+		}
 	}
 }
 
 func TestValidateWorkflowContractSurface_DurableActivityIdempotentWriteFailsClosed(t *testing.T) {
-	bundle := testRuntimeWorkflowValidationBundle("source.requested")
-	bundle.Tools = map[string]runtimecontracts.ToolSchemaEntry{
-		"source_scrape": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassIdempotentWrite))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.test"})),
-	}
-	bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{
-		"scanner": {
-			EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-				"source.requested": {
-					Activity: runtimecontracts.ActivitySpec{Tool: "source_scrape"},
-				},
-			},
-		},
-	}
-	_, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), compiledRuntimeValidationSource(t, bundle), WorkflowContractValidationOptions{
-		ExecutionPosture:               executionposture.Live,
-		CheckMCPReachable:              false,
-		StrictEmitSchemas:              false,
-		FatalToolImplementationWarning: false,
-		FatalBootWarnings:              false,
-	})
-	if err == nil || !strings.Contains(err.Error(), "idempotency execution ownership") {
-		t.Fatalf("ValidateWorkflowContractSurface error = %v, want idempotent_write fail-closed", err)
+	// USER6220888538 retires the declaration, not the no-redispatch guarantee.
+	// Refuse it at shared source admission, before late runtime validation.
+	const teaching = "effect_class is not a tool key; the runtime attempts each HTTP call once, and an interrupted call is outcome-uncertain"
+	for _, value := range []string{"idempotent_write", "read_only", "non_idempotent_write", "long_running"} {
+		t.Run(value, func(t *testing.T) {
+			root := canonicalrouting.CopyPublicationActivity(t, "root", "http://127.0.0.1:1/send", false)
+			path := filepath.Join(root, "tools.yaml")
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(string(raw), "send:\n") {
+				t.Fatalf("activity fixture tool declaration changed: %s", raw)
+			}
+			body := strings.Replace(string(raw), "send:\n", "send:\n  effect_class: "+value+"\n", 1)
+			if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			repo := canonicalrouting.RepoRoot(t)
+			_, err = runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
+			if err == nil || !strings.Contains(err.Error(), teaching) || !strings.Contains(err.Error(), "tools.yaml:2:") || !strings.Contains(err.Error(), `["send"]["effect_class"]`) {
+				t.Fatalf("retired activity selector did not refuse through shared source admission: %v", err)
+			}
+		})
 	}
 }
 
@@ -739,7 +750,7 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClose
 			errContains: "uses rate_limit",
 		},
 		{
-			name: "read only static credentials",
+			name: "key-free static credentials supported",
 			mutateTool: func(tool runtimecontracts.ToolSchemaEntry) runtimecontracts.ToolSchemaEntry {
 				updated, err := tool.WithStaticCredentials("provider_token")
 				if err != nil {
@@ -747,16 +758,11 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClose
 				}
 				return updated
 			},
-			errContains: "static credential activity HTTP execution is supported only for non_idempotent_write",
 		},
 		{
 			name: "managed credentials",
 			mutateTool: func(tool runtimecontracts.ToolSchemaEntry) runtimecontracts.ToolSchemaEntry {
-				updated, err := tool.WithEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite)
-				if err != nil {
-					panic(err)
-				}
-				updated, err = updated.WithManagedCredential(runtimecontracts.ManagedCredentialRef{Key: "provider_oauth"})
+				updated, err := tool.WithManagedCredential(runtimecontracts.ManagedCredentialRef{Key: "provider_oauth"})
 				if err != nil {
 					panic(err)
 				}
@@ -769,7 +775,7 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClose
 		t.Run(tc.name, func(t *testing.T) {
 			bundle := testRuntimeWorkflowValidationBundle("source.requested")
 			declareRuntimeValidationSourceRequestedEvent(bundle)
-			tool := runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassReadOnly))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			tool := runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 				"url": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 			}), runtimecontracts.ToolSchemaRequired("url")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "GET", URL: "https://example.test?url={{input.url}}"}))
 
@@ -798,6 +804,14 @@ func TestValidateWorkflowContractSurface_DurableActivityHTTPSubfeaturesFailClose
 				FatalToolImplementationWarning: false,
 				FatalBootWarnings:              false,
 			})
+			// USER6220888538 gives key-free GET the same fixed conservative
+			// policy as POST, including the existing static credential owner.
+			if tc.errContains == "" {
+				if err != nil {
+					t.Fatalf("supported key-free credential admission: %v", err)
+				}
+				return
+			}
 			if err == nil || !strings.Contains(err.Error(), tc.errContains) {
 				t.Fatalf("ValidateWorkflowContractSurface error = %v, want substring %q", err, tc.errContains)
 			}

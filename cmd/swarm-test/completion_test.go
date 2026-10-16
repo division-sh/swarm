@@ -98,7 +98,7 @@ func TestExplicitCompletionPostExecutionDirtInvalidatesReceipt(t *testing.T) {
 	repo, head := completionRepo(t)
 	t.Chdir(repo)
 	bin := t.TempDir()
-	script := "#!/bin/sh\nset -eu\nprintf 'changed during command\\n' > source_test.go\nprintf '%s\\n' '{\"Action\":\"pass\",\"Package\":\"proof\",\"Elapsed\":0.001}'\n"
+	script := precompileFixtureGoHeader() + "printf 'changed during command\\n' > source_test.go\nprintf '%s\\n' '{\"Action\":\"pass\",\"Package\":\"proof\",\"Elapsed\":0.001}'\n"
 	if err := os.WriteFile(filepath.Join(bin, "go"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}

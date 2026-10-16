@@ -66,21 +66,21 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 		{
 			name:            "manual confirmation does not authorize another write",
 			effectClass:     runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-			forkPolicy:      runtimecontracts.ActivityForkRequireConfirmation,
+			forkPolicy:      "require_manual_confirmation",
 			resultEventType: "flow_a/connector.succeeded",
 			wantError:       "fork policy \"require_manual_confirmation\" is not executable",
 		},
 		{
 			name:               "read-only reexecutes exactly once",
 			effectClass:        runtimecontracts.ActivityEffectClassReadOnly,
-			forkPolicy:         runtimecontracts.ActivityForkReexecuteRead,
+			forkPolicy:         "reexecute_read",
 			resultEventType:    "flow_a/connector.succeeded",
 			wantConnectorCalls: 1,
 		},
 		{
 			name:                  "succeeded write publishes recorded result",
 			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-			forkPolicy:            runtimecontracts.ActivityForkReuseRecordedResult,
+			forkPolicy:            "reuse_recorded_result",
 			sourceAttemptStatus:   "succeeded",
 			resultEventType:       "flow_a/connector.succeeded",
 			wantForkAttemptStatus: "succeeded",
@@ -88,7 +88,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 		{
 			name:                  "failed write publishes recorded typed failure",
 			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-			forkPolicy:            runtimecontracts.ActivityForkReuseRecordedResult,
+			forkPolicy:            "reuse_recorded_result",
 			sourceAttemptStatus:   "failed",
 			resultEventType:       "flow_a/connector.failed",
 			failureClass:          string(runtimefailures.ClassDependencyUnavailable),
@@ -98,7 +98,7 @@ func runSelectedContractActivityForkCases(t *testing.T, fixture activityForkFixt
 		{
 			name:                  "uncertain write stays uncertain and publishes outcome-uncertain failure",
 			effectClass:           runtimecontracts.ActivityEffectClassNonIdempotentWrite,
-			forkPolicy:            runtimecontracts.ActivityForkReuseRecordedResult,
+			forkPolicy:            "reuse_recorded_result",
 			sourceAttemptStatus:   "uncertain",
 			resultEventType:       "flow_a/connector.failed",
 			failureClass:          string(runtimefailures.ClassOutcomeUncertain),
@@ -417,7 +417,7 @@ func selectedContractActivityDescriptorExists(descriptors []runtimeauthoractivit
 type selectedContractActivityForkCase struct {
 	name                  string
 	effectClass           runtimecontracts.ActivityEffectClass
-	forkPolicy            runtimecontracts.ActivityForkPolicy
+	forkPolicy            string
 	sourceAttemptStatus   string
 	resultEventType       string
 	failureClass          string
@@ -571,7 +571,7 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 		FlowTree:    runtimecontracts.FlowTree{Root: &flow, ByPath: map[string]*runtimecontracts.FlowContractView{"flow_a": &flow}, ByID: map[string]*runtimecontracts.FlowContractView{"flow_a": &flow}},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"flow_a": flow.Schema},
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"provider.connector": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(effectClass))), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: strings.TrimRight(serverURL, "/")})),
+			"provider.connector": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolHandler(runtimecontracts.MustToolHandlerKind("http")), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))), runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: strings.TrimRight(serverURL, "/")})),
 		},
 	}
 	return semanticview.Wrap(bundle)
@@ -607,7 +607,7 @@ func seedSelectedContractActivityAttempt(t *testing.T, selected any, fact activi
 	if err := storetest.SeedHistoricalActivityForkAttempt(context.Background(), selected, pipeline.ActivityAttemptRecord{
 		RequestEventID: requestEventID, RunID: fact.RunID, ExecutionMode: executionmode.Live,
 		SourceEventID: fact.SourceEventID, EntityID: fact.EntityID, FlowInstance: "flow_a", NodeID: fact.Owner.Key(), HandlerEventKey: "review.requested",
-		ActivityID: "connector", Tool: "provider.connector", EffectClass: "non_idempotent_write", Attempt: 1, Status: status,
+		ActivityID: "connector", Tool: "provider.connector", Attempt: 1, Status: status,
 		SuccessEvent: "flow_a/connector.succeeded", FailureEvent: "flow_a/connector.failed",
 		ResultEventID: resultEventID, ResultEventType: resultEventType, ResultPayload: resultPayload, Failure: failure,
 		InputHash: fmt.Sprintf("sha256:%x", inputHash[:]), Generation: generation, LoopStage: "review",

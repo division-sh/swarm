@@ -3,7 +3,6 @@ package cliapp
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
@@ -106,16 +105,11 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		return returnDoctorPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	configReport := newReport()
-	platformSpecPath := strings.TrimSpace(cfgResult.cli.Paths.PlatformSpecPath)
-	if platformSpecPath == "" {
-		platformSpecPath, err = EmbeddedPlatformSpecPath()
-		if err != nil {
-			report := configReport
-			report.add(localPreflightBackendPrerequisite, "platform_spec_resolution_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the embedded platform spec")
-			return returnDoctorPreflightResult(cmd, report.finalize(), opts.asJSON)
-		}
-	} else {
-		platformSpecPath = ResolvePath(repo, platformSpecPath)
+	platformSpecPath, err := EmbeddedPlatformSpecPath()
+	if err != nil {
+		report := configReport
+		report.add(localPreflightBackendPrerequisite, "platform_spec_resolution_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "repair the embedded platform spec")
+		return returnDoctorPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	platformPackBase, err := LoadConfiguredPlatformPackBase(repo, cfgResult)
 	if err != nil {

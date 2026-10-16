@@ -853,8 +853,9 @@ func TestChannelNativeInboxOperationsRemainProviderNeutral(t *testing.T) {
 				t.Fatalf("native address input = %#v, %v", addressInput, err)
 			}
 			_, addressTool, err := binding.ConnectorOperation("identify_inbox_address")
-			if err != nil || addressTool.Effect() != runtimecontracts.ActivityEffectClassReadOnly {
-				t.Fatalf("native address effect = %q, %v", addressTool.Effect(), err)
+			addressEffect, effectErr := binding.OperationEffectClass("identify_inbox_address")
+			if err != nil || addressTool.IsZero() || effectErr != nil || addressEffect != runtimecontracts.ActivityEffectClassReadOnly {
+				t.Fatalf("native address operation effect = %q, errors=%v/%v", addressEffect, err, effectErr)
 			}
 			addressResult, err := binding.ProjectOperationOutput("identify_inbox_address", map[string]any{"address": "SwarmTestBot"})
 			if err != nil || addressResult["address_reference"] != "SwarmTestBot" {
@@ -889,8 +890,9 @@ func TestChannelNativeInboxOperationsRemainProviderNeutral(t *testing.T) {
 				t.Fatalf("readback gained install input: %#v", read)
 			}
 			_, tool, err := binding.ConnectorOperation("read_inbox_entry")
-			if err != nil || tool.Effect() != runtimecontracts.ActivityEffectClassReadOnly {
-				t.Fatalf("native readback effect = %q, %v", tool.Effect(), err)
+			readEffect, effectErr := binding.OperationEffectClass("read_inbox_entry")
+			if err != nil || tool.IsZero() || effectErr != nil || readEffect != runtimecontracts.ActivityEffectClassReadOnly {
+				t.Fatalf("native readback operation effect = %q, errors=%v/%v", readEffect, err, effectErr)
 			}
 			projected, err := binding.ProjectOperationOutput("read_inbox_entry", map[string]any{"commands": commands})
 			if err != nil || !reflect.DeepEqual(projected["commands"], commands) {
@@ -924,12 +926,26 @@ func TestChannelNativeInboxOperationsRemainProviderNeutral(t *testing.T) {
 				t.Fatalf("mock shared native setting lost member: install=%#v read=%#v", sharedInstall, sharedRead)
 			}
 			_, sharedTool, err := binding.ConnectorOperation("read_shared_inbox_entry")
-			if err != nil || sharedTool.Effect() != runtimecontracts.ActivityEffectClassReadOnly {
-				t.Fatalf("shared native readback effect = %q, %v", sharedTool.Effect(), err)
+			sharedEffect, effectErr := binding.OperationEffectClass("read_shared_inbox_entry")
+			if err != nil || sharedTool.IsZero() || effectErr != nil || sharedEffect != runtimecontracts.ActivityEffectClassReadOnly {
+				t.Fatalf("shared native readback operation effect = %q, errors=%v/%v", sharedEffect, err, effectErr)
 			}
 			sharedProjection, err := binding.ProjectOperationOutput("read_shared_inbox_entry", map[string]any{"commands": commands})
 			if err != nil || !reflect.DeepEqual(sharedProjection["commands"], commands) {
 				t.Fatalf("shared native readback projection = %#v, %v", sharedProjection, err)
+			}
+		})
+	}
+}
+
+func TestChannelConnectorRefusesRetiredEffectDeclaration(t *testing.T) {
+	// USER ruling #2700/6220888538 replaces the old tool/operation
+	// effect-equality check with refusal at the existing declaration owner.
+	for _, value := range []string{"read_only", "non_idempotent_write", "null"} {
+		t.Run(value, func(t *testing.T) {
+			_, err := providerconnectors.ParseConnectorManifest([]byte("provider: mock\ntools:\n  mock.deliver:\n    handler_type: http\n    effect_class: " + value + "\n    http: {method: POST, url: 'https://proof.invalid'}\n"))
+			if err == nil || !strings.Contains(err.Error(), "effect_class is not a tool key; a connector tool takes its class from the operation or registration slot it is bound to") {
+				t.Fatalf("connector pack did not refuse the retired tool declaration: %v", err)
 			}
 		})
 	}
@@ -1459,15 +1475,6 @@ func TestProductionCompilerFailsClosedAcrossChannelContractPhases(t *testing.T) 
 				delete(channel.Manifest.OpaqueTypes, "conversation_reference")
 			},
 			want: "channel opaque_types",
-		},
-		{
-			name: "effect mismatch",
-			mutate: func(_ *packs.LoadedChannelPack, _ *packs.TriggerPackDescriptor, connector *packs.ConnectorPackDescriptor) {
-				tool := connector.Tools["mock.deliver"]
-				tool = mustToolWithEffect(tool, runtimecontracts.ActivityEffectClassReadOnly)
-				connector.Tools["mock.deliver"] = tool
-			},
-			want: "effect class does not match",
 		},
 		{
 			name: "unconsumed interface input",
@@ -2039,7 +2046,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 			"destination": destination, "commands": inboxInstall,
 		}, "destination", "commands"), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))),
 		"mock.read_inbox": runtimecontracts.MustToolSchemaEntry(
-			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+
 			runtimecontracts.WithToolSchemas(
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"destination": destination, "language": clientLanguage}, "destination", "language"),
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"commands": inboxReadback}, "commands"),
@@ -2049,28 +2056,28 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 			"destination": destination, "member": externalAccount, "commands": inboxInstall,
 		}, "destination", "member", "commands"), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"))),
 		"mock.read_member_inbox": runtimecontracts.MustToolSchemaEntry(
-			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+
 			runtimecontracts.WithToolSchemas(
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"destination": destination, "member": externalAccount, "language": clientLanguage}, "destination", "member", "language"),
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"commands": inboxReadback}, "commands"),
 			),
 		),
 		"mock.read_address": runtimecontracts.MustToolSchemaEntry(
-			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+
 			runtimecontracts.WithToolSchemas(
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{}),
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"address": mockStringSchema(5, 32, "")}, "address"),
 			),
 		),
 		"mock.read_room_launcher": runtimecontracts.MustToolSchemaEntry(
-			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+
 			runtimecontracts.WithToolSchemas(
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"destination": destination}, "destination"),
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"mode": launcher}, "mode"),
 			),
 		),
 		"mock.read_default_launcher": runtimecontracts.MustToolSchemaEntry(
-			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+
 			runtimecontracts.WithToolSchemas(
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{}),
 				mockObjectSchema(map[string]runtimecontracts.ToolInputSchema{"mode": launcher}, "mode"),
@@ -2244,7 +2251,7 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 }
 
 func mockConnectorTool(input, output runtimecontracts.ToolInputSchema) runtimecontracts.ToolSchemaEntry {
-	return runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolEffect(runtimecontracts.NormalizeActivityEffectClass(string(runtimecontracts.ActivityEffectClassNonIdempotentWrite))), runtimecontracts.WithToolSchemas(input, output))
+	return runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolSchemas(input, output))
 }
 
 func mockRegistrationTool(effect runtimecontracts.ActivityEffectClass, credentials []string, input, output runtimecontracts.ToolInputSchema, httpSpec runtimecontracts.HTTPToolSpec, responseMapping map[string]any) runtimecontracts.ToolSchemaEntry {
@@ -2252,7 +2259,7 @@ func mockRegistrationTool(effect runtimecontracts.ActivityEffectClass, credentia
 		runtimecontracts.WithToolCategory(runtimecontracts.ToolCategoryProviderRegistration.String()),
 		runtimecontracts.WithToolDescription("mock provider registration operation"),
 		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-		runtimecontracts.WithToolEffect(effect),
+
 		runtimecontracts.WithToolSchemas(input, output),
 		runtimecontracts.WithToolHTTP(httpSpec),
 		runtimecontracts.WithToolResponseSuccess(runtimecontracts.HTTPResponseSuccess{Kind: "http_status_2xx"}),
@@ -2317,14 +2324,6 @@ func mustSchemaWithLengthBounds(schema runtimecontracts.ToolInputSchema, minimum
 
 func mustToolWithSchemas(tool runtimecontracts.ToolSchemaEntry, input, output runtimecontracts.ToolInputSchema) runtimecontracts.ToolSchemaEntry {
 	updated, err := tool.WithSchemas(input, output)
-	if err != nil {
-		panic(err)
-	}
-	return updated
-}
-
-func mustToolWithEffect(tool runtimecontracts.ToolSchemaEntry, effect runtimecontracts.ActivityEffectClass) runtimecontracts.ToolSchemaEntry {
-	updated, err := tool.WithEffect(effect)
 	if err != nil {
 		panic(err)
 	}

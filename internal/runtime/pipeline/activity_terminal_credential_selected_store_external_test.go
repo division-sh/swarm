@@ -46,7 +46,7 @@ func TestActivityCredentialTerminalTimestampReplayBothStores(t *testing.T) {
 				}
 				tool := runtimecontracts.MustToolSchemaEntry(
 					runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-					runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+
 					runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
 					runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL, Headers: map[string]string{"Authorization": "Bearer {{credentials.provider_token}}"}}),
 					runtimecontracts.WithToolCredentials("provider_token"),

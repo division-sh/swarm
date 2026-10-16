@@ -128,14 +128,11 @@ func (r *ServiceRegistry) Provision(ctx context.Context, executable string) (_ *
 	if err := r.Reconcile(ctx); err != nil {
 		return nil, err
 	}
-	if out, err := r.runDocker(ctx, "pull", postgresImage); err != nil {
-		return nil, fmt.Errorf("pull %s: %v output=%s", postgresImage, err, strings.TrimSpace(string(out)))
-	}
-	daemonID, err := r.dockerOutput(ctx, "info", "--format", "{{.ID}}")
+	imageID, err := r.postgresImageID(ctx)
 	if err != nil {
 		return nil, err
 	}
-	imageID, err := r.dockerOutput(ctx, "image", "inspect", "--format", "{{.Id}}", postgresImage)
+	daemonID, err := r.dockerOutput(ctx, "info", "--format", "{{.ID}}")
 	if err != nil {
 		return nil, err
 	}
@@ -962,6 +959,53 @@ func (r *ServiceRegistry) ownerID() (string, error) {
 	}
 }
 
+func (r *ServiceRegistry) postgresImageID(ctx context.Context) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	images, err := r.dockerOutput(ctx, "image", "ls", "--no-trunc", "--format", "{{.Repository}}:{{.Tag}} {{.ID}}", postgresImage)
+	if err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	var listedID string
+	if images == "" {
+		if out, err := r.runDocker(ctx, "pull", postgresImage); err != nil {
+			return "", fmt.Errorf("pull %s: %w output=%s", postgresImage, err, strings.TrimSpace(string(out)))
+		}
+	} else {
+		fields := strings.Fields(images)
+		if len(fields) != 2 || fields[0] != postgresImage || strings.ContainsAny(images, "\r\n") {
+			return "", fmt.Errorf("unexpected local image listing for %s: %q", postgresImage, images)
+		}
+		listedID = fields[1]
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	imageID, err := r.dockerOutput(ctx, "image", "inspect", "--format", "{{.Id}}", postgresImage)
+	if err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if imageID == "" {
+		return "", fmt.Errorf("inspect %s: empty image ID", postgresImage)
+	}
+	hash := strings.TrimPrefix(imageID, "sha256:")
+	digest, decodeErr := hex.DecodeString(hash)
+	if !strings.HasPrefix(imageID, "sha256:") || decodeErr != nil || len(digest) != sha256.Size || hex.EncodeToString(digest) != hash {
+		return "", fmt.Errorf("inspect %s: malformed image ID %q", postgresImage, imageID)
+	}
+	if listedID != "" && listedID != imageID {
+		return "", fmt.Errorf("local %s image identity changed before admission", postgresImage)
+	}
+	return imageID, nil
+}
+
 func (r *ServiceRegistry) dockerOutput(ctx context.Context, args ...string) (string, error) {
 	out, err := r.runDocker(ctx, args...)
 	if err != nil {
@@ -978,6 +1022,10 @@ func (r *ServiceRegistry) runDocker(ctx context.Context, args ...string) ([]byte
 }
 
 func (r *ServiceRegistry) managedContainers(ctx context.Context) (map[string][]dockerInspect, error) {
+	owner, err := r.managedNamespaceOwner()
+	if err != nil {
+		return nil, err
+	}
 	nameOut, err := r.runDocker(ctx, "ps", "--all", "--format", "{{.ID}} {{.Names}}")
 	if err != nil {
 		return nil, fmt.Errorf("enumerate canonical Postgres service names: %w output=%s", err, strings.TrimSpace(string(nameOut)))
@@ -1015,26 +1063,39 @@ func (r *ServiceRegistry) managedContainers(ctx context.Context) (map[string][]d
 			continue
 		}
 		seenFullIDs[got.ID] = true
-		labels := got.Config.Labels
-		if strings.TrimPrefix(got.Name, "/") == "" || !strings.HasPrefix(strings.TrimPrefix(got.Name, "/"), "swarm-test-postgres-v1-") {
-			return nil, fmt.Errorf("managed Postgres service %s has non-canonical name %q; left untouched", got.ID, got.Name)
+		if err := validateManagedContainerIdentity(got); err != nil {
+			return nil, err
 		}
-		if labels["com.division.swarm.test-postgres.managed"] != "1" || labels["com.division.swarm.test-postgres.contract"] != "v1" {
-			return nil, fmt.Errorf("canonical Postgres service %s has missing or invalid management labels; left untouched", got.ID)
+		local, err := r.belongsToManagedNamespace(owner, got)
+		if err != nil {
+			return nil, err
 		}
-		for _, key := range []string{"owner-id", "daemon-id", "runner-id", "lease-id", "spec-sha256"} {
-			if labels["com.division.swarm.test-postgres."+key] == "" {
-				return nil, fmt.Errorf("managed Postgres service %s has no %s label; left untouched", got.ID, key)
-			}
+		if !local {
+			continue
 		}
-		runnerID := labels["com.division.swarm.test-postgres.runner-id"]
-		if strings.TrimPrefix(got.Name, "/") != "swarm-test-postgres-v1-"+runnerID {
-			return nil, fmt.Errorf("managed Postgres service %s name does not match its runner label; left untouched", got.ID)
-		}
-		leaseID := labels["com.division.swarm.test-postgres.lease-id"]
+		leaseID := got.Config.Labels["com.division.swarm.test-postgres.lease-id"]
 		result[leaseID] = append(result[leaseID], got)
 	}
 	return result, nil
+}
+
+func validateManagedContainerIdentity(got dockerInspect) error {
+	if strings.TrimPrefix(got.Name, "/") == "" || !strings.HasPrefix(strings.TrimPrefix(got.Name, "/"), "swarm-test-postgres-v1-") {
+		return fmt.Errorf("managed Postgres service %s has non-canonical name %q; left untouched", got.ID, got.Name)
+	}
+	labels := got.Config.Labels
+	if labels["com.division.swarm.test-postgres.managed"] != "1" || labels["com.division.swarm.test-postgres.contract"] != "v1" {
+		return fmt.Errorf("canonical Postgres service %s has missing or invalid management labels; left untouched", got.ID)
+	}
+	for _, key := range []string{"owner-id", "daemon-id", "runner-id", "lease-id", "spec-sha256"} {
+		if labels["com.division.swarm.test-postgres."+key] == "" {
+			return fmt.Errorf("managed Postgres service %s has no %s label; left untouched", got.ID, key)
+		}
+	}
+	if strings.TrimPrefix(got.Name, "/") != "swarm-test-postgres-v1-"+labels["com.division.swarm.test-postgres.runner-id"] {
+		return fmt.Errorf("managed Postgres service %s name does not match its runner label; left untouched", got.ID)
+	}
+	return nil
 }
 
 func validateServiceRecord(key string, record ServiceRecord) error {

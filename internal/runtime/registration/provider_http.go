@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -64,8 +65,28 @@ type DeliveryResult struct {
 	Output      any
 }
 
-func (e HTTPExecutor) Read(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any) (any, error) {
-	if tool.Category() != runtimecontracts.ToolCategoryProviderRegistration || tool.Effect() != runtimecontracts.ActivityEffectClassReadOnly {
+func (e HTTPExecutor) Read(ctx context.Context, operation packs.RegistrationOperationPlan, input, credentials map[string]any) (any, error) {
+	policy, err := operation.EffectClass()
+	if err != nil || policy != runtimecontracts.ActivityEffectClassReadOnly {
+		return nil, fmt.Errorf("provider registration read requires its compiled read slot")
+	}
+	return e.read(ctx, operation.ToolID(), operation.Tool(), input, credentials)
+}
+
+func (e HTTPExecutor) ReadChannelOperation(ctx context.Context, plan packs.OutboundBindingPlan, operation string, input, credentials map[string]any) (any, error) {
+	policy, err := plan.OperationEffectClass(operation)
+	if err != nil || policy != runtimecontracts.ActivityEffectClassReadOnly {
+		return nil, fmt.Errorf("channel read requires its compiled read operation")
+	}
+	toolID, tool, err := plan.ConnectorOperation(operation)
+	if err != nil {
+		return nil, err
+	}
+	return e.read(ctx, toolID, tool, input, credentials)
+}
+
+func (e HTTPExecutor) read(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any) (any, error) {
+	if tool.Category() != runtimecontracts.ToolCategoryProviderRegistration {
 		return nil, fmt.Errorf("provider registration read tool %q has an invalid contract", strings.TrimSpace(toolID))
 	}
 	prepared, secrets, err := prepareProviderRequest(toolID, tool, input, credentials)
@@ -83,15 +104,20 @@ func (e HTTPExecutor) Read(ctx context.Context, toolID string, tool runtimecontr
 	return result, err
 }
 
-func (e HTTPExecutor) Apply(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string) (ApplyResult, error) {
-	if tool.Category() != runtimecontracts.ToolCategoryProviderRegistration || tool.Effect() != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+func (e HTTPExecutor) Apply(ctx context.Context, operation packs.RegistrationOperationPlan, input, credentials map[string]any, lineage map[string]string) (ApplyResult, error) {
+	policy, err := operation.EffectClass()
+	if err != nil || operation.Name() != packs.RegistrationOperationApply || policy != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		return ApplyResult{}, fmt.Errorf("provider registration apply requires its compiled write slot")
+	}
+	toolID, tool := operation.ToolID(), operation.Tool()
+	if tool.Category() != runtimecontracts.ToolCategoryProviderRegistration {
 		return ApplyResult{}, fmt.Errorf("provider registration apply tool %q has an invalid contract", strings.TrimSpace(toolID))
 	}
 	return e.applyWithReadback(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginServeRegistration, providerRegistrationSource)
 }
 
 func (e HTTPExecutor) ApplyChannelNativeSetting(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string) (ApplyResult, error) {
-	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector || tool.Effect() != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector {
 		return ApplyResult{}, fmt.Errorf("channel native setting tool %q has an invalid contract", strings.TrimSpace(toolID))
 	}
 	return e.applyWithReadback(ctx, toolID, tool, input, credentials, lineage, runtimeeffects.BeginChannelNativeSetting, "channel_native_setting")
@@ -181,7 +207,7 @@ func (e HTTPExecutor) AcknowledgeChannelAction(ctx context.Context, toolID strin
 }
 
 func (e HTTPExecutor) deliverChannelWrite(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string, begin func(context.Context, []byte, map[string]string) (*runtimeeffects.Handle, error), source string, project func(any) (map[string]any, error)) (DeliveryResult, error) {
-	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector || tool.Effect() != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector {
 		return DeliveryResult{}, fmt.Errorf("%s tool %q has an invalid contract", source, strings.TrimSpace(toolID))
 	}
 	prepared, secrets, err := prepareProviderRequest(toolID, tool, input, credentials)

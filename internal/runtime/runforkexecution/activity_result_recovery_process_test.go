@@ -147,9 +147,9 @@ func runSelectedActivityResultCrashHelper(t *testing.T, ctx context.Context, sel
 	selection := runfork.RunForkContractSelection{Mode: "selected_contracts"}
 	advanced := os.Getenv("SWARM_SELECTED_CRASH_CUT") == "retained_activity_read_result_consumed"
 	readOnly := advanced || os.Getenv("SWARM_SELECTED_CRASH_CUT") == "retained_activity_read_result_committed"
-	effectClass, forkPolicy, wantCalls := contracts.ActivityEffectClassNonIdempotentWrite, contracts.ActivityForkReuseRecordedResult, int64(0)
+	effectClass, forkPolicy, wantCalls := contracts.ActivityEffectClassNonIdempotentWrite, "reuse_recorded_result", int64(0)
 	if readOnly {
-		effectClass, forkPolicy, wantCalls = contracts.ActivityEffectClassReadOnly, contracts.ActivityForkReexecuteRead, 1
+		effectClass, forkPolicy, wantCalls = contracts.ActivityEffectClassReadOnly, "reexecute_read", 1
 	}
 	loaded := selectedContractActivityDeclaredSourceWithResultConsumer(t, server.URL, effectClass, selection, advanced)
 	sourceRun, initiatingID, entityID := uuid.NewString(), uuid.NewString(), flowidentity.EntityID("flow_a")

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -71,12 +70,8 @@ func assertDiagnosticNativeConsumerCall(t *testing.T, function *ast.FuncDecl) {
 
 func TestRewrite2566CurrentSelectorsRetainExactSourceCorrespondence(t *testing.T) {
 	root := canonicalrouting.RepoRoot(t)
-	body, err := os.ReadFile("entries.json")
+	entries, err := readCurrentEntryGoldens(root)
 	if err != nil {
-		t.Fatal(err)
-	}
-	var entries []entryGolden
-	if err := json.Unmarshal(body, &entries); err != nil {
 		t.Fatal(err)
 	}
 	for _, entry := range entries {
@@ -141,12 +136,8 @@ func TestRewrite2566CurrentSelectorsPreserveHistoricalDecisionsAndRegeneration(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := os.ReadFile("entries.json")
+	retained, err := readCurrentEntryGoldens(root)
 	if err != nil {
-		t.Fatal(err)
-	}
-	var retained []entryGolden
-	if err := json.Unmarshal(body, &retained); err != nil {
 		t.Fatal(err)
 	}
 	merged, err := retainCurrentEntrySelectors(reviewed, retained)

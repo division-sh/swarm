@@ -3,9 +3,6 @@ package pipeline
 import (
 	"context"
 	"fmt"
-
-	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 )
 
 type ActivityAttemptJournal interface {
@@ -16,24 +13,11 @@ type ActivityAttemptJournal interface {
 	LoadActivityAttempt(context.Context, string) (ActivityAttemptRecord, bool, error)
 }
 
-func (s *workflowInstanceStore) recordedActivityResult(ctx context.Context, intent runtimeengine.ActivityIntent) (activityRecordedResult, bool, error) {
-	if s == nil || s.activityResults == nil {
-		return activityRecordedResult{}, false, fmt.Errorf("activity result reader is required")
-	}
-	success, err := admitActivityPublication(intent, intent.SuccessEvent)
-	if err != nil {
-		return activityRecordedResult{}, false, err
-	}
-	failure, err := admitActivityPublication(intent, intent.FailureEvent)
-	if err != nil {
-		return activityRecordedResult{}, false, err
-	}
-	return s.activityResults.LoadRecordedActivityResult(ctx, runtimeactivityresult.Query{
-		ActivityID:     intent.ActivityID,
-		RequestEventID: activityRequestEventID(intent),
-		SuccessEventID: success.eventID,
-		FailureEventID: failure.eventID,
-	})
+// ActivityRecoverySummary carries results out of their owning recovery mutation,
+// not an ACK, work queue or execution grant. Publication consumes the durable
+// journal/readback obligation only after native transaction acknowledgement.
+type ActivityRecoverySummary struct {
+	Results []RecoveredHTTPActivity
 }
 
 func (s *workflowInstanceStore) StartActivityAttempt(ctx context.Context, record ActivityAttemptRecord) (ActivityAttemptRecord, bool, error) {

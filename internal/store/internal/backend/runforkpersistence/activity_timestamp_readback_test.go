@@ -39,7 +39,7 @@ func activityTimestampDatabase(t *testing.T, backend string) *sql.DB {
 		run_id TEXT NOT NULL DEFAULT '', source_event_id TEXT, parent_event_id TEXT,
 		entity_id TEXT, flow_instance TEXT, node_id TEXT NOT NULL DEFAULT '',
 		handler_event_key TEXT NOT NULL DEFAULT '', activity_id TEXT NOT NULL DEFAULT '',
-		tool TEXT NOT NULL DEFAULT '', effect_class TEXT NOT NULL DEFAULT '',
+		tool TEXT NOT NULL DEFAULT '',
 		attempt INTEGER NOT NULL DEFAULT 1, success_event TEXT NOT NULL DEFAULT '',
 		failure_event TEXT NOT NULL DEFAULT '', result_event_id TEXT, loop_generation TEXT,
 		loop_stage TEXT, reply_context_id TEXT)`, stamp, stamp, stamp))

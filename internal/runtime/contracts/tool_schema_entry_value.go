@@ -76,7 +76,6 @@ type toolSchemaEntryValue struct {
 	category             ToolCategory
 	description          string
 	handler              ToolHandlerKind
-	effect               ActivityEffectClass
 	permission           ToolPermission
 	ratePolicy           ToolRatePolicy
 	inputSchema          ToolInputSchema
@@ -147,17 +146,6 @@ func WithToolHandler(handler ToolHandlerKind) ToolSchemaEntryOption {
 			return fmt.Errorf("handler kind is invalid")
 		}
 		draft.value.handler = handler
-		return nil
-	})
-}
-
-func WithToolEffect(effect ActivityEffectClass) ToolSchemaEntryOption {
-	return toolSchemaEntryOption(func(draft *toolSchemaEntryDraft) error {
-		normalized := NormalizeActivityEffectClass(string(effect))
-		if effect != "" && normalized == "" {
-			return fmt.Errorf("unsupported effect_class %q", effect)
-		}
-		draft.value.effect = normalized
 		return nil
 	})
 }
@@ -387,12 +375,6 @@ func (e ToolSchemaEntry) Handler() ToolHandlerKind {
 	}
 	return e.value.handler
 }
-func (e ToolSchemaEntry) Effect() ActivityEffectClass {
-	if e.value == nil {
-		return ""
-	}
-	return e.value.effect
-}
 func (e ToolSchemaEntry) Permission() ToolPermission {
 	if e.value == nil {
 		return ToolPermission{}
@@ -507,23 +489,6 @@ func (e ToolSchemaEntry) WithSchemas(input, output ToolInputSchema) (ToolSchemaE
 		}
 		copyValue.compiledResult = ToolCompiledResultProjection{value: &admitted}
 	}
-	out := ToolSchemaEntry{value: &copyValue}
-	if err := out.validate(); err != nil {
-		return ToolSchemaEntry{}, err
-	}
-	return out, nil
-}
-
-func (e ToolSchemaEntry) WithEffect(effect ActivityEffectClass) (ToolSchemaEntry, error) {
-	if e.value == nil {
-		return ToolSchemaEntry{}, fmt.Errorf("tool contract is missing")
-	}
-	normalized := NormalizeActivityEffectClass(string(effect))
-	if effect != "" && normalized == "" {
-		return ToolSchemaEntry{}, fmt.Errorf("unsupported effect_class %q", effect)
-	}
-	copyValue := *e.value
-	copyValue.effect = normalized
 	out := ToolSchemaEntry{value: &copyValue}
 	if err := out.validate(); err != nil {
 		return ToolSchemaEntry{}, err
@@ -658,9 +623,9 @@ func (e ToolSchemaEntry) CanonicalValue() (map[string]any, error) {
 	rateLimit, rateLimitMaxWait := e.value.ratePolicy.Syntax()
 	out := map[string]any{
 		"category": e.value.category.String(), "description": e.value.description,
-		"handler_type": e.value.handler.String(), "effect_class": string(e.value.effect),
-		"permission": e.value.permission.String(),
-		"rate_limit": rateLimit, "rate_limit_max_wait": rateLimitMaxWait,
+		"handler_type": e.value.handler.String(),
+		"permission":   e.value.permission.String(),
+		"rate_limit":   rateLimit, "rate_limit_max_wait": rateLimitMaxWait,
 		"input_schema": input, "output_schema": output,
 		"credentials":      toolCredentialKeyStrings(e.value.credentials),
 		"generated_schema": e.value.generatedSchema,
@@ -718,7 +683,7 @@ func (e ToolSchemaEntry) MarshalYAML() (any, error) {
 		return out, nil
 	}
 	out := map[string]any{}
-	for key, value := range map[string]string{"category": e.Category().String(), "description": e.Description(), "handler_type": e.Handler().String(), "effect_class": string(e.Effect()), "permission": e.Permission().String()} {
+	for key, value := range map[string]string{"category": e.Category().String(), "description": e.Description(), "handler_type": e.Handler().String(), "permission": e.Permission().String()} {
 		if value != "" {
 			out[key] = value
 		}

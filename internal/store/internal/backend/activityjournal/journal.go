@@ -68,7 +68,7 @@ func Claim(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun Re
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
-	if err := runtimepipeline.ValidateActivityAttemptClaimIdentity(actual, record); err != nil {
+	if err := runtimepipeline.ValidateActivityAttemptExecutionIdentity(actual, record); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	return actual, inserted, nil
@@ -92,31 +92,35 @@ func start(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun Re
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("marshal activity loop generation: %w", err)
 	}
+	executionBinding, err := activityExecutionBindingValue(record.ExecutionBinding)
+	if err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
+	}
 	query := `
 		INSERT INTO activity_attempts (
 			request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
-			node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
-			success_event, failure_event, input_hash, loop_generation, loop_stage, reply_context_id, execution_mode
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?)
+			node_id, handler_event_key, activity_id, tool, attempt, status,
+			success_event, failure_event, input_hash, loop_generation, loop_stage, reply_context_id, execution_mode, execution_binding
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?)
 		ON CONFLICT (request_event_id) DO NOTHING
 	`
 	if dialect == DialectPostgres {
 		query = `
 			INSERT INTO activity_attempts (
 				request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
-				node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
-				success_event, failure_event, input_hash, loop_generation, loop_stage, reply_context_id, execution_mode
+				node_id, handler_event_key, activity_id, tool, attempt, status,
+				success_event, failure_event, input_hash, loop_generation, loop_stage, reply_context_id, execution_mode, execution_binding
 			) VALUES (
 				$1::uuid, $2::uuid, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, NULLIF($6, ''),
-				$7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, NULLIF($18, ''), NULLIF($19, ''), $20
+				$7, $8, $9, $10, $11, $12, $13, $14, $15, $16::jsonb, NULLIF($17, ''), NULLIF($18, ''), $19, $20::jsonb
 			)
 			ON CONFLICT (request_event_id) DO NOTHING
 		`
 	}
 	result, err := tx.ExecContext(ctx, query,
 		record.RequestEventID, record.RunID, nullableUUID(record.SourceEventID), nullableUUID(record.ParentEventID), nullableUUID(record.EntityID), nullableString(record.FlowInstance),
-		record.NodeID, record.HandlerEventKey, record.ActivityID, record.Tool, record.EffectClass, record.Attempt, record.Status,
-		record.SuccessEvent, record.FailureEvent, record.InputHash, string(generationJSON), nullableString(record.LoopStage), record.ReplyContextID, record.ExecutionMode,
+		record.NodeID, record.HandlerEventKey, record.ActivityID, record.Tool, record.Attempt, record.Status,
+		record.SuccessEvent, record.FailureEvent, record.InputHash, string(generationJSON), nullableString(record.LoopStage), record.ReplyContextID, record.ExecutionMode, executionBinding,
 	)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("start activity attempt %s: %w", record.RequestEventID, err)
@@ -132,7 +136,7 @@ func start(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun Re
 	if !found {
 		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("activity attempt %s was not readable after start", record.RequestEventID)
 	}
-	if err := runtimepipeline.ValidateActivityAttemptClaimIdentity(actual, record); err != nil {
+	if err := runtimepipeline.ValidateActivityAttemptExecutionIdentity(actual, record); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	if story == nil {
@@ -147,6 +151,9 @@ func start(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun Re
 }
 
 func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun RequireActiveRun, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
+	if record.Attempt != 1 {
+		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("activity settlement requires the original exact attempt")
+	}
 	record = runtimepipeline.NormalizeActivityAttemptRecord(record)
 	if err := runtimepipeline.ValidateActivityAttemptTerminal(record); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
@@ -155,6 +162,9 @@ func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	if err := requireActiveRun(ctx, record.RunID); err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
+	}
+	if err := validateTerminalExecutionIdentity(ctx, tx, dialect, record, "completion"); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	payload, err := canonicaljson.MarshalPreservingNumberKinds(record.ResultPayload)
@@ -216,6 +226,9 @@ func Complete(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun
 }
 
 func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActiveRun RequireActiveRun, story runtimeauthoractivity.Mutation, record runtimepipeline.ActivityAttemptRecord) (runtimepipeline.ActivityAttemptRecord, bool, error) {
+	if record.Attempt != 1 {
+		return runtimepipeline.ActivityAttemptRecord{}, false, fmt.Errorf("activity settlement requires the original exact attempt")
+	}
 	record = runtimepipeline.NormalizeActivityAttemptRecord(record)
 	record.Status = runtimepipeline.ActivityAttemptStatusUncertain
 	if err := runtimepipeline.ValidateActivityAttemptTerminal(record); err != nil {
@@ -225,6 +238,9 @@ func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActi
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	if err := requireActiveRun(ctx, record.RunID); err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, false, err
+	}
+	if err := validateTerminalExecutionIdentity(ctx, tx, dialect, record, "uncertain transition"); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, false, err
 	}
 	payload, err := canonicaljson.MarshalPreservingNumberKinds(record.ResultPayload)
@@ -279,6 +295,21 @@ func MarkUncertain(ctx context.Context, tx *sql.Tx, dialect Dialect, requireActi
 	return actual, rows > 0, nil
 }
 
+func validateTerminalExecutionIdentity(ctx context.Context, tx *sql.Tx, dialect Dialect, record runtimepipeline.ActivityAttemptRecord, operation string) error {
+	query := activityAttemptSelect + ` WHERE request_event_id = ?`
+	if dialect == DialectPostgres {
+		query = activityAttemptSelect + ` WHERE request_event_id = $1::uuid FOR UPDATE`
+	}
+	actual, err := scan(tx.QueryRowContext(ctx, query, record.RequestEventID))
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("activity attempt %s was not found for %s", record.RequestEventID, operation)
+	}
+	if err != nil {
+		return fmt.Errorf("load original activity execution %s before settlement: %w", record.RequestEventID, err)
+	}
+	return runtimepipeline.ValidateActivityAttemptExecutionIdentity(actual, record)
+}
+
 // Capture once after admission; dialect defaults cannot define immutable result time.
 func terminalTimestamp() string {
 	return time.Now().UTC().Truncate(time.Microsecond).Format(time.RFC3339Nano)
@@ -311,10 +342,10 @@ func Load(ctx context.Context, db QueryRower, dialect Dialect, requestEventID st
 
 const activityAttemptSelect = `
 	SELECT request_event_id, run_id, source_event_id, parent_event_id, entity_id, flow_instance,
-	       node_id, handler_event_key, activity_id, tool, effect_class, attempt, status,
+	       node_id, handler_event_key, activity_id, tool, attempt, status,
 	       success_event, failure_event, result_event_id, result_event_type, result_payload,
 	       failure, input_hash, loop_generation, loop_stage, reply_context_id, execution_mode,
-	       started_at, completed_at, updated_at
+	       started_at, completed_at, updated_at, execution_binding
 	FROM activity_attempts
 `
 
@@ -324,15 +355,21 @@ func scan(row interface{ Scan(...any) error }) (runtimepipeline.ActivityAttemptR
 	var resultEventID, resultEventType, loopStage, replyContextID sql.NullString
 	var rawPayload, rawFailure, rawGeneration any
 	var startedAtRaw, completedAtRaw, updatedAtRaw any
+	var executionBindingRaw any
 	if err := row.Scan(
 		&record.RequestEventID, &record.RunID, &sourceEventID, &parentEventID, &entityID, &flowInstance,
-		&record.NodeID, &record.HandlerEventKey, &record.ActivityID, &record.Tool, &record.EffectClass, &record.Attempt, &record.Status,
+		&record.NodeID, &record.HandlerEventKey, &record.ActivityID, &record.Tool, &record.Attempt, &record.Status,
 		&record.SuccessEvent, &record.FailureEvent, &resultEventID, &resultEventType, &rawPayload,
 		&rawFailure, &record.InputHash, &rawGeneration, &loopStage, &replyContextID, &record.ExecutionMode,
-		&startedAtRaw, &completedAtRaw, &updatedAtRaw,
+		&startedAtRaw, &completedAtRaw, &updatedAtRaw, &executionBindingRaw,
 	); err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, err
 	}
+	binding, err := decodeActivityExecutionBinding(executionBindingRaw)
+	if err != nil {
+		return runtimepipeline.ActivityAttemptRecord{}, err
+	}
+	record.ExecutionBinding = binding
 	startedAt, ok, err := decodeTime(startedAtRaw)
 	if err != nil {
 		return runtimepipeline.ActivityAttemptRecord{}, fmt.Errorf("decode activity attempt started_at: %w", err)

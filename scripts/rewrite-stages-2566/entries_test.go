@@ -41,9 +41,11 @@ func TestRewrite2566EntryGoldenInventoryCoversEveryReviewedSite(t *testing.T) {
 		}
 	}
 	var p plan
-	var entries []entryGolden
 	read("intent.json", &p)
-	read("entries.json", &entries)
+	entries, err := readCurrentEntryGoldens("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
 	wanted, actual := map[string]int{}, map[string]int{}
 	for _, change := range p.Changes {
 		wanted[change.File] += len(change.Equivalence)
@@ -71,6 +73,9 @@ func TestRewrite2566EntryGoldenInventoryCoversEveryReviewedSite(t *testing.T) {
 }
 
 func TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens(t *testing.T) {
+	if err := validateFiniteAccounting(canonicalrouting.RepoRoot(t)); err != nil {
+		t.Fatal(err)
+	}
 	type generatedFixture struct {
 		name     string
 		build    func(testing.TB) string
@@ -193,12 +198,8 @@ func TestRewrite2566GeneratedSourcesMatchReviewedEntryGoldens(t *testing.T) {
 }
 
 func TestRewrite2566EntryGoldenMatchesTypedCorpus(t *testing.T) {
-	body, err := os.ReadFile("entries.json")
+	entries, err := readCurrentEntryGoldens("../..")
 	if err != nil {
-		t.Fatal(err)
-	}
-	var entries []entryGolden
-	if err := json.Unmarshal(body, &entries); err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) == 0 {

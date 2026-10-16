@@ -74,7 +74,7 @@ func TestWorkflowAdmissionEarlyRefusalRetainsCompleteRegistryTail(t *testing.T) 
 			opts.Purpose = purpose
 			opts.ExecutionPosture = executionposture.Live
 			result, err := ValidateWorkflowContractSurface(context.Background(), source, opts)
-			if err == nil || !strings.Contains(err.Error(), "effect_class must be non_idempotent_write") {
+			if err == nil || !strings.Contains(err.Error(), "must declare exactly one credential binding mode: static credentials or managed_credential") || !strings.Contains(err.Error(), "must declare exactly one response_success policy") {
 				t.Fatalf("source refusal disappeared: %v", err)
 			}
 			want := make(map[string]bool)
@@ -108,7 +108,7 @@ func invalidWorkflowAdmissionConnectorSource(t *testing.T) semanticview.Source {
 		"provider.send": runtimecontracts.MustToolSchemaEntry(
 			runtimecontracts.WithToolCategory("provider_connector"),
 			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-			runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassReadOnly),
+
 			runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
 			runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: "https://example.invalid"}),
 		),

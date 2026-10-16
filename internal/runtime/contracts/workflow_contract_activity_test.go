@@ -40,7 +40,7 @@ func TestActivityResultEventsMaterializeIntoCatalogSchemaAndProduces(t *testing.
 		Tools: map[string]ToolSchemaEntry{
 			"source_scrape": MustToolSchemaEntry(
 				WithToolHandler(ToolHandlerHTTP),
-				WithToolEffect(ActivityEffectClassReadOnly),
+
 				WithToolSchemas(
 					MustToolInputSchema(ToolSchemaObject, ToolSchemaProperties(map[string]ToolInputSchema{
 						"url": MustToolInputSchema(ToolSchemaString),
@@ -102,60 +102,20 @@ func TestActivityResultEventsMaterializeIntoCatalogSchemaAndProduces(t *testing.
 	}
 }
 
-func TestActivityEffectClassDefaults(t *testing.T) {
-	cases := []struct {
-		name        string
-		class       ActivityEffectClass
-		maxAttempts int
-		backoff     string
-		forkPolicy  ActivityForkPolicy
-		supported   bool
-	}{
-		{
-			name:        "read only",
-			class:       ActivityEffectClassReadOnly,
-			maxAttempts: 3,
-			backoff:     "exponential",
-			forkPolicy:  ActivityForkReexecuteRead,
-			supported:   true,
-		},
-		{
-			name:        "idempotent write",
-			class:       ActivityEffectClassIdempotentWrite,
-			maxAttempts: 2,
-			backoff:     "exponential",
-			forkPolicy:  ActivityForkReuseRecordedResult,
-			supported:   false,
-		},
-		{
-			name:        "non idempotent write",
-			class:       ActivityEffectClassNonIdempotentWrite,
-			maxAttempts: 1,
-			backoff:     "none",
-			forkPolicy:  ActivityForkRequireConfirmation,
-			supported:   true,
-		},
-		{
-			name:        "long running split",
-			class:       ActivityEffectClassLongRunning,
-			maxAttempts: 1,
-			backoff:     "none",
-			forkPolicy:  ActivityForkForbidReexecution,
-			supported:   false,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			defaults := ActivityRetryDefaultsForEffectClass(tc.class)
-			if defaults.MaxAttempts != tc.maxAttempts || defaults.Backoff != tc.backoff {
-				t.Fatalf("ActivityRetryDefaultsForEffectClass(%q) = %#v, want max=%d backoff=%q", tc.class, defaults, tc.maxAttempts, tc.backoff)
-			}
-			if got := ActivityForkPolicyForEffectClass(tc.class); got != tc.forkPolicy {
-				t.Fatalf("ActivityForkPolicyForEffectClass(%q) = %q, want %q", tc.class, got, tc.forkPolicy)
-			}
-			if got := SupportedActivityEffectClass(tc.class); got != tc.supported {
-				t.Fatalf("SupportedActivityEffectClass(%q) = %v, want %v", tc.class, got, tc.supported)
+func TestActivityPolicyRetiredFromCurrentSyntax(t *testing.T) {
+	// USER6220888538 replaces class-driven defaults with one execution behavior.
+	for _, tc := range []struct{ key, value string }{
+		{"effect_class", "read_only"}, {"effect_class", "non_idempotent_write"},
+		{"effect_class", "idempotent_write"}, {"effect_class", "long_running"},
+		{"fork_policy", "reexecute_read"}, {"fork_policy", "reuse_recorded_result"},
+		{"fork_policy", "require_manual_confirmation"}, {"fork_policy", "forbid_reexecution"},
+		{"retry_max_attempts", "3"}, {"retry_backoff", "exponential"}, {"attempt", "2"},
+	} {
+		t.Run(tc.key+"/"+tc.value, func(t *testing.T) {
+			var spec ActivitySpec
+			err := decodeNodeTestYAML([]byte("tool: provider.http\n"+tc.key+": "+tc.value+"\n"), &spec)
+			if err == nil || !strings.Contains(err.Error(), tc.key) {
+				t.Fatalf("retired activity policy did not refuse at source: %v", err)
 			}
 		})
 	}

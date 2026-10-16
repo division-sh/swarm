@@ -708,10 +708,10 @@ func TestProposedEffectCompletedRouteReplaysBeforeBundleFenceAndPreservesReplyCo
 					CardID: decisioncard.ProposedEffectCardID(requestEventID, "support_reply"), RunID: runID,
 					RequestEventID: requestEventID, ActivityID: "send_support_reply", Tool: "provider_write",
 					BundleHash: bundleSource.BundleHash(), WorkflowVersion: "1", Input: input,
-					EffectClass:  runtimecontracts.ActivityEffectClassNonIdempotentWrite,
+
 					SuccessEvent: "send_support_reply.succeeded", FailureEvent: "send_support_reply.failed",
 					RevisionEvent: "send_support_reply.revision_requested", RejectedEvent: "send_support_reply.rejected",
-					RetryMaxAttempts: 1, ForkPolicy: runtimecontracts.ActivityForkRequireConfirmation,
+
 					EntityID: entityID, NodeID: supportOwner.Key(), FlowID: ".", FlowInstance: runID, HandlerEventKey: "support.reply_drafted",
 					SourceEventID: sourceEventID, SourceRunID: runID, SourceTaskID: "task-1",
 					ExecutionMode: executionmode.Live, ReplyContextID: "reply-context-route-proof", State: decisioncard.ProposedEffectPending,
@@ -1581,7 +1581,6 @@ func proposedEffectProofBundle(t *testing.T, serverURL string, queueAfterProposa
 		"tools.yaml": fmt.Sprintf(`provider_write:
   description: Send the approved support reply.
   handler_type: http
-  effect_class: non_idempotent_write
   credentials: [provider_token]
   input_schema:
     type: object

@@ -15,12 +15,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 type nativeBashInput struct {
@@ -191,7 +193,7 @@ func (e *Executor) executeWebSearch(ctx context.Context, cfg webSearchProviderCo
 		}
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("X-Subscription-Token", credentialValue)
-		return e.doNormalizedSearch(ctx, req, "web.results", map[string]string{"title": "title", "url": "url", "snippet": "description"}, e.webSearchExternalDispatchPolicy(cfg))
+		return e.doNormalizedSearch(ctx, req, "web.results", map[string]string{"title": "title", "url": "url", "snippet": "description"}, e.webSearchExternalDispatchPolicy(cfg), 0)
 	case "serper":
 		body, _ := json.Marshal(map[string]any{"q": query, "num": maxResults})
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://google.serper.dev/search", bytes.NewReader(body))
@@ -200,7 +202,7 @@ func (e *Executor) executeWebSearch(ctx context.Context, cfg webSearchProviderCo
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-API-KEY", credentialValue)
-		return e.doNormalizedSearch(ctx, req, "organic", map[string]string{"title": "title", "url": "link", "snippet": "snippet"}, e.webSearchExternalDispatchPolicy(cfg))
+		return e.doNormalizedSearch(ctx, req, "organic", map[string]string{"title": "title", "url": "link", "snippet": "snippet"}, e.webSearchExternalDispatchPolicy(cfg), 0)
 	case "tavily":
 		body, _ := json.Marshal(map[string]any{"api_key": credentialValue, "query": query, "max_results": maxResults})
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.tavily.com/search", bytes.NewReader(body))
@@ -208,7 +210,7 @@ func (e *Executor) executeWebSearch(ctx context.Context, cfg webSearchProviderCo
 			return nil, err
 		}
 		req.Header.Set("Content-Type", "application/json")
-		return e.doNormalizedSearch(ctx, req, "results", map[string]string{"title": "title", "url": "url", "snippet": "content"}, e.webSearchExternalDispatchPolicy(cfg))
+		return e.doNormalizedSearch(ctx, req, "results", map[string]string{"title": "title", "url": "url", "snippet": "content"}, e.webSearchExternalDispatchPolicy(cfg), 0)
 	case "custom":
 		return e.executeCustomWebSearch(ctx, cfg, query, maxResults, credentialValue)
 	default:
@@ -235,12 +237,22 @@ func (e *Executor) executeCustomWebSearch(ctx context.Context, cfg webSearchProv
 		return nil, err
 	}
 	req.Header = requestPlan.Headers()
-	return e.doNormalizedSearch(ctx, req, cfg.ResponsePath, cfg.FieldMapping, e.webSearchExternalDispatchPolicy(cfg))
+	return e.doNormalizedSearch(ctx, req, cfg.ResponsePath, cfg.FieldMapping, e.webSearchExternalDispatchPolicy(cfg), requestPlan.Timeout())
 }
 
-func (e *Executor) doNormalizedSearch(ctx context.Context, req *http.Request, responsePath string, fieldMapping map[string]string, policy externalDispatchAdmissionPolicy) ([]map[string]any, error) {
+func (e *Executor) doNormalizedSearch(ctx context.Context, req *http.Request, responsePath string, fieldMapping map[string]string, policy externalDispatchAdmissionPolicy, customTimeout time.Duration) ([]map[string]any, error) {
 	if err := e.admitExternalDispatch(ctx, policy); err != nil {
 		return nil, err
+	}
+	client := e.httpClient
+	if customTimeout > 0 {
+		// Only prepared custom requests replace the shared client's budget.
+		requestCtx, cancel := context.WithTimeout(req.Context(), customTimeout)
+		defer cancel()
+		req = req.WithContext(requestCtx)
+		callClient := *client
+		callClient.Timeout = 0
+		client = &callClient
 	}
 	headerEvidence, err := json.Marshal(req.Header)
 	if err != nil {
@@ -266,7 +278,7 @@ func (e *Executor) doNormalizedSearch(ctx context.Context, req *http.Request, re
 	if err := continueCommittedEffectLaunch(ctx, attempt, attempt.MarkLaunched(ctx)); err != nil {
 		return nil, err
 	}
-	resp, err := e.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, attempt.Fail(ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain, "native_web_search_outcome_unconfirmed", "tool-executor", "web_search", map[string]any{"stage": "transport"}, err)
 	}
@@ -535,15 +547,19 @@ func resolveWebSearchProviderConfigFromSourceForFlow(source semanticview.Source,
 		cfg.MaxResultsDefault = 10
 	}
 	if httpRaw, ok := normalizeAnyMap(root["http"]); ok {
-		spec := runtimecontracts.HTTPToolSpec{}
-		raw, err := json.Marshal(httpRaw)
-		if err == nil && json.Unmarshal(raw, &spec) == nil {
-			cfg.HTTP, err = runtimecontracts.AdmitToolHTTPExecution(spec)
-			if err != nil {
-				return webSearchProviderConfig{}, fmt.Errorf("policy.web_search_provider.http: %w", err)
-			}
-			cfg.HasHTTP = true
+		raw, err := canonicaljson.MarshalPreservingNumberKinds(httpRaw)
+		if err != nil {
+			return webSearchProviderConfig{}, fmt.Errorf("policy.web_search_provider.http: %w", err)
 		}
+		authored, err := yamlsource.Load(raw)
+		if err != nil {
+			return webSearchProviderConfig{}, fmt.Errorf("policy.web_search_provider.http: %w", err)
+		}
+		cfg.HTTP, err = runtimecontracts.AdmitToolHTTPExecutionValue(authored.Document("policy.yaml").Root())
+		if err != nil {
+			return webSearchProviderConfig{}, fmt.Errorf("policy.web_search_provider.http: %w", err)
+		}
+		cfg.HasHTTP = true
 	}
 	if mappingRaw, ok := normalizeAnyMap(root["field_mapping"]); ok {
 		for _, key := range []string{"title", "url", "snippet"} {

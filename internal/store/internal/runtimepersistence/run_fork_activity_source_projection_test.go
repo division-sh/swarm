@@ -475,8 +475,7 @@ func seedSelectedActivityProjectionFixtureWithPostEvent(t *testing.T, fixture au
 	}
 	payload, err := json.Marshal(map[string]any{
 		"activity_id": "inspect", "tool": "provider.read", "input": input,
-		"effect_class": string(runtimecontracts.ActivityEffectClassReadOnly), "fork_policy": string(runtimecontracts.ActivityForkReexecuteRead),
-		"success_event": results.SuccessEvent, "failure_event": results.FailureEvent, "attempt": 1,
+		"success_event": results.SuccessEvent, "failure_event": results.FailureEvent,
 		"entity_id": entityID, "node_id": fact.Owner.Key(), "flow_id": flowID, "flow_instance": activityFlow,
 		"handler_event_key": "review.inspect", "source_run_id": runID, "source_event_id": parentID,
 	})
@@ -628,15 +627,12 @@ reader:
 `,
 		"tools.yaml": `provider.read:
   handler_type: http
-  effect_class: read_only
   http: {method: GET, url: "http://127.0.0.1:1/read"}
 provider.write:
   handler_type: http
-  effect_class: non_idempotent_write
   http: {method: POST, url: "http://127.0.0.1:1/write"}
 telegram.send_message:
   handler_type: http
-  effect_class: non_idempotent_write
   http: {method: POST, url: "http://127.0.0.1:1/send"}
 `,
 	}

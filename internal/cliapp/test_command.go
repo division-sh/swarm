@@ -389,7 +389,7 @@ func scenarioTestSourceArtifactFact(ctx context.Context, client *cliAPIClient, b
 	return matched, nil
 }
 
-func resolveScenarioTestSources(RepoRoot, sourceArgument string, cfg cliCommandConfig) (string, string, error) {
+func resolveScenarioTestSources(RepoRoot, sourceArgument string, _ cliCommandConfig) (string, string, error) {
 	var err error
 	RepoRoot, err = requireInvocationRootPath(RepoRoot)
 	if err != nil {
@@ -399,12 +399,9 @@ func resolveScenarioTestSources(RepoRoot, sourceArgument string, cfg cliCommandC
 	if err != nil {
 		return "", "", err
 	}
-	platformSpec := strings.TrimSpace(cfg.Paths.PlatformSpecPath)
-	if platformSpec == "" {
-		platformSpec, err = EmbeddedPlatformSpecPath()
-		if err != nil {
-			return "", "", fmt.Errorf("resolve embedded platform spec: %w", err)
-		}
+	platformSpec, err := EmbeddedPlatformSpecPath()
+	if err != nil {
+		return "", "", fmt.Errorf("resolve embedded platform spec: %w", err)
 	}
 	return sourceRoot, ResolvePath(RepoRoot, platformSpec), nil
 }

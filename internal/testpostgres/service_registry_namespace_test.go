@@ -19,6 +19,8 @@ func holdServiceTestLock(t *testing.T, path string) *fileLock {
 }
 
 func TestServiceRegistryConcurrentCreationPublication(t *testing.T) {
+	t.Run("independent_registry_namespaces", proveIndependentRegistryNamespaces)
+	t.Run("namespace_refusals", proveRegistryNamespaceRefusals)
 	for _, phase := range []string{"pre_id", "new_row_after_snapshot", "terminal_after_discovery"} {
 		t.Run(phase, func(t *testing.T) {
 			publisher, record := testRegistryRecord(t, ServiceCreating)
@@ -246,8 +248,9 @@ func TestServiceRegistryProvisionPreservesPrimaryAndCleanupFailure(t *testing.T)
 	registry, _ := testRegistryRecord(t, ServicePrepared)
 	primary, cleanup := errors.New("injected creator-publication failure"), errors.New("injected cleanup write failure")
 	docker := registry.docker.(*fakeDocker)
+	docker.outputs["image ls --no-trunc --format {{.Repository}}:{{.Tag}} {{.ID}} postgres:16"] = []byte("postgres:16 sha256:" + strings.Repeat("a", 64))
 	docker.outputs["info --format {{.ID}}"] = []byte("daemon")
-	docker.outputs["image inspect --format {{.Id}} postgres:16"] = []byte("image")
+	docker.outputs["image inspect --format {{.Id}} postgres:16"] = []byte("sha256:" + strings.Repeat("a", 64))
 	registry.beforeRegistrySave = func(doc registryDocument) error {
 		for _, record := range doc.Services {
 			if record.State == ServiceCreatorStarting {

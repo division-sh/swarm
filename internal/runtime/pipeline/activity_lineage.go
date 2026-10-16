@@ -58,9 +58,6 @@ func FreshActivityRequestLineage(request, parent events.Event, source semanticvi
 	if err != nil {
 		return ActivityRequestLineage{}, err
 	}
-	if intent.Attempt != 1 {
-		return ActivityRequestLineage{}, fmt.Errorf("fresh activity request must begin at attempt 1")
-	}
 	if parent.ID() == "" || request.RunID() != parent.RunID() || intent.SourceRunID != parent.RunID() ||
 		intent.SourceEventID != parent.ID() || intent.ParentEventID != parent.ParentEventID() ||
 		intent.SourceTaskID != parent.TaskID() || intent.ChainDepth != parent.ChainDepth() || request.ExecutionMode() != parent.ExecutionMode() {
@@ -124,7 +121,7 @@ func FreshActivityRequestLineage(request, parent events.Event, source semanticvi
 		return ActivityRequestLineage{}, fmt.Errorf("fresh activity has no completed exact parent delivery")
 	}
 	tool, ok := source.ToolEntries()[intent.Tool]
-	if !ok || tool.Effect() != intent.EffectClass || !runtimecontracts.SupportedActivityEffectClass(intent.EffectClass) {
+	if _, hasHTTP := tool.HTTPExecution(); !ok || tool.Handler() != runtimecontracts.ToolHandlerHTTP || !hasHTTP {
 		return ActivityRequestLineage{}, fmt.Errorf("fresh selected activity effect is not admitted")
 	}
 	if intent.BundleHash != "" {
@@ -134,7 +131,6 @@ func FreshActivityRequestLineage(request, parent events.Event, source semanticvi
 			return ActivityRequestLineage{}, fmt.Errorf("fresh activity has a foreign contract pin")
 		}
 	}
-	defaults := runtimecontracts.ActivityRetryDefaultsForEffectClass(intent.EffectClass)
 	matched := false
 	for _, site := range runtimecontracts.ActivitySitesForNode(node, source.ExecutableNodeEventHandlers(node)) {
 		if site.Kind == runtimecontracts.ActivitySiteRule && (!site.RuleRef.Valid() || selection.Disposition() != handlerselection.DispositionSelected || site.RuleRef != selection.Ref()) {
@@ -146,9 +142,7 @@ func FreshActivityRequestLineage(request, parent events.Event, source semanticvi
 		}
 		if site.HandlerEventKey == intent.HandlerEventKey && site.Spec.Tool == intent.Tool && site.Spec.Approval == nil &&
 			result.ActivityID == intent.ActivityID && result.SuccessEvent == intent.SuccessEvent && result.FailureEvent == intent.FailureEvent &&
-			result.RevisionRequested == intent.RevisionEvent && result.Rejected == intent.RejectedEvent &&
-			intent.ForkPolicy == runtimecontracts.ActivityForkPolicyForEffectClass(intent.EffectClass) &&
-			intent.RetryMaxAttempts == defaults.MaxAttempts && intent.RetryBackoff == defaults.Backoff {
+			result.RevisionRequested == intent.RevisionEvent && result.Rejected == intent.RejectedEvent {
 			matched = true
 		}
 	}
@@ -188,18 +182,15 @@ func (l ActivityRequestLineage) ValidateResultPayload(result events.Event) error
 		return fmt.Errorf("activity result type has foreign request lineage")
 	}
 	var payload struct {
-		ActivityID  string                    `json:"activity_id"`
-		Tool        string                    `json:"tool"`
-		EffectClass string                    `json:"effect_class"`
-		Attempt     int                       `json:"attempt"`
-		Result      json.RawMessage           `json:"result"`
-		Failure     *runtimefailures.Envelope `json:"failure"`
+		ActivityID string                    `json:"activity_id"`
+		Tool       string                    `json:"tool"`
+		Result     json.RawMessage           `json:"result"`
+		Failure    *runtimefailures.Envelope `json:"failure"`
 	}
 	if err := json.Unmarshal(result.Payload(), &payload); err != nil {
 		return err
 	}
-	if payload.ActivityID != intent.ActivityID || payload.Tool != intent.Tool || payload.EffectClass != string(intent.EffectClass) ||
-		payload.Attempt < 1 || payload.Attempt > activityRetryMaxAttempts(intent, intent.EffectClass) {
+	if payload.ActivityID != intent.ActivityID || payload.Tool != intent.Tool {
 		return fmt.Errorf("activity result has invalid request facts")
 	}
 	if intent.Generation.Valid() {

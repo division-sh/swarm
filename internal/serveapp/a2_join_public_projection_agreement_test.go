@@ -34,6 +34,7 @@ type a2JoinPublicDiagnosis struct {
 }
 
 func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
+	t.Run("settlement_gate", proveA2JoinPublicSettlementGate)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			root := canonicalrouting.CopyServedJoinProof(t)
@@ -123,6 +124,7 @@ func TestA2JoinPublicProjectionAgreementBothStores(t *testing.T) {
 			case <-time.After(servedEventPublishLifecycleProbeWaitTimeout):
 				t.Fatal("real platform.join_complete did not reach the existing handler-start hook")
 			}
+			// Only the held continuation may still lack its pipeline receipt.
 			pendingDiagnosis := a2WaitJoinPublicRun(t, rt, opened.RunID, "running", 1, false)
 			pendingEntity, pending := a2ReadJoinPublicObligation(t, rt, opened.RunID)
 			a2RequireJoinPublicIdentity(t, initial, pending)
@@ -329,15 +331,60 @@ func a2ReadJoinPublicEvent(t *testing.T, rt servedControlProofRuntime, eventID s
 	return event
 }
 
+func proveA2JoinPublicSettlementGate(t *testing.T) {
+	for _, cell := range []struct {
+		name   string
+		change func(*a2JoinPublicDiagnosis)
+		want   bool
+	}{
+		{name: "held_continuation_settled_late_refusal", want: true},
+		{name: "late_pipeline_unsettled", change: func(d *a2JoinPublicDiagnosis) { d.TestQuiescence.UnsettledPipelineEvents++ }},
+		{name: "dead_letter_not_committed", change: func(d *a2JoinPublicDiagnosis) { d.FailedDeliveries[0].DeadLetters = nil }},
+		{name: "dead_letter_different_delivery", change: func(d *a2JoinPublicDiagnosis) { d.FailedDeliveries[0].DeadLetters[0].DeliveryID = "other" }},
+		{name: "late_delivery_not_terminal", change: func(d *a2JoinPublicDiagnosis) { d.FailedDeliveries[0].Terminal = false }},
+		{name: "wrong_failed_event", change: func(d *a2JoinPublicDiagnosis) { d.FailedDeliveries[0].EventID = "other" }},
+	} {
+		t.Run(cell.name, func(t *testing.T) {
+			diagnosis := a2JoinPublicDiagnosis{
+				Run:              operatorread.RunHeader{RunID: "run", Status: "running"},
+				TestQuiescence:   operatorread.RunTestQuiescence{ActiveDeliveries: 1, UnsettledPipelineEvents: 1},
+				FailedDeliveries: []operatorread.RunDebugFailureDelivery{{EventID: "late", DeliveryID: "delivery", Status: "dead_letter", Terminal: true, DeadLetters: []operatorread.OperatorDeadLetterRecord{{DeliveryID: "delivery"}}}},
+			}
+			if cell.change != nil {
+				cell.change(&diagnosis)
+			}
+			if got := a2JoinPublicRunMatches(diagnosis, "run", "running", 1, 1, false, "late"); got != cell.want {
+				t.Fatalf("settlement gate=%v want=%v for diagnosis=%+v", got, cell.want, diagnosis)
+			}
+		})
+	}
+}
+
+func a2JoinPublicRunMatches(diagnosis a2JoinPublicDiagnosis, runID, status string, active, unsettled int, ready bool, failedEventID ...string) bool {
+	failureReady := len(failedEventID) == 0 || len(failedEventID) == 1 && a2JoinPublicFailureSettled(diagnosis.FailedDeliveries, failedEventID[0])
+	return failureReady && diagnosis.Run.RunID == runID && (status == "" || diagnosis.Run.Status == status) &&
+		diagnosis.TestQuiescence.ActiveDeliveries == active && diagnosis.TestQuiescence.UnsettledPipelineEvents == unsettled && diagnosis.TestQuiescence.Ready == ready
+}
+
+func a2JoinPublicFailureSettled(failed []operatorread.RunDebugFailureDelivery, eventID string) bool {
+	if len(failed) != 1 {
+		return false
+	}
+	delivery := failed[0]
+	return delivery.EventID == eventID && delivery.Status == "dead_letter" && delivery.Terminal &&
+		len(delivery.DeadLetters) == 1 && delivery.DeadLetters[0].DeliveryID == delivery.DeliveryID
+}
+
 func a2WaitJoinPublicRun(t *testing.T, rt servedControlProofRuntime, runID, status string, active int, ready bool, failedEventID ...string) a2JoinPublicDiagnosis {
 	t.Helper()
+	// This fixture holds exactly one continuation; all other phases are settled.
+	unsettled := active
 	deadline := time.Now().Add(servedProofPollDeadline)
 	var last, previous a2JoinPublicDiagnosis
 	stable := 0
 	for time.Now().Before(deadline) {
 		requireServedJSONRPCResult(t, rt.Endpoint, "run.diagnose", map[string]any{"run_id": runID}, &last)
-		failureReady := len(failedEventID) == 0 || len(last.FailedDeliveries) == 1 && last.FailedDeliveries[0].EventID == failedEventID[0]
-		if failureReady && last.Run.RunID == runID && (status == "" || last.Run.Status == status) && last.TestQuiescence.ActiveDeliveries == active && last.TestQuiescence.Ready == ready {
+		if a2JoinPublicRunMatches(last, runID, status, active, unsettled, ready, failedEventID...) {
 			if reflect.DeepEqual(previous, last) {
 				stable++
 			} else {
@@ -360,7 +407,7 @@ func a2WaitJoinPublicRun(t *testing.T, rt servedControlProofRuntime, runID, stat
 		previous = last
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("public run did not settle to status=%s active=%d ready=%v within the existing budget: %+v", status, active, ready, last)
+	t.Fatalf("public run did not settle to status=%s active=%d unsettled=%d ready=%v within the existing budget: %+v", status, active, unsettled, ready, last)
 	return last
 }
 
@@ -399,7 +446,7 @@ func a2RequireJoinPublicClients(t *testing.T, rt servedControlProofRuntime, diag
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(cliHeader, header) || !reflect.DeepEqual(cliDiagnosis, diagnosis) || !reflect.DeepEqual(cliEntity, entity) {
-		t.Fatalf("actual CLI HTTP clients disagree with run/entity/obligation readback: header=%+v diagnosis=%+v entity=%+v", cliHeader, cliDiagnosis, cliEntity)
+		t.Fatalf("actual CLI HTTP clients disagree with run/entity/obligation readback: expected_header=%+v actual_cli_header=%+v expected_diagnosis=%+v actual_cli_diagnosis=%+v expected_entity=%+v actual_cli_entity=%+v", header, cliHeader, diagnosis, cliDiagnosis, entity, cliEntity)
 	}
 }
 

@@ -8,11 +8,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/activityresult"
-	"github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
-	"github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 )
 
@@ -40,37 +38,8 @@ func (a runForkSourceStateAdmission) publishedActivityResult(ctx context.Context
 	if err != nil {
 		return activityresult.PublishedContinuation{}, err
 	}
-	return activityresult.NewPublishedContinuation(fact, result.ID(), evidence.ResultEventType, payload, evidence.ExecutionMode, contracts.ActivityEffectClassNonIdempotentWrite,
+	return activityresult.NewPublishedContinuation(fact, result.ID(), evidence.ResultEventType, payload, evidence.ExecutionMode,
 		evidence.InputHash, replyID, evidence.CompletedAt)
-}
-
-func (a runForkSourceStateAdmission) publishedReadOnlyActivityResult(ctx context.Context, tx *sql.Tx, sourceID string, child runForkActivityRequestPayload, reference *loopruntime.ForkChildReference) (activityresult.PublishedContinuation, error) {
-	result, present, err := a.activityPublicationAtCut(ctx, tx, sourceID, make(map[string]bool))
-	if err != nil || !present {
-		return activityresult.PublishedContinuation{}, err
-	}
-	cut, err := newRunForkReplayCut(a.snapshot)
-	if err != nil {
-		return activityresult.PublishedContinuation{}, err
-	}
-	request, err := cut.event(sourceID)
-	if err != nil {
-		return activityresult.PublishedContinuation{}, err
-	}
-	fact, err := runForkActivityFact(child)
-	if err != nil {
-		return activityresult.PublishedContinuation{}, err
-	}
-	hash, err := pipeline.ActivityRequestInputHash(request)
-	if err != nil {
-		return activityresult.PublishedContinuation{}, err
-	}
-	payload, err := projectForkRevisionPayload(result.Payload(), reference)
-	if err != nil {
-		return activityresult.PublishedContinuation{}, err
-	}
-	return activityresult.NewPublishedContinuation(fact, result.ID(), string(result.Type()), payload, result.ExecutionMode(), contracts.ActivityEffectClassReadOnly,
-		hash, "", result.CreatedAt())
 }
 
 // The same fixed-cut activity owner recognizes published results when their
@@ -241,9 +210,6 @@ func (a runForkSourceStateAdmission) requirePublishedActivityRequestJournal(ctx 
 	requestID, _, err := admitRunForkActivitySourceIdentity(ctx, tx, a, source, fact)
 	if err != nil {
 		return err
-	}
-	if request.EffectClass == string(contracts.ActivityEffectClassReadOnly) {
-		return nil
 	}
 	evidence, err := loadRunForkActivityAttemptEvidence(ctx, tx, requestID)
 	if err != nil {

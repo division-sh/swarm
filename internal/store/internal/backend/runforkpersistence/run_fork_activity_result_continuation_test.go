@@ -62,7 +62,7 @@ func activityPublicationCutFixture(t *testing.T) (runForkSourceStateAdmission, s
 	snapshot := &runForkRevisionSnapshot{RunID: f.record.RunID, Revision: 3,
 		Events: []runForkRevisionEvent{genericPublicationRevisionEvent(f.record, request.Event()), genericPublicationRevisionEvent(record, result)}}
 	child := runForkActivityRequestPayload{SourceRunID: uuid.NewString(), SourceEventID: uuid.NewString(), EntityID: uuid.NewString(),
-		NodeID: fact.Owner.Key(), FlowID: ".", HandlerEventKey: fact.HandlerEventKey, ActivityID: fact.ActivityID, Tool: fact.Tool, Attempt: 1}
+		NodeID: fact.Owner.Key(), FlowID: ".", HandlerEventKey: fact.HandlerEventKey, ActivityID: fact.ActivityID, Tool: fact.Tool}
 	evidence := runForkActivityAttemptEvidence{Status: "succeeded", ExecutionMode: source.ExecutionMode,
 		ResultEventID: resultID, ResultEventType: "compute.succeeded", ResultPayload: raw, InputHash: "exact-input", CompletedAt: result.CreatedAt()}
 	return runForkSourceStateAdmission{snapshot: snapshot, forkRunID: child.SourceRunID}, source.SourceEventID, evidence, child

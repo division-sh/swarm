@@ -96,7 +96,7 @@ func TestActivityTerminalResultUsesDurableTimestampBothStores(t *testing.T) {
 					t.Cleanup(server.Close)
 					tool := runtimecontracts.MustToolSchemaEntry(
 						runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
-						runtimecontracts.WithToolEffect(runtimecontracts.ActivityEffectClassNonIdempotentWrite),
+
 						runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)),
 						runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: "POST", URL: server.URL}),
 					)
